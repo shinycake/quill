@@ -90,13 +90,18 @@ jobs:
         env:
           # The packages ship FFmpeg next to the library; here it's in the prefix.
           LD_LIBRARY_PATH: vendor/ffmpeg/prefix/lib
-          DYLD_LIBRARY_PATH: vendor/ffmpeg/prefix/lib
         run: |
-          # On macOS the library names OpenSSL by @rpath; packaging ships it.
-          if [[ -n "${OPENSSL_ROOT_DIR:-}" ]]; then
-            export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$OPENSSL_ROOT_DIR/lib"
+          lib="vendor/quill-calls/lib/${{ matrix.lib }}"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # Lay it out as the app bundle does, FFmpeg and OpenSSL beside the
+            # library, so loading proves its @loader_path rpath finds them.
+            dir="$RUNNER_TEMP/quill-calls"
+            mkdir -p "$dir"
+            cp -L "$lib" vendor/ffmpeg/prefix/lib/*.dylib \
+              "$OPENSSL_ROOT_DIR"/lib/libssl.3.dylib "$OPENSSL_ROOT_DIR"/lib/libcrypto.3.dylib "$dir/"
+            lib="$dir/${{ matrix.lib }}"
           fi
-          python3 - "vendor/quill-calls/lib/${{ matrix.lib }}" <<'EOF'
+          python3 - "$lib" <<'EOF'
           import ctypes, sys
           lib = ctypes.CDLL(sys.argv[1])
           lib.qc_api_version.restype = ctypes.c_uint32
