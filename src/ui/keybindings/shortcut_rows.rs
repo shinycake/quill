@@ -38,6 +38,14 @@ pub fn shortcut_rows() -> Vec<ShortcutRow> {
             tr(keys::Q_PREFS_GENERAL),
             QuitApp,
         ),
+        // Also in the startup keymap, so the app menu's Settings item reads
+        // ⌘, before an account's keymap is applied.
+        row(
+            primary!(","),
+            tr(keys::MENU_SETTINGS),
+            tr(keys::Q_PREFS_GENERAL),
+            OpenSettings,
+        ),
         // kit Phase 7: window-chrome shortcuts (HIG: Cmd+W close, Cmd+M
         // minimize; F11 / Cmd+Ctrl+F fullscreen).
         row(
