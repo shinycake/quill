@@ -28,6 +28,9 @@ pub struct MicProcessor {
     /// it back on starts from a fresh state, not a stale one.
     denoised_last: bool,
     window: PeakWindow,
+    /// The raw microphone's windows while muted, for the "You are on
+    /// mute" hint (tdesktop measures the device itself then).
+    muted_window: PeakWindow,
 }
 
 impl Default for MicProcessor {
@@ -43,6 +46,7 @@ impl MicProcessor {
             denoiser: DenoiseState::new(),
             denoised_last: false,
             window: PeakWindow::default(),
+            muted_window: PeakWindow::default(),
         }
     }
 
@@ -84,6 +88,8 @@ impl MicProcessor {
             }
             self.window
                 .push(&[0.0; FRAME], |level| controls.level().record(level));
+            self.muted_window
+                .push(input, |level| controls.muted_level().record(level));
             return vec![0; FRAME];
         }
         let mut scaled = [0.0_f32; FRAME];
@@ -137,6 +143,7 @@ fn samples_duration(samples: usize) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calls::audio_level::level_from_peak;
     use crate::calls::capture::LevelCell;
     use std::sync::Arc;
 
@@ -267,6 +274,9 @@ mod tests {
         }
         assert!(frames.iter().all(|f| f.pcm.iter().all(|&s| s == 0)));
         assert_eq!(controls.level().take(), Some(0.0));
+        // The raw microphone is still measured, for the muted-speech hint.
+        let muted = controls.muted_level().take().expect("a muted window");
+        assert!((muted - level_from_peak(0.8)).abs() < 1e-4);
     }
 
     #[test]

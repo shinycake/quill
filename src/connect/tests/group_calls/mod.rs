@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod levels;
 mod link;
 mod no_engine;
 mod rtmp_start;
@@ -139,6 +140,8 @@ fn driver_group_call_participant_management_shapes_and_gates() {
         remote_video: RemoteVideoState::Inactive,
         remote_screen: RemoteVideoState::Inactive,
         remote_audio_muted: false,
+        remote_battery_low: false,
+        signal_bars: None,
     });
     assert_eq!(
         driver.accept_group_call_invitation(3, 42),

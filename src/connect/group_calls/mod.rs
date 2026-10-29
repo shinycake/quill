@@ -26,10 +26,12 @@ mod admin;
 mod controls;
 pub use controls::SelfMuteError;
 mod join;
+pub(crate) mod levels;
 mod link;
 pub(crate) mod live_feeds;
 mod live_story;
 mod live_story_extras;
+pub(crate) mod muted_hint;
 mod rtmp_start;
 pub(crate) mod stream;
 

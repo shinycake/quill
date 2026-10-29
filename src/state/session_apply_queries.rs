@@ -181,6 +181,8 @@ impl Session {
                 remote_video: RemoteVideoState::Inactive,
                 remote_screen: RemoteVideoState::Inactive,
                 remote_audio_muted: false,
+                remote_battery_low: false,
+                signal_bars: None,
                 state: CallState::Pending {
                     is_created: true,
                     is_received: false,

@@ -3,8 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_row::chat_avatar;
 use super::group_call_panel::*;
+use super::group_call_speaker::speaker_userpic;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu, PopupMenu, PopupMenuItem};
@@ -16,7 +16,7 @@ use quill::state::ActiveGroupCall;
 use quill::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
 
 /// A member's status line and its color (tdesktop's member row).
-/// `speaking` is TDLib's flag, or your own level tap for your row.
+/// `speaking` is tgcalls' levels, TDLib's flag, or your own level tap.
 pub(super) fn member_status(p: &ParsedGroupCallParticipant, speaking: bool) -> (&'static str, u32) {
     if speaking {
         ("speaking", MEMBER_ACTIVE)
@@ -179,6 +179,7 @@ impl QuillApp {
         call: &ActiveGroupCall,
         participant: &ParsedGroupCallParticipant,
         self_speaking: bool,
+        now: std::time::Instant,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let name = self.group_call_participant_name(&participant.participant_id);
@@ -193,7 +194,11 @@ impl QuillApp {
         .and_then(|path| {
             quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
         });
-        let speaking = participant.is_speaking || (participant.is_current_user && self_speaking);
+        // tgcalls' levels (tdesktop's), else TDLib's flag and your own tap.
+        let speaker = self.group_member_speaker(participant, now);
+        let speaking = speaker.look.speaking
+            || participant.is_speaking
+            || (participant.is_current_user && self_speaking);
         let (status, status_color, mic, mic_color) =
             member_look(participant, speaking, call.is_muted_self);
         let force_muted = participant.is_muted_for_all_users && !participant.can_unmute_self;
@@ -215,7 +220,12 @@ impl QuillApp {
             .items_center()
             .gap(px(14.))
             .hover(|style| style.bg(rgb(MEMBERS_BG_OVER)))
-            .child(chat_avatar(&name, photo.as_deref(), 40.))
+            .child(speaker_userpic(
+                &name,
+                photo.as_deref(),
+                speaker,
+                participant.is_muted_for_current_user,
+            ))
             .child(
                 div()
                     .flex_1()

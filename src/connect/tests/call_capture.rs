@@ -306,3 +306,45 @@ fn private_call_uses_the_chosen_microphone() {
     assert!(mics.stopped.load(Ordering::SeqCst));
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// Talking while muted: the raw microphone's peaks reach the hint, which
+/// shows after three loud 500 ms checks and goes when you unmute.
+#[test]
+fn talking_while_muted_shows_the_hint_until_you_unmute() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    driver.session.calls.active_group_call = Some(joined_group_call(true));
+    driver.pump_call_capture();
+    let controls = mics.controls.lock().unwrap().clone().expect("open");
+    let t0 = Instant::now();
+    assert!(!driver.request_tick(t0), "starts listening");
+    assert_eq!(
+        driver.next_deadline(t0, 0),
+        Some(Duration::from_millis(
+            crate::calls::muted_speech::CHECK_EVERY_MS
+        ))
+    );
+    let mut shown_at = None;
+    for step in 1..=8u64 {
+        // A peak of half of full scale is loud (tdesktop: 0.2).
+        controls
+            .muted_level()
+            .record(crate::calls::audio_level::level_from_peak(0.5));
+        let now = t0 + Duration::from_millis(step * 250);
+        if driver.request_tick(now) {
+            shown_at = Some(step * 250);
+            break;
+        }
+    }
+    assert_eq!(shown_at, Some(1500), "the third check shows it");
+    assert!(driver.group_call_muted_speech_hint());
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_mut()
+        .unwrap()
+        .is_muted_self = false;
+    assert!(driver.request_tick(t0 + Duration::from_millis(1600)));
+    assert!(!driver.group_call_muted_speech_hint());
+    std::fs::remove_dir_all(dir).ok();
+}

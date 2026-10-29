@@ -8,10 +8,12 @@ pub mod group_call_create;
 #[cfg(feature = "ui")]
 pub mod level_tap;
 pub mod live_video;
+pub mod muted_speech;
 pub mod proxy;
 pub mod ptt;
 pub mod ptt_global;
 pub mod rtmp_start;
 pub mod share_links;
+pub mod speaker_levels;
 pub mod stream_audio;
 pub mod tile_pin;

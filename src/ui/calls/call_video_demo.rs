@@ -5,7 +5,8 @@
 //! `QUILL_DEMO_CAPTURE_WINDOWS=1`. `QUILL_DEMO_SCREEN=1`: Maya shares her
 //! screen instead. `QUILL_DEMO_DEVICES=1`: the device menu is open.
 //! `QUILL_DEMO_VOICE=1`: the call started as a voice call and both
-//! cameras were turned on mid-call.
+//! cameras were turned on mid-call. `QUILL_DEMO_BATTERY=1`: Maya's
+//! battery is low.
 #![deny(clippy::indexing_slicing)]
 
 use super::demo_feed::{DemoFeed, demo_feed};
@@ -132,6 +133,8 @@ pub(in crate::ui) fn seed_video_call(
         remote_video,
         remote_screen,
         remote_audio_muted: false,
+        remote_battery_low: std::env::var_os("QUILL_DEMO_BATTERY").is_some(),
+        signal_bars: Some(3),
     });
 }
 

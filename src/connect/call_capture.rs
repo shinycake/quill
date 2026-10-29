@@ -106,6 +106,14 @@ impl CallCapture {
             .map_or(0, |active| active.feeder.stats().sent())
     }
 
+    /// The raw microphone's highest level since the last take while the
+    /// running capture is muted (tgcalls' scale).
+    pub fn take_muted_level(&self) -> Option<f32> {
+        self.active
+            .as_ref()
+            .and_then(|active| active.controls.muted_level().take())
+    }
+
     /// Whether the running capture sends silence.
     pub fn muted(&self) -> Option<bool> {
         self.active.as_ref().map(|active| active.controls.muted())

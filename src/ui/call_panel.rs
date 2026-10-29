@@ -16,6 +16,7 @@
 use super::app::QuillApp;
 use super::call_panel_backdrop::connecting_arc;
 use super::call_panel_devices::{self as devices, DeviceMenuTarget};
+use super::call_panel_notices as notices;
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
 use super::nested_click::SwallowPress;
@@ -30,6 +31,10 @@ use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::CallState;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// Where the round buttons' row ends, from the window's bottom: 8 px
+/// under it, then a 44 px disc, a 6 px gap and the 11 px label's line.
+const BUTTONS_TOP: f32 = 8. + 44. + 6. + 15.;
 
 /// How long an ended call's window lingers on "call ended".
 const ENDED_LINGER: Duration = Duration::from_millis(1600);
@@ -60,15 +65,15 @@ pub(super) struct CallSnap {
     emojis: Vec<String>,
     /// The peer's microphone is off (tdesktop `lng_call_microphone_off`).
     remote_muted: bool,
+    /// The peer's battery is low (tdesktop `lng_call_battery_level_low`).
+    remote_battery_low: bool,
+    /// The connection's signal bars, once established (tdesktop
+    /// `Calls::SignalBars`).
+    signal_bars: Option<u8>,
     /// The peer's picture has a frame: it fills the window.
     video: bool,
     /// Your camera's preview has a frame.
     preview: bool,
-}
-
-/// tdesktop `lng_call_microphone_off`.
-pub(super) fn microphone_off_line(name: &str) -> String {
-    tr_with(keys::CALL_MICROPHONE_OFF, &[("user", name)])
 }
 
 /// tdesktop `Ui::FormatDurationText`: `m:ss`, or `h:mm:ss`.
@@ -160,6 +165,8 @@ impl QuillApp {
                 can_share_screen: false,
                 emojis: Vec::new(),
                 remote_muted: false,
+                remote_battery_low: false,
+                signal_bars: None,
                 video: false,
                 preview: false,
             });
@@ -193,6 +200,8 @@ impl QuillApp {
                 .map(|r| r.emojis.clone())
                 .unwrap_or_default(),
             remote_muted: ready && call.remote_audio_muted,
+            remote_battery_low: ready && call.remote_battery_low,
+            signal_bars: notices::shown_signal_bars(&call),
             // The root made the players follow the call before this draw.
             video: self.call_picture_drawn(CallPicture::Remote),
             preview: self.call_picture_drawn(CallPicture::Local),
@@ -400,6 +409,10 @@ impl QuillApp {
                                 .child(name),
                         )
                         .child(div().opacity(0.85).child(status)),
+                )
+                .children(
+                    notices::shown_signal_bars(call)
+                        .map(|bars| notices::signal_bars(bars, notices::BarsStyle::Bar)),
                 )
                 .child(
                     icon_button(
@@ -778,8 +791,13 @@ impl Render for CallPanel {
             div()
                 .text_size(px(12.))
                 .text_color(call_chrome::muted())
-                .child(microphone_off_line(&snap.name))
+                .child(notices::microphone_off_line(&snap.name))
         });
+
+        // tdesktop's low-battery notice over the buttons, while the
+        // microphone notice is not showing.
+        let battery_low = notices::battery_notice_shown(snap.remote_battery_low, snap.remote_muted)
+            .then(|| notices::battery_low_notice(&snap.name, BUTTONS_TOP));
 
         // The 4 emoji everyone in the call should see the same.
         let fingerprint = (!snap.emojis.is_empty()).then(|| {
@@ -802,6 +820,10 @@ impl Render for CallPanel {
                         .flex()
                         .gap(px(4.))
                         .children(snap.emojis.iter().map(|emoji| div().child(emoji.clone())))
+                        .children(
+                            snap.signal_bars
+                                .map(|bars| notices::signal_bars(bars, notices::BarsStyle::Panel)),
+                        )
                         .tooltip({
                             let tip: SharedString = tr_with(
                                 keys::CALL_FINGERPRINT_TOOLTIP,
@@ -902,6 +924,7 @@ impl Render for CallPanel {
             })
             .child(body)
             .children(fingerprint)
+            .children(battery_low)
             // tdesktop's pin-on-top control, in the corner under the title.
             .child(
                 super::window_control::pin_on_top_button(
@@ -934,55 +957,5 @@ impl Render for CallPanel {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{call_status, duration_text, microphone_off_line};
-    use quill::calls::engine::TransportState;
-    use quill::telegram::envelope::CallState;
-
-    #[test]
-    fn peer_microphone_off_line_names_the_peer() {
-        assert_eq!(microphone_off_line("Zed"), "Zed's microphone is off");
-    }
-
-    #[test]
-    fn statuses_follow_tdesktop() {
-        let pending = |is_created, is_received| CallState::Pending {
-            is_created,
-            is_received,
-        };
-        assert_eq!(
-            call_status(&pending(false, false), true, None, 0).0,
-            "requesting…"
-        );
-        assert_eq!(
-            call_status(&pending(true, false), true, None, 0).0,
-            "waiting…"
-        );
-        assert_eq!(
-            call_status(&pending(true, true), true, None, 0).0,
-            "ringing…"
-        );
-        assert_eq!(
-            call_status(&pending(true, true), false, None, 0).0,
-            "is calling you…"
-        );
-        assert_eq!(
-            call_status(&CallState::ExchangingKeys, true, None, 0).0,
-            "exchanging encryption keys…"
-        );
-        let ready = |t| call_status(&CallState::Ready, true, t, 75);
-        assert_eq!(
-            ready(Some(TransportState::Connected)),
-            ("1:15".to_string(), false)
-        );
-        assert_eq!(ready(None), ("connecting…".to_string(), true));
-        assert_eq!(ready(Some(TransportState::Failed)).0, "failed to connect");
-    }
-
-    #[test]
-    fn durations_read_like_tdesktop() {
-        assert_eq!(duration_text(0), "0:00");
-        assert_eq!(duration_text(605), "10:05");
-        assert_eq!(duration_text(3725), "1:02:05");
-    }
-}
+#[path = "call_panel_tests.rs"]
+mod tests;

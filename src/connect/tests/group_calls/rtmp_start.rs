@@ -268,6 +268,8 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         remote_video: RemoteVideoState::Inactive,
         remote_screen: RemoteVideoState::Inactive,
         remote_audio_muted: false,
+        remote_battery_low: false,
+        signal_bars: None,
     });
     assert!(
         driver.start_video_chat(CHAT, String::new(), 0).is_err(),

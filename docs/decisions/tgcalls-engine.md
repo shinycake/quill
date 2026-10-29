@@ -182,8 +182,8 @@ broadcast mode (unified for `"rtmp": true`); any other answer sets RTC
 mode and then the answer, in tdesktop's order. Incoming video is routed by
 endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
 qualities follow tdesktop's grid defaults and budget, since Quill does not
-report tile sizes. Speaker levels reach the engine event hook; the driver
-drops them until the speaking-levels parity item. Media channel requests
+report tile sizes. Speaker levels reach the engine event hook and drive every
+member row (see "Parity items on tgcalls"). Media channel requests
 stay unwired: tgcalls then accepts every ssrc as it comes, which a stream
 never needs (its parts carry no ssrcs) and an RTC call plays the same.
 
@@ -323,3 +323,68 @@ Windows builds with MSVC like tdesktop (`scripts/build-tgcalls.sh` from
 MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow.
 No package ships `libquill_calls` yet on any platform; the packages add it,
 beside `quill.exe` on Windows, before step 6.
+
+## Parity items on tgcalls
+
+- Peer battery (1:1): `remote_battery_low` becomes
+  `EngineEvent::PeerBatteryLow`, the driver keeps it on
+  `ActiveCall::remote_battery_low`, and the call window shows tdesktop's
+  "{user}'s battery level is low" pill over the buttons
+  (`calls_panel.cpp` `createRemoteLowBattery`), hidden while the
+  microphone-off line shows (`showRemoteLowBattery`). Quill never sends
+  its own battery state: tdesktop's `setIsLowBatteryLevel` is under
+  `#if 0`.
+- Signal bars (1:1): `signal_bars` becomes `EngineEvent::SignalBars`
+  (clamped to tdesktop's 0 to 4), kept on `ActiveCall::signal_bars`.
+  tdesktop's `SignalBars` widget is drawn beside the emoji fingerprint
+  (`callPanelSignalBars`: 2 px bars, 2 px apart, 4 to 10 px tall) and in
+  the main window's call bar after the mute button (`callBarSignalBars`:
+  3 px, 1 px apart, 3 to 12 px), with bars past the count at half
+  opacity. They show only once the call is established (Ready and
+  connected, or reconnecting after it was), as tdesktop's fingerprint
+  appears with the key.
+- Speaking levels (group calls): `EngineEvent::GroupAudioLevels` batches
+  (tgcalls' 100 ms level timer) go through `LevelGate` in the engine
+  hook, which drops a batch unless some ssrc in it is above tdesktop's
+  `kSpeakLevelThreshold` or was within the kept-for window, so silence
+  never wakes the driver or the UI. The driver
+  (`connect/group_calls/levels.rs`, rules in `calls/speaker_levels.rs`)
+  maps ssrc 0 to your own audio source and ignores your level while you
+  are muted (`GroupCall::audioLevelsUpdated`), keeps tdesktop's last-spoke
+  times (`applyLastSpoke`: sounding for 1,500 ms after sound, speaking
+  while there was voice too, forgotten after 2 s), and tells TDLib when
+  another participant starts or stops speaking with
+  `setGroupCallParticipantIsSpeaking(audio_source)`; that is how TDLib
+  orders recent speakers and loads participants it does not know, the
+  job of tdesktop's `resolveParticipants`. Your own speaking still goes
+  through `call_audio`. The poll loop's deadline includes the next state
+  that runs out on its own. Only a change of sounding or speaking asks
+  for a redraw; while a row sounds the window requests 30 fps frame
+  clock ticks and eases each row toward the newest level over
+  `kLevelDuration`. The row draws tdesktop's two blobs (`RowBlobs`: radii
+  27 to 29 px, the minor one at 0.9, scaled from 0.605 with the level, at
+  0.5 and 0.2 opacity, fading in and out over `kBlobsEnterDuration`) and
+  scales the userpic from 0.8 with the level; green while speaking, blue
+  for sound, red for someone you muted. Power saving for calls holds them
+  at rest. The blobs are round discs, not tdesktop's wobbling shapes, and
+  a participant's screen-sharing audio ssrc is not mapped (TDLib's
+  `screen_sharing_audio_source_id` is not parsed yet).
+- Muted-speech hint (group calls): tdesktop sticks "You are on mute.
+  Click here to speak." over the mute button when `MicLevelTester`
+  (`calls_group_settings.cpp`) hears you while muted: every 500 ms the
+  loudest peak since the last check is compared with 0.2 of full scale,
+  three loud checks show it, five quiet ones after a loud one reset the
+  count. It goes for the call when you unmute
+  (`StickedTooltipHide::Activated`) or close it (`Discarded`; tdesktop
+  always shows the microphone tooltip again in a new panel), and hides
+  while an admin holds you muted (`Unavailable`). tgcalls cannot report
+  this level: a muted instance mutes its audio device module, and Quill
+  sends silence then anyway. tdesktop measures the device itself
+  (`Webrtc::AudioInputTester`), so Quill does the same with the call
+  microphone it already runs: while muted, the raw input's level windows
+  go to `MicControls::muted_level` instead of the call, the driver feeds
+  them to `calls::muted_speech` on its clock (the poll loop wakes for the
+  next check while it listens), and the window draws tdesktop's sticked
+  tooltip (`groupCallStickedTooltip`). No C API change was needed. With
+  push-to-talk on the hint never shows, as tdesktop counts push-to-talk
+  as live.
