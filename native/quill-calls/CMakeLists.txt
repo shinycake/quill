@@ -26,6 +26,7 @@ endforeach()
 
 find_package(tg_owt REQUIRED PATHS ${QUILL_CALLS_DEPS} NO_DEFAULT_PATH)
 find_package(OpenSSL 3 REQUIRED)
+find_package(ZLIB REQUIRED)
 
 set(tgcalls_loc ${QUILL_CALLS_TGCALLS}/tgcalls)
 
@@ -177,6 +178,7 @@ PRIVATE
     ${FFMPEG_AVUTIL}
     OpenSSL::SSL
     OpenSSL::Crypto
+    ZLIB::ZLIB
 )
 
 if (APPLE)
@@ -200,14 +202,13 @@ if (APPLE)
     set_target_properties(quill_calls PROPERTIES INSTALL_NAME_DIR "@rpath")
 else()
     find_package(Threads REQUIRED)
-    find_package(ZLIB REQUIRED)
     # tg_owt's X11 and portal (GLib) capture code, as tdesktop links it on
     # Linux; PipeWire itself is loaded with dlopen.
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(QC_SYSTEM REQUIRED IMPORTED_TARGET
         gio-2.0 gobject-2.0 glib-2.0
         x11 xcomposite xdamage xext xfixes xrandr xrender xtst)
-    target_link_libraries(quill_calls PRIVATE Threads::Threads ZLIB::ZLIB PkgConfig::QC_SYSTEM ${CMAKE_DL_LIBS})
+    target_link_libraries(quill_calls PRIVATE Threads::Threads PkgConfig::QC_SYSTEM ${CMAKE_DL_LIBS})
     # Everything we link statically stays private; only qc_* is exported.
     target_link_options(quill_calls PRIVATE
         -Wl,--exclude-libs,ALL

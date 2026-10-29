@@ -34,6 +34,9 @@ LIBVPX_TAG=v1.14.1 LIBVPX_COMMIT=12f3a2ac603e8f10742105519e0cd03c3b8f71dd
 OPENH264_TAG=v2.6.0 OPENH264_COMMIT=652bdb7719f30b52b08e506645a7322ff1b2cc6f
 MOZJPEG_TAG=v4.1.5 MOZJPEG_COMMIT=6c9f0897afa1c2738d7222a0a9ab49e8b536a267
 RNNOISE_COMMIT=d8ea2b0ec6a88f8a68d6904d75e33b4f09cb2987
+# Linux: PipeWire's headers only (tg_owt dlopens the library), at the
+# release tdesktop's Linux build uses (Telegram/build/docker/centos_env).
+PIPEWIRE_TAG=0.3.62 PIPEWIRE_COMMIT=3a443b4e1c9730675c7de0453a6279ab9ee263fd
 
 case "$(uname -s)" in
   Linux) OS=linux ;;
@@ -148,6 +151,18 @@ build_tg_owt() {
   [[ -f "$DEPS/lib/libtg_owt.a" ]] && return
   fetch tg_owt https://github.com/desktop-app/tg_owt.git "$TG_OWT_COMMIT"
   git -C "$WORK/tg_owt" submodule update -q --init --recursive --depth 1
+  if [[ "$OS" == linux ]]; then
+    # tg_owt reads these ahead of the system's, which are too old on
+    # Ubuntu 22.04 (0.3.48) for its camera code.
+    fetch tg_owt/src/third_party/pipewire https://github.com/PipeWire/pipewire.git "$PIPEWIRE_COMMIT"
+    local major minor micro
+    IFS=. read -r major minor micro <<<"$PIPEWIRE_TAG"
+    mkdir -p "$WORK/tg_owt/src/third_party/pipewire/build/src/pipewire"
+    sed -e "s/@PIPEWIRE_VERSION_MAJOR@/$major/g" -e "s/@PIPEWIRE_VERSION_MINOR@/$minor/g" \
+      -e "s/@PIPEWIRE_VERSION_MICRO@/$micro/g" -e 's/@PIPEWIRE_API_VERSION@/"0.3"/g' \
+      "$WORK/tg_owt/src/third_party/pipewire/src/pipewire/version.h.in" \
+      > "$WORK/tg_owt/src/third_party/pipewire/build/src/pipewire/version.h"
+  fi
   # TG_OWT_SPECIAL_TARGET selects tdesktop's non-packaged mode: include
   # paths only, the libraries are linked once into libquill_calls.
   local extra=()
@@ -199,6 +214,7 @@ libvpx   https://github.com/webmproject/libvpx         $LIBVPX_TAG ($LIBVPX_COMM
 openh264 https://github.com/cisco/openh264             $OPENH264_TAG ($OPENH264_COMMIT)
 mozjpeg  https://github.com/mozilla/mozjpeg            $MOZJPEG_TAG ($MOZJPEG_COMMIT)
 rnnoise  https://github.com/desktop-app/rnnoise        $RNNOISE_COMMIT
+pipewire https://github.com/PipeWire/pipewire        $PIPEWIRE_TAG ($PIPEWIRE_COMMIT), headers only, Linux
 quill-calls (the C API)  native/quill-calls in https://github.com/shinycake/quill
 EOF
 
