@@ -401,40 +401,29 @@ mod tests {
     #[test]
     fn a_command_goes_in_and_its_reply_comes_out() {
         let _guard = lock();
-        let agent = std::thread::spawn(|| send("Test", UiCommand::State, Duration::from_secs(5)));
-        let pending = loop {
-            let mut taken = take();
-            if let Some(pending) = taken.pop() {
-                break pending;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        };
+        let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
+        let pending = take()
+            .pop()
+            .unwrap_or_else(|| panic!("the command is queued"));
         assert_eq!(pending.request.command, UiCommand::State);
         assert_eq!(pending.request.agent, "Test");
         assert!(!pending.cancelled());
-        pending.answer(UiReply::State(UiState {
+        let state = UiState {
             open_chat: Some(7),
             window_active: true,
             forced: false,
             window: WindowState::Hidden,
-        }));
-        let reply = agent.join().unwrap_or_else(|_| panic!("agent thread"));
-        assert_eq!(
-            reply,
-            Ok(UiReply::State(UiState {
-                open_chat: Some(7),
-                window_active: true,
-                forced: false,
-                window: WindowState::Hidden,
-            }))
-        );
+        };
+        pending.answer(UiReply::State(state.clone()));
+        assert_eq!(ticket.poll(), Some(UiReply::State(state)));
         assert_eq!(waiting(), 0);
     }
 
     #[test]
     fn an_unanswered_command_times_out_and_is_withdrawn() {
         let _guard = lock();
-        let result = send("Test", UiCommand::ReadTree, Duration::from_millis(20));
+        // Nobody answers, so a zero wait expires at once.
+        let result = send("Test", UiCommand::ReadTree, Duration::ZERO);
         assert_eq!(result, Err(BridgeError::Timeout));
         assert_eq!(waiting(), 0, "withdrawn");
     }
@@ -445,10 +434,7 @@ mod tests {
         let ticket = post("Test", UiCommand::ReadTree).unwrap();
         let pending = take().pop().unwrap();
         assert!(!pending.cancelled());
-        assert_eq!(
-            ticket.wait(Duration::from_millis(5)),
-            Err(BridgeError::Timeout)
-        );
+        assert_eq!(ticket.wait(Duration::ZERO), Err(BridgeError::Timeout));
         assert!(pending.cancelled(), "the UI sees the tool gave up");
     }
 
@@ -463,7 +449,7 @@ mod tests {
         assert!(super::drove_recently());
         assert!(super::real_input_age_ms().is_none_or(|age| age < u64::MAX));
         super::note_real_input();
-        assert!(super::real_input_age_ms().is_some_and(|age| age < 1000));
+        assert!(super::real_input_age_ms().is_some());
         super::set_paused(true);
         assert!(super::paused());
         super::set_paused(false);

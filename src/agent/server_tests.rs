@@ -6,7 +6,6 @@ use crate::agent::access;
 use crate::single_instance::{Acquired, Endpoint, acquire, connect};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
-use std::time::Duration;
 
 fn session(endpoint: &Endpoint, lines: &[String]) -> Vec<Value> {
     let stream = connect(endpoint).unwrap_or_else(|e| panic!("connect: {e}"));
@@ -151,7 +150,6 @@ fn agents_need_the_switch_and_this_launchs_token() {
         None,
         "off deletes the token"
     );
-    std::thread::sleep(Duration::from_millis(10));
     let answers = session(&endpoint, &[auth(&token)]);
     assert_eq!(answers[0]["error"]["code"], super::code::ACCESS_OFF);
 }
