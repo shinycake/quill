@@ -122,6 +122,13 @@ pub struct CallsState {
     /// you were in a call, or are older than the ring timeout (tdesktop
     /// `declineIncomingConferenceInvites`). The driver drains them.
     pub conference_invite_declines: Vec<(ChatId, MessageId)>,
+    /// The "Add People" box's server search: `local` holds the
+    /// `searchChatsOnServer` answer, `server` the `searchPublicChats` one
+    /// (`crate::state::conference_add_people`).
+    pub add_people_search: ShareSearch,
+    /// The invitations "Add People" sent into the new conference, until
+    /// their toast is dismissed (`crate::state::conference_add_people`).
+    pub invite_results: Option<ConferenceInviteResults>,
 }
 
 impl CallsState {
@@ -192,6 +199,8 @@ impl CallsState {
             call_upgrade: None,
             conference_invite: None,
             conference_invite_declines: Vec::new(),
+            add_people_search: ShareSearch::default(),
+            invite_results: None,
         }
     }
 }

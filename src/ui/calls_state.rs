@@ -47,9 +47,9 @@ pub(crate) struct CallUi {
     /// Settings > Calls: the microphone test and its level meter
     /// (`ui::call_audio_ui`), `Some` while testing.
     pub(super) mic_test: Option<super::call_audio_ui::MicTest>,
-    /// "Add People" over the call window: the people picked so far
-    /// (`ui::call_conference_ui`), `Some` while the box is open.
-    pub(super) add_people: Option<Vec<i64>>,
+    /// "Add People" over the call window (`ui::call_add_people`), `Some`
+    /// while the box is open.
+    pub(super) add_people: Option<super::call_add_people::AddPeopleBox>,
     /// A conference call's link waiting on "Join Group Call"
     /// (`ui::call_conference_ui`).
     pub(super) conference_link: Option<String>,

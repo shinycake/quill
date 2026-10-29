@@ -23,6 +23,14 @@ impl Session {
         {
             return;
         }
+        // One of "Add People"'s invitations failed: its toast tells.
+        if let Some(results) = self.calls.invite_results.as_mut()
+            && let Some(extra) = extra
+            && results.owns(Some(extra))
+        {
+            results.answered(extra, None);
+            return;
+        }
         // Phase C1: a failed call request surfaces on the call
         // overlay (shown and cleared by the UI). A failed
         // `createCall` also drops the half-tracked outgoing call.
@@ -254,6 +262,15 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
                 ..
             })) => {}
+            // A failed "Add People" search ends it with what the other
+            // half found (tdesktop's `fail` handler refreshes the rows).
+            Some(
+                RequestPurpose::SearchAddPeopleOnServer | RequestPurpose::SearchAddPeoplePublic,
+            ) => {
+                if let Some(extra) = extra {
+                    self.calls.add_people_search.accept(extra, &[]);
+                }
+            }
             _ => {}
         }
     }

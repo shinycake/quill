@@ -435,6 +435,7 @@ impl QuillApp {
             .child(header)
             .children(banner)
             .children(error)
+            .children(self.conference_invite_toast(cx))
             .children(stream)
             .children(self.group_call_join_as_row(&call, cx))
             .child(members)

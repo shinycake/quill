@@ -211,6 +211,7 @@ mod bots_extras;
 mod bubble_header;
 mod business;
 mod business_bot_bar_ui;
+mod call_add_people;
 mod call_audio_ui;
 mod call_conference_ui;
 mod call_device_prefs_ui;

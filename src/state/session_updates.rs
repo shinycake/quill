@@ -49,6 +49,7 @@ impl Session {
             self.chats_state.chat_message_sender.clear();
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
+            self.calls.add_people_search = ShareSearch::default();
             self.messages.last_forward = None;
         }
         if matches!(state, AuthorizationState::LoggingOut) {
