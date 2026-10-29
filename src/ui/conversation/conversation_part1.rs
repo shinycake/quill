@@ -387,9 +387,11 @@ impl QuillApp {
                                 .when_some(rich_preview, |row, preview| row.child(preview))
                                 .child(
                                     div()
+                                        .id("composer-field")
                                         .relative()
                                         .flex_1()
                                         .min_w_0()
+                                        .map(|field| self.emoji_words_hover(field, cx))
                                         // tdesktop hides the field behind a
                                         // rich draft's preview.
                                         .when(self.shown_rich_draft().is_some(), |field| {
@@ -428,10 +430,17 @@ impl QuillApp {
                                         )
                                         // Red wavy underlines over the
                                         // misspelled words.
-                                        .when_some(
-                                            self.spellcheck_underlines(cx),
-                                            |wrap, lines| wrap.child(lines),
-                                        ),
+                                        .when_some(self.spellcheck_underlines(cx), |wrap, lines| {
+                                            wrap.child(lines)
+                                        })
+                                        // Words that have an emoji, and the
+                                        // strip over the hovered one.
+                                        .when_some(self.emoji_word_highlights(cx), |wrap, wash| {
+                                            wrap.child(wash)
+                                        })
+                                        .when_some(self.emoji_word_strip(cx), |wrap, strip| {
+                                            wrap.child(strip)
+                                        }),
                                 )
                                 // Scheduled-messages button while the chat has
                                 // any (`updateChatHasScheduledMessages`).

@@ -604,6 +604,41 @@ impl QuillApp {
                         this.sync_suggest_menu(false, cx);
                     })),
             );
+        // Quill's own: soft highlights on words that have an emoji
+        // (`emoji_words`), part of the suggestions so it follows them.
+        let highlight = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .pl_4()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_sm()
+                            .child(tr(keys::Q_PREFS_HIGHLIGHT_EMOJI_WORDS)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_PREFS_HIGHLIGHT_EMOJI_WORDS_ABOUT)),
+                    ),
+            )
+            .child(
+                Switch::new("appearance-highlight-emoji-words")
+                    .checked(self.chat_prefs.suggest_emoji && self.chat_prefs.highlight_emoji_words)
+                    .disabled(!self.chat_prefs.suggest_emoji)
+                    .accessibility_label(tr(keys::Q_PREFS_HIGHLIGHT_EMOJI_WORDS))
+                    .on_click(cx.listener(|this, &on, _, cx| {
+                        this.set_chat_prefs(cx, |c| c.highlight_emoji_words = on);
+                    })),
+            );
         // tdesktop "Replace emoji automatically" (`replaceEmoji`).
         let replace = div()
             .flex()
@@ -641,6 +676,7 @@ impl QuillApp {
             .flex_col()
             .gap_3()
             .child(suggest)
+            .child(highlight)
             .child(replace)
             .child(self.emoji_set_settings_row(cx))
             .into_any_element();

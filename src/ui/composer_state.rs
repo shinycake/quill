@@ -55,6 +55,7 @@ pub(crate) struct ComposerUi {
     pub(super) mention_selected: usize,
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
+    pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
     /// Bots slice: `@botname query` inline-mode results dropdown above
     /// the composer. `inline_results_selected` is the highlighted row
     /// (Up/Down/Enter); `inline_query_token` debounces the
@@ -201,6 +202,7 @@ impl ComposerUi {
             command_menu_selected: 0,
             mention_selected: 0,
             suggest: super::composer_suggest::SuggestUi::load(),
+            emoji_words: Default::default(),
             inline_results_open: false,
             inline_results_selected: 0,
             inline_query_token: 0,

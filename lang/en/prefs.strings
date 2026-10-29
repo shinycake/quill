@@ -767,6 +767,8 @@
 "qll_prefs_two_step_verification_password" = "Two-step verification password";
 "qll_prefs_type_a_reply_or_press" = "Type a reply or press a button; nothing is sent.";
 "qll_prefs_type_and_a_name_in" = "Type : and a name in the composer to pick a matching emoji.";
+"qll_prefs_highlight_emoji_words" = "Highlight words with emoji";
+"qll_prefs_highlight_emoji_words_about" = "A few words you type that have an emoji get a soft highlight. Point at one to swap it for its emoji.";
 "qll_prefs_unblock" = "Unblock";
 "qll_prefs_underline" = "Underline";
 "qll_prefs_undo" = "Undo";

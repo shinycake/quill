@@ -28,6 +28,8 @@ impl QuillApp {
         self.sync_composer_placeholder(window, cx);
         // Emoji keywords for the `:` popup arrived.
         self.refresh_suggest_menu(cx);
+        // Words with emoji: picked again when the text, caret or answers move.
+        self.sync_emoji_words(cx);
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
         self.restore_chat_windows(window, cx);

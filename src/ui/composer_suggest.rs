@@ -24,9 +24,9 @@ use std::time::Duration;
 
 /// Emoji tiles shown before the strip scrolls (tdesktop
 /// `kMaxNonScrolledEmoji`), their size and the gap between them.
-const STRIP_VISIBLE: usize = 7;
-const TILE: f32 = 36.;
-const GAP: f32 = 4.;
+pub(super) const STRIP_VISIBLE: usize = 7;
+pub(super) const TILE: f32 = 36.;
+pub(super) const GAP: f32 = 4.;
 
 /// Emoji one strip holds; a one-letter `:` query can match hundreds.
 const MAX_ROWS: usize = 48;
@@ -145,6 +145,54 @@ pub(super) fn suggest_items(
             name: emoji_name(&emoji).unwrap_or_default().to_string(),
             insert: emoji.clone(),
             glyph: emoji,
+        })
+        .collect()
+}
+
+/// The emoji tiles of a suggestion strip; a press on one calls `pick`
+/// with its index (on press: the composer's blur would close the strip
+/// before a click could land).
+pub(super) fn emoji_tiles(
+    items: &[SuggestItem],
+    selected: Option<usize>,
+    id: &'static str,
+    cx: &mut Context<QuillApp>,
+    pick: fn(&mut QuillApp, usize, &mut Window, &mut Context<QuillApp>),
+) -> Vec<AnyElement> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            div()
+                .id((id, index as u64))
+                .flex_none()
+                .size(px(TILE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md()
+                .text_size(px(22.))
+                .role(gpui_kit::Role::ListBoxOption)
+                .aria_label(if item.name.is_empty() {
+                    item.glyph.clone()
+                } else {
+                    item.name.clone()
+                })
+                .cursor_pointer()
+                .when(Some(index) == selected, |this| {
+                    this.bg(cx.theme().selection)
+                })
+                .hover(|style| style.bg(cx.theme().accent))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        pick(this, index, window, cx);
+                    }),
+                )
+                .child(item.glyph.clone())
+                .into_any_element()
         })
         .collect()
 }
@@ -400,6 +448,11 @@ impl QuillApp {
 
     /// Esc / blur: close the popup. True when it was showing.
     pub(super) fn close_suggest_menu(&mut self, remember: bool, cx: &mut Context<Self>) -> bool {
+        // Esc over a highlighted word's strip closes it, unless the `:`
+        // strip is open: that one is what the user is typing into.
+        if remember && self.composer_ui.suggest.active.is_none() && self.dismiss_emoji_word(cx) {
+            return true;
+        }
         let ui = &mut self.composer_ui.suggest;
         ui.word_timer = None;
         let Some(active) = ui.active.take() else {
@@ -606,39 +659,13 @@ impl QuillApp {
                     .max_w(px(STRIP_VISIBLE as f32 * (TILE + GAP)))
                     .overflow_x_scroll()
                     .track_scroll(&self.composer_ui.suggest.strip_scroll);
-                for (index, item) in active.items.iter().enumerate() {
-                    row = row.child(
-                        div()
-                            .id(("suggest-item", index as u64))
-                            .flex_none()
-                            .size(px(TILE))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_md()
-                            .text_size(px(22.))
-                            .role(gpui_kit::Role::ListBoxOption)
-                            .aria_label(if item.name.is_empty() {
-                                item.glyph.clone()
-                            } else {
-                                item.name.clone()
-                            })
-                            .cursor_pointer()
-                            .when(Some(index) == selected, |this| {
-                                this.bg(cx.theme().selection)
-                            })
-                            .hover(|style| style.bg(cx.theme().accent))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    window.prevent_default();
-                                    this.pick_suggest_index(index, window, cx);
-                                }),
-                            )
-                            .child(item.glyph.clone()),
-                    );
-                }
+                row = row.children(emoji_tiles(
+                    &active.items,
+                    selected,
+                    "suggest-item",
+                    cx,
+                    QuillApp::pick_suggest_index,
+                ));
                 panel
                     .aria_label(tr(keys::Q_CHAT_EMOJI_SUGGESTIONS))
                     .self_start()
