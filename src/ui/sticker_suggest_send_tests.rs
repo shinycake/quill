@@ -2,6 +2,7 @@
 //! it raised (tdesktop `updateStickersByEmoji` runs on the field clear
 //! after Send). Over the `ready-chats` demo; nothing reaches Telegram.
 #![cfg(feature = "demo-capture")]
+#![allow(clippy::unwrap_used, reason = "test code")]
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
