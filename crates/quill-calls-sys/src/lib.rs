@@ -18,7 +18,7 @@ use std::path::PathBuf;
 mod loader;
 pub use loader::*;
 
-pub const QC_API_VERSION: u32 = 2;
+pub const QC_API_VERSION: u32 = 3;
 
 pub const QC_LOG_VERBOSE: i32 = 0;
 pub const QC_LOG_INFO: i32 = 1;
@@ -37,6 +37,18 @@ pub const QC_P2P_WAIT_INIT_ACK: i32 = 1;
 pub const QC_P2P_ESTABLISHED: i32 = 2;
 pub const QC_P2P_FAILED: i32 = 3;
 pub const QC_P2P_RECONNECTING: i32 = 4;
+
+pub const QC_GROUP_MODE_NONE: i32 = 0;
+pub const QC_GROUP_MODE_RTC: i32 = 1;
+pub const QC_GROUP_MODE_BROADCAST: i32 = 2;
+
+pub const QC_GROUP_QUALITY_THUMBNAIL: i32 = 0;
+pub const QC_GROUP_QUALITY_MEDIUM: i32 = 1;
+pub const QC_GROUP_QUALITY_FULL: i32 = 2;
+
+pub const QC_BROADCAST_PART_SUCCESS: i32 = 0;
+pub const QC_BROADCAST_PART_NOT_READY: i32 = 1;
+pub const QC_BROADCAST_PART_RESYNC_NEEDED: i32 = 2;
 
 pub type qc_log_fn =
     Option<unsafe extern "C" fn(user: *mut c_void, level: i32, line: *const c_char)>;
@@ -82,6 +94,67 @@ pub struct qc_p2p_callbacks {
     pub signaling: Option<unsafe extern "C" fn(user: *mut c_void, data: *const u8, length: usize)>,
     pub audio_out: qc_audio_out_fn,
     pub remote_video: qc_video_frame_fn,
+}
+
+#[repr(C)]
+pub struct qc_group {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct qc_group_level {
+    pub ssrc: u32,
+    pub level: f32,
+    pub voice: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct qc_group_media_channel {
+    pub audio_ssrc: u32,
+    pub user_id: i64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct qc_group_broadcast_part {
+    pub timestamp_ms: i64,
+    pub duration_ms: i64,
+    pub is_video: i32,
+    pub video_channel: i32,
+    pub video_quality: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct qc_group_callbacks {
+    pub user: *mut c_void,
+    pub network_state:
+        Option<unsafe extern "C" fn(user: *mut c_void, connected: i32, transitioning_to_rtc: i32)>,
+    pub audio_levels: Option<
+        unsafe extern "C" fn(user: *mut c_void, levels: *const qc_group_level, count: usize),
+    >,
+    pub audio_out: qc_audio_out_fn,
+    pub incoming_video: Option<
+        unsafe extern "C" fn(
+            user: *mut c_void,
+            endpoint: *const c_char,
+            frame: *const qc_video_frame,
+        ),
+    >,
+    pub request_media_channels: Option<
+        unsafe extern "C" fn(user: *mut c_void, request_id: u64, ssrcs: *const u32, count: usize),
+    >,
+    pub request_current_time: Option<unsafe extern "C" fn(user: *mut c_void, request_id: u64)>,
+    pub request_broadcast_part: Option<
+        unsafe extern "C" fn(
+            user: *mut c_void,
+            request_id: u64,
+            part: *const qc_group_broadcast_part,
+        ),
+    >,
+    pub request_cancelled: Option<unsafe extern "C" fn(user: *mut c_void, request_id: u64)>,
 }
 
 /// Native sidecar name, using Rust's platform library naming convention.

@@ -6,8 +6,8 @@ use std::ffi::OsStr;
 ///
 /// The library is never closed, even when the `Loader` drops: tgcalls keeps
 /// its threads for the life of the process and finishes tearing calls down
-/// on them after `qc_p2p_destroy` returns, so unloading its code would crash
-/// those threads.
+/// on them after `qc_p2p_destroy` and `qc_group_destroy` return, so
+/// unloading its code would crash those threads.
 pub struct Loader {
     _lib: std::mem::ManuallyDrop<libloading::Library>,
     pub qc_api_version: unsafe extern "C" fn() -> u32,
@@ -39,6 +39,28 @@ pub struct Loader {
     pub qc_p2p_debug_info: unsafe extern "C" fn(*mut qc_p2p) -> *mut c_char,
     pub qc_p2p_last_error: unsafe extern "C" fn(*mut qc_p2p) -> *mut c_char,
     pub qc_p2p_destroy: unsafe extern "C" fn(*mut qc_p2p),
+    pub qc_group_create: unsafe extern "C" fn(
+        *const c_char,
+        *const qc_group_callbacks,
+        *mut qc_video_capture,
+    ) -> *mut qc_group,
+    pub qc_group_join_payload: unsafe extern "C" fn(*mut qc_group, *mut u32) -> *mut c_char,
+    pub qc_group_set_join_response: unsafe extern "C" fn(*mut qc_group, *const c_char),
+    pub qc_group_set_connection_mode: unsafe extern "C" fn(*mut qc_group, i32, i32),
+    pub qc_group_set_muted: unsafe extern "C" fn(*mut qc_group, i32),
+    pub qc_group_push_audio: unsafe extern "C" fn(*mut qc_group, *const i16, usize),
+    pub qc_group_set_volume: unsafe extern "C" fn(*mut qc_group, u32, f64),
+    pub qc_group_remove_ssrcs: unsafe extern "C" fn(*mut qc_group, *const u32, usize),
+    pub qc_group_set_requested_video: unsafe extern "C" fn(*mut qc_group, *const c_char) -> i32,
+    pub qc_group_add_incoming_video: unsafe extern "C" fn(*mut qc_group, *const c_char),
+    pub qc_group_remove_incoming_video: unsafe extern "C" fn(*mut qc_group, *const c_char),
+    pub qc_group_set_video_capture: unsafe extern "C" fn(*mut qc_group, *mut qc_video_capture),
+    pub qc_group_answer_media_channels:
+        unsafe extern "C" fn(*mut qc_group, u64, *const qc_group_media_channel, usize),
+    pub qc_group_answer_current_time: unsafe extern "C" fn(*mut qc_group, u64, i64),
+    pub qc_group_answer_broadcast_part:
+        unsafe extern "C" fn(*mut qc_group, u64, i32, i64, f64, *const u8, usize),
+    pub qc_group_destroy: unsafe extern "C" fn(*mut qc_group),
 }
 
 macro_rules! resolve {
@@ -96,6 +118,22 @@ impl Loader {
             qc_p2p_debug_info: resolve!(lib, qc_p2p_debug_info),
             qc_p2p_last_error: resolve!(lib, qc_p2p_last_error),
             qc_p2p_destroy: resolve!(lib, qc_p2p_destroy),
+            qc_group_create: resolve!(lib, qc_group_create),
+            qc_group_join_payload: resolve!(lib, qc_group_join_payload),
+            qc_group_set_join_response: resolve!(lib, qc_group_set_join_response),
+            qc_group_set_connection_mode: resolve!(lib, qc_group_set_connection_mode),
+            qc_group_set_muted: resolve!(lib, qc_group_set_muted),
+            qc_group_push_audio: resolve!(lib, qc_group_push_audio),
+            qc_group_set_volume: resolve!(lib, qc_group_set_volume),
+            qc_group_remove_ssrcs: resolve!(lib, qc_group_remove_ssrcs),
+            qc_group_set_requested_video: resolve!(lib, qc_group_set_requested_video),
+            qc_group_add_incoming_video: resolve!(lib, qc_group_add_incoming_video),
+            qc_group_remove_incoming_video: resolve!(lib, qc_group_remove_incoming_video),
+            qc_group_set_video_capture: resolve!(lib, qc_group_set_video_capture),
+            qc_group_answer_media_channels: resolve!(lib, qc_group_answer_media_channels),
+            qc_group_answer_current_time: resolve!(lib, qc_group_answer_current_time),
+            qc_group_answer_broadcast_part: resolve!(lib, qc_group_answer_broadcast_part),
+            qc_group_destroy: resolve!(lib, qc_group_destroy),
             _lib: std::mem::ManuallyDrop::new(lib),
         })
     }

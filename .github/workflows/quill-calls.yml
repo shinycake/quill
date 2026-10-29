@@ -113,7 +113,7 @@ jobs:
           lib.qc_max_layer.restype = ctypes.c_int32
           versions = lib.qc_library_versions().decode().split("\n")
           print("api", lib.qc_api_version(), "max layer", lib.qc_max_layer(), "versions", versions)
-          assert lib.qc_api_version() == 2
+          assert lib.qc_api_version() == 3
           assert lib.qc_max_layer() >= 92, "tgcalls max layer"
           assert len(versions) >= 3 and all(versions), "tgcalls registered no protocol versions"
           EOF

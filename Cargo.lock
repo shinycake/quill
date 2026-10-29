@@ -7125,6 +7125,7 @@ name = "quill-calls-sys"
 version = "0.1.0"
 dependencies = [
  "libloading 0.9.0",
+ "serde_json",
 ]
 
 [[package]]
