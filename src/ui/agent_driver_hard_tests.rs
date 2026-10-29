@@ -47,47 +47,46 @@ fn the_settings_and_lock_chords_open_nothing_for_an_agent(cx: &mut TestAppContex
     settle(vcx);
     focus_message_box(&app, vcx);
 
-    // Cmd+, (and Ctrl+, elsewhere): Settings stays closed and the reply
-    // carries the refusal.
-    for chord in ["cmd-,", "ctrl-,"] {
-        let refusals = press(&app, vcx, chord);
-        assert!(
-            refusals.iter().any(|r| r.contains("open Settings")),
-            "{chord}: {refusals:?}"
-        );
-        assert!(
-            !vcx.update(|_, cx| app.read(cx).settings.open),
-            "{chord} left Settings open"
-        );
-    }
+    // Cmd on macOS, Ctrl elsewhere: one chord per platform.
+    let primary = |key: &str| {
+        let modifier = if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "ctrl"
+        };
+        format!("{modifier}-{key}")
+    };
+
+    // Cmd/Ctrl+,: Settings stays closed and the reply carries the refusal.
+    let refusals = press(&app, vcx, &primary(","));
+    assert!(
+        refusals.iter().any(|r| r.contains("open Settings")),
+        "{refusals:?}"
+    );
+    assert!(!vcx.update(|_, cx| app.read(cx).settings.open));
 
     // Cmd/Ctrl+L with a passcode set: Quill stays unlocked.
     app.update(vcx, |app, _| {
         app.account.passcode.enabled = true;
         app.account.passcode.demo = true;
     });
-    for chord in ["cmd-l", "ctrl-l"] {
-        let refusals = press(&app, vcx, chord);
-        assert!(
-            refusals.iter().any(|r| r.contains("lock Quill")),
-            "{chord}: {refusals:?}"
-        );
-        assert!(
-            !vcx.update(|_, cx| app.read(cx).account.passcode.locked),
-            "{chord} locked Quill"
-        );
-    }
+    let refusals = press(&app, vcx, &primary("l"));
+    assert!(
+        refusals.iter().any(|r| r.contains("lock Quill")),
+        "{refusals:?}"
+    );
+    assert!(!vcx.update(|_, cx| app.read(cx).account.passcode.locked));
 
-    // Minimise has a Ctrl chord on Linux and Windows that the chord list
-    // does not name; the handler refuses it on every platform.
-    let refusals = press(&app, vcx, "ctrl-m");
+    // Minimise: the chord list refuses Cmd+M, and off macOS the handler
+    // refuses Ctrl+M, which the list does not name.
+    let refusals = press(&app, vcx, &primary("m"));
     assert!(
         refusals.iter().any(|r| r.contains("minimise")),
         "{refusals:?}"
     );
 
-    // The user's own Cmd+, still opens Settings.
-    vcx.simulate_keystrokes("cmd-,");
+    // The user's own Cmd/Ctrl+, still opens Settings.
+    vcx.simulate_keystrokes(&primary(","));
     settle(vcx);
     assert!(vcx.update(|_, cx| app.read(cx).settings.open));
 }
@@ -311,15 +310,18 @@ fn full_screen_and_zoom_refuse_while_injecting(cx: &mut TestAppContext) {
     settle(vcx);
     focus_message_box(&app, vcx);
 
-    // F11 and Cmd+Ctrl+F: the window stays as it is.
-    for chord in ["f11", "cmd-ctrl-f"] {
-        let refusals = press(&app, vcx, chord);
-        assert!(
-            refusals.iter().any(|r| r.contains("full-screen")),
-            "{chord}: {refusals:?}"
-        );
-        assert!(!vcx.update(|window, _| window.is_fullscreen()), "{chord}");
-    }
+    // Cmd+Ctrl+F on macOS, F11 elsewhere: the window stays as it is.
+    let chord = if cfg!(target_os = "macos") {
+        "cmd-ctrl-f"
+    } else {
+        "f11"
+    };
+    let refusals = press(&app, vcx, chord);
+    assert!(
+        refusals.iter().any(|r| r.contains("full-screen")),
+        "{chord}: {refusals:?}"
+    );
+    assert!(!vcx.update(|window, _| window.is_fullscreen()), "{chord}");
 
     // Window > Zoom, under the flag a step sets.
     let _ = guard::take_refusals();

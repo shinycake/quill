@@ -816,7 +816,7 @@ mod tests {
     #[cfg(feature = "demo-capture")]
     fn ctrl_l_locks_and_shift_variant_focuses_the_composer() {
         let lock = super::LockApp.name();
-        let mut chords: Vec<String> = default_bindings()
+        let chords: Vec<String> = default_bindings()
             .iter()
             .filter(|binding| binding.action().name() == lock)
             .map(|binding| binding.keystrokes()[0].inner().unparse(HOST_OS))
