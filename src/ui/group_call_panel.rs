@@ -337,24 +337,27 @@ impl QuillApp {
                 .child(tr(keys::Q_AV_CONNECTION_LOST_CLICK_TO_REJOIN))
         });
 
-        let invite = (self.group_call.invite_open && !self.account.passcode.locked).then(|| {
-            div()
-                .absolute()
-                .inset_0()
-                .bg(call_chrome::scrim())
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(340.))
-                        .max_h(relative(0.85))
-                        .rounded(px(12.))
-                        .bg(cx.theme().background)
-                        .p(px(12.))
-                        .child(self.group_call_invite_panel(&call, cx)),
-                )
-        });
+        // A conference made with "Create Call Link" opens on its link.
+        let link_open = call.conference.as_ref().is_some_and(|c| c.link_open);
+        let invite = ((self.group_call.invite_open || link_open) && !self.account.passcode.locked)
+            .then(|| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(call_chrome::scrim())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .w(px(340.))
+                            .max_h(relative(0.85))
+                            .rounded(px(12.))
+                            .bg(cx.theme().background)
+                            .p(px(12.))
+                            .child(self.group_call_invite_panel(&call, cx)),
+                    )
+            });
 
         // Rename (`setVideoChatTitle`).
         let rename = self.group_call_rename_overlay(tr(keys::Q_AV_EDIT_TITLE).into(), cx);

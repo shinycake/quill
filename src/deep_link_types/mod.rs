@@ -111,7 +111,11 @@ pub enum InternalLink {
         invite_hash: String,
         live_stream: bool,
     },
-    GroupCall,
+    /// `internalLinkTypeGroupCall`: a conference call's link
+    /// (`t.me/call/<slug>`).
+    GroupCall {
+        invite_link: String,
+    },
     ChatFolderInvite {
         invite_link: String,
     },
@@ -190,6 +194,10 @@ pub enum DeepLinkUi {
     Settings(SettingsTarget),
     /// `addlist`: the "Add folder" box for a shared folder (invite link).
     FolderInvite {
+        link: String,
+    },
+    /// `call`: "join this group call?" for a conference call's link.
+    ConferenceCall {
         link: String,
     },
     /// `bg`: the wallpaper preview for a background name (`searchBackground`).
@@ -406,7 +414,9 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             invite_hash: text(value, "invite_hash"),
             live_stream: flag(value, "is_live_stream"),
         },
-        "GroupCall" => InternalLink::GroupCall,
+        "GroupCall" => InternalLink::GroupCall {
+            invite_link: text(value, "invite_link"),
+        },
         "ChatFolderInvite" => InternalLink::ChatFolderInvite {
             invite_link: text(value, "invite_link"),
         },
@@ -684,8 +694,14 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
         } else {
             "This video chat link is broken.".into()
         }),
-        InternalLink::GroupCall => {
-            LinkRoute::Message(format!("Joining a call from a link {NOT_SUPPORTED}"))
+        // tdesktop asks before joining a conference call by its link.
+        InternalLink::GroupCall { invite_link } if !invite_link.is_empty() => {
+            LinkRoute::Ui(DeepLinkUi::ConferenceCall {
+                link: invite_link.clone(),
+            })
+        }
+        InternalLink::GroupCall { .. } => {
+            LinkRoute::Message("This call link is broken or has expired.".into())
         }
         InternalLink::ChatFolderInvite { invite_link } => {
             if invite_link.is_empty() {

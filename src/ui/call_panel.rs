@@ -43,6 +43,9 @@ const ENDED_LINGER: Duration = Duration::from_millis(1600);
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CallPhase {
     Incoming,
+    /// A conference call invitation rings (tdesktop's call panel for a
+    /// `conferenceInvite()` call): Decline or Join.
+    ConferenceInvite,
     Active,
     /// The peer didn't pick up or was busy: Redial or Cancel.
     Busy,
@@ -51,30 +54,36 @@ pub(super) enum CallPhase {
 
 /// Everything the call window shows, read from the app each frame.
 pub(super) struct CallSnap {
-    user_id: i64,
-    is_video: bool,
-    name: String,
-    photo: Option<PathBuf>,
-    phase: CallPhase,
-    status: String,
+    pub(super) user_id: i64,
+    pub(super) is_video: bool,
+    pub(super) name: String,
+    pub(super) photo: Option<PathBuf>,
+    pub(super) phase: CallPhase,
+    pub(super) status: String,
     /// Not connected yet: a ring spins around the photo.
-    connecting: bool,
-    muted: bool,
-    camera_on: bool,
-    screen_sharing: bool,
-    can_share_screen: bool,
-    emojis: Vec<String>,
+    pub(super) connecting: bool,
+    pub(super) muted: bool,
+    pub(super) camera_on: bool,
+    pub(super) screen_sharing: bool,
+    pub(super) can_share_screen: bool,
+    pub(super) emojis: Vec<String>,
     /// The peer's microphone is off (tdesktop `lng_call_microphone_off`).
-    remote_muted: bool,
+    pub(super) remote_muted: bool,
     /// The peer's battery is low (tdesktop `lng_call_battery_level_low`).
-    remote_battery_low: bool,
+    pub(super) remote_battery_low: bool,
     /// The connection's signal bars, once established (tdesktop
     /// `Calls::SignalBars`).
-    signal_bars: Option<u8>,
+    pub(super) signal_bars: Option<u8>,
     /// The peer's picture has a frame: it fills the window.
-    video: bool,
+    pub(super) video: bool,
     /// Your camera's preview has a frame.
-    preview: bool,
+    pub(super) preview: bool,
+    /// "Add People" is offered: the call can be taken into a conference
+    /// call (tdesktop `_conferenceSupported`).
+    pub(super) can_add_people: bool,
+    /// A conference invitation: who else is in the call
+    /// (`lng_confcall_already_joined_*`).
+    pub(super) joined_line: Option<String>,
 }
 
 /// tdesktop `Ui::FormatDurationText`: `m:ss`, or `h:mm:ss`.
@@ -131,7 +140,7 @@ impl QuillApp {
         let (user_id, is_video) = match (&call, &summary) {
             (Some(call), _) => (call.user_id, call.is_video),
             (None, Some(summary)) => (summary.user_id, summary.is_video),
-            (None, None) => return None,
+            (None, None) => return self.conference_invite_snapshot(),
         };
         let user = session.user(user_id);
         let name = user
@@ -170,6 +179,8 @@ impl QuillApp {
                 signal_bars: None,
                 video: false,
                 preview: false,
+                can_add_people: false,
+                joined_line: None,
             });
         };
         let (status, connecting) = call_status(
@@ -206,6 +217,11 @@ impl QuillApp {
             // The root made the players follow the call before this draw.
             video: self.call_picture_drawn(CallPicture::Remote),
             preview: self.call_picture_drawn(CallPicture::Local),
+            can_add_people: call
+                .ready
+                .as_ref()
+                .is_some_and(|ready| ready.is_group_call_supported),
+            joined_line: None,
         })
     }
 
@@ -222,7 +238,10 @@ impl QuillApp {
                     false,
                 ),
                 (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
-                _ => (None, false, false, false),
+                _ => match super::call_conference_ui::ringing_invite_key(session) {
+                    Some(key) => (Some(key), true, false, false),
+                    None => (None, false, false, false),
+                },
             },
             None => (None, false, false, false),
         };
@@ -631,6 +650,18 @@ impl Render for CallPanel {
                     DeviceMenuTarget::Audio,
                     cx,
                 ));
+                if snap.can_add_people {
+                    row.push(
+                        call_button(
+                            "call-add-people",
+                            IconName::UserPlus,
+                            tr(keys::CALL_ADD_PEOPLE),
+                            ButtonLook::Plain,
+                            act(QuillApp::open_call_add_people),
+                        )
+                        .into_any_element(),
+                    );
+                }
                 row.push(
                     call_button(
                         "call-end",
@@ -670,6 +701,24 @@ impl Render for CallPanel {
                     .into_any_element(),
                 ]
             }
+            CallPhase::ConferenceInvite => vec![
+                call_button(
+                    "conference-decline",
+                    IconName::Phone,
+                    tr(keys::CALL_DECLINE),
+                    ButtonLook::Hangup,
+                    act(QuillApp::decline_conference_invite),
+                )
+                .into_any_element(),
+                call_button(
+                    "conference-join",
+                    IconName::Phone,
+                    tr(keys::GROUP_CALL_JOIN),
+                    ButtonLook::Answer,
+                    act(QuillApp::accept_conference_invite),
+                )
+                .into_any_element(),
+            ],
             CallPhase::Ended => Vec::new(),
         };
 
@@ -785,6 +834,14 @@ impl Render for CallPanel {
                 .child(div().mt(px(16.)).max_w(px(420.)).child(name))
                 .child(status)
                 .children(mic_off)
+                .children(snap.joined_line.clone().map(|line| {
+                    div()
+                        .max_w(px(420.))
+                        .text_size(px(13.))
+                        .text_color(call_chrome::muted())
+                        .text_center()
+                        .child(super::call_conference_ui::joined_line_element(&line))
+                }))
                 .into_any_element()
         };
 
@@ -869,6 +926,7 @@ impl Render for CallPanel {
                     .children(buttons),
             )
             .children(device_menu)
+            .children(owner.update(cx, |app, cx| app.call_add_people_overlay(cx)))
             .children(owner.update(cx, |app, cx| app.screen_privacy_overlay(false, cx)))
             .into_any_element()
     }

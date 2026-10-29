@@ -212,6 +212,7 @@ mod bubble_header;
 mod business;
 mod business_bot_bar_ui;
 mod call_audio_ui;
+mod call_conference_ui;
 mod call_device_prefs_ui;
 mod call_link_ui;
 mod call_panel;
