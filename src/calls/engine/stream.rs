@@ -1,9 +1,11 @@
-//! Stream-mode group calls (channel live streams over RTMP and large
-//! broadcast calls over MTProto): the types the engine and the connect
-//! side share. ntgcalls switches a group call into stream mode on its own
-//! when the `joinVideoChat` answer says so; the engine reports the mode and
-//! forwards ntgcalls' segment requests, the connect side answers them with
-//! TDLib (`StreamFeeder`).
+//! Stream-mode group calls (channel live streams over RTMP, live stories
+//! and large broadcast calls over MTProto): the types the engine and the
+//! connect side share. The engine switches a group call into stream mode
+//! when the `joinVideoChat` answer says so, reports the mode and forwards
+//! the engine's time and part requests, each with a request id, as
+//! tgcalls asks them (`requestCurrentTime`, `requestAudioBroadcastPart`,
+//! `requestVideoBroadcastPart`); the connect side answers them with TDLib
+//! (`StreamFeeder`).
 use super::*;
 use ntgcalls_sys::{
     NTG_CONNECTION_MODE_RTC, NTG_CONNECTION_MODE_RTMP, NTG_CONNECTION_MODE_STREAM,
@@ -12,8 +14,7 @@ use ntgcalls_sys::{
     NTG_MEDIA_SEGMENT_QUALITY_MEDIUM, NTG_MEDIA_SEGMENT_QUALITY_NONE,
     NTG_MEDIA_SEGMENT_QUALITY_THUMBNAIL, NTG_STREAM_DEVICE_CAMERA, NTG_STREAM_DEVICE_SCREEN,
     NTG_STREAM_MODE_CAPTURE, NTG_STREAM_MODE_PLAYBACK, ntg_connection_mode,
-    ntg_media_segment_part_status, ntg_media_segment_quality, ntg_segment_part_request,
-    ntg_stream_device, ntg_stream_mode,
+    ntg_media_segment_part_status, ntg_media_segment_quality, ntg_stream_device, ntg_stream_mode,
 };
 use std::sync::Arc;
 
@@ -112,39 +113,72 @@ impl StreamQuality {
     }
 }
 
-/// One segment part ntgcalls asks for, copied out of the native callback
-/// (`ntg_segment_part_request`). `timestamp` is the segment's start in
-/// Unix milliseconds and `segment_id` the index ntgcalls derived from it;
-/// Quill never derives either.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BroadcastPartRequest {
-    pub segment_id: i64,
-    pub part_id: i32,
-    pub limit: i32,
-    pub timestamp: i64,
-    pub quality_update: bool,
-    pub channel_id: i32,
-    /// `None` for an audio part.
-    pub quality: Option<StreamQuality>,
+/// Names one broadcast request until it is answered or cancelled: the
+/// native instance that asked (a rejoin makes a new one, whose ids start
+/// over) and the id that instance gave it. An answer for an instance that
+/// is gone is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BroadcastRequestId {
+    pub instance: u64,
+    pub id: u64,
 }
 
-impl BroadcastPartRequest {
-    pub(crate) fn from_native(request: &ntg_segment_part_request) -> Self {
-        Self {
-            segment_id: request.segment_id,
-            part_id: request.part_id,
-            limit: request.limit,
-            timestamp: request.timestamp,
-            quality_update: request.quality_update,
-            channel_id: request.channel_id,
-            quality: StreamQuality::from_native(request.quality),
+/// Which stream channel a part is from (tgcalls asks
+/// `requestAudioBroadcastPart` or `requestVideoBroadcastPart`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BroadcastChannel {
+    /// The mixed sound of an MTProto stream.
+    Audio,
+    /// A video channel at a quality; an RTMP stream's unified part is
+    /// channel 1 at Full.
+    Video {
+        channel_id: i32,
+        quality: StreamQuality,
+    },
+}
+
+impl BroadcastChannel {
+    /// `getGroupCallStreamSegment`'s `channel_id` and `video_quality`, as
+    /// tdesktop's `broadcastPartStart` fills `inputGroupCallStream`: the
+    /// video fields only for a video channel other than 0.
+    pub fn segment_channel(self) -> (i32, Option<StreamQuality>) {
+        match self {
+            BroadcastChannel::Audio => (0, None),
+            BroadcastChannel::Video { channel_id: 0, .. } => (0, None),
+            BroadcastChannel::Video {
+                channel_id,
+                quality,
+            } => (channel_id, Some(quality)),
         }
     }
 }
 
-/// The answer status for a part. ntgcalls also defines `DOWNLOADING`, but
-/// `send_broadcast_part` rejects it ("Invalid part status"), so Quill never
-/// sends it.
+/// One stream part the engine asks for (tdesktop's `LoadPartTask`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BroadcastPartRequest {
+    /// The part's start in server Unix milliseconds; 0 means now.
+    pub timestamp_ms: i64,
+    /// 1000, 500, 250 or 125.
+    pub duration_ms: i64,
+    pub channel: BroadcastChannel,
+}
+
+impl BroadcastPartRequest {
+    /// TDLib's segment scale for the part's duration, as tdesktop maps
+    /// it (1000 ms is scale 0, each halving one more); `None` for a
+    /// duration tdesktop does not know.
+    pub fn scale(&self) -> Option<i32> {
+        match self.duration_ms {
+            1000 => Some(0),
+            500 => Some(1),
+            250 => Some(2),
+            125 => Some(3),
+            _ => None,
+        }
+    }
+}
+
+/// The answer status for a part (tgcalls' `BroadcastPart::Status`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BroadcastPartStatus {
     NotReady,
@@ -162,25 +196,29 @@ impl BroadcastPartStatus {
     }
 }
 
-/// The answer to one part request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The answer to one part request (tgcalls' `BroadcastPart`).
+#[derive(Debug, Clone, PartialEq)]
 pub struct BroadcastPartAnswer {
-    pub segment_id: i64,
-    pub part_id: i32,
+    pub request: BroadcastRequestId,
     pub status: BroadcastPartStatus,
-    pub quality_update: bool,
+    /// The part that was loaded: the request's start, or the time Quill
+    /// chose for a request that said "now".
+    pub timestamp_ms: i64,
+    /// The server time the answer came at, in seconds; tgcalls resyncs
+    /// to it after NotReady and ResyncNeeded.
+    pub response_time: f64,
     /// The segment bytes for `Success`; empty otherwise.
     pub data: Vec<u8>,
 }
 
 impl BroadcastPartAnswer {
-    /// The data pointer for `ntg_send_broadcast_part`. The C wrapper turns
-    /// a null pointer into "no data", which ntgcalls must only see for
+    /// The data pointer for the native answer. ntgcalls' C wrapper turns
+    /// a null pointer into "no data", which it must only see for
     /// NOT_READY and RESYNC_NEEDED: a SUCCESS without data makes it ask
     /// for the part forever, or throw on its media thread for a quality
     /// update. So SUCCESS always passes a non-null pointer, even for 0
-    /// bytes (an empty `Vec`'s pointer is dangling but non-null, and
-    /// ntgcalls reads `len` = 0 bytes from it).
+    /// bytes (an empty `Vec`'s pointer is dangling but non-null, and is
+    /// read for 0 bytes).
     pub(crate) fn native_data_ptr(&self) -> *const u8 {
         match self.status {
             BroadcastPartStatus::Success => self.data.as_ptr(),
@@ -213,14 +251,23 @@ pub struct GroupAudioLevel {
 /// over without blocking.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineEvent {
-    /// RTMP only: ntgcalls needs the stream's current time
-    /// (`getGroupCallStreams`). MTProto streams use the server time
-    /// ntgcalls already has and never ask.
-    BroadcastTimestampRequested { chat_id: i64 },
-    /// ntgcalls needs a segment part (`getGroupCallStreamSegment`).
+    /// The stream's current server time in ms, answered with
+    /// `answer_broadcast_time` (tgcalls' `requestCurrentTime`).
+    BroadcastTimeRequested {
+        chat_id: i64,
+        request: BroadcastRequestId,
+    },
+    /// A stream part, answered with `answer_broadcast_part`.
     BroadcastPartRequested {
         chat_id: i64,
-        request: BroadcastPartRequest,
+        request: BroadcastRequestId,
+        part: BroadcastPartRequest,
+    },
+    /// The engine no longer wants `request` (tgcalls' `cancel()`); an
+    /// answer after this is ignored.
+    BroadcastRequestCancelled {
+        chat_id: i64,
+        request: BroadcastRequestId,
     },
     /// A batch of speaker levels in a group call (tgcalls only; a batch
     /// of only your own level comes only when it changed, as in
@@ -303,10 +350,10 @@ mod tests {
 
     fn answer(status: BroadcastPartStatus, data: Vec<u8>) -> BroadcastPartAnswer {
         BroadcastPartAnswer {
-            segment_id: 1,
-            part_id: 0,
+            request: BroadcastRequestId { instance: 1, id: 1 },
             status,
-            quality_update: false,
+            timestamp_ms: 0,
+            response_time: 0.0,
             data,
         }
     }
@@ -351,6 +398,32 @@ mod tests {
             assert!(answer.native_data_ptr().is_null());
             assert_eq!(answer.native_data_len(), 0);
         }
+    }
+
+    #[test]
+    fn durations_map_to_tdesktops_scales() {
+        let part = |duration_ms| BroadcastPartRequest {
+            timestamp_ms: 0,
+            duration_ms,
+            channel: BroadcastChannel::Audio,
+        };
+        let scales: Vec<_> = [1000, 500, 250, 125, 2000, 0]
+            .into_iter()
+            .map(|duration| part(duration).scale())
+            .collect();
+        assert_eq!(scales, vec![Some(0), Some(1), Some(2), Some(3), None, None]);
+    }
+
+    #[test]
+    fn only_a_video_channel_carries_a_quality() {
+        assert_eq!(BroadcastChannel::Audio.segment_channel(), (0, None));
+        let video = |channel_id| BroadcastChannel::Video {
+            channel_id,
+            quality: StreamQuality::Medium,
+        };
+        assert_eq!(video(2).segment_channel(), (2, Some(StreamQuality::Medium)));
+        // tdesktop sets the video flags only for a channel other than 0.
+        assert_eq!(video(0).segment_channel(), (0, None));
     }
 
     #[test]

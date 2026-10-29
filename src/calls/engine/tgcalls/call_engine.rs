@@ -322,6 +322,25 @@ impl CallEngine for TgcallsEngine {
         self.group_stream_quality(chat_id)
     }
 
+    fn answer_broadcast_time(
+        &mut self,
+        chat_id: i64,
+        request: BroadcastRequestId,
+        timestamp_ms: i64,
+    ) -> Result<(), EngineError> {
+        self.answer_group_time(chat_id, request, timestamp_ms);
+        Ok(())
+    }
+
+    fn answer_broadcast_part(
+        &mut self,
+        chat_id: i64,
+        answer: &BroadcastPartAnswer,
+    ) -> Result<(), EngineError> {
+        self.answer_group_part(chat_id, answer);
+        Ok(())
+    }
+
     fn set_live_frame_callback(&mut self, callback: LiveFrameCallback) {
         set_hook(&self.callback.live_frame_hook, callback);
     }

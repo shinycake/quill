@@ -110,21 +110,24 @@ fn native_rtmp_connect_reports_stream_mode() {
     let event = events_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("A broadcast timestamp request");
-    assert_eq!(
-        event,
-        EngineEvent::BroadcastTimestampRequested { chat_id },
-        "RTMP asks for the stream's current time first"
-    );
+    let EngineEvent::BroadcastTimeRequested {
+        chat_id: asked,
+        request,
+    } = event
+    else {
+        panic!("RTMP asks for the stream's current time first: {event:?}");
+    };
+    assert_eq!(asked, chat_id);
     // "No stream yet": ntgcalls asks again a second later on its own.
     engine
-        .send_broadcast_timestamp(chat_id, 0)
+        .answer_broadcast_time(chat_id, request, 0)
         .expect("Timestamp answer");
     let again = events_rx.recv_timeout(std::time::Duration::from_secs(5));
     eprintln!("after a 0 answer: {again:?}");
-    assert_eq!(
-        again.ok(),
-        Some(EngineEvent::BroadcastTimestampRequested { chat_id })
-    );
+    assert!(matches!(
+        again,
+        Ok(EngineEvent::BroadcastTimeRequested { .. })
+    ));
     engine.leave_group_call(7).expect("Teardown");
 }
 
@@ -153,23 +156,26 @@ fn native_stream_connect_needs_no_capture_and_asks_for_parts() {
         .recv_timeout(std::time::Duration::from_secs(5))
         .expect("A broadcast part request");
     eprintln!("first stream event: {event:?}");
-    let request = match event {
-        EngineEvent::BroadcastPartRequested { request, .. } => Some(request),
-        EngineEvent::BroadcastTimestampRequested { .. } | EngineEvent::GroupAudioLevels { .. } => {
-            None
-        }
+    let (request, part) = match event {
+        EngineEvent::BroadcastPartRequested { request, part, .. } => Some((request, part)),
+        EngineEvent::BroadcastTimeRequested { .. }
+        | EngineEvent::BroadcastRequestCancelled { .. }
+        | EngineEvent::GroupAudioLevels { .. } => None,
     }
     .expect("An MTProto stream asks for parts, not the time");
-    assert_eq!(request.channel_id, 0, "the audio part comes first");
-    assert_eq!(request.quality, None);
+    assert_eq!(
+        part.channel,
+        BroadcastChannel::Audio,
+        "the audio part comes first"
+    );
     engine
-        .send_broadcast_part(
+        .answer_broadcast_part(
             chat_id,
             &BroadcastPartAnswer {
-                segment_id: request.segment_id,
-                part_id: request.part_id,
+                request,
                 status: BroadcastPartStatus::NotReady,
-                quality_update: false,
+                timestamp_ms: part.timestamp_ms,
+                response_time: 0.0,
                 data: Vec::new(),
             },
         )

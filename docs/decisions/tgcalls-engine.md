@@ -170,9 +170,58 @@ mode and then the answer, in tdesktop's order. Incoming video is routed by
 endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
 qualities follow tdesktop's grid defaults and budget, since Quill does not
 report tile sizes. Speaker levels reach the engine event hook; the driver
-drops them until the speaking-levels parity item. Nobody answers media
-channel, time or part requests yet: a stream connects but gets no parts
-until the live-streams step.
+drops them until the speaking-levels parity item. Media channel requests
+stay unwired: tgcalls then accepts every ssrc as it comes, which a stream
+never needs (its parts carry no ssrcs) and an RTC call plays the same.
+
+### Live streams
+
+A stream (an RTMP channel stream, a live story or a large MTProto
+broadcast) is broadcast mode. The engine trait carries tgcalls' requests
+as they are: `EngineEvent::BroadcastTimeRequested`,
+`BroadcastPartRequested` (start, duration, audio or a video channel at a
+quality) and `BroadcastRequestCancelled`, each with a
+`BroadcastRequestId` (the instance and the library's id, so an answer
+for an instance a rejoin replaced is dropped). The driver's
+`StreamFeeder` answers them with TDLib as tdesktop's `GroupCall` does
+with MTProto (`requestCurrentTimeStart`, `broadcastPartStart`,
+`LoadPartTask`):
+
+- Time: an RTMP stream asks `getGroupCallStreams` once for every waiting
+  request and answers the first channel's `time_offset` (0 for none, and
+  for any failure); other streams answer the server time at once, kept
+  from TDLib's `unix_time` option.
+- Part: `getGroupCallStreamSegment` at the duration's scale (1000 ms is
+  0, each halving one more), with the video channel and quality only for
+  a video channel other than 0. A part for "now" loads the server's
+  current second. `data` is Success; flood and `TIME_TOO_BIG` NotReady;
+  `GROUPCALL_JOIN_MISSING` and `GROUPCALL_FORBIDDEN` NotReady and a
+  rejoin; anything else ResyncNeeded.
+- A cancelled request is forgotten and TDLib's late reply dropped; a
+  leave or rejoin answers every open part ResyncNeeded first.
+
+Two answers differ from tdesktop: the response time is the server time
+when the answer goes out (TDLib does not pass on the reply's message
+time), and a membership error answers the part NotReady before the
+rejoin, where tdesktop leaves it to the new instance.
+
+An RTMP stream also asks for tdesktop's `RtmpEndpointId` (`"unified"`)
+video, at least Full while the stream tile is Full, and every picture of
+a stream goes to its chat's stream feed.
+
+Known gaps, kept on purpose for now:
+
+- A stream shows one picture: the RTMP feed alone, otherwise one
+  speaker's screen (or, without one, the first camera). Asking for every
+  endpoint would send all of them to the one stream feed.
+- Server time comes from TDLib's `unix_time` option, whole seconds
+  measured when the driver reads the update, so MTProto time answers can
+  be up to about a second off. tdesktop gets milliseconds from the join
+  reply's message id, which TDLib does not pass on. A time that runs
+  early is answered `TIME_TOO_BIG` and retried, so a stream starts a
+  little later but does not stall.
+- Requests queued by an instance a rejoin replaced still reach TDLib
+  once; their answers are dropped by instance id.
 
 ## Build order
 

@@ -237,8 +237,10 @@ pub(crate) struct CallbackShared {
     /// Chats whose group call runs in stream mode: their frames go to the
     /// stream slot instead of the ssrc lookup.
     pub(crate) stream_chats: Mutex<HashSet<i64>>,
-    /// Broadcast timestamp and part requests (stream mode).
+    /// Broadcast time and part requests (stream mode).
     pub(crate) engine_event_hook: Mutex<Option<EngineEventCallback>>,
+    /// ntgcalls' open part requests by the request id Quill gave them.
+    pub(crate) ntg_parts: Mutex<super::native::NtgPartRequests>,
     /// Every decoded picture (group-call tracks, streams, 1:1 calls), as
     /// I420 planes.
     pub(crate) live_frame_hook: Mutex<Option<LiveFrameCallback>>,
@@ -255,6 +257,7 @@ impl CallbackShared {
             .lock_or_recover()
             .retain(|(chat, _), _| *chat != chat_id);
         self.stream_chats.lock_or_recover().remove(&chat_id);
+        self.ntg_parts.lock_or_recover().forget_chat(chat_id);
         self.route_stream_audio(chat_id, None);
     }
 
@@ -284,6 +287,7 @@ impl CallbackShared {
             group_video_ssrc_to_user: Mutex::new(HashMap::new()),
             stream_chats: Mutex::new(HashSet::new()),
             engine_event_hook: Mutex::new(None),
+            ntg_parts: Mutex::new(super::native::NtgPartRequests::default()),
             live_frame_hook: Mutex::new(None),
             stream_audio: ArcSwap::from_pointee(HashMap::new()),
         }

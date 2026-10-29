@@ -1,17 +1,20 @@
-//! Connect driver: stream-mode group calls (channel live streams over RTMP
-//! and large broadcast calls). ntgcalls asks for the stream's time and its
-//! segment parts on its own threads; the requests queue here and one
+//! Connect driver: stream-mode group calls (channel live streams over RTMP,
+//! live stories and large broadcast calls). The engine asks for the
+//! stream's time and its parts on its own threads, each request with an
+//! id; the requests (and their cancellations) queue here and one
 //! [`StreamFeeder`] per chat answers them with TDLib on the driver thread.
 use super::*;
 use crate::calls::engine::{
-    BroadcastPartAnswer, BroadcastPartStatus, CallEngine, EngineEvent, GroupCallMode, ReplyOutcome,
-    SegmentFetch, StreamFeeder, StreamFetchError, StreamPort, StreamQualityTracker, StreamReply,
-    StreamState,
+    BroadcastPartAnswer, BroadcastPartStatus, BroadcastRequestId, CallEngine, EngineEvent,
+    GroupCallMode, ReplyOutcome, SegmentFetch, StreamFeeder, StreamFetchError, StreamPort,
+    StreamQualityTracker, StreamReply, StreamState,
 };
 use crate::calls::stream_audio::gain::clamp_volume;
 use crate::calls::stream_audio::watch::PlaybackWatch;
 use crate::state::Session;
-use crate::telegram::envelope::{CallsPayload, Envelope, EnvelopePayload, ErrorClass, TdError};
+use crate::telegram::envelope::{
+    CallsPayload, CommonPayload, Envelope, EnvelopePayload, ErrorClass, OptionValue, TdError,
+};
 use crate::telegram::requests::{get_group_call_stream_segment, get_group_call_streams};
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -25,12 +28,12 @@ const EVENTS_PER_TICK: usize = 64;
 /// feeder per stream chat (the pictures go to live feeds,
 /// `live_feeds.rs`).
 ///
-/// The queue is unbounded on purpose. ntgcalls never asks again for a
-/// request nobody answered: a part stays Downloading until its answer, and
-/// the time request stays outstanding until `send_broadcast_timestamp`.
-/// So a dropped request would stall the stream for good. ntgcalls bounds
-/// the backlog itself: it keeps only a few segments pending, each with one
-/// request per part, plus at most one time request.
+/// The queue is unbounded on purpose. The engine never asks again for a
+/// request nobody answered: a part or time request stays open until its
+/// answer or its cancellation, so a dropped request would stall the
+/// stream for good. The engine bounds the backlog itself: it keeps only a
+/// few segments pending, each with one request per part, plus at most one
+/// time request.
 pub(crate) struct GroupCallStreams {
     events_tx: Sender<EngineEvent>,
     events_rx: Mutex<Receiver<EngineEvent>>,
@@ -38,6 +41,9 @@ pub(crate) struct GroupCallStreams {
     quality: HashMap<i64, StreamQualityTracker>,
     sound_watch: HashMap<i32, PlaybackWatch>,
     volume: f32,
+    /// The server's clock minus this machine's, in ms, from TDLib's
+    /// `unix_time` option (0 until it comes).
+    server_offset_ms: i64,
 }
 
 impl Default for GroupCallStreams {
@@ -50,6 +56,7 @@ impl Default for GroupCallStreams {
             quality: HashMap::new(),
             sound_watch: HashMap::new(),
             volume: 1.0,
+            server_offset_ms: 0,
         }
     }
 }
@@ -66,6 +73,7 @@ struct DriverStreamPort<'a, S: JsonSender> {
     session: &'a mut Session,
     sender: &'a S,
     engine: Option<&'a mut (dyn CallEngine + 'static)>,
+    server_offset_ms: i64,
 }
 
 impl<S: JsonSender> DriverStreamPort<'_, S> {
@@ -99,21 +107,44 @@ impl<S: JsonSender> StreamPort for DriverStreamPort<'_, S> {
         })
     }
 
-    fn answer_timestamp(&mut self, chat_id: i64, timestamp_ms: i64) {
+    fn server_time_ms(&self) -> i64 {
+        local_time_ms().saturating_add(self.server_offset_ms)
+    }
+
+    fn answer_time(&mut self, chat_id: i64, request: BroadcastRequestId, timestamp_ms: i64) {
         if let Some(engine) = self.engine.as_deref_mut()
-            && let Err(err) = engine.send_broadcast_timestamp(chat_id, timestamp_ms)
+            && let Err(err) = engine.answer_broadcast_time(chat_id, request, timestamp_ms)
         {
-            eprintln!("quill: stream timestamp answer for chat {chat_id} failed: {err}");
+            eprintln!("quill: stream time answer for chat {chat_id} failed: {err}");
         }
     }
 
     fn answer_part(&mut self, chat_id: i64, answer: BroadcastPartAnswer) {
         if let Some(engine) = self.engine.as_deref_mut()
-            && let Err(err) = engine.send_broadcast_part(chat_id, &answer)
+            && let Err(err) = engine.answer_broadcast_part(chat_id, &answer)
         {
             eprintln!("quill: stream part answer for chat {chat_id} failed: {err}");
         }
     }
+}
+
+/// This machine's Unix time in ms.
+fn local_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+        })
+}
+
+/// The server's clock minus this machine's, from TDLib's `unix_time`
+/// option (whole seconds of the server's time when TDLib sent it), taken
+/// at the middle of that second.
+pub(crate) fn server_offset_ms(unix_time: i64, local_ms: i64) -> i64 {
+    unix_time
+        .saturating_mul(1000)
+        .saturating_add(500)
+        .saturating_sub(local_ms)
 }
 
 /// TDLib's error for a stream request, classified as tdesktop does.
@@ -129,7 +160,7 @@ pub(crate) fn stream_fetch_error(err: &TdError) -> StreamFetchError {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Routes the engine's broadcast requests and stream pictures into the
-    /// driver. The hooks run on ntgcalls threads: they only queue or store
+    /// driver. The hooks run on engine threads: they only queue or store
     /// and never block. The queue never drops a request (see
     /// [`GroupCallStreams`]); a send only fails once the driver is gone.
     pub(crate) fn install_stream_hooks(&self, engine: &mut dyn CallEngine) {
@@ -232,11 +263,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
-    /// to the engine only when it changes. ntgcalls 3.0.5 has no API to
-    /// pick a stream's quality (it asks Full for RTMP and chooses per
-    /// endpoint for MTProto streams), so the engine records it for the
-    /// window and for a later ntgcalls that has one; segment requests keep
-    /// the quality ntgcalls asked for.
+    /// to the engine only when it changes; tgcalls uses it for the RTMP
+    /// stream's video, as tdesktop does, and segment requests keep the
+    /// quality the engine asked for.
     pub fn report_stream_tile_width(&mut self, chat_id: i64, width: f32) {
         let Some(quality) = self
             .group_call_streams
@@ -272,7 +301,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.group_call_streams
             .feeders
-            .insert(chat_id, StreamFeeder::new(group_call_id, chat_id));
+            .insert(chat_id, StreamFeeder::new(group_call_id, chat_id, mode));
         self.open_stream_feed(chat_id);
     }
 
@@ -293,7 +322,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The call is leaving, ending or rejoining: answer the feeder's
-    /// pending parts RESYNC_NEEDED before the native call stops, and drop
+    /// pending parts ResyncNeeded before the native call stops, and drop
     /// its picture.
     pub(super) fn drain_stream_feeder(&mut self, group_call_id: i32) {
         let chats: Vec<i64> = self
@@ -311,6 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 session: &mut self.session,
                 sender: &self.sender,
                 engine: self.call_engine.as_deref_mut(),
+                server_offset_ms: self.group_call_streams.server_offset_ms,
             };
             feeder.drain(&mut port);
             self.group_call_streams.quality.remove(&chat_id);
@@ -319,7 +349,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Per poll: answer the broadcast requests ntgcalls queued. Returns
+    /// Per poll: answer the broadcast requests the engine queued. Returns
     /// whether anything was handled.
     pub(crate) fn pump_group_call_streams(&mut self, now: Instant) -> bool {
         let mut handled = false;
@@ -339,8 +369,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn handle_engine_event(&mut self, event: EngineEvent, now: Instant) {
         let chat_id = match &event {
-            EngineEvent::BroadcastTimestampRequested { chat_id }
-            | EngineEvent::BroadcastPartRequested { chat_id, .. } => *chat_id,
+            EngineEvent::BroadcastTimeRequested { chat_id, .. }
+            | EngineEvent::BroadcastPartRequested { chat_id, .. }
+            | EngineEvent::BroadcastRequestCancelled { chat_id, .. } => *chat_id,
             EngineEvent::GroupAudioLevels { .. } => return,
         };
         let Self {
@@ -354,36 +385,63 @@ impl<S: JsonSender> ConnectDriver<S> {
             session,
             sender: &*sender,
             engine: call_engine.as_deref_mut(),
+            server_offset_ms: group_call_streams.server_offset_ms,
         };
         let Some(feeder) = group_call_streams.feeders.get_mut(&chat_id) else {
             // No feeder (the call left, or is not in stream mode): answer at
-            // once so ntgcalls never waits on a request nobody will serve.
+            // once so the engine never waits on a request nobody will serve.
             match event {
-                EngineEvent::BroadcastTimestampRequested { chat_id } => {
-                    port.answer_timestamp(chat_id, 0);
+                EngineEvent::BroadcastTimeRequested { chat_id, request } => {
+                    port.answer_time(chat_id, request, 0);
                 }
-                EngineEvent::BroadcastPartRequested { chat_id, request } => port.answer_part(
+                EngineEvent::BroadcastPartRequested {
                     chat_id,
-                    BroadcastPartAnswer {
-                        segment_id: request.segment_id,
-                        part_id: request.part_id,
-                        status: BroadcastPartStatus::ResyncNeeded,
-                        quality_update: request.quality_update,
-                        data: Vec::new(),
-                    },
-                ),
-                EngineEvent::GroupAudioLevels { .. } => {}
+                    request,
+                    part,
+                } => {
+                    let response_time = port.server_time_ms() as f64 / 1000.0;
+                    port.answer_part(
+                        chat_id,
+                        BroadcastPartAnswer {
+                            request,
+                            status: BroadcastPartStatus::ResyncNeeded,
+                            timestamp_ms: part.timestamp_ms,
+                            response_time,
+                            data: Vec::new(),
+                        },
+                    );
+                }
+                EngineEvent::BroadcastRequestCancelled { .. }
+                | EngineEvent::GroupAudioLevels { .. } => {}
             }
             return;
         };
         match event {
-            EngineEvent::BroadcastTimestampRequested { .. } => {
-                feeder.on_timestamp_request(&mut port)
+            EngineEvent::BroadcastTimeRequested { request, .. } => {
+                feeder.on_time_request(request, &mut port);
             }
-            EngineEvent::BroadcastPartRequested { request, .. } => {
-                feeder.on_part_request(request, now, &mut port);
+            EngineEvent::BroadcastPartRequested { request, part, .. } => {
+                feeder.on_part_request(request, part, now, &mut port);
+            }
+            EngineEvent::BroadcastRequestCancelled { request, .. } => {
+                feeder.on_cancel(request);
             }
             EngineEvent::GroupAudioLevels { .. } => {}
+        }
+    }
+
+    /// Keeps the server's clock from TDLib's `unix_time` option: tdesktop
+    /// answers a stream's time and its parts with the server's time.
+    pub(crate) fn note_server_time(&mut self, envelope: &Envelope) {
+        if let EnvelopePayload::Common(CommonPayload::UpdateOption {
+            name,
+            value: OptionValue::Integer(unix_time),
+        }) = &envelope.payload
+            && name == "unix_time"
+            && *unix_time > 0
+        {
+            self.group_call_streams.server_offset_ms =
+                server_offset_ms(*unix_time, local_time_ms());
         }
     }
 
@@ -427,6 +485,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             session,
             sender: &*sender,
             engine: call_engine.as_deref_mut(),
+            server_offset_ms: group_call_streams.server_offset_ms,
         };
         let mut outcome = ReplyOutcome::NotMine;
         let mut feeder_call = None;

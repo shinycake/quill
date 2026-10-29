@@ -6,8 +6,8 @@
 //! The library has no devices: Quill's microphone is pushed in through
 //! the external frame sender, its screen through the presentation's
 //! external source, and the call's sound comes out to a `StreamPlayer`.
-use super::group_callbacks::{EndpointOwner, GroupContext, on_local_video};
-use super::group_config::{join_mode, requested_video_json};
+use super::group_callbacks::{GroupContext, on_local_video};
+use super::group_config::{RTMP_ENDPOINT, join_mode, requested_video_json, unified_min_quality};
 use super::*;
 use crate::locks::LockExt;
 use quill_calls_sys::{QC_GROUP_MODE_BROADCAST, QC_GROUP_MODE_RTC, qc_group, qc_video_capture};
@@ -32,6 +32,9 @@ pub(super) struct GroupCall {
     speaker: Option<String>,
     playback_muted: bool,
     sound: Option<StreamPlayer>,
+    /// The participant videos last asked for, kept so a connect or a
+    /// new stream quality asks again without waiting for the driver.
+    video_sources: Vec<GroupVideoSource>,
     /// The requested-video JSON last given to tgcalls.
     requested_video: Option<String>,
     /// Endpoints with an incoming video output.
@@ -178,7 +181,12 @@ impl TgcallsEngine {
         if let Some(old) = self.groups.remove(&group_call_id) {
             destroy_group(self.api, old);
         }
-        let context = Arc::new(GroupContext::new(group_call_id, false, &self.callback));
+        let context = Arc::new(GroupContext::new(
+            group_call_id,
+            chat_id,
+            false,
+            &self.callback,
+        ));
         let (handle, payload) = create_instance(self.api, &context, std::ptr::null_mut()).ok_or(
             EngineError::Engine {
                 op: "qc_group_create",
@@ -204,6 +212,7 @@ impl TgcallsEngine {
                 speaker: None,
                 playback_muted: false,
                 sound: None,
+                video_sources: Vec::new(),
                 requested_video: None,
                 outputs: HashSet::new(),
                 presentation: None,
@@ -238,8 +247,13 @@ impl TgcallsEngine {
         if call.role == GroupCallRole::Member && !mode.is_stream() {
             call.gate.open_group(api, call.handle.as_ptr());
         }
+        // The mode decides where pictures go and whether an RTMP stream's
+        // unified video is asked for: route every video again.
+        call.requested_video = None;
+        let sources = call.video_sources.clone();
         self.apply_group_mute(group_call_id)?;
         self.open_group_sound(group_call_id)?;
+        self.sync_group_videos(group_call_id, &sources)?;
         self.apply_group_camera(group_call_id)
     }
 
@@ -346,9 +360,12 @@ impl TgcallsEngine {
         Ok(())
     }
 
-    /// Receives exactly `sources`' videos: tgcalls is told only when the
-    /// set (or its order) changed, and each new endpoint gets an output
-    /// before stale ones lose theirs.
+    /// Receives exactly `sources`' videos, plus the unified video of a
+    /// connected RTMP stream (tdesktop's `RtmpEndpointId`): tgcalls is told
+    /// only when the set (or its order, or the stream's quality) changed,
+    /// and each new endpoint gets an output before stale ones lose
+    /// theirs. In a stream every picture is the stream's, as the stream
+    /// window shows one; in a call each goes to its participant's tile.
     pub(super) fn sync_group_videos(
         &mut self,
         group_call_id: i32,
@@ -356,27 +373,66 @@ impl TgcallsEngine {
     ) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
-        let requested = requested_video_json(sources);
+        let unified = (call.connected && call.mode == GroupCallMode::Rtmp)
+            .then(|| unified_min_quality(call.stream_quality));
+        if call.video_sources != sources {
+            call.video_sources = sources.to_vec();
+        }
+        let stream = call.connected && call.mode.is_stream();
+        // A stream shows one picture: the RTMP feed alone, or one speaker
+        // (their screen first), so the feed never flips between people.
+        let chosen: Vec<GroupVideoSource> = match (stream, unified.is_some()) {
+            (false, _) => sources.to_vec(),
+            (true, true) => Vec::new(),
+            (true, false) => sources
+                .iter()
+                .find(|source| source.screen)
+                .or_else(|| sources.first())
+                .into_iter()
+                .cloned()
+                .collect(),
+        };
+        let sources = chosen.as_slice();
+        let requested = requested_video_json(sources, unified);
         if call.requested_video.as_deref() == Some(requested.as_str()) {
             return Ok(());
         }
-        let owners: HashMap<String, EndpointOwner> = sources
-            .iter()
-            .map(|source| {
-                let owner = EndpointOwner {
+        let key = |source: &GroupVideoSource| {
+            if stream {
+                LiveKey::Stream {
+                    chat_id: call.chat_id,
+                }
+            } else {
+                LiveKey::Video {
+                    call_id: group_call_id,
                     user_id: source.user_id,
                     screen: source.screen,
-                };
-                (source.endpoint.clone(), owner)
-            })
+                }
+            }
+        };
+        let mut owners: HashMap<String, LiveKey> = sources
+            .iter()
+            .map(|source| (source.endpoint.clone(), key(source)))
             .collect();
-        let endpoints = sources
+        let mut endpoints = sources
             .iter()
             .map(|source| {
                 text("qc_group_add_incoming_video", &source.endpoint)
                     .map(|native| (source.endpoint.clone(), native))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if unified.is_some() {
+            owners.insert(
+                RTMP_ENDPOINT.to_owned(),
+                LiveKey::Stream {
+                    chat_id: call.chat_id,
+                },
+            );
+            endpoints.push((
+                RTMP_ENDPOINT.to_owned(),
+                text("qc_group_add_incoming_video", RTMP_ENDPOINT)?,
+            ));
+        }
         let channels = text("qc_group_set_requested_video", &requested)?;
         // SAFETY: a live instance; `channels` is NUL-ended.
         let accepted =
@@ -452,7 +508,12 @@ impl TgcallsEngine {
         // SAFETY: returns a new external screencast source owned here.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
         let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
-        let context = Arc::new(GroupContext::new(group_call_id, true, &shared));
+        let context = Arc::new(GroupContext::new(
+            group_call_id,
+            call.chat_id,
+            true,
+            &shared,
+        ));
         let Some((handle, payload)) = create_instance(api, &context, screen.as_ptr()) else {
             // SAFETY: Quill's only reference to the source made above.
             unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
@@ -532,13 +593,22 @@ impl TgcallsEngine {
             .map(|call| call.mode)
     }
 
+    /// The stream tile's quality; an RTMP stream asks for its unified
+    /// video again at once when the least quality it needs changed.
     pub(super) fn set_group_stream_quality(&mut self, chat_id: i64, quality: StreamQuality) {
-        if let Some(call) = self
+        let Some((&group_call_id, call)) = self
             .groups
-            .values_mut()
-            .find(|call| call.chat_id == chat_id)
-        {
-            call.stream_quality = Some(quality);
+            .iter_mut()
+            .find(|(_, call)| call.chat_id == chat_id)
+        else {
+            return;
+        };
+        call.stream_quality = Some(quality);
+        let sources = call.video_sources.clone();
+        if let Err(err) = self.sync_group_videos(group_call_id, &sources) {
+            crate::advanced::debug_mode::call_log(&format!(
+                "[call] group {group_call_id} stream quality not applied ({err})"
+            ));
         }
     }
 
@@ -577,6 +647,9 @@ impl TgcallsEngine {
         self.open_group_sound(group_call_id)
     }
 }
+
+#[path = "group_stream.rs"]
+mod stream;
 
 #[cfg(test)]
 #[path = "group_tests.rs"]

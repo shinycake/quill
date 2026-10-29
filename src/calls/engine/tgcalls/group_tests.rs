@@ -129,7 +129,8 @@ fn incoming_videos_follow_the_participants() {
     let owner = engine.groups[&3].context.endpoints.lock().unwrap()["screen-42"];
     assert_eq!(
         owner,
-        EndpointOwner {
+        LiveKey::Video {
+            call_id: 3,
             user_id: 42,
             screen: true
         }
@@ -207,10 +208,63 @@ fn a_stream_is_received_only() {
     );
     // The camera is kept, not opened.
     assert!(engine.groups[&5].camera.is_none());
+    // The connect asks for the unified video and routes it to the stream.
+    assert_eq!(outputs(&engine, 5), vec!["unified"]);
+    let route = engine.groups[&5].context.endpoints.lock().unwrap()["unified"];
+    assert_eq!(route, LiveKey::Stream { chat_id: -500 });
+    let min_quality = |engine: &TgcallsEngine| {
+        let requested = engine.groups[&5].requested_video.clone().unwrap();
+        let json: Value = serde_json::from_str(&requested).unwrap();
+        json[0]["min_quality"].as_i64().unwrap()
+    };
+    assert_eq!(
+        min_quality(&engine),
+        i64::from(quill_calls_sys::QC_GROUP_QUALITY_THUMBNAIL)
+    );
+    // A Full tile asks for Full at once, without a driver sync.
     engine.set_stream_quality(-500, StreamQuality::Full);
     assert_eq!(engine.stream_quality(-500), Some(StreamQuality::Full));
+    assert_eq!(
+        min_quality(&engine),
+        i64::from(quill_calls_sys::QC_GROUP_QUALITY_FULL)
+    );
+    // The driver's own sync keeps it.
+    engine.sync_group_video(5, &[]).unwrap();
+    assert_eq!(outputs(&engine, 5), vec!["unified"]);
     engine.set_stream_volume(0.5);
     // Dropped with the engine, without a leave.
+}
+
+#[test]
+fn an_mtproto_stream_shows_one_video_on_the_stream() {
+    let Some(mut engine) = engine() else { return };
+    engine
+        .create_group_call(7, -700, GroupCallRole::Viewer)
+        .unwrap();
+    // Asked for before the connect: routed again once it says stream.
+    engine
+        .sync_group_video(7, &[source(42, "camera-42", false)])
+        .unwrap();
+    engine
+        .connect_group_call(7, r#"{"stream":true}"#, None)
+        .unwrap();
+    assert_eq!(engine.group_call_mode(-700), Some(GroupCallMode::Stream));
+    assert_eq!(outputs(&engine, 7), vec!["camera-42"]);
+    let route = engine.groups[&7].context.endpoints.lock().unwrap()["camera-42"];
+    assert_eq!(route, LiveKey::Stream { chat_id: -700 });
+    // Two cameras and a screen: only the screen is asked for.
+    engine
+        .sync_group_video(
+            7,
+            &[
+                source(42, "camera-42", false),
+                source(43, "camera-43", false),
+                source(42, "screen-42", true),
+            ],
+        )
+        .unwrap();
+    assert_eq!(outputs(&engine, 7), vec!["screen-42"]);
+    engine.leave_group_call(7).unwrap();
 }
 
 #[test]
