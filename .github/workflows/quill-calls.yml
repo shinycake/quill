@@ -28,8 +28,7 @@ jobs:
           - { target: linux-x86_64, runner: ubuntu-22.04, lib: libquill_calls.so }
           - { target: linux-aarch64, runner: ubuntu-22.04-arm, lib: libquill_calls.so }
           - { target: macos-arm64, runner: macos-14, lib: libquill_calls.dylib }
-          # windows-x86_64 (windows-2022, quill_calls.dll) joins once its MSVC
-          # build is proven in its own PR; the Windows steps below wait for it.
+          - { target: windows-x86_64, runner: windows-2022, lib: quill_calls.dll }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
@@ -66,7 +65,7 @@ jobs:
           msystem: UCRT64
           update: false
           install: >-
-            git make diffutils perl
+            git make diffutils perl which
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-zlib
@@ -106,7 +105,8 @@ jobs:
       - name: build libquill_calls
         if: runner.os != 'Windows'
         run: bash scripts/build-tgcalls.sh
-      # MSYS2 bash with the MSVC environment from msvc-dev-cmd on its PATH.
+      # MSYS2 bash with the MSVC environment from msvc-dev-cmd on its PATH;
+      # the script finds Visual Studio's MSBuild itself (VSINSTALLDIR).
       - name: build quill_calls.dll (MSVC)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -182,12 +182,16 @@ jobs:
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
           # Windows: FFmpeg's DLLs; OpenSSL is linked into quill_calls.dll.
           export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
+          # MSVC's link.exe ahead of Git Bash's /usr/bin/link, which would
+          # otherwise link the tests (msvc-dev-cmd's bash caveat).
+          [[ "$RUNNER_OS" == Windows ]] && export PATH="$(dirname "$(command -v cl)"):$PATH"
           cargo test -p quill-calls-sys --locked
       - name: the 1:1 engine against the library
         run: |
           export LD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib"
           export DYLD_LIBRARY_PATH="$PWD/vendor/ffmpeg/prefix/lib${OPENSSL_ROOT_DIR:+:$OPENSSL_ROOT_DIR/lib}"
           export PATH="$PWD/vendor/ffmpeg/prefix/bin:$PATH"
+          [[ "$RUNNER_OS" == Windows ]] && export PATH="$(dirname "$(command -v cl)"):$PATH"
           root="$PWD"
           [[ "$RUNNER_OS" == Windows ]] && root="$(cygpath -m "$PWD")"
           export QUILL_CALLS_LIB="$root/vendor/quill-calls/lib/${{ matrix.lib }}"
