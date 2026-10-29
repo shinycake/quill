@@ -39,6 +39,7 @@
 "lng_group_call_share_speaker" = "Users with this link can speak";
 "lng_group_call_start_now" = "Start Now";
 "lng_group_call_starts_short" = "Starts {when}";
+"lng_group_call_tooltip_microphone" = "You are on mute. Click here to speak.";
 "lng_group_call_tooltip_screen" = "Share screen";
 "lng_group_call_unmute" = "Unmute";
 "lng_group_call_unpinned_on_top" = "Live stream is unpinned from top.";

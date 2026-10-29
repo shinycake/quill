@@ -76,6 +76,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();
+        // Group calls: the "You are on mute" hint.
+        changed |= self.tick_muted_speech_hint(now);
         self.watch_call_sound(now);
         if !self.flood_retries.is_empty() {
             let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.flood_retries)
@@ -129,7 +131,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|at| Duration::from_millis(at.saturating_sub(now_ms)));
         // A group call row whose sounding or speaking runs out.
         let levels = self.group_levels_deadline(now);
-        [retry, bot, levels].into_iter().flatten().min()
+        // The muted-speech hint's next check while it listens.
+        let hint = self.muted_hint_deadline(now);
+        [retry, bot, levels, hint].into_iter().flatten().min()
     }
 
     /// The "Couldn't load messages · Retry" action: clear the failure and

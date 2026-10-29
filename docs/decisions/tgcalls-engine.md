@@ -369,3 +369,22 @@ beside `quill.exe` on Windows, before step 6.
   at rest. The blobs are round discs, not tdesktop's wobbling shapes, and
   a participant's screen-sharing audio ssrc is not mapped (TDLib's
   `screen_sharing_audio_source_id` is not parsed yet).
+- Muted-speech hint (group calls): tdesktop sticks "You are on mute.
+  Click here to speak." over the mute button when `MicLevelTester`
+  (`calls_group_settings.cpp`) hears you while muted: every 500 ms the
+  loudest peak since the last check is compared with 0.2 of full scale,
+  three loud checks show it, five quiet ones after a loud one reset the
+  count. It goes for the call when you unmute
+  (`StickedTooltipHide::Activated`) or close it (`Discarded`; tdesktop
+  always shows the microphone tooltip again in a new panel), and hides
+  while an admin holds you muted (`Unavailable`). tgcalls cannot report
+  this level: a muted instance mutes its audio device module, and Quill
+  sends silence then anyway. tdesktop measures the device itself
+  (`Webrtc::AudioInputTester`), so Quill does the same with the call
+  microphone it already runs: while muted, the raw input's level windows
+  go to `MicControls::muted_level` instead of the call, the driver feeds
+  them to `calls::muted_speech` on its clock (the poll loop wakes for the
+  next check while it listens), and the window draws tdesktop's sticked
+  tooltip (`groupCallStickedTooltip`). No C API change was needed. With
+  push-to-talk on the hint never shows, as tdesktop counts push-to-talk
+  as live.

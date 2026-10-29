@@ -112,6 +112,8 @@ pub struct MicControls {
     noise_suppression: AtomicBool,
     muted: AtomicBool,
     level: Arc<LevelCell>,
+    /// The raw microphone's level while muted (nothing is sent then).
+    muted_level: Arc<LevelCell>,
     /// Shared system audio added to each frame ("Share System Audio").
     system_audio: Mutex<Option<Arc<system_audio::SystemAudioMix>>>,
 }
@@ -122,6 +124,7 @@ impl MicControls {
             noise_suppression: AtomicBool::new(noise_suppression),
             muted: AtomicBool::new(false),
             level,
+            muted_level: Arc::new(LevelCell::default()),
             system_audio: Mutex::new(None),
         }
     }
@@ -155,6 +158,12 @@ impl MicControls {
 
     pub fn level(&self) -> &Arc<LevelCell> {
         &self.level
+    }
+
+    /// The raw microphone's highest level while muted, on tgcalls'
+    /// scale; unmuted windows are not recorded here.
+    pub fn muted_level(&self) -> &Arc<LevelCell> {
+        &self.muted_level
     }
 }
 

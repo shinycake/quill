@@ -568,6 +568,22 @@ impl QuillApp {
             }
         }));
         let scheduled_admin = state == MuteState::Scheduled && call.can_be_managed;
+        let muted_hint =
+            (state == MuteState::Muted && self.group_call_muted_hint_shown()).then(|| {
+                div()
+                    .absolute()
+                    .bottom(px(104.))
+                    .left(px(-160.))
+                    .right(px(-160.))
+                    .flex()
+                    .justify_center()
+                    .child(super::group_call_speaker::muted_speech_hint(cx.listener(
+                        |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.dismiss_group_call_muted_hint(cx);
+                        },
+                    )))
+            });
         let notify_on = call.enabled_start_notification;
         let mute = div()
             .id("group-call-mute")
@@ -625,6 +641,7 @@ impl QuillApp {
                             .into_any_element()
                         }
                     })
+                    .children(muted_hint)
                     .child(
                         div()
                             .size(px(84.))

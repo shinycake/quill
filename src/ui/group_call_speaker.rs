@@ -6,15 +6,20 @@
 //! from the driver (`connect::group_calls::levels`); between two batches
 //! each row eases toward the newest level over tdesktop's
 //! `kLevelDuration`, drawn on the frame clock only while some row sounds.
+//! Also the "You are on mute" hint over the mute button
+//! (`calls::muted_speech`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::group_call_panel::{MEMBER_ACTIVE, MEMBER_INACTIVE_STATUS, MEMBER_MUTED_ICON};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::audio_level::{LEVEL_ANIMATION_MS, LevelAnimation};
 use quill::calls::speaker_levels::{SpeakerLook, row_blob_radii, row_userpic_scale};
+use quill::lang::{keys, tr};
 use quill::telegram::envelope::ParsedGroupCallParticipant;
 use std::path::Path;
 use std::time::Instant;
@@ -136,6 +141,91 @@ pub(super) fn speaker_userpic(
         })
         .child(chat_avatar(name, photo, size))
         .into_any_element()
+}
+
+/// tdesktop `importantTooltipBg` (`toastBg`, black at 0xb2).
+fn hint_bg() -> Hsla {
+    hsla(0., 0., 0., 0xb2 as f32 / 255.)
+}
+
+/// The sticked hint over the mute button when you talk while muted
+/// (tdesktop `groupCallStickedTooltip`: the 13 px label, a 20 px close
+/// button, padding 10/1/6/3, 4 px corners and a 4 px arrow pointing at
+/// the button). `on_close` is the close button's click.
+pub(super) fn muted_speech_hint(
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let arrow = div()
+        .flex()
+        .flex_col()
+        .items_center()
+        .children([8., 6., 4., 2.].map(|width| div().w(px(width)).h(px(1.)).bg(hint_bg())));
+    div()
+        .id("group-call-muted-hint")
+        // Over the mute button, but a click on it is not a click on the
+        // button (tdesktop's sticked tooltip takes the mouse).
+        .on_click(|_, _, cx| cx.stop_propagation())
+        .flex()
+        .flex_col()
+        .items_center()
+        .child(
+            div()
+                .pl(px(10.))
+                .pt(px(1.))
+                .pr(px(6.))
+                .pb(px(3.))
+                .rounded(px(4.))
+                .bg(hint_bg())
+                .text_color(white())
+                .text_size(px(13.))
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .whitespace_nowrap()
+                        .child(tr(keys::GROUP_CALL_TOOLTIP_MICROPHONE)),
+                )
+                .child(
+                    div()
+                        .id("group-call-muted-hint-close")
+                        .role(Role::Button)
+                        .aria_label(tr(keys::CLOSE))
+                        .size(px(20.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .on_click(on_close)
+                        .child(
+                            Icon::new(IconName::Close)
+                                .with_size(px(12.))
+                                .text_color(white()),
+                        ),
+                ),
+        )
+        .child(arrow)
+}
+
+impl QuillApp {
+    /// The hint's close button: it does not come back in this call.
+    pub(super) fn dismiss_group_call_muted_hint(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.dismiss_group_call_muted_speech_hint()
+        {
+            cx.notify();
+        }
+    }
+
+    /// Whether the mute button carries the hint: you are muted, the
+    /// driver heard you talk, and push-to-talk is off (tdesktop's
+    /// push-to-talk state counts as live and ends the hint).
+    pub(super) fn group_call_muted_hint_shown(&self) -> bool {
+        self.ptt_hint().is_none()
+            && self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.driver.group_call_muted_speech_hint())
+    }
 }
 
 #[cfg(test)]

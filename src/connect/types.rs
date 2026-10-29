@@ -281,6 +281,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Everyone's speaking levels in the joined group call
     /// (`group_calls/levels.rs`).
     pub(crate) group_levels: super::group_calls::levels::GroupLevels,
+    /// The "You are on mute" hint (`group_calls/muted_hint.rs`).
+    pub(crate) muted_hint: super::group_calls::muted_hint::MutedHint,
     /// Phase C2e: selected camera device id; `None` means the engine
     /// default. No devices are fabricated, so this can legitimately be
     /// unset.
