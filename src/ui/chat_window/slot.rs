@@ -212,7 +212,7 @@ pub(in crate::ui) fn scope_probe(
                     on(cx);
                 }
             });
-            window.on_mouse_event(move |_: &ScrollWheelEvent, phase, _, cx| {
+            window.on_mouse_event(move |_: &ScrollEvent, phase, _, cx| {
                 if phase == DispatchPhase::Capture {
                     note(cx);
                 }

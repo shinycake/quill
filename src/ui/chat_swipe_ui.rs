@@ -122,7 +122,7 @@ impl QuillApp {
         };
         div()
             .w_full()
-            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
                 this.chat_swipe_wheel(id, event, cx);
             }))
             .child(inner)
@@ -218,7 +218,7 @@ impl QuillApp {
     /// One wheel event over a swipeable row. Trackpad scrolls only:
     /// without precise deltas there is no gesture to follow, and a
     /// platform that sends no phases never starts one.
-    fn chat_swipe_wheel(&mut self, id: ChatId, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn chat_swipe_wheel(&mut self, id: ChatId, event: &ScrollEvent, cx: &mut Context<Self>) {
         let ScrollDelta::Pixels(delta) = event.delta else {
             return;
         };

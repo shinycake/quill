@@ -377,7 +377,7 @@ impl QuillApp {
                     .h(px(360.))
                     .overflow_y_scroll()
                     .track_scroll(&self.pickers.emoji_set_scroll)
-                    .on_scroll_wheel(cx.listener(|this, _, _, cx| this.emoji_sets_load_more(cx)))
+                    .on_scroll(cx.listener(|this, _, _, cx| this.emoji_sets_load_more(cx)))
                     .child(rows),
             )
             .into_any_element()

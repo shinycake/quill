@@ -250,7 +250,7 @@ impl QuillApp {
             } else {
                 CursorStyle::OpenHand
             })
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
                 this.location_scrolled(event.delta, cx);
                 cx.stop_propagation();
             }))

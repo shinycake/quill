@@ -154,7 +154,7 @@ impl QuillApp {
                 cx,
             ));
         }
-        list.on_scroll_wheel(watch_scroll(cx, Self::shared_media_more))
+        list.on_scroll(watch_scroll(cx, Self::shared_media_more))
             .into_any_element()
     }
 

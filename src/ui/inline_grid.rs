@@ -226,7 +226,7 @@ impl QuillApp {
                 .max_h(px(viewport as f32))
                 .overflow_y_scroll()
                 .track_scroll(&self.composer_ui.inline_scroll)
-                .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                .on_scroll(cx.listener(|this, _, _, cx| {
                     this.load_more_inline_results_if_needed(cx);
                 }))
                 .child(body),

@@ -477,9 +477,7 @@ impl QuillApp {
                     .h(px(420.))
                     .overflow_y_scroll()
                     .track_scroll(&self.pickers.sticker_manager.scroll)
-                    .on_scroll_wheel(
-                        cx.listener(move |this, _, _, cx| this.manager_load_more(kind, cx)),
-                    )
+                    .on_scroll(cx.listener(move |this, _, _, cx| this.manager_load_more(kind, cx)))
                     .child(rows),
             )
             .into_any_element()

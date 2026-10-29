@@ -129,7 +129,7 @@ impl QuillApp {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.chat_list.global.contacts_scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, cx| this.notify_sidebar(cx)))
+            .on_scroll(cx.listener(|this, _, _, cx| this.notify_sidebar(cx)))
             .child(self.contacts_list(items, cx));
         scroll = scroll.pr(px(if index::index_shown(&stops) {
             BAR_WIDTH

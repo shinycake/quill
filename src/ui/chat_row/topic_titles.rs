@@ -130,7 +130,7 @@ fn on_jump(
     cx.listener(move |this, event: &ClickEvent, window, cx| {
         cx.stop_propagation();
         this.chat_list.preview_press = None;
-        if event.modifiers().secondary() {
+        if event.modifiers().secondary(cx) {
             this.open_chat_in_new_window(chat_id, window, cx);
         } else {
             this.select_listed_chat(chat_id, window, cx);

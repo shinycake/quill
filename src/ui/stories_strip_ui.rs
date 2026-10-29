@@ -164,7 +164,7 @@ impl QuillApp {
             .w_full()
             .h(px(metrics::FULL_HEIGHT))
             .overflow_hidden()
-            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
                 this.story_strip_wheel(event, max, cx);
             }));
         if visible(0) {
@@ -248,7 +248,7 @@ impl QuillApp {
     /// Wheel over the strip: sideways motion scrolls the strip, vertical
     /// motion falls through to the chat list (`verticalScrollEvents`).
     /// The axis locks for a whole gesture.
-    fn story_strip_wheel(&mut self, event: &ScrollWheelEvent, max: f32, cx: &mut Context<Self>) {
+    fn story_strip_wheel(&mut self, event: &ScrollEvent, max: f32, cx: &mut Context<Self>) {
         let (dx, dy) = match event.delta {
             ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y)),
             ScrollDelta::Lines(l) => (l.x * 20., l.y * 20.),

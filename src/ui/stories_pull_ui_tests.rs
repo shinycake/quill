@@ -12,7 +12,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent, TestAppContext,
     TouchPhase, VisualTestContext, point, px, size,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -79,11 +79,12 @@ fn centre(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Point<Pixels> 
 }
 
 fn wheel(vcx: &mut VisualTestContext, at: Point<Pixels>, phase: TouchPhase, delta: ScrollDelta) {
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: at,
         delta,
         modifiers: Modifiers::default(),
         touch_phase: phase,
+        source: gpui_kit::ScrollSource::Pointer,
     });
 }
 

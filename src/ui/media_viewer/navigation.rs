@@ -276,7 +276,7 @@ impl QuillApp {
     /// the window position of the visual's top-left.
     pub(in crate::ui) fn viewer_scroll_wheel(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         origin: (f32, f32),
         cx: &mut Context<Self>,
     ) {
@@ -302,7 +302,7 @@ impl QuillApp {
         let action = self.viewer.wheel.feed(WheelInput {
             dx,
             dy,
-            primary: event.modifiers.secondary(),
+            primary: event.modifiers.secondary(cx),
             source,
             zoomed: self.viewer.zoom.is_zoomed(),
             at,

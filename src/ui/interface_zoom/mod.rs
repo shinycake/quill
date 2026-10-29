@@ -39,21 +39,26 @@ use futures_channel::oneshot;
 use gpui_kit::{
     A11yCallbacks, Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, AppLifecyclePhase,
     BackgroundExecutor, Bounds, Capslock, ClipboardItem, ClipboardReadError, CursorStyle,
-    Decorations, DispatchEventResult, ExternalDragPayload, FileDropEvent, ForegroundExecutor,
-    GpuSpecs, GraphicalEnvironment, Keymap, Menu, MenuItem, Modifiers, OwnedMenu,
-    PathPromptOptions, Pixels, Platform, PlatformAtlas, PlatformDisplay, PlatformGestures,
-    PlatformInput, PlatformInputHandler, PlatformKeyboardLayout, PlatformKeyboardMapper,
-    PlatformTextSystem, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
-    ResizeEdge, Scene, ScreenCaptureSource, ScrollDelta, Size, SystemNotification,
-    SystemNotificationResponse, SystemWindowTab, Task, TextInputConfiguration,
-    TextInputStateChange, ThermalState, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowButtonLayout, WindowControlArea, WindowControls, WindowDecorations, WindowInsets,
-    WindowParams, WindowVisibility, WindowingRequest, px,
+    Decorations, DispatchEventResult, ExternalDragPayload, ForegroundExecutor, GpuSpecs,
+    GraphicalEnvironment, Keymap, Menu, MenuItem, Modifiers, OwnedMenu, PathPromptOptions, Pixels,
+    Platform, PlatformAtlas, PlatformDisplay, PlatformGestures, PlatformInfo, PlatformInput,
+    PlatformInputHandler, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, Scene,
+    ScreenCaptureSource, Size, SystemNotification, SystemNotificationResponse, SystemWindowTab,
+    Task, TextInputConfiguration, TextInputStateChange, ThermalState, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, WindowButtonLayout, WindowControlArea,
+    WindowControls, WindowDecorations, WindowInsets, WindowParams, WindowVisibility,
+    WindowingRequest,
 };
 use quill::agent::ui_driver::guard;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
+
+mod geometry;
+
+pub(crate) use geometry::zoom_input;
+use geometry::*;
 
 type AnyResult<T> = gpui_kit::Result<T>;
 
@@ -119,125 +124,6 @@ fn sanitize(zoom: f32) -> f32 {
         zoom.clamp(0.5, 4.)
     } else {
         1.
-    }
-}
-
-/// GPUI logical pixels → the platform's logical pixels.
-fn out(v: Pixels, zoom: f32) -> Pixels {
-    px(f32::from(v) * zoom)
-}
-
-/// The platform's logical pixels → GPUI logical pixels.
-fn inn(v: Pixels, zoom: f32) -> Pixels {
-    px(f32::from(v) / zoom)
-}
-
-fn point_in(p: Point<Pixels>, zoom: f32) -> Point<Pixels> {
-    p.map(|v| inn(v, zoom))
-}
-
-fn point_out(p: Point<Pixels>, zoom: f32) -> Point<Pixels> {
-    p.map(|v| out(v, zoom))
-}
-
-/// Half the height of a macOS traffic-light button frame, in points.
-const TRAFFIC_LIGHT_HALF: f32 = 8.;
-
-/// Where to put the macOS traffic lights so they stay centered on the
-/// zoomed title bar: the buttons themselves don't scale, so the point
-/// that scales is their center, not their corner.
-fn traffic_light_out(p: Point<Pixels>, zoom: f32) -> Point<Pixels> {
-    let y = (f32::from(p.y) + TRAFFIC_LIGHT_HALF) * zoom - TRAFFIC_LIGHT_HALF;
-    Point::new(out(p.x, zoom), px(y))
-}
-
-fn size_in(s: Size<Pixels>, zoom: f32) -> Size<Pixels> {
-    s.map(|v| inn(v, zoom))
-}
-
-fn size_out(s: Size<Pixels>, zoom: f32) -> Size<Pixels> {
-    s.map(|v| out(v, zoom))
-}
-
-fn bounds_in(b: Bounds<Pixels>, zoom: f32) -> Bounds<Pixels> {
-    b.map(|v| inn(v, zoom))
-}
-
-fn bounds_out(b: Bounds<Pixels>, zoom: f32) -> Bounds<Pixels> {
-    b.map(|v| out(v, zoom))
-}
-
-/// Map a platform input event into the zoomed coordinate space: positions
-/// and pixel scroll deltas shrink by `zoom` (content follows the fingers on
-/// a trackpad); line deltas, keys and pinch amounts are unchanged.
-pub(crate) fn zoom_input(input: PlatformInput, zoom: f32) -> PlatformInput {
-    if (zoom - 1.).abs() < f32::EPSILON {
-        return input;
-    }
-    let p = |p: Point<Pixels>| point_in(p, zoom);
-    match input {
-        PlatformInput::MouseDown(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::MouseDown(e)
-        }
-        PlatformInput::MouseUp(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::MouseUp(e)
-        }
-        PlatformInput::MousePressure(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::MousePressure(e)
-        }
-        PlatformInput::MouseMove(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::MouseMove(e)
-        }
-        PlatformInput::MouseExited(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::MouseExited(e)
-        }
-        PlatformInput::ScrollWheel(mut e) => {
-            e.position = p(e.position);
-            if let ScrollDelta::Pixels(delta) = e.delta {
-                e.delta = ScrollDelta::Pixels(p(delta));
-            }
-            PlatformInput::ScrollWheel(e)
-        }
-        PlatformInput::Pinch(mut e) => {
-            e.position = p(e.position);
-            PlatformInput::Pinch(e)
-        }
-        PlatformInput::LongPress(mut e) => {
-            e.start_position = p(e.start_position);
-            e.position = p(e.position);
-            PlatformInput::LongPress(e)
-        }
-        PlatformInput::TouchDrag(mut e) => {
-            e.start_position = p(e.start_position);
-            e.position = p(e.position);
-            PlatformInput::TouchDrag(e)
-        }
-        PlatformInput::Touch(mut e) => {
-            e.position = p(e.position);
-            e.predicted_position = e.predicted_position.map(p);
-            PlatformInput::Touch(e)
-        }
-        PlatformInput::FileDrop(event) => PlatformInput::FileDrop(match event {
-            FileDropEvent::Entered { position, paths } => FileDropEvent::Entered {
-                position: p(position),
-                paths,
-            },
-            FileDropEvent::Pending { position } => FileDropEvent::Pending {
-                position: p(position),
-            },
-            FileDropEvent::Submit { position } => FileDropEvent::Submit {
-                position: p(position),
-            },
-            other => other,
-        }),
-        other @ (PlatformInput::KeyDown(_)
-        | PlatformInput::KeyUp(_)
-        | PlatformInput::ModifiersChanged(_)) => other,
     }
 }
 
@@ -357,6 +243,9 @@ impl HasDisplayHandle for ZoomWindow {
 }
 
 impl Platform for ZoomPlatform {
+    fn platform_info(&self) -> PlatformInfo {
+        self.inner.platform_info()
+    }
     fn background_executor(&self) -> BackgroundExecutor {
         self.inner.background_executor()
     }
@@ -638,6 +527,16 @@ impl Platform for ZoomPlatform {
     }
     fn write_credentials(&self, url: &str, username: &str, password: &[u8]) -> Task<AnyResult<()>> {
         self.inner.write_credentials(url, username, password)
+    }
+    #[cfg(target_os = "macos")]
+    fn write_credentials_if_not_exists(
+        &self,
+        url: &str,
+        username: &str,
+        password: &[u8],
+    ) -> Task<AnyResult<bool>> {
+        self.inner
+            .write_credentials_if_not_exists(url, username, password)
     }
     fn read_credentials(&self, url: &str) -> Task<AnyResult<Option<(String, Vec<u8>)>>> {
         self.inner.read_credentials(url)
@@ -951,6 +850,7 @@ impl PlatformWindow for ZoomWindow {
         WindowInsets {
             safe_area: insets.safe_area.map(|v| inn(*v, zoom)),
             ime: insets.ime.map(|v| inn(*v, zoom)),
+            corner_radii: insets.corner_radii.map(|v| inn(*v, zoom)),
         }
     }
     fn on_insets_changed(&self, mut callback: Box<dyn FnMut(WindowInsets)>) {
@@ -960,6 +860,7 @@ impl PlatformWindow for ZoomWindow {
             callback(WindowInsets {
                 safe_area: insets.safe_area.map(|v| inn(*v, zoom)),
                 ime: insets.ime.map(|v| inn(*v, zoom)),
+                corner_radii: insets.corner_radii.map(|v| inn(*v, zoom)),
             })
         }))
     }
@@ -1003,7 +904,9 @@ impl PlatformWindow for ZoomWindow {
 mod tests {
     #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
-    use gpui_kit::{MouseButton, MouseDownEvent, ScrollWheelEvent, point};
+    use gpui_kit::{
+        FileDropEvent, MouseButton, MouseDownEvent, ScrollDelta, ScrollEvent, point, px,
+    };
 
     #[test]
     fn zoom_for_percent_clamps_like_the_setting() {
@@ -1048,12 +951,12 @@ mod tests {
         };
         assert_eq!(e.position, point(px(200.), px(100.)));
 
-        let scroll = PlatformInput::ScrollWheel(ScrollWheelEvent {
+        let scroll = PlatformInput::Scroll(ScrollEvent {
             position: point(px(40.), px(40.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(-30.))),
             ..Default::default()
         });
-        let PlatformInput::ScrollWheel(e) = zoom_input(scroll, 2.) else {
+        let PlatformInput::Scroll(e) = zoom_input(scroll, 2.) else {
             panic!("event kind changed");
         };
         assert_eq!(e.position, point(px(20.), px(20.)));
@@ -1062,11 +965,11 @@ mod tests {
         };
         assert_eq!(delta, point(px(0.), px(-15.)));
 
-        let lines = PlatformInput::ScrollWheel(ScrollWheelEvent {
+        let lines = PlatformInput::Scroll(ScrollEvent {
             delta: ScrollDelta::Lines(point(0., 3.)),
             ..Default::default()
         });
-        let PlatformInput::ScrollWheel(e) = zoom_input(lines, 2.) else {
+        let PlatformInput::Scroll(e) = zoom_input(lines, 2.) else {
             panic!("event kind changed");
         };
         assert!(matches!(e.delta, ScrollDelta::Lines(l) if l == point(0., 3.)));
@@ -1133,7 +1036,7 @@ mod tests {
     #[test]
     fn forwards_every_trait_method() {
         let source = GPUI_PLATFORM_SOURCE;
-        let this = include_str!("interface_zoom.rs");
+        let this = include_str!("mod.rs");
         // Methods that only exist for GPUI's own tests, and the Wayland
         // layer-shell edge (behind a GPUI feature Quill doesn't enable).
         let skip = ["as_test", "set_exclusive_edge"];
@@ -1198,5 +1101,6 @@ mod tests {
     /// GPUI's `platform.rs` as Quill builds it: gpui-pre is vendored
     /// (`third_party/gpui-pre`, patched in through `[patch.crates-io]`), so
     /// the cargo registry has no copy of it.
-    const GPUI_PLATFORM_SOURCE: &str = include_str!("../../third_party/gpui-pre/src/platform.rs");
+    const GPUI_PLATFORM_SOURCE: &str =
+        include_str!("../../../third_party/gpui-pre/src/platform.rs");
 }

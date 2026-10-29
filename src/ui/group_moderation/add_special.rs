@@ -225,7 +225,7 @@ impl QuillApp {
             .max_h(px(320.))
             .overflow_y_scroll()
             .track_scroll(&state.scroll)
-            .on_scroll_wheel(cx.listener(|this, _, _, cx| this.add_special_load_more(cx)));
+            .on_scroll(cx.listener(|this, _, _, cx| this.add_special_load_more(cx)));
         let message =
             |text: &'static str| div().px_2().py_2().text_sm().text_color(muted).child(text);
         match fetch {

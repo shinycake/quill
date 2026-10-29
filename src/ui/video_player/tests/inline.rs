@@ -15,7 +15,7 @@ use crate::ui::shell::QuillShell;
 use crate::ui::video_player::{PlayState, VideoPlayer};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use gpui_kit::{Modifiers, ScrollDelta, ScrollWheelEvent, point};
+use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, point};
 use quill::ids::ChatId;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -153,7 +153,7 @@ fn history_passes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, times: us
 }
 
 fn scroll(vcx: &mut VisualTestContext, dy: f32) {
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: point(px(800.), px(300.)),
         delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
         modifiers: Modifiers::default(),

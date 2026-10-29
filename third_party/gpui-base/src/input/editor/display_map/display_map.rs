@@ -268,6 +268,13 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Set the number of spaces per tab stop.
+    pub(crate) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) {
+        if self.wrap_map.set_tab_size(tab_size, cx) {
+            self.rebuild_fold_projection();
+        }
+    }
+
     /// The font and size the input lays its text out with.
     pub fn text_style(&self) -> (&Font, Pixels) {
         self.wrap_map.text_style()

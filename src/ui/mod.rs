@@ -86,6 +86,7 @@ mod group_call_state;
 mod hdr_image;
 mod history_a11y;
 mod history_state;
+mod host_os;
 mod image_budget;
 mod image_decode;
 mod image_open;

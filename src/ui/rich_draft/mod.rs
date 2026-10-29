@@ -143,7 +143,7 @@ impl QuillApp {
                 .tooltip(tr(keys::RECORD_LOCK_DISCARD))
                 .accessibility_label(tr(keys::RECORD_LOCK_DISCARD))
                 .on_click(cx.listener(|this, event: &ClickEvent, _, cx| {
-                    if event.modifiers().secondary() {
+                    if event.modifiers().secondary(cx) {
                         this.discard_rich_draft(cx);
                     } else {
                         this.composer_ui.rich_draft.discard_confirm = true;

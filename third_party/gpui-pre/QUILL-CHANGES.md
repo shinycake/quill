@@ -1,13 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre 0.3.9 from crates.io (Apache-2.0,
+This directory is gpui-pre 0.3.10 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's core, used through `[patch.crates-io]` in Quill's
-`Cargo.toml`. Commit `cfc4f7e7` added the registry copy without its
+`Cargo.toml`. Commit `6be84cd7` added the registry copy without its
 `examples/` directory and their `[[example]]` tables (and without the
 registry's `.cargo-ok`, `.cargo_vcs_info.json`, `Cargo.toml.orig` and
-`Cargo.lock`), so `git diff cfc4f7e7 -- third_party/gpui-pre` shows every
+`Cargo.lock`), so `git diff 6be84cd7 -- third_party/gpui-pre` shows every
 later change. (The patch was first made on 0.3.8, vendored in `f55b3086`,
-and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`.)
+and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, and to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`.)
 
 The Quill project changed it in 2026 so the `surface` element can carry CPU
 pixels where CoreVideo doesn't exist, for HDR stills on Windows

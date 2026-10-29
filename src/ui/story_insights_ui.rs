@@ -186,7 +186,7 @@ impl QuillApp {
             .max_h(px(420.))
             .overflow_y_scroll()
             .track_scroll(&self.stories.stats_scroll)
-            .on_scroll_wheel(watch_scroll(cx, Self::story_forwards_more))
+            .on_scroll(watch_scroll(cx, Self::story_forwards_more))
             .p_2()
             .rounded_md()
             .bg(bg_canvas())
@@ -522,7 +522,7 @@ impl QuillApp {
             .max_h(px(260.))
             .overflow_y_scroll()
             .track_scroll(&self.stories.found_scroll)
-            .on_scroll_wheel(watch_scroll(cx, Self::found_stories_more));
+            .on_scroll(watch_scroll(cx, Self::found_stories_more));
         for (index, (chat_id, story_id)) in search.stories.iter().enumerate() {
             let name = self.chat_title_or_id(*chat_id);
             let date = self

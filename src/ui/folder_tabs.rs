@@ -374,7 +374,7 @@ impl QuillApp {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
+                    .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
                     .child(self.folder_tab_bar(&slots, selected, &scroll, cx))
                     .when(fades.start, |this| {
                         this.child(folder_tabs_fade(true, fade_color))

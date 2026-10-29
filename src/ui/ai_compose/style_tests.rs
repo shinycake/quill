@@ -10,7 +10,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::apply_custom_bindings;
 use gpui_kit::component::WindowExt;
 use gpui_kit::{
-    Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TouchPhase, VisualTestContext, point, px,
+    Entity, Modifiers, ScrollDelta, ScrollEvent, TouchPhase, VisualTestContext, point, px,
 };
 use quill::ai_compose::{StyleChoice, StyleLimitNotice, prefs};
 use quill::settings::CustomKeybinding;
@@ -35,11 +35,12 @@ fn open_editor(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         .debug_bounds("ai-style-create")
         .map(|pill| pill.center().y);
     if let (Some(x), Some(y)) = (row, pill) {
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
             position: point(x, y),
             delta: ScrollDelta::Pixels(point(px(-400.), px(0.))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Moved,
+            source: gpui_kit::ScrollSource::Pointer,
         });
         frames(vcx);
     }

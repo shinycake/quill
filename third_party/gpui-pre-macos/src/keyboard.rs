@@ -4,13 +4,13 @@
 use collections::HashMap;
 use std::ffi::{CStr, c_void};
 
-use objc::{msg_send, runtime::Object, sel, sel_impl};
+use objc2::msg_send;
 
 use gpui::{KeybindingKeystroke, Keystroke, PlatformKeyboardLayout, PlatformKeyboardMapper};
 
 use crate::{
-    TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty, kTISPropertyInputSourceID,
-    kTISPropertyLocalizedName,
+    TISCopyCurrentKeyboardLayoutInputSource, TISGetInputSourceProperty,
+    kTISPropertyInputSourceID, kTISPropertyLocalizedName,
 };
 
 pub(crate) struct MacKeyboardLayout {
@@ -57,15 +57,21 @@ impl MacKeyboardLayout {
     pub(crate) fn new() -> Self {
         unsafe {
             let current_keyboard = TISCopyCurrentKeyboardLayoutInputSource();
+            if current_keyboard.is_null() {
+                return Self {
+                    id: String::new(),
+                    name: String::new(),
+                };
+            }
 
-            let id: *mut Object = TISGetInputSourceProperty(
+            let id = TISGetInputSourceProperty(
                 current_keyboard,
                 kTISPropertyInputSourceID as *const c_void,
             );
             let id: *const std::os::raw::c_char = msg_send![id, UTF8String];
             let id = c_string_lossy(id);
 
-            let name: *mut Object = TISGetInputSourceProperty(
+            let name = TISGetInputSourceProperty(
                 current_keyboard,
                 kTISPropertyLocalizedName as *const c_void,
             );

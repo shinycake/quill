@@ -338,7 +338,7 @@ impl QuillApp {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.location_ui.list_scroll)
-            .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()));
+            .on_scroll(cx.listener(|_, _, _, cx| cx.notify()));
         if !searching {
             list = list
                 .child(self.location_send_row(cx))

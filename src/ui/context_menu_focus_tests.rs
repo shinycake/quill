@@ -409,7 +409,8 @@ fn activate_row(vcx: &mut VisualTestContext, prefix: &str, key: &str) {
             // A keyboard click completes on key up, which the keystroke
             // simulation does not send.
             vcx.simulate_event(gpui_kit::KeyUpEvent {
-                keystroke: gpui_kit::Keystroke::parse(key).expect("a known key"),
+                keystroke: gpui_kit::Keystroke::parse_with_os(key, crate::ui::host_os::HOST_OS)
+                    .expect("a known key"),
             });
             vcx.run_until_parked();
             return;

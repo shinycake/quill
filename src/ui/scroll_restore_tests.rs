@@ -9,7 +9,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext, TouchPhase,
+    AppContext, Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase,
     VisualTestContext, px, size,
 };
 use quill::diagnostics::{DiagnosticSink, MemorySink};
@@ -186,11 +186,12 @@ fn swipe(
     moves: usize,
 ) {
     let mut send = |phase, dy| {
-        vcx.simulate_event(ScrollWheelEvent {
+        vcx.simulate_event(ScrollEvent {
             position: at,
             delta: ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
             modifiers: Modifiers::default(),
             touch_phase: phase,
+            source: gpui_kit::ScrollSource::Pointer,
         });
     };
     send(TouchPhase::Started, dy);

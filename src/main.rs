@@ -768,11 +768,12 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                             };
                             let scrolled = demo_window.update(cx, |_, window, cx| {
                                 window.dispatch_event(
-                                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                    PlatformInput::Scroll(ScrollEvent {
                                         position: point(px(x), px(y)),
                                         delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
                                         modifiers: Modifiers::default(),
                                         touch_phase: TouchPhase::Moved,
+                                        source: gpui_kit::ScrollSource::Pointer,
                                     }),
                                     cx,
                                 );

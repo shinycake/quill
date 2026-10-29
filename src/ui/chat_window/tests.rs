@@ -459,7 +459,7 @@ fn ctrl_or_cmd_click_on_a_chat_row_opens_its_window(cx: &mut TestAppContext) {
         })
         .unwrap();
     let mut vcx = VisualTestContext::from_window(h.main, cx);
-    vcx.simulate_click(center, Modifiers::secondary_key());
+    vcx.simulate_click(center, crate::ui::host_os::secondary_key());
     vcx.run_until_parked();
     assert_eq!(h.other_windows(cx).len(), 1);
     assert_eq!(h.window_chats(cx), vec![OTHER]);

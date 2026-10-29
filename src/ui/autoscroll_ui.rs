@@ -10,8 +10,8 @@
 use super::app::QuillApp;
 use gpui_kit::component::*;
 use gpui_kit::gpui::{
-    Modifiers, MouseMoveEvent, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase,
-    point, px,
+    Modifiers, MouseMoveEvent, PlatformInput, Point, ScrollDelta, ScrollEvent, TouchPhase, point,
+    px,
 };
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -214,11 +214,12 @@ pub(super) fn scroll_history_by(
     }
     // A wheel delta moves the content; content moving up shows newer rows.
     window.dispatch_event(
-        PlatformInput::ScrollWheel(ScrollWheelEvent {
+        PlatformInput::Scroll(ScrollEvent {
             position: anchor,
             delta: ScrollDelta::Pixels(point(px(0.), px(-dy))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Moved,
+            source: gpui_kit::ScrollSource::Pointer,
         }),
         cx,
     );

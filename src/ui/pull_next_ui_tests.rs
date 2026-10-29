@@ -9,7 +9,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    AppContext, Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent, TestAppContext,
     TouchPhase, VisualTestContext, point, px, size,
 };
 use quill::chat_wide::ChatLayout;
@@ -77,11 +77,12 @@ fn history_centre(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<P
 }
 
 fn wheel(cx: &mut VisualTestContext, at: Point<Pixels>, phase: TouchPhase, down: f32) {
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: at,
         delta: ScrollDelta::Pixels(point(px(0.), px(-down))),
         modifiers: Modifiers::default(),
         touch_phase: phase,
+        source: gpui_kit::ScrollSource::Pointer,
     });
 }
 

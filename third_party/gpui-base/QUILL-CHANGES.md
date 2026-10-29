@@ -1,12 +1,12 @@
 # Changes made by the Quill project
 
-This directory is gpui-base 0.8.0 from crates.io (Apache-2.0, `LICENSE-APACHE`),
-used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `6d03a41e`
-added the unmodified registry copy, so `git diff 6d03a41e -- third_party/gpui-base`
+This directory is gpui-base 0.8.1 from crates.io (Apache-2.0, `LICENSE-APACHE`),
+used through `[patch.crates-io]` in Quill's `Cargo.toml`. Commit `6be84cd7`
+added the unmodified registry copy, so `git diff 6be84cd7 -- third_party/gpui-base`
 shows every change. (The patch was first made on 0.7.0, vendored in `eb465597`,
 carried to 0.7.1 in `docs/decisions/codex-gpui-kit-0.7.1.md`, to 0.7.3 in
 `docs/decisions/gpui-kit-0-7-3.md` and to 0.8.0 in
-`docs/decisions/gpui-kit-0-8-0.md`.)
+`docs/decisions/gpui-kit-0-8-0.md`, and to 0.8.1 in `docs/decisions/gpui-kit-0-8-1.md`.)
 
 The Quill project changed it in 2026 to add bidirectional text support to the
 input engine:

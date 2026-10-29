@@ -10,7 +10,7 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    AppContext, Entity, Modifiers, MouseButton, ScrollDelta, ScrollEvent, TestAppContext,
     VisualTestContext, point, px, size,
 };
 use quill::ids::ChatId;
@@ -157,7 +157,7 @@ fn the_zoom_buttons_and_the_wheel_zoom_and_a_new_image_follows(cx: &mut TestAppC
 
     let map = bounds_of(vcx, "location-map").center();
     vcx.simulate_mouse_move(map, None, Modifiers::default());
-    vcx.simulate_event(ScrollWheelEvent {
+    vcx.simulate_event(ScrollEvent {
         position: map,
         delta: ScrollDelta::Lines(point(0., 2.)),
         ..Default::default()

@@ -1,13 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre-windows 0.3.9 from crates.io (Apache-2.0,
+This directory is gpui-pre-windows 0.3.10 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's Windows platform, used through `[patch.crates-io]`
-in Quill's `Cargo.toml`. Commit `be35a01b` added the unmodified registry copy
+in Quill's `Cargo.toml`. Commit `6be84cd7` added the unmodified registry copy
 (without the registry's `.cargo-ok`, `.cargo_vcs_info.json`,
 `Cargo.toml.orig` and `Cargo.lock`), so
-`git diff be35a01b -- third_party/gpui-pre-windows` shows every change.
+`git diff 6be84cd7 -- third_party/gpui-pre-windows` shows every change.
 (The patch was first made on 0.3.7, carried to 0.3.8 in
-`docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`.)
+`docs/decisions/codex-gpui-kit-0.7.1.md` and to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, and to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`.)
 
 The Quill project changed it in 2026 so an idle window stops receiving a
 `WM_PAINT` and a GPUI frame request on every vblank:
@@ -273,3 +273,8 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   it, and answers with an error while the renderer is borrowed. Not run on
   Windows by the author. An HDR swap chain format refuses readback with an
   error.
+
+Carried to 0.3.10, which validates GPUI's window messages with a per-process
+number (`handle_gpui_events`): `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` goes through
+that check too and is posted with the validation number, and the dispatcher's
+`unreachable!()` for an unknown id returns `None` instead.

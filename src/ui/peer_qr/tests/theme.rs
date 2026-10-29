@@ -249,11 +249,12 @@ fn wheel(vcx: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>, dy:
         (gpui_kit::TouchPhase::Moved, dy),
         (gpui_kit::TouchPhase::Ended, 0.),
     ] {
-        vcx.simulate_event(gpui_kit::ScrollWheelEvent {
+        vcx.simulate_event(gpui_kit::ScrollEvent {
             position: at,
             delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(px(0.), px(dy))),
             modifiers: Modifiers::default(),
             touch_phase: phase,
+            source: gpui_kit::ScrollSource::Pointer,
         });
     }
 }
