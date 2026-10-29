@@ -13,11 +13,18 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 if (APPLE)
     enable_language(OBJC OBJCXX)
 endif()
+if (MSVC)
+    # The static C runtime (/MT) throughout, as Telegram Desktop builds tg_owt
+    # and its codecs on Windows: the DLL needs no VC++ runtime beside it.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
+endif()
 
 set(QUILL_CALLS_DEPS "" CACHE PATH "Prefix with tg_owt, Opus, libvpx, OpenH264, libjpeg and rnnoise")
 set(QUILL_CALLS_TGCALLS "" CACHE PATH "tgcalls checkout")
 set(QUILL_CALLS_FFMPEG "" CACHE PATH "FFmpeg prefix (scripts/build-ffmpeg.sh)")
 set(QUILL_CALLS_OPENSSL_INCLUDE "" CACHE PATH "OpenSSL 3 include directory")
+set(QUILL_CALLS_FFMPEG_LIB "${QUILL_CALLS_FFMPEG}/lib" CACHE PATH
+    "FFmpeg's link libraries (on Windows, MSVC import libraries for the MinGW-built DLLs)")
 foreach (var QUILL_CALLS_DEPS QUILL_CALLS_TGCALLS QUILL_CALLS_FFMPEG QUILL_CALLS_OPENSSL_INCLUDE)
     if ("${${var}}" STREQUAL "")
         message(FATAL_ERROR "${var} is required; run scripts/build-tgcalls.sh")
@@ -25,8 +32,17 @@ foreach (var QUILL_CALLS_DEPS QUILL_CALLS_TGCALLS QUILL_CALLS_FFMPEG QUILL_CALLS
 endforeach()
 
 find_package(tg_owt REQUIRED PATHS ${QUILL_CALLS_DEPS} NO_DEFAULT_PATH)
-find_package(OpenSSL 3 REQUIRED)
-find_package(ZLIB REQUIRED)
+if (WIN32)
+    # Static OpenSSL and zlib, which the build script puts in the prefix
+    # (Telegram Desktop links both statically on Windows too).
+    set(qc_openssl ${QUILL_CALLS_DEPS}/lib/libssl.lib ${QUILL_CALLS_DEPS}/lib/libcrypto.lib)
+    set(qc_zlib ${QUILL_CALLS_DEPS}/lib/zlib.lib)
+else()
+    find_package(OpenSSL 3 REQUIRED)
+    find_package(ZLIB REQUIRED)
+    set(qc_openssl OpenSSL::SSL OpenSSL::Crypto)
+    set(qc_zlib ZLIB::ZLIB)
+endif()
 
 set(tgcalls_loc ${QUILL_CALLS_TGCALLS}/tgcalls)
 
@@ -169,7 +185,25 @@ PRIVATE
 if (APPLE)
     target_compile_options(quill_calls PRIVATE $<$<COMPILE_LANGUAGE:OBJC,OBJCXX>:-fobjc-arc>)
 endif()
-if (NOT MSVC)
+if (MSVC)
+    # Telegram Desktop's Windows options for tgcalls (cmake_helpers
+    # options_win.cmake), with fewer warnings and none as errors.
+    target_compile_definitions(quill_calls PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        UNICODE
+        _UNICODE
+        _WINDOWS
+        _SCL_SECURE_NO_WARNINGS
+    )
+    target_compile_options(quill_calls PRIVATE
+        /utf-8
+        /EHsc
+        /bigobj
+        /W1
+        $<$<COMPILE_LANGUAGE:CXX>:/permissive- /Zc:__cplusplus>
+    )
+else()
     target_compile_options(quill_calls PRIVATE
         -Wno-deprecated-volatile
         -Wno-deprecated-declarations
@@ -178,28 +212,30 @@ if (NOT MSVC)
     )
 endif()
 
-find_library(FFMPEG_AVCODEC avcodec PATHS ${QUILL_CALLS_FFMPEG}/lib NO_DEFAULT_PATH REQUIRED)
-find_library(FFMPEG_AVFORMAT avformat PATHS ${QUILL_CALLS_FFMPEG}/lib NO_DEFAULT_PATH REQUIRED)
-find_library(FFMPEG_AVUTIL avutil PATHS ${QUILL_CALLS_FFMPEG}/lib NO_DEFAULT_PATH REQUIRED)
-find_library(FFMPEG_SWRESAMPLE swresample PATHS ${QUILL_CALLS_FFMPEG}/lib NO_DEFAULT_PATH REQUIRED)
-find_library(FFMPEG_SWSCALE swscale PATHS ${QUILL_CALLS_FFMPEG}/lib NO_DEFAULT_PATH REQUIRED)
+find_library(FFMPEG_AVCODEC avcodec PATHS ${QUILL_CALLS_FFMPEG_LIB} NO_DEFAULT_PATH REQUIRED)
+find_library(FFMPEG_AVFORMAT avformat PATHS ${QUILL_CALLS_FFMPEG_LIB} NO_DEFAULT_PATH REQUIRED)
+find_library(FFMPEG_AVUTIL avutil PATHS ${QUILL_CALLS_FFMPEG_LIB} NO_DEFAULT_PATH REQUIRED)
+find_library(FFMPEG_SWRESAMPLE swresample PATHS ${QUILL_CALLS_FFMPEG_LIB} NO_DEFAULT_PATH REQUIRED)
+find_library(FFMPEG_SWSCALE swscale PATHS ${QUILL_CALLS_FFMPEG_LIB} NO_DEFAULT_PATH REQUIRED)
+
+# The codecs the build script installs: libNAME.a, or NAME.lib with MSVC.
+set(qc_codecs "")
+foreach (name opus vpx openh264 jpeg rnnoise)
+    list(APPEND qc_codecs
+        ${QUILL_CALLS_DEPS}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}${name}${CMAKE_STATIC_LIBRARY_SUFFIX})
+endforeach()
 
 target_link_libraries(quill_calls
 PRIVATE
     tg_owt::tg_owt
-    ${QUILL_CALLS_DEPS}/lib/libopus.a
-    ${QUILL_CALLS_DEPS}/lib/libvpx.a
-    ${QUILL_CALLS_DEPS}/lib/libopenh264.a
-    ${QUILL_CALLS_DEPS}/lib/libjpeg.a
-    ${QUILL_CALLS_DEPS}/lib/librnnoise.a
+    ${qc_codecs}
     ${FFMPEG_AVFORMAT}
     ${FFMPEG_AVCODEC}
     ${FFMPEG_SWRESAMPLE}
     ${FFMPEG_SWSCALE}
     ${FFMPEG_AVUTIL}
-    OpenSSL::SSL
-    OpenSSL::Crypto
-    ZLIB::ZLIB
+    ${qc_openssl}
+    ${qc_zlib}
 )
 
 if (APPLE)
@@ -225,6 +261,14 @@ if (APPLE)
         INSTALL_NAME_DIR "@rpath"
         INSTALL_RPATH "@loader_path"
         BUILD_WITH_INSTALL_RPATH ON)
+elseif (WIN32)
+    # Only qc_* leaves the DLL: quill_calls.h marks those dllexport, and
+    # nothing linked in statically exports anything (rnnoise is built
+    # without its dllexport). FFmpeg's DLLs are found beside this one.
+    target_link_libraries(quill_calls PRIVATE
+        advapi32 bcrypt crypt32 d3d11 dwmapi dxgi gdi32 iphlpapi ole32
+        oleaut32 secur32 shcore shell32 strmiids user32 uuid winmm ws2_32
+    )
 else()
     find_package(Threads REQUIRED)
     # tg_owt's X11 and portal (GLib) capture code, as tdesktop links it on
@@ -245,5 +289,6 @@ else()
         BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
-install(TARGETS quill_calls LIBRARY DESTINATION lib RUNTIME DESTINATION bin ARCHIVE DESTINATION lib)
+# The Windows DLL goes to lib/ too, where the loader and the tests look.
+install(TARGETS quill_calls LIBRARY DESTINATION lib RUNTIME DESTINATION lib ARCHIVE DESTINATION lib)
 install(FILES include/quill_calls.h DESTINATION include)

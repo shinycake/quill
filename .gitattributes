@@ -1,6 +1,7 @@
 # Byte-exact inputs: Windows checkouts must not rewrite line endings.
 schema/** -text
 native/patches/** -text
+native/quill-calls/patches/** -text
 *.sh text eol=lf
 *.py text eol=lf
 # Compiled in with include_str! and parsed (SKILL.md frontmatter): keep LF on Windows.

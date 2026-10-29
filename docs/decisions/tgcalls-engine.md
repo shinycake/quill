@@ -66,6 +66,9 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
 - The library finds FFmpeg and OpenSSL next to itself (`@loader_path`,
   `$ORIGIN`). On macOS the build script rewrites their absolute install
   names to `@rpath/<name>` and re-signs, and fails if any build path is left.
+  On Windows OpenSSL is linked in, and the Rust loader opens
+  `quill_calls.dll` with `LOAD_WITH_ALTERED_SEARCH_PATH`, so FFmpeg's DLLs
+  are found beside it first.
 
 Where the build deliberately differs from tdesktop's:
 
@@ -75,9 +78,19 @@ Where the build deliberately differs from tdesktop's:
 - PipeWire 0.3.62's headers are fetched for tg_owt's camera code (the
   version tdesktop's build image uses) because Ubuntu 22.04's are too old.
 - rnnoise is the desktop-app fork tdesktop uses; OpenH264 is built with its
-  makefile rather than meson; tdesktop's libvpx patches (desktop-app/patches
-  `libvpx/`) are not applied: they fix its MSVC and Windows-on-Arm builds
-  and let `SDKROOT` pick the macOS SDK, none of which this build needs.
+  makefile rather than meson (its MSVC makefile on Windows); of tdesktop's
+  libvpx patches (desktop-app/patches `libvpx/`) only the three a Windows
+  x64 build needs are applied, on Windows: no forced `/GL`, parallel
+  compiles, and the NASM 3 fix (`native/quill-calls/patches/libvpx-win-*`).
+  The others fix Windows-on-Arm and let `SDKROOT` pick the macOS SDK.
+- Windows: everything is MSVC with the static C runtime (`/MT`), as in
+  tdesktop's win64 build, but FFmpeg stays the shared MinGW build Quill
+  already ships (tdesktop links a static MSVC FFmpeg); the build script
+  makes MSVC import libraries from the DLLs' exports. OpenSSL 3 and zlib
+  are static from vcpkg (`x64-windows-static`, as TDLib's Windows build
+  takes them) rather than built from tdesktop's pins. rnnoise is built
+  with an empty `RNNOISE_EXPORT`, so its functions are not exported from
+  `quill_calls.dll`.
 - tgcalls carries Quill's patches from `native/quill-calls/patches/`,
   applied after the checkout. `tgcalls-v2-reference-release-on-media-thread`
   fixes a deadlock in `InstanceV2ReferenceImpl` (10.0.0, 11.0.0) when a call
@@ -292,4 +305,7 @@ and make it required in `windows-package.ps1`, `check-bundle-pe.ps1` and
 Then the parity items: conference calls, battery-low line, speaking levels for
 everyone in group calls, signal bars, the muted-speech hint.
 
-Windows builds with MSVC like tdesktop and joins the pipeline before step 6.
+Windows builds with MSVC like tdesktop (`scripts/build-tgcalls.sh` from
+MSYS2 bash with the MSVC environment inherited) in the quill-calls workflow.
+No package ships `libquill_calls` yet on any platform; the packages add it,
+beside `quill.exe` on Windows, before step 6.

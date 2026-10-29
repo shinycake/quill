@@ -82,12 +82,9 @@ impl Loader {
     /// `qc_*` function.
     pub fn load(path: impl AsRef<OsStr>) -> Result<Self, LoadError> {
         let path = path.as_ref();
-        // SAFETY: opening runs the library's initializers, which only set up
-        // tgcalls' own static state (its protocol version registry).
-        let lib =
-            unsafe { libloading::Library::new(path) }.map_err(|_| LoadError::LibraryMissing {
-                searched: vec![PathBuf::from(path)],
-            })?;
+        let lib = open(path).map_err(|_| LoadError::LibraryMissing {
+            searched: vec![PathBuf::from(path)],
+        })?;
         let qc_api_version: unsafe extern "C" fn() -> u32 = resolve!(lib, qc_api_version);
         // SAFETY: qc_api_version takes nothing and only returns a constant.
         let library = unsafe { qc_api_version() };
@@ -140,10 +137,11 @@ impl Loader {
 
     /// Searches the standard locations and loads the first library found.
     ///
-    /// Order: the `QUILL_CALLS_LIB` env var; `lib/` beside the executable
-    /// (Linux and Windows packages); `Frameworks/` or `vendor/quill-calls/lib`
-    /// at any ancestor of the executable (the macOS bundle, `cargo run`);
-    /// then the bare file name on the system search path.
+    /// Order: the `QUILL_CALLS_LIB` env var; on Windows, the executable's own
+    /// directory (the Windows package); `lib/` beside the executable (the
+    /// Linux package); `Frameworks/` or `vendor/quill-calls/lib` at any
+    /// ancestor of the executable (the macOS bundle, `cargo run`); then the
+    /// bare file name on the system search path.
     pub fn load_default() -> Result<Self, LoadError> {
         let mut searched: Vec<PathBuf> = Vec::new();
 
@@ -155,11 +153,17 @@ impl Loader {
         }
 
         if let Ok(exe) = std::env::current_exe() {
-            if let Some(candidate) = exe
-                .parent()
-                .map(|dir| dir.join("lib").join(library_filename()))
-                .filter(|candidate| candidate.exists())
-            {
+            // Only the executable's own directory, never its parents: a DLL
+            // in, say, the Downloads folder above it must not be picked up.
+            if let Some(candidate) = exe.parent().and_then(|dir| {
+                [
+                    #[cfg(windows)]
+                    dir.join(library_filename()),
+                    dir.join("lib").join(library_filename()),
+                ]
+                .into_iter()
+                .find(|candidate| candidate.exists())
+            }) {
                 return Self::load(&candidate);
             }
             for ancestor in exe
@@ -170,8 +174,6 @@ impl Loader {
                 for directory in [
                     ancestor.join("Frameworks"),
                     ancestor.join("vendor/quill-calls/lib"),
-                    #[cfg(windows)]
-                    ancestor.to_path_buf(),
                 ] {
                     let candidate = directory.join(library_filename());
                     if candidate.exists() {
@@ -185,4 +187,31 @@ impl Loader {
         searched.push(system.clone());
         Self::load(&system).map_err(|_| LoadError::LibraryMissing { searched })
     }
+}
+
+/// Opens the library file without resolving anything in it.
+///
+/// On Windows an absolute path is opened with `LOAD_WITH_ALTERED_SEARCH_PATH`,
+/// so the DLLs it imports (FFmpeg's) are looked for in its own directory
+/// first, as `$ORIGIN` and `@loader_path` do on Linux and macOS, then on the
+/// usual search path.
+fn open(path: &OsStr) -> Result<libloading::Library, libloading::Error> {
+    #[cfg(windows)]
+    {
+        // GetFullPathNameW: backslashes and no `..`, as that flag requires.
+        if std::path::Path::new(path).is_absolute()
+            && let Ok(absolute) = std::path::absolute(path)
+        {
+            use libloading::os::windows;
+            // SAFETY: as for `Library::new` below; the flag only changes
+            // where the DLL's own imports are searched for.
+            let lib = unsafe {
+                windows::Library::load_with_flags(absolute, windows::LOAD_WITH_ALTERED_SEARCH_PATH)
+            };
+            return lib.map(Into::into);
+        }
+    }
+    // SAFETY: opening runs the library's initializers, which only set up
+    // tgcalls' own static state (its protocol version registry).
+    unsafe { libloading::Library::new(path) }
 }
