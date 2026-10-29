@@ -78,6 +78,16 @@ Where the build deliberately differs from tdesktop's:
   makefile rather than meson; tdesktop's libvpx patches (desktop-app/patches
   `libvpx/`) are not applied: they fix its MSVC and Windows-on-Arm builds
   and let `SDKROOT` pick the macOS SDK, none of which this build needs.
+- tgcalls carries Quill's patches from `native/quill-calls/patches/`,
+  applied after the checkout. `tgcalls-v2-reference-release-on-media-thread`
+  fixes a deadlock in `InstanceV2ReferenceImpl` (10.0.0, 11.0.0) when a call
+  is destroyed right after it is created: the stats task on the worker thread
+  could hold the internal object's last reference, and destroying its
+  PeerConnection there waits on the media thread while `~PeerConnection` on
+  the media thread waits on the worker. The task now drops its reference on
+  the media thread. Upstream tgcalls has the same code on every branch
+  (October 2026). Before the patch, about 1 in 75 runs of the contract test
+  hung, and `qc_p2p_destroy` would have hung Quill's thread.
 
 ## The C API (`native/quill-calls/include/quill_calls.h`)
 
@@ -108,16 +118,6 @@ Where the build deliberately differs from tdesktop's:
   to its threads. Returning earlier left them running into process exit,
   where they used OpenSSL and WebRTC statics already torn down (the contract
   test crashed about every other run).
-
-## Follow-ups
-
-- tgcalls' `InstanceV2ReferenceImpl` (10.0.0, 11.0.0) can deadlock when a
-  call is destroyed right after it is created: the internal object's last
-  reference can drop in a worker-thread task, and its PeerConnection
-  teardown then waits on the media thread, which is waiting on the worker.
-  Seen about once in 75 runs of create-and-destroy; the contract test skips
-  those versions until it's fixed (likely by releasing the last reference on
-  the media thread).
 
 ## Build order
 

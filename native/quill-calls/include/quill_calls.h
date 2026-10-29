@@ -177,8 +177,8 @@ typedef struct qc_p2p_callbacks {
  *   "encryption_key": "<base64, 256 bytes>",
  *   "allow_p2p": true,
  *   "max_layer": 92,                     protocol.max_layer
- *   "connect_timeout_ms": 30000,         option call_connect_timeout_ms
- *   "packet_timeout_ms": 10000,          option call_packet_timeout_ms
+ *   "connect_timeout_ms": 30000,         option call_connect_timeout_ms; optional, default 30000
+ *   "packet_timeout_ms": 10000,          option call_packet_timeout_ms; optional, default 10000
  *   "custom_parameters": "{...}",        callStateReady.custom_parameters
  *   "servers": [                         callStateReady.servers
  *     {"id": "1", "ipv4": "...", "ipv6": "...", "port": 1400,

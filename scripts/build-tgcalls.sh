@@ -78,7 +78,7 @@ fetch() {
   fi
   if [[ "$(git -C "$dir" rev-parse -q --verify HEAD 2>/dev/null)" != "$commit" ]]; then
     git -C "$dir" fetch -q --depth 1 origin "$commit"
-    git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD
+    git -C "$dir" -c advice.detachedHead=false checkout -q -f FETCH_HEAD
   fi
   local have
   have="$(git -C "$dir" rev-parse HEAD)"
@@ -240,6 +240,15 @@ build_mozjpeg
 build_rnnoise
 build_tg_owt
 fetch tgcalls https://github.com/TelegramMessenger/tgcalls.git "$TGCALLS_COMMIT"
+# Quill's fixes to tgcalls (native/quill-calls/patches), each applied once.
+for patch in "$ROOT"/native/quill-calls/patches/tgcalls-*.patch; do
+  if git -C "$WORK/tgcalls" apply --check "$patch" 2>/dev/null; then
+    git -C "$WORK/tgcalls" apply "$patch"
+  elif ! git -C "$WORK/tgcalls" apply --reverse --check "$patch" 2>/dev/null; then
+    echo "error: $patch does not apply to tgcalls $TGCALLS_COMMIT" >&2
+    exit 1
+  fi
+done
 
 cmake -S "$ROOT/native/quill-calls" -B "$WORK/quill-calls" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
