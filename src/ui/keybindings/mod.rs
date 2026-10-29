@@ -797,7 +797,7 @@ mod tests {
     fn reference_table_matches_resolved_defaults() {
         let defaults = default_bindings();
         // macOS adds Hide and Hide Others.
-        let expected = if cfg!(target_os = "macos") { 98 } else { 96 };
+        let expected = if cfg!(target_os = "macos") { 99 } else { 97 };
         assert_eq!(defaults.len(), expected);
         for row in resolve_keybindings(&[]) {
             for chord in row.live {
@@ -977,6 +977,16 @@ mod tests {
                 assert!(!ks.modifiers.platform, "{chord} takes a Super chord");
             }
         }
+    }
+
+    /// The startup keymap (before an account's keymap is applied) already
+    /// has Settings, so the app menu shows its chord from launch.
+    #[test]
+    fn settings_chord_is_in_the_startup_keymap() {
+        assert_eq!(
+            resolve(&primary(","), &[]).as_deref(),
+            Some("quill_ui::OpenSettings")
+        );
     }
 
     #[test]
