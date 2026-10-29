@@ -157,7 +157,7 @@ apply_patches() {
 # installed, and is skipped while that stamp still matches: a rerun after a
 # failure resumes where it stopped, and a changed pin rebuilds.
 # STAMP_LAYOUT changes when what a build leaves in $DEPS changes.
-STAMP_LAYOUT=2
+STAMP_LAYOUT=3
 # built <name> <key> <library>: the stamp matches and the library is still there.
 built() { [[ "$(cat "$DEPS/.stamp-$1" 2>/dev/null)" == "$STAMP_LAYOUT $2" && -f "$DEPS/lib/$3" ]]; }
 stamp() { printf '%s\n' "$STAMP_LAYOUT $2" > "$DEPS/.stamp-$1"; }
@@ -372,6 +372,12 @@ build_tg_owt() {
   license spl_sqrt_floor "$owt/src/common_audio/third_party/spl_sqrt_floor/LICENSE"
   license base64 "$owt/src/rtc_base/third_party/base64/LICENSE"
   license sigslot "$owt/src/rtc_base/third_party/sigslot/LICENSE"
+  # WebRTC's modules/third_party code that tg_owt compiles in (the G.711
+  # and G.722 codecs, iSAC's FFT, PortAudio's ring buffer).
+  local part
+  for part in fft g711 g722 portaudio; do
+    license "$part" "$owt/src/modules/third_party/$part/LICENSE"
+  done
   if [[ "$OS" == linux ]]; then
     license pipewire "$owt/src/third_party/pipewire/COPYING"
   fi
