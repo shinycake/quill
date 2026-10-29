@@ -278,3 +278,4 @@ Carried to 0.3.10, which validates GPUI's window messages with a per-process
 number (`handle_gpui_events`): `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` goes through
 that check too and is posted with the validation number, and the dispatcher's
 `unreachable!()` for an unknown id returns `None` instead.
+- 0.3.10: `direct_manipulation.rs` inertia-start event uses `PlatformInput::Scroll` with `ScrollSource::Pointer` (the 0.3.10 rename).
