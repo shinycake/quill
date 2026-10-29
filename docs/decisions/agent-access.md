@@ -1351,10 +1351,11 @@ button refuses too (`FrameTitleBar` in `src/ui/window_frame.rs` wraps the
 callback), and its minimise and maximise buttons are kept off by a tag
 (below, "Review fixes").
 
-Tests: `agent_driver_hard_tests.rs`. An agent presses Cmd+, and Ctrl+,
-(Settings stays closed, the reply carries "open Settings"), Cmd+L and
-Ctrl+L with a passcode set (Quill stays unlocked) and Ctrl+M (refused);
-the user's own Cmd+, still opens Settings. A second test runs the main
+Tests: `agent_driver_hard_tests.rs`. An agent presses the platform's own
+Cmd/Ctrl+, (Settings stays closed, the reply carries "open Settings"),
+Cmd/Ctrl+L with a passcode set (Quill stays unlocked) and Cmd/Ctrl+M
+(refused); the user's own Cmd/Ctrl+, still opens Settings. Off macOS an
+agent's `cmd` is Ctrl (`agent_driver_input::keystroke`). A second test runs the main
 menu entries and the openers under the injecting flag: nothing opens, each
 refusal is recorded, and the same entry opens for the user. In a real
 window, `QUILL_DEMO_SHOT_KEYS="cmd-, cmd-l"` on the `ready-agent-screenshot`

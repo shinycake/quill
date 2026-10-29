@@ -82,7 +82,7 @@ Example input: {\"text\": \"hello\"}. Output: {typed (characters), focus {id, ro
     Tool {
         name: "press_keys",
         title: "Press keys in Quill's window",
-        description: "Use to press one or more key chords, GPUI style: modifiers ctrl, alt, shift, cmd (Win on Linux and Windows), \
+        description: "Use to press one or more key chords, GPUI style: modifiers ctrl, alt, shift, cmd (Ctrl on Linux and Windows), \
 joined with - or +, chords separated by spaces. Each chord is checked on its own: keys that quit or close Quill are refused, \
 Enter and Space only go to a focused text box (Enter in the message box sends through the agent path), and a chord that \
 moves to an ungranted chat stops the sequence. Chords never type characters; use type_text for text. \
