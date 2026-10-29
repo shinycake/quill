@@ -649,6 +649,11 @@ impl QuillApp {
 }
 
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "composer_suggest_tests.rs"]
+mod ui_tests;
+
+#[cfg(test)]
 mod tests {
     #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::{SuggestItem, apply_suggestion, step_selection, suggest_items};

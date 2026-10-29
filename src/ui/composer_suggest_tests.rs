@@ -1,7 +1,6 @@
 //! The composer's emoji suggestions end to end: typed text, keyword
 //! answers landing, keys. Over the `ready-chats` demo with the keyword
 //! answers put in the session by hand; nothing reaches Telegram.
-#![cfg(all(test, feature = "demo-capture"))]
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;

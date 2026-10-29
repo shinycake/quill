@@ -256,7 +256,6 @@ mod composer_keystroke_tests;
 mod composer_sends_tests;
 mod composer_shortcuts;
 mod composer_suggest;
-mod composer_suggest_tests;
 mod composer_system_replace;
 mod composer_ui;
 mod composer_unicode;
