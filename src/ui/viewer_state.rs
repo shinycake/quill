@@ -8,7 +8,6 @@ use quill::media_viewer::SwipeNav;
 use quill::media_viewer::ViewerZoom;
 use quill::media_viewer::WheelNav;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 pub(crate) struct ViewerUi {
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
@@ -56,7 +55,7 @@ pub(crate) struct ViewerUi {
     /// MED1: re-oriented render of the viewer photo, keyed
     /// `(path, orientation code)`; decoded eagerly by Rotate/Flip so the
     /// overlay render stays allocation-free.
-    pub(super) rotated: Option<(PathBuf, u8, Arc<RenderImage>)>,
+    pub(super) rotated: Option<(PathBuf, u8, super::owned_image::OwnedImage)>,
     /// The orientation a background decode is producing; it replaces
     /// `orientation` when the decode lands.
     pub(super) reorient_pending: Option<quill::media_viewer::ViewerOrientation>,

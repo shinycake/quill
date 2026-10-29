@@ -105,6 +105,7 @@ impl QuillApp {
     /// Tests: hover the `index`th highlight (the headless test text
     /// system has no glyph rects to point at).
     #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn hover_highlight(&mut self, index: usize) {
         if let Some(h) = self.composer_ui.emoji_words.highlights.get(index).cloned() {
             let items = self.word_strip_items(&h);

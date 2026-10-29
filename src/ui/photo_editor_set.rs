@@ -54,7 +54,7 @@ impl PhotoEditor {
                 image,
                 center: (0.5, 0.5),
             },
-            preview,
+            preview.into(),
         ));
         Some(editor)
     }

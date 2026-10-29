@@ -182,7 +182,7 @@ impl QuillApp {
                         *turns == self.viewer.orientation.code()
                             && Some(path.as_path()) == thumb_path.as_deref()
                     })
-                    .map(|(_, _, image)| ImageSource::from(image.clone()));
+                    .map(|(_, _, image)| ImageSource::from(Arc::clone(image)));
                 let source: Option<ImageSource> = rotated.or_else(|| {
                     thumb_path.as_deref().map(|path| {
                         if item.kind == MediaViewerKind::ImageFile {

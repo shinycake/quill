@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use crate::ui::owned_image::OwnedImage;
 use crate::ui::story_viewer::chrome;
 use quill::story_cover::{
     STRIP_FRAMES, fraction_of, frame_times, time_at, time_label, timestamp_secs,
@@ -35,8 +36,8 @@ pub(in crate::ui) struct CoverPicker {
     duration_ms: Option<i64>,
     /// The chosen time.
     at_ms: i64,
-    frames: Vec<Option<Arc<RenderImage>>>,
-    preview: Option<Arc<RenderImage>>,
+    frames: Vec<Option<OwnedImage>>,
+    preview: Option<OwnedImage>,
     /// The preview is being cut for this time.
     preview_job: Option<i64>,
     dragging: bool,
@@ -75,7 +76,7 @@ impl QuillApp {
             source: source.clone(),
             duration_ms: None,
             at_ms: 0,
-            frames: vec![None; STRIP_FRAMES],
+            frames: (0..STRIP_FRAMES).map(|_| None).collect(),
             preview: None,
             preview_job: None,
             dragging: false,
@@ -136,7 +137,7 @@ impl QuillApp {
                         return false;
                     };
                     if let Some(slot) = cover.frames.get_mut(index) {
-                        *slot = still;
+                        *slot = still.map(Into::into);
                     }
                     cx.notify();
                     true
@@ -178,8 +179,8 @@ impl QuillApp {
                     return;
                 };
                 cover.preview_job = None;
-                if still.is_some() {
-                    cover.preview = still;
+                if let Some(still) = still {
+                    cover.preview = Some(still.into());
                 }
                 let wanted = cover.at_ms;
                 if wanted != at {
@@ -278,7 +279,7 @@ impl QuillApp {
                 .text_color(chrome_text())
                 .child(tr(keys::Q_MEDIA_COVER_UNREADABLE))
                 .into_any_element(),
-            (Some(image), false) => img(ImageSource::Render(image.clone()))
+            (Some(image), false) => img(ImageSource::Render(Arc::clone(image)))
                 .h_full()
                 .object_fit(ObjectFit::Contain)
                 .into_any_element(),
@@ -298,7 +299,7 @@ impl QuillApp {
                 .bg(chrome::frame_bg());
             frames = frames.child(match frame {
                 Some(image) => tile.child(
-                    img(ImageSource::Render(image.clone()))
+                    img(ImageSource::Render(Arc::clone(image)))
                         .size_full()
                         .object_fit(ObjectFit::Cover),
                 ),

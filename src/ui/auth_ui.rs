@@ -209,10 +209,10 @@ impl QuillApp {
         if let Some((cached_link, image)) = &self.auth_ui.qr_login_cache
             && cached_link == link
         {
-            return Some(image.clone());
+            return Some(Arc::clone(image));
         }
         let rendered = render_qr_image(link)?;
-        self.auth_ui.qr_login_cache = Some((link.to_string(), rendered.clone()));
+        self.auth_ui.qr_login_cache = Some((link.to_string(), Arc::clone(&rendered).into()));
         Some(rendered)
     }
 }
