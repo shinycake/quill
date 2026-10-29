@@ -93,7 +93,8 @@ fetch() {
 # failure resumes where it stopped, and a changed pin rebuilds.
 # STAMP_LAYOUT changes when what a build leaves in $DEPS changes.
 STAMP_LAYOUT=2
-built() { [[ "$(cat "$DEPS/.stamp-$1" 2>/dev/null)" == "$STAMP_LAYOUT $2" ]]; }
+# built <name> <key> <library>: the stamp matches and the library is still there.
+built() { [[ "$(cat "$DEPS/.stamp-$1" 2>/dev/null)" == "$STAMP_LAYOUT $2" && -f "$DEPS/lib/$3" ]]; }
 stamp() { printf '%s\n' "$STAMP_LAYOUT $2" > "$DEPS/.stamp-$1"; }
 
 # license <name> <file>...: keeps the notices a part asks to travel with it
@@ -107,7 +108,7 @@ license() {
 }
 
 build_opus() {
-  built opus "$OPUS_COMMIT" && return
+  built opus "$OPUS_COMMIT" libopus.a && return
   fetch opus https://github.com/xiph/opus.git "$OPUS_COMMIT"
   cmake -S "$WORK/opus" -B "$WORK/opus/out" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$DEPS" \
@@ -120,7 +121,7 @@ build_opus() {
 }
 
 build_libvpx() {
-  built libvpx "$LIBVPX_COMMIT" && return
+  built libvpx "$LIBVPX_COMMIT" libvpx.a && return
   fetch libvpx https://github.com/webmproject/libvpx.git "$LIBVPX_COMMIT"
   local target=()
   if [[ "$OS" == macos ]]; then
@@ -136,7 +137,7 @@ build_libvpx() {
 }
 
 build_openh264() {
-  built openh264 "$OPENH264_COMMIT" && return
+  built openh264 "$OPENH264_COMMIT" libopenh264.a && return
   fetch openh264 https://github.com/cisco/openh264.git "$OPENH264_COMMIT"
   local arch=()
   [[ "$ARCH" == arm64 ]] && arch=(ARCH="$([[ $OS == macos ]] && echo arm64 || echo aarch64)")
@@ -147,7 +148,7 @@ build_openh264() {
 }
 
 build_mozjpeg() {
-  built mozjpeg "$MOZJPEG_COMMIT" && return
+  built mozjpeg "$MOZJPEG_COMMIT" libjpeg.a && return
   fetch mozjpeg https://github.com/mozilla/mozjpeg.git "$MOZJPEG_COMMIT"
   cmake -S "$WORK/mozjpeg" -B "$WORK/mozjpeg/out" -G Ninja \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release \
@@ -161,7 +162,7 @@ build_mozjpeg() {
 }
 
 build_rnnoise() {
-  built rnnoise "$RNNOISE_COMMIT" && return
+  built rnnoise "$RNNOISE_COMMIT" librnnoise.a && return
   fetch rnnoise https://github.com/desktop-app/rnnoise.git "$RNNOISE_COMMIT"
   cmake -S "$WORK/rnnoise" -B "$WORK/rnnoise/out" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -174,7 +175,7 @@ build_rnnoise() {
 }
 
 build_tg_owt() {
-  built tg_owt "$TG_OWT_KEY" && return
+  built tg_owt "$TG_OWT_KEY" libtg_owt.a && return
   fetch tg_owt https://github.com/desktop-app/tg_owt.git "$TG_OWT_COMMIT"
   git -C "$WORK/tg_owt" submodule update -q --init --recursive --depth 1
   if [[ "$OS" == linux ]]; then
@@ -215,14 +216,22 @@ build_tg_owt() {
   license libsrtp "$owt/src/third_party/libsrtp/LICENSE"
   license libyuv "$owt/src/third_party/libyuv/LICENSE" "$owt/src/third_party/libyuv/PATENTS"
   license pffft "$owt/src/third_party/pffft/LICENSE"
+  license rnnoise-tg_owt "$owt/src/third_party/rnnoise/COPYING"
+  license ooura "$owt/src/common_audio/third_party/ooura/LICENSE"
+  license spl_sqrt_floor "$owt/src/common_audio/third_party/spl_sqrt_floor/LICENSE"
+  license base64 "$owt/src/rtc_base/third_party/base64/LICENSE"
+  license sigslot "$owt/src/rtc_base/third_party/sigslot/LICENSE"
   if [[ "$OS" == linux ]]; then
     license pipewire "$owt/src/third_party/pipewire/COPYING"
   fi
   stamp tg_owt "$TG_OWT_KEY"
 }
 
-# tg_owt compiles against FFmpeg's headers, so a new FFmpeg rebuilds it.
-TG_OWT_KEY="$TG_OWT_COMMIT pipewire-$PIPEWIRE_COMMIT ffmpeg-$(cat "$FFMPEG_PREFIX"/include/libav*/version*.h | shasum -a 256 | cut -c1-16)"
+# tg_owt compiles against the codecs' and FFmpeg's headers, so a new pin of
+# any of them rebuilds it.
+TG_OWT_KEY="$TG_OWT_COMMIT pipewire-$PIPEWIRE_COMMIT opus-$OPUS_COMMIT libvpx-$LIBVPX_COMMIT"
+TG_OWT_KEY+=" openh264-$OPENH264_COMMIT mozjpeg-$MOZJPEG_COMMIT"
+TG_OWT_KEY+=" ffmpeg-$(cat "$FFMPEG_PREFIX"/include/libav*/version*.h | shasum -a 256 | cut -c1-16)"
 
 build_opus
 build_libvpx
@@ -264,8 +273,28 @@ EOF
 license tgcalls "$WORK/tgcalls/LICENSE" "$ROOT/licenses/GPL-3.0.txt"
 rm -rf "$DEST/share/licenses"
 cp -R "$DEPS/licenses" "$DEST/share/licenses"
+# tgcalls carries json11 without a license file; its notice heads the source.
+mkdir -p "$DEST/share/licenses/json11"
+sed -n '1,/\*\//p' "$WORK/tgcalls/tgcalls/third-party/json11.cpp" > "$DEST/share/licenses/json11/LICENSE"
 
 LIB="$DEST/lib/libquill_calls.$([[ $OS == macos ]] && echo dylib || echo so)"
 [[ -f "$LIB" ]] || { echo "error: $LIB was not built" >&2; exit 1; }
+if [[ "$OS" == macos ]]; then
+  # FFmpeg and OpenSSL are linked by their absolute build paths; refer to
+  # them by name through the rpath (@loader_path) so the copies shipped next
+  # to the library are the ones loaded. The edit voids the linker's ad-hoc
+  # signature, so sign again.
+  while read -r dep; do
+    case "$dep" in
+      "$FFMPEG_PREFIX"/*|"${OPENSSL_ROOT_DIR:-/nonexistent}"/*|/opt/homebrew/*|/usr/local/opt/*)
+        install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$LIB" ;;
+    esac
+  done < <(otool -L "$LIB" | tail -n +2 | sed -E 's/^[[:space:]]+//; s/ \(compatibility version.*$//')
+  codesign --force --sign - "$LIB"
+  if otool -L "$LIB" | tail -n +2 | grep -E -v '^[[:space:]]+(@rpath/|/usr/lib/|/System/)'; then
+    echo "error: $LIB still links a library by a build path" >&2
+    exit 1
+  fi
+fi
 shasum -a 256 "$LIB" | tee "$DEST/share/libquill_calls.sha256"
 echo "Built $LIB"

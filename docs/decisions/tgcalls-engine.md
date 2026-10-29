@@ -64,9 +64,8 @@ Everything matches Telegram Desktop at `dev` f985723b (26 Oct 2026):
   `vendor/quill-calls/share/licenses/` carries the notices each part asks
   to ship with its binaries.
 - The library finds FFmpeg and OpenSSL next to itself (`@loader_path`,
-  `$ORIGIN`). On macOS it links Homebrew's OpenSSL and the FFmpeg prefix by
-  their install names, so packaging rewrites those to `@rpath` when it
-  bundles them (the switch-over PR).
+  `$ORIGIN`). On macOS the build script rewrites their absolute install
+  names to `@rpath/<name>` and re-signs, and fails if any build path is left.
 
 Where the build deliberately differs from tdesktop's:
 
