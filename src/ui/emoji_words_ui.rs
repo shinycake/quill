@@ -1,7 +1,9 @@
 //! Composer words that have an emoji (`quill::emoji_words`): a soft
 //! gradient highlight painted over the Textarea (it has no decoration
 //! hooks, like the spelling underlines), a one-time glimmer when a word
-//! first lights up, and on hover the same strip `:word` would offer.
+//! first lights up, and on hover the same bar `:word` would offer. The
+//! word's right-click menu (`emoji_words_menu`) offers its emoji, stops
+//! offering them, or turns the highlights off.
 //!
 //! Cost: the words are picked again only when the text, the selection,
 //! the formatting, the keyword answers or the setting change (a compare
@@ -16,13 +18,13 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use super::app::QuillApp;
-use super::composer_suggest::{GAP, STRIP_VISIBLE, SuggestItem, TILE, emoji_tiles, suggest_items};
+use super::composer_suggest::{SuggestItem, suggest_items};
+use gpui_base::input::InputContent;
 use gpui_kit::component::input::{Rope, TextareaState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer_doc::ComposerTag;
 use quill::emoji_words::{Highlight, candidates, pick};
-use quill::lang::{keys, tr};
 use quill::suggest::{RecentHashtags, SuggestKind, SuggestQuery};
 
 /// How long a word's glimmer runs when it first lights up.
@@ -37,6 +39,8 @@ struct Basis {
     skip: Vec<Range<usize>>,
     generation: u64,
     on: bool,
+    /// Words the user said not to offer emoji for (Settings).
+    blocked: Vec<String>,
 }
 
 #[derive(Default)]
@@ -44,15 +48,57 @@ pub(super) struct EmojiWordsUi {
     basis: Basis,
     pub highlights: Vec<Highlight>,
     /// When each word of this draft (by normalized text) first lit up:
-    /// its glimmer, and its place kept while the draft changes.
+    /// its glimmer plays once.
     lit_at: HashMap<String, Instant>,
-    /// The highlight under the pointer, with its strip.
+    /// The highlight under the pointer, with its bar.
     pub hovered: Option<(Highlight, Vec<SuggestItem>)>,
+    /// `hovered` came from "Suggest Emoji" in the menu: it stays while
+    /// its word does, highlighted or not.
+    pub pinned: bool,
+    /// "Suggest Emoji" on a word whose keyword answer is on its way.
+    pub asked: Option<(Range<usize>, String)>,
     /// Words closed with Esc: not highlighted again in this session.
     ignored: HashSet<String>,
-    /// Where the hover strip was painted, so leaving the field for it
-    /// does not close it.
+    /// Where the word's bar was painted, so moving the pointer from the
+    /// word to it does not close it.
     strip_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+}
+
+impl EmojiWordsUi {
+    pub(super) fn strip_bounds(&self) -> Rc<Cell<Option<Bounds<Pixels>>>> {
+        self.strip_bounds.clone()
+    }
+
+    /// Close the word's bar.
+    pub(super) fn unhover(&mut self) {
+        self.hovered = None;
+        self.pinned = false;
+        self.strip_bounds.set(None);
+    }
+}
+
+/// How far around the word and its bar the pointer may stray.
+const SLACK: f32 = 6.;
+
+/// Whether `p` is on the way between a word and its bar: inside either
+/// (with some slack) or in the band between them, which narrows from
+/// the bar's width to the word's (their convex hull, for a bar above).
+pub(super) fn on_the_way(p: Point<Pixels>, word: &[Bounds<Pixels>], bar: Bounds<Pixels>) -> bool {
+    let slack = px(SLACK);
+    if bar.dilate(slack).contains(&p) || word.iter().any(|r| r.dilate(slack).contains(&p)) {
+        return true;
+    }
+    let Some(top) = word.first() else {
+        return false;
+    };
+    let (from, to) = (bar.bottom(), top.top());
+    if to <= from || p.y < from || p.y > to {
+        return false;
+    }
+    let t = (p.y - from) / (to - from);
+    let left = bar.left() + (top.left() - bar.left()) * t - slack;
+    let right = bar.right() + (top.right() - bar.right()) * t + slack;
+    p.x >= left && p.x <= right
 }
 
 impl QuillApp {
@@ -93,6 +139,7 @@ impl QuillApp {
         if ui.basis.selection == selection
             && ui.basis.generation == generation
             && ui.basis.on == on
+            && ui.basis.blocked == self.chat_prefs.emoji_word_blocklist
             && ui.basis.text == *composer.text()
             && ui
                 .basis
@@ -111,29 +158,24 @@ impl QuillApp {
         } else {
             (Vec::new(), 0)
         };
-        found.retain(|c| !ui.ignored.contains(&c.normalized));
+        let blocked = &self.chat_prefs.emoji_word_blocklist;
+        found.retain(|c| !ui.ignored.contains(&c.normalized) && !blocked.contains(&c.normalized));
         if let Some(live) = self.live.as_mut() {
             let _ = live
                 .driver
                 .lookup_emoji_keywords(found.iter().map(|c| c.normalized.as_str()));
         }
-        let ui = &self.composer_ui.emoji_words;
         let highlights = match self.session() {
             Some(session) => {
                 let lookups = &session.stickers.emoji.keyword_lookups;
-                pick(
-                    &found,
-                    words,
-                    |w| ui.lit_at.contains_key(w),
-                    |q| lookups.answer(q),
-                )
+                pick(&found, words, |q| lookups.answer(q))
             }
             None => Vec::new(),
         };
         let now = Instant::now();
         let ui = &mut self.composer_ui.emoji_words;
-        // A word keeps its place while the caret passes through it; one
-        // deleted from the draft is forgotten.
+        // A word glimmers once while it is in the draft: one the caret
+        // passes through does not replay it.
         if !ui.lit_at.is_empty() {
             let lower = text.to_lowercase();
             ui.lit_at.retain(|word, _| lower.contains(word.as_str()));
@@ -141,12 +183,22 @@ impl QuillApp {
         for h in &highlights {
             ui.lit_at.entry(h.normalized.clone()).or_insert(now);
         }
-        if ui
-            .hovered
-            .as_ref()
-            .is_some_and(|(hovered, _)| !highlights.contains(hovered))
-        {
-            ui.hovered = None;
+        let same_word = |h: &Highlight| {
+            text.get(h.range.clone()).map(str::to_lowercase).as_deref() == Some(&h.normalized)
+        };
+        if ui.hovered.as_ref().is_some_and(|(hovered, _)| {
+            if ui.pinned {
+                !same_word(hovered)
+            } else {
+                !highlights.contains(hovered)
+            }
+        }) {
+            ui.unhover();
+        }
+        if ui.asked.as_ref().is_some_and(|(range, word)| {
+            text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word)
+        }) {
+            ui.asked = None;
         }
         ui.basis = Basis {
             text: rope,
@@ -154,16 +206,18 @@ impl QuillApp {
             skip,
             generation,
             on,
+            blocked: self.chat_prefs.emoji_word_blocklist.clone(),
         };
         if ui.highlights != highlights {
             ui.highlights = highlights;
             cx.notify();
         }
+        self.answer_asked_word(cx);
     }
 
     /// The pointer moved over the field: hover the highlight under it,
     /// or close the strip when it is over plain text.
-    fn hover_emoji_word(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(super) fn hover_emoji_word(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let state = self.composer.read(cx);
         let under = self
             .composer_ui
@@ -181,19 +235,58 @@ impl QuillApp {
         if ui.hovered.as_ref().map(|(h, _)| h) == under.as_ref() {
             return;
         }
-        if under.is_none() && ui.strip_bounds.get().is_some_and(|b| b.contains(&position)) {
+        // A bar asked for from the menu stays until another word is
+        // pointed at.
+        if under.is_none() && (ui.pinned || self.pointer_on_the_way(position, cx)) {
             return;
         }
         let hovered = under.map(|h| {
             let items = self.word_strip_items(&h);
             (h, items)
         });
-        self.composer_ui.emoji_words.hovered = hovered.filter(|(_, items)| !items.is_empty());
+        let ui = &mut self.composer_ui.emoji_words;
+        ui.unhover();
+        ui.hovered = hovered.filter(|(_, items)| !items.is_empty());
         cx.notify();
     }
 
-    /// The strip for a highlighted word: what `:word` would offer.
-    fn word_strip_items(&self, h: &Highlight) -> Vec<SuggestItem> {
+    /// Whether the pointer is over the hovered word, its bar, or on its
+    /// way from one to the other.
+    fn pointer_on_the_way(&self, position: Point<Pixels>, cx: &App) -> bool {
+        let ui = &self.composer_ui.emoji_words;
+        let Some((h, _)) = ui.hovered.as_ref() else {
+            return false;
+        };
+        let word = self.composer.read(cx).range_to_rects(&h.range);
+        match ui.strip_bounds.get() {
+            Some(bar) => on_the_way(position, &word, bar),
+            None => word.iter().any(|r| r.dilate(px(SLACK)).contains(&position)),
+        }
+    }
+
+    /// The pointer moved anywhere in the window while a word's bar shows
+    /// (or left the field or the bar): close it once the pointer is off
+    /// the way between the word and the bar.
+    pub(super) fn leave_word_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let position = window.mouse_position();
+        let ui = &self.composer_ui.emoji_words;
+        if ui.hovered.is_none() || self.pointer_on_the_way(position, cx) {
+            return;
+        }
+        // A pinned bar was asked for: it stays until the pointer goes to
+        // another word, Esc, or a pick.
+        if ui.pinned {
+            return;
+        }
+        self.composer_ui.emoji_words.unhover();
+        if self.composer_ui.suggest.active.is_none() {
+            self.composer_ui.suggest.bar.reset();
+        }
+        cx.notify();
+    }
+
+    /// The bar for a word: what `:word` would offer, custom emoji after.
+    pub(super) fn word_strip_items(&mut self, h: &Highlight) -> Vec<SuggestItem> {
         let query = SuggestQuery {
             kind: SuggestKind::Emoji,
             range: h.range.clone(),
@@ -204,17 +297,8 @@ impl QuillApp {
         let recent = session
             .map(|s| s.settings.media_prefs.recent_emoji.as_slice())
             .unwrap_or_default();
-        suggest_items(&query, &RecentHashtags::default(), keywords, recent)
-    }
-
-    /// The pointer left the field and is not over the strip.
-    fn leave_emoji_words(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let ui = &mut self.composer_ui.emoji_words;
-        let position = window.mouse_position();
-        if ui.hovered.is_some() && !ui.strip_bounds.get().is_some_and(|b| b.contains(&position)) {
-            ui.hovered = None;
-            cx.notify();
-        }
+        let items = suggest_items(&query, &RecentHashtags::default(), keywords, recent);
+        self.with_custom_emoji(items)
     }
 
     /// Esc while a word's strip is open: close it and stop highlighting
@@ -224,6 +308,7 @@ impl QuillApp {
         let Some((h, _)) = ui.hovered.take() else {
             return false;
         };
+        ui.unhover();
         ui.ignored.insert(h.normalized);
         ui.basis = Basis::default();
         self.sync_emoji_words(cx);
@@ -241,6 +326,8 @@ impl QuillApp {
         let Some((h, items)) = self.composer_ui.emoji_words.hovered.take() else {
             return;
         };
+        self.composer_ui.emoji_words.unhover();
+        self.composer_ui.suggest.bar.reset();
         let Some(item) = items.get(index) else {
             return;
         };
@@ -251,16 +338,22 @@ impl QuillApp {
         }
         // The word is not at the caret: put the caret back where it was,
         // shifted by the change in length if it was after the word.
+        let content = match item.custom.as_ref().and_then(|s| s.custom_emoji_id) {
+            Some(id) => self.custom_emoji_content(&item.insert, id),
+            None => InputContent::new(item.insert.clone()),
+        };
+        // The rich editor inserts a custom emoji as longer markup.
+        let inserted = content.text().len();
         let selection = self.composer.read(cx).selected_range();
         let shift = |at: usize| {
             if at >= h.range.end {
-                (at + item.insert.len()).saturating_sub(h.range.len())
+                (at + inserted).saturating_sub(h.range.len())
             } else {
                 at
             }
         };
         let selection = shift(selection.start)..shift(selection.end);
-        self.replace_composer_text(h.range.clone(), &item.insert, window, cx);
+        self.replace_composer_content(h.range.clone(), content, window, cx);
         self.composer.update(cx, |input, cx| {
             input.focus(window, cx);
             input.set_selected_range(selection, cx);
@@ -287,7 +380,7 @@ impl QuillApp {
             }))
             .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
                 if !*hovered {
-                    this.leave_emoji_words(window, cx);
+                    this.leave_word_bar(window, cx);
                 }
             }))
     }
@@ -296,7 +389,14 @@ impl QuillApp {
     /// inside the `relative()` wrapper).
     pub(super) fn emoji_word_highlights(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ui = &self.composer_ui.emoji_words;
-        if ui.highlights.is_empty() || ui.basis.text != *self.composer.read(cx).text() {
+        let pinned = ui
+            .hovered
+            .as_ref()
+            .filter(|(h, _)| ui.pinned && !ui.highlights.contains(h))
+            .map(|(h, _)| (h.range.clone(), None, true));
+        if (ui.highlights.is_empty() && pinned.is_none())
+            || ui.basis.text != *self.composer.read(cx).text()
+        {
             return None;
         }
         let now = Instant::now();
@@ -314,6 +414,7 @@ impl QuillApp {
                 let hovered = ui.hovered.as_ref().is_some_and(|(o, _)| o == h);
                 (h.range.clone(), glimmer, hovered)
             })
+            .chain(pinned)
             .collect();
         if words.iter().any(|(_, glimmer, _)| glimmer.is_some()) {
             self.request_animation_tick(60, cx);
@@ -332,79 +433,6 @@ impl QuillApp {
             )
             .absolute()
             .inset_0()
-            .into_any_element(),
-        )
-    }
-
-    /// The strip over a hovered word, anchored just above it.
-    pub(super) fn emoji_word_strip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (h, items) = self.composer_ui.emoji_words.hovered.as_ref()?;
-        let rect = self
-            .composer
-            .read(cx)
-            .range_to_rects(&h.range)
-            .first()
-            .copied()?;
-        let bounds_out = self.composer_ui.emoji_words.strip_bounds.clone();
-        let tiles = emoji_tiles(items, None, "word-emoji", cx, QuillApp::pick_word_emoji);
-        let strip = div()
-            .id("word-emoji-strip")
-            .role(gpui_kit::Role::ListBox)
-            .aria_label(tr(keys::Q_CHAT_EMOJI_SUGGESTIONS))
-            .relative()
-            .flex()
-            .items_center()
-            .gap_1()
-            .p_1()
-            .mb_1()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .shadow_md()
-            .max_w(px(STRIP_VISIBLE as f32 * (TILE + GAP) + 8.))
-            .overflow_x_scroll()
-            .on_mouse_move(|_, _, cx| cx.stop_propagation())
-            .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
-                if !*hovered {
-                    this.composer_ui.emoji_words.strip_bounds.set(None);
-                    let position = window.mouse_position();
-                    let over_word =
-                        this.composer_ui
-                            .emoji_words
-                            .hovered
-                            .as_ref()
-                            .is_some_and(|(h, _)| {
-                                this.composer
-                                    .read(cx)
-                                    .range_to_rects(&h.range)
-                                    .iter()
-                                    .any(|r| r.contains(&position))
-                            });
-                    if !over_word {
-                        this.composer_ui.emoji_words.hovered = None;
-                        cx.notify();
-                    }
-                }
-            }))
-            .children(tiles)
-            .child(
-                canvas(
-                    move |bounds, _, _| bounds_out.set(Some(bounds)),
-                    |_, _, _, _| (),
-                )
-                .absolute()
-                .inset_0(),
-            );
-        Some(
-            deferred(
-                anchored()
-                    .position(rect.origin)
-                    .anchor(Anchor::BottomLeft)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(strip),
-            )
-            .with_priority(1)
             .into_any_element(),
         )
     }
@@ -491,3 +519,28 @@ fn paint_highlights(
 #[cfg(feature = "demo-capture")]
 #[path = "emoji_words_ui_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod way_tests {
+    use super::on_the_way;
+    use gpui_kit::{Bounds, point, px, size};
+
+    #[test]
+    fn the_way_from_a_word_up_to_its_bar_keeps_it_open() {
+        // A wide bar above, a short word two lines further down.
+        let bar = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(44.)));
+        let word = [Bounds::new(
+            point(px(200.), px(100.)),
+            size(px(40.), px(18.)),
+        )];
+        let on = |x: f32, y: f32| on_the_way(point(px(x), px(y)), &word, bar);
+        assert!(on(220., 110.), "on the word");
+        assert!(on(10., 20.), "on the bar");
+        assert!(on(205., 95.), "just above the word");
+        assert!(on(30., 50.), "just below the bar's left end");
+        assert!(on(120., 72.), "halfway, between the two");
+        assert!(!on(10., 95.), "beside the word, off the way");
+        assert!(!on(220., 140.), "below the word");
+        assert!(!on(500., 20.), "past the bar");
+    }
+}

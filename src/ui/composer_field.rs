@@ -237,8 +237,18 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let range = self.composer.read(cx).selected_range();
+        let content = self.custom_emoji_content(fallback, custom_emoji_id);
+        self.replace_composer_content(range, content, window, cx);
+    }
+
+    /// A custom emoji as composer content: drawn inline, one caret stop.
+    pub(super) fn custom_emoji_content(
+        &self,
+        fallback: &str,
+        custom_emoji_id: i64,
+    ) -> InputContent {
         let fallback = if fallback.is_empty() { "⭐" } else { fallback };
-        let content = if self.composer_ui.rich_editor_open {
+        if self.composer_ui.rich_editor_open {
             InputContent::new(quill::composer::custom_emoji_markup(
                 fallback,
                 custom_emoji_id,
@@ -249,8 +259,7 @@ impl QuillApp {
             InputContent::new(text.clone())
                 .with_token(0..len, emoji_token(custom_emoji_id, &text))
                 .unwrap_or_else(|_| InputContent::new(text))
-        };
-        self.replace_composer_content(range, content, window, cx);
+        }
     }
 
     /// Replace the `@query` being typed with a mention (Telegram Desktop's

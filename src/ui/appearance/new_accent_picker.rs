@@ -677,6 +677,7 @@ impl QuillApp {
             .gap_3()
             .child(suggest)
             .child(highlight)
+            .children(self.emoji_word_blocklist_row(cx))
             .child(replace)
             .child(self.emoji_set_settings_row(cx))
             .into_any_element();

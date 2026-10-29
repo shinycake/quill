@@ -348,8 +348,9 @@ impl QuillApp {
         let mut menu = menu;
         if app.chat_prefs.spellcheck_enabled {
             let text = input.value().to_string();
-            menu = spelling_menu_items(menu, &app.spell.checker, &text, selection);
+            menu = spelling_menu_items(menu, &app.spell.checker, &text, selection.clone());
         }
+        let menu = app.emoji_word_menu_items(menu, &input.value(), selection);
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = Self::unicode_control_menu(edit_menu_items(menu, has_selection, true));
