@@ -17,7 +17,8 @@ use quill::state::StickersPurpose;
 use quill::state::{RequestPurpose, StickerTab};
 use quill::sticker_suggest::suggest_emoji_for;
 
-#[cfg(all(test, feature = "demo-capture"))]
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
 #[path = "sticker_suggest_send_tests.rs"]
 mod send_tests;
 
