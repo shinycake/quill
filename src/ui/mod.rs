@@ -158,6 +158,7 @@ mod userpic_videos;
 mod vanish;
 mod viewer_state;
 mod whats_new;
+mod window_image_cache;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;

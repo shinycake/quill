@@ -992,6 +992,13 @@ impl Element for CacheScope {
 
 #[cfg(test)]
 mod tests {
+    impl super::BoundedImageCache {
+        /// Tests elsewhere: whether `resource` loads through this cache.
+        pub(in crate::ui) fn holds(&self, resource: &gpui_kit::Resource) -> bool {
+            self.entries.contains_key(&gpui_kit::hash(resource))
+        }
+    }
+
     use super::{
         Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
         plan_eviction, slice_rendered, slice_shown,
