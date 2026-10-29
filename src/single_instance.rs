@@ -334,12 +334,15 @@ impl Drop for ClientSlot {
     }
 }
 
-/// One end of a connection. Dropping it first waits, on the dropping thread,
-/// until the peer has read everything written to it, so the close happens at
-/// once. On Windows a pipe dropped with unread data goes to interprocess'
-/// linger pool instead, whose one thread flushes such pipes in turn: a peer
-/// that is itself waiting for this end to close stalls every later close in
-/// the process, and every client waiting on one of those closes hangs.
+/// One end of a connection. On Windows, dropping it first waits, on the
+/// dropping thread, until the peer has read everything written to it (or has
+/// gone), and only then closes the pipe. Dropped as a bare `Stream`, a pipe
+/// with unread data goes to interprocess' linger pool instead, whose one
+/// thread flushes such pipes in turn: a peer that is itself waiting for this
+/// end to close stalls every later close in the process, and every client
+/// waiting on one of those closes hangs. A peer that never reads now holds
+/// only the thread that dropped its connection. On Unix the drop does nothing
+/// extra.
 pub struct Connection(Stream);
 
 impl Connection {
