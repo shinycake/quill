@@ -360,7 +360,10 @@ fn only_a_shown_jump_button_covers_the_clips(cx: &mut TestAppContext) {
         panic!("one occluder: {covered:?}");
     };
     assert!(
-        button.size.width < px(100.) && button.size.height < px(60.),
+        button.size.width > px(0.)
+            && button.size.height > px(0.)
+            && button.size.width < px(100.)
+            && button.size.height < px(60.),
         "{button:?}"
     );
 }

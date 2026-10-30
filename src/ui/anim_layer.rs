@@ -195,6 +195,7 @@ impl Layer {
 
     /// What covered the slice's content in its last real frame.
     #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn occluders(&self) -> Vec<Bounds<Pixels>> {
         self.0.occluders.borrow().clone()
     }
