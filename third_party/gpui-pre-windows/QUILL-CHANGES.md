@@ -286,3 +286,13 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 - `src/directx_atlas.rs`: `DirectXAtlas` forwards `PlatformAtlas::next_use_mark`,
   `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
   `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).
+
+## Small pictures get small textures
+
+Added in 2026 (`docs/decisions/images-left-behind.md`):
+
+- `src/directx_atlas.rs`: `push_texture` starts image textures at 512²
+  (1 MB) instead of 1024² (4 MB); glyph textures keep 1024². Same change as
+  gpui-pre-apple's `metal_atlas.rs`. The tile-reuse test's large tile is
+  400² so it still fits next to the small one. Not run on Windows by the
+  author.

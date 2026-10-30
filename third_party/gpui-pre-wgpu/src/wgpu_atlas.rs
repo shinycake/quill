@@ -236,7 +236,19 @@ impl WgpuAtlasTextures {
             height: DevicePixels(max_texture_size),
         };
 
-        let size = min_size.min(&max_atlas_size).max(&DEFAULT_ATLAS_SIZE);
+        // QUILL: image textures start at 512² (1 MB), not 1024² (4 MB): a
+        // few small pictures on screen each kept a mostly empty 4 MB texture,
+        // and a photo of 512 to 1024 px gets a texture of its own size.
+        const IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(512),
+            height: DevicePixels(512),
+        };
+        let floor = if images {
+            IMAGE_ATLAS_SIZE
+        } else {
+            DEFAULT_ATLAS_SIZE
+        };
+        let size = min_size.min(&max_atlas_size).max(&floor);
         let format = match kind {
             AtlasTextureKind::Monochrome => wgpu::TextureFormat::R8Unorm,
             AtlasTextureKind::Subpixel | AtlasTextureKind::Polychrome => self.color_texture_format,
@@ -511,8 +523,8 @@ mod tests {
             height: DevicePixels(64),
         };
         let big = Size {
-            width: DevicePixels(700),
-            height: DevicePixels(700),
+            width: DevicePixels(400),
+            height: DevicePixels(400),
         };
 
         let make_key = |image_id: usize| {
@@ -639,6 +651,38 @@ mod tests {
         atlas.remove(&photo);
         assert!(atlas.get_texture_info(photo_tile.texture_id).is_none());
         assert!(atlas.get_texture_info(emoji_tile.texture_id).is_some());
+        Ok(())
+    }
+
+    /// QUILL: an avatar on screen kept a whole 1024² (4 MB) texture.
+    #[test]
+    fn small_pictures_get_small_textures() -> anyhow::Result<()> {
+        let (device, queue) = test_device_and_queue()?;
+        let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        let insert = |image_id: usize, width: i32, height: i32| {
+            let size = Size {
+                width: DevicePixels(width),
+                height: DevicePixels(height),
+            };
+            let key = AtlasKey::Image(RenderImageParams {
+                image_id: ImageId(image_id),
+                frame_index: 0,
+            });
+            atlas
+                .get_or_insert_with(key, &mut || {
+                    let byte_count = (width * height * 4) as usize;
+                    Ok(Some((size, Cow::Owned(vec![0u8; byte_count]))))
+                })
+                .expect("allocation should succeed")
+                .expect("callback returns Some")
+        };
+        let avatar = insert(1, 92, 92);
+        // A 1024² texture had room for both.
+        let photo = insert(2, 600, 400);
+        assert_ne!(photo.texture_id, avatar.texture_id);
+        // Small pictures still share.
+        let thumbnail = insert(3, 200, 200);
+        assert_eq!(thumbnail.texture_id, avatar.texture_id);
         Ok(())
     }
 

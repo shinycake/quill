@@ -175,7 +175,19 @@ impl MetalAtlasTextures {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
+        // QUILL: image textures start at 512² (1 MB), not 1024² (4 MB): a
+        // few small pictures on screen each kept a mostly empty 4 MB texture,
+        // and a photo of 512 to 1024 px gets a texture of its own size.
+        const IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(512),
+            height: DevicePixels(512),
+        };
+        let floor = if images {
+            IMAGE_ATLAS_SIZE
+        } else {
+            DEFAULT_ATLAS_SIZE
+        };
+        let size = min_size.min(&MAX_ATLAS_SIZE).max(&floor);
         let texture_descriptor = metal::TextureDescriptor::new();
         texture_descriptor.set_width(size.width.into());
         texture_descriptor.set_height(size.height.into());
@@ -420,8 +432,8 @@ mod tests {
             height: DevicePixels(64),
         };
         let big = Size {
-            width: DevicePixels(700),
-            height: DevicePixels(700),
+            width: DevicePixels(400),
+            height: DevicePixels(400),
         };
 
         let keeper_key = make_image_key(1, 0);
@@ -480,6 +492,30 @@ mod tests {
         atlas.remove(&photo);
         assert!(atlas.metal_texture(photo_tile.texture_id).is_none());
         assert!(atlas.metal_texture(emoji_tile.texture_id).is_some());
+    }
+
+    /// QUILL: an avatar on screen kept a whole 1024² (4 MB) texture.
+    #[test]
+    fn test_small_pictures_get_small_textures() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
+        let side = |tile: &AtlasTile| {
+            let texture = atlas.metal_texture(tile.texture_id).unwrap();
+            (texture.width(), texture.height())
+        };
+        let size = |width, height| Size {
+            width: DevicePixels(width),
+            height: DevicePixels(height),
+        };
+        let avatar = insert_tile(&atlas, make_image_key(1, 0), size(92, 92));
+        assert_eq!(side(&avatar), (512, 512));
+        // Too big for the avatar's texture: one of its own size.
+        let photo = insert_tile(&atlas, make_image_key(2, 0), size(720, 540));
+        assert_ne!(photo.texture_id, avatar.texture_id);
+        assert_eq!(side(&photo), (720, 540));
+        let emoji = insert_tile(&atlas, make_emoji_key(7), size(64, 64));
+        assert_eq!(side(&emoji), (1024, 1024));
     }
 
     #[test]

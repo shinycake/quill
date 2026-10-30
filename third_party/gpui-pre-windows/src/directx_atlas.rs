@@ -212,7 +212,19 @@ impl DirectXAtlasTextures {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        let size = min_size.min(&MAX_ATLAS_SIZE).max(&DEFAULT_ATLAS_SIZE);
+        // QUILL: image textures start at 512² (1 MB), not 1024² (4 MB): a
+        // few small pictures on screen each kept a mostly empty 4 MB texture,
+        // and a photo of 512 to 1024 px gets a texture of its own size.
+        const IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(512),
+            height: DevicePixels(512),
+        };
+        let floor = if images {
+            IMAGE_ATLAS_SIZE
+        } else {
+            DEFAULT_ATLAS_SIZE
+        };
+        let size = min_size.min(&MAX_ATLAS_SIZE).max(&floor);
         let pixel_format;
         let bind_flag;
         let bytes_per_pixel;
@@ -449,8 +461,8 @@ mod tests {
             height: DevicePixels(64),
         };
         let big = Size {
-            width: DevicePixels(700),
-            height: DevicePixels(700),
+            width: DevicePixels(400),
+            height: DevicePixels(400),
         };
 
         let keeper_key = make_image_key(1);

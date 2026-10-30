@@ -25,11 +25,11 @@
 //! gone once that slice rendered again without it. Images used outside any
 //! slice are re-requested by `QuillApp` every frame.
 //!
-//! Atlas textures (1024² and up, on every GPUI backend: Metal, wgpu,
-//! DirectX) are released only once every tile in them is gone. Tiles are
-//! allocated in the newest texture with room, so images loaded together
-//! share textures; evicting oldest-first empties whole textures rather
-//! than punching holes in all of them.
+//! Image atlas textures (512² and up, on every vendored GPUI backend:
+//! Metal, wgpu, DirectX) are released only once every tile in them is
+//! gone. Tiles are allocated in the newest texture with room, so images
+//! loaded together share textures; evicting oldest-first empties whole
+//! textures rather than punching holes in all of them.
 #![deny(clippy::indexing_slicing)]
 
 use super::image_decode::{self, DecodeSize};
@@ -538,14 +538,14 @@ impl Asset for SizedAsset {
     }
 }
 
-/// Side of the atlas textures GPUI allocates (larger images get a texture
-/// of their own size).
-const ATLAS_TEXTURE: u32 = 1024;
+/// Side of the textures the vendored GPUI atlas allocates for images
+/// (larger images get a texture of their own size).
+const ATLAS_TEXTURE: u32 = 512;
 
 /// What a decoded image costs: its pixels, or, for a small one, the share
 /// of an atlas texture it takes up. A texture holds `cols x rows` tiles of
-/// that size at best, so a 768x576 image uses a whole 4 MB texture for
-/// 1.7 MB of pixels (and the texture only goes once its last tile does).
+/// that size at best, so a 384x288 image uses a whole 1 MB texture for
+/// 0.4 MB of pixels (and the texture only goes once its last tile does).
 fn atlas_cost(width: u32, height: u32) -> usize {
     let pixels = width as usize * height as usize * 4;
     if width == 0 || height == 0 || width > ATLAS_TEXTURE || height > ATLAS_TEXTURE {
@@ -717,7 +717,7 @@ impl BoundedImageCache {
         }
         // What stays off screen keeps its decode, so coming back to it only
         // uploads it again, but not its atlas tile: a kept photo would
-        // otherwise hold a 4 MB texture of its own for as long as it stays.
+        // otherwise hold a texture of its own for as long as it stays.
         let off_screen = self
             .entries
             .values()
@@ -1445,17 +1445,17 @@ mod tests {
 
     #[test]
     fn small_images_cost_their_atlas_share() {
-        let texture = 1024 * 1024 * 4;
+        let texture = 512 * 512 * 4;
         // Larger than a texture: the pixels.
         assert_eq!(atlas_cost(2560, 1920), 2560 * 1920 * 4);
-        assert_eq!(atlas_cost(1280, 960), 1280 * 960 * 4);
+        assert_eq!(atlas_cost(939, 704), 939 * 704 * 4);
         // One per texture: the whole texture.
-        assert_eq!(atlas_cost(768, 576), texture);
-        assert_eq!(atlas_cost(1024, 1024), texture);
+        assert_eq!(atlas_cost(384, 288), texture);
+        assert_eq!(atlas_cost(512, 512), texture);
         // Two per row, one row.
-        assert_eq!(atlas_cost(512, 576), texture / 2);
+        assert_eq!(atlas_cost(256, 288), texture / 2);
         // Avatars pack tightly: about their pixels.
-        assert_eq!(atlas_cost(92, 92), texture / (11 * 11));
+        assert_eq!(atlas_cost(92, 92), texture / (5 * 5));
         assert!((36 * 36 * 4..36 * 36 * 4 * 11 / 10).contains(&atlas_cost(36, 36)));
         assert_eq!(atlas_cost(0, 5), 0);
     }

@@ -33,6 +33,21 @@ tile does. Scrolling back to it uploads the same decode again while the
 frame paints, so it shows at once with no placeholder; only a picture the
 trim evicted decodes again. What may be on screen keeps its tile.
 
+## Small pictures in big textures
+
+GPUI's atlas made every texture at least 1024 x 1024 (4 MB). Images get
+textures of their own kind (`sweep-r3-browse-memory.md`), so the few small
+pictures on screen after a browse, such as avatars and a sticker, kept 4 MB
+textures that were mostly empty: about 8 MB on the Mac. A photo of 512 to
+1024 px either shared one of them or got a 4 MB texture for itself.
+
+The three vendored atlases (Metal, wgpu, DirectX) now start image textures
+at 512 x 512 (1 MB); a picture larger than that still gets a texture of its
+own size. Glyph textures stay at 1024 x 1024: text fills them. More small
+textures mean a few more sprite batches per frame, one per texture, which
+is cheap next to the frame. `image_budget`'s `atlas_cost` charges a small
+picture its share of a 512 x 512 texture to match.
+
 ## Wallpaper renders nobody took
 
 Wallpaper pictures render on a worker (`wallpaper_cache`); a finished result
@@ -75,5 +90,8 @@ index now forgets them on eviction.
 - `media_viewer::actions::rotate_ui_tests::closing_the_viewer_lets_go_of_a_turned_photo`
 - `image_budget::tests::evicted_sizes_leave_the_index`
 - `image_budget::tests::idle_trim_takes_kept_pictures_out_of_the_atlas`
+- `wgpu_atlas::tests::small_pictures_get_small_textures` (gpui-pre-wgpu, on
+  lavapipe) and `metal_atlas::tests::test_small_pictures_get_small_textures`
+  (gpui-pre-apple)
 
 Each fails without its fix.
