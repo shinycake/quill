@@ -1103,6 +1103,7 @@ pub(crate) struct PrepaintStateIndex {
     accessed_element_states_index: usize,
     line_layout_index: LineLayoutIndex,
     a11y_index: crate::window::a11y::A11yIndex,
+    focus: Option<FocusId>,
 }
 
 #[derive(Clone, Default)]
@@ -4091,7 +4092,17 @@ impl Window {
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             line_layout_index: self.text_system.layout_index(),
             a11y_index: self.a11y.index(),
+            focus: self.focus,
         }
+    }
+
+    /// While the accessibility tree is built, whether the focus is not the
+    /// one a cached view's last prepaint saw from start to end. Its focus
+    /// claims were made for that focus, so it renders instead of replaying.
+    /// Focus moved outside a draw refreshes the window anyway; this catches
+    /// a move during one (a view that focuses something as it renders).
+    pub(crate) fn a11y_focus_moved(&self, range: &Range<PrepaintStateIndex>) -> bool {
+        self.a11y.is_active() && (range.start.focus != self.focus || range.end.focus != self.focus)
     }
 
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {

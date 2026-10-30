@@ -167,6 +167,8 @@ pub(crate) struct A11y {
     rendered: RenderedTables,
     /// The last frame built a tree, the one [`Self::replay`] reads.
     replayable: bool,
+    /// A range this frame could not be replayed ([`Self::replay`]).
+    replay_refused: bool,
     /// The window's title, used to label the root node so assistive
     /// technology can tell windows apart.
     window_title: Option<SharedString>,
@@ -200,6 +202,7 @@ impl A11y {
             action_listeners: FxHashMap::default(),
             rendered: RenderedTables::default(),
             replayable: false,
+            replay_refused: false,
             window_title,
             last_focus_without_node: None,
             debug: debug::A11yDebug::default(),
@@ -384,14 +387,20 @@ impl A11y {
         else {
             return;
         };
+        // Fresh content already holds one of these ids (an element drawn
+        // twice): adding the range would list a node under two parents,
+        // which AccessKit rejects. It is left out, and the next frame
+        // renders every view.
+        if nodes.iter().any(|(id, _)| self.nodes.has_node(*id)) {
+            self.replay_refused = true;
+            return;
+        }
         let nested: FxHashSet<NodeId> = nodes
             .iter()
             .flat_map(|(_, node)| node.children().iter().copied())
             .collect();
         for (id, node) in nodes {
-            if !self.nodes.replay(*id, node.clone(), !nested.contains(id)) {
-                continue;
-            }
+            self.nodes.replay(*id, node.clone(), !nested.contains(id));
             let rendered = &mut self.rendered;
             if let Some(bounds) = rendered.node_bounds.get(id) {
                 self.node_bounds.insert(*id, *bounds);
@@ -416,7 +425,7 @@ impl A11y {
 
     /// Finalize the tree and produce a [`TreeUpdate`] for the platform adapter.
     pub(crate) fn end_frame(&mut self, frame: debug::FrameDebugInfo) -> TreeUpdate {
-        self.replayable = true;
+        self.replayable = !mem::take(&mut self.replay_refused);
         let update = self.nodes.finalize();
         self.debug.capture(
             &update,
@@ -710,16 +719,14 @@ impl A11yNodeBuilder {
     }
 
     /// Adds a finished node the last frame built, as a child of the node
-    /// on top of the stack when `top_level`. Returns whether it was added.
-    fn replay(&mut self, id: NodeId, node: accesskit::Node, top_level: bool) -> bool {
-        if !self.can_push(id) {
-            return false;
-        }
+    /// on top of the stack when `top_level`. The caller checked that the
+    /// frame has no node with this id yet.
+    fn replay(&mut self, id: NodeId, node: accesskit::Node, top_level: bool) {
+        self.seen_ids.insert(id);
         if top_level && let Some(parent) = self.nodes_stack.last_mut() {
             parent.push_child(id);
         }
         self.all_nodes.push((id, node));
-        true
     }
 
     /// Makes the last frame's claims in `range` again.

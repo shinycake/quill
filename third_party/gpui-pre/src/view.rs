@@ -549,6 +549,7 @@ fn prepaint_view(
                     && element_state.cache_key.text_style == text_style
                     && !window.dirty_views.contains(&entity_id)
                     && !window.refreshing
+                    && !window.a11y_focus_moved(&element_state.prepaint_range)
                 {
                     let prepaint_start = window.prepaint_index();
                     window.reuse_prepaint(element_state.prepaint_range.clone());
