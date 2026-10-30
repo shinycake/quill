@@ -126,8 +126,7 @@ impl QuillApp {
     }
 
     /// Something reads the accessibility tree this frame: a screen reader,
-    /// or the agent UI driver. Then every slice renders uncached so the tree
-    /// is whole (`app_slice::embed_slice`).
+    /// another accessibility client, or the agent UI driver.
     pub(super) fn a11y_tree_wanted(&self, window: &Window) -> bool {
         #[cfg(test)]
         if self.message_ui.a11y.force_screen_reader {

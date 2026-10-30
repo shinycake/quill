@@ -398,8 +398,10 @@ GPUI builds that tree only while assistive technology is connected
 the platform adapter, and `Window::is_a11y_system_active()` keeps Quill's
 screen-reader behaviour (focus announcements in the history, Up/Down
 moving the read message) off: an agent driving must not change what the
-user's keys do. Only the tree gating (`slices.a11y_active`, which renders
-every slice uncached so the tree is whole) follows the forced flag.
+user's keys do. Only `slices.a11y_active` (history rows report the
+accessibility focus) follows the forced flag. Until 2026-10-30 it also
+rendered every slice uncached so the tree was whole; GPUI now replays a
+cached view's part of the tree (`docs/decisions/a11y-cached-views.md`).
 
 The tree is forced only while it is used: the switches are on, an agent is
 connected and one drove within the last 30 seconds
@@ -422,9 +424,9 @@ redraws each way, on the M-series Mac this was built on, 2026-10-25:
 So forcing the tree costs on the order of a millisecond per drawn frame in
 release, within the run-to-run noise of this harness (the second "off"
 run came out slower than "on"); the debug build shows the same shape at
-about 30 ms. Nearly all of it is the slices rendering uncached (the price
-a screen reader pays too), not the tree itself, which the 78 µs snapshot
-read bounds. It is paid only while an agent drives and only on frames that
+about 30 ms. Nearly all of it was the slices rendering uncached (the price
+a screen reader paid too, until `docs/decisions/a11y-cached-views.md`),
+not the tree itself, which the 78 µs snapshot read bounds. It is paid only while an agent drives and only on frames that
 are drawn; idle Quill, and Quill with agents merely connected, build no
 tree. A chat with a long history has more nodes than this demo's 47;
 message rows join the tree only when a screen reader focuses them, so the
@@ -975,8 +977,8 @@ nothing in between. With no agent driving the layer is not built; the
 cost is one mutex read per render.
 
 GPUI redraws the whole window on each frame, and while an agent drives the
-element tree is forced on, so slices draw uncached (see "Cost of forcing
-the tree"). Each sweep frame therefore costs a full window draw, and the
+element tree is forced on, so slices drew uncached (see "Cost of forcing
+the tree"; since `docs/decisions/a11y-cached-views.md` they replay). Each sweep frame therefore costs a full window draw, and the
 only levers are how many frames there are and when. Caching `QuillApp`'s
 root so a frame repaints only the layer would cut the per-frame cost, but
 it touches every refresh path and the forced tree, so it was left out.

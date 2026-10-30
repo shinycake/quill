@@ -6,6 +6,7 @@
     clippy::unnecessary_unwrap
 )]
 
+mod a11y_replay_tests;
 mod account_export_box;
 mod account_export_progress;
 mod account_lifecycle;
