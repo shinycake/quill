@@ -1203,6 +1203,46 @@ impl App {
         self.entities.assert_no_new_leaks(snapshot)
     }
 
+    /// How many entities of each type are alive, by type name. Unlike
+    /// [`assert_no_new_leaks`](Self::assert_no_new_leaks) it needs no leak
+    /// detection build, so a test can check that closing a surface lets go
+    /// of everything opening it made.
+    #[cfg(feature = "test-support")]
+    pub fn live_entity_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.entities.live_counts()
+    }
+
+    /// How many subscriptions the app holds, by kind: a subscription
+    /// detached onto an emitter that outlives what made it stays here.
+    #[cfg(feature = "test-support")]
+    pub fn live_subscription_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("observers", self.observers.subscriber_count());
+        counts.insert("event_listeners", self.event_listeners.subscriber_count());
+        counts.insert(
+            "release_listeners",
+            self.release_listeners.subscriber_count(),
+        );
+        counts.insert("global_observers", self.global_observers.subscriber_count());
+        counts.insert(
+            "new_entity_observers",
+            self.new_entity_observers.subscriber_count(),
+        );
+        counts.insert(
+            "keystroke_observers",
+            self.keystroke_observers.subscriber_count(),
+        );
+        counts.insert(
+            "keystroke_interceptors",
+            self.keystroke_interceptors.subscriber_count(),
+        );
+        counts.insert(
+            "window_closed_observers",
+            self.window_closed_observers.subscriber_count(),
+        );
+        counts
+    }
+
     /// Without leak detection compiled in, this records nothing.
     #[cfg(all(feature = "test-support", not(any(test, gpui_leak_detection))))]
     pub fn leak_detector_snapshot(&self) -> LeakDetectorSnapshot {

@@ -57,6 +57,10 @@ pub(crate) struct EntityMap {
     entities: SecondaryMap<EntityId, Box<dyn Any>>,
     pub accessed_entities: RefCell<FxHashSet<EntityId>>,
     ref_counts: Arc<RwLock<EntityRefCounts>>,
+    /// The type of every live entity, for [`EntityMap::live_counts`]. Kept
+    /// apart from `entities` so an entity leased for an update still counts.
+    #[cfg(feature = "test-support")]
+    type_names: SecondaryMap<EntityId, &'static str>,
 }
 
 #[doc(hidden)]
@@ -76,6 +80,8 @@ impl EntityMap {
         Self {
             entities: SecondaryMap::new(),
             accessed_entities: RefCell::new(FxHashSet::default()),
+            #[cfg(feature = "test-support")]
+            type_names: SecondaryMap::new(),
             ref_counts: Arc::new(RwLock::new(EntityRefCounts {
                 counts: SlotMap::with_key(),
                 dropped_entity_ids: Vec::new(),
@@ -130,7 +136,20 @@ impl EntityMap {
 
         let handle = slot.0;
         self.entities.insert(handle.entity_id, Box::new(entity));
+        #[cfg(feature = "test-support")]
+        self.type_names.insert(handle.entity_id, type_name::<T>());
         handle
+    }
+
+    /// How many entities of each type are alive: inserted and not yet
+    /// released.
+    #[cfg(feature = "test-support")]
+    pub fn live_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for type_name in self.type_names.values() {
+            *counts.entry(*type_name).or_default() += 1;
+        }
+        counts
     }
 
     /// Move an entity to the stack.
@@ -201,6 +220,8 @@ impl EntityMap {
                     "dropped an entity that was referenced"
                 );
                 accessed_entities.remove(&entity_id);
+                #[cfg(feature = "test-support")]
+                self.type_names.remove(entity_id);
                 // If the EntityId was allocated with `Context::reserve`,
                 // the entity may not have been inserted.
                 Some((entity_id, self.entities.remove(entity_id)?))
