@@ -101,7 +101,8 @@ frames (`begin_window_frame`): a picture may be on screen until that
 window draws a frame without it. Chat windows hold no cached slices, so
 the last frame shows all they show. The idle trim covers every chat
 window's cache, evicting to what is on screen when the window is not the
-active one.
+active one. Each chat window has a budget of its own, as large as the main
+window's.
 
 ## Not covered
 
@@ -110,6 +111,8 @@ active one.
   and paint run after every cache scope has ended, and a cached slice can
   replay them without a load, which the bounded cache would read as off
   screen.
+  They are laid out inside the scope, though, so in a chat window they
+  are decoded once there too, as in the main window.
 
 ## Tests
 
