@@ -218,6 +218,8 @@ pub struct MessageScroller {
     row_style: StyleRefinement,
     jump_button_style: StyleRefinement,
     jump_button_renderer: Option<Box<dyn FnOnce(Button) -> Button>>,
+    /// QUILL: see [`MessageScroller::wrap_jump_button`].
+    jump_button_wrap: Option<Box<dyn FnOnce(AnyElement) -> AnyElement>>,
     jump_button_transition: Duration,
     bottom_fade: Option<Hsla>,
     scrollbar: bool,
@@ -250,6 +252,7 @@ impl MessageScroller {
             row_style: StyleRefinement::default(),
             jump_button_style: StyleRefinement::default(),
             jump_button_renderer: None,
+            jump_button_wrap: None,
             jump_button_transition: JUMP_BUTTON_TRANSITION,
             bottom_fade: None,
             scrollbar: true,
@@ -328,6 +331,17 @@ impl MessageScroller {
         self
     }
 
+    /// QUILL: wraps the built-in jump button, while it is drawn, in an
+    /// element the caller passes (Quill marks it as covering the rows'
+    /// animations).
+    pub fn wrap_jump_button(
+        mut self,
+        wrap: impl FnOnce(AnyElement) -> AnyElement + 'static,
+    ) -> Self {
+        self.jump_button_wrap = Some(Box::new(wrap));
+        self
+    }
+
     /// Set how long the built-in jump button takes to enter or leave.
     ///
     /// A zero duration disables its transition. Reduced-motion preferences
@@ -398,6 +412,10 @@ impl RenderOnce for MessageScroller {
         let row_style = self.row_style;
         let jump_button_style = self.jump_button_style;
         let jump_button_renderer = self.jump_button_renderer;
+        let wrap_jump_button = move |button: AnyElement| match self.jump_button_wrap {
+            Some(wrap) => wrap(button),
+            None => button,
+        };
         let mut renderer = self.renderer;
 
         // GPUI's `list` lays rows out at the full list width and offsets them
@@ -492,7 +510,7 @@ impl RenderOnce for MessageScroller {
                         .flex()
                         .justify_center()
                         .opacity(jump_button_visibility)
-                        .child(
+                        .child(wrap_jump_button(
                             // No explicit width or height: Button sizes an
                             // icon-only button as a square on its own, and a
                             // renderer that adds a label or another semantic
@@ -513,8 +531,9 @@ impl RenderOnce for MessageScroller {
                                 .when_some(jump_button_renderer, |button, renderer| {
                                     renderer(button)
                                 })
-                                .when(!show_jump_button, |button| button.disabled(true)),
-                        ),
+                                .when(!show_jump_button, |button| button.disabled(true))
+                                .into_any_element(),
+                        )),
                 )
             })
             .refine_style(&self.style)

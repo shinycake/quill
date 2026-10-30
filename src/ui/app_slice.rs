@@ -123,6 +123,16 @@ impl Slices {
             .map(|parts| (parts.slice.entity_id(), parts.painter.entity_id()))
     }
 
+    /// What covers the conversation's animations, for tests.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn conversation_occluders(&self) -> Vec<Bounds<Pixels>> {
+        self.conversation
+            .as_ref()
+            .map(|parts| parts.layer.occluders())
+            .unwrap_or_default()
+    }
+
     /// Whether content being built now belongs to the chat list.
     pub(super) fn in_sidebar(&self) -> bool {
         self.in_slice(self.sidebar.as_ref())

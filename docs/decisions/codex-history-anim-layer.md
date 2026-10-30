@@ -98,8 +98,8 @@ The layer paints after the whole slice and before anything painted later:
 - Over history content inside the conversation (occluders): the emoji /
   sticker / GIF panel, the round-video recording circle, the floating date
   pill, the "@" / heart corner buttons, the kit scroller's jump-to-latest
-  button (an occluder over its bottom-center zone while scrolled up, since it
-  is drawn inside the kit's `MessageScroller`), selection-mode check circles,
+  button (wrapped in an occluder through `MessageScroller::wrap_jump_button`
+  while it is drawn), selection-mode check circles,
   and Thanos dust while a deleted message crumbles. Animated content under
   them is drawn by the conversation as before, only while covered.
 - Drawn over a layered tile inside the bubble: the time pill (a mirror).
@@ -180,8 +180,13 @@ the part this removes.
 - An ancestor opacity under the conversation (crate-private in GPUI) isn't
   applied to layer content; nothing in a history row fades content that
   animates today (the spoiler-reveal fade is kept on the slice).
-- The occluder for the kit's jump-to-latest button is a fixed zone (128×56
-  at the bottom center), not the button's real bounds.
+- The occluder for the kit's jump-to-latest button was a fixed zone (128×56
+  at the bottom center) whenever the history was scrolled up, even while
+  the button stayed hidden (within 480 px of the bottom with nothing
+  unread), so a clip passing the bottom edge redrew the whole conversation
+  at its frame rate. Since 2026-10-30 it is the button's own box, only
+  while the button is drawn (`only_a_shown_jump_button_covers_the_clips`
+  in `src/ui/video_player/tests/inline.rs`).
 - The layer redraws elements it builds (video tiles, pills) every frame; it
   is a few divs per visible clip, but a history with many visible clips
   pays that per tick.

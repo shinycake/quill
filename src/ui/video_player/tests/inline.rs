@@ -322,3 +322,48 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
     app.update_in(vcx, |app, _, _| app.stories.player = None);
 }
+
+/// Scrolled up a little, the jump button stays hidden and nothing covers
+/// the clips (they stay on the layer); once it shows, only its own box
+/// does.
+#[gpui_kit::test]
+fn only_a_shown_jump_button_covers_the_clips(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    let occluders = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.slices.conversation_occluders())
+    };
+    scroll(vcx, 20.);
+    let scrolled_up = app.read_with(vcx, |app, cx| {
+        app.history.scroller.read(cx).is_scrolled_up()
+    });
+    assert!(scrolled_up);
+    assert_eq!(occluders(&app, vcx), []);
+
+    // Unread messages below show the button wherever the list is scrolled.
+    app.update_in(vcx, |app, _, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session
+            .chats
+            .get_mut(&TILE.0)
+            .expect("the chat")
+            .unread_count = 2;
+        app.notify_conversation(cx);
+    });
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    settle(vcx);
+    let covered = occluders(&app, vcx);
+    let [button] = covered.as_slice() else {
+        panic!("one occluder: {covered:?}");
+    };
+    assert!(
+        button.size.width > px(0.)
+            && button.size.height > px(0.)
+            && button.size.width < px(100.)
+            && button.size.height < px(60.),
+        "{button:?}"
+    );
+}
