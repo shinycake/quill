@@ -18,9 +18,10 @@
 //!   ([`CLOSED_TAIL_CAP`]) and count as use of the chat;
 //! - what is kept beside a chat's rows goes once nothing of the chat is
 //!   kept: the replied-to messages fetched for its rows, their
-//!   translations, and its pinned list (fetched again whenever the chat
-//!   opens). A kept tail keeps them all, so rows paged back in show their
-//!   reply strips and translations at once.
+//!   translations, its pinned list and sponsored messages (fetched again
+//!   whenever the chat opens), the index of its poll rows, and what its
+//!   info panel loaded. A kept tail keeps them all, so rows paged back in
+//!   show their reply strips and translations at once.
 //!
 //! A history is never pruned while any view shows it (the main window, a
 //! chat window, a topic or comment thread of it) or while the UI holds it
@@ -447,7 +448,9 @@ impl Session {
 
     /// Once nothing of `chat_id` is kept (no history entry, no topic),
     /// forget what was fetched beside its rows: the replied-to messages
-    /// (`reply_targets`) and the pinned list. Opening the chat fetches both
+    /// (`reply_targets`), the pinned list, the sponsored messages and the
+    /// index of its poll rows, and what its info panel loaded (member
+    /// lists, media counts). Opening the chat or its panel fetches them
     /// again. While a tail is kept they stay, so rows paged back in show
     /// their reply strips at once.
     fn forget_side_tables_once_unloaded(&mut self, chat_id: ChatId) {
@@ -472,6 +475,43 @@ impl Session {
         translate.jobs.retain(|_, job| {
             !matches!(job.target, TranslateTarget::Message { chat_id: chat, .. } if chat == chat_id.0)
         });
+        // Fetched again when the chat opens (`sponsored_fetch_due`).
+        self.messages.sponsored.remove(&chat_id.0);
+        self.messages.poll_messages.retain(|_, rows| {
+            rows.retain(|&(chat, _)| chat != chat_id.0);
+            !rows.is_empty()
+        });
+        self.forget_info_panel_data(chat_id);
+    }
+
+    /// What the info panel of `chat_id` loaded: its media counts and member
+    /// lists, unless the panel or the gallery shows the chat right now. An
+    /// open member dialog of the chat asks for its list again
+    /// (`member_list_stale`), as after a membership change.
+    fn forget_info_panel_data(&mut self, chat_id: ChatId) {
+        let panel_shows = match self.users_state.open_info_panel {
+            Some(InfoPanelTarget::Supergroup(id)) => self.chat_supergroup(chat_id) == Some(id),
+            Some(InfoPanelTarget::BasicGroup(id)) => self.chats.get(&chat_id.0).is_some_and(
+                |chat| matches!(chat.kind, ChatKind::BasicGroup { basic_group_id } if basic_group_id == id),
+            ),
+            _ => false,
+        };
+        let gallery_shows =
+            self.media.shared_media.open && self.media.shared_media.chat_id == Some(chat_id);
+        if panel_shows || gallery_shows {
+            return;
+        }
+        self.media.chat_media_counts.remove(&chat_id.0);
+        let groups = &mut self.groups;
+        let members = groups.supergroup_members.len();
+        groups
+            .supergroup_members
+            .retain(|(chat, _), _| *chat != chat_id.0);
+        let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
+            || groups.supergroup_members.len() != members;
+        if dropped && !groups.member_list_stale.contains(&chat_id.0) {
+            groups.member_list_stale.push(chat_id.0);
+        }
     }
 
     /// A chat that was left or deleted: its histories go when no view

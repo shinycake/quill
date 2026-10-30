@@ -1,9 +1,10 @@
 //! State reducer tests: histories of chats nobody is looking at are
 //! bounded (`state::history_prune`).
-use super::common::session;
+use super::common::{AtomicU64, MemorySink, apply_json, session};
 use super::{
-    CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX, ChannelMemberStatus,
-    ChatId, MessageContent, MessageId, ParsedMessage, ReplyTarget, Session, TopicHistory,
+    Arc, CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX,
+    ChannelMemberStatus, ChatId, HashMap, InfoPanelTarget, MemberListFilter, MessageContent,
+    MessageId, ParsedMessage, ReplyTarget, Session, SupergroupMembersFetch, TopicHistory,
     TranslateTarget, Translation, history_message,
 };
 
@@ -559,4 +560,122 @@ fn a_session_without_a_server_keeps_every_history() {
     }
     assert!(session.histories.contains_key(&100), "no LRU eviction");
     assert!(session.histories.contains_key(&7));
+}
+
+/// What opening `chat` and its info panel leaves beside its rows: its ads,
+/// a poll row in the poll index, the panel's media counts and member lists.
+fn fill_side_tables(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, chat: i64) {
+    session.accept_sponsored_messages(ChatId(chat), Vec::new(), 0, &[]);
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":90,"chat_id":{chat},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":{chat},"question":{{"@type":"formattedText","text":"Q","entities":[]}},"options":[],"total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{{"@type":"pollTypeRegular"}}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+        ),
+    );
+    session
+        .media
+        .chat_media_counts
+        .insert(chat, HashMap::from([(0, 3)]));
+    let loaded = || SupergroupMembersFetch::Loaded {
+        members: Vec::new(),
+        total_count: 200,
+    };
+    for filter in [MemberListFilter::Recent, MemberListFilter::Administrators] {
+        session
+            .groups
+            .supergroup_members
+            .insert((chat, filter), loaded());
+    }
+    session.groups.basic_group_members.insert(chat, loaded());
+}
+
+/// The chats each side table holds something for, sorted.
+fn side_table_chats(session: &Session) -> [Vec<i64>; 5] {
+    let sorted = |mut chats: Vec<i64>| {
+        chats.sort_unstable();
+        chats.dedup();
+        chats
+    };
+    [
+        sorted(session.messages.sponsored.keys().copied().collect()),
+        sorted(
+            session
+                .messages
+                .poll_messages
+                .values()
+                .flatten()
+                .map(|(chat, _)| *chat)
+                .collect(),
+        ),
+        sorted(session.media.chat_media_counts.keys().copied().collect()),
+        sorted(
+            session
+                .groups
+                .supergroup_members
+                .keys()
+                .map(|(chat, _)| *chat)
+                .collect(),
+        ),
+        sorted(session.groups.basic_group_members.keys().copied().collect()),
+    ]
+}
+
+#[test]
+fn side_tables_of_dropped_chats_go_back_to_empty() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let visited = 4 * CLOSED_CHATS_MAX as i64;
+    for chat in 1..=visited {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 80);
+        fill_side_tables(&mut session, &seq, &sink, chat);
+    }
+    leave(&mut session);
+    let mut kept: Vec<i64> = session.histories.keys().copied().collect();
+    kept.sort_unstable();
+    assert_eq!(kept.len(), CLOSED_CHATS_MAX, "only the newest tails stay");
+    for (table, chats) in side_table_chats(&session).iter().enumerate() {
+        assert_eq!(chats, &kept, "table {table} holds only the kept chats");
+    }
+    // As many chats again that leave nothing beside their rows push every
+    // kept tail out: the tables are back where they started.
+    for chat in (visited + 1)..=(visited + 1 + CLOSED_CHATS_MAX as i64) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    leave(&mut session);
+    for (table, chats) in side_table_chats(&session).iter().enumerate() {
+        assert!(chats.is_empty(), "table {table} still holds {chats:?}");
+    }
+    let stale = &session.groups.member_list_stale;
+    assert!(
+        (1..=visited).all(|chat| stale.contains(&chat)),
+        "an open member dialog of a dropped chat asks again"
+    );
+}
+
+#[test]
+fn an_open_info_panel_keeps_what_it_shows() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":1,"title":"G","type":{"@type":"chatTypeSupergroup","supergroup_id":101,"is_channel":false},"unread_count":0}}"#,
+    );
+    switch(&mut session, 1);
+    fill_side_tables(&mut session, &seq, &sink, 1);
+    session.set_open_info_panel(Some(InfoPanelTarget::Supergroup(101)));
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    assert!(!session.histories.contains_key(&1), "its rows went");
+    let [sponsored, polls, counts, members, _] = side_table_chats(&session);
+    assert!(!sponsored.contains(&1) && !polls.contains(&1));
+    assert!(counts.contains(&1), "the panel's counts stay");
+    assert!(members.contains(&1), "the panel's member list stays");
 }
