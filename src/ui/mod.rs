@@ -82,6 +82,7 @@ mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;
 mod frame_state;
+mod glyph_sweep;
 mod group_call_state;
 mod hdr_image;
 mod history_a11y;

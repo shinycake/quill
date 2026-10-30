@@ -83,6 +83,28 @@ tile goes, and glyph and SVG tiles are never removed, so a colour emoji
 placed in the space a photo left in its texture kept that texture (4 MB
 and up) alive for good.
 
+## Color emoji glyphs can be swept
+
+Added in 2026 to give back GPU memory after browsing
+(`docs/decisions/idle-wallpaper-and-emoji-trim.md`). GPUI keeps every glyph
+it rasterized until the window closes, and color emoji are big (4 bytes a
+pixel, often 64 px and up): one look at the emoji panel kept 16 MB.
+
+- `src/platform.rs`: `AtlasState` stores each tile with the use mark it was
+  last asked for under and counts its color emoji glyphs. `PlatformAtlas`
+  gains `next_use_mark`, `emoji_glyph_count` and
+  `remove_emoji_glyphs_unused_since`, which do nothing by default; the
+  headless atlas forwards them to its `AtlasState`.
+- `src/window.rs`: `Window::emoji_glyph_count`,
+  `Window::begin_emoji_glyph_sweep` (a new use mark, then `refresh`, so the
+  next frame redraws every view and asks for each glyph on screen) and
+  `Window::sweep_emoji_glyphs`, called once that frame is drawn.
+- Text glyphs, SVGs and images are never swept.
+
+Tests (in Quill, since the crate's own do not build in Quill's tree):
+`glyph_sweep::tests::a_sweep_drops_only_the_emoji_nothing_drew_since_it_began`
+and `text_glyphs_stay_whatever_their_mark`, on the headless atlas.
+
 ## A drag can start later than 2 pixels
 
 Added in 2026 for dragging a message out by its picture

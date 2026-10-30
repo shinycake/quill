@@ -1790,6 +1790,24 @@ pub trait PlatformAtlas {
     ) -> Result<Option<AtlasTile>>;
     fn remove(&self, key: &AtlasKey);
 
+    /// QUILL: start a new use mark: tiles asked for from here on carry it,
+    /// for `remove_emoji_glyphs_unused_since`.
+    fn next_use_mark(&self) -> u64 {
+        0
+    }
+
+    /// QUILL: how many color emoji glyphs the atlas holds.
+    fn emoji_glyph_count(&self) -> usize {
+        0
+    }
+
+    /// QUILL: remove the color emoji glyphs nothing asked for since `mark`
+    /// started; how many went. GPUI keeps every glyph it rasterized for
+    /// good, and color emoji are big (4 bytes a pixel, often 64 px and up).
+    fn remove_emoji_glyphs_unused_since(&self, _mark: u64) -> usize {
+        0
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, _key: &AtlasKey) -> bool {
         false
@@ -1823,7 +1841,12 @@ pub trait AtlasBackend {
 
 #[doc(hidden)]
 pub struct AtlasState<Backend> {
-    tiles_by_key: FxHashMap<AtlasKey, AtlasTile>,
+    /// Each tile with the use mark it was last asked for under.
+    tiles_by_key: FxHashMap<AtlasKey, (AtlasTile, u64)>,
+    /// QUILL: the current use mark (`next_use_mark`).
+    use_mark: u64,
+    /// QUILL: how many keys are color emoji glyphs.
+    emoji_glyphs: usize,
     pub backend: Backend,
 }
 
@@ -1831,8 +1854,19 @@ impl<Backend> AtlasState<Backend> {
     pub fn new(backend: Backend) -> Self {
         Self {
             tiles_by_key: FxHashMap::default(),
+            use_mark: 0,
+            emoji_glyphs: 0,
             backend,
         }
+    }
+
+    pub fn next_use_mark(&mut self) -> u64 {
+        self.use_mark += 1;
+        self.use_mark
+    }
+
+    pub fn emoji_glyph_count(&self) -> usize {
+        self.emoji_glyphs
     }
 
     pub fn contains(&self, key: &AtlasKey) -> bool {
@@ -1841,6 +1875,7 @@ impl<Backend> AtlasState<Backend> {
 
     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
         self.tiles_by_key.clear();
+        self.emoji_glyphs = 0;
         reset_backend(&mut self.backend);
     }
 }
@@ -1857,8 +1892,13 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
         key: AtlasKey,
         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
     ) -> Result<Option<AtlasTile>> {
+        let use_mark = self.use_mark;
         match self.tiles_by_key.entry(key) {
-            Entry::Occupied(entry) => Ok(Some(*entry.get())),
+            Entry::Occupied(entry) => {
+                let (tile, used) = entry.into_mut();
+                *used = use_mark;
+                Ok(Some(*tile))
+            }
             Entry::Vacant(entry) => {
                 profiling::scope!("new tile");
                 let Some((size, bytes)) = build()? else {
@@ -1871,17 +1911,44 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
                 } else {
                     self.backend.insert(kind, size, &bytes)?
                 };
-                entry.insert(tile);
+                if is_emoji_glyph(entry.key()) {
+                    self.emoji_glyphs += 1;
+                }
+                entry.insert((tile, use_mark));
                 Ok(Some(tile))
             }
         }
     }
 
     pub fn remove(&mut self, key: &AtlasKey) {
-        if let Some(tile) = self.tiles_by_key.remove(key) {
+        if let Some((tile, _)) = self.tiles_by_key.remove(key) {
+            if is_emoji_glyph(key) {
+                self.emoji_glyphs -= 1;
+            }
             self.backend.remove(tile);
         }
     }
+
+    pub fn remove_emoji_glyphs_unused_since(&mut self, mark: u64) -> usize {
+        let mut gone = Vec::new();
+        self.tiles_by_key.retain(|key, (tile, used)| {
+            let keep = *used >= mark || !is_emoji_glyph(key);
+            if !keep {
+                gone.push(*tile);
+            }
+            keep
+        });
+        let count = gone.len();
+        self.emoji_glyphs -= count;
+        for tile in gone {
+            self.backend.remove(tile);
+        }
+        count
+    }
+}
+
+fn is_emoji_glyph(key: &AtlasKey) -> bool {
+    matches!(key, AtlasKey::Glyph(params) if params.is_emoji)
 }
 
 /// A sprite atlas for windows without a GPU. It hands out uniquely identified
@@ -1935,6 +2002,18 @@ impl PlatformAtlas for HeadlessAtlas {
 
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
+    }
+
+    fn next_use_mark(&self) -> u64 {
+        self.0.lock().next_use_mark()
+    }
+
+    fn emoji_glyph_count(&self) -> usize {
+        self.0.lock().emoji_glyph_count()
+    }
+
+    fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_emoji_glyphs_unused_since(mark)
     }
 
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
