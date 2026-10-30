@@ -56,9 +56,7 @@ animated sticker (448 px at 2x) or a GIF made and freed a texture on every
 frame, 60 to 120 times a second, where a 1024 x 1024 texture lets its
 frames rotate. Thirty 300 x 300 pictures also took 30 MB in 30 textures
 instead of 16 MB in 4. Keeping larger images at 1024 x 1024 keeps both as
-they were. A synthetic browse simulated with etagere (the atlas allocator)
-left 3 MB of image textures on screen afterwards, against 16 MB before and
-7 MB with 512 x 512 for every image.
+they were: above 128 px the atlas places tiles exactly as upstream does.
 
 `image_budget`'s `atlas_cost` charges each picture its share of the texture
 its class gets.
@@ -107,7 +105,8 @@ index now forgets them on eviction.
 - `image_budget::tests::idle_trim_takes_kept_pictures_out_of_the_atlas`
 - `wgpu_atlas::tests::small_pictures_keep_to_textures_of_their_own` and
   `animation_frames_rotate_through_one_texture` (gpui-pre-wgpu, run on
-  lavapipe), `metal_atlas::tests::test_small_pictures_get_small_textures`
-  (gpui-pre-apple, run on the Mac)
+  lavapipe; CI does not run vendored crate tests), and
+  `metal_atlas::tests::test_small_pictures_get_small_textures`
+  (gpui-pre-apple)
 
 Each fails without its fix.

@@ -708,15 +708,28 @@ mod tests {
     fn small_pictures_keep_to_textures_of_their_own() -> anyhow::Result<()> {
         let (device, queue) = test_device_and_queue()?;
         let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        let side = |tile: &AtlasTile| {
+            let state = atlas.0.lock();
+            let texture = &state.backend.storage.get(tile.texture_id).unwrap().texture;
+            (texture.width(), texture.height())
+        };
         let avatar = insert_image(&atlas, image_key(1, 0), 92, 92);
+        assert_eq!(side(&avatar), (512, 512));
         let photo = insert_image(&atlas, image_key(2, 0), 600, 400);
         assert_ne!(photo.texture_id, avatar.texture_id);
+        assert_eq!(side(&photo), (1024, 1024));
         let emoji = insert_image(&atlas, image_key(3, 0), 40, 40);
         assert_eq!(emoji.texture_id, avatar.texture_id);
         let thumbnail = insert_image(&atlas, image_key(4, 0), 200, 200);
         assert_eq!(thumbnail.texture_id, photo.texture_id);
+        // The edge `image_budget::atlas_cost` charges by.
+        let small = insert_image(&atlas, image_key(5, 0), 128, 128);
+        assert_eq!(small.texture_id, avatar.texture_id);
+        let large = insert_image(&atlas, image_key(6, 0), 129, 128);
+        assert_eq!(large.texture_id, photo.texture_id);
         atlas.remove(&image_key(2, 0));
         atlas.remove(&image_key(4, 0));
+        atlas.remove(&image_key(6, 0));
         assert!(atlas.get_texture_info(photo.texture_id).is_none());
         assert!(atlas.get_texture_info(avatar.texture_id).is_some());
         Ok(())
