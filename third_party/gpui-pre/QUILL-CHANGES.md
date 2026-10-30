@@ -274,11 +274,19 @@ manager such as Tiles) turns the tree on until Quill quits.
   `A11yNodeBuilder::claim` (`FocusClaim`: owner, fallback, active
   descendant), which logs each claim so the claims in a range are made
   again. `begin_frame` returns whether the last frame built a tree;
-  `skip_frame` records one that did not.
+  `skip_frame` records one that did not. A range holding an id that fresh
+  content already added (an element drawn twice) is left out, since
+  AccessKit rejects a node listed under two parents, and the next frame
+  renders every view.
 - `src/window.rs`: `reuse_prepaint` calls `A11y::replay` while the tree
   is built, and copies the `Frame.hitbox_tags` of the hitboxes it reuses.
   `draw_roots` renders every view (`refreshing`) when the tree is built
-  and the last frame built none. `Frame.focus_tags` keeps every tag stack
+  and the last frame built none. `PrepaintStateIndex` also records the
+  focus, and while the tree is built a cached view whose last prepaint
+  saw another focus renders instead of replaying
+  (`Window::a11y_focus_moved`, checked in `src/view.rs`): a view that
+  focuses something as it renders moves the focus mid-draw, where
+  `refresh` does nothing, and replayed claims would be stale. `Frame.focus_tags` keeps every tag stack
   a focused element recorded, indexed by `PaintIndex::focus_tags_index`
   so `reuse_paint` replays them; `Window::focused_a11y_tags` reads the
   last. `Window::simulate_a11y_action` (test support) handles an action
