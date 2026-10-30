@@ -16,12 +16,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
-use rodio::mixer::Mixer;
 use rodio::source::SeekError;
-use rodio::{ChannelCount, Player, SampleRate, Source};
+use rodio::{ChannelCount, SampleRate, Source};
 
 use super::tempo::{SharedSpeed, Tempo};
-use super::{AudioError, SharedOutput, open_decoded};
+use super::{AudioError, Outlet, OutputPlayer, SharedOutput, open_decoded};
 
 /// What the engine is doing right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -309,7 +308,7 @@ impl SeekBoard {
     }
 
     /// Queue `target` and make sure a worker will deliver it. Returns at once.
-    fn post(self: &Arc<Self>, player: &Arc<Player>, target: f64, now: Duration) {
+    fn post(self: &Arc<Self>, player: &Arc<OutputPlayer>, target: f64, now: Duration) {
         let spawn = {
             let mut state = self.lock();
             state.queued = Some(Seek {
@@ -343,7 +342,7 @@ impl SeekBoard {
 
     /// The worker: hand the newest target to the audio thread, wait there,
     /// repeat until nothing newer was posted.
-    fn drain(&self, player: &Player) {
+    fn drain(&self, player: &OutputPlayer) {
         loop {
             if self.is_cancelled() {
                 return;
@@ -380,7 +379,7 @@ impl SeekBoard {
 
 /// A freshly built player and the probe counting its frames.
 struct Built {
-    player: Arc<Player>,
+    player: Arc<OutputPlayer>,
     probe: Arc<Probe>,
 }
 
@@ -389,7 +388,7 @@ struct Built {
 /// device to leave when the device answers, so a replaced track can't leave
 /// anything running or touch the next track's state.
 struct Track {
-    player: Arc<Player>,
+    player: Arc<OutputPlayer>,
     seeks: Arc<SeekBoard>,
     probe: Arc<Probe>,
 }
@@ -427,7 +426,7 @@ struct Restart {
 /// A playing (or, with `hold`, paused) `Player` on `path` at `offset`.
 /// Opens and decodes the file: never call it on the UI thread for a restart.
 fn build_player(
-    mixer: &Mixer,
+    outlet: &Outlet,
     path: &Path,
     offset: f64,
     volume: f32,
@@ -444,7 +443,7 @@ fn build_player(
         0.0
     };
     let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone());
-    let player = Player::connect_new(mixer);
+    let player = outlet.player();
     player.set_volume(volume);
     if hold {
         player.pause();
@@ -643,7 +642,7 @@ impl AudioEngine {
         let Some(path) = self.path.clone() else {
             return;
         };
-        let Some(mixer) = self.output.mixer() else {
+        let Some(outlet) = self.output.outlet() else {
             self.note(&Err(AudioError::NoOutput));
             return;
         };
@@ -652,7 +651,7 @@ impl AudioEngine {
         let spawned = std::thread::Builder::new()
             .name("quill-audio-restart".into())
             .spawn(move || {
-                let result = build_player(&mixer, &path, target, volume, &speed, true);
+                let result = build_player(&outlet, &path, target, volume, &speed, true);
                 *job_slot.lock().unwrap_or_else(PoisonError::into_inner) =
                     Some(Rebuilt { at: target, result });
             });
@@ -686,12 +685,13 @@ impl AudioEngine {
             Ok(built) => {
                 let held = self.track.as_ref().is_some_and(|t| t.player.is_paused());
                 built.player.set_volume(self.volume);
-                if !held {
-                    built.player.play();
+                let playing = held || built.player.play();
+                if !playing {
+                    built.player.pause();
                 }
                 self.track = Some(Track::new(built, &self.workers));
                 self.stale = false;
-                self.error = None;
+                self.error = (!playing).then_some(AudioError::NoOutput);
             }
             Err(error) => self.note(&Err(error)),
         }
@@ -743,8 +743,8 @@ impl AudioEngine {
     /// A playing `Player` on `path` at `offset`; the current one is left
     /// alone, so a failure here changes nothing.
     fn build(&self, path: &Path, offset: f64) -> Result<Built, AudioError> {
-        let mixer = self.output.mixer().ok_or(AudioError::NoOutput)?;
-        build_player(&mixer, path, offset, self.volume, &self.speed, false)
+        let outlet = self.output.outlet().ok_or(AudioError::NoOutput)?;
+        build_player(&outlet, path, offset, self.volume, &self.speed, false)
     }
 
     /// True while a track is loaded (playing or paused, ended or not).
@@ -797,8 +797,13 @@ impl AudioEngine {
             self.note(&started);
             return started;
         }
-        if let Some(track) = &self.track {
-            track.player.play();
+        if let Some(track) = &self.track
+            && !track.player.play()
+        {
+            track.player.pause();
+            let woke = Err(AudioError::NoOutput);
+            self.note(&woke);
+            return woke;
         }
         self.error = None;
         Ok(())
@@ -1023,6 +1028,23 @@ mod tests {
         engine.start(&path, 0.0, 1.0, 1.0, 1.0).unwrap();
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
         assert_eq!(engine.state(), EngineState::Ended);
+    }
+
+    /// The output closes while nothing plays, so a resume opens it before
+    /// the track plays on.
+    #[test]
+    fn resuming_a_paused_track_opens_the_output() {
+        let (output, mut device) = device();
+        let mut engine = AudioEngine::new(output.clone());
+        let path = track("resume-opens.wav", 4);
+        engine.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        engine.pause();
+        let asked = output.wakes();
+        engine.resume(0.0).unwrap();
+        assert_eq!(output.wakes(), asked + 1);
+        assert_eq!(engine.state(), EngineState::Playing);
+        pull(&mut device, 4000);
+        assert!(engine.position_secs() > 0.4, "{}", engine.position_secs());
     }
 
     #[test]

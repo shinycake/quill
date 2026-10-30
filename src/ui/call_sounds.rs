@@ -10,9 +10,8 @@
 use std::num::NonZero;
 use std::time::{Duration, Instant};
 
-use super::audio::SharedOutput;
+use super::audio::{Hold, OutputPlayer, SharedOutput};
 
-use rodio::Player;
 use rodio::buffer::SamplesBuffer;
 
 use super::call_tones;
@@ -57,8 +56,10 @@ impl CallSound {
 pub(super) struct CallSounds {
     /// The app's shared audio output (opened on first use).
     output: SharedOutput,
-    player: Option<Player>,
+    player: Option<OutputPlayer>,
     looping: Option<CallSound>,
+    /// Keeps the output open between a loop's sounds.
+    hold: Option<Hold>,
     /// When the current loop's sound may start again.
     again_at: Option<Instant>,
     /// The "Play sounds" preference.
@@ -71,6 +72,7 @@ impl CallSounds {
             output,
             player: None,
             looping: None,
+            hold: None,
             again_at: None,
             enabled: true,
         }
@@ -93,10 +95,10 @@ impl CallSounds {
         if !self.enabled && !rings {
             return;
         }
-        let Some(mixer) = self.output.mixer() else {
+        let Some(outlet) = self.output.outlet() else {
             return;
         };
-        let player = Player::connect_new(&mixer);
+        let player = outlet.player();
         player.append(SamplesBuffer::new(
             NonZero::<u16>::MIN,
             NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),
@@ -114,6 +116,7 @@ impl CallSounds {
     /// Play once, cutting whatever plays (and any loop).
     pub(super) fn play(&mut self, sound: CallSound) {
         self.looping = None;
+        self.hold = None;
         self.again_at = None;
         self.spawn(sound);
     }
@@ -126,12 +129,13 @@ impl CallSounds {
                 self.stop_player();
             }
             self.looping = sound;
+            self.hold = sound.map(|_| self.output.hold());
             self.again_at = Some(Instant::now());
         }
         let Some(sound) = self.looping else {
             return;
         };
-        let finished = self.player.as_ref().is_none_or(Player::empty);
+        let finished = self.player.as_ref().is_none_or(OutputPlayer::empty);
         if !finished {
             return;
         }

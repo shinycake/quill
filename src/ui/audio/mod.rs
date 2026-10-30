@@ -13,6 +13,7 @@
 mod cpal_stream_tests;
 pub(super) mod engine;
 mod opus;
+mod output;
 mod tempo;
 
 use std::cell::RefCell;
@@ -21,23 +22,15 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use quill::advanced::debug_mode::debug_log;
 use quill::connect::SoundResolution;
-use quill::cpal_stream::StreamErrors;
 use rodio::buffer::SamplesBuffer;
-use rodio::cpal::traits::{DeviceTrait, HostTrait};
-use rodio::mixer::Mixer;
-use rodio::{
-    CpalError, Decoder, DeviceSinkBuilder, DeviceSinkError, MixerDeviceSink, Player, Source,
-};
+use rodio::{Decoder, Source};
 
 use super::call_tones;
 pub(super) use engine::{AudioEngine, EngineState, Simulation};
+pub(super) use output::{Hold, Outlet, OutputPlayer, SharedOutput};
 use tempo::{SharedSpeed, Tempo};
 
 /// Which decoder reads a file.
@@ -158,119 +151,6 @@ fn read_prefix(file: &mut File, buf: &mut [u8]) -> usize {
     filled
 }
 
-/// The app's one audio output, opened on first use and shared by the
-/// playback engines, the notification sounds and the call tones. `None`
-/// when the machine has no usable device (retried every few seconds).
-///
-/// It is the system *default* output device, so on macOS (cpal 0.18) the
-/// stream follows a new default device by itself. Where the stream cannot
-/// follow (Windows reports the change as `StreamInvalidated`), or the
-/// device went away, the error callback marks the output stale and the
-/// next sound opens the new default.
-#[derive(Clone, Default)]
-pub(super) struct SharedOutput(Rc<RefCell<OutputState>>);
-
-#[derive(Default)]
-struct OutputState {
-    sink: Option<MixerDeviceSink>,
-    /// Set from cpal's audio thread when `sink`'s stream ended.
-    stale: Arc<AtomicBool>,
-    /// The sink replaced last. Kept so a track still playing on it (when
-    /// its device is still there) is not cut off; dropped at the next
-    /// replacement.
-    retired: Option<MixerDeviceSink>,
-    failed_at: Option<Instant>,
-    /// Tests: stands in for the device (`Some(None)` is "no device").
-    #[cfg(test)]
-    forced: Option<Option<Mixer>>,
-}
-
-impl SharedOutput {
-    /// Tests: an output that hands out `mixer` (or nothing) instead of
-    /// opening a device.
-    #[cfg(test)]
-    pub(super) fn for_test(mixer: Option<Mixer>) -> Self {
-        let this = Self::default();
-        this.0.borrow_mut().forced = Some(mixer);
-        this
-    }
-
-    pub(super) fn mixer(&self) -> Option<Mixer> {
-        let mut state = self.0.borrow_mut();
-        #[cfg(test)]
-        if let Some(forced) = &state.forced {
-            return forced.clone();
-        }
-        if state.sink.is_some() && state.stale.load(Ordering::Relaxed) {
-            debug_log("audio: output: reopening the default output device");
-            state.retired = state.sink.take();
-            state.failed_at = None;
-        }
-        if state.sink.is_none()
-            && state
-                .failed_at
-                .is_none_or(|at| at.elapsed() > Duration::from_secs(5))
-        {
-            let stale = Arc::new(AtomicBool::new(false));
-            match open_default_output(output_error_callback(stale.clone())) {
-                Ok(mut sink) => {
-                    sink.log_on_drop(false);
-                    state.sink = Some(sink);
-                    state.stale = stale;
-                }
-                Err(_) => state.failed_at = Some(Instant::now()),
-            }
-        }
-        state.sink.as_ref().map(|sink| sink.mixer().clone())
-    }
-}
-
-/// rodio's own callback prints every error to stderr, xruns and reroutes
-/// included. This one logs through Quill's debug log, rate-limited, and
-/// marks the output stale when the stream ended.
-fn output_error_callback(stale: Arc<AtomicBool>) -> impl FnMut(CpalError) + Send + Clone + 'static {
-    let mut errors = StreamErrors::new("output");
-    move |err| {
-        if errors.check(err).is_some() {
-            stale.store(true, Ordering::Relaxed);
-        }
-    }
-}
-
-/// `DeviceSinkBuilder::open_default_sink` with `on_error` in place of
-/// rodio's printing callback: the default device first, then any other
-/// output that is not the null device.
-fn open_default_output<E>(on_error: E) -> Result<MixerDeviceSink, DeviceSinkError>
-where
-    E: FnMut(CpalError) + Send + Clone + 'static,
-{
-    DeviceSinkBuilder::from_default_device()
-        .and_then(|builder| builder.with_error_callback(on_error.clone()).open_stream())
-        .or_else(|first| {
-            let devices = match rodio::cpal::default_host().output_devices() {
-                Ok(devices) => devices,
-                Err(err) => {
-                    debug_log(&format!("audio: output: can't list output devices: {err}"));
-                    return Err(first);
-                }
-            };
-            devices
-                .filter(|device| {
-                    device
-                        .description()
-                        .is_ok_and(|desc| desc.driver().is_some_and(|driver| driver != "null"))
-                })
-                .find_map(|device| {
-                    DeviceSinkBuilder::from_device(device)
-                        .ok()?
-                        .with_error_callback(on_error.clone())
-                        .open_sink_or_fallback()
-                        .ok()
-                })
-                .ok_or(first)
-        })
-}
-
 thread_local! {
     /// The app's output, shared with video soundtracks (`StreamSound`),
     /// which are started from places that don't hold the app.
@@ -287,7 +167,7 @@ pub(super) fn share_output_with_video(output: &SharedOutput) {
 /// the playback speed without changing pitch. The decoder's player keeps
 /// time from what this pulls, so pausing it pauses the picture too.
 pub(super) struct StreamSound {
-    player: Player,
+    player: OutputPlayer,
     speed: SharedSpeed,
 }
 
@@ -300,10 +180,10 @@ impl StreamSound {
         speed: f64,
         playing: bool,
     ) -> Option<Self> {
-        let mixer =
-            VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::mixer))?;
+        let outlet =
+            VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::outlet))?;
         let speed = SharedSpeed::new(speed);
-        let player = Player::connect_new(&mixer);
+        let player = outlet.player();
         player.set_volume(volume.clamp(0.0, 1.0));
         if !playing {
             player.pause();
@@ -312,6 +192,8 @@ impl StreamSound {
         Some(Self { player, speed })
     }
 
+    /// The decoder keeps time from what the output pulls: with no device
+    /// the picture holds still too.
     pub(super) fn play(&self) {
         self.player.play();
     }
@@ -399,7 +281,7 @@ pub(super) fn notification_sound(resolution: SoundResolution) -> Option<Notifica
 /// without cutting it. A new sound replaces the previous one.
 pub(super) struct NotificationSounds {
     output: SharedOutput,
-    player: Option<Player>,
+    player: Option<OutputPlayer>,
 }
 
 impl NotificationSounds {
@@ -420,13 +302,13 @@ impl NotificationSounds {
     /// Like [`Self::play`], with a per-chat or per-scope volume percent
     /// that replaces the app-wide one (`quill::notify_volume`).
     pub(super) fn play_at(&mut self, sound: NotificationSound, volume_percent: Option<u8>) {
-        let Some(mixer) = self.output.mixer() else {
-            return;
-        };
         if let Some(old) = self.player.take() {
             old.stop();
         }
-        let player = Player::connect_new(&mixer);
+        let Some(outlet) = self.output.outlet_soon() else {
+            return;
+        };
+        let player = outlet.player();
         // Settings > Notifications volume (tdesktop `notificationsVolume`).
         player.set_volume(quill::notify_volume::resolve_gain(
             volume_percent,
@@ -437,8 +319,8 @@ impl NotificationSounds {
             NotificationSound::DefaultTone => None,
         };
         match source {
-            Some(source) => player.append(source),
-            None => player.append(default_tone()),
+            Some(source) => player.append_alert(source),
+            None => player.append_alert(default_tone()),
         }
         self.player = Some(player);
     }
