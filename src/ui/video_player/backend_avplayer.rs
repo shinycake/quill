@@ -21,9 +21,9 @@ use objc2::{AnyThread, MainThreadMarker};
 #[cfg(feature = "demo-capture")]
 use objc2_av_foundation::{AVAssetImageGenerator, AVURLAsset};
 use objc2_av_foundation::{
-    AVAudioTimePitchAlgorithm, AVAudioTimePitchAlgorithmTimeDomain, AVPlayer,
-    AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemVideoOutput,
-    NSValueAVFoundationExtensions,
+    AVAudioTimePitchAlgorithm, AVAudioTimePitchAlgorithmTimeDomain, AVMediaTypeAudio, AVPlayer,
+    AVPlayerActionAtItemEnd, AVPlayerItem, AVPlayerItemStatus, AVPlayerItemTrack,
+    AVPlayerItemVideoOutput, NSValueAVFoundationExtensions,
 };
 use objc2_core_foundation::CFRetained;
 use objc2_core_media::CMTime;
@@ -57,6 +57,11 @@ pub(super) struct AvPlayerBackend {
     output: Retained<AVPlayerItemVideoOutput>,
     /// The item's pitch algorithm as opened, restored at normal speed.
     default_pitch: Retained<AVAudioTimePitchAlgorithm>,
+    /// The volume as last set.
+    volume: f32,
+    /// The audio tracks muting turned off, to turn back on with the sound;
+    /// `None` while the tracks are as AVPlayer chose them.
+    muted_tracks: Option<Vec<Retained<AVPlayerItemTrack>>>,
     /// The transport's intent as last synced.
     want: Want,
     /// The present time of the last pull.
@@ -112,6 +117,8 @@ impl AvPlayerBackend {
                 item,
                 output,
                 default_pitch,
+                volume: 1.0,
+                muted_tracks: None,
                 want: Want::default(),
                 last_present: None,
                 buffer: BufferState::default(),
@@ -185,6 +192,47 @@ impl AvPlayerBackend {
         }
     }
 
+    /// AVPlayer keeps the output device awake for an audio track even at
+    /// volume 0, so a muted player's audio tracks are off. Only the tracks
+    /// that were on come back with the sound: a file's alternate audio
+    /// tracks (another language) stay off. The tracks exist once the item
+    /// is ready.
+    fn apply_audio_on(&mut self) {
+        let on = self.volume > 0.0;
+        if on {
+            for track in self.muted_tracks.take().unwrap_or_default() {
+                // SAFETY: switching a track of a live item on the main
+                // thread.
+                unsafe { track.setEnabled(true) };
+            }
+            return;
+        }
+        if self.muted_tracks.is_some() {
+            return;
+        }
+        // SAFETY: reading the tracks of a live item and switching them on
+        // the main thread; `AVMediaTypeAudio` is an AVFoundation global.
+        unsafe {
+            let tracks = self.item.tracks();
+            if tracks.is_empty() {
+                return;
+            }
+            let audio: Vec<Retained<AVPlayerItemTrack>> = tracks
+                .iter()
+                .filter(|track| {
+                    track.isEnabled()
+                        && track.assetTrack().is_some_and(|asset| {
+                            AVMediaTypeAudio.is_some_and(|kind| *asset.mediaType() == *kind)
+                        })
+                })
+                .collect();
+            for track in &audio {
+                track.setEnabled(false);
+            }
+            self.muted_tracks = Some(audio);
+        }
+    }
+
     fn buffered(&self) -> Vec<Range<f64>> {
         // SAFETY: `loadedTimeRanges` holds NSValues wrapping CMTimeRanges.
         let ranges = unsafe { self.item.loadedTimeRanges() };
@@ -239,6 +287,9 @@ impl Backend for AvPlayerBackend {
         self.want = want;
         self.read_buffer(Instant::now());
         let (status, rate) = self.engine_state();
+        if status == AVPlayerItemStatus::ReadyToPlay {
+            self.apply_audio_on();
+        }
         let engine = Engine {
             ready: status == AVPlayerItemStatus::ReadyToPlay,
             running: rate != 0.0,
@@ -271,8 +322,12 @@ impl Backend for AvPlayerBackend {
     }
 
     fn set_volume(&mut self, volume: f32) {
+        self.volume = volume.clamp(0.0, 1.0);
         // SAFETY: messaging a live AVPlayer on the main thread.
-        unsafe { self.player.setVolume(volume.clamp(0.0, 1.0)) };
+        unsafe { self.player.setVolume(self.volume) };
+        if self.engine_state().0 == AVPlayerItemStatus::ReadyToPlay {
+            self.apply_audio_on();
+        }
     }
 
     fn step_frame(&mut self, forward: bool) {
@@ -364,8 +419,12 @@ impl Backend for AvPlayerBackend {
 impl Drop for AvPlayerBackend {
     fn drop(&mut self) {
         // SAFETY: stop audio before the player is released (main thread:
-        // the player is dropped where it lives).
-        unsafe { self.player.pause() };
+        // the player is dropped where it lives). An output left attached
+        // keeps the item's timebases and listeners alive for good.
+        unsafe {
+            self.player.pause();
+            self.item.removeOutput(&self.output);
+        }
     }
 }
 
