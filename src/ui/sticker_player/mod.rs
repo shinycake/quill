@@ -23,6 +23,7 @@ mod spec;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors};
 pub(super) use spec::{ClipSpec, HeadId};
 
+use super::image_budget::PaintStamp;
 use gpui_kit::*;
 use quill::sticker_playback::player::{
     AHEAD, ClipKey, ClipState, Engine, PlayHead, PlayMode, Timeline, edge_for,
@@ -37,7 +38,8 @@ use std::time::{Duration, Instant};
 /// Bytes the engine keeps for stored frames and open sources together.
 /// The three decode-all caches it replaces held up to 176 MB.
 pub(super) const BUDGET: usize = 96 * 1024 * 1024;
-/// A clip not drawn for this long closes (its frames and canvas go).
+/// A clip not drawn for this long closes (its frames and canvas go),
+/// once no frame on screen shows it.
 const CLOSE_AFTER: Duration = Duration::from_secs(5);
 /// Heads not drawn for this long are forgotten (a sticker seen again
 /// after that plays as if new).
@@ -100,6 +102,8 @@ struct UiClip {
     /// The frame last shown.
     shown: Option<(u32, Arc<RenderImage>)>,
     used: Option<Instant>,
+    /// Where and in which frame a view last drew it.
+    painted: Option<PaintStamp>,
     /// What each head drawing it wants: its frame and the next ones.
     wants: Vec<(HeadId, u32, [Option<u32>; AHEAD], Instant)>,
     /// When its first frame arrived.
@@ -125,6 +129,8 @@ pub(crate) struct Player {
     inner: RefCell<Inner>,
     /// The task waking the app when a clip's first frame is ready.
     pump: Cell<bool>,
+    /// The task closing clips once nothing draws them (`close_stale`).
+    closer: Cell<bool>,
     #[cfg(test)]
     fixtures: RefCell<HashMap<i32, Fixture>>,
 }
@@ -135,6 +141,7 @@ impl Player {
             engine: Engine::new(Engine::default_workers(), BUDGET),
             inner: RefCell::new(Inner::default()),
             pump: Cell::new(false),
+            closer: Cell::new(false),
             #[cfg(test)]
             fixtures: RefCell::new(HashMap::new()),
         }
@@ -294,6 +301,7 @@ impl Player {
                 UiClip::default()
             });
             clip.used = Some(now);
+            clip.painted = Some(super::image_budget::paint_stamp());
             if clip.timeline.is_none() && !clip.failed {
                 match self.engine.state(&key) {
                     Some(ClipState::Ready(info)) => clip.timeline = Some(info.timeline),
@@ -434,23 +442,6 @@ impl Player {
             return;
         }
         inner.trimmed = Some(now);
-        let idle: Vec<ClipKey> = inner
-            .clips
-            .iter()
-            .filter(|(_, clip)| {
-                clip.used
-                    .is_none_or(|used| now.saturating_duration_since(used) >= CLOSE_AFTER)
-            })
-            .map(|(key, _)| *key)
-            .collect();
-        let mut retired = Vec::new();
-        for key in idle {
-            if let Some(clip) = inner.clips.remove(&key) {
-                retired.extend(clip.ready.into_values());
-                retired.extend(clip.shown.map(|(_, image)| image));
-            }
-            self.engine.close(&key);
-        }
         inner
             .heads
             .retain(|_, (_, seen)| now.saturating_duration_since(*seen) < HEAD_TTL);
@@ -463,10 +454,63 @@ impl Player {
         }
         let screen = inner.stats;
         drop(inner);
-        super::image_budget::retire_all(retired);
+        self.close_stale(now);
         if trace_stickers() {
             self.trace(screen);
         }
+    }
+
+    /// Close the clips no view drew for [`CLOSE_AFTER`] whose frame is not
+    /// on screen; how long until the next clip off screen may close, if
+    /// any. A view at rest in a slice that replays keeps its clip: closed,
+    /// it would show its still the next time the slice renders.
+    pub(super) fn close_stale(&self, now: Instant) -> Option<Duration> {
+        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+            return Some(CLOSE_AFTER);
+        };
+        let mut next: Option<Duration> = None;
+        let mut stale = Vec::new();
+        for (key, clip) in &inner.clips {
+            if clip.painted.is_some_and(super::image_budget::shows_now) {
+                continue;
+            }
+            let idle = clip
+                .used
+                .map_or(CLOSE_AFTER, |used| now.saturating_duration_since(used));
+            match CLOSE_AFTER.checked_sub(idle).filter(|left| !left.is_zero()) {
+                Some(left) => next = Some(next.map_or(left, |next| next.min(left))),
+                None => stale.push(*key),
+            }
+        }
+        let mut retired = Vec::new();
+        for key in stale {
+            if let Some(clip) = inner.clips.remove(&key) {
+                retired.extend(clip.ready.into_values());
+                retired.extend(clip.shown.map(|(_, image)| image));
+            }
+            self.engine.close(&key);
+        }
+        drop(inner);
+        super::image_budget::retire_all(retired);
+        next
+    }
+
+    /// `QUILL_TRACE_STICKERS=1`: what the player holds, when nothing paints.
+    fn trace_idle(&self) {
+        if trace_stickers()
+            && let Ok(inner) = self.inner.try_borrow()
+        {
+            let screen = inner.stats;
+            drop(inner);
+            self.trace(screen);
+        }
+    }
+
+    /// Whether any clip is open.
+    fn has_clips(&self) -> bool {
+        self.inner
+            .try_borrow()
+            .is_ok_and(|inner| !inner.clips.is_empty())
     }
 
     /// `QUILL_TRACE_STICKERS=1`: once a second, what the player did.

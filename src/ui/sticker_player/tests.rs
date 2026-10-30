@@ -157,3 +157,57 @@ fn a_clip_is_drawn_at_its_box_times_the_scale_factor() {
     assert_eq!(ask.key().edge, edge_for(22.0));
     DISPLAY.with(|display| display.set(before));
 }
+
+/// The emoji panel closed over a chat of text: no view draws its clips any
+/// more, and clips used to close only while some view drew, so every clip
+/// it opened stayed open with its frames and canvas for good.
+#[test]
+fn a_clip_no_view_draws_closes_with_nothing_drawing() {
+    let (player, spec) = player(4);
+    let t0 = Instant::now();
+    begin_frame();
+    let image = player
+        .frame(&spec, HeadId::of("panel"), PlayMode::Loop, EDGE, false, t0)
+        .expect("a frame");
+    let shown = Arc::downgrade(&image);
+    drop(image);
+    player.settle();
+    assert!(player.engine().stats().store_bytes > 0);
+    // The next frame no longer draws it.
+    begin_frame();
+    assert_eq!(player.close_stale(t0 + ms(1000)), Some(ms(4000)));
+    assert_eq!(player.engine().stats().clips, 1, "too soon");
+    assert_eq!(player.close_stale(t0 + ms(5000)), None, "nothing left");
+    let stats = player.engine().stats();
+    assert_eq!((stats.clips, stats.store_bytes), (0, 0));
+    begin_frame();
+    begin_frame();
+    drop(take_unshowable());
+    assert_eq!(
+        shown.strong_count(),
+        0,
+        "its frame left the atlas and memory"
+    );
+}
+
+/// A view at rest is not drawn again while nothing changes, but its frame
+/// is on screen: closing its clip would show the still at the next draw.
+#[test]
+fn a_clip_whose_frame_is_on_screen_stays_open() {
+    let (player, spec) = player(4);
+    let t0 = Instant::now();
+    begin_frame();
+    let rest = PlayMode::Once(Rest::First);
+    let _ = player.frame(&spec, HeadId::of("rest"), rest, EDGE, false, t0);
+    player.settle();
+    assert_eq!(
+        player.close_stale(t0 + ms(60_000)),
+        None,
+        "nothing to wait for"
+    );
+    assert_eq!(player.engine().stats().clips, 1);
+    // A frame without it.
+    begin_frame();
+    assert_eq!(player.close_stale(t0 + ms(60_000)), None);
+    assert_eq!(player.engine().stats().clips, 0);
+}

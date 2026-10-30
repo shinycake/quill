@@ -1,6 +1,6 @@
 use super::head::{PAUSE_GAP, pick};
 use super::source::Source;
-use super::store::{self, Scratch};
+use super::store::{self, Scratch, Store};
 use super::*;
 use std::io::Write;
 use std::path::Path;
@@ -193,23 +193,104 @@ fn edges_round_up_to_a_multiple_of_eight() {
     assert_eq!(edge_for(5000.0), MAX_EDGE);
 }
 
+/// A 64 px frame, transparent but for a band of pixels that differs with
+/// `seed`.
+fn sparse_frame(seed: usize) -> Vec<u8> {
+    let mut frame = vec![0u8; 64 * 64 * 4];
+    for (i, byte) in frame.iter_mut().enumerate().skip(4096).take(2048) {
+        *byte = ((i * 7 + seed * 13) % 251) as u8;
+    }
+    frame
+}
+
 #[test]
 fn stored_frames_unpack_to_the_same_pixels() {
     let mut scratch = Scratch::default();
-    let mut frame = vec![0u8; 4096];
-    for (i, byte) in frame.iter_mut().enumerate().skip(1024).take(512) {
-        *byte = (i % 251) as u8;
-    }
-    let stored = store::encode(&frame, &mut scratch).unwrap();
+    let frame = sparse_frame(0);
+    let mut store = Store::default();
+    store.insert(3, store::encode(&frame, &mut scratch).unwrap());
     assert!(
-        stored.bytes() < frame.len() / 2,
+        store.bytes() < frame.len() / 2,
         "transparent margins pack small"
     );
+    let stored = store.get(3).unwrap();
     let mut out = vec![1; frame.len()];
     assert!(store::decode(&stored, &mut out));
     assert_eq!(out, frame);
     let mut short = vec![0; 10];
     assert!(!store::decode(&stored, &mut short));
+    assert!(store.get(4).is_none());
+}
+
+/// A packed frame of a few KB freed on its own stays in malloc's small
+/// regions on macOS, charged to Quill after its clip closed; a clip's
+/// frames packed into one large block go back to the system with it.
+#[test]
+fn a_clips_frames_share_one_large_block() {
+    let mut scratch = Scratch::default();
+    let frames: Vec<Vec<u8>> = (0..60).map(sparse_frame).collect();
+    let mut store = Store::default();
+    for (index, frame) in (0u32..).zip(&frames) {
+        store.insert(index, store::encode(frame, &mut scratch).unwrap());
+    }
+    let blocks = store.blocks();
+    assert_eq!(blocks.len(), 1, "one block for the clip: {blocks:?}");
+    let (len, capacity) = blocks[0];
+    assert_eq!(len, store.bytes());
+    assert!(
+        capacity >= 64 * 1024,
+        "a large allocation (64 KiB and up): {capacity}"
+    );
+    for (index, frame) in (0u32..).zip(&frames) {
+        let mut out = vec![0; frame.len()];
+        assert!(store::decode(&store.get(index).unwrap(), &mut out));
+        assert_eq!(&out, frame, "frame {index}");
+    }
+}
+
+/// Bytes that do not pack (xorshift).
+fn noise(len: usize) -> Vec<u8> {
+    let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+#[test]
+fn frames_go_to_a_new_block_when_one_is_full_or_being_unpacked() {
+    let mut scratch = Scratch::default();
+    let mut store = Store::default();
+    // About 100 KB packed: two fit a block.
+    let frame = noise(100 * 1024);
+    for index in 0..5 {
+        store.insert(index, store::encode(&frame, &mut scratch).unwrap());
+    }
+    let counts = |store: &Store| store.blocks().len();
+    assert_eq!(counts(&store), 3, "{:?}", store.blocks());
+    // A worker unpacking from the last block holds it.
+    let held = store.get(4).unwrap();
+    store.insert(5, store::encode(&sparse_frame(1), &mut scratch).unwrap());
+    assert_eq!(counts(&store), 4);
+    let mut out = vec![0; frame.len()];
+    assert!(store::decode(&held, &mut out));
+    assert_eq!(out, frame);
+    // A frame larger than a block gets one of its own size.
+    let big = noise(300 * 1024);
+    store.insert(6, store::encode(&big, &mut scratch).unwrap());
+    assert_eq!(counts(&store), 5);
+    let mut out = vec![0; big.len()];
+    assert!(store::decode(&store.get(6).unwrap(), &mut out));
+    assert_eq!(out, big);
+    assert!(store.blocks().iter().all(|(len, capacity)| len <= capacity));
+    assert_eq!(
+        store.blocks().iter().map(|(len, _)| len).sum::<usize>(),
+        store.bytes()
+    );
 }
 
 #[test]
@@ -435,15 +516,17 @@ fn sticker_store_bench() {
                 };
                 draw.push(t.elapsed());
                 let t = Instant::now();
-                let packed = store::encode(&pixels, &mut scratch).unwrap();
+                let mut kept = Store::default();
+                kept.insert(0, store::encode(&pixels, &mut scratch).unwrap());
                 pack.push(t.elapsed());
+                let packed = kept.get(0).unwrap();
                 let mut out = vec![0; pixels.len()];
                 let t = Instant::now();
                 assert!(store::decode(&packed, &mut out));
                 unpack.push(t.elapsed());
                 assert_eq!(out, pixels);
                 raw += pixels.len();
-                stored += packed.bytes();
+                stored += kept.bytes();
                 frames += 1;
             }
         }

@@ -256,6 +256,38 @@ impl QuillApp {
         self.playback.stickers.failed_key(&ask.key())
     }
 
+    /// Closes clips once nothing draws them. Views close the clips they no
+    /// longer draw only while some view paints, so with nothing animating
+    /// (the emoji panel closed over a chat of text) every clip it opened
+    /// stayed open with its frames and canvas. Called at each frame of the
+    /// main window; one waiting task at most, which ends once every open
+    /// clip is on screen (the next frame starts it again).
+    pub(in crate::ui) fn schedule_sticker_close(&self, cx: &mut Context<QuillApp>) {
+        let player = &self.playback.stickers;
+        if !player.has_clips() || player.closer.replace(true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                let wait = this.update(cx, |this, _| {
+                    let player = &this.playback.stickers;
+                    // The clock views stamp their draws with.
+                    let wait = player.close_stale(std::time::Instant::now());
+                    player.trace_idle();
+                    if wait.is_none() {
+                        player.closer.set(false);
+                    }
+                    wait
+                });
+                let Ok(Some(wait)) = wait else {
+                    break;
+                };
+                cx.background_executor().timer(wait).await;
+            }
+        })
+        .detach();
+    }
+
     /// Starts the task that redraws the app when a clip opened or its first
     /// frame is ready (views then switch from the still to the animation).
     fn ensure_sticker_pump(&self, cx: &mut Context<QuillApp>) {

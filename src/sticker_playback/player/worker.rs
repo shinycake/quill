@@ -3,7 +3,7 @@
 
 use super::engine::{Job, Shared, State};
 use super::source::{Kind, Source, frame_len};
-use super::store::{self, Scratch, StoredFrame};
+use super::store::{self, Scratch, Store, StoredFrame};
 use super::{ClipInfo, ClipKey, ClipState, Origin, Rendered};
 use crate::locks::lock_or_recover;
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ pub(super) fn run(me: usize, shared: &Shared) {
     let mut sources: HashMap<ClipKey, Source> = HashMap::new();
     let mut scratch = Scratch::default();
     loop {
-        let job = {
+        let (job, freed) = {
             let mut state = lock_or_recover(&shared.state);
             loop {
                 if let Some(closed) = state.closed.get_mut(me) {
@@ -27,11 +27,19 @@ pub(super) fn run(me: usize, shared: &Shared) {
                 if state.stop {
                     return;
                 }
+                if !state.freed.is_empty() {
+                    break (None, std::mem::take(&mut state.freed));
+                }
                 if let Some(job) = state.next_job(me) {
-                    break job;
+                    break (Some(job), Vec::new());
                 }
                 state = wait(shared, state);
             }
+        };
+        // Freed outside the lock.
+        drop(freed);
+        let Some(job) = job else {
+            continue;
         };
         // The UI is woken when a clip opened or failed and for a clip's
         // first frame; later frames are picked up as views paint.
@@ -69,17 +77,16 @@ fn open(
         .get(&key)
         .map(|clip| clip.cancel.clone())
         .unwrap_or_default();
-    let mut packed: Vec<StoredFrame> = Vec::new();
+    let mut packed = Store::default();
     let opened = match origin {
         Origin::Lottie(path) => Source::lottie(&path, key),
         Origin::Decoded(decode) => decode(&cancel)
             .and_then(|decoded| Source::stored(key, decoded))
             .and_then(|(source, frames)| {
-                for frame in &frames {
-                    packed.push(
-                        store::encode(frame, scratch)
-                            .ok_or_else(|| "Could not keep animated sticker frames".to_string())?,
-                    );
+                for (index, frame) in (0u32..).zip(&frames) {
+                    let frame = store::encode(frame, scratch)
+                        .ok_or_else(|| "Could not keep animated sticker frames".to_string())?;
+                    packed.insert(index, frame);
                 }
                 Ok(source)
             }),
@@ -100,8 +107,8 @@ fn open(
                 Kind::Lottie(_) => frame_len(key).unwrap_or(0),
                 Kind::Stored => 0,
             };
-            for (index, stored) in (0u32..).zip(packed) {
-                state.store(&key, index, stored);
+            if let Kind::Stored = source.kind {
+                state.install(&key, packed);
             }
             sources.insert(key, source);
         }
@@ -130,7 +137,7 @@ fn frame(
     stored: Option<StoredFrame>,
 ) -> bool {
     // The pixels, and what to store (a frame just drawn).
-    let mut drawn: Option<(Vec<u8>, Option<StoredFrame>)> = None;
+    let mut drawn: Option<(Vec<u8>, Option<&[u8]>)> = None;
     let mut timing = Timing::default();
     if let Some(source) = sources.get_mut(&key)
         && let Ok(len) = frame_len(key)
@@ -151,6 +158,8 @@ fn frame(
             drawn = Some((pixels, packed));
         }
     }
+    // Its block may take new frames again.
+    drop(stored);
     let mut state = lock_or_recover(&shared.state);
     let Some(clip) = state.clips.get_mut(&key) else {
         return false;

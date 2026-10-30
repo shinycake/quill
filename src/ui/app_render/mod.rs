@@ -60,6 +60,7 @@ impl Render for QuillApp {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
         }
         self.schedule_idle_image_trim(cx);
+        self.schedule_sticker_close(cx);
         self.sync_capture_block(window);
         self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);
