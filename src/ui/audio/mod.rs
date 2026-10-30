@@ -22,6 +22,8 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::num::NonZero;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use quill::connect::SoundResolution;
@@ -169,6 +171,8 @@ pub(super) fn share_output_with_video(output: &SharedOutput) {
 pub(super) struct StreamSound {
     player: OutputPlayer,
     speed: SharedSpeed,
+    /// Set by a seek, taken by the stretcher ([`Flushed`]).
+    flush: Arc<AtomicBool>,
 }
 
 impl StreamSound {
@@ -180,16 +184,31 @@ impl StreamSound {
         speed: f64,
         playing: bool,
     ) -> Option<Self> {
+        Self::start_with(TapSource(tap), volume, speed, playing)
+    }
+
+    fn start_with<S>(source: S, volume: f32, speed: f64, playing: bool) -> Option<Self>
+    where
+        S: Source + Send + 'static,
+    {
         let outlet =
             VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::outlet))?;
         let speed = SharedSpeed::new(speed);
+        let flush = Arc::new(AtomicBool::new(false));
         let player = outlet.player();
         player.set_volume(volume.clamp(0.0, 1.0));
         if !playing {
             player.pause();
         }
-        player.append(Tempo::new(TapSource(tap), speed.clone()));
-        Some(Self { player, speed })
+        player.append(Flushed {
+            inner: Tempo::new(source, speed.clone()),
+            flush: flush.clone(),
+        });
+        Some(Self {
+            player,
+            speed,
+            flush,
+        })
     }
 
     /// The decoder keeps time from what the output pulls: with no device
@@ -210,9 +229,51 @@ impl StreamSound {
         self.speed.set(speed);
     }
 
-    /// After a seek: drop what the speed stretcher buffered from before.
+    /// After a seek: drop what the speed stretcher buffered from before,
+    /// at its next pull. Nothing waits for the audio thread or opens the
+    /// device: a paused video seeks on the UI thread.
     pub(super) fn flush(&self) {
-        let _ = self.player.try_seek(Duration::ZERO);
+        self.flush.store(true, Ordering::Relaxed);
+    }
+}
+
+/// A source that starts over (`try_seek` to zero: the stretcher drops what
+/// it holds) when asked, at its next pull.
+struct Flushed<S> {
+    inner: S,
+    flush: Arc<AtomicBool>,
+}
+
+impl<S: Source> Iterator for Flushed<S> {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        if self.flush.load(Ordering::Relaxed) && self.flush.swap(false, Ordering::Relaxed) {
+            let _ = self.inner.try_seek(Duration::ZERO);
+        }
+        self.inner.next()
+    }
+}
+
+impl<S: Source> Source for Flushed<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(pos)
     }
 }
 
@@ -305,7 +366,7 @@ impl NotificationSounds {
         if let Some(old) = self.player.take() {
             old.stop();
         }
-        let Some(outlet) = self.output.outlet_soon() else {
+        let Some(outlet) = self.output.outlet() else {
             return;
         };
         let player = outlet.player();
@@ -339,12 +400,15 @@ mod tests {
     use super::opus::{OpusSource, packet_frames};
     use super::tempo::{SharedSpeed, Tempo, clamp_speed};
     use super::{
-        Codec, NotificationSound, choose_codec, format_hint, notification_sound, open_source,
+        Codec, NotificationSound, SharedOutput, StreamSound, choose_codec, format_hint,
+        notification_sound, open_source, share_output_with_video,
     };
     use quill::connect::SoundResolution;
     use rodio::Source;
     use rodio::buffer::SamplesBuffer;
     use std::num::NonZero;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     /// A 0.6 s, 440 Hz mono Opus voice clip (`ffmpeg -f lavfi -i
@@ -579,5 +643,58 @@ mod tests {
         );
         // Still downloading: nothing now, it plays when the file lands.
         assert_eq!(notification_sound(SoundResolution::Pending), None);
+    }
+
+    /// An endless silent soundtrack that counts its seeks.
+    struct Seeks(Arc<AtomicUsize>);
+
+    impl Iterator for Seeks {
+        type Item = f32;
+
+        fn next(&mut self) -> Option<f32> {
+            Some(0.0)
+        }
+    }
+
+    impl Source for Seeks {
+        fn current_span_len(&self) -> Option<usize> {
+            None
+        }
+
+        fn channels(&self) -> rodio::ChannelCount {
+            NonZero::<u16>::MIN
+        }
+
+        fn sample_rate(&self) -> rodio::SampleRate {
+            NonZero::new(48_000).unwrap()
+        }
+
+        fn total_duration(&self) -> Option<Duration> {
+            None
+        }
+
+        fn try_seek(&mut self, _pos: Duration) -> Result<(), rodio::source::SeekError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// A video seek returns at once, even while the device is opening (a
+    /// paused video seeks on the UI thread); the soundtrack's stretcher
+    /// starts over at its next pull.
+    #[test]
+    fn a_video_seek_never_waits_for_the_device() {
+        let (output, gate) = SharedOutput::gated();
+        share_output_with_video(&output);
+        let seeks = Arc::new(AtomicUsize::new(0));
+        let sound = StreamSound::start_with(Seeks(seeks.clone()), 1.0, 1.0, true).unwrap();
+        sound.flush();
+        assert_eq!(seeks.load(Ordering::Relaxed), 0, "nothing pulled yet");
+        gate.answer(true);
+        output.settle_device();
+        gate.pull(512);
+        assert_eq!(seeks.load(Ordering::Relaxed), 1);
+        gate.pull(512);
+        assert_eq!(seeks.load(Ordering::Relaxed), 1, "once per seek");
     }
 }

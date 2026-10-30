@@ -54,7 +54,8 @@ impl CallSound {
 /// The one call sound playing (a new one cuts the last), and the loop to
 /// keep going.
 pub(super) struct CallSounds {
-    /// The app's shared audio output (opened on first use).
+    /// The app's shared audio output (opened off the UI thread when a
+    /// sound needs it).
     output: SharedOutput,
     player: Option<OutputPlayer>,
     looping: Option<CallSound>,
@@ -135,7 +136,12 @@ impl CallSounds {
         let Some(sound) = self.looping else {
             return;
         };
-        let finished = self.player.as_ref().is_none_or(OutputPlayer::empty);
+        // A ring whose device failed to open didn't play: the loop tries
+        // again after its gap, as after one that played.
+        let finished = self
+            .player
+            .as_ref()
+            .is_none_or(|player| player.empty() || player.lost());
         if !finished {
             return;
         }

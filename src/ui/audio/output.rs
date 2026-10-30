@@ -1,13 +1,16 @@
 //! The app's one audio output device, open only while something plays.
 //!
-//! Every player connects to one app mixer that never goes away. A device
-//! plays it while any player's sound is being pulled ([`Heard`]), and is
-//! closed once nothing has played for [`QUIET_FOR`] (tdesktop detaches its
-//! device after 500 ms of silence, `kDetachDeviceTimeout`). An open output
-//! keeps the audio hardware running: on macOS coreaudiod holds an assertion
-//! that keeps the Mac from idle sleep, and the device's threads and buffers
-//! stay alive. Whatever needs the device again (a new sound, play, a seek)
-//! goes through [`OutputPlayer`], which opens it first. See
+//! Every player connects to one app mixer that never goes away, made with
+//! a fixed layout ([`MIX_RATE`], [`MIX_CHANNELS`]) so that it needs no
+//! device. A device plays it while any player's sound is being pulled
+//! ([`Heard`]), and is closed once nothing has played for [`QUIET_FOR`]
+//! (tdesktop detaches its device after 500 ms of silence,
+//! `kDetachDeviceTimeout`). An open output keeps the audio hardware
+//! running: on macOS coreaudiod holds an assertion that keeps the Mac from
+//! idle sleep, and the device's threads and buffers stay alive. Whatever
+//! needs the device again (a new sound, play, a seek) goes through
+//! [`OutputPlayer`], which has it opened on a thread of its own: opening
+//! takes 10 to 75 ms on macOS, up to five frames on the UI thread. See
 //! `docs/decisions/codex-audio-in-process.md`.
 #![deny(clippy::indexing_slicing)]
 
@@ -25,6 +28,9 @@ use rodio::{
     SampleRate, Source,
 };
 
+#[cfg(test)]
+use gate::Gate;
+
 /// How long nothing may play before the device is closed.
 const QUIET_FOR: Duration = Duration::from_millis(500);
 /// How often an open device is checked for silence.
@@ -35,6 +41,14 @@ const RETRY_AFTER: Duration = Duration::from_secs(5);
 const FEED_FRAMES: usize = 256;
 /// How long an alert may wait for the device before it is dropped.
 const ALERT_LATE: Duration = Duration::from_secs(2);
+/// The app mixer's rate and channels, whatever the device's. Players
+/// connect to it before any device is open, so it can't take the device's
+/// layout; a device with another one converts the mix ([`Feed`]), as it
+/// did for every device after the first. Voice notes, the app's tones and
+/// most devices run at 48 kHz, and tdesktop mixes at it too
+/// (`kDefaultFrequency`).
+const MIX_RATE: u32 = 48_000;
+const MIX_CHANNELS: u16 = 2;
 
 /// The app's one audio output, shared by the playback engines, the
 /// notification sounds, the call tones and video soundtracks. `None` from
@@ -53,8 +67,11 @@ pub(in crate::ui) struct SharedOutput(Arc<Output>);
 #[derive(Default)]
 struct Output {
     state: Mutex<OutputState>,
-    /// Signalled when a device opening off the UI thread is up or failed.
+    /// Signalled when a device opening off the calling thread is up or
+    /// failed.
     opened: Condvar,
+    /// Where every player connects.
+    app: AppMixer,
     /// Set by every sound a player pulls, cleared by the watch.
     heard: Arc<AtomicBool>,
     /// Set each time the device asks for sound ([`Feed`]), cleared by the
@@ -62,36 +79,26 @@ struct Output {
     pulled: Arc<AtomicBool>,
     /// Open [`Hold`]s.
     holds: AtomicUsize,
-    /// Tests: stands in for the device (`Some(None)` is "no device").
+    /// Tests: stands in for the app mixer and a device that is always up
+    /// (`Some(None)` is "no device").
     #[cfg(test)]
     forced: Option<Option<Mixer>>,
     /// Tests: how many times a player asked for the device.
     #[cfg(test)]
     wakes: AtomicUsize,
+    /// Tests: opens devices in place of the system ([`Gate`]).
+    #[cfg(test)]
+    gate: Option<Arc<Gate>>,
 }
 
 #[derive(Default)]
 struct OutputState {
-    /// Made with the first device's layout and kept for the app's life.
-    app: Option<AppMixer>,
     device: Option<Device>,
     failed_at: Option<Instant>,
     /// A watch thread looks after the open device.
     watched: bool,
-    /// A device is opening off the UI thread ([`reopen`]).
+    /// A device is opening on a thread of its own ([`reopen`]).
     opening: bool,
-}
-
-/// When a closed device has to be open.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Open {
-    /// Before returning: the caller needs the audio thread (a play, a seek)
-    /// or has to know there is no device.
-    Now,
-    /// Off the calling thread, for a notification: it is queued on the app
-    /// mixer and plays once the device is up. Opening takes 10
-    /// to 40 ms on macOS, two frames on the UI thread.
-    Soon,
 }
 
 struct AppMixer {
@@ -101,7 +108,8 @@ struct AppMixer {
 }
 
 struct Device {
-    _sink: MixerDeviceSink,
+    /// The open stream; `None` only for a test's stand-in ([`Gate`]).
+    _sink: Option<MixerDeviceSink>,
     /// Set from cpal's audio thread when the stream ended.
     stale: Arc<AtomicBool>,
 }
@@ -122,9 +130,9 @@ impl Outlet {
     }
 }
 
-/// A player on the app mixer. Whatever needs the audio thread opens the
-/// device first: with it closed nothing pulls the sound, so a play would
-/// stall and a seek would wait for an answer forever.
+/// A player on the app mixer. Whatever needs the audio thread has the
+/// device opened first: with it closed nothing pulls the sound, so a play
+/// would stall and a seek would wait for an answer forever.
 pub(in crate::ui) struct OutputPlayer {
     player: Player,
     output: SharedOutput,
@@ -155,7 +163,7 @@ impl OutputPlayer {
         S: Source + Send + 'static,
     {
         if !self.player.is_paused() {
-            self.output.wake(Open::Soon);
+            self.output.wake();
         }
         self.player.append(Heard {
             source,
@@ -164,23 +172,32 @@ impl OutputPlayer {
         });
     }
 
-    /// False when there is no device now; unpaused either way, so a device
-    /// that opens later plays it.
+    /// False when no device opened lately. True when one is up or opening
+    /// off the calling thread: the sound starts once it is up, and a device
+    /// that fails to open leaves the player [`Self::lost`]. Unpaused either
+    /// way, so a device that opens later plays it.
     pub(in crate::ui) fn play(&self) -> bool {
-        let woke = self.output.wake(Open::Now);
+        let woke = self.output.wake();
         self.player.play();
         woke
     }
 
-    /// Waits for the audio thread to take the seek; fails at once when
-    /// there is no device.
+    /// Waits for a device that is opening, then for the audio thread to
+    /// take the seek, so never on the UI thread (the engine's seek worker
+    /// calls it). Fails at once when there is no device.
     pub(in crate::ui) fn try_seek(&self, pos: Duration) -> Result<(), SeekError> {
-        if !self.output.wake(Open::Now) {
+        if !self.output.wake_and_wait() {
             return Err(SeekError::Other(Arc::new(std::io::Error::other(
                 "no audio output device",
             ))));
         }
         self.player.try_seek(pos)
+    }
+
+    /// Playing, with nothing to play it: the device it asked for failed to
+    /// open, and none is up or opening.
+    pub(in crate::ui) fn lost(&self) -> bool {
+        !self.player.is_paused() && !self.player.empty() && !self.output.has_device()
     }
 
     pub(in crate::ui) fn pause(&self) {
@@ -205,8 +222,8 @@ impl OutputPlayer {
 }
 
 impl SharedOutput {
-    /// Tests: an output that hands out `mixer` (or nothing) instead of
-    /// opening a device.
+    /// Tests: an output that hands out `mixer` (or nothing) and has a
+    /// device whenever it has a mixer.
     #[cfg(test)]
     pub(in crate::ui) fn for_test(mixer: Option<Mixer>) -> Self {
         Self(Arc::new(Output {
@@ -215,19 +232,21 @@ impl SharedOutput {
         }))
     }
 
-    /// The app mixer, with the device open to play it. Every new sound
-    /// connects here.
+    /// Tests: an output whose devices open through the returned [`Gate`].
+    #[cfg(test)]
+    pub(in crate::ui) fn gated() -> (Self, Arc<Gate>) {
+        let gate = Arc::new(Gate::new());
+        let output = Self(Arc::new(Output {
+            gate: Some(gate.clone()),
+            ..Output::default()
+        }));
+        (output, gate)
+    }
+
+    /// The app mixer, where every new sound connects. A closed device
+    /// starts opening on a thread of its own, as the sound will need it.
+    /// `None` only when no device opened lately.
     pub(in crate::ui) fn outlet(&self) -> Option<Outlet> {
-        self.outlet_when(Open::Now)
-    }
-
-    /// [`Self::outlet`] for a notification: a closed device opens off the
-    /// calling thread. `None` only when no device opened lately.
-    pub(in crate::ui) fn outlet_soon(&self) -> Option<Outlet> {
-        self.outlet_when(Open::Soon)
-    }
-
-    fn outlet_when(&self, when: Open) -> Option<Outlet> {
         #[cfg(test)]
         if let Some(forced) = &self.0.forced {
             return forced.clone().map(|mixer| Outlet {
@@ -235,13 +254,8 @@ impl SharedOutput {
                 output: self.clone(),
             });
         }
-        let mut state = self.0.settled(when);
-        if !state.open(&self.0, when) {
-            return None;
-        }
-        let app = state.app.as_ref()?;
-        Some(Outlet {
-            mixer: app.mixer.clone(),
+        self.wake().then(|| Outlet {
+            mixer: self.0.app.mixer.clone(),
             output: self.clone(),
         })
     }
@@ -252,40 +266,76 @@ impl SharedOutput {
         self.0.wakes.load(Ordering::Relaxed)
     }
 
+    /// Tests: wait until no device is opening.
+    #[cfg(test)]
+    pub(in crate::ui) fn settle_device(&self) {
+        let mut state = self.0.lock();
+        while state.opening {
+            state = self
+                .0
+                .opened
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
     /// Keep the device open, once a sound opened it, until the hold drops.
     pub(in crate::ui) fn hold(&self) -> Hold {
         self.0.holds.fetch_add(1, Ordering::Relaxed);
         Hold(self.0.clone())
     }
 
-    /// Open the device for a player about to need it. False when there is
-    /// none.
-    fn wake(&self, when: Open) -> bool {
+    /// Have the device opened, off the calling thread, for a player about
+    /// to need it. False when no device opened lately.
+    fn wake(&self) -> bool {
         #[cfg(test)]
         if let Some(forced) = &self.0.forced {
             self.0.wakes.fetch_add(1, Ordering::Relaxed);
             return forced.is_some();
         }
-        self.0.settled(when).open(&self.0, when)
+        self.0.lock().open(&self.0)
+    }
+
+    /// [`Self::wake`], then wait for a device that is opening: whether one
+    /// is up.
+    fn wake_and_wait(&self) -> bool {
+        #[cfg(test)]
+        if let Some(forced) = &self.0.forced {
+            self.0.wakes.fetch_add(1, Ordering::Relaxed);
+            return forced.is_some();
+        }
+        let mut state = self.0.lock();
+        if !state.open(&self.0) {
+            return false;
+        }
+        #[cfg(test)]
+        if let (true, Some(gate)) = (state.opening, &self.0.gate) {
+            gate.not_on_ui("waited for the device to open");
+        }
+        while state.opening {
+            state = self
+                .0
+                .opened
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        state.device.is_some()
+    }
+
+    /// A device is up, or opening.
+    fn has_device(&self) -> bool {
+        #[cfg(test)]
+        if let Some(forced) = &self.0.forced {
+            return forced.is_some();
+        }
+        let state = self.0.lock();
+        state.device.is_some() || state.opening
     }
 }
 
 impl Output {
     fn lock(&self) -> MutexGuard<'_, OutputState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The state, after a device opening off the UI thread is up or failed
-    /// when the caller needs the device [`Open::Now`].
-    fn settled(&self, when: Open) -> MutexGuard<'_, OutputState> {
-        let mut state = self.lock();
-        while when == Open::Now && state.opening {
-            state = self
-                .opened
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-        state
     }
 
     /// Whether the device should stay open: something played since the
@@ -311,15 +361,16 @@ impl Drop for Hold {
 }
 
 impl OutputState {
-    /// Make sure a live device plays the app mixer, and that a watch closes
-    /// it once nothing plays. Counts as sound, so the watch gives a player
-    /// about to start [`QUIET_FOR`] to do so. The first device always opens
-    /// here: its layout makes the app mixer.
-    fn open(&mut self, output: &Arc<Output>, when: Open) -> bool {
+    /// Make sure a live device plays the app mixer, or that one is opening
+    /// on a thread of its own, and that a watch closes it once nothing
+    /// plays. Never waits for a device. Counts as sound, so the watch gives
+    /// a player about to start [`QUIET_FOR`] to do so. False when no device
+    /// opened lately.
+    fn open(&mut self, output: &Arc<Output>) -> bool {
         output.heard.store(true, Ordering::Relaxed);
-        if self.device.as_ref().is_some_and(Device::is_stale) {
+        let stale = self.device.take_if(|device| device.is_stale());
+        if stale.is_some() {
             debug_log("audio: output: reopening the default output device");
-            self.device = None;
             self.failed_at = None;
         }
         if self.device.is_some() {
@@ -332,24 +383,17 @@ impl OutputState {
         if self.failed_at.is_some_and(|at| at.elapsed() < RETRY_AFTER) {
             return false;
         }
-        if let (Some(app), Open::Soon) = (&self.app, when) {
-            let (sound, opener) = (app.sound.clone(), output.clone());
-            let spawned = quill::thread_guard::spawn_guarded("quill-audio-open", move || {
-                reopen(&opener, &sound);
-            });
-            if spawned.is_ok() {
-                self.opening = true;
-                return true;
-            }
-        }
-        let Some(sink) = open_sink() else {
+        let opener = output.clone();
+        let spawned = quill::thread_guard::spawn_guarded("quill-audio-open", move || {
+            // Stopping a stream takes a while too.
+            drop(stale);
+            reopen(&opener);
+        });
+        self.opening = spawned.is_ok();
+        if !self.opening {
             self.failed_at = Some(Instant::now());
-            return false;
-        };
-        let app = self.app.get_or_insert_with(|| AppMixer::for_device(&sink));
-        let device = sink.play(&app.sound, &output.pulled);
-        self.install(device, output);
-        true
+        }
+        self.opening
     }
 
     /// Play on `device`, with a watch to close it.
@@ -362,6 +406,12 @@ impl OutputState {
     /// Make sure a watch looks after the open device; one that failed to
     /// start is tried again, or the device would never close.
     fn watch(&mut self, output: &Arc<Output>) {
+        // Tests: a gate's device stays open, as the watch looks in real
+        // time.
+        #[cfg(test)]
+        if output.gate.is_some() {
+            return;
+        }
         if !self.watched {
             let watched = output.clone();
             let spawned = std::thread::Builder::new()
@@ -372,18 +422,18 @@ impl OutputState {
     }
 }
 
-/// Open the default device for the app mixer's `sound`, off the UI thread,
+/// Open the default device for the app mixer, on a thread of its own and
 /// without holding the output's lock while the device comes up.
-fn reopen(output: &Arc<Output>, sound: &Arc<Mutex<MixerSource>>) {
+fn reopen(output: &Arc<Output>) {
     let mut reopened = Reopened {
         output,
         device: None,
     };
-    reopened.device = open_sink().map(|sink| sink.play(sound, &output.pulled));
+    reopened.device = open_device(output);
 }
 
-/// Ends an open off the UI thread however it went, a panic included, so a
-/// play waiting for it doesn't wait for ever.
+/// Ends an open off the calling thread however it went, a panic included,
+/// so a seek waiting for it doesn't wait for ever.
 struct Reopened<'a> {
     output: &'a Arc<Output>,
     device: Option<Device>,
@@ -402,11 +452,12 @@ impl Drop for Reopened<'_> {
     }
 }
 
-impl AppMixer {
-    /// A mixer with `sink`'s channels and rate.
-    fn for_device(sink: &OpenSink) -> Self {
-        let config = sink.sink.config();
-        let (mixer, sound) = rodio::mixer::mixer(config.channel_count(), config.sample_rate());
+impl Default for AppMixer {
+    fn default() -> Self {
+        let (mixer, sound) = rodio::mixer::mixer(
+            ChannelCount::new(MIX_CHANNELS).unwrap_or(ChannelCount::MIN),
+            SampleRate::new(MIX_RATE).unwrap_or(SampleRate::MIN),
+        );
         Self {
             mixer,
             sound: Arc::new(Mutex::new(sound)),
@@ -414,35 +465,27 @@ impl AppMixer {
     }
 }
 
-/// A device just opened, not yet playing the app mixer.
-struct OpenSink {
-    sink: MixerDeviceSink,
-    stale: Arc<AtomicBool>,
-}
-
-/// Open the default output device.
-fn open_sink() -> Option<OpenSink> {
+/// The default output device, playing the app mixer.
+fn open_device(output: &Output) -> Option<Device> {
+    let feed = Feed::new(output.app.sound.clone(), output.pulled.clone());
+    #[cfg(test)]
+    if let Some(gate) = &output.gate {
+        return gate.open(feed);
+    }
     let stale = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
     let mut sink = open_default_output(output_error_callback(stale.clone())).ok()?;
     debug_log(&format!(
-        "audio: output: opened the output device in {} ms",
-        started.elapsed().as_millis()
+        "audio: output: opened the output device in {} ms on {}",
+        started.elapsed().as_millis(),
+        std::thread::current().name().unwrap_or("an unnamed thread"),
     ));
     sink.log_on_drop(false);
-    Some(OpenSink { sink, stale })
-}
-
-impl OpenSink {
-    fn play(self, sound: &Arc<Mutex<MixerSource>>, pulled: &Arc<AtomicBool>) -> Device {
-        self.sink
-            .mixer()
-            .add(Feed::new(sound.clone(), pulled.clone()));
-        Device {
-            _sink: self.sink,
-            stale: self.stale,
-        }
-    }
+    sink.mixer().add(feed);
+    Some(Device {
+        _sink: Some(sink),
+        stale,
+    })
 }
 
 impl Device {
@@ -477,7 +520,7 @@ fn watch(output: &Arc<Output>) {
         if stale {
             debug_log("audio: output: reopening the default output device");
             // The new device gets a watch of its own.
-            output.lock().open(output, Open::Soon);
+            output.lock().open(output);
         } else {
             debug_log("audio: output: closing the output device after silence");
         }
@@ -671,13 +714,108 @@ where
         })
 }
 
+/// Tests: a stand-in for the system's output device.
+#[cfg(test)]
+mod gate {
+    use super::{Device, Feed};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+    use std::thread::ThreadId;
+
+    /// Each open waits, on the thread that opens it, for the test's answer;
+    /// an opened device is a feed the test pulls by hand. The thread that
+    /// made the gate plays the UI thread: opening a device there, or
+    /// waiting there for one, fails the test.
+    pub(in crate::ui) struct Gate {
+        ui: ThreadId,
+        state: Mutex<GateState>,
+        changed: Condvar,
+    }
+
+    #[derive(Default)]
+    struct GateState {
+        /// Answers no open took yet: true opens a device.
+        answers: VecDeque<bool>,
+        /// Opens asked for so far.
+        asked: usize,
+        /// The open device's side of the app mixer.
+        feed: Option<Feed>,
+    }
+
+    impl Gate {
+        pub(super) fn new() -> Self {
+            Self {
+                ui: std::thread::current().id(),
+                state: Mutex::default(),
+                changed: Condvar::new(),
+            }
+        }
+
+        fn lock(&self) -> MutexGuard<'_, GateState> {
+            self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        }
+
+        pub(super) fn not_on_ui(&self, what: &str) {
+            assert_ne!(
+                std::thread::current().id(),
+                self.ui,
+                "{what} on the UI thread"
+            );
+        }
+
+        pub(super) fn open(&self, feed: Feed) -> Option<Device> {
+            self.not_on_ui("opened the device");
+            let mut state = self.lock();
+            state.asked += 1;
+            self.changed.notify_all();
+            loop {
+                if let Some(opens) = state.answers.pop_front() {
+                    return opens.then(|| {
+                        state.feed = Some(feed);
+                        Device {
+                            _sink: None,
+                            stale: Arc::default(),
+                        }
+                    });
+                }
+                state = self
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        }
+
+        /// Answer the next open: a device, or none.
+        pub(in crate::ui) fn answer(&self, opens: bool) {
+            self.lock().answers.push_back(opens);
+            self.changed.notify_all();
+        }
+
+        /// Opens asked for so far.
+        pub(in crate::ui) fn asked(&self) -> usize {
+            self.lock().asked
+        }
+
+        /// The open device takes `samples` from the app mixer (none with
+        /// no device).
+        pub(in crate::ui) fn pull(&self, samples: usize) -> Vec<f32> {
+            self.lock()
+                .feed
+                .as_mut()
+                .map(|feed| feed.by_ref().take(samples).collect())
+                .unwrap_or_default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput};
+    use super::{FEED_FRAMES, Feed, Heard, MIX_CHANNELS, MIX_RATE, QUIET_FOR, Quiet, SharedOutput};
     use rodio::buffer::SamplesBuffer;
     use rodio::mixer::mixer;
     use rodio::{ChannelCount, SampleRate, Source};
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc::TryRecvError;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -774,6 +912,72 @@ mod tests {
         assert!(!player.play());
         assert!(!player.is_paused(), "a device that opens later plays it");
         assert!(player.try_seek(Duration::from_millis(50)).is_err());
+    }
+
+    /// The first sound of the app's life is queued on the app mixer at
+    /// once; the device opens on a thread of its own, then plays it.
+    #[test]
+    fn the_first_sound_plays_once_the_device_opens_off_the_ui_thread() {
+        let (channels, rate) = mono(8000);
+        let (output, gate) = SharedOutput::gated();
+        let player = output.outlet().unwrap().player();
+        player.append(SamplesBuffer::new(channels, rate, vec![0.5; 800]));
+        assert!(player.play(), "the device is opening");
+        assert!(gate.pull(100).is_empty(), "not up yet");
+        gate.answer(true);
+        output.settle_device();
+        // 0.2 s of the mix, twice the sound.
+        let played = gate.pull((MIX_RATE / 5) as usize * usize::from(MIX_CHANNELS));
+        assert!(played.iter().any(|s| *s > 0.4), "the sound plays");
+        assert_eq!(gate.asked(), 1, "one open for the outlet, sound and play");
+    }
+
+    /// A playing player whose device failed to open says so, so its owner
+    /// can stop waiting for it; a paused one waits for its play.
+    #[test]
+    fn a_player_whose_device_failed_to_open_is_lost() {
+        let (channels, rate) = mono(8000);
+        let (output, gate) = SharedOutput::gated();
+        let outlet = output.outlet().unwrap();
+        let playing = outlet.player();
+        playing.append(SamplesBuffer::new(channels, rate, vec![0.5; 800]));
+        let paused = outlet.player();
+        paused.pause();
+        paused.append(SamplesBuffer::new(channels, rate, vec![0.5; 800]));
+        assert!(!playing.lost(), "its device is opening");
+        gate.answer(false);
+        output.settle_device();
+        assert!(playing.lost());
+        assert!(!paused.lost());
+    }
+
+    /// A seek waits, off the UI thread, for a device that is opening and
+    /// then for the audio thread; it fails once the device couldn't open.
+    #[test]
+    fn a_seek_waits_for_the_opening_device_and_fails_without_one() {
+        let (channels, rate) = mono(8000);
+        for opens in [true, false] {
+            let (output, gate) = SharedOutput::gated();
+            let player = Arc::new(output.outlet().unwrap().player());
+            player.pause();
+            player.append(SamplesBuffer::new(channels, rate, vec![0.5; 8000]));
+            let (done, seeked) = std::sync::mpsc::channel();
+            let seeker = player.clone();
+            std::thread::spawn(move || {
+                let _ = done.send(seeker.try_seek(Duration::from_millis(500)).is_ok());
+            });
+            gate.answer(opens);
+            // The audio thread takes a seek while it pulls the player.
+            let moved = loop {
+                gate.pull(FEED_FRAMES);
+                match seeked.try_recv() {
+                    Ok(moved) => break moved,
+                    Err(TryRecvError::Empty) => std::thread::yield_now(),
+                    Err(TryRecvError::Disconnected) => panic!("the seek thread died"),
+                }
+            };
+            assert_eq!(moved, opens);
+        }
     }
 
     #[test]
