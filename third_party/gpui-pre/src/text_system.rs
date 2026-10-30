@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.10 (Apache-2.0):
+// `ShapedLine` keeps one decoration run inline. See third_party/gpui-pre/QUILL-CHANGES.md.
 mod font_fallbacks;
 mod font_features;
 mod line;
@@ -680,7 +682,7 @@ impl WindowTextSystem {
             "text argument should not contain newlines"
         );
 
-        let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
+        let mut decoration_runs = DecorationRuns::new();
         for run in runs {
             if let Some(last_run) = decoration_runs.last_mut()
                 && last_run.color == run.color
@@ -728,7 +730,7 @@ impl WindowTextSystem {
         force_width: Option<Pixels>,
         materialize_text: impl FnOnce() -> SharedString,
     ) -> ShapedLine {
-        let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
+        let mut decoration_runs = DecorationRuns::new();
         for run in runs {
             if let Some(last_run) = decoration_runs.last_mut()
                 && last_run.color == run.color
