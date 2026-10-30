@@ -41,3 +41,14 @@ show, so the change makes the next one explain itself.
 
 `QUILL_STREAM_AUDIO_DEVICE=1` keeps calls and streams on ntgcalls' device
 output.
+
+## The output's format (2026-10-30)
+
+On tgcalls (2026.1029.3985) the caller's voice played high-pitched and
+twice as fast. The library hands over 48 kHz mono, but the output queued
+it in the device's channel count, so on stereo speakers every two mono
+samples became one stereo frame. The queue now always holds mono at the
+device's rate: the frames are converted from 48 kHz when the device does
+not run at it (Bluetooth headsets in call mode often run at 16 or 24 kHz),
+and each sample is spread over every output channel. This is the same
+shared output on macOS, Windows and Linux.

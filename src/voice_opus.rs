@@ -268,8 +268,8 @@ impl<W: Write> VoiceEncoder<W> {
     }
 }
 
-/// Streaming sample-rate converter to [`RATE`] for one mono channel:
-/// linear interpolation when upsampling, area averaging when downsampling.
+/// Streaming sample-rate converter for one mono channel: linear
+/// interpolation when upsampling, area averaging when downsampling.
 pub struct Resampler {
     /// Input samples per output sample.
     step: f64,
@@ -283,14 +283,19 @@ pub struct Resampler {
 }
 
 impl Resampler {
+    /// From `input_rate` to [`RATE`].
     pub fn new(input_rate: u32) -> Self {
+        Self::between(input_rate, RATE)
+    }
+
+    pub fn between(input_rate: u32, output_rate: u32) -> Self {
         Self {
-            step: f64::from(input_rate) / f64::from(RATE),
+            step: f64::from(input_rate.max(1)) / f64::from(output_rate.max(1)),
             pos: 0.0,
             prev: 0.0,
             acc: 0.0,
             weight: 0.0,
-            identity: input_rate == RATE,
+            identity: input_rate == output_rate,
         }
     }
 
