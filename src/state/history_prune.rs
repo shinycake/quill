@@ -464,10 +464,14 @@ impl Session {
         self.messages
             .reply_targets
             .retain(|&(chat, _), _| chat != chat_id.0);
-        self.messages
-            .translate
+        let translate = &mut self.messages.translate;
+        translate
             .messages
             .retain(|(chat, _, _), _| *chat != chat_id.0);
+        // An answer still on its way would bring one back.
+        translate.jobs.retain(|_, job| {
+            !matches!(job.target, TranslateTarget::Message { chat_id: chat, .. } if chat == chat_id.0)
+        });
     }
 
     /// A chat that was left or deleted: its histories go when no view

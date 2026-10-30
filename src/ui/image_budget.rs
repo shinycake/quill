@@ -1205,6 +1205,7 @@ mod tests {
     /// The browse finding: two photos the idle budget kept off screen held
     /// a 4 MB atlas texture each. The idle trim keeps their decode and takes
     /// them out of the atlas; showing one again uploads that same decode.
+    /// A picture still on screen keeps its tile.
     #[cfg(feature = "demo-capture")]
     #[gpui_kit::test]
     fn idle_trim_takes_kept_pictures_out_of_the_atlas(cx: &mut gpui_kit::TestAppContext) {
@@ -1214,33 +1215,50 @@ mod tests {
             AppContext, Context, Entity, IntoElement, ParentElement, Render, Resource, Styled,
             VisualTestContext, Window, div, img, px, size,
         };
+        use std::path::PathBuf;
 
-        struct Picture {
+        struct Pictures {
             cache: Entity<BoundedImageCache>,
-            path: std::path::PathBuf,
-            show: bool,
+            on_screen: PathBuf,
+            left: PathBuf,
+            show_left: bool,
         }
-        impl Render for Picture {
+        impl Render for Pictures {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 begin_frame();
-                let picture = self.show.then(|| img(self.path.clone()).size(px(40.)));
-                CacheScope::new(self.cache.clone(), div().size_full().children(picture))
+                let left = self.show_left.then(|| img(self.left.clone()).size(px(40.)));
+                let pictures = div()
+                    .size_full()
+                    .child(img(self.on_screen.clone()).size(px(40.)))
+                    .children(left);
+                CacheScope::new(self.cache.clone(), pictures)
+            }
+        }
+        /// The pictures' files, removed however the test ends.
+        struct Files(PathBuf);
+        impl Drop for Files {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
             }
         }
 
         cx.update(gpui_kit::init);
-        let path = std::env::temp_dir().join(format!("quill-atlas-{}.png", std::process::id()));
-        image::RgbaImage::new(8, 8)
-            .save(&path)
-            .expect("write the picture");
-        let resource = Resource::Path(path.clone().into());
-        let view_path = path.clone();
+        let files = Files(std::env::temp_dir().join(format!("quill-atlas-{}", std::process::id())));
+        std::fs::create_dir_all(&files.0).expect("a folder for the pictures");
+        let [on_screen, left] = ["on-screen.png", "left.png"].map(|name| files.0.join(name));
+        for path in [&on_screen, &left] {
+            image::RgbaImage::new(8, 8)
+                .save(path)
+                .expect("write the picture");
+        }
+        let view_paths = (on_screen.clone(), left.clone());
         let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
             let cache = cx.new(|_| BoundedImageCache::new(Default::default()));
-            Picture {
+            Pictures {
                 cache,
-                path: view_path,
-                show: true,
+                on_screen: view_paths.0,
+                left: view_paths.1,
+                show_left: true,
             }
         });
         let view = handle.root(cx).expect("the view");
@@ -1253,29 +1271,39 @@ mod tests {
             }
             vcx.run_until_parked();
         };
+        let loaded = |vcx: &VisualTestContext, path: &PathBuf| {
+            let resource = Resource::Path(path.clone().into());
+            cache.read_with(vcx, |cache, _| cache.loaded(&resource))
+        };
         frames(&mut vcx);
-        let image = cache
-            .read_with(&vcx, |cache, _| cache.loaded(&resource))
-            .expect("loaded");
-        assert!(vcx.update(|window, _| window.has_image_atlas_entry(&image)));
+        let kept = loaded(&vcx, &on_screen).expect("loaded");
+        let image = loaded(&vcx, &left).expect("loaded");
+        let in_atlas = |vcx: &mut VisualTestContext,
+                        image: &std::sync::Arc<gpui_kit::RenderImage>| {
+            vcx.update(|window, _| window.has_image_atlas_entry(image))
+        };
+        assert!(in_atlas(&mut vcx, &image));
 
         view.update(&mut vcx, |view, cx| {
-            view.show = false;
+            view.show_left = false;
             cx.notify();
         });
         frames(&mut vcx);
         cache.update(&mut vcx, |cache, cx| cache.idle_trim(false, cx));
-        let kept = cache.read_with(&vcx, |cache, _| cache.loaded(&resource));
-        assert!(kept.is_some_and(|kept| kept.id == image.id), "kept");
-        assert!(!vcx.update(|window, _| window.has_image_atlas_entry(&image)));
+        let still = loaded(&vcx, &left);
+        assert!(still.is_some_and(|still| still.id == image.id), "kept");
+        assert!(!in_atlas(&mut vcx, &image), "out of the atlas");
+        assert!(in_atlas(&mut vcx, &kept), "on screen: left alone");
 
         view.update(&mut vcx, |view, cx| {
-            view.show = true;
+            view.show_left = true;
             cx.notify();
         });
         frames(&mut vcx);
-        assert!(vcx.update(|window, _| window.has_image_atlas_entry(&image)));
-        let _ = std::fs::remove_file(path);
+        assert!(
+            in_atlas(&mut vcx, &image),
+            "the same decode, uploaded again"
+        );
     }
 
     #[cfg(feature = "demo-capture")]

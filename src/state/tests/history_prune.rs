@@ -291,16 +291,30 @@ fn a_dropped_chat_forgets_its_translations() {
     for chat in 1..=total {
         switch(&mut session, chat);
         feed(&mut session, chat, 80);
+        session.set_chat_translated_to(ChatId(chat), Some("en"));
         // Row 5 leaves with the tail trim, row 80 stays in the tail.
         translate(&mut session, chat, 5);
         translate(&mut session, chat, 80);
     }
+    // Chat 1's answer for row 7 is still on its way when the chat goes.
+    let target = TranslateTarget::Message {
+        chat_id: 1,
+        message_id: 7,
+    };
+    let (late, _) = session.begin_translation(target, "en", Some(ChatId(1)));
     leave(&mut session);
     assert!(!session.histories.contains_key(&1), "the oldest went");
     assert!(!translated(&session, 1, 5));
     assert!(!translated(&session, 1, 80));
     assert!(translated(&session, 2, 5), "a kept tail keeps them");
     assert!(translated(&session, 2, 80));
+    session.finish_translation(late, Translation::Failed("late".into()));
+    assert!(!translated(&session, 1, 7), "a late answer finds no job");
+    assert_eq!(
+        session.chat_translated_to(ChatId(1)),
+        Some("en"),
+        "the user's choice of language stays"
+    );
 }
 
 #[test]
