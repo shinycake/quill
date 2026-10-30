@@ -90,11 +90,12 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
 `media_audio_track.cpp`).
 
 - `src/ui/audio/output.rs`: every player connects to one app mixer, made
-  at 48 kHz stereo whatever the device and kept for the app's life. A
-  device plays it through a feed that takes 256 frames at a time and is
-  converted to the device's own layout. The players never see the device
-  come and go, so a paused voice note or video carries on with the next
-  device.
+  with the first device's channels and rate and kept for the app's life. A
+  device plays it through a feed that takes 256 frames at a time (a later
+  device with another layout converts it). A player made while no device
+  is up waits outside the mixer and connects when one is; its sound is
+  dropped if the player goes first. The players never see the device come
+  and go, so a paused voice note or video carries on with the next device.
 - A sound counts as playing while its player pulls it: `Outlet::append`
   wraps each queued sound in `Heard`, which marks the output on every
   sample. A paused player, or one with nothing queued, plays silence

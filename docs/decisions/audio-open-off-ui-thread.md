@@ -26,12 +26,15 @@ the calling thread, under the output's lock.
 
 ## What changed
 
-- The app mixer has a fixed layout, 48 kHz stereo (`MIX_RATE`,
-  `MIX_CHANNELS`), made with the output and kept for the app's life. Every
-  device plays it through `Feed`, which rodio converts to the device's
-  layout, as it already did for every device after the first one. Telegram
-  voice notes and the app's tones are 48 kHz, and tdesktop mixes at 48 kHz
-  too (`Media::Player::kDefaultFrequency`).
+- A player no longer needs the app mixer to exist: `Outlet::player` makes
+  a rodio `Player` unconnected (`Player::new`) and parks its queue while no
+  device is up. The opener thread opens the device, makes the app mixer
+  from that device's own channels and rate if it is the first (as before,
+  so a 44.1 kHz file on a 44.1 kHz output is not resampled), connects the
+  parked queues, then starts the feed. A later device with another layout
+  converts the mix, as before. A parked queue whose player is gone is
+  dropped when the next player parks or an open fails, so a machine with
+  no device keeps no sounds.
 - Every open runs on `quill-audio-open`; nothing on the UI thread waits for
   it. `outlet`, `play` and a sound queued on a playing player start an open
   and return. `play` is false only when no device opened in the last 5 s.
@@ -51,19 +54,23 @@ track playing at its start, as it did during the device's first buffer.
 A voice note now opens the device while its file is decoded, not before,
 so its sound starts no later than before, and usually earlier.
 
-## Costs weighed
+## Alternatives weighed
 
-- No launch-time open. Opening the device right after launch, then letting
-  the 500 ms close apply, would keep the first device's layout but wake the
-  audio hardware and load CoreAudio in every session, including ones that
-  never play a sound, and would not help any later reopen.
-- Same device lifetime as before, so no new CPU or battery cost: the device
-  opens for the same sounds and closes after the same silence.
-- A device that doesn't run at 48 kHz gets the mix converted with rodio's
-  linear resampler. On such a device a file at the device's own rate (a
-  44.1 kHz MP3 on a 44.1 kHz output) is now converted twice, which softens
-  its treble slightly; before, only the first device of the app's life was
-  spared that. CPU cost of the extra pass is negligible.
+- A fixed 48 kHz stereo mixer (tdesktop's `kDefaultFrequency`) needs no
+  device either, but a file at a non-48 kHz device's own rate (a 44.1 kHz
+  MP3 on a 44.1 kHz output) would go through rodio's linear resampler
+  twice and lose some treble. Rejected for that.
+- Querying the default device's config (`default_output_config`) before
+  the first sound, at launch or on a background thread, would load
+  CoreAudio in sessions that never play a sound and could still race the
+  first sound; the opened stream's own config needs no extra query and is
+  what the device really runs.
+- Opening the device right after launch, then letting the 500 ms close
+  apply, would wake the audio hardware in every session and would not help
+  any later reopen.
+
+No new CPU or battery cost: the device opens for the same sounds and
+closes after the same silence, and the mixer layout is what it was before.
 
 ## How it was checked
 
@@ -78,9 +85,12 @@ put back, the new tests fail with "opened the device on the UI thread".
 - `a_track_starts_while_the_device_opens_off_the_ui_thread`
 - `a_device_that_fails_to_open_pauses_the_track`
 - `a_video_seek_never_waits_for_the_device`
+- `the_app_mixer_takes_the_first_devices_layout` (a 44.1 kHz mono device
+  gets a 44.1 kHz mono sound sample for sample)
+- `a_sound_waiting_for_a_device_goes_with_its_player`
 
 The UI thread's part of a first sound (outlet, queue, play) took about
-50 µs in a test on Linux: a thread spawn and a mixer connection.
+50 to 230 µs in tests on Linux, mostly a thread spawn.
 
 On a Mac, with debug logging on: the log line "audio: output: opened the
 output device in N ms on T" names the thread. Before this change the first
