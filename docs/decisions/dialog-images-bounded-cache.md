@@ -44,8 +44,10 @@ budget, or at the idle trim.
 Not covered:
 - A dialog in a chat window keeps GPUI's cache: the bounded cache counts the
   main window's frames only.
-- `deferred` content inside a dialog (a popover or menu) paints in a later
-  deferred pass, outside the dialog's scope.
+- `deferred` content inside a dialog (a popover or menu) lays out inside
+  the dialog's scope but paints in a later deferred pass, outside it, so a
+  picture there can decode twice and keep GPUI's copy (the title emoji
+  panel of the group edit box shows custom emoji set icons that way).
 - Alert dialogs (`open_alert_dialog`) carry text only.
 
 ## Tests

@@ -694,9 +694,10 @@ impl BoundedImageCache {
     }
 
     /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget,
-    /// or, with the window in the `background`, to what is on screen.
-    /// Runs between frames (no window is being drawn), so the images leave
-    /// every window's atlas.
+    /// or, with the window in the `background`, to what is on screen, and
+    /// take what is kept off screen out of the atlas. Runs between frames
+    /// (no window is being drawn), so the images leave every window's
+    /// atlas.
     pub(super) fn idle_trim(&mut self, background: bool, cx: &mut App) {
         IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
         let before = (self.bytes, self.entries.len());
@@ -714,7 +715,15 @@ impl BoundedImageCache {
                 self.bytes as f64 / 1048576.0
             );
         }
-        for image in images {
+        // What stays off screen keeps its decode, so coming back to it only
+        // uploads it again, but not its atlas tile: a kept photo would
+        // otherwise hold a 4 MB texture of its own for as long as it stays.
+        let off_screen = self
+            .entries
+            .values()
+            .filter(|entry| !entry.may_be_visible())
+            .filter_map(|entry| entry.load.get()?.ok());
+        for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
         }
         // Even with nothing evicted here: what left the screen (a closed
@@ -1191,6 +1200,82 @@ mod tests {
         assert_eq!(idle_trim_due(), None, "already trimmed");
         note_activity();
         assert!(idle_trim_due().is_some());
+    }
+
+    /// The browse finding: two photos the idle budget kept off screen held
+    /// a 4 MB atlas texture each. The idle trim keeps their decode and takes
+    /// them out of the atlas; showing one again uploads that same decode.
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn idle_trim_takes_kept_pictures_out_of_the_atlas(cx: &mut gpui_kit::TestAppContext) {
+        use super::{BoundedImageCache, CacheScope};
+        use gpui_kit::test::TestWindowExt;
+        use gpui_kit::{
+            AppContext, Context, Entity, IntoElement, ParentElement, Render, Resource, Styled,
+            VisualTestContext, Window, div, img, px, size,
+        };
+
+        struct Picture {
+            cache: Entity<BoundedImageCache>,
+            path: std::path::PathBuf,
+            show: bool,
+        }
+        impl Render for Picture {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                begin_frame();
+                let picture = self.show.then(|| img(self.path.clone()).size(px(40.)));
+                CacheScope::new(self.cache.clone(), div().size_full().children(picture))
+            }
+        }
+
+        cx.update(gpui_kit::init);
+        let path = std::env::temp_dir().join(format!("quill-atlas-{}.png", std::process::id()));
+        image::RgbaImage::new(8, 8)
+            .save(&path)
+            .expect("write the picture");
+        let resource = Resource::Path(path.clone().into());
+        let view_path = path.clone();
+        let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+            let cache = cx.new(|_| BoundedImageCache::new(Default::default()));
+            Picture {
+                cache,
+                path: view_path,
+                show: true,
+            }
+        });
+        let view = handle.root(cx).expect("the view");
+        let cache = view.read_with(cx, |view, _| view.cache.clone());
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let frames = |vcx: &mut VisualTestContext| {
+            for _ in 0..3 {
+                vcx.run_until_parked();
+                vcx.update(|window, cx| window.render_frame(cx));
+            }
+            vcx.run_until_parked();
+        };
+        frames(&mut vcx);
+        let image = cache
+            .read_with(&vcx, |cache, _| cache.loaded(&resource))
+            .expect("loaded");
+        assert!(vcx.update(|window, _| window.has_image_atlas_entry(&image)));
+
+        view.update(&mut vcx, |view, cx| {
+            view.show = false;
+            cx.notify();
+        });
+        frames(&mut vcx);
+        cache.update(&mut vcx, |cache, cx| cache.idle_trim(false, cx));
+        let kept = cache.read_with(&vcx, |cache, _| cache.loaded(&resource));
+        assert!(kept.is_some_and(|kept| kept.id == image.id), "kept");
+        assert!(!vcx.update(|window, _| window.has_image_atlas_entry(&image)));
+
+        view.update(&mut vcx, |view, cx| {
+            view.show = true;
+            cx.notify();
+        });
+        frames(&mut vcx);
+        assert!(vcx.update(|window, _| window.has_image_atlas_entry(&image)));
+        let _ = std::fs::remove_file(path);
     }
 
     #[cfg(feature = "demo-capture")]
