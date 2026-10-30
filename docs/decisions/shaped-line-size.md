@@ -24,7 +24,8 @@ about 35 MB.
 `ShapedLine::decoration_runs` keeps one run inline
 (`SmallVec<[DecorationRun; 1]>`, the `DecorationRuns` alias in gpui-pre's
 `src/text_system/line.rs`). A line with more runs keeps them on the heap:
-one small allocation when it is shaped. A cached paragraph is shaped once,
+a few small allocations when it is shaped (the vector doubles from one
+run). A cached paragraph is shaped once,
 and GPUI's `WrappedLine` already keeps its runs in a `Vec`. Nothing about
 how text looks or is measured changes. See
 `third_party/gpui-pre/QUILL-CHANGES.md`.
@@ -36,7 +37,10 @@ space, not their number.
 
 On the Mac (release build, the screenshot demo, the same scroll through
 1,500 long right-to-left posts with links, two runs each, on main
-2785fa858):
+2785fa858). The demo scrolls through more text than one pass over the three
+channels did, so its cache is fuller than the 202 MB above. The
+paragraph cache row comes from a separate run with malloc stack logging,
+which adds its own overhead to every block:
 
 | | Before | After |
 | --- | --- | --- |

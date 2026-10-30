@@ -251,4 +251,5 @@ Quill's `paragraph_cache`) keep one per visual run, and scrolling three
 long Hebrew channels on a Mac left about 137 MB of them. `src/text_system/line.rs`:
 the field is now `DecorationRuns`, a `SmallVec<[DecorationRun; 1]>`, and
 `src/text_system.rs` builds it in `shape_line` and `shape_line_by_hash`. A
-line with more runs keeps them on the heap, one allocation at shaping.
+line with more runs keeps them on the heap, a few small allocations at
+shaping.
