@@ -255,6 +255,10 @@ impl QuillApp {
         self.viewer.extra.caption = Default::default();
         self.viewer.state.close();
         self.viewer.cancel_reorient();
+        // A turned photo is a full-size picture of its own (up to about
+        // 20 MB, and as much again on the GPU); opening the next item
+        // replaced it, but nothing did until then.
+        self.viewer.rotated = None;
         self.viewer.hdr.reset();
         self.viewer.over_controls = false;
         cx.notify();
