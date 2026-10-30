@@ -238,6 +238,11 @@ fn gallery_message_counts_include_polls_and_round_videos() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
+    // The entry the counts land in, as `fetch_chat_media_counts` opens it.
+    session
+        .media
+        .chat_media_counts
+        .insert(6, Default::default());
     for (key, count) in [(0u8, 5), (1, 0), (7, 2), (8, 4)] {
         let extra = session.request(
             RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter: key }),

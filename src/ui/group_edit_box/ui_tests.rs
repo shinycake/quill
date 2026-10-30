@@ -315,3 +315,29 @@ fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
     assert_eq!(edit, Some((None, Some(true))));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));
 }
+
+/// The Manage rows read the chat's member lists, which go with the chat's
+/// history once it is pruned: the open box holds the chat.
+#[gpui_kit::test]
+fn the_open_box_holds_its_chat_from_pruning(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-group-edit-box");
+    let vcx = &mut vcx;
+    let held = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .map(|session| {
+                    session
+                        .history_pruning
+                        .held_chats()
+                        .collect::<Vec<ChatId>>()
+                })
+                .unwrap_or_default()
+        })
+    };
+    let chat = app.read_with(vcx, |app, _| app.group_edit_box().map(|edit| edit.chat_id));
+    let chat = chat.expect("the box is open");
+    assert_eq!(held(&app, vcx), vec![chat]);
+    vcx.update(|window, cx| window.press("escape", cx));
+    frames(vcx);
+    assert!(held(&app, vcx).is_empty(), "closing the box lets it go");
+}

@@ -223,12 +223,12 @@ impl Session {
                 if let Some(RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter })) =
                     pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    // Only into the entry `fetch_chat_media_counts` opened:
+                    // one dropped meanwhile (a send failed, the chat is no
+                    // longer kept) is asked for again in full.
+                    && let Some(counts) = self.media.chat_media_counts.get_mut(&chat_id.0)
                 {
-                    self.media
-                        .chat_media_counts
-                        .entry(chat_id.0)
-                        .or_default()
-                        .insert(filter, count);
+                    counts.insert(filter, count);
                 }
             }
             CommonPayload::UpdateServiceNotification { kind, text } => {

@@ -67,6 +67,24 @@ impl Session {
         );
     }
 
+    /// `chat_id` is no longer kept (`history_prune`): its ads go and are
+    /// fetched again when it opens (an answer still on its way lands only
+    /// for a chat a view shows). The ids the user reported or hid stay, so
+    /// the same ad in the next list stays hidden.
+    pub(crate) fn forget_sponsored_messages(&mut self, chat_id: ChatId) {
+        let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
+            return;
+        };
+        if entry.dismissed.is_empty() {
+            self.messages.sponsored.remove(&chat_id.0);
+        } else {
+            *entry = ChatSponsoredMessages {
+                dismissed: std::mem::take(&mut entry.dismissed),
+                ..ChatSponsoredMessages::default()
+            };
+        }
+    }
+
     /// Whether `getChatSponsoredMessages` should be sent for `chat_id`: not
     /// after the user hid ads, and not again within five minutes of the last
     /// response (tdesktop `TooEarlyForRequest`).
@@ -253,11 +271,16 @@ impl Session {
                 self.messages.sponsored_report = None;
                 self.messages.sponsored_report_target = None;
                 match &result {
-                    // The reported ad leaves the history (tdesktop removes it).
+                    // The reported ad leaves the history (tdesktop removes
+                    // it), also when its list went while the report was on
+                    // its way (`forget_sponsored_messages`).
                     ReportSponsoredResult::Ok => {
-                        if let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) {
-                            entry.dismissed.insert(message_id);
-                        }
+                        self.messages
+                            .sponsored
+                            .entry(chat_id.0)
+                            .or_default()
+                            .dismissed
+                            .insert(message_id);
                     }
                     ReportSponsoredResult::AdsHidden => self.messages.sponsored_hidden = true,
                     ReportSponsoredResult::PremiumRequired => {

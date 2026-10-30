@@ -2,10 +2,12 @@
 //! view shows them, so closed-chat pruning (`state::history_prune`) keeps
 //! them whole: the source of a pending forward, the chat a reply bar points
 //! at ("Reply in Another Chat" replies to a message of a chat that is no
-//! longer shown) and the chat of the track in the player bar. A chat that
-//! closes while the claim is not synced yet waits in the session's release
-//! queue until this runs, so a claim and a chat switch in one event cannot
-//! trim the source.
+//! longer shown), the chat of the track in the player bar, and the chat
+//! whose member lists an open management box reads (they go with the
+//! chat's history otherwise, and a box stays open when the main chat
+//! changes under it). A chat that closes while the claim is not synced yet
+//! waits in the session's release queue until this runs, so a claim and a
+//! chat switch in one event cannot trim the source.
 use super::*;
 use quill::ids::ChatId;
 
@@ -19,6 +21,7 @@ impl QuillApp {
             .into_iter()
             .chain(self.playback.player.chat)
             .chain(self.composer_ui.reply().map(|reply| reply.chat_id))
+            .chain(self.member_list_readers())
             .collect();
         let Some(session) = self
             .live
@@ -29,5 +32,22 @@ impl QuillApp {
             return;
         };
         session.set_history_holds(holds);
+    }
+
+    /// The chats whose member lists an open box reads: the member dialog,
+    /// the admin and exception pickers, the restrict and ownership
+    /// dialogs, and the Edit box's Manage rows.
+    fn member_list_readers(&self) -> impl Iterator<Item = ChatId> {
+        let admin = &self.admin;
+        [
+            admin.member_dialog.as_ref().map(|dialog| dialog.chat_id),
+            admin.add_special.as_ref().map(|dialog| dialog.chat_id),
+            admin.admin_dialog.as_ref().map(|dialog| dialog.chat_id),
+            admin.restrict_dialog.as_ref().map(|dialog| dialog.chat_id),
+            admin.ownership_dialog.as_ref().map(|dialog| dialog.chat_id),
+            self.group_edit_box().map(|edit| edit.chat_id),
+        ]
+        .into_iter()
+        .flatten()
     }
 }

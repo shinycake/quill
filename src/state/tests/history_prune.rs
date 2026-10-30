@@ -4,8 +4,8 @@ use super::common::{AtomicU64, MemorySink, apply_json, session};
 use super::{
     Arc, CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX,
     ChannelMemberStatus, ChatId, HashMap, InfoPanelTarget, MemberListFilter, MessageContent,
-    MessageId, ParsedMessage, ReplyTarget, Session, SupergroupMembersFetch, TopicHistory,
-    TranslateTarget, Translation, history_message,
+    MessageId, ParsedMessage, ReplyTarget, RequestPurpose, Session, SupergroupMembersFetch,
+    TopicHistory, TranslateTarget, Translation, history_message,
 };
 
 fn live(chat: i64, id: i64) -> ParsedMessage {
@@ -678,4 +678,160 @@ fn an_open_info_panel_keeps_what_it_shows() {
     assert!(!sponsored.contains(&1) && !polls.contains(&1));
     assert!(counts.contains(&1), "the panel's counts stay");
     assert!(members.contains(&1), "the panel's member list stays");
+}
+
+#[test]
+fn a_basic_group_panel_keeps_what_it_shows() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":1,"title":"G","type":{"@type":"chatTypeBasicGroup","basic_group_id":202},"unread_count":0}}"#,
+    );
+    switch(&mut session, 1);
+    fill_side_tables(&mut session, &seq, &sink, 1);
+    session.set_open_info_panel(Some(InfoPanelTarget::BasicGroup(202)));
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    assert!(!session.histories.contains_key(&1), "its rows went");
+    let [sponsored, _, counts, _, basic_members] = side_table_chats(&session);
+    assert!(!sponsored.contains(&1));
+    assert!(counts.contains(&1), "the panel's counts stay");
+    assert!(basic_members.contains(&1), "the panel's member list stays");
+}
+
+/// A box that reads the member lists of chat 1 (the Edit box's Manage
+/// rows, the member dialog) stays open while the main chat moves on.
+#[test]
+fn a_chat_an_open_box_holds_keeps_its_member_lists() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    fill_side_tables(&mut session, &seq, &sink, 1);
+    session.set_history_holds([ChatId(1)]);
+    let churn = |session: &mut Session, from: i64| {
+        for chat in from..=(from + CLOSED_CHATS_MAX as i64) {
+            switch(session, chat);
+            feed(session, chat, 1);
+        }
+    };
+    churn(&mut session, 2);
+    let held = side_table_chats(&session);
+    assert!(
+        held.iter().all(|chats| chats.contains(&1)),
+        "the box's lists stay: {held:?}"
+    );
+    assert!(!session.groups.member_list_stale.contains(&1));
+    // The box closes: the chat is an ordinary closed tail from then on.
+    session.set_history_holds([]);
+    churn(&mut session, 100);
+    let dropped = side_table_chats(&session);
+    assert!(
+        dropped.iter().all(|chats| !chats.contains(&1)),
+        "{dropped:?}"
+    );
+}
+
+#[test]
+fn a_forum_forgets_its_side_tables_with_its_last_topic() {
+    let (mut session, _sink) = session();
+    session.topic_history_entry(ChatId(70), 1);
+    session.accept_sponsored_messages(ChatId(70), Vec::new(), 0, &[]);
+    session
+        .media
+        .chat_media_counts
+        .insert(70, HashMap::from([(0, 3)]));
+    session.groups.supergroup_members.insert(
+        (70, MemberListFilter::Recent),
+        SupergroupMembersFetch::Loaded {
+            members: Vec::new(),
+            total_count: 200,
+        },
+    );
+    assert!(side_table_chats(&session)[0].contains(&70));
+    for topic in 1..=CLOSED_TOPICS_MAX as i32 {
+        session.topic_history_entry(ChatId(71), topic);
+    }
+    assert!(!session.threads.topic_histories.contains_key(&(70, 1)));
+    let tables = side_table_chats(&session);
+    assert!(
+        tables.iter().all(|chats| !chats.contains(&70)),
+        "{tables:?}"
+    );
+}
+
+/// The gallery shows its view's open chat, whose history entry stays while
+/// it is shown, so closed topics of that chat going leave its counts.
+#[test]
+fn the_open_chat_keeps_its_gallery_counts_while_its_topics_go() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 1);
+    session.media.shared_media.open_for(ChatId(1));
+    session
+        .media
+        .chat_media_counts
+        .insert(1, HashMap::from([(0, 3)]));
+    for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 4) {
+        session.topic_history_entry(ChatId(1), topic);
+    }
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 4) {
+        session.history_entry(ChatId(chat));
+    }
+    assert!(!session.threads.topic_histories.contains_key(&(1, 1)));
+    assert!(session.media.shared_media.open);
+    assert!(session.media.chat_media_counts.contains_key(&1));
+}
+
+fn sponsored_answer(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, chat: i64) {
+    let extra = session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(chat)));
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":""}},"title":"T","button_text":"Go","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+            extra.0
+        ),
+    );
+}
+
+#[test]
+fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    let shown = |session: &Session| session.open_sponsored_tail().map(|ad| ad.message_id);
+    assert_eq!(shown(&session), Some(9001));
+    assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
+    let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"reportSponsoredResultOk","@extra":"{}"}}"#,
+            report.0
+        ),
+    );
+    assert_eq!(shown(&session), None, "the reported ad left the chat");
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    assert!(!session.histories.contains_key(&1), "its rows went");
+    assert!(
+        session.sponsored_message(ChatId(1), 9001).is_none(),
+        "and its ads"
+    );
+    assert!(session.sponsored_fetch_due(ChatId(1), std::time::Instant::now()));
+    // TDLib's list still has the ad when the chat opens again.
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.sponsored_message(ChatId(1), 9001).is_some());
+    assert_eq!(shown(&session), None, "the reported ad stays hidden");
 }
