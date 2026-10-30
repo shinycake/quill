@@ -127,3 +127,20 @@ end of the line. GPUI hands a key to AppKit's text system only when no
 binding matches, and then drops the command, so a field had none of these
 unless the keymap names them. Background:
 `docs/decisions/native-macos-shortcuts.md`.
+
+## The caret blinks in an active window only
+
+`src/input/base/state.rs`: a field focused while its window was inactive
+(the window in the background, or never made key) started the caret's
+blink. Deactivating a window stops it (the blur handler), but nothing
+stopped one started after that. An inactive window never draws the caret
+(`show_cursor`), yet each blink notified the view, so the window drew two
+invisible frames a second for as long as it stayed in the background.
+That kept the display link from going idle, so the idle release of its
+drawables never ran (one window-sized drawable, about 20 MB, held for
+nothing). `focus` and the focus handler now start the blink only in an
+active window; activating the window starts it as before.
+
+The input tests' window (`InputView::build_with`) is activated, as a real
+window that takes a click or a key is, and the two tests that timed the
+blink after a focus wait for the focus handler's restart.

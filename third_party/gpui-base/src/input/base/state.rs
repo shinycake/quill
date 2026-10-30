@@ -1700,9 +1700,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Focus the input field.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_handle.focus(window, cx);
-        self.blink_cursor.update(cx, |cursor, cx| {
-            cursor.start(cx);
-        });
+        self.start_blink_cursor(window, cx);
     }
 
     /// Refresh the input, so the next render re-runs syntax highlighting and
@@ -3990,11 +3988,22 @@ impl<M: InputModeKind> InputBaseState<M> {
             && window.is_window_active()
     }
 
-    fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_blink_cursor(window, cx);
+        cx.emit(InputEvent::Focus);
+    }
+
+    /// QUILL: start the caret's blink in an active window only. An inactive
+    /// one never shows the caret (`show_cursor`), so a blink there redrew
+    /// the window twice a second for nothing and kept it from going idle.
+    /// Activating the window starts it.
+    fn start_blink_cursor(&self, window: &Window, cx: &mut Context<Self>) {
+        if !window.is_window_active() {
+            return;
+        }
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
-        cx.emit(InputEvent::Focus);
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -6276,6 +6285,12 @@ mod tests {
                 })
                 .unwrap()
             });
+            // QUILL: the caret blinks in an active window only, as a real
+            // window that takes a click or a key is.
+            window
+                .update(cx, |_, window, _| window.activate_window())
+                .unwrap();
+            cx.run_until_parked();
 
             Self {
                 input: input.clone().unwrap(),
@@ -9818,10 +9833,12 @@ mod tests {
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "a|b");
         cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.focus(window, cx);
-                state.pause_blink_cursor(cx);
-            });
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        // The focus observer restarts the blink once the focus lands.
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            view.input.update(cx, |state, cx| state.pause_blink_cursor(cx));
         });
         cx.run_until_parked();
         cx.executor()
@@ -9873,9 +9890,11 @@ mod tests {
         cx.run_until_parked();
 
         // Pressing elsewhere in the focused input, in the hidden phase of the
-        // blink, shows the caret again at the press.
+        // blink, shows the caret again at the press. The focus observer
+        // restarted the blink from a shown caret after the first press, so
+        // the hidden phase begins one 500 ms interval later.
         cx.executor()
-            .advance_clock(std::time::Duration::from_millis(400));
+            .advance_clock(std::time::Duration::from_millis(600));
         cx.run_until_parked();
         assert!(!visible(&mut cx));
         let second = position(px(30.), &mut cx);

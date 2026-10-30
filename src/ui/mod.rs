@@ -232,6 +232,7 @@ mod calls;
 mod calls_clear;
 mod capture_access;
 mod capture_block;
+mod caret_blink_tests;
 mod chat;
 mod chat_bars;
 mod chat_header_menu_ui;
