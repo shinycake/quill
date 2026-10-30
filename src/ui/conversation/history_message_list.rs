@@ -369,17 +369,6 @@ impl QuillApp {
             (None, true) => Some((-pull_shift, 0.)),
         };
         let reveal_probe = self.frame.motion.reveal_probe();
-        let jump_zone = self.history.scroller.read(cx).is_scrolled_up().then(|| {
-            div()
-                .absolute()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .h(px(56.))
-                .flex()
-                .justify_center()
-                .child(super::anim_layer::occluder(div().w(px(128.)).h_full()))
-        });
         // Built for a chat window: the work the rows defer (paging, GIF
         // autoplay, the jump button) runs with that window's state in
         // place (`in_window_scope`).
@@ -505,6 +494,9 @@ impl QuillApp {
                             })
                     }
                 })
+                // What animates under the jump button, while it shows, is
+                // drawn by the conversation.
+                .wrap_jump_button(|button| super::anim_layer::occluder(button).into_any_element())
                 .size_full()
                 .min_h_0(),
             ))
@@ -619,11 +611,7 @@ impl QuillApp {
             .children(date_pill)
             .child(self.history_width_probe(cx))
             // tdesktop's corner "@" / heart buttons.
-            .children(corner_buttons.map(super::anim_layer::occluder))
-            // Where the scroller's jump-to-latest button floats while
-            // scrolled up (it is drawn inside the kit's scroller): what
-            // animates under it is drawn by the conversation.
-            .children(jump_zone),
+            .children(corner_buttons.map(super::anim_layer::occluder)),
         )
         .into_any_element()
     }

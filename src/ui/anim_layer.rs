@@ -193,6 +193,12 @@ impl Layer {
         items.len() - 1
     }
 
+    /// What covered the slice's content in its last real frame.
+    #[cfg(test)]
+    pub(super) fn occluders(&self) -> Vec<Bounds<Pixels>> {
+        self.0.occluders.borrow().clone()
+    }
+
     fn occluded(&self, visible: Bounds<Pixels>) -> bool {
         self.0
             .occluders

@@ -69,3 +69,9 @@ something up for its subtree while it draws has to sit inside the surface.
 Quill puts its bounded image cache there, so pictures in dialogs leave
 memory once off screen (`docs/decisions/dialog-images-bounded-cache.md`).
 Re-apply when re-vendoring.
+
+`src/message_scroller.rs`: `MessageScroller::wrap_jump_button` wraps the
+built-in jump-to-latest button, while it is drawn, in an element the caller
+passes. Quill marks the button as covering the rows' animations
+(`anim_layer::occluder`) with its own bounds, only while it shows
+(`docs/decisions/codex-history-anim-layer.md`). Re-apply when re-vendoring.
