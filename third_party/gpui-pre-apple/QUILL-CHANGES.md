@@ -52,6 +52,12 @@ The Quill project also changed it in 2026 to give back idle window memory
   layer's drawable size to 1×1 and back, which empties the drawable pool
   (up to three window-sized surfaces). The surface on screen stays as the
   layer's contents until the next present.
+- `src/metal_renderer.rs`: `draw` notes when each drawable (by its
+  IOSurface) was handed out, and `trim_spare_drawables` runs the same release
+  when one has gone unused for 3 s while others were handed out in the last
+  second: the spare a burst (the first frames, a scroll) left in the pool
+  while a slow animation keeps the window drawing. A resize or a release
+  forgets the drawables it knew.
 
 The Quill project also changed it in 2026 to give back memory after
 browsing (`docs/decisions/sweep-r3-browse-memory.md`):
