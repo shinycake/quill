@@ -75,6 +75,7 @@ mod esc_stack;
 mod folders_state;
 mod force_reply;
 mod frame_clock;
+mod free_heap;
 pub mod link_inbox;
 mod wake_wait;
 pub use wake_wait::sleep_or_wake;

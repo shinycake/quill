@@ -300,36 +300,6 @@ pub(super) fn take_unshowable() -> Vec<Arc<RenderImage>> {
     })
 }
 
-/// Hand the allocator's free pages back to the system once Quill goes
-/// idle (decoded images and their decode buffers are large, short-lived
-/// blocks; without this the freed space stays resident as allocator free
-/// lists).
-/// - macOS: `malloc_zone_pressure_relief` on every zone. Blocks of 64 KiB
-///   and up already went back when freed (`quill::large_alloc`).
-/// - Linux (glibc): `malloc_trim`.
-/// - Windows and other libcs: nothing; the Windows heap decommits large
-///   free ranges on its own.
-fn release_free_heap() {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe extern "C" {
-            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-        }
-        // SAFETY: a null zone means "all zones"; goal 0 means "as much as
-        // possible". The call only releases free pages.
-        unsafe {
-            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
-        }
-    }
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        // SAFETY: glibc's `malloc_trim` only returns free heap memory.
-        unsafe {
-            libc::malloc_trim(0);
-        }
-    }
-}
-
 /// Keys to evict, least recently used first, until `total` fits `budget`.
 /// `candidates` are `(last_used, key, bytes)` of entries that can't be on
 /// screen; `total` is `(bytes, entries)` of the whole cache.
@@ -750,7 +720,7 @@ impl BoundedImageCache {
         // Even with nothing evicted here: what left the screen (a closed
         // viewer's full-size photo, a chat's sticker frames) was freed
         // meanwhile.
-        release_free_heap();
+        super::free_heap::release();
     }
 
     /// Remove entries past `budget`; their loaded images, for the caller
