@@ -78,3 +78,13 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 - `src/metal_atlas.rs`: `MetalAtlas` forwards `PlatformAtlas::next_use_mark`,
   `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
   `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).
+
+The Quill project also changed it in 2026 so small pictures don't keep big
+textures (`docs/decisions/images-left-behind.md`):
+
+- `src/metal_atlas.rs`: tiles are sorted into `TileClass`es (glyphs and
+  SVGs, images up to 128 px a side, larger images), and a texture holds one
+  class. Small images get 512² (1 MB) textures; the rest keep 1024². An
+  avatar left on screen kept the 4 MB texture larger pictures had come and
+  gone in. Test: `test_small_pictures_get_small_textures`; the tile-reuse
+  test's keeper tile is 200² so it shares the large tiles' texture.

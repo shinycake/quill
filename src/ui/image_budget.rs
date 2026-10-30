@@ -25,11 +25,12 @@
 //! gone once that slice rendered again without it. Images used outside any
 //! slice are re-requested by `QuillApp` every frame.
 //!
-//! Atlas textures (1024² and up, on every GPUI backend: Metal, wgpu,
-//! DirectX) are released only once every tile in them is gone. Tiles are
-//! allocated in the newest texture with room, so images loaded together
-//! share textures; evicting oldest-first empties whole textures rather
-//! than punching holes in all of them.
+//! Atlas textures (512² for pictures up to 128 px a side, else 1024² and
+//! up, on every GPUI backend: Metal, wgpu, DirectX) are released only once
+//! every tile in them is gone. Tiles are allocated in the newest texture
+//! with room, so images loaded together share textures; evicting
+//! oldest-first empties whole textures rather than punching holes in all
+//! of them.
 #![deny(clippy::indexing_slicing)]
 
 use super::image_decode::{self, DecodeSize};
@@ -538,8 +539,12 @@ impl Asset for SizedAsset {
     }
 }
 
-/// Side of the atlas textures GPUI allocates (larger images get a texture
-/// of their own size).
+/// The textures the vendored GPUI atlas allocates for images (`TileClass`
+/// in its backends): pictures up to `SMALL_IMAGE` px a side share
+/// `SMALL_TEXTURE`² textures, larger ones `ATLAS_TEXTURE`² textures, and a
+/// picture larger than that gets a texture of its own size.
+const SMALL_IMAGE: u32 = 128;
+const SMALL_TEXTURE: u32 = 512;
 const ATLAS_TEXTURE: u32 = 1024;
 
 /// What a decoded image costs: its pixels, or, for a small one, the share
@@ -548,11 +553,16 @@ const ATLAS_TEXTURE: u32 = 1024;
 /// 1.7 MB of pixels (and the texture only goes once its last tile does).
 fn atlas_cost(width: u32, height: u32) -> usize {
     let pixels = width as usize * height as usize * 4;
-    if width == 0 || height == 0 || width > ATLAS_TEXTURE || height > ATLAS_TEXTURE {
+    let side = if width <= SMALL_IMAGE && height <= SMALL_IMAGE {
+        SMALL_TEXTURE
+    } else {
+        ATLAS_TEXTURE
+    };
+    if width == 0 || height == 0 || width > side || height > side {
         return pixels;
     }
-    let tiles = (ATLAS_TEXTURE / width) as usize * (ATLAS_TEXTURE / height) as usize;
-    let texture = ATLAS_TEXTURE as usize * ATLAS_TEXTURE as usize * 4;
+    let tiles = (side / width) as usize * (side / height) as usize;
+    let texture = side as usize * side as usize * 4;
     pixels.max(texture / tiles)
 }
 
@@ -1454,8 +1464,13 @@ mod tests {
         assert_eq!(atlas_cost(1024, 1024), texture);
         // Two per row, one row.
         assert_eq!(atlas_cost(512, 576), texture / 2);
-        // Avatars pack tightly: about their pixels.
-        assert_eq!(atlas_cost(92, 92), texture / (11 * 11));
+        // Just too big to be small: 7 x 7 to a texture.
+        assert_eq!(atlas_cost(129, 129), texture / (7 * 7));
+        // Small pictures share 1 MB textures; avatars a little above their
+        // pixels.
+        let small_texture = 512 * 512 * 4;
+        assert_eq!(atlas_cost(128, 128), small_texture / (4 * 4));
+        assert_eq!(atlas_cost(92, 92), small_texture / (5 * 5));
         assert!((36 * 36 * 4..36 * 36 * 4 * 11 / 10).contains(&atlas_cost(36, 36)));
         assert_eq!(atlas_cost(0, 5), 0);
     }

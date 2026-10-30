@@ -48,3 +48,15 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 - `src/wgpu_atlas.rs`: `WgpuAtlas` forwards `PlatformAtlas::next_use_mark`,
   `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
   `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).
+
+The Quill project also changed it in 2026 so small pictures don't keep big
+textures (`docs/decisions/images-left-behind.md`):
+
+- `src/wgpu_atlas.rs`: tiles are sorted into `TileClass`es and small
+  images get 512² textures, the same change as gpui-pre-apple's
+  `metal_atlas.rs`. Tests: `small_pictures_keep_to_textures_of_their_own`,
+  `animation_frames_rotate_through_one_texture`; the tile-reuse test's
+  keeper tile is 200². The atlas tests ran on lavapipe, through
+  `cargo test -p gpui-pre-wgpu --lib wgpu_atlas` with the `test-support`
+  feature on and the crate's other test modules left out (they read fonts
+  from the Zed tree or need `naga`).
