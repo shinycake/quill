@@ -26,7 +26,16 @@ use objc2_core_video::{
 };
 use parking_lot::Mutex;
 
-use std::{cell::Cell, ffi::c_void, mem, mem::MaybeUninit, ops::Range, ptr, slice, sync::Arc};
+use std::{
+    cell::Cell,
+    ffi::c_void,
+    mem,
+    mem::MaybeUninit,
+    ops::Range,
+    ptr, slice,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 // Exported to metal
 pub(crate) type PointF = gpui::Point<f32>;
@@ -41,6 +50,21 @@ const PATH_SAMPLE_COUNT: u32 = 4;
 /// Metal requires the offset a buffer is bound at to be 256-byte aligned.
 const INSTANCE_BUFFER_ALIGNMENT: usize = 256;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
+/// QUILL: a drawable not handed out for this long, while another one was
+/// handed out within `DRAWING_WITHIN`, is a spare (`trim_spare_drawables`).
+const SPARE_DRAWABLE_AFTER: Duration = Duration::from_secs(3);
+const DRAWING_WITHIN: Duration = Duration::from_secs(1);
+
+/// QUILL: an `IOSurfaceRef` as `-[MTLTexture iosurface]` returns it. A bare
+/// `*mut c_void` fails objc2's check of the return type in debug builds.
+#[repr(transparent)]
+struct SurfaceRef(*mut c_void);
+
+// SAFETY: a pointer to the opaque `struct __IOSurface`, as declared.
+unsafe impl objc2::encode::Encode for SurfaceRef {
+    const ENCODING: objc2::encode::Encoding =
+        objc2::encode::Encoding::Pointer(&objc2::encode::Encoding::Struct("__IOSurface", &[]));
+}
 
 pub type Context = Arc<Mutex<InstanceBufferPool>>;
 pub type Renderer = MetalRenderer;
@@ -148,6 +172,9 @@ pub struct MetalRenderer {
     /// rendering headlessly without reading pixels back.
     #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
     headless_render_target: Option<metal::Texture>,
+    /// QUILL: when each drawable of the layer's pool, known by its
+    /// IOSurface, was last handed out (`trim_spare_drawables`).
+    drawables_handed_out: Vec<(usize, Instant)>,
 }
 
 #[repr(C)]
@@ -459,6 +486,7 @@ impl MetalRenderer {
             path_sample_count: PATH_SAMPLE_COUNT,
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
+            drawables_handed_out: Vec::new(),
         }
     }
 
@@ -486,7 +514,15 @@ impl MetalRenderer {
 
     pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
         if let Some(layer) = &self.layer {
-            layer.set_drawable_size(CGSize::new(size.width.0 as f64, size.height.0 as f64));
+            let new = CGSize::new(size.width.0 as f64, size.height.0 as f64);
+            let old = layer.drawable_size();
+            // QUILL: a new size empties the pool; none of the known
+            // drawables will be handed out again. The same size (a move
+            // between displays of one scale) keeps them.
+            if old.width != new.width || old.height != new.height {
+                self.drawables_handed_out.clear();
+            }
+            layer.set_drawable_size(new);
         }
         self.update_path_intermediate_textures(size);
     }
@@ -500,6 +536,7 @@ impl MetalRenderer {
     /// which the layer keeps showing until the next present. The next frame
     /// allocates a fresh drawable.
     pub fn release_idle_drawables(&mut self) {
+        self.drawables_handed_out.clear();
         let Some(layer) = &self.layer else {
             return;
         };
@@ -509,6 +546,62 @@ impl MetalRenderer {
         }
         layer.set_drawable_size(CGSize::new(1.0, 1.0));
         layer.set_drawable_size(size);
+    }
+
+    /// QUILL: frees the layer's spare drawables while the window keeps
+    /// drawing.
+    ///
+    /// A burst (the first frames, a scroll) can fill the pool with all three
+    /// drawables, and the layer keeps them for as long as anything animates,
+    /// so the idle release above never runs. A slow animation (a looping
+    /// custom emoji at 30 or 60 fps on a 120 Hz display) only cycles two:
+    /// the third, a whole window-sized surface, sits unused. A drawable not
+    /// handed out for `SPARE_DRAWABLE_AFTER` while others are is such a
+    /// spare: empty the pool as the idle release does, and the next frames
+    /// allocate only the drawables they use. Content that needs all three
+    /// keeps handing each one out, so this never fires for it. Two are the
+    /// floor (one on screen, one to draw into): emptying a pool of two
+    /// frees nothing the next frames don't allocate again.
+    fn trim_spare_drawables(&mut self) {
+        if self.drawables_handed_out.len() < 3 {
+            return;
+        }
+        let now = Instant::now();
+        let age = |at: &Instant| now.saturating_duration_since(*at);
+        let spare = self
+            .drawables_handed_out
+            .iter()
+            .any(|(_, at)| age(at) >= SPARE_DRAWABLE_AFTER);
+        let drawing = self
+            .drawables_handed_out
+            .iter()
+            .any(|(_, at)| age(at) < DRAWING_WITHIN);
+        if spare && drawing {
+            self.release_idle_drawables();
+        }
+    }
+
+    /// QUILL: records that `drawable` was handed out now. A pooled drawable
+    /// keeps its IOSurface, so the surface names it.
+    fn note_drawable_handed_out(&mut self, drawable: &metal::MetalDrawableRef) {
+        let texture: *const AnyObject = drawable.texture().as_ptr().cast();
+        // SAFETY: a drawable's texture is a live MTLTexture for as long as
+        // the drawable is, and `iosurface` is a getter returning an unretained
+        // IOSurfaceRef (or null).
+        let surface: SurfaceRef = unsafe { objc2::msg_send![&*texture, iosurface] };
+        if surface.0.is_null() {
+            return;
+        }
+        let id = surface.0 as usize;
+        let now = Instant::now();
+        match self
+            .drawables_handed_out
+            .iter_mut()
+            .find(|(known, _)| *known == id)
+        {
+            Some((_, at)) => *at = now,
+            None => self.drawables_handed_out.push((id, now)),
+        }
     }
 
     fn update_path_intermediate_textures(&mut self, size: Size<DevicePixels>) {
@@ -575,6 +668,8 @@ impl MetalRenderer {
             (viewport_size.width.ceil() as i32).into(),
             (viewport_size.height.ceil() as i32).into(),
         );
+        // QUILL: free spares a burst left before taking the next drawable.
+        self.trim_spare_drawables();
         let drawable = if let Some(drawable) = layer.next_drawable() {
             drawable
         } else {
@@ -584,6 +679,7 @@ impl MetalRenderer {
             );
             return;
         };
+        self.note_drawable_handed_out(drawable);
 
         let command_buffer = match self.render_frame(scene, drawable.texture(), viewport_size) {
             Ok(command_buffer) => command_buffer,
