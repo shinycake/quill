@@ -140,3 +140,7 @@ That kept the display link from going idle, so the idle release of its
 drawables never ran (one window-sized drawable, about 20 MB, held for
 nothing). `focus` and the focus handler now start the blink only in an
 active window; activating the window starts it as before.
+
+The input tests' window (`InputView::build_with`) is activated, as a real
+window that takes a click or a key is, and the two tests that timed the
+blink after a focus wait for the focus handler's restart.

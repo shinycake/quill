@@ -6285,6 +6285,12 @@ mod tests {
                 })
                 .unwrap()
             });
+            // QUILL: the caret blinks in an active window only, as a real
+            // window that takes a click or a key is.
+            window
+                .update(cx, |_, window, _| window.activate_window())
+                .unwrap();
+            cx.run_until_parked();
 
             Self {
                 input: input.clone().unwrap(),
@@ -9827,10 +9833,12 @@ mod tests {
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "a|b");
         cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.focus(window, cx);
-                state.pause_blink_cursor(cx);
-            });
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        // The focus observer restarts the blink once the focus lands.
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            view.input.update(cx, |state, cx| state.pause_blink_cursor(cx));
         });
         cx.run_until_parked();
         cx.executor()
@@ -9882,9 +9890,11 @@ mod tests {
         cx.run_until_parked();
 
         // Pressing elsewhere in the focused input, in the hidden phase of the
-        // blink, shows the caret again at the press.
+        // blink, shows the caret again at the press. The focus observer
+        // restarted the blink from a shown caret after the first press, so
+        // the hidden phase begins one 500 ms interval later.
         cx.executor()
-            .advance_clock(std::time::Duration::from_millis(400));
+            .advance_clock(std::time::Duration::from_millis(600));
         cx.run_until_parked();
         assert!(!visible(&mut cx));
         let second = position(px(30.), &mut cx);

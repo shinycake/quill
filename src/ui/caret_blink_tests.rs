@@ -74,13 +74,14 @@ fn a_caret_focused_in_an_inactive_window_waits_for_it(cx: &mut TestAppContext) {
     assert!(redraws(&app, vcx) >= 5, "it blinks once active");
 }
 
-/// Deactivating the window stops a running blink (the input's blur
-/// handler); the field stays focused.
+/// A field focused in an active window blinks, and deactivating the window
+/// stops it (the input's blur handler); the field stays focused.
 #[gpui_kit::test]
 fn the_caret_stops_when_its_window_deactivates(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
     focus_composer(&app, vcx);
     assert!(redraws(&app, vcx) >= 5, "it blinks while active");
 
