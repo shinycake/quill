@@ -108,8 +108,13 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   answer for ever (`Player::try_seek` blocks until the audio thread takes
   it; a paused video's seek runs on the UI thread). The video decoder keeps
   time from what the output pulls, so a soundtrack resumed without a device
-  would also freeze the picture. With no device, `play` leaves the player
-  paused and `try_seek` fails at once.
+  would also freeze the picture. With no device, `play` says so (the engine
+  pauses again and shows no output; a video soundtrack waits for the next
+  device) and `try_seek` fails at once.
+- Silence counts only while the device asks for sound. A device that stalls
+  (a reroute, a Bluetooth reconnect) stops asking, and closing it then could
+  leave a seek parked for an answer that never comes, on the UI thread for a
+  video. The watch keeps a device that didn't ask since its last look.
 - A video soundtrack (`StreamSound`) never ends: it plays silence after the
   clip. The ffmpeg backend pauses it whenever the decoder isn't playing, so
   an ended clip left on screen lets the device close.

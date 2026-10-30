@@ -686,6 +686,9 @@ impl AudioEngine {
                 let held = self.track.as_ref().is_some_and(|t| t.player.is_paused());
                 built.player.set_volume(self.volume);
                 let playing = held || built.player.play();
+                if !playing {
+                    built.player.pause();
+                }
                 self.track = Some(Track::new(built, &self.workers));
                 self.stale = false;
                 self.error = (!playing).then_some(AudioError::NoOutput);
@@ -797,6 +800,7 @@ impl AudioEngine {
         if let Some(track) = &self.track
             && !track.player.play()
         {
+            track.player.pause();
             let woke = Err(AudioError::NoOutput);
             self.note(&woke);
             return woke;

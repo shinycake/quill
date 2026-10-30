@@ -53,6 +53,9 @@ struct Output {
     state: Mutex<OutputState>,
     /// Set by every sound a player pulls, cleared by the watch.
     heard: Arc<AtomicBool>,
+    /// Set each time the device asks for sound ([`Feed`]), cleared by the
+    /// watch.
+    pulled: Arc<AtomicBool>,
     /// Open [`Hold`]s.
     holds: AtomicUsize,
     /// Tests: stands in for the device (`Some(None)` is "no device").
@@ -124,13 +127,12 @@ impl OutputPlayer {
         });
     }
 
-    /// False, and still paused, when there is no device.
+    /// False when there is no device now; unpaused either way, so a device
+    /// that opens later plays it.
     pub(in crate::ui) fn play(&self) -> bool {
-        if !self.output.wake() {
-            return false;
-        }
+        let woke = self.output.wake();
         self.player.play();
-        true
+        woke
     }
 
     /// Waits for the audio thread to take the seek; fails at once when
@@ -226,9 +228,15 @@ impl Output {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether anything played since the last look, or a hold is open.
+    /// Whether the device should stay open: something played since the
+    /// last look, a hold is open, or the device didn't ask for sound. A
+    /// device that stalls (a reroute, a Bluetooth reconnect) stops asking,
+    /// and its silence then says nothing about the players: a player could
+    /// be waiting on it, a seek parked for its answer.
     fn sounded(&self) -> bool {
-        self.heard.swap(false, Ordering::Relaxed) || self.holds.load(Ordering::Relaxed) > 0
+        let heard = self.heard.swap(false, Ordering::Relaxed);
+        let pulled = self.pulled.swap(false, Ordering::Relaxed);
+        heard || !pulled || self.holds.load(Ordering::Relaxed) > 0
     }
 }
 
@@ -257,7 +265,7 @@ impl OutputState {
             if self.failed_at.is_some_and(|at| at.elapsed() < RETRY_AFTER) {
                 return false;
             }
-            if !self.attach() {
+            if !self.attach(output) {
                 self.failed_at = Some(Instant::now());
                 return false;
             }
@@ -274,7 +282,7 @@ impl OutputState {
 
     /// Open the default device and feed it the app mixer, made now from the
     /// device's layout if this is the first one.
-    fn attach(&mut self) -> bool {
+    fn attach(&mut self, output: &Output) -> bool {
         let stale = Arc::new(AtomicBool::new(false));
         let started = Instant::now();
         let mut sink = match open_default_output(output_error_callback(stale.clone())) {
@@ -294,7 +302,8 @@ impl OutputState {
                 sound: Arc::new(Mutex::new(sound)),
             }
         });
-        sink.mixer().add(Feed::new(app.sound.clone()));
+        sink.mixer()
+            .add(Feed::new(app.sound.clone(), output.pulled.clone()));
         self.device = Some(Device { _sink: sink, stale });
         true
     }
@@ -329,7 +338,7 @@ fn watch(output: &Arc<Output>) {
         if stale {
             debug_log("audio: output: reopening the default output device");
             state.device = None;
-            if !state.attach() {
+            if !state.attach(output) {
                 state.watched = false;
                 return;
             }
@@ -405,6 +414,7 @@ impl<S: Source> Source for Heard<S> {
 /// silence when nothing plays.
 struct Feed {
     sound: Arc<Mutex<MixerSource>>,
+    pulled: Arc<AtomicBool>,
     channels: ChannelCount,
     rate: SampleRate,
     block: Vec<f32>,
@@ -412,7 +422,7 @@ struct Feed {
 }
 
 impl Feed {
-    fn new(sound: Arc<Mutex<MixerSource>>) -> Self {
+    fn new(sound: Arc<Mutex<MixerSource>>, pulled: Arc<AtomicBool>) -> Self {
         let (channels, rate) = {
             let sound = sound.lock().unwrap_or_else(PoisonError::into_inner);
             (sound.channels(), sound.sample_rate())
@@ -420,6 +430,7 @@ impl Feed {
         let len = FEED_FRAMES * usize::from(channels.get());
         Self {
             sound,
+            pulled,
             channels,
             rate,
             block: vec![0.0; len],
@@ -438,6 +449,7 @@ impl Iterator for Feed {
                 *slot = sound.next().unwrap_or(0.0);
             }
             self.at = 0;
+            self.pulled.store(true, Ordering::Relaxed);
         }
         let sample = self.block.get(self.at).copied().unwrap_or(0.0);
         self.at += 1;
@@ -601,8 +613,8 @@ mod tests {
         assert_eq!(wakes(), 2);
     }
 
-    /// With no device a play leaves the player paused, and a seek fails at
-    /// once instead of waiting for an audio thread that isn't there.
+    /// With no device a play says so, and a seek fails at once instead of
+    /// waiting for an audio thread that isn't there.
     #[test]
     fn without_a_device_play_and_seek_give_up_at_once() {
         let (channels, rate) = mono(8000);
@@ -616,7 +628,7 @@ mod tests {
         // The device went away after the player was made.
         player.output = SharedOutput::for_test(None);
         assert!(!player.play());
-        assert!(player.is_paused());
+        assert!(!player.is_paused(), "a device that opens later plays it");
         assert!(player.try_seek(Duration::from_millis(50)).is_err());
     }
 
@@ -640,7 +652,8 @@ mod tests {
     fn the_feed_plays_the_app_mixer_then_silence() {
         let (channels, rate) = mono(8000);
         let (mixer, sound) = mixer(channels, rate);
-        let mut feed = Feed::new(Arc::new(Mutex::new(sound)));
+        let pulled = Arc::new(AtomicBool::new(false));
+        let mut feed = Feed::new(Arc::new(Mutex::new(sound)), pulled.clone());
         assert_eq!(feed.channels(), channels);
         assert_eq!(feed.sample_rate(), rate);
         mixer.add(SamplesBuffer::new(channels, rate, vec![0.25; 300]));
@@ -648,16 +661,31 @@ mod tests {
         assert_eq!(played.iter().filter(|s| **s == 0.25).count(), 300);
         assert!(played.iter().skip(300).all(|s| *s == 0.0));
         assert!(feed.next().is_some());
+        assert!(pulled.load(Ordering::Relaxed), "the device asked");
     }
 
     #[test]
     fn a_hold_counts_as_sound_until_dropped() {
         let output = SharedOutput::default();
-        assert!(!output.0.sounded());
+        let look = || {
+            output.0.pulled.store(true, Ordering::Relaxed);
+            output.0.sounded()
+        };
+        assert!(!look());
         let hold = output.hold();
-        assert!(output.0.sounded());
-        assert!(output.0.sounded(), "every look while held");
+        assert!(look());
+        assert!(look(), "every look while held");
         drop(hold);
-        assert!(!output.0.sounded());
+        assert!(!look());
+    }
+
+    /// A device that stopped asking for sound (stalled) is not closed for
+    /// its silence: a player may be waiting on it.
+    #[test]
+    fn a_stalled_device_is_not_closed_for_its_silence() {
+        let output = SharedOutput::default();
+        output.0.pulled.store(true, Ordering::Relaxed);
+        assert!(!output.0.sounded(), "asked for sound, heard none");
+        assert!(output.0.sounded(), "didn't ask since");
     }
 }
