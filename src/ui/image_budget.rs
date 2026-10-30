@@ -694,9 +694,10 @@ impl BoundedImageCache {
     }
 
     /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget,
-    /// or, with the window in the `background`, to what is on screen.
-    /// Runs between frames (no window is being drawn), so the images leave
-    /// every window's atlas.
+    /// or, with the window in the `background`, to what is on screen, and
+    /// take what is kept off screen out of the atlas. Runs between frames
+    /// (no window is being drawn), so the images leave every window's
+    /// atlas.
     pub(super) fn idle_trim(&mut self, background: bool, cx: &mut App) {
         IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
         let before = (self.bytes, self.entries.len());
@@ -714,7 +715,15 @@ impl BoundedImageCache {
                 self.bytes as f64 / 1048576.0
             );
         }
-        for image in images {
+        // What stays off screen keeps its decode, so coming back to it only
+        // uploads it again, but not its atlas tile: a kept photo would
+        // otherwise hold a 4 MB texture of its own for as long as it stays.
+        let off_screen = self
+            .entries
+            .values()
+            .filter(|entry| !entry.may_be_visible())
+            .filter_map(|entry| entry.load.get()?.ok());
+        for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
         }
         // Even with nothing evicted here: what left the screen (a closed
@@ -1191,6 +1200,110 @@ mod tests {
         assert_eq!(idle_trim_due(), None, "already trimmed");
         note_activity();
         assert!(idle_trim_due().is_some());
+    }
+
+    /// The browse finding: two photos the idle budget kept off screen held
+    /// a 4 MB atlas texture each. The idle trim keeps their decode and takes
+    /// them out of the atlas; showing one again uploads that same decode.
+    /// A picture still on screen keeps its tile.
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn idle_trim_takes_kept_pictures_out_of_the_atlas(cx: &mut gpui_kit::TestAppContext) {
+        use super::{BoundedImageCache, CacheScope};
+        use gpui_kit::test::TestWindowExt;
+        use gpui_kit::{
+            AppContext, Context, Entity, IntoElement, ParentElement, Render, Resource, Styled,
+            VisualTestContext, Window, div, img, px, size,
+        };
+        use std::path::PathBuf;
+
+        struct Pictures {
+            cache: Entity<BoundedImageCache>,
+            on_screen: PathBuf,
+            left: PathBuf,
+            show_left: bool,
+        }
+        impl Render for Pictures {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                begin_frame();
+                let left = self.show_left.then(|| img(self.left.clone()).size(px(40.)));
+                let pictures = div()
+                    .size_full()
+                    .child(img(self.on_screen.clone()).size(px(40.)))
+                    .children(left);
+                CacheScope::new(self.cache.clone(), pictures)
+            }
+        }
+        /// The pictures' files, removed however the test ends.
+        struct Files(PathBuf);
+        impl Drop for Files {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        cx.update(gpui_kit::init);
+        let files = Files(std::env::temp_dir().join(format!("quill-atlas-{}", std::process::id())));
+        std::fs::create_dir_all(&files.0).expect("a folder for the pictures");
+        let [on_screen, left] = ["on-screen.png", "left.png"].map(|name| files.0.join(name));
+        for path in [&on_screen, &left] {
+            image::RgbaImage::new(8, 8)
+                .save(path)
+                .expect("write the picture");
+        }
+        let view_paths = (on_screen.clone(), left.clone());
+        let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+            let cache = cx.new(|_| BoundedImageCache::new(Default::default()));
+            Pictures {
+                cache,
+                on_screen: view_paths.0,
+                left: view_paths.1,
+                show_left: true,
+            }
+        });
+        let view = handle.root(cx).expect("the view");
+        let cache = view.read_with(cx, |view, _| view.cache.clone());
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let frames = |vcx: &mut VisualTestContext| {
+            for _ in 0..3 {
+                vcx.run_until_parked();
+                vcx.update(|window, cx| window.render_frame(cx));
+            }
+            vcx.run_until_parked();
+        };
+        let loaded = |vcx: &VisualTestContext, path: &PathBuf| {
+            let resource = Resource::Path(path.clone().into());
+            cache.read_with(vcx, |cache, _| cache.loaded(&resource))
+        };
+        frames(&mut vcx);
+        let kept = loaded(&vcx, &on_screen).expect("loaded");
+        let image = loaded(&vcx, &left).expect("loaded");
+        let in_atlas = |vcx: &mut VisualTestContext,
+                        image: &std::sync::Arc<gpui_kit::RenderImage>| {
+            vcx.update(|window, _| window.has_image_atlas_entry(image))
+        };
+        assert!(in_atlas(&mut vcx, &image));
+
+        view.update(&mut vcx, |view, cx| {
+            view.show_left = false;
+            cx.notify();
+        });
+        frames(&mut vcx);
+        cache.update(&mut vcx, |cache, cx| cache.idle_trim(false, cx));
+        let still = loaded(&vcx, &left);
+        assert!(still.is_some_and(|still| still.id == image.id), "kept");
+        assert!(!in_atlas(&mut vcx, &image), "out of the atlas");
+        assert!(in_atlas(&mut vcx, &kept), "on screen: left alone");
+
+        view.update(&mut vcx, |view, cx| {
+            view.show_left = true;
+            cx.notify();
+        });
+        frames(&mut vcx);
+        assert!(
+            in_atlas(&mut vcx, &image),
+            "the same decode, uploaded again"
+        );
     }
 
     #[cfg(feature = "demo-capture")]

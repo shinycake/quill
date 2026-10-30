@@ -20,6 +20,19 @@ runs two seconds later. While Quill is in front, the 8 MB stays. The cost:
 after coming back, a picture scrolled back into view decodes again (a frame
 or two of its placeholder), as it would after any chat switch.
 
+## Kept pictures off screen, while Quill is in front
+
+In front, the idle trim still keeps 8 MB of pictures beyond the screen. On a
+Mac, after a full browse, that was two photos of a chat already left, each
+alone in a 4 MB atlas texture: 8 MB of GPU memory on top of their 5 MB of
+decodes, for as long as nothing pushed them out.
+
+The idle trim now keeps the decode of each picture it keeps off screen but
+takes it out of the atlas (`drop_image`). Its texture goes once its last
+tile does. Scrolling back to it uploads the same decode again while the
+frame paints, so it shows at once with no placeholder; only a picture the
+trim evicted decodes again. What may be on screen keeps its tile.
+
 ## Wallpaper renders nobody took
 
 Wallpaper pictures render on a worker (`wallpaper_cache`); a finished result
@@ -61,5 +74,6 @@ index now forgets them on eviction.
 - `wallpaper_cache::tests::a_result_its_slot_moved_past_is_dropped`
 - `media_viewer::actions::rotate_ui_tests::closing_the_viewer_lets_go_of_a_turned_photo`
 - `image_budget::tests::evicted_sizes_leave_the_index`
+- `image_budget::tests::idle_trim_takes_kept_pictures_out_of_the_atlas`
 
 Each fails without its fix.
