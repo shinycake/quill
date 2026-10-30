@@ -147,17 +147,17 @@ Other per-chat side tables (translations, sponsored messages, media counts)
 are not pruned here. The media viewer's prev/next and the unread
 mention/reaction jump buttons read the shown chat only.
 
-## Side tables that go with the rows (2026-10 memory sweep)
+## Side tables that go with the chat (2026-10 memory sweep)
 
 - `messages.reply_targets`, the originals `getRepliedMessage` fetched for
-  rows whose replied-to message is outside the window, kept a boxed message
-  each for the whole session. Entries now go with their rows: when a
-  closed chat or topic is trimmed to its tail, when live messages push old
-  rows out of a closed chat, when a topic leaves the topic LRU, and when a
-  chat's history is dropped. A row loaded again fetches its original again.
-- `messages.pinned_messages` goes when the chat's history is dropped. Every
-  open fetches it again, and the pinned bar shows the loaded pinned rows
-  until it lands, as on a first open.
+  rows whose replied-to message is outside the window, and
+  `messages.pinned_messages` were kept for the whole session, a boxed
+  message each. They now go once nothing of the chat is kept: its history
+  entry dropped (LRU or a chat left) and no topic of it left. Opening the
+  chat fetches both again. A kept tail keeps them all, rows trimmed off it
+  included: dropping those with the trim made reply strips of rows paged
+  back in (coming back to a chat left scrolled up) show "Loading" until
+  the answer came.
 - A background account: releases settle from the frame's holds sync, which
   runs for the account on screen only, so the chat an account had open when
   it went to the background kept its whole window. Going to the background
@@ -165,8 +165,9 @@ mention/reaction jump buttons read the shown chat only.
   the release at once; nothing on screen holds a background account's
   chats.
 
-Tests: `state::tests::history_prune::replied_messages_fetched_for_trimmed_rows_go_with_them`,
-`a_dropped_chat_forgets_its_pinned_list_and_replied_messages`, and
+Tests: `state::tests::history_prune::a_kept_tail_keeps_the_replied_messages_of_rows_paged_out`,
+`a_dropped_chat_forgets_its_pinned_list_and_replied_messages`,
+`a_forum_keeps_its_replied_messages_until_its_last_topic_goes`, and
 `connect::tests::chat_window::an_account_going_to_the_background_trims_the_chat_it_showed`.
 
 ## How verified
