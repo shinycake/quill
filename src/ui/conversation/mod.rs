@@ -403,7 +403,7 @@ fn day_separator(label: &str, cx: &mut Context<QuillApp>) -> impl IntoElement {
 }
 
 /// A day pill that opens the calendar box.
-pub(super) fn date_pill_button(label: &str, cx: &mut Context<QuillApp>) -> impl IntoElement {
+pub(super) fn date_pill_button(label: &str, cx: &mut Context<QuillApp>) -> Stateful<Div> {
     pill_label(label, cx)
         .cursor_pointer()
         .on_click(cx.listener(|this, _, _, cx| this.open_jump_date_ui(cx)))

@@ -525,6 +525,11 @@ impl RenderOnce for MessageScroller {
                                 .bg(tokens.colors.background)
                                 .text_color(tokens.colors.foreground)
                                 .refine_style(&jump_button_style)
+                                // QUILL: it floats over the rows, so it takes
+                                // the pointer from what is under it (a click
+                                // would reach a row's media too); the wheel
+                                // still scrolls the list.
+                                .block_mouse_except_scroll()
                                 .on_click(move |_, _, cx| {
                                     state.update(cx, |state, cx| state.scroll_to_end(cx));
                                 })

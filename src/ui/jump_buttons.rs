@@ -137,6 +137,9 @@ fn corner_button(kind: UnreadJumpKind, count: i32, owner: WeakEntity<QuillApp>) 
     let jump_owner = owner.clone();
     div()
         .id(format!("{id}-wrap"))
+        // Floats over the history: a click on the button or its badge
+        // stays here instead of also reaching the media under it.
+        .block_mouse_except_scroll()
         .relative()
         .pt(px(BADGE_SIZE / 2.))
         .context_menu(move |menu, _, _| {
