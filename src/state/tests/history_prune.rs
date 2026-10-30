@@ -4,7 +4,7 @@ use super::common::session;
 use super::{
     CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX, ChannelMemberStatus,
     ChatId, MessageContent, MessageId, ParsedMessage, ReplyTarget, Session, TopicHistory,
-    history_message,
+    TranslateTarget, Translation, history_message,
 };
 
 fn live(chat: i64, id: i64) -> ParsedMessage {
@@ -263,6 +263,44 @@ fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
     assert!(session.messages.pinned_messages.contains_key(&2));
     assert!(fetched_reply(&session, 2, 5), "a kept tail keeps them");
     assert!(fetched_reply(&session, 2, 80));
+}
+
+fn translate(session: &mut Session, chat: i64, message: i64) {
+    let target = TranslateTarget::Message {
+        chat_id: chat,
+        message_id: message,
+    };
+    let (job, _) = session.begin_translation(target, "en", Some(ChatId(chat)));
+    let done = Translation::Done {
+        text: "t".into(),
+        entities: Vec::new(),
+    };
+    session.finish_translation(job, done);
+}
+
+fn translated(session: &Session, chat: i64, message: i64) -> bool {
+    session
+        .message_translation(ChatId(chat), MessageId(message), "en")
+        .is_some()
+}
+
+#[test]
+fn a_dropped_chat_forgets_its_translations() {
+    let (mut session, _sink) = session();
+    let total = CLOSED_CHATS_MAX as i64 + 1;
+    for chat in 1..=total {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 80);
+        // Row 5 leaves with the tail trim, row 80 stays in the tail.
+        translate(&mut session, chat, 5);
+        translate(&mut session, chat, 80);
+    }
+    leave(&mut session);
+    assert!(!session.histories.contains_key(&1), "the oldest went");
+    assert!(!translated(&session, 1, 5));
+    assert!(!translated(&session, 1, 80));
+    assert!(translated(&session, 2, 5), "a kept tail keeps them");
+    assert!(translated(&session, 2, 80));
 }
 
 #[test]

@@ -158,6 +158,11 @@ mention/reaction jump buttons read the shown chat only.
   included: dropping those with the trim made reply strips of rows paged
   back in (coming back to a chat left scrolled up) show "Loading" until
   the answer came.
+- `messages.translate.messages`, every message translation asked for
+  (a translated chat asks for each row it shows), go by the same rule.
+  Telegram Desktop keeps a translation on its `HistoryItem`, so it goes
+  with the item. The language a chat is shown in (`translate.chat_to`) is
+  the user's choice and stays.
 - A background account: releases settle from the frame's holds sync, which
   runs for the account on screen only, so the chat an account had open when
   it went to the background kept its whole window. Going to the background
@@ -167,7 +172,8 @@ mention/reaction jump buttons read the shown chat only.
 
 Tests: `state::tests::history_prune::a_kept_tail_keeps_the_replied_messages_of_rows_paged_out`,
 `a_dropped_chat_forgets_its_pinned_list_and_replied_messages`,
-`a_forum_keeps_its_replied_messages_until_its_last_topic_goes`, and
+`a_forum_keeps_its_replied_messages_until_its_last_topic_goes`,
+`a_dropped_chat_forgets_its_translations`, and
 `connect::tests::chat_window::an_account_going_to_the_background_trims_the_chat_it_showed`.
 
 ## How verified

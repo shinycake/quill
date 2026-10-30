@@ -17,9 +17,10 @@
 //! - live messages landing in a chat nobody shows keep that tail bounded
 //!   ([`CLOSED_TAIL_CAP`]) and count as use of the chat;
 //! - what is kept beside a chat's rows goes once nothing of the chat is
-//!   kept: the replied-to messages fetched for its rows, and its pinned
-//!   list (fetched again whenever the chat opens). A kept tail keeps them
-//!   all, so rows paged back in show their reply strips at once.
+//!   kept: the replied-to messages fetched for its rows, their
+//!   translations, and its pinned list (fetched again whenever the chat
+//!   opens). A kept tail keeps them all, so rows paged back in show their
+//!   reply strips and translations at once.
 //!
 //! A history is never pruned while any view shows it (the main window, a
 //! chat window, a topic or comment thread of it) or while the UI holds it
@@ -463,6 +464,10 @@ impl Session {
         self.messages
             .reply_targets
             .retain(|&(chat, _), _| chat != chat_id.0);
+        self.messages
+            .translate
+            .messages
+            .retain(|(chat, _, _), _| *chat != chat_id.0);
     }
 
     /// A chat that was left or deleted: its histories go when no view
