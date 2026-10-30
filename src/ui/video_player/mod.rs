@@ -611,6 +611,11 @@ impl VideoPlayer {
         self.with_inner(|inner| inner.estimator.set_period(period));
     }
 
+    /// The content grid of the display it is drawn on (`frame_grid`).
+    pub(super) fn set_content_grid(&self, grid: Option<super::frame_grid::ContentGrid>) {
+        self.with_inner(|inner| inner.estimator.set_grid(grid));
+    }
+
     pub(super) fn pull(&self, now: Instant, hint: Option<(Instant, u64)>) -> Option<Picture> {
         let present = self.with_inner(|inner| {
             inner.estimator.record_draw(now);
@@ -708,9 +713,14 @@ impl VideoPlayer {
         let interval = self
             .read_inner(|inner| inner.estimator.interval())
             .unwrap_or(Duration::from_millis(16));
+        // Drawn on the display's content grid, with the other animations.
         let next_due = self
             .with_backend(|backend| backend.next_due(now, interval))
-            .flatten();
+            .flatten()
+            .map(|due| {
+                self.with_inner(|inner| inner.estimator.on_grid(due))
+                    .unwrap_or(due)
+            });
         self.read_inner(|inner| {
             let transport = inner.machine.snapshot(now);
             let awaiting = inner.awaiting.is_some_and(|since| {

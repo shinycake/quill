@@ -21,6 +21,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::frame_clock::{VideoFrameAsk, request_video_frame};
+use super::super::frame_grid::ContentGrid;
+#[cfg(target_os = "macos")]
+use super::super::frame_grid::{Vsync, display_grid};
 use super::{Picture, PlayState, VideoPlayer};
 use gpui_kit::*;
 use std::rc::Rc;
@@ -101,8 +104,9 @@ impl VideoFrame {
 impl RenderOnce for VideoFrame {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let now = Instant::now();
-        let (hint, period) = present_hint(window, cx);
+        let (hint, period, grid) = present_hint(window, cx, now);
         self.player.set_refresh_period(period);
+        self.player.set_content_grid(grid);
         let picture = self.player.pull(now, hint);
         let target = window.current_view();
         self.player.note_live_view(target);
@@ -293,23 +297,36 @@ fn paint_corner_mask(
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: [Hsla; 4], _: &mut Window) {}
 
+/// What [`present_hint`] reports: the next present time (with its host
+/// ticks), the refresh period and the display's content grid.
+type Hint = (
+    Option<(Instant, u64)>,
+    Option<Duration>,
+    Option<ContentGrid>,
+);
+
 /// The display link's next present time (with its host ticks) and refresh
-/// period for this window's display; without the link's period, the one
-/// GPUI reports for the window's display.
+/// period for this window's display, and the display's content grid
+/// (`frame_grid`); without the link's period, the one GPUI reports for the
+/// window's display.
 #[cfg(target_os = "macos")]
-fn present_hint(window: &Window, cx: &App) -> (Option<(Instant, u64)>, Option<Duration>) {
+fn present_hint(window: &Window, cx: &App, now: Instant) -> Hint {
     let Some(display) = window.display(cx) else {
-        return (None, window.refresh_interval(cx));
+        return (None, window.refresh_interval(cx), None);
     };
-    let (hint, period) = gpui_macos::present_timing(u64::from(display.id()));
-    (hint, period.or_else(|| window.refresh_interval(cx)))
+    let display = u64::from(display.id());
+    let (hint, period) = gpui_macos::present_timing(display);
+    let grid = hint
+        .zip(period)
+        .and_then(|((at, _), period)| display_grid(display, Vsync { at, period }, now));
+    (hint, period.or_else(|| window.refresh_interval(cx)), grid)
 }
 
 /// No present time; the refresh period GPUI reports for the window's
 /// display (Windows and Wayland; `None` on X11, where the interval is
 /// learned from draw spacing). GPUI caches it per display, so this costs
-/// nothing per draw.
+/// nothing per draw. Without vsync times there is no content grid.
 #[cfg(not(target_os = "macos"))]
-fn present_hint(window: &Window, cx: &App) -> (Option<(Instant, u64)>, Option<Duration>) {
-    (None, window.refresh_interval(cx))
+fn present_hint(window: &Window, cx: &App, _: Instant) -> Hint {
+    (None, window.refresh_interval(cx), None)
 }

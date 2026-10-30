@@ -12,6 +12,7 @@
 //! start.
 #![deny(clippy::indexing_slicing)]
 
+use super::super::frame_grid::{Cadence, ContentGrid};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -40,6 +41,11 @@ pub(crate) struct PresentEstimator {
     present: Option<Instant>,
     /// The platform's refresh period, if it reports one.
     period: Option<Duration>,
+    /// The vsyncs content draws on, on a display faster than 60 Hz
+    /// (`frame_grid`).
+    grid: Option<ContentGrid>,
+    /// How the clip's pictures are spaced.
+    cadence: Cadence,
 }
 
 impl PresentEstimator {
@@ -95,6 +101,20 @@ impl PresentEstimator {
     /// link output time), or `None`.
     pub(crate) fn set_hint(&mut self, hint: Option<Instant>) {
         self.hint = hint;
+    }
+
+    /// The content grid of the window's display, or `None` (60 Hz, or no
+    /// vsync times).
+    pub(crate) fn set_grid(&mut self, grid: Option<ContentGrid>) {
+        self.grid = grid;
+    }
+
+    /// When to show the next picture, due at `due`: on the next grid vsync,
+    /// so it shares a window frame with the other animated content, unless
+    /// the clip's pictures come faster than the grid.
+    pub(crate) fn on_grid(&mut self, due: Instant) -> Instant {
+        self.cadence.note(due);
+        self.cadence.on_grid(due, self.grid.as_ref())
     }
 
     /// The display's frame interval: the platform's refresh period, else

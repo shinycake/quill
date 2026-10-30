@@ -8,13 +8,27 @@
 //! (`app_slice`); a tick then redraws only the slices that asked, and the
 //! rest of the window replays its last frame. Requests made outside any
 //! slice redraw the whole app, as before.
+//!
+//! On a display faster than 60 Hz the clock ticks on the main window's
+//! content grid (`frame_grid`), the vsyncs videos also draw on, so all
+//! animated content shares at most about 60 window frames a second.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::frame_grid::{self, Vsync};
 use super::video_player::FrameRequested;
 use super::video_player::pacing::{FrameRequest, request_policy};
 use gpui_kit::*;
 use std::time::{Duration, Instant};
+
+/// The main window's display, and how long before it is shown one of its
+/// frames starts drawing, as of its last frame drawn while the display
+/// link ran.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ClockTiming {
+    pub(super) display: u64,
+    pub(super) lead: Duration,
+}
 
 impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
@@ -85,10 +99,22 @@ impl QuillApp {
         self.frame.frame_clock_running.set(true);
         cx.spawn(async move |this, cx| {
             let mut fps = 30;
+            // The grid vsync the last tick drew on.
+            let mut last = None;
+            let mut later = None;
             loop {
-                cx.background_executor().timer(tick_period(fps)).await;
+                let (wait, vsync) = match later.take() {
+                    Some(plan) => plan,
+                    None => this
+                        .update(cx, |this, _| this.next_tick(fps, last))
+                        .unwrap_or((tick_period(fps), None)),
+                };
+                cx.background_executor().timer(wait).await;
                 let next = this
                     .update(cx, |this, cx| {
+                        if let Some(plan) = this.tick_after_draws(fps, vsync) {
+                            return Woke::Later(plan);
+                        }
                         let demand = this.frame.animation_demand.replace(0);
                         let targets =
                             std::mem::take(&mut *this.frame.animation_targets.borrow_mut());
@@ -104,18 +130,165 @@ impl QuillApp {
                                 }
                             }
                         }
-                        demand
+                        Woke::Ticked(demand)
                     })
-                    .unwrap_or(0);
-                if next == 0 {
-                    break;
+                    .unwrap_or(Woke::Ticked(0));
+                match next {
+                    Woke::Later(plan) => later = Some(plan),
+                    Woke::Ticked(0) => break,
+                    Woke::Ticked(next) => {
+                        fps = next;
+                        last = vsync;
+                    }
                 }
-                fps = next;
             }
             let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
         })
         .detach();
     }
+
+    /// How long until the next tick at `fps`, and the vsync it draws on:
+    /// on the main window's content grid (`frame_grid`) while its display
+    /// link reports vsyncs, one content frame after `last`; else one
+    /// period at `fps` from now, as before.
+    fn next_tick(&self, fps: u32, last: Option<Instant>) -> (Duration, Option<Instant>) {
+        let display = self
+            .frame
+            .clock_timing
+            .get()
+            .and_then(|timing| Some((timing, display_vsync(timing.display)?)));
+        tick_wait(display, Instant::now(), fps, last)
+    }
+
+    /// The tick planned for `planned`, not needed yet: every view that
+    /// asked is an animation layer drawn since the last tick (a clip's
+    /// picture redrew it, with its emoji), so the next tick counts from the
+    /// oldest of those draws and shares a window frame with the clip.
+    /// `None` when the tick is due.
+    fn tick_after_draws(
+        &self,
+        fps: u32,
+        planned: Option<Instant>,
+    ) -> Option<(Duration, Option<Instant>)> {
+        let planned = planned?;
+        let drawn = self.frame.layers_drawn.borrow();
+        let oldest = self
+            .frame
+            .animation_targets
+            .borrow()
+            .iter()
+            .map(|target| {
+                let painter = (*target)?;
+                drawn
+                    .iter()
+                    .find(|(id, _)| *id == painter)
+                    .map(|(_, at)| *at)
+            })
+            .collect::<Option<Vec<_>>>()?
+            .into_iter()
+            .min()?;
+        let fps = fps.max(self.frame.animation_demand.get());
+        let display = self
+            .frame
+            .clock_timing
+            .get()
+            .and_then(|timing| Some((timing, display_vsync(timing.display)?)));
+        later_tick(display, Instant::now(), fps, planned, oldest)
+    }
+
+    /// Note that animation layer `painter` drew on this frame of the main
+    /// window (`tick_animation_layer`), for [`Self::tick_after_draws`].
+    pub(super) fn note_layer_drawn(&self, painter: EntityId) {
+        let Some(at) = self
+            .frame
+            .clock_timing
+            .get()
+            .and_then(|timing| display_vsync(timing.display))
+            .map(|vsync| vsync.at)
+        else {
+            return;
+        };
+        let mut drawn = self.frame.layers_drawn.borrow_mut();
+        drawn.retain(|(id, _)| *id != painter);
+        // The chat list's and the conversation's; a replaced one ages out.
+        if drawn.len() >= 4 {
+            drawn.remove(0);
+        }
+        drawn.push((painter, at));
+    }
+
+    /// Note the main window's display and how far ahead of its present
+    /// time this frame started (`QuillApp::render`), for the clock's
+    /// content grid. A frame drawn while the display link is stopped (its
+    /// last present time is past) keeps what the last one noted.
+    pub(super) fn note_frame_timing(&self, window: &Window, cx: &App) {
+        let Some(display) = window.display(cx).map(|display| u64::from(display.id())) else {
+            return;
+        };
+        let now = Instant::now();
+        let Some(vsync) = display_vsync(display).filter(|vsync| vsync.at >= now) else {
+            return;
+        };
+        let lead = (vsync.at - now).clamp(vsync.period / 2, vsync.period * 3);
+        self.frame
+            .clock_timing
+            .set(Some(ClockTiming { display, lead }));
+    }
+}
+
+/// [`QuillApp::next_tick`] at `now`, for a main window drawn as `display`
+/// says with that display's latest vsync, if known.
+pub(super) fn tick_wait(
+    display: Option<(ClockTiming, Vsync)>,
+    now: Instant,
+    fps: u32,
+    last: Option<Instant>,
+) -> (Duration, Option<Instant>) {
+    let on_grid = display.and_then(|(timing, vsync)| {
+        let grid = frame_grid::display_grid(timing.display, vsync, now)?;
+        frame_grid::clock_tick(&grid, timing.lead, last.unwrap_or(vsync.at), now, fps)
+    });
+    match on_grid {
+        Some((wake, vsync)) => (wake.saturating_duration_since(now), Some(vsync)),
+        None => (tick_period(fps), None),
+    }
+}
+
+/// What a wake of the frame clock did.
+enum Woke {
+    /// Ticked what asked at this rate (0: nothing asked, the clock stops).
+    Ticked(u32),
+    /// Nothing was due yet: wait this long, for that vsync.
+    Later((Duration, Option<Instant>)),
+}
+
+/// The tick planned for `planned` waits when every view that asked was
+/// drawn since, the oldest on `oldest`: the tick one content frame after
+/// that draw, when it is later than planned.
+pub(super) fn later_tick(
+    display: Option<(ClockTiming, Vsync)>,
+    now: Instant,
+    fps: u32,
+    planned: Instant,
+    oldest: Instant,
+) -> Option<(Duration, Option<Instant>)> {
+    let (wait, next) = tick_wait(display, now, fps, Some(oldest));
+    let next = next.filter(|next| *next > planned + Duration::from_millis(1))?;
+    Some((wait, Some(next)))
+}
+
+/// `display`'s latest vsync as its display link reported it (macOS).
+#[cfg(target_os = "macos")]
+fn display_vsync(display: u64) -> Option<Vsync> {
+    let (hint, period) = gpui_macos::present_timing(display);
+    let ((at, _), period) = hint.zip(period)?;
+    Some(Vsync { at, period })
+}
+
+/// No display link: no vsync times, so no content grid.
+#[cfg(not(target_os = "macos"))]
+fn display_vsync(_: u64) -> Option<Vsync> {
+    None
 }
 
 /// The fastest the clock ticks: animated stickers on a 120 Hz display
