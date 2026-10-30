@@ -3,7 +3,8 @@
 use super::common::session;
 use super::{
     CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX, ChannelMemberStatus,
-    ChatId, MessageContent, MessageId, ParsedMessage, Session, TopicHistory, history_message,
+    ChatId, MessageContent, MessageId, ParsedMessage, ReplyTarget, Session, TopicHistory,
+    history_message,
 };
 
 fn live(chat: i64, id: i64) -> ParsedMessage {
@@ -213,6 +214,54 @@ fn the_least_recently_used_closed_chat_is_dropped_past_the_bound() {
         assert_eq!(len(&session, chat), CLOSED_TAIL_KEEP, "chat {chat} kept");
     }
     assert_eq!(session.histories.len(), CLOSED_CHATS_MAX);
+}
+
+fn fetched_reply(session: &Session, chat: i64, row: i64) -> bool {
+    session.messages.reply_targets.contains_key(&(chat, row))
+}
+
+#[test]
+fn replied_messages_fetched_for_trimmed_rows_go_with_them() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 7);
+    feed(&mut session, 7, 200);
+    // Rows 10 and 190 reply to messages outside the window; 50's original
+    // is gone.
+    session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
+    session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
+    session.reject_replied_message(ChatId(7), MessageId(50));
+    session.accept_replied_message(ChatId(8), MessageId(10), live(8, 3));
+    switch(&mut session, 8);
+    assert!(
+        !fetched_reply(&session, 7, 10),
+        "its row left with the trim"
+    );
+    assert!(!fetched_reply(&session, 7, 50));
+    assert!(fetched_reply(&session, 7, 190), "the tail still shows it");
+    assert!(fetched_reply(&session, 8, 10), "another chat's stays");
+    assert!(matches!(
+        session.messages.reply_targets.get(&(7, 190)),
+        Some(ReplyTarget::Loaded(_))
+    ));
+}
+
+#[test]
+fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
+    let (mut session, _sink) = session();
+    let total = CLOSED_CHATS_MAX as i64 + 1;
+    for chat in 1..=total {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 80);
+        session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 1));
+        let pinned = session.histories[&chat].messages[&80].clone();
+        session.messages.pinned_messages.insert(chat, vec![pinned]);
+    }
+    leave(&mut session);
+    assert!(!session.histories.contains_key(&1), "the oldest went");
+    assert!(!session.messages.pinned_messages.contains_key(&1));
+    assert!(!fetched_reply(&session, 1, 80));
+    assert!(session.messages.pinned_messages.contains_key(&2));
+    assert!(fetched_reply(&session, 2, 80), "a kept tail keeps both");
 }
 
 #[test]
