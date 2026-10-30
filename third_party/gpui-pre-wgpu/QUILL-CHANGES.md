@@ -41,3 +41,10 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   returns RGBA rows. Not built for wasm. It renders in the surface's alpha
   mode (the pipelines blend for it), so the rows are premultiplied in both
   the opaque and the premultiplied mode.
+
+The Quill project also changed it in 2026 so color emoji glyphs can be swept
+(`docs/decisions/idle-wallpaper-and-emoji-trim.md`):
+
+- `src/wgpu_atlas.rs`: `WgpuAtlas` forwards `PlatformAtlas::next_use_mark`,
+  `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
+  `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

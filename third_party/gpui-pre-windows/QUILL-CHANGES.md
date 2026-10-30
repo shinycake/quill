@@ -279,3 +279,10 @@ number (`handle_gpui_events`): `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` goes through
 that check too and is posted with the validation number, and the dispatcher's
 `unreachable!()` for an unknown id returns `None` instead.
 - 0.3.10: `direct_manipulation.rs` inertia-start event uses `PlatformInput::Scroll` with `ScrollSource::Pointer` (the 0.3.10 rename).
+
+The Quill project also changed it in 2026 so color emoji glyphs can be swept
+(`docs/decisions/idle-wallpaper-and-emoji-trim.md`):
+
+- `src/directx_atlas.rs`: `DirectXAtlas` forwards `PlatformAtlas::next_use_mark`,
+  `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
+  `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

@@ -71,3 +71,10 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   `MetalRenderer::capture_scene` renders a scene offscreen at the layer's
   drawable size and reads it back. Nothing is presented and no drawable is
   taken from the layer.
+
+The Quill project also changed it in 2026 so color emoji glyphs can be swept
+(`docs/decisions/idle-wallpaper-and-emoji-trim.md`):
+
+- `src/metal_atlas.rs`: `MetalAtlas` forwards `PlatformAtlas::next_use_mark`,
+  `emoji_glyph_count` and `remove_emoji_glyphs_unused_since` to its
+  `AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).
