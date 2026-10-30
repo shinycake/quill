@@ -426,6 +426,9 @@ impl QuillApp {
             .border_color(theme.border)
             .bg(theme.popover)
             .shadow_md()
+            // Floats over the history: a click between the tiles must not
+            // reach the media under the bar.
+            .block_mouse_except_scroll()
             .on_mouse_move(|_, _, cx| cx.stop_propagation())
             .when_some(on_leave, |this, leave| {
                 this.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {

@@ -75,3 +75,10 @@ built-in jump-to-latest button, while it is drawn, in an element the caller
 passes. Quill marks the button as covering the rows' animations
 (`anim_layer::occluder`) with its own bounds, only while it shows
 (`docs/decisions/codex-history-anim-layer.md`). Re-apply when re-vendoring.
+
+`src/message_scroller.rs`: the built-in jump-to-latest button calls
+`block_mouse_except_scroll`. It floats over the rows, and a GPUI hitbox with
+the default behavior leaves the hitboxes behind it hovered, so one click on
+the button also clicked the row content under it (a clip or photo opened the
+media viewer). The wheel over the button still scrolls the list. Background:
+`docs/decisions/jump-click-through.md`. Re-apply when re-vendoring.
