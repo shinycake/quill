@@ -57,7 +57,6 @@ impl Render for QuillApp {
         let image_cache = self.slices.image_cache();
         if let Some(cache) = &image_cache {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
-            super::window_image_cache::cover(window, cache.clone());
         }
         self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);

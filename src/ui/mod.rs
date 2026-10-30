@@ -66,6 +66,7 @@ mod connection_state;
 mod country_box;
 pub(crate) mod crash_notice;
 mod demo_state;
+mod dialog_image_cache;
 mod dialogs_state;
 mod display_events;
 mod earn;
@@ -159,7 +160,6 @@ mod userpic_videos;
 mod vanish;
 mod viewer_state;
 mod whats_new;
-mod window_image_cache;
 
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;

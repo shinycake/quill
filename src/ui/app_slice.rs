@@ -179,7 +179,6 @@ impl QuillApp {
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
-        super::window_image_cache::register(cx);
         cx.observe_self(|this, cx| this.notify_slices(cx)).detach();
     }
 

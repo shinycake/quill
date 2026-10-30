@@ -972,10 +972,18 @@ impl Element for CacheScope {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "demo-capture")]
     impl super::BoundedImageCache {
-        /// Tests elsewhere: whether `resource` loads through this cache.
-        pub(in crate::ui) fn holds(&self, resource: &gpui_kit::Resource) -> bool {
-            self.entries.contains_key(&gpui_kit::hash(resource))
+        /// Tests elsewhere: the image `resource` loaded as, once loaded.
+        pub(in crate::ui) fn loaded(
+            &self,
+            resource: &gpui_kit::Resource,
+        ) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
+            self.entries
+                .get(&gpui_kit::hash(resource))?
+                .load
+                .get()?
+                .ok()
         }
     }
 

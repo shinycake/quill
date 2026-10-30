@@ -60,3 +60,12 @@ distance above the last row (tdesktop `historyToDownShownAfter`, 480px), and
 `jump_button_always` shows it wherever the list is scrolled, for a history
 whose loaded window stops short of the latest message. Background:
 `docs/decisions/unread-open-landing.md`.
+
+`src/dialog/dialog.rs`: `Dialog::wrap_surface` wraps the dialog's surface
+(everything above the backdrop) in an element the caller passes. The base
+dialog lays the surface out in place but prepaints and paints it in a
+deferred pass after the rest of the window, so an element that sets
+something up for its subtree while it draws has to sit inside the surface.
+Quill puts its bounded image cache there, so pictures in dialogs leave
+memory once off screen (`docs/decisions/dialog-images-bounded-cache.md`).
+Re-apply when re-vendoring.
