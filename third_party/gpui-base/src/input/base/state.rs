@@ -1700,9 +1700,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Focus the input field.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_handle.focus(window, cx);
-        self.blink_cursor.update(cx, |cursor, cx| {
-            cursor.start(cx);
-        });
+        self.start_blink_cursor(window, cx);
     }
 
     /// Refresh the input, so the next render re-runs syntax highlighting and
@@ -3990,11 +3988,22 @@ impl<M: InputModeKind> InputBaseState<M> {
             && window.is_window_active()
     }
 
-    fn on_focus(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_blink_cursor(window, cx);
+        cx.emit(InputEvent::Focus);
+    }
+
+    /// QUILL: start the caret's blink in an active window only. An inactive
+    /// one never shows the caret (`show_cursor`), so a blink there redrew
+    /// the window twice a second for nothing and kept it from going idle.
+    /// Activating the window starts it.
+    fn start_blink_cursor(&self, window: &Window, cx: &mut Context<Self>) {
+        if !window.is_window_active() {
+            return;
+        }
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
-        cx.emit(InputEvent::Focus);
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
