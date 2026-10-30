@@ -39,15 +39,16 @@ never idled and the release above never ran. Its frames went out on every other 
 display and only ever used two drawables. The third was left over from the first frames.
 
 - `third_party/gpui-pre-apple` `MetalRenderer::draw` notes when each drawable, known by its IOSurface, was
-  handed out. Before it takes the next one, `trim_spare_drawables` runs the same release when a drawable has
-  gone unused for 3 s while another was handed out in the last second. A resize or a release forgets the
-  drawables it knew.
+  handed out. Before it takes the next one, `trim_spare_drawables` runs the same release when the pool holds
+  three and one has gone unused for 3 s while another was handed out in the last second. A pool of two is
+  left alone: one drawable is on screen and the next frame draws into the other, so emptying it frees nothing
+  the next frames don't allocate again. A resize or a release forgets the drawables it knew.
 - Content that needs all three keeps handing each one out, so the trim never fires for it. A scroll grows
   the pool back to three, and it is trimmed again 3 s after the scroll ends. There is no timer: the check
   runs only when a frame is drawn.
 
 Rejected: `maximumDrawableCount` 2 while only small animations run. It saved the same 22 MB for a slow loop,
-but a 60 fps sticker that presented 100 to 120 frames a second lost about a tenth of its frames, waiting 11
+but an animated sticker that presented 100 to 120 frames a second lost about a tenth of its frames, waiting 11
 to 20 ms for a drawable every second.
 
 ### Measured
@@ -61,7 +62,7 @@ Each run: 30 s into a looping animation, a scroll burst, then 20 s more. Two run
 | looping custom emoji, 30 s in | 3 drawables, 115 / 120 | 2 drawables, 94 / 94 |
 | same, right after the scroll | 3 drawables, 115 / 120 | 3 drawables, 120 / 115 |
 | same, 20 s after the scroll | 3 drawables, 115 / 117 | 2 drawables, 99 / 92 |
-| 60 fps sticker, 20 s after the scroll | 3 drawables, 131 / 139 | 3 drawables, 132 / 132 |
+| animated sticker (about 100 frames a second on screen), 20 s after the scroll | 3 drawables, 131 / 139 | 3 drawables, 132 / 132 |
 | trims per run | | emoji 3 / 2, sticker 0 / 0 |
 
 The emoji presented 28.6 frames a second in every run, and no `nextDrawable` wait went past 3.5 ms. In the

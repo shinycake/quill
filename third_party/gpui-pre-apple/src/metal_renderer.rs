@@ -514,11 +514,16 @@ impl MetalRenderer {
 
     pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
         if let Some(layer) = &self.layer {
-            layer.set_drawable_size(CGSize::new(size.width.0 as f64, size.height.0 as f64));
+            let new = CGSize::new(size.width.0 as f64, size.height.0 as f64);
+            let old = layer.drawable_size();
+            // QUILL: a new size empties the pool; none of the known
+            // drawables will be handed out again. The same size (a move
+            // between displays of one scale) keeps them.
+            if old.width != new.width || old.height != new.height {
+                self.drawables_handed_out.clear();
+            }
+            layer.set_drawable_size(new);
         }
-        // QUILL: a new size empties the pool; none of the known drawables
-        // will be handed out again.
-        self.drawables_handed_out.clear();
         self.update_path_intermediate_textures(size);
     }
 
@@ -554,8 +559,13 @@ impl MetalRenderer {
     /// handed out for `SPARE_DRAWABLE_AFTER` while others are is such a
     /// spare: empty the pool as the idle release does, and the next frames
     /// allocate only the drawables they use. Content that needs all three
-    /// keeps handing each one out, so this never fires for it.
+    /// keeps handing each one out, so this never fires for it. Two are the
+    /// floor (one on screen, one to draw into): emptying a pool of two
+    /// frees nothing the next frames don't allocate again.
     fn trim_spare_drawables(&mut self) {
+        if self.drawables_handed_out.len() < 3 {
+            return;
+        }
         let now = Instant::now();
         let age = |at: &Instant| now.saturating_duration_since(*at);
         let spare = self
