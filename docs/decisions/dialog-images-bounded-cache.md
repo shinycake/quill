@@ -32,7 +32,9 @@ above the backdrop) before it goes to the base dialog.
 `src/ui/dialog_image_cache.rs` (`cover`) wraps the surface of every dialog
 the shell opens in the main window in a `CacheScope` over the main window's
 cache (`QuillShell::sync_kit_dialogs_in`). `CacheScope` passes its child's
-layout through, so the dialog lays out as before.
+layout through, so the dialog lays out as before. The call sits in the shell,
+a hotspot file, because that is the one place every kit dialog opens; the
+commit that adds it carries a `Hotspot-change` trailer.
 
 Dialog pictures use no slice, so they count as visible for one frame after
 they were last painted, like anything else `QuillApp` draws outside a
