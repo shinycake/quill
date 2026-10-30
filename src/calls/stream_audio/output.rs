@@ -2,7 +2,7 @@
 
 use super::gain::scaled;
 use super::ring::Playout;
-use super::{PcmFormat, StreamAudio};
+use super::{SOURCE_RATE, StreamAudio};
 use crate::cpal_stream::{RequestedInput, StreamErrors, device_name_matches, requested_input};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -10,9 +10,9 @@ use cpal::{
 };
 use std::sync::Arc;
 
-/// The call library's sound is 48 kHz; the output runs at it too when the
-/// device offers it.
-const PREFERRED_RATE: u32 = 48_000;
+/// The output runs at the call library's rate when the device offers it,
+/// so the sound needs no conversion.
+const PREFERRED_RATE: u32 = SOURCE_RATE;
 
 pub(super) struct Output {
     _stream: Stream,
@@ -28,8 +28,7 @@ impl Output {
         let device = find_output(&host, device).ok_or("No audio output found.")?;
         let supported = output_config(&device)?;
         let device_channels = supported.channels();
-        let format = PcmFormat::for_output(supported.sample_rate(), device_channels);
-        let audio = Arc::new(StreamAudio::new(format, volume, muted));
+        let audio = Arc::new(StreamAudio::new(supported.sample_rate(), volume, muted));
         let config: StreamConfig = supported.config();
         let ctx = Callback {
             audio: audio.clone(),
@@ -114,10 +113,9 @@ where
         audio,
         device_channels,
     } = ctx;
-    let ring_channels = usize::from(audio.format().channels).max(1);
     let mut playout = Playout::new(audio.prime_samples());
-    let max_frames = (audio.ring().capacity() / ring_channels).max(1);
-    let mut pcm = vec![0i16; max_frames * ring_channels];
+    let max_frames = audio.ring().capacity().max(1);
+    let mut pcm = vec![0i16; max_frames];
     device
         .build_output_stream(
             config,
@@ -125,16 +123,13 @@ where
                 let factor = audio.gain().factor();
                 for part in data.chunks_mut(max_frames * device_channels) {
                     let frames = part.len() / device_channels;
-                    let Some(pcm) = pcm.get_mut(..frames * ring_channels) else {
+                    let Some(pcm) = pcm.get_mut(..frames) else {
                         part.fill(T::EQUILIBRIUM);
                         continue;
                     };
                     playout.fill(audio.ring(), pcm);
-                    for (out, frame) in part
-                        .chunks_mut(device_channels)
-                        .zip(pcm.chunks(ring_channels))
-                    {
-                        spread(frame, out, factor);
+                    for (out, &sample) in part.chunks_mut(device_channels).zip(pcm.iter()) {
+                        spread(sample, out, factor);
                     }
                 }
             },
@@ -144,16 +139,9 @@ where
         .map_err(|err| err.to_string())
 }
 
-fn spread<T: Sample + FromSample<f32>>(frame: &[i16], out: &mut [T], factor: f32) {
-    let mono = frame.len() == 1;
-    for (channel, sample) in out.iter_mut().enumerate() {
-        let source = if mono {
-            frame.first()
-        } else {
-            frame.get(channel)
-        };
-        *sample = T::from_sample(source.map_or(0.0, |&value| scaled(value, factor)));
-    }
+/// The ring's mono `sample` on every channel of one output frame.
+fn spread<T: Sample + FromSample<f32>>(sample: i16, out: &mut [T], factor: f32) {
+    out.fill(T::from_sample(scaled(sample, factor)));
 }
 
 #[cfg(test)]
@@ -161,14 +149,14 @@ mod tests {
     use super::spread;
 
     #[test]
-    fn mono_fills_every_channel_and_stereo_the_first_two() {
+    fn a_sample_fills_every_channel() {
         let mut out = [9.0f32; 4];
-        spread(&[16_384], &mut out, 1.0);
+        spread(16_384, &mut out, 1.0);
         assert_eq!(out, [0.5; 4]);
-        spread(&[16_384, -16_384], &mut out, 0.5);
-        assert_eq!(out, [0.25, -0.25, 0.0, 0.0]);
+        spread(-16_384, &mut out, 0.5);
+        assert_eq!(out, [-0.25; 4]);
         let mut pair = [0i16; 2];
-        spread(&[16_384, 8_192], &mut pair, 1.0);
-        assert_eq!(pair, [16_384, 8_192]);
+        spread(8_192, &mut pair, 1.0);
+        assert_eq!(pair, [8_192, 8_192]);
     }
 }

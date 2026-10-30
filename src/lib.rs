@@ -200,6 +200,7 @@ pub mod reaction_who;
 pub mod release_notes;
 pub mod reply_options;
 pub mod request_share;
+pub mod resample;
 pub mod rich;
 pub mod rich_html;
 pub mod row_fx;

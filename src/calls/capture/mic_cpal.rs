@@ -14,7 +14,7 @@ use crate::cpal_stream::{
     RequestedInput, StreamErrors, device_name_matches, downmix_into, requested_input,
 };
 use crate::locks::LockExt;
-use crate::voice_opus::Resampler;
+use crate::resample::Resampler;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
     FromSample, I24, SampleFormat, SizedSample, Stream, StreamConfig, SupportedStreamConfig,
@@ -181,7 +181,7 @@ where
         channels,
         rate,
     } = ctx;
-    let mut resampler = Resampler::new(rate);
+    let mut resampler = Resampler::new(rate, EXTERNAL_AUDIO_RATE);
     let mut processor = MicProcessor::new();
     let mut mono = Vec::new();
     let mut resampled = Vec::new();
