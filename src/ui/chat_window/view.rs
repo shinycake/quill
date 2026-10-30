@@ -3,6 +3,7 @@
 
 use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
+use super::super::image_budget::{BoundedImageCache, CacheScope};
 use super::super::shell::QuillShell;
 use super::slot::{SharedSlot, WindowSlot, scope_probe};
 use gpui_kit::component::{Root, StyledExt, TitleBar};
@@ -27,6 +28,9 @@ pub(crate) struct ChatWindowView {
     bounds_seen: Option<Bounds<Pixels>>,
     /// The window's bookkeeping ran (the app knows the window is gone).
     closed: bool,
+    /// The pictures this window shows (`image_budget`), counted by its own
+    /// frames; they go with the window.
+    pub(super) images: Entity<BoundedImageCache>,
     _observe: Subscription,
 }
 
@@ -48,6 +52,7 @@ impl ChatWindowView {
             title_shown: String::new(),
             bounds_seen: None,
             closed: false,
+            images: cx.new(|_| BoundedImageCache::for_window()),
             _observe: observe,
         }
     }
@@ -131,11 +136,14 @@ impl Render for ChatWindowView {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
+        self.images
+            .update(cx, |images, cx| images.begin_window_frame(window, cx));
         let body = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             app.adopt_remote_draft(window, cx);
+            app.schedule_idle_image_trim(cx);
             app.chat_window_body(chat_id, window, cx)
         });
         app.update(cx, |app, _| app.set_window_scope(outer));
@@ -191,7 +199,7 @@ impl Render for ChatWindowView {
             .child(WindowScope {
                 app: self.owner.clone(),
                 target: Some(chat_id),
-                child: body,
+                child: CacheScope::new(self.images.clone(), body).into_any_element(),
             })
             .when(dialog_open, |this| {
                 // Kit dialog contents paint at priority 10; occlude the

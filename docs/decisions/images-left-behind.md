@@ -87,6 +87,23 @@ a nearby size can stand in. Eviction removed the decodes but left their
 index entries, about 80 bytes per picture ever shown at display size. The
 index now forgets them on eviction.
 
+## Chat windows
+
+A chat opened in its own window drew outside every bounded cache, so each
+picture it showed stayed in GPUI's asset cache, decoded and in the atlas,
+for as long as Quill ran. Each chat window now has a `BoundedImageCache` of
+its own over its body (`ChatWindowView::images`), and a dialog opened in
+it draws through that cache too. The main window's cache tells what may be
+on screen by the main window's frames, which say nothing about another
+window: a chat window idle beside a main window playing a sticker would
+see its pictures counted as gone. So a chat window's cache counts its own
+frames (`begin_window_frame`): a picture may be on screen until that
+window draws a frame without it. Chat windows hold no cached slices, so
+the last frame shows all they show. The idle trim covers every chat
+window's cache, evicting to what is on screen when the window is not the
+active one. Each chat window has a budget of its own, as large as the main
+window's.
+
 ## Not covered
 
 - Pictures drawn in `deferred` content (popovers, menus, the emoji bar)
@@ -94,8 +111,8 @@ index now forgets them on eviction.
   and paint run after every cache scope has ended, and a cached slice can
   replay them without a load, which the bounded cache would read as off
   screen.
-- Chat windows draw outside the bounded cache too. The cache counts frames
-  of the main window only, so it can't tell what another window shows.
+  They are laid out inside the scope, though, so in a chat window they
+  are decoded once there too, as in the main window.
 
 ## Tests
 
@@ -103,6 +120,8 @@ index now forgets them on eviction.
 - `media_viewer::actions::rotate_ui_tests::closing_the_viewer_lets_go_of_a_turned_photo`
 - `image_budget::tests::evicted_sizes_leave_the_index`
 - `image_budget::tests::idle_trim_takes_kept_pictures_out_of_the_atlas`
+- `image_budget::tests::a_chat_window_cache_counts_its_own_frames`
+- `chat_window::tests::a_chat_windows_pictures_go_through_a_cache_of_its_own`
 - `wgpu_atlas::tests::small_pictures_keep_to_textures_of_their_own` and
   `animation_frames_rotate_through_one_texture` (gpui-pre-wgpu, run on
   lavapipe; CI does not run vendored crate tests), and

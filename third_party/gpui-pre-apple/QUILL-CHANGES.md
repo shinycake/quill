@@ -55,9 +55,9 @@ The Quill project also changed it in 2026 to give back idle window memory
 - `src/metal_renderer.rs`: `draw` notes when each drawable (by its
   IOSurface) was handed out, and `trim_spare_drawables` runs the same release
   when the pool holds three and one has gone unused for 3 s while others
-  were handed out in the last second: the spare a burst (the first frames, a scroll) left in the pool
-  while a slow animation keeps the window drawing. A resize or a release
-  forgets the drawables it knew.
+  were handed out in the last second: the spare a burst (the first frames,
+  a scroll) left in the pool while a slow animation keeps the window
+  drawing. A resize or a release forgets the drawables it knew.
 
 The Quill project also changed it in 2026 to give back memory after
 browsing (`docs/decisions/sweep-r3-browse-memory.md`):

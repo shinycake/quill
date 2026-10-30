@@ -1,4 +1,4 @@
-//! Bounded image memory for the main window.
+//! Bounded image memory for the main window and chat windows.
 //!
 //! GPUI keeps every image an `img(path)` ever loaded — decoded in RAM and
 //! uploaded to the window's sprite atlas — for the life of the app, and an
@@ -6,8 +6,9 @@
 //! `drop_image`. Scrolling through avatars and photos therefore only ever
 //! grew the footprint. This module bounds both:
 //!
-//! - [`BoundedImageCache`] loads the window's path images (an `ImageCache`
-//!   installed over `QuillApp` by [`CacheScope`]) and, past a byte budget,
+//! - [`BoundedImageCache`] loads a window's path images (an `ImageCache`
+//!   installed over `QuillApp`, or over a chat window's body, by
+//!   [`CacheScope`]) and, past a byte budget,
 //!   evicts the least recently used images that can no longer be on screen,
 //!   dropping them from the atlas too. Once nothing new has been shown for
 //!   a moment (`IDLE_AFTER`), it trims to a much smaller idle budget
@@ -44,6 +45,9 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+mod cache_scope;
+pub(in crate::ui) use cache_scope::CacheScope;
 
 /// What the cache keeps beyond the screen: while the user scrolls (the
 /// next rows are probably the ones just seen), and once idle.
@@ -371,8 +375,8 @@ pub(super) struct SizedKey {
 
 /// An image drawn `size` wide and high (the shorter side, for non-square
 /// ones), decoded at that size in device pixels rather than at file size.
-/// Inside the main window's `CacheScope` it goes through the bounded
-/// cache; elsewhere (other windows) through GPUI's asset cache as before.
+/// Inside a `CacheScope` (the main window's or a chat window's) it goes
+/// through that bounded cache; elsewhere through GPUI's asset cache.
 pub(super) fn sized_image(source: SizedSource, size: Pixels) -> ImageSource {
     sized_image_with(source, move |scale_factor| display_edge(size, scale_factor))
 }
@@ -659,15 +663,51 @@ impl Entry {
         self.uses.iter().map(|(_, at)| *at).max().unwrap_or(0)
     }
 
-    fn may_be_visible(&self) -> bool {
+    fn may_be_visible(&self, clock: Clock) -> bool {
         self.uses
             .iter()
-            .any(|(scope, used)| may_be_visible(*scope, *used))
+            .any(|(scope, used)| clock.may_be_visible(*scope, *used))
     }
 }
 
-/// The main window's image cache: least recently used images that can't
-/// be on screen go once the decoded total passes the budget.
+/// Whose frames a cache counts.
+#[derive(Clone, Copy, Debug)]
+enum Clock {
+    /// The main window's (`begin_frame`), with its slices.
+    Main,
+    /// A chat window's own (`begin_window_frame`): its pictures show in a
+    /// window the main window's frames say nothing about.
+    Window { frame: u64 },
+}
+
+impl Clock {
+    /// The scope and frame a use made now is stamped with.
+    fn stamp(self, scope: &Cell<Option<EntityId>>) -> (Option<EntityId>, u64) {
+        match self {
+            Self::Main => (scope.get(), frame()),
+            Self::Window { frame } => (None, frame),
+        }
+    }
+
+    fn may_be_visible(self, scope: Option<EntityId>, used: u64) -> bool {
+        match self {
+            Self::Main => may_be_visible(scope, used),
+            // A chat window has no cached slices: it draws all it shows
+            // every frame.
+            Self::Window { frame } => used + 1 >= frame,
+        }
+    }
+
+    fn newly_shown(self, scope: Option<EntityId>, previous: Option<u64>) -> bool {
+        match (self, previous) {
+            (Self::Window { frame }, Some(previous)) => previous + 1 < frame,
+            _ => newly_shown(scope, previous),
+        }
+    }
+}
+
+/// A window's image cache: least recently used images that can't be on
+/// screen go once the decoded total passes the budget.
 pub(super) struct BoundedImageCache {
     entries: HashMap<u64, Entry>,
     /// The display-size decodes of each picture: source hash -> (edge,
@@ -679,24 +719,51 @@ pub(super) struct BoundedImageCache {
     shown: usize,
     /// The slice being drawn (shared with `app_slice`).
     scope: Rc<Cell<Option<EntityId>>>,
+    clock: Clock,
 }
 
 impl BoundedImageCache {
     pub(super) fn new(scope: Rc<Cell<Option<EntityId>>>) -> Self {
         SCOPE.with(|current| *current.borrow_mut() = Some(scope.clone()));
+        Self::with_clock(scope, Clock::Main)
+    }
+
+    /// A chat window's cache, counting that window's frames. Before it,
+    /// chat windows drew outside any bounded cache, so every picture one
+    /// showed stayed in GPUI's asset cache for good.
+    pub(super) fn for_window() -> Self {
+        Self::with_clock(Rc::default(), Clock::Window { frame: 0 })
+    }
+
+    fn with_clock(scope: Rc<Cell<Option<EntityId>>>, clock: Clock) -> Self {
         Self {
             entries: HashMap::new(),
             variants: HashMap::new(),
             bytes: 0,
             shown: 0,
             scope,
+            clock,
         }
+    }
+
+    /// Start a frame of the chat window this cache serves, before its body
+    /// renders, and evict down to the scrolling budget (`trim`).
+    pub(super) fn begin_window_frame(&mut self, window: &mut Window, cx: &mut App) {
+        if let Clock::Window { frame } = &mut self.clock {
+            *frame += 1;
+        }
+        self.trim(window, cx);
     }
 
     /// Evict down to the scrolling budget. Call at the start of a frame,
     /// before anything renders, so last frame's loads are all counted.
     pub(super) fn trim(&mut self, window: &mut Window, cx: &mut App) {
-        let shown = self.entries.values().filter(|e| e.may_be_visible()).count();
+        let clock = self.clock;
+        let shown = self
+            .entries
+            .values()
+            .filter(|e| e.may_be_visible(clock))
+            .count();
         note_departures(&mut self.shown, shown);
         for image in self.evict(ACTIVE_BUDGET) {
             cx.drop_image(image, Some(&mut *window));
@@ -728,10 +795,11 @@ impl BoundedImageCache {
         // What stays off screen keeps its decode, so coming back to it only
         // uploads it again, but not its atlas tile: a kept photo would
         // otherwise hold a 4 MB texture of its own for as long as it stays.
+        let clock = self.clock;
         let off_screen = self
             .entries
             .values()
-            .filter(|entry| !entry.may_be_visible())
+            .filter(|entry| !entry.may_be_visible(clock))
             .filter_map(|entry| entry.load.get()?.ok());
         for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
@@ -748,10 +816,11 @@ impl BoundedImageCache {
         if self.bytes <= budget.bytes && self.entries.len() <= budget.entries {
             return Vec::new();
         }
+        let clock = self.clock;
         let candidates = self
             .entries
             .iter()
-            .filter(|(_, entry)| !entry.may_be_visible())
+            .filter(|(_, entry)| !entry.may_be_visible(clock))
             .map(|(key, entry)| (entry.last_used(), *key, entry.bytes.unwrap_or(0)))
             .collect();
         let mut images = Vec::new();
@@ -780,8 +849,7 @@ impl BoundedImageCache {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<LoadResult> {
-        let scope = self.scope.get();
-        let now = frame();
+        let (scope, now) = self.clock.stamp(&self.scope);
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
             load: start(cx),
             bytes: None,
@@ -794,7 +862,7 @@ impl BoundedImageCache {
                 None
             }
         };
-        if previous != Some(now) && newly_shown(scope, previous) {
+        if previous != Some(now) && self.clock.newly_shown(scope, previous) {
             note_activity();
         }
         let result = entry.load.use_image(window);
@@ -902,93 +970,6 @@ impl ImageCache for BoundedImageCache {
     }
 }
 
-/// Installs the bounded image cache over its child for every drawing
-/// phase. GPUI's own `image_cache` element skips prepaint, where virtual
-/// lists and cached views build their content.
-pub(super) struct CacheScope {
-    cache: Entity<BoundedImageCache>,
-    child: AnyElement,
-}
-
-impl CacheScope {
-    pub(super) fn new(cache: Entity<BoundedImageCache>, child: impl IntoElement) -> Self {
-        Self {
-            cache,
-            child: child.into_any_element(),
-        }
-    }
-
-    fn enter<R>(&self, window: &mut Window, f: impl FnOnce(&mut Window) -> R) -> R {
-        SCOPED.with(|scoped| scoped.borrow_mut().push(self.cache.clone()));
-        let result = window.with_image_cache(Some(self.cache.clone().into()), f);
-        SCOPED.with(|scoped| scoped.borrow_mut().pop());
-        result
-    }
-}
-
-impl IntoElement for CacheScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for CacheScope {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        let layout_id = self.enter(window, |window| child.request_layout(window, cx));
-        self.child = child;
-        (layout_id, ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        self.enter(window, |window| child.prepaint(window, cx));
-        self.child = child;
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        self.enter(window, |window| child.paint(window, cx));
-        self.child = child;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "demo-capture")]
@@ -1003,6 +984,14 @@ mod tests {
                 .load
                 .get()?
                 .ok()
+        }
+
+        /// Tests elsewhere: every image it holds loaded.
+        pub(in crate::ui) fn loaded_images(&self) -> Vec<std::sync::Arc<gpui_kit::RenderImage>> {
+            self.entries
+                .values()
+                .filter_map(|entry| entry.load.get()?.ok())
+                .collect()
         }
     }
 
@@ -1314,6 +1303,104 @@ mod tests {
             in_atlas(&mut vcx, &image),
             "the same decode, uploaded again"
         );
+    }
+
+    /// A chat window's cache counts that window's frames. The main window
+    /// drawing on doesn't make what the chat window shows look off screen
+    /// (with the main window's count, the idle trim took its pictures),
+    /// and what it stopped showing goes at the idle trim.
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn a_chat_window_cache_counts_its_own_frames(cx: &mut gpui_kit::TestAppContext) {
+        use super::{BoundedImageCache, CacheScope};
+        use gpui_kit::test::TestWindowExt;
+        use gpui_kit::{
+            AppContext, Context, Entity, IntoElement, ParentElement, Render, Resource, Styled,
+            VisualTestContext, Window, div, img, px, size,
+        };
+        use std::path::PathBuf;
+
+        struct ChatWindow {
+            cache: Entity<BoundedImageCache>,
+            on_screen: PathBuf,
+            left: PathBuf,
+            show_left: bool,
+        }
+        impl Render for ChatWindow {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.cache
+                    .update(cx, |cache, cx| cache.begin_window_frame(window, cx));
+                let left = self.show_left.then(|| img(self.left.clone()).size(px(40.)));
+                let pictures = div()
+                    .size_full()
+                    .child(img(self.on_screen.clone()).size(px(40.)))
+                    .children(left);
+                CacheScope::new(self.cache.clone(), pictures)
+            }
+        }
+        struct Files(PathBuf);
+        impl Drop for Files {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        cx.update(gpui_kit::init);
+        let files =
+            Files(std::env::temp_dir().join(format!("quill-window-{}", std::process::id())));
+        std::fs::create_dir_all(&files.0).expect("a folder for the pictures");
+        let [on_screen, left] = ["on-screen.png", "left.png"].map(|name| files.0.join(name));
+        for path in [&on_screen, &left] {
+            image::RgbaImage::new(8, 8)
+                .save(path)
+                .expect("write the picture");
+        }
+        let view_paths = (on_screen.clone(), left.clone());
+        let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| ChatWindow {
+            cache: cx.new(|_| BoundedImageCache::for_window()),
+            on_screen: view_paths.0,
+            left: view_paths.1,
+            show_left: true,
+        });
+        let view = handle.root(cx).expect("the view");
+        let cache = view.read_with(cx, |view, _| view.cache.clone());
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let frames = |vcx: &mut VisualTestContext| {
+            for _ in 0..3 {
+                vcx.run_until_parked();
+                vcx.update(|window, cx| window.render_frame(cx));
+            }
+            vcx.run_until_parked();
+        };
+        let loaded = |vcx: &VisualTestContext, path: &PathBuf| {
+            let resource = Resource::Path(path.clone().into());
+            cache.read_with(vcx, |cache, _| cache.loaded(&resource))
+        };
+        let in_atlas = |vcx: &mut VisualTestContext, image: &Arc<RenderImage>| {
+            vcx.update(|window, _| window.has_image_atlas_entry(image))
+        };
+        frames(&mut vcx);
+        let kept = loaded(&vcx, &on_screen).expect("loaded");
+        let image = loaded(&vcx, &left).expect("loaded");
+
+        // The main window plays an animation for a while; this one has
+        // nothing new to draw.
+        for _ in 0..120 {
+            begin_frame();
+        }
+        cache.update(&mut vcx, |cache, cx| cache.idle_trim(true, cx));
+        assert!(loaded(&vcx, &left).is_some(), "still shown: kept");
+        assert!(in_atlas(&mut vcx, &kept), "still shown: in the atlas");
+
+        view.update(&mut vcx, |view, cx| {
+            view.show_left = false;
+            cx.notify();
+        });
+        frames(&mut vcx);
+        cache.update(&mut vcx, |cache, cx| cache.idle_trim(true, cx));
+        assert!(loaded(&vcx, &left).is_none(), "no longer shown: gone");
+        assert!(!in_atlas(&mut vcx, &image), "and out of the atlas");
+        assert!(in_atlas(&mut vcx, &kept), "on screen: left alone");
     }
 
     #[cfg(feature = "demo-capture")]

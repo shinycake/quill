@@ -345,6 +345,7 @@ impl Cache {
 /// again if asked for). Runs between frames, so they leave every window's
 /// atlas now; one a crossfade still holds is retired instead.
 pub(super) fn release_unshown(main: WindowId, cx: &mut App) {
+    end_finished_fades();
     let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
     let gone = CACHE.with(|cache| cache.borrow_mut().take_unshown(main, &open));
     if super::frame_clock::trace_ticks() && !gone.is_empty() {
@@ -404,6 +405,16 @@ fn settle(
         return (Some(from), true);
     }
     (composite, false)
+}
+
+/// Forget the crossfades that are over. `fade_layer` ends one only when
+/// its wallpaper draws again, so leaving the chat within the fade kept
+/// the old window-sized picture until that wallpaper showed again.
+fn end_finished_fades() {
+    FADES.with(|f| {
+        f.borrow_mut()
+            .retain(|_, fade| fade_opacity(fade.start.elapsed()).is_some())
+    });
 }
 
 /// Opacity left of the old picture `elapsed` into a fade.
@@ -740,6 +751,28 @@ mod tests {
         let half = fade_opacity(Duration::from_millis(100)).unwrap();
         assert!((half - 0.5).abs() < 1e-3);
         assert_eq!(fade_opacity(Duration::from_millis(200)), None);
+    }
+
+    /// A crossfade cut short (the chat left within it) lets go of its
+    /// picture at the idle release, which can then free it.
+    #[test]
+    fn the_idle_release_frees_a_picture_a_finished_fade_held() {
+        use super::{FADES, Fade, end_finished_fades};
+        let mut cache = Cache::default();
+        let from = composite(1);
+        cache.insert(1, Some(from.clone()), window(MAIN));
+        let start = Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .expect("a second since boot");
+        FADES.with(|f| f.borrow_mut().insert(9, Fade { from, start }));
+        begin_frame();
+        begin_frame();
+
+        end_finished_fades();
+        let gone = cache.take_unshown(window(MAIN), &[window(MAIN)]);
+        assert_eq!(gone.len(), 1);
+        assert_eq!(Arc::strong_count(&gone[0]), 1, "nothing else holds it");
+        assert!(FADES.with(|f| f.borrow().is_empty()));
     }
 
     #[test]

@@ -136,6 +136,34 @@ impl ChatWindows {
             .map(|open| open.chat_id)
     }
 
+    /// Each open chat window's image cache, and whether the window is
+    /// active (for the idle trim).
+    pub(super) fn image_caches(
+        &self,
+        cx: &App,
+    ) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
+        self.open
+            .iter()
+            .filter_map(|open| {
+                let images = open.view.upgrade()?.read(cx).images.clone();
+                Some((images, open.slot.borrow().active))
+            })
+            .collect()
+    }
+
+    /// The image cache of the chat window with this id.
+    pub(super) fn image_cache_for(
+        &self,
+        id: WindowId,
+        cx: &App,
+    ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
+        let open = self
+            .open
+            .iter()
+            .find(|open| open.handle.window_id() == id)?;
+        Some(open.view.upgrade()?.read(cx).images.clone())
+    }
+
     fn slot_for(&self, chat_id: ChatId) -> Option<slot::SharedSlot> {
         self.window_for(chat_id).map(|open| open.slot.clone())
     }
