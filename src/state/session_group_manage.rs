@@ -70,8 +70,8 @@ impl Session {
             permissions_count(&defaults, is_forum)
         };
         match chat.kind {
-            ChatKind::BasicGroup { basic_group_id } => {
-                let admins = match self.groups.basic_group_members.get(&basic_group_id) {
+            ChatKind::BasicGroup { .. } => {
+                let admins = match self.groups.basic_group_members.get(&chat_id.0) {
                     Some(SupergroupMembersFetch::Loaded { members, .. }) => members
                         .iter()
                         .filter(|m| {
