@@ -82,16 +82,61 @@ fn registry_path(app_root: &Path) -> PathBuf {
     app_root.join("accounts.json")
 }
 
+/// The registry as last read from a readable file, and how the file looked
+/// then. The UI asks for the active account on every frame (the agent
+/// request check), and reading and parsing the file each time showed in an
+/// idle profile at 60 frames a second. A write in this process, or any
+/// change to the file's size or modification time, reads it again.
+static LOADED: std::sync::Mutex<Option<Loaded>> = std::sync::Mutex::new(None);
+
+struct Loaded {
+    path: PathBuf,
+    writes: u64,
+    stamp: (std::time::SystemTime, u64),
+    registry: AccountRegistry,
+}
+
+fn file_stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
 /// Load the registry; missing or corrupt ⇒ `[primary]` (never a hard error).
 fn load_registry(app_root: &Path) -> AccountRegistry {
     let path = registry_path(app_root);
-    let mut registry: AccountRegistry = match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+    let writes = registry_writes();
+    let stamp = file_stamp(&path);
+    let mut loaded = crate::locks::lock_or_recover(&LOADED);
+    if let (Some(last), Some(stamp)) = (loaded.as_ref(), stamp)
+        && last.path == path
+        && last.writes == writes
+        && last.stamp == stamp
+    {
+        return last.registry.clone();
+    }
+    let parsed = std::fs::read(&path)
+        .ok()
+        .map(|bytes| serde_json::from_slice::<AccountRegistry>(&bytes));
+    let registry = match parsed {
+        Some(Ok(registry)) => tidy_registry(registry),
+        Some(Err(_)) => {
             quarantine_registry(&path);
-            AccountRegistry::default()
-        }),
-        Err(_) => AccountRegistry::default(),
+            return AccountRegistry::default();
+        }
+        None => return AccountRegistry::default(),
     };
+    if let Some(stamp) = stamp {
+        *loaded = Some(Loaded {
+            path,
+            writes,
+            stamp,
+            registry: registry.clone(),
+        });
+    }
+    registry
+}
+
+fn tidy_registry(mut registry: AccountRegistry) -> AccountRegistry {
     // Drop hand-edited garbage and duplicate keys.
     registry
         .accounts
@@ -551,6 +596,22 @@ mod account_registry_tests {
         // Removing the active account falls back to a remaining one.
         remove_account(&root, &k1).expect("remove works");
         assert_eq!(active_account(&root), AccountKey::primary());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The registry is kept between reads; an edit made outside Quill
+    /// still shows on the next one.
+    #[test]
+    fn a_registry_edited_on_disk_is_read_again() {
+        let root = tmp_root("edited");
+        let work = add_account(&root, "Work").expect("add works");
+        set_active_account(&root, &work).expect("set works");
+        assert_eq!(active_account(&root), work);
+        let edited =
+            r#"{"accounts":[{"key":"primary","display_name":"Primary"}],"active":"primary"}"#;
+        std::fs::write(root.join("accounts.json"), edited).unwrap();
+        assert_eq!(active_account(&root), AccountKey::primary());
+        assert_eq!(list_accounts(&root).len(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
