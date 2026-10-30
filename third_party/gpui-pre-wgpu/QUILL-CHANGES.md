@@ -52,10 +52,11 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 The Quill project also changed it in 2026 so small pictures don't keep big
 textures (`docs/decisions/images-left-behind.md`):
 
-- `src/wgpu_atlas.rs`: `push_texture` starts image textures at 512² (1 MB)
-  instead of 1024² (4 MB); glyph textures keep 1024². Same change as
-  gpui-pre-apple's `metal_atlas.rs`. Test:
-  `small_pictures_get_small_textures`; the tile-reuse test's large tile is
-  400² so it still fits next to the small one. The atlas tests ran on
-  lavapipe with the crate's other test modules (which read fonts from the
-  Zed tree) left out.
+- `src/wgpu_atlas.rs`: tiles are sorted into `TileClass`es and small
+  images get 512² textures, the same change as gpui-pre-apple's
+  `metal_atlas.rs`. Tests: `small_pictures_keep_to_textures_of_their_own`,
+  `animation_frames_rotate_through_one_texture`; the tile-reuse test's
+  keeper tile is 200². The atlas tests ran on lavapipe, through
+  `cargo test -p gpui-pre-wgpu --lib wgpu_atlas` with the `test-support`
+  feature on and the crate's other test modules left out (they read fonts
+  from the Zed tree or need `naga`).

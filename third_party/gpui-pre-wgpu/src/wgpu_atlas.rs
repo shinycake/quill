@@ -190,7 +190,7 @@ impl WgpuAtlasTextures {
         images: bool,
     ) -> Result<AtlasTile> {
         let tile = self
-            .allocate(size, kind, images)
+            .allocate(size, kind, TileClass::of(images, size))
             .context("failed to allocate")?;
         self.upload_texture(tile.texture_id, tile.bounds, bytes);
         Ok(tile)
@@ -200,23 +200,23 @@ impl WgpuAtlasTextures {
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
-        images: bool,
+        class: TileClass,
     ) -> Option<AtlasTile> {
         {
             let textures = &mut self.storage[texture_kind];
 
-            // QUILL: only textures holding the same kind of tile.
+            // QUILL: only textures holding the same class of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
-                .filter(|texture| texture.images == images)
+                .filter(|texture| texture.class == class)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Some(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind, images);
+        let texture = self.push_texture(size, texture_kind, class);
         texture.allocate(size)
     }
 
@@ -224,7 +224,7 @@ impl WgpuAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
-        images: bool,
+        class: TileClass,
     ) -> &mut WgpuAtlasTexture {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -236,15 +236,13 @@ impl WgpuAtlasTextures {
             height: DevicePixels(max_texture_size),
         };
 
-        // QUILL: image textures start at 512² (1 MB), not 1024² (4 MB): a
-        // few small pictures on screen each kept a mostly empty 4 MB texture,
-        // and a photo of 512 to 1024 px gets a texture of its own size.
-        const IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+        // QUILL: small images get 512² textures (`TileClass`).
+        const SMALL_IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(512),
             height: DevicePixels(512),
         };
-        let floor = if images {
-            IMAGE_ATLAS_SIZE
+        let floor = if class == TileClass::SmallImages {
+            SMALL_IMAGE_ATLAS_SIZE
         } else {
             DEFAULT_ATLAS_SIZE
         };
@@ -287,7 +285,7 @@ impl WgpuAtlasTextures {
             texture,
             view,
             live_atlas_keys: 0,
-            images,
+            class,
         };
 
         if let Some(ix) = index {
@@ -397,8 +395,8 @@ struct WgpuAtlasTexture {
     view: wgpu::TextureView,
     format: wgpu::TextureFormat,
     live_atlas_keys: u32,
-    /// QUILL: holds image tiles only (else glyphs and SVGs only).
-    images: bool,
+    /// QUILL: the class of every tile it holds.
+    class: TileClass,
 }
 
 impl WgpuAtlasTexture {
@@ -444,6 +442,33 @@ fn swizzle_upload_data(bytes: &[u8], format: wgpu::TextureFormat) -> Vec<u8> {
             data
         }
         _ => bytes.to_vec(),
+    }
+}
+
+/// QUILL: which tiles share a texture. Images never share one with glyphs
+/// and SVGs (a long-lived glyph kept a photo's texture alive). Small images
+/// (avatars, custom emoji: both sides at most 128 px) get 512² (1 MB)
+/// textures of their own, so the few left on screen after browsing keep
+/// 1 MB textures instead of 4 MB ones larger pictures came and went in.
+/// Larger images keep upstream's 1024² textures: animation frames of a few
+/// hundred pixels rotate through one, where a smaller texture would hold
+/// one frame and be made anew for each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TileClass {
+    Glyphs,
+    SmallImages,
+    Images,
+}
+
+impl TileClass {
+    fn of(images: bool, size: Size<DevicePixels>) -> Self {
+        if !images {
+            Self::Glyphs
+        } else if size.width.0 <= 128 && size.height.0 <= 128 {
+            Self::SmallImages
+        } else {
+            Self::Images
+        }
     }
 }
 
@@ -518,13 +543,15 @@ mod tests {
         let (device, queue) = test_device_and_queue()?;
         let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
 
+        // QUILL: larger than a small image (`TileClass`), so it shares the
+        // big tiles' texture.
         let small = Size {
-            width: DevicePixels(64),
-            height: DevicePixels(64),
+            width: DevicePixels(200),
+            height: DevicePixels(200),
         };
         let big = Size {
-            width: DevicePixels(400),
-            height: DevicePixels(400),
+            width: DevicePixels(700),
+            height: DevicePixels(700),
         };
 
         let make_key = |image_id: usize| {
@@ -654,35 +681,68 @@ mod tests {
         Ok(())
     }
 
-    /// QUILL: an avatar on screen kept a whole 1024² (4 MB) texture.
+    fn insert_image(atlas: &WgpuAtlas, key: AtlasKey, width: i32, height: i32) -> AtlasTile {
+        let size = Size {
+            width: DevicePixels(width),
+            height: DevicePixels(height),
+        };
+        atlas
+            .get_or_insert_with(key, &mut || {
+                let byte_count = (width * height * 4) as usize;
+                Ok(Some((size, Cow::Owned(vec![0u8; byte_count]))))
+            })
+            .expect("allocation should succeed")
+            .expect("callback returns Some")
+    }
+
+    fn image_key(image_id: usize, frame_index: usize) -> AtlasKey {
+        AtlasKey::Image(RenderImageParams {
+            image_id: ImageId(image_id),
+            frame_index,
+        })
+    }
+
+    /// QUILL: an avatar left on screen kept the 4 MB texture larger
+    /// pictures had come and gone in.
     #[test]
-    fn small_pictures_get_small_textures() -> anyhow::Result<()> {
+    fn small_pictures_keep_to_textures_of_their_own() -> anyhow::Result<()> {
         let (device, queue) = test_device_and_queue()?;
         let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
-        let insert = |image_id: usize, width: i32, height: i32| {
-            let size = Size {
-                width: DevicePixels(width),
-                height: DevicePixels(height),
-            };
-            let key = AtlasKey::Image(RenderImageParams {
-                image_id: ImageId(image_id),
-                frame_index: 0,
-            });
-            atlas
-                .get_or_insert_with(key, &mut || {
-                    let byte_count = (width * height * 4) as usize;
-                    Ok(Some((size, Cow::Owned(vec![0u8; byte_count]))))
-                })
-                .expect("allocation should succeed")
-                .expect("callback returns Some")
-        };
-        let avatar = insert(1, 92, 92);
-        // A 1024² texture had room for both.
-        let photo = insert(2, 600, 400);
+        let avatar = insert_image(&atlas, image_key(1, 0), 92, 92);
+        let photo = insert_image(&atlas, image_key(2, 0), 600, 400);
         assert_ne!(photo.texture_id, avatar.texture_id);
-        // Small pictures still share.
-        let thumbnail = insert(3, 200, 200);
-        assert_eq!(thumbnail.texture_id, avatar.texture_id);
+        let emoji = insert_image(&atlas, image_key(3, 0), 40, 40);
+        assert_eq!(emoji.texture_id, avatar.texture_id);
+        let thumbnail = insert_image(&atlas, image_key(4, 0), 200, 200);
+        assert_eq!(thumbnail.texture_id, photo.texture_id);
+        atlas.remove(&image_key(2, 0));
+        atlas.remove(&image_key(4, 0));
+        assert!(atlas.get_texture_info(photo.texture_id).is_none());
+        assert!(atlas.get_texture_info(avatar.texture_id).is_some());
+        Ok(())
+    }
+
+    /// QUILL: frames of an animation a few hundred pixels wide (a sticker,
+    /// a GIF) rotate through one texture; a texture with room for a single
+    /// frame would be made anew for every frame.
+    #[test]
+    fn animation_frames_rotate_through_one_texture() -> anyhow::Result<()> {
+        let (device, queue) = test_device_and_queue()?;
+        let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        let mut textures = std::collections::HashSet::new();
+        for frame in 0..60 {
+            let tile = insert_image(&atlas, image_key(1, frame), 300, 300);
+            let generation = atlas
+                .get_texture_info(tile.texture_id)
+                .context("the frame's texture should exist")?
+                .generation;
+            textures.insert((tile.texture_id, generation));
+            // Three frames are alive at a time: on screen, drawn, decoded.
+            if let Some(gone) = frame.checked_sub(2) {
+                atlas.remove(&image_key(1, gone));
+            }
+        }
+        assert_eq!(textures.len(), 1);
         Ok(())
     }
 

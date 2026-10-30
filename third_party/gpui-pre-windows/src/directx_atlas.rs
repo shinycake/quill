@@ -33,8 +33,8 @@ struct DirectXAtlasTexture {
     texture: ID3D11Texture2D,
     view: [Option<ID3D11ShaderResourceView>; 1],
     live_atlas_keys: u32,
-    /// QUILL: holds image tiles only (else glyphs and SVGs only).
-    images: bool,
+    /// QUILL: the class of every tile it holds.
+    class: TileClass,
 }
 
 impl DirectXAtlas {
@@ -159,7 +159,7 @@ impl DirectXAtlasTextures {
         images: bool,
     ) -> anyhow::Result<AtlasTile> {
         let tile = self
-            .allocate(size, kind, images)
+            .allocate(size, kind, TileClass::of(images, size))
             .ok_or_else(|| anyhow::anyhow!("failed to allocate"))?;
         let texture = self
             .texture(tile.texture_id)
@@ -172,7 +172,7 @@ impl DirectXAtlasTextures {
         &mut self,
         size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
-        images: bool,
+        class: TileClass,
     ) -> Option<AtlasTile> {
         {
             let textures = match texture_kind {
@@ -181,18 +181,18 @@ impl DirectXAtlasTextures {
                 AtlasTextureKind::Subpixel => &mut self.subpixel_textures,
             };
 
-            // QUILL: only textures holding the same kind of tile.
+            // QUILL: only textures holding the same class of tile.
             if let Some(tile) = textures
                 .iter_mut()
                 .rev()
-                .filter(|texture| texture.images == images)
+                .filter(|texture| texture.class == class)
                 .find_map(|texture| texture.allocate(size))
             {
                 return Some(tile);
             }
         }
 
-        let texture = self.push_texture(size, texture_kind, images)?;
+        let texture = self.push_texture(size, texture_kind, class)?;
         texture.allocate(size)
     }
 
@@ -200,7 +200,7 @@ impl DirectXAtlasTextures {
         &mut self,
         min_size: Size<DevicePixels>,
         kind: AtlasTextureKind,
-        images: bool,
+        class: TileClass,
     ) -> Option<&mut DirectXAtlasTexture> {
         const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(1024),
@@ -212,15 +212,13 @@ impl DirectXAtlasTextures {
             width: DevicePixels(16384),
             height: DevicePixels(16384),
         };
-        // QUILL: image textures start at 512² (1 MB), not 1024² (4 MB): a
-        // few small pictures on screen each kept a mostly empty 4 MB texture,
-        // and a photo of 512 to 1024 px gets a texture of its own size.
-        const IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
+        // QUILL: small images get 512² textures (`TileClass`).
+        const SMALL_IMAGE_ATLAS_SIZE: Size<DevicePixels> = Size {
             width: DevicePixels(512),
             height: DevicePixels(512),
         };
-        let floor = if images {
-            IMAGE_ATLAS_SIZE
+        let floor = if class == TileClass::SmallImages {
+            SMALL_IMAGE_ATLAS_SIZE
         } else {
             DEFAULT_ATLAS_SIZE
         };
@@ -293,7 +291,7 @@ impl DirectXAtlasTextures {
             texture,
             view,
             live_atlas_keys: 0,
-            images,
+            class,
         };
         if let Some(ix) = index {
             texture_list.textures[ix] = Some(atlas_texture);
@@ -400,6 +398,33 @@ fn etagere_point_to_device(value: etagere::Point) -> Point<DevicePixels> {
     }
 }
 
+/// QUILL: which tiles share a texture. Images never share one with glyphs
+/// and SVGs (a long-lived glyph kept a photo's texture alive). Small images
+/// (avatars, custom emoji: both sides at most 128 px) get 512² (1 MB)
+/// textures of their own, so the few left on screen after browsing keep
+/// 1 MB textures instead of 4 MB ones larger pictures came and went in.
+/// Larger images keep upstream's 1024² textures: animation frames of a few
+/// hundred pixels rotate through one, where a smaller texture would hold
+/// one frame and be made anew for each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TileClass {
+    Glyphs,
+    SmallImages,
+    Images,
+}
+
+impl TileClass {
+    fn of(images: bool, size: Size<DevicePixels>) -> Self {
+        if !images {
+            Self::Glyphs
+        } else if size.width.0 <= 128 && size.height.0 <= 128 {
+            Self::SmallImages
+        } else {
+            Self::Images
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,13 +481,15 @@ mod tests {
             return;
         };
 
+        // QUILL: larger than a small image (`TileClass`), so it shares the
+        // big tiles' texture.
         let small = Size {
-            width: DevicePixels(64),
-            height: DevicePixels(64),
+            width: DevicePixels(200),
+            height: DevicePixels(200),
         };
         let big = Size {
-            width: DevicePixels(400),
-            height: DevicePixels(400),
+            width: DevicePixels(700),
+            height: DevicePixels(700),
         };
 
         let keeper_key = make_image_key(1);

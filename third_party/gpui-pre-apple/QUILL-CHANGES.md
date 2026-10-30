@@ -82,8 +82,9 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 The Quill project also changed it in 2026 so small pictures don't keep big
 textures (`docs/decisions/images-left-behind.md`):
 
-- `src/metal_atlas.rs`: `push_texture` starts image textures at 512² (1 MB)
-  instead of 1024² (4 MB); glyph textures keep 1024². A few small pictures
-  on screen each kept a mostly empty 4 MB texture. Test:
-  `test_small_pictures_get_small_textures`; the tile-reuse test's large
-  tile is 400² so it still fits next to the small one.
+- `src/metal_atlas.rs`: tiles are sorted into `TileClass`es (glyphs and
+  SVGs, images up to 128 px a side, larger images), and a texture holds one
+  class. Small images get 512² (1 MB) textures; the rest keep 1024². An
+  avatar left on screen kept the 4 MB texture larger pictures had come and
+  gone in. Test: `test_small_pictures_get_small_textures`; the tile-reuse
+  test's keeper tile is 200² so it shares the large tiles' texture.

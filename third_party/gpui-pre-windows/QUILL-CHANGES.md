@@ -291,8 +291,7 @@ The Quill project also changed it in 2026 so color emoji glyphs can be swept
 
 Added in 2026 (`docs/decisions/images-left-behind.md`):
 
-- `src/directx_atlas.rs`: `push_texture` starts image textures at 512²
-  (1 MB) instead of 1024² (4 MB); glyph textures keep 1024². Same change as
-  gpui-pre-apple's `metal_atlas.rs`. The tile-reuse test's large tile is
-  400² so it still fits next to the small one. Not run on Windows by the
-  author.
+- `src/directx_atlas.rs`: tiles are sorted into `TileClass`es and small
+  images get 512² textures, the same change as gpui-pre-apple's
+  `metal_atlas.rs`. The tile-reuse test's keeper tile is 200². Not run on
+  Windows by the author.

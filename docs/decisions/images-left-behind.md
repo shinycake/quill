@@ -36,17 +36,32 @@ trim evicted decodes again. What may be on screen keeps its tile.
 ## Small pictures in big textures
 
 GPUI's atlas made every texture at least 1024 x 1024 (4 MB). Images get
-textures of their own kind (`sweep-r3-browse-memory.md`), so the few small
-pictures on screen after a browse, such as avatars and a sticker, kept 4 MB
-textures that were mostly empty: about 8 MB on the Mac. A photo of 512 to
-1024 px either shared one of them or got a 4 MB texture for itself.
+textures of their own kind (`sweep-r3-browse-memory.md`), but a small
+picture went into whatever image texture had room. After a browse, the
+avatars and emoji left on screen sat in textures larger pictures had come
+and gone in, and each kept a mostly empty 4 MB texture alive: about 8 MB on
+the Mac.
 
-The three vendored atlases (Metal, wgpu, DirectX) now start image textures
-at 512 x 512 (1 MB); a picture larger than that still gets a texture of its
-own size. Glyph textures stay at 1024 x 1024: text fills them. More small
-textures mean a few more sprite batches per frame, one per texture, which
-is cheap next to the frame. `image_budget`'s `atlas_cost` charges a small
-picture its share of a 512 x 512 texture to match.
+The three vendored atlases (Metal, wgpu, DirectX) now sort tiles into three
+classes (`TileClass`): glyphs and SVGs, small images (both sides at most
+128 px: avatars, custom emoji, reactions) and larger images. A texture only
+holds one class. Small images get 512 x 512 (1 MB) textures, about 20 chat
+list avatars each, so what stays on screen keeps 1 MB textures. Larger
+images keep 1024 x 1024 textures, as before.
+
+The first version gave every image texture 512 x 512. Review measured the
+cost on the real wgpu atlas: a 512 x 512 texture holds one frame of 257 to
+512 px, and a frame of 513 to 1024 px got a texture of its own size, so an
+animated sticker (448 px at 2x) or a GIF made and freed a texture on every
+frame, 60 to 120 times a second, where a 1024 x 1024 texture lets its
+frames rotate. Thirty 300 x 300 pictures also took 30 MB in 30 textures
+instead of 16 MB in 4. Keeping larger images at 1024 x 1024 keeps both as
+they were. A synthetic browse simulated with etagere (the atlas allocator)
+left 3 MB of image textures on screen afterwards, against 16 MB before and
+7 MB with 512 x 512 for every image.
+
+`image_budget`'s `atlas_cost` charges each picture its share of the texture
+its class gets.
 
 ## Wallpaper renders nobody took
 
@@ -90,8 +105,9 @@ index now forgets them on eviction.
 - `media_viewer::actions::rotate_ui_tests::closing_the_viewer_lets_go_of_a_turned_photo`
 - `image_budget::tests::evicted_sizes_leave_the_index`
 - `image_budget::tests::idle_trim_takes_kept_pictures_out_of_the_atlas`
-- `wgpu_atlas::tests::small_pictures_get_small_textures` (gpui-pre-wgpu, on
-  lavapipe) and `metal_atlas::tests::test_small_pictures_get_small_textures`
-  (gpui-pre-apple)
+- `wgpu_atlas::tests::small_pictures_keep_to_textures_of_their_own` and
+  `animation_frames_rotate_through_one_texture` (gpui-pre-wgpu, run on
+  lavapipe), `metal_atlas::tests::test_small_pictures_get_small_textures`
+  (gpui-pre-apple, run on the Mac)
 
 Each fails without its fix.
