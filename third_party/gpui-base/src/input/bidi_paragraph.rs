@@ -147,6 +147,8 @@ impl BidiParagraph {
             .map(|row| row.line.width)
             .max()
             .unwrap_or_default();
+        // Quill keeps laid-out paragraphs in a cache: no room for rows that never come.
+        rows.shrink_to_fit();
         Self {
             rows,
             line_height,
@@ -372,8 +374,8 @@ impl BidiParagraph {
             None if range.is_empty() => Vec::new(),
             None => vec![(range.clone(), false)],
         };
-        let mut fragments = Vec::new();
-        let mut shaped_lines = Vec::new();
+        let mut fragments = Vec::with_capacity(visual.len());
+        let mut shaped_lines = Vec::with_capacity(visual.len());
         let mut x = px(0.);
         for (run_range, rtl) in visual {
             let slice = &text[run_range.clone()];
@@ -384,12 +386,15 @@ impl BidiParagraph {
                 slice.to_string()
             }
             .into();
-            let shaped = window
+            let mut shaped = window
                 .text_system()
                 .shape_line(shaped_text, font_size, &run_runs, None);
             let local = run_range.start - range.start..run_range.end - range.start;
             let fragment =
                 fragment_from_shaped(&shaped, local, rtl, x, slice, window.text_system());
+            // Painting reads the glyphs and decorations only, and the fragment keeps the
+            // run's text: a cached paragraph need not hold a second copy.
+            shaped.text = SharedString::default();
             x += px(fragment.width);
             fragments.push(fragment);
             shaped_lines.push(shaped);

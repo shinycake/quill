@@ -22,7 +22,7 @@
 use super::selectable_text::{BidiSource, text_runs};
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::*;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -42,6 +42,7 @@ pub(crate) fn one_line(
                 highlights,
                 font_families,
             },
+            runs: Rc::from([]),
             measured: Rc::default(),
             paragraph: None,
         }
@@ -84,9 +85,11 @@ pub(crate) fn aligned_block(text: impl Into<SharedString>) -> Div {
 struct BidiLine {
     text: SharedString,
     source: BidiSource,
-    /// The paragraph measured at the width GPUI asked for, reused by prepaint when the
-    /// final width matches.
-    measured: Rc<RefCell<Option<(Pixels, Rc<BidiParagraph>)>>>,
+    /// The styled runs, from layout.
+    runs: Rc<[TextRun]>,
+    /// The room GPUI last measured the line in and the width it took there; prepaint
+    /// draws the paragraph laid out for that room when the final width allows.
+    measured: Rc<Cell<Option<(Pixels, Pixels)>>>,
     paragraph: Option<Rc<BidiParagraph>>,
 }
 
@@ -129,7 +132,8 @@ impl Element for BidiLine {
         _cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let (style, font_size, line_height) = metrics(window);
-        let runs = text_runs(&self.text, &style, &self.source);
+        self.runs = text_runs(&self.text, &style, &self.source).into();
+        let runs = self.runs.clone();
         let text = self.text.clone();
         let measured = self.measured.clone();
         let layout_id = window.request_measured_layout(Default::default(), {
@@ -142,7 +146,7 @@ impl Element for BidiLine {
                         _ => None,
                     })
                     .unwrap_or(px(1.0e6));
-                let Some(paragraph) = super::paragraph_cache::layout_one_line(
+                let Some(measure) = super::paragraph_cache::measure_one_line(
                     &text,
                     &runs,
                     font_size,
@@ -152,9 +156,8 @@ impl Element for BidiLine {
                 ) else {
                     return Size::default();
                 };
-                let size = size(paragraph.width(), line_height);
-                *measured.borrow_mut() = Some((limit, paragraph));
-                size
+                measured.set(Some((limit, measure.width)));
+                size(measure.width, line_height)
             }
         });
         (layout_id, ())
@@ -169,28 +172,25 @@ impl Element for BidiLine {
         window: &mut Window,
         _cx: &mut App,
     ) -> Self::PrepaintState {
-        let measured = self
-            .measured
-            .borrow()
-            .as_ref()
-            .filter(|(limit, paragraph)| {
-                // Laid out for this room, or whole and still fitting.
-                *limit == bounds.size.width
-                    || (paragraph.width() <= bounds.size.width && *limit > bounds.size.width)
-            })
-            .map(|(_, paragraph)| paragraph.clone());
-        self.paragraph = measured.or_else(|| {
-            let (style, font_size, line_height) = metrics(window);
-            let runs = text_runs(&self.text, &style, &self.source);
-            super::paragraph_cache::layout_one_line(
-                &self.text,
-                &runs,
-                font_size,
-                line_height,
-                bounds.size.width,
-                window,
-            )
-        });
+        let room = match self.measured.get() {
+            // Laid out for this room, or whole and still fitting.
+            Some((limit, width))
+                if limit == bounds.size.width
+                    || (width <= bounds.size.width && limit > bounds.size.width) =>
+            {
+                limit
+            }
+            _ => bounds.size.width,
+        };
+        let (_, font_size, line_height) = metrics(window);
+        self.paragraph = super::paragraph_cache::layout_one_line(
+            &self.text,
+            &self.runs,
+            font_size,
+            line_height,
+            room,
+            window,
+        );
     }
 
     fn paint(

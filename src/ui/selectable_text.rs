@@ -425,7 +425,7 @@ impl Element for SelectableRichText {
                         AvailableSpace::Definite(width) => Some(width),
                         _ => None,
                     });
-                    super::paragraph_cache::layout(
+                    super::paragraph_cache::measure(
                         &text,
                         &runs,
                         font_size,
@@ -433,7 +433,7 @@ impl Element for SelectableRichText {
                         wrap,
                         window,
                     )
-                    .map_or_else(Size::default, |p| p.size())
+                    .unwrap_or_default()
                 }
             });
             return (layout_id, handle);
@@ -467,7 +467,7 @@ impl Element for SelectableRichText {
                 &runs,
                 font_size,
                 line_height,
-                Some(bounds.size.width),
+                bounds.size.width,
                 window,
             );
         } else {
