@@ -722,13 +722,18 @@ impl BoundedImageCache {
         }
     }
 
-    /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget.
+    /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget,
+    /// or, with the window in the `background`, to what is on screen.
     /// Runs between frames (no window is being drawn), so the images leave
     /// every window's atlas.
-    pub(super) fn idle_trim(&mut self, cx: &mut App) {
+    pub(super) fn idle_trim(&mut self, background: bool, cx: &mut App) {
         IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
         let before = (self.bytes, self.entries.len());
-        let images = self.evict(IDLE_BUDGET);
+        let none = Budget {
+            bytes: 0,
+            entries: 0,
+        };
+        let images = self.evict(if background { none } else { IDLE_BUDGET });
         if super::frame_clock::trace_ticks() {
             eprintln!(
                 "image idle trim: {} images, {:.1} MB -> {} images, {:.1} MB",
