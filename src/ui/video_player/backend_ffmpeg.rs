@@ -280,6 +280,13 @@ impl Backend for FfmpegBackend {
             }
             Some(Correction::Rate) | None => {}
         }
+        // An ended clip's soundtrack plays silence for ever, which would
+        // keep the audio output open while the clip sits on screen.
+        if !self.player.is_playing()
+            && let Some(sound) = &self.sound
+        {
+            sound.pause();
+        }
     }
 
     fn seek(&mut self, secs: f64) {

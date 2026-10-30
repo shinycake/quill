@@ -17,10 +17,10 @@ use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
 use rodio::source::SeekError;
-use rodio::{ChannelCount, Player, SampleRate, Source};
+use rodio::{ChannelCount, SampleRate, Source};
 
 use super::tempo::{SharedSpeed, Tempo};
-use super::{AudioError, Outlet, SharedOutput, open_decoded};
+use super::{AudioError, Outlet, OutputPlayer, SharedOutput, open_decoded};
 
 /// What the engine is doing right now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -308,7 +308,7 @@ impl SeekBoard {
     }
 
     /// Queue `target` and make sure a worker will deliver it. Returns at once.
-    fn post(self: &Arc<Self>, player: &Arc<Player>, target: f64, now: Duration) {
+    fn post(self: &Arc<Self>, player: &Arc<OutputPlayer>, target: f64, now: Duration) {
         let spawn = {
             let mut state = self.lock();
             state.queued = Some(Seek {
@@ -342,7 +342,7 @@ impl SeekBoard {
 
     /// The worker: hand the newest target to the audio thread, wait there,
     /// repeat until nothing newer was posted.
-    fn drain(&self, player: &Player) {
+    fn drain(&self, player: &OutputPlayer) {
         loop {
             if self.is_cancelled() {
                 return;
@@ -379,7 +379,7 @@ impl SeekBoard {
 
 /// A freshly built player and the probe counting its frames.
 struct Built {
-    player: Arc<Player>,
+    player: Arc<OutputPlayer>,
     probe: Arc<Probe>,
 }
 
@@ -388,7 +388,7 @@ struct Built {
 /// device to leave when the device answers, so a replaced track can't leave
 /// anything running or touch the next track's state.
 struct Track {
-    player: Arc<Player>,
+    player: Arc<OutputPlayer>,
     seeks: Arc<SeekBoard>,
     probe: Arc<Probe>,
 }
@@ -448,7 +448,7 @@ fn build_player(
     if hold {
         player.pause();
     }
-    outlet.append(&player, source);
+    player.append(source);
     Ok(Built {
         player: Arc::new(player),
         probe,
@@ -685,13 +685,10 @@ impl AudioEngine {
             Ok(built) => {
                 let held = self.track.as_ref().is_some_and(|t| t.player.is_paused());
                 built.player.set_volume(self.volume);
-                if !held {
-                    self.output.wake();
-                    built.player.play();
-                }
+                let playing = held || built.player.play();
                 self.track = Some(Track::new(built, &self.workers));
                 self.stale = false;
-                self.error = None;
+                self.error = (!playing).then_some(AudioError::NoOutput);
             }
             Err(error) => self.note(&Err(error)),
         }
@@ -797,14 +794,12 @@ impl AudioEngine {
             self.note(&started);
             return started;
         }
-        if let Some(track) = &self.track {
-            // The output closes while nothing plays.
-            if !self.output.wake() {
-                let woke = Err(AudioError::NoOutput);
-                self.note(&woke);
-                return woke;
-            }
-            track.player.play();
+        if let Some(track) = &self.track
+            && !track.player.play()
+        {
+            let woke = Err(AudioError::NoOutput);
+            self.note(&woke);
+            return woke;
         }
         self.error = None;
         Ok(())
@@ -1029,6 +1024,23 @@ mod tests {
         engine.start(&path, 0.0, 1.0, 1.0, 1.0).unwrap();
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
         assert_eq!(engine.state(), EngineState::Ended);
+    }
+
+    /// The output closes while nothing plays, so a resume opens it before
+    /// the track plays on.
+    #[test]
+    fn resuming_a_paused_track_opens_the_output() {
+        let (output, mut device) = device();
+        let mut engine = AudioEngine::new(output.clone());
+        let path = track("resume-opens.wav", 4);
+        engine.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        engine.pause();
+        let asked = output.wakes();
+        engine.resume(0.0).unwrap();
+        assert_eq!(output.wakes(), asked + 1);
+        assert_eq!(engine.state(), EngineState::Playing);
+        pull(&mut device, 4000);
+        assert!(engine.position_secs() > 0.4, "{}", engine.position_secs());
     }
 
     #[test]

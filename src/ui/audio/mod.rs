@@ -26,11 +26,11 @@ use std::time::Duration;
 
 use quill::connect::SoundResolution;
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, Player, Source};
+use rodio::{Decoder, Source};
 
 use super::call_tones;
 pub(super) use engine::{AudioEngine, EngineState, Simulation};
-pub(super) use output::{Hold, Outlet, SharedOutput};
+pub(super) use output::{Hold, Outlet, OutputPlayer, SharedOutput};
 use tempo::{SharedSpeed, Tempo};
 
 /// Which decoder reads a file.
@@ -167,8 +167,7 @@ pub(super) fn share_output_with_video(output: &SharedOutput) {
 /// the playback speed without changing pitch. The decoder's player keeps
 /// time from what this pulls, so pausing it pauses the picture too.
 pub(super) struct StreamSound {
-    output: SharedOutput,
-    player: Player,
+    player: OutputPlayer,
     speed: SharedSpeed,
 }
 
@@ -181,26 +180,21 @@ impl StreamSound {
         speed: f64,
         playing: bool,
     ) -> Option<Self> {
-        let output = VIDEO_OUTPUT.with(|slot| slot.borrow().clone())?;
-        let outlet = output.outlet()?;
+        let outlet =
+            VIDEO_OUTPUT.with(|slot| slot.borrow().as_ref().and_then(SharedOutput::outlet))?;
         let speed = SharedSpeed::new(speed);
         let player = outlet.player();
         player.set_volume(volume.clamp(0.0, 1.0));
         if !playing {
             player.pause();
         }
-        outlet.append(&player, Tempo::new(TapSource(tap), speed.clone()));
-        Some(Self {
-            output,
-            player,
-            speed,
-        })
+        player.append(Tempo::new(TapSource(tap), speed.clone()));
+        Some(Self { player, speed })
     }
 
-    /// The decoder keeps time from what the output pulls, so the device
-    /// must be open for the picture to move.
+    /// The decoder keeps time from what the output pulls: with no device
+    /// the picture holds still too.
     pub(super) fn play(&self) {
-        self.output.wake();
         self.player.play();
     }
 
@@ -287,7 +281,7 @@ pub(super) fn notification_sound(resolution: SoundResolution) -> Option<Notifica
 /// without cutting it. A new sound replaces the previous one.
 pub(super) struct NotificationSounds {
     output: SharedOutput,
-    player: Option<Player>,
+    player: Option<OutputPlayer>,
 }
 
 impl NotificationSounds {
@@ -325,8 +319,8 @@ impl NotificationSounds {
             NotificationSound::DefaultTone => None,
         };
         match source {
-            Some(source) => outlet.append(&player, source),
-            None => outlet.append(&player, default_tone()),
+            Some(source) => player.append(source),
+            None => player.append(default_tone()),
         }
         self.player = Some(player);
     }

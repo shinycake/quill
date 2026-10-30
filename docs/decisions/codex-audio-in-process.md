@@ -101,11 +101,18 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   device after 500 ms with nothing heard, then ends. Measuring the samples
   instead would close the device during silence inside a track, such as
   the quiet start of many songs, and leave the track stalled.
-- Opening: every new sound (`SharedOutput::outlet`) and every resume
-  (`AudioEngine::resume`, a restart landing, `StreamSound::play`) calls
-  `wake`, which opens the device if it was closed. The video decoder keeps
-  time from what the output pulls, so a soundtrack that resumes without a
-  device would also freeze the picture.
+- Opening: players are `OutputPlayer`s, and whatever needs the audio
+  thread opens the device first: `play`, `try_seek`, and a sound queued on
+  a playing player (after its file was decoded, however long that took).
+  With the device closed, a play would stall and a seek would wait for an
+  answer for ever (`Player::try_seek` blocks until the audio thread takes
+  it; a paused video's seek runs on the UI thread). The video decoder keeps
+  time from what the output pulls, so a soundtrack resumed without a device
+  would also freeze the picture. With no device, `play` leaves the player
+  paused and `try_seek` fails at once.
+- A video soundtrack (`StreamSound`) never ends: it plays silence after the
+  clip. The ffmpeg backend pauses it whenever the decoder isn't playing, so
+  an ended clip left on screen lets the device close.
 - A call sound that loops takes a `Hold` while it loops, so the device stays
   open through the gaps between rings (1 s and 2.5 s) and is not reopened
   for every ring.

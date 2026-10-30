@@ -10,9 +10,8 @@
 use std::num::NonZero;
 use std::time::{Duration, Instant};
 
-use super::audio::{Hold, SharedOutput};
+use super::audio::{Hold, OutputPlayer, SharedOutput};
 
-use rodio::Player;
 use rodio::buffer::SamplesBuffer;
 
 use super::call_tones;
@@ -57,7 +56,7 @@ impl CallSound {
 pub(super) struct CallSounds {
     /// The app's shared audio output (opened on first use).
     output: SharedOutput,
-    player: Option<Player>,
+    player: Option<OutputPlayer>,
     looping: Option<CallSound>,
     /// Keeps the output open between a loop's sounds.
     hold: Option<Hold>,
@@ -100,14 +99,11 @@ impl CallSounds {
             return;
         };
         let player = outlet.player();
-        outlet.append(
-            &player,
-            SamplesBuffer::new(
-                NonZero::<u16>::MIN,
-                NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),
-                sound.samples(),
-            ),
-        );
+        player.append(SamplesBuffer::new(
+            NonZero::<u16>::MIN,
+            NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),
+            sound.samples(),
+        ));
         self.player = Some(player);
     }
 
@@ -139,7 +135,7 @@ impl CallSounds {
         let Some(sound) = self.looping else {
             return;
         };
-        let finished = self.player.as_ref().is_none_or(Player::empty);
+        let finished = self.player.as_ref().is_none_or(OutputPlayer::empty);
         if !finished {
             return;
         }
