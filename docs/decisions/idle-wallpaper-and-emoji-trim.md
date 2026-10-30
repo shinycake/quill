@@ -16,12 +16,15 @@ wallpaper since changed, and a closed dialog's preview and thumbnails stayed
 the same way.
 
 Each picture now records where and when it was last painted
-(`image_budget::paint_stamp`). At the idle trim, `release_unshown` takes out
-the pictures no slot shows and no frame can still show (a cached slice
-replaying an older frame), and drops them from the atlas. A slot's current
-picture always stays, also in windows whose frames `image_budget` doesn't
-count. A new picture counts as activity, so the idle trim also runs after a
-resize, which shows nothing else new.
+(`image_budget::paint_stamp`) and in which windows. At the idle trim,
+`release_unshown` takes out the pictures no slot shows and no frame can
+still show (a cached slice replaying an older frame), and drops them from
+the atlas: old window sizes, a wallpaper since turned or changed, a closed
+dialog's thumbnails, a closed chat window's history. A slot's current
+picture always stays (the dialog preview's too, about 1 MB). Frames are
+counted in the main window only, so a picture another open window painted
+stays until that window closes. A new picture counts as activity, so the
+idle trim also runs after a resize, which shows nothing else new.
 
 ## Emoji glyphs
 
@@ -67,6 +70,7 @@ focus, it dropped 20 and kept 2, and the two reaction chips still drew.
 
 - `wallpaper_cache::tests::once_idle_only_what_a_slot_shows_stays`
 - `wallpaper_cache::tests::a_picture_painted_last_frame_stays`
+- `wallpaper_cache::tests::what_another_open_window_painted_stays_until_it_closes`
 - `glyph_sweep::tests::a_sweep_drops_only_the_emoji_nothing_drew_since_it_began`
   (the atlas side, on GPUI's headless atlas)
 - `glyph_sweep::tests::text_glyphs_stay_whatever_their_mark`

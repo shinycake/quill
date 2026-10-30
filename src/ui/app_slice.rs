@@ -218,12 +218,18 @@ impl QuillApp {
             while let Some(due) = super::image_budget::idle_trim_due() {
                 let now = std::time::Instant::now();
                 if due <= now {
+                    let main = this
+                        .read_with(cx, |this, _| this.windows.main)
+                        .ok()
+                        .flatten();
                     cache.update(cx, |cache, cx| {
                         cache.idle_trim(cx);
                         super::spoiler_fx::release_media_tile(None, cx);
-                        super::wallpaper_cache::release_unshown(cx);
+                        if let Some(main) = main {
+                            super::wallpaper_cache::release_unshown(main.window_id(), cx);
+                        }
                     });
-                    if let Ok(Some(main)) = this.read_with(cx, |this, _| this.windows.main) {
+                    if let Some(main) = main {
                         let _ = main.update(cx, |_, window, _| super::glyph_sweep::begin(window));
                     }
                     break;
