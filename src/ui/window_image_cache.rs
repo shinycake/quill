@@ -93,7 +93,7 @@ mod tests {
             vcx.update(|window, cx| window.render_frame(cx));
         }
 
-        let (paths, cache) = app.read_with(&mut vcx, |app, _| {
+        let (paths, cache) = app.read_with(&vcx, |app, _| {
             let stage = app
                 .demo_session
                 .as_ref()
