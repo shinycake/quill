@@ -81,11 +81,16 @@ struct Board {
     /// is no longer wanted is dropped.
     wanted: HashSet<u64>,
     running: Option<(u64, u64)>,
-    done: HashMap<u64, Option<Rendered>>,
+    /// Finished results by key, with their slot, until a lookup takes
+    /// them.
+    done: HashMap<u64, (u64, Option<Rendered>)>,
 }
 
 impl Board {
-    /// Queue `job`, replacing the slot's older request.
+    /// Queue `job`, replacing the slot's older request and any result for
+    /// it nobody took: a size the window was at for one frame when its
+    /// render finished (a full history picture) would otherwise wait in
+    /// `done` until `DONE_CAP` clears it.
     fn request(&mut self, job: Job, replaces: bool) {
         if self.wanted.contains(&job.key) || self.done.contains_key(&job.key) {
             return;
@@ -108,6 +113,7 @@ impl Board {
             for key in dropped {
                 self.wanted.remove(&key);
             }
+            self.done.retain(|_, (done_slot, _)| *done_slot != slot);
         }
         self.wanted.insert(job.key);
         self.queue.push(job);
@@ -129,13 +135,13 @@ impl Board {
         }
     }
 
-    fn finish(&mut self, key: u64, result: Option<Rendered>) {
+    fn finish(&mut self, slot: u64, key: u64, result: Option<Rendered>) {
         self.running = None;
         if self.wanted.remove(&key) {
             if self.done.len() >= DONE_CAP {
                 self.done.clear();
             }
-            self.done.insert(key, result);
+            self.done.insert(key, (slot, result));
         }
     }
 }
@@ -188,7 +194,10 @@ fn worker() {
             }
         };
         let result = sources.render(&job.wallpaper, job.width, job.height);
-        shared.board.lock_or_recover().finish(job.key, result);
+        shared
+            .board
+            .lock_or_recover()
+            .finish(job.slot, job.key, result);
     }
 }
 
@@ -500,7 +509,7 @@ fn lookup(
             return ready(&mut cache, composite, true);
         }
         let mut board = shared.board.lock_or_recover();
-        if let Some(result) = board.done.remove(&key) {
+        if let Some((_, result)) = board.done.remove(&key) {
             drop(board);
             let composite = result.and_then(|r| to_composite(r, width, height));
             cache.insert(key, composite.clone(), window);
@@ -769,7 +778,7 @@ mod tests {
         assert_eq!(running.key, 1);
         // The window keeps resizing while key 1 renders.
         board.request(job(2, 7, 10_000), true);
-        board.finish(1, None);
+        board.finish(7, 1, None);
         assert!(!board.done.contains_key(&1), "nobody wants it any more");
         match board.next(Instant::now()) {
             Err(Some(wait)) => assert!(wait > Duration::from_secs(5)),
@@ -777,7 +786,25 @@ mod tests {
         }
         board.request(job(3, 8, 0), true);
         assert_eq!(board.next(Instant::now()).ok().unwrap().key, 3);
-        board.finish(3, None);
+        board.finish(8, 3, None);
         assert!(board.done.contains_key(&3));
+    }
+
+    #[test]
+    fn a_result_its_slot_moved_past_is_dropped() {
+        let mut board = Board::default();
+        board.request(job(1, 7, 0), true);
+        board.request(job(2, 9, 0), false);
+        for _ in 0..2 {
+            let running = board.next(Instant::now()).ok().unwrap();
+            board.finish(running.slot, running.key, None);
+        }
+        assert!(board.done.contains_key(&1));
+        // The window is at a new size before a frame took key 1.
+        board.request(job(3, 7, 0), true);
+        assert!(!board.done.contains_key(&1), "nobody will ask for it");
+        // Thumbnails share a slot and never replace each other.
+        board.request(job(4, 9, 0), false);
+        assert!(board.done.contains_key(&2));
     }
 }

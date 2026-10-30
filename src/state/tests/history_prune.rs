@@ -3,7 +3,8 @@
 use super::common::session;
 use super::{
     CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX, ChannelMemberStatus,
-    ChatId, MessageContent, MessageId, ParsedMessage, Session, TopicHistory, history_message,
+    ChatId, MessageContent, MessageId, ParsedMessage, ReplyTarget, Session, TopicHistory,
+    history_message,
 };
 
 fn live(chat: i64, id: i64) -> ParsedMessage {
@@ -213,6 +214,76 @@ fn the_least_recently_used_closed_chat_is_dropped_past_the_bound() {
         assert_eq!(len(&session, chat), CLOSED_TAIL_KEEP, "chat {chat} kept");
     }
     assert_eq!(session.histories.len(), CLOSED_CHATS_MAX);
+}
+
+fn fetched_reply(session: &Session, chat: i64, row: i64) -> bool {
+    session.messages.reply_targets.contains_key(&(chat, row))
+}
+
+#[test]
+fn a_kept_tail_keeps_the_replied_messages_of_rows_paged_out() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 7);
+    feed(&mut session, 7, 200);
+    // Rows 10 and 190 reply to messages outside the window; 50's original
+    // is gone.
+    session.accept_replied_message(ChatId(7), MessageId(10), live(7, 3));
+    session.accept_replied_message(ChatId(7), MessageId(190), live(7, 4));
+    session.reject_replied_message(ChatId(7), MessageId(50));
+    switch(&mut session, 8);
+    assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP);
+    // Coming back scrolled up pages rows 10 and 50 in again: their strips
+    // show at once instead of "Loading".
+    assert!(fetched_reply(&session, 7, 10));
+    assert!(matches!(
+        session.messages.reply_targets.get(&(7, 50)),
+        Some(ReplyTarget::Missing)
+    ));
+    assert!(fetched_reply(&session, 7, 190));
+}
+
+#[test]
+fn a_dropped_chat_forgets_its_pinned_list_and_replied_messages() {
+    let (mut session, _sink) = session();
+    let total = CLOSED_CHATS_MAX as i64 + 1;
+    for chat in 1..=total {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 80);
+        // Row 5 leaves with the tail trim, row 80 stays in the tail.
+        session.accept_replied_message(ChatId(chat), MessageId(5), live(chat, 1));
+        session.accept_replied_message(ChatId(chat), MessageId(80), live(chat, 2));
+        let pinned = session.histories[&chat].messages[&80].clone();
+        session.messages.pinned_messages.insert(chat, vec![pinned]);
+    }
+    leave(&mut session);
+    assert!(!session.histories.contains_key(&1), "the oldest went");
+    assert!(!session.messages.pinned_messages.contains_key(&1));
+    assert!(!fetched_reply(&session, 1, 5));
+    assert!(!fetched_reply(&session, 1, 80));
+    assert!(session.messages.pinned_messages.contains_key(&2));
+    assert!(fetched_reply(&session, 2, 5), "a kept tail keeps them");
+    assert!(fetched_reply(&session, 2, 80));
+}
+
+#[test]
+fn a_forum_keeps_its_replied_messages_until_its_last_topic_goes() {
+    let (mut session, _sink) = session();
+    session.topic_history_entry(ChatId(70), 1);
+    session.topic_history_entry(ChatId(70), 2);
+    session.accept_replied_message(ChatId(70), MessageId(5), live(70, 1));
+    // Topics of other chats push chat 70's topics out of the LRU, oldest
+    // first.
+    session.topic_history_entry(ChatId(71), 1);
+    for topic in 2..CLOSED_TOPICS_MAX as i32 {
+        session.topic_history_entry(ChatId(71), topic);
+    }
+    assert!(!session.threads.topic_histories.contains_key(&(70, 1)));
+    assert!(session.threads.topic_histories.contains_key(&(70, 2)));
+    assert!(fetched_reply(&session, 70, 5), "topic 2 is still kept");
+    session.topic_history_entry(ChatId(71), CLOSED_TOPICS_MAX as i32);
+    assert!(!session.threads.topic_histories.contains_key(&(70, 2)));
+    assert!(!session.histories.contains_key(&70));
+    assert!(!fetched_reply(&session, 70, 5));
 }
 
 #[test]

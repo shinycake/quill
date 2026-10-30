@@ -15,7 +15,11 @@
 //!   dropped whole;
 //! - a chat that was left or deleted is dropped as soon as nothing shows it;
 //! - live messages landing in a chat nobody shows keep that tail bounded
-//!   ([`CLOSED_TAIL_CAP`]) and count as use of the chat.
+//!   ([`CLOSED_TAIL_CAP`]) and count as use of the chat;
+//! - what is kept beside a chat's rows goes once nothing of the chat is
+//!   kept: the replied-to messages fetched for its rows, and its pinned
+//!   list (fetched again whenever the chat opens). A kept tail keeps them
+//!   all, so rows paged back in show their reply strips at once.
 //!
 //! A history is never pruned while any view shows it (the main window, a
 //! chat window, a topic or comment thread of it) or while the UI holds it
@@ -437,6 +441,28 @@ impl Session {
         self.history_pruning
             .closed_chats
             .retain(|id| *id != chat_id);
+        self.forget_side_tables_once_unloaded(ChatId(chat_id));
+    }
+
+    /// Once nothing of `chat_id` is kept (no history entry, no topic),
+    /// forget what was fetched beside its rows: the replied-to messages
+    /// (`reply_targets`) and the pinned list. Opening the chat fetches both
+    /// again. While a tail is kept they stay, so rows paged back in show
+    /// their reply strips at once.
+    fn forget_side_tables_once_unloaded(&mut self, chat_id: ChatId) {
+        let kept = self.histories.contains_key(&chat_id.0)
+            || self
+                .threads
+                .topic_histories
+                .keys()
+                .any(|(chat, _)| *chat == chat_id.0);
+        if kept {
+            return;
+        }
+        self.messages.pinned_messages.remove(&chat_id.0);
+        self.messages
+            .reply_targets
+            .retain(|&(chat, _), _| chat != chat_id.0);
     }
 
     /// A chat that was left or deleted: its histories go when no view
@@ -458,6 +484,7 @@ impl Session {
         self.history_pruning
             .closed_topics
             .retain(|(chat, _)| *chat != chat_id.0);
+        self.forget_side_tables_once_unloaded(chat_id);
     }
 
     /// A live message landed in a chat no view shows: keep its tail
@@ -499,6 +526,7 @@ impl Session {
                 break;
             };
             self.threads.topic_histories.remove(&key);
+            self.forget_side_tables_once_unloaded(ChatId(key.0));
         }
     }
 

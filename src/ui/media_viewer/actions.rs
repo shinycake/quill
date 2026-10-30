@@ -802,3 +802,8 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 #[path = "reply_ui_tests.rs"]
 mod reply_ui_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "rotate_ui_tests.rs"]
+mod rotate_ui_tests;

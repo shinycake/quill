@@ -376,9 +376,12 @@ impl QuillShell {
                     // the hand-rolled dialogs had no dialog-level Enter behavior,
                     // so keep it disabled. A builder that wants Enter-to-confirm
                     // can set its own `on_ok`, which overrides this default.
-                    build(&app_c, &shell_c, dialog.on_ok(|_, _, _| false), cx)
+                    let dialog = build(&app_c, &shell_c, dialog.on_ok(|_, _, _| false), cx)
                         .max_w((window.viewport_size().width - px(48.)).max(px(240.)))
-                        .max_h((window.viewport_size().height - px(48.)).max(px(120.)))
+                        .max_h((window.viewport_size().height - px(48.)).max(px(120.)));
+                    // Every dialog's pictures go through the main window's
+                    // bounded image cache, so closing one lets them go.
+                    super::dialog_image_cache::cover(dialog, app_c.read(cx), window)
                 });
             }
         }

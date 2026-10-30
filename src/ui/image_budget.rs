@@ -300,36 +300,6 @@ pub(super) fn take_unshowable() -> Vec<Arc<RenderImage>> {
     })
 }
 
-/// Hand the allocator's free pages back to the system once Quill goes
-/// idle (decoded images and their decode buffers are large, short-lived
-/// blocks; without this the freed space stays resident as allocator free
-/// lists).
-/// - macOS: `malloc_zone_pressure_relief` on every zone. Blocks of 64 KiB
-///   and up already went back when freed (`quill::large_alloc`).
-/// - Linux (glibc): `malloc_trim`.
-/// - Windows and other libcs: nothing; the Windows heap decommits large
-///   free ranges on its own.
-fn release_free_heap() {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe extern "C" {
-            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-        }
-        // SAFETY: a null zone means "all zones"; goal 0 means "as much as
-        // possible". The call only releases free pages.
-        unsafe {
-            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
-        }
-    }
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        // SAFETY: glibc's `malloc_trim` only returns free heap memory.
-        unsafe {
-            libc::malloc_trim(0);
-        }
-    }
-}
-
 /// Keys to evict, least recently used first, until `total` fits `budget`.
 /// `candidates` are `(last_used, key, bytes)` of entries that can't be on
 /// screen; `total` is `(bytes, entries)` of the whole cache.
@@ -691,7 +661,8 @@ impl Entry {
 pub(super) struct BoundedImageCache {
     entries: HashMap<u64, Entry>,
     /// The display-size decodes of each picture: source hash -> (edge,
-    /// entry key). May list evicted entries; checked against `entries`.
+    /// entry key). Only entries still in `entries` (`evict` drops the
+    /// rest), loaded or not; check which loaded against `entries`.
     variants: HashMap<u64, SmallVec<[(u32, u64); 2]>>,
     bytes: usize,
     /// How many entries may have been on screen at the last `trim`.
@@ -722,13 +693,18 @@ impl BoundedImageCache {
         }
     }
 
-    /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget.
+    /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget,
+    /// or, with the window in the `background`, to what is on screen.
     /// Runs between frames (no window is being drawn), so the images leave
     /// every window's atlas.
-    pub(super) fn idle_trim(&mut self, cx: &mut App) {
+    pub(super) fn idle_trim(&mut self, background: bool, cx: &mut App) {
         IDLE_TRIMMED.with(|trimmed| trimmed.set(ACTIVITY.with(Cell::get)));
         let before = (self.bytes, self.entries.len());
-        let images = self.evict(IDLE_BUDGET);
+        let none = Budget {
+            bytes: 0,
+            entries: 0,
+        };
+        let images = self.evict(if background { none } else { IDLE_BUDGET });
         if super::frame_clock::trace_ticks() {
             eprintln!(
                 "image idle trim: {} images, {:.1} MB -> {} images, {:.1} MB",
@@ -744,7 +720,7 @@ impl BoundedImageCache {
         // Even with nothing evicted here: what left the screen (a closed
         // viewer's full-size photo, a chat's sticker frames) was freed
         // meanwhile.
-        release_free_heap();
+        super::free_heap::release();
     }
 
     /// Remove entries past `budget`; their loaded images, for the caller
@@ -769,6 +745,12 @@ impl BoundedImageCache {
                 images.push(image);
             }
         }
+        // Every picture ever shown at display size left its sizes here.
+        let entries = &self.entries;
+        self.variants.retain(|_, tracked| {
+            tracked.retain(|(_, hash)| entries.contains_key(hash));
+            !tracked.is_empty()
+        });
         images
     }
 
@@ -866,8 +848,6 @@ impl BoundedImageCache {
         );
         let tracked = self.variants.entry(source_hash).or_default();
         if !tracked.iter().any(|(_, h)| *h == hash) {
-            // Forget the evicted ones as new ones are added.
-            tracked.retain(|(_, h)| loaded.iter().any(|(_, l)| l == h));
             tracked.push((key.edge, hash));
         }
         if result.is_some() {
@@ -992,6 +972,21 @@ impl Element for CacheScope {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "demo-capture")]
+    impl super::BoundedImageCache {
+        /// Tests elsewhere: the image `resource` loaded as, once loaded.
+        pub(in crate::ui) fn loaded(
+            &self,
+            resource: &gpui_kit::Resource,
+        ) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
+            self.entries
+                .get(&gpui_kit::hash(resource))?
+                .load
+                .get()?
+                .ok()
+        }
+    }
+
     use super::{
         Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
         plan_eviction, slice_rendered, slice_shown,
@@ -1196,6 +1191,45 @@ mod tests {
         assert_eq!(idle_trim_due(), None, "already trimmed");
         note_activity();
         assert!(idle_trim_due().is_some());
+    }
+
+    #[cfg(feature = "demo-capture")]
+    #[gpui_kit::test]
+    fn evicted_sizes_leave_the_index(cx: &mut gpui_kit::TestAppContext) {
+        use super::{BoundedImageCache, Entry, Load, SizedKey, SizedLoad, SizedSource};
+        cx.update(|cx| {
+            let mut cache = BoundedImageCache::new(Default::default());
+            let source = SizedSource::Path(std::path::Path::new("gone.jpg").into());
+            for (edge, key) in [(64, 1), (128, 2)] {
+                let sized = SizedKey {
+                    source: source.clone(),
+                    edge,
+                };
+                let entry = Entry {
+                    load: Load::Sized(SizedLoad::new(sized, cx)),
+                    bytes: Some(10),
+                    uses: SmallVec::new(),
+                };
+                cache.entries.insert(key, entry);
+                cache.bytes += 10;
+            }
+            cache
+                .variants
+                .insert(7, SmallVec::from_slice(&[(64, 1), (128, 2)]));
+            let one = Budget {
+                bytes: 10,
+                entries: 1,
+            };
+            cache.evict(one);
+            assert_eq!(cache.entries.len(), 1);
+            assert_eq!(cache.variants.get(&7).map(|v| v.len()), Some(1));
+            let none = Budget {
+                bytes: 0,
+                entries: 0,
+            };
+            cache.evict(none);
+            assert!(cache.variants.is_empty(), "nothing left to index");
+        });
     }
 
     #[test]
