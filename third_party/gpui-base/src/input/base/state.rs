@@ -950,8 +950,19 @@ impl<M: InputModeKind> InputBaseState<M> {
                 }
             }),
             // Observe the blink cursor to repaint the view when it changes.
-            cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
-            // Blink the cursor when the window is active, pause when it's not.
+            // QUILL: a blink the caret can't show stops instead of repainting.
+            // The blur handler leaves it running while the context menu is
+            // open, and nothing else stopped it once the menu closed on a
+            // field that had lost its focus.
+            cx.observe_in(&blink_cursor, window, |input, cursor, window, cx| {
+                if cursor.read(cx).is_blinking() && !input.caret_can_show(window, cx) {
+                    // Stopping notifies again, and that repaints the view.
+                    cursor.update(cx, |cursor, cx| cursor.stop(cx));
+                    return;
+                }
+                cx.notify();
+            }),
+            // Blink the cursor when the window is active, stop when it's not.
             cx.observe_window_activation(window, |input, window, cx| {
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
@@ -960,6 +971,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                             blink_cursor.start(cx);
                         });
                     }
+                } else {
+                    // QUILL: the blur handler stops it too, but not while the
+                    // context menu is open, and an inactive window never
+                    // shows the caret.
+                    input.blink_cursor.update(cx, |cursor, cx| cursor.stop(cx));
                 }
             }),
             cx.on_focus(&focus_handle, window, Self::on_focus),
@@ -3982,9 +3998,16 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
-        (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
+        self.caret_can_show(window, cx)
             && !self.disabled
             && self.blink_cursor.read(cx).visible()
+    }
+
+    /// QUILL: whether the caret can be drawn at all: the field is focused,
+    /// or its context menu keeps it looking focused, in an active window.
+    /// A blink is only worth its redraws while this holds.
+    fn caret_can_show(&self, window: &Window, cx: &App) -> bool {
+        (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
             && window.is_window_active()
     }
 
@@ -9905,6 +9928,89 @@ mod tests {
         cx.run_until_parked();
         assert!(visible(&mut cx));
         cx.simulate_mouse_up(second, MouseButton::Left, Default::default());
+    }
+
+    /// QUILL: how many times the input repaints over three seconds of the
+    /// test clock, with nothing else going on: six while the caret blinks.
+    fn caret_repaints<M: InputModeKind>(
+        input: &Entity<InputBaseState<M>>,
+        cx: &mut VisualTestContext,
+    ) -> usize {
+        let repaints = Rc::new(Cell::new(0));
+        let _watch = cx.update(|_, cx| {
+            let repaints = repaints.clone();
+            cx.observe(input, move |_, _| repaints.set(repaints.get() + 1))
+        });
+        for _ in 0..6 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(500));
+            cx.run_until_parked();
+        }
+        repaints.get()
+    }
+
+    /// QUILL: the blur handler leaves the caret blinking while the completion
+    /// menu is open, so the menu keeps the field looking focused. A window
+    /// deactivated with the menu open stopped the blink no more, and the
+    /// inactive window, which never shows the caret, repainted twice a second.
+    #[gpui::test]
+    fn an_open_completion_menu_does_not_blink_the_caret_in_the_background(
+        cx: &mut TestAppContext,
+    ) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.run_until_parked();
+        view.input.update(&mut cx, |state, _| {
+            state.extras.context_menu_content.completion.open = true;
+        });
+        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
+
+        cx.deactivate_window();
+        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink while inactive");
+        view.input.read_with(&cx, |state, cx| {
+            assert!(state.is_context_menu_open(cx), "the menu stays open");
+        });
+
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks once active");
+        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
+        cx.run_until_parked();
+        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and after the menu closes");
+    }
+
+    /// QUILL: a field that loses its focus while the completion menu is open
+    /// keeps blinking under the menu, and stops once the menu closes.
+    #[gpui::test]
+    fn a_caret_blinking_under_its_menu_stops_when_the_menu_closes_without_focus(
+        cx: &mut TestAppContext,
+    ) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.run_until_parked();
+        view.input.update(&mut cx, |state, _| {
+            state.extras.context_menu_content.completion.open = true;
+        });
+        cx.update(|window, cx| window.blur(cx));
+        cx.run_until_parked();
+        assert!(
+            caret_repaints(&view.input, &mut cx) >= 5,
+            "the menu keeps the caret blinking"
+        );
+
+        view.input.update(&mut cx, |state, cx| state.hide_context_menu(cx));
+        cx.run_until_parked();
+        // The next blink finds nothing to show and stops.
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        cx.run_until_parked();
+        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink left behind");
     }
 
     #[gpui::test]

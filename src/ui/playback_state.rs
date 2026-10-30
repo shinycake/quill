@@ -24,6 +24,15 @@ pub(crate) struct SeekHover {
     pub(crate) at: f32,
 }
 
+/// The active sound as the seek bars and the player bar draw it
+/// (`PlaybackUi::sound_shown`). A paused track's stays the same.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct SoundShown {
+    state: super::audio::EngineState,
+    position_bits: Option<u64>,
+    error: Option<super::audio::AudioError>,
+}
+
 pub(crate) struct PlaybackUi {
     /// History row whose voice note is playing.
     pub(super) player: super::player_bar::PlayerBarState,
@@ -52,6 +61,9 @@ pub(crate) struct PlaybackUi {
     pub(super) seek_hover: Option<SeekHover>,
     /// Guard for the playback progress tick task.
     pub(super) tick: bool,
+    /// What the seek bars and the player bar showed of the sound at the
+    /// last tick: the tick redraws them only when it changed.
+    pub(super) tick_shown: Option<SoundShown>,
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
@@ -119,6 +131,15 @@ impl PlaybackUi {
         self.engine_state() == super::audio::EngineState::Playing
     }
 
+    /// What the seek bars and the player bar draw of the active sound.
+    pub(super) fn sound_shown(&self) -> SoundShown {
+        SoundShown {
+            state: self.engine_state(),
+            position_bits: self.active_position_secs().map(f64::to_bits),
+            error: self.audio.error(),
+        }
+    }
+
     /// Where the active track is, in seconds, from the frames the output
     /// consumed. `None` with no active track.
     pub(super) fn active_position_secs(&self) -> Option<f64> {
@@ -141,6 +162,7 @@ impl PlaybackUi {
             seek_preview_secs: None,
             seek_hover: None,
             tick: false,
+            tick_shown: None,
             positions: HashMap::new(),
             stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
             emoji_plays: std::cell::RefCell::default(),

@@ -144,3 +144,14 @@ active window; activating the window starts it as before.
 The input tests' window (`InputView::build_with`) is activated, as a real
 window that takes a click or a key is, and the two tests that timed the
 blink after a focus wait for the focus handler's restart.
+
+The blur handler returns early while the code editor's completion or
+code-action menu is open, so the menu keeps the field looking focused
+(`show_cursor`). That left the blink running in two cases: the window
+deactivated with the menu open (the background window repainted twice a
+second until it was activated again), and the menu closed on a field that
+had lost its focus under it (the field repainted twice a second for good,
+with no caret drawn). Deactivating the window now stops the blink, and a
+blink that finds nothing to show (`caret_can_show`: focused or under its
+menu, in an active window) stops instead of repainting. Background:
+`docs/decisions/idle-inactive-redraw.md`.

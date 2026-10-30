@@ -294,6 +294,7 @@ impl QuillApp {
             return;
         }
         self.playback.tick = true;
+        self.playback.tick_shown = None;
         Self::spawn_main(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -338,9 +339,13 @@ impl QuillApp {
                             }
                         }
                         this.publish_now_playing();
+                        // A paused track shows the same every tick: only
+                        // the media keys need the tick then, not a redraw.
+                        let shown = this.playback.sound_shown();
+                        let moved = this.playback.tick_shown.replace(shown) != Some(shown);
                         if finished {
                             cx.notify();
-                        } else {
+                        } else if moved {
                             this.notify_playback_position(cx);
                         }
                         true
