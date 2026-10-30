@@ -111,6 +111,12 @@ impl A11yDebug {
         self.last_node_info = node_info.clone();
     }
 
+    /// Where a node of the last captured frame came from.
+    #[cfg(debug_assertions)]
+    pub(crate) fn node_info(&self, id: NodeId) -> Option<&NodeDebugInfo> {
+        self.last_node_info.get(&id)
+    }
+
     /// Serialize the last tree update to a readable JSON string. Node ids are
     /// replaced with short ephemeral ids (`a`, `b`, ..., `z`, `aa`, ...).
     pub(crate) fn to_json(&self) -> Option<String> {

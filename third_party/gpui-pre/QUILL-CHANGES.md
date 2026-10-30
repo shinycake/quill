@@ -253,3 +253,37 @@ the field is now `DecorationRuns`, a `SmallVec<[DecorationRun; 1]>`, and
 `src/text_system.rs` builds it in `shape_line` and `shape_line_by_hash`. A
 line with more runs keeps them on the heap, a few small allocations at
 shaping.
+
+## A cached view replays its part of the accessibility tree
+
+Changed in 2026 for the memory and idle sweep
+(`docs/decisions/a11y-cached-views.md`). GPUI builds the AccessKit tree
+during prepaint, and a cached view that replays its last frame
+(`reuse_prepaint`) skipped that, so its nodes dropped out of the tree.
+Quill worked around it by rendering every slice each frame while the tree
+was built, and on macOS anything that hit-tests the window (a window
+manager such as Tiles) turns the tree on until Quill quits.
+
+- `src/window/a11y.rs`: `A11y::index` returns an `A11yIndex` (finished
+  nodes and focus claims so far), which `PrepaintStateIndex` now carries.
+  `A11y::replay` adds a range of the last frame's tree again: the nodes
+  from the retained update (`A11yDebug::last_update`), those whose parent
+  is outside the range as children of the node being built, and their
+  bounds, tags, focus handles and action listeners, kept from the last
+  frame in `RenderedTables`. Focus is claimed through
+  `A11yNodeBuilder::claim` (`FocusClaim`: owner, fallback, active
+  descendant), which logs each claim so the claims in a range are made
+  again. `begin_frame` returns whether the last frame built a tree;
+  `skip_frame` records one that did not.
+- `src/window.rs`: `reuse_prepaint` calls `A11y::replay` while the tree
+  is built, and copies the `Frame.hitbox_tags` of the hitboxes it reuses.
+  `draw_roots` renders every view (`refreshing`) when the tree is built
+  and the last frame built none. `Frame.focus_tags` keeps every tag stack
+  a focused element recorded, indexed by `PaintIndex::focus_tags_index`
+  so `reuse_paint` replays them; `Window::focused_a11y_tags` reads the
+  last. `Window::simulate_a11y_action` (test support) handles an action
+  request as if assistive technology sent it.
+- `src/window/a11y/debug.rs`: `A11yDebug::node_info` (debug builds) gives
+  a replayed node its provenance.
+
+Quill's `a11y_replay_tests` cover it.

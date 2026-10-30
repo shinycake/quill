@@ -1075,8 +1075,9 @@ pub(crate) struct Frame {
     /// ([`Window::hovered_a11y_tags`]).
     pub(crate) hitbox_tags: FxHashMap<HitboxId, SharedString>,
     /// The tags of the focused element and its tagged ancestors, outermost
-    /// first, as painted this frame ([`Window::focused_a11y_tags`]).
-    pub(crate) focus_tags: Vec<SharedString>,
+    /// first, each time a focused element was painted this frame; the last
+    /// is the one [`Window::focused_a11y_tags`] reads.
+    pub(crate) focus_tags: Vec<Vec<SharedString>>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
@@ -1101,6 +1102,7 @@ pub(crate) struct PrepaintStateIndex {
     dispatch_tree_index: usize,
     accessed_element_states_index: usize,
     line_layout_index: LineLayoutIndex,
+    a11y_index: crate::window::a11y::A11yIndex,
 }
 
 #[derive(Clone, Default)]
@@ -1114,6 +1116,7 @@ pub(crate) struct PaintIndex {
     accessed_element_states_index: usize,
     tab_handle_index: usize,
     line_layout_index: LineLayoutIndex,
+    focus_tags_index: usize,
 }
 
 impl Frame {
@@ -3738,7 +3741,13 @@ impl Window {
 
         self.a11y.sync_active_flag();
         if self.a11y.is_active() {
-            self.a11y.begin_frame();
+            // A cached view replays its part of the last frame's tree; with
+            // none to replay, every view renders.
+            if !self.a11y.begin_frame() {
+                self.refreshing = true;
+            }
+        } else {
+            self.a11y.skip_frame();
         }
 
         let _inspector_width: Pixels = rems(30.0).to_pixels(self.rem_size());
@@ -4081,15 +4090,23 @@ impl Window {
             dispatch_tree_index: self.next_frame.dispatch_tree.len(),
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             line_layout_index: self.text_system.layout_index(),
+            a11y_index: self.a11y.index(),
         }
     }
 
     pub(crate) fn reuse_prepaint(&mut self, range: Range<PrepaintStateIndex>) {
-        self.next_frame.hitboxes.extend(
-            self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
-                .iter()
-                .cloned(),
-        );
+        let hitboxes =
+            &self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index];
+        for hitbox in hitboxes {
+            if let Some(tag) = self.rendered_frame.hitbox_tags.get(&hitbox.id) {
+                self.next_frame.hitbox_tags.insert(hitbox.id, tag.clone());
+            }
+        }
+        self.next_frame.hitboxes.extend(hitboxes.iter().cloned());
+        if self.a11y.is_active() {
+            self.a11y
+                .replay(range.start.a11y_index..range.end.a11y_index);
+        }
         self.next_frame.tooltip_requests.extend(
             self.rendered_frame.tooltip_requests
                 [range.start.tooltips_index..range.end.tooltips_index]
@@ -4146,6 +4163,7 @@ impl Window {
             accessed_element_states_index: self.next_frame.accessed_element_states.len(),
             tab_handle_index: self.next_frame.tab_stops.paint_index(),
             line_layout_index: self.text_system.layout_index(),
+            focus_tags_index: self.next_frame.focus_tags.len(),
         }
     }
 
@@ -4185,6 +4203,10 @@ impl Window {
         self.next_frame.tab_stops.replay(
             &self.rendered_frame.tab_stops.insertion_history
                 [range.start.tab_handle_index..range.end.tab_handle_index],
+        );
+        self.next_frame.focus_tags.extend_from_slice(
+            &self.rendered_frame.focus_tags
+                [range.start.focus_tags_index..range.end.focus_tags_index],
         );
 
         self.text_system
@@ -5493,10 +5515,9 @@ impl Window {
     pub fn focused_a11y_tags(&self) -> Vec<SharedString> {
         self.rendered_frame
             .focus_tags
-            .iter()
-            .rev()
-            .cloned()
-            .collect()
+            .last()
+            .map(|tags| tags.iter().rev().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Paint-time: an element tagged `tag` starts painting (its own
@@ -5601,7 +5622,7 @@ impl Window {
     /// Paint-time: the focused element is being painted; keep the tag
     /// stack above it for [`Self::focused_a11y_tags`].
     pub(crate) fn record_focus_tags(&mut self) {
-        self.next_frame.focus_tags = self.a11y_tag_stack.clone();
+        self.next_frame.focus_tags.push(self.a11y_tag_stack.clone());
     }
 
     /// The caret (or the start of the text being composed) of the text
@@ -7398,6 +7419,27 @@ impl Window {
             .entry(node_id)
             .or_default()
             .push((action, Box::new(listener)));
+    }
+
+    /// Test support: handle `action` on `node` as if assistive technology
+    /// asked for it.
+    #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
+    pub fn simulate_a11y_action(
+        &mut self,
+        node: accesskit::NodeId,
+        action: accesskit::Action,
+        data: Option<accesskit::ActionData>,
+        cx: &mut App,
+    ) {
+        self.handle_a11y_action(
+            accesskit::ActionRequest {
+                action,
+                target_tree: accesskit::TreeId::ROOT,
+                target_node: node,
+                data,
+            },
+            cx,
+        );
     }
 
     #[cfg(not(target_family = "wasm"))]
