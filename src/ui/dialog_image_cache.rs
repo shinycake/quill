@@ -10,23 +10,23 @@
 //! the main window's cache, so its pictures are evicted like any other once
 //! they are off screen.
 //!
-//! A dialog shown in a chat window keeps GPUI's cache: the bounded cache
-//! counts the main window's frames only, so it can't tell what another
-//! window shows.
+//! A dialog shown in a chat window draws through that window's own cache
+//! (`ChatWindowView::images`), which counts that window's frames.
 
 use super::app::QuillApp;
 use super::image_budget::CacheScope;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 
-/// `dialog`, drawing its surface through the main window's cache when
-/// `window` is the main window.
-pub(super) fn cover(dialog: Dialog, app: &QuillApp, window: &Window) -> Dialog {
-    let main = app.windows.main.map(|main| main.window_id());
-    let cache = app
-        .slices
-        .image_cache()
-        .filter(|_| main == Some(window.window_handle().window_id()));
+/// `dialog`, drawing its surface through the cache of the window it opens
+/// in: the main window's or a chat window's.
+pub(super) fn cover(dialog: Dialog, app: &QuillApp, window: &Window, cx: &App) -> Dialog {
+    let id = window.window_handle().window_id();
+    let cache = if app.windows.main.is_some_and(|main| main.window_id() == id) {
+        app.slices.image_cache()
+    } else {
+        app.windows.image_cache_for(id, cx)
+    };
     match cache {
         Some(cache) => {
             dialog.wrap_surface(move |surface| CacheScope::new(cache, surface).into_any_element())

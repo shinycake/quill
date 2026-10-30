@@ -218,9 +218,13 @@ impl QuillApp {
             while let Some(due) = super::image_budget::idle_trim_due() {
                 let now = std::time::Instant::now();
                 if due <= now {
-                    let (main, background) = this
-                        .read_with(cx, |this, _| {
-                            (this.windows.main, !this.frame.window_active.get())
+                    let (main, background, windows) = this
+                        .read_with(cx, |this, cx| {
+                            (
+                                this.windows.main,
+                                !this.frame.window_active.get(),
+                                this.windows.image_caches(cx),
+                            )
                         })
                         .unwrap_or_default();
                     cache.update(cx, |cache, cx| {
@@ -230,6 +234,9 @@ impl QuillApp {
                             super::wallpaper_cache::release_unshown(main.window_id(), cx);
                         }
                     });
+                    for (images, active) in windows {
+                        images.update(cx, |images, cx| images.idle_trim(!active, cx));
+                    }
                     if let Some(main) = main {
                         let _ = main.update(cx, |_, window, _| super::glyph_sweep::begin(window));
                     }

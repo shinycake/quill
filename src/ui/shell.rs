@@ -381,7 +381,7 @@ impl QuillShell {
                         .max_h((window.viewport_size().height - px(48.)).max(px(120.)));
                     // Every dialog's pictures go through the main window's
                     // bounded image cache, so closing one lets them go.
-                    super::dialog_image_cache::cover(dialog, app_c.read(cx), window)
+                    super::dialog_image_cache::cover(dialog, app_c.read(cx), window, cx)
                 });
             }
         }

@@ -938,3 +938,48 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         "the flag cannot stick"
     );
 }
+
+/// A chat window's pictures go through a bounded cache of its own, and
+/// the window paints from it. They went to GPUI's asset cache, which keeps
+/// every picture for good.
+#[gpui_kit::test]
+fn a_chat_windows_pictures_go_through_a_cache_of_its_own(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    // A downloaded photo arrives in the window's chat.
+    let file = crate::ui::demo::demo_file_json(91, &crate::ui::demo::demo_thumb_png_path(), true);
+    let photo = format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":41,"chat_id":{chat},"is_outgoing":false,"date":1790640000,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+        chat = OTHER.0
+    );
+    h.settle(cx);
+    h.app.update(cx, |app, _| {
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+        let session = app.demo_session.as_mut().expect("the demo session");
+        // `Session::apply` drops an envelope not newer than the last one.
+        let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+        let parsed = quill::telegram::client::copy_and_parse(&photo, &seq, &sink);
+        session.apply(parsed.expect("the photo parses"));
+    });
+    // Decodes land between frames; the frame after paints them.
+    for _ in 0..3 {
+        cx.update_window(chat_window, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    }
+    let images = h
+        .app
+        .read_with(cx, |app, cx| {
+            app.windows.image_cache_for(chat_window.window_id(), cx)
+        })
+        .expect("the window's cache");
+    let loaded = images.read_with(cx, |images, _| images.loaded_images());
+    assert_eq!(loaded.len(), 1, "the photo is in the window's cache");
+    cx.update_window(chat_window, |_, window, _| {
+        assert!(window.has_image_atlas_entry(&loaded[0]), "painted from it");
+    })
+    .unwrap();
+}
