@@ -119,9 +119,12 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   clip. The ffmpeg backend pauses it whenever the decoder isn't playing, so
   an ended clip left on screen lets the device close.
 - Opening a device takes 10 to 40 ms on macOS, two frames on the UI
-  thread. A sound nothing waits on (a notification, a call tone) is queued
-  on the app mixer at once and the device opens on a thread of its own
-  (`SharedOutput::outlet_soon`); the sound plays once the device is up. A
+  thread. A notification sound is queued on the app mixer at once and the
+  device opens on a thread of its own (`SharedOutput::outlet_soon`); the
+  sound plays once the device is up, or is dropped if it can't start within
+  2 s (a device that failed to open would otherwise play it whenever one
+  opens next). Call sounds still open the device before returning: a ring
+  that loops has to know it didn't play, to try again after its gap. A
   play or a seek opens the device before it returns, and waits for one
   that is opening: it has to know whether there is a device, or a seek
   would wait for an answer for ever. The first device of the app's life

@@ -33,6 +33,8 @@ const LOOK_EVERY: Duration = Duration::from_millis(250);
 const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// Frames the device takes from the app mixer at a time (about 5 ms).
 const FEED_FRAMES: usize = 256;
+/// How long an alert may wait for the device before it is dropped.
+const ALERT_LATE: Duration = Duration::from_secs(2);
 
 /// The app's one audio output, shared by the playback engines, the
 /// notification sounds, the call tones and video soundtracks. `None` from
@@ -86,8 +88,8 @@ enum Open {
     /// Before returning: the caller needs the audio thread (a play, a seek)
     /// or has to know there is no device.
     Now,
-    /// Off the calling thread, for a sound nothing waits on: it is queued
-    /// on the app mixer and plays once the device is up. Opening takes 10
+    /// Off the calling thread, for a notification: it is queued on the app
+    /// mixer and plays once the device is up. Opening takes 10
     /// to 40 ms on macOS, two frames on the UI thread.
     Soon,
 }
@@ -134,12 +136,31 @@ impl OutputPlayer {
     where
         S: Source + Send + 'static,
     {
+        self.queue(source, None);
+    }
+
+    /// [`Self::append`] for an alert, which is pointless late: dropped
+    /// unless it starts within [`ALERT_LATE`]. A device that failed to open
+    /// would otherwise play it whenever one opens next, over a voice note
+    /// minutes later.
+    pub(in crate::ui) fn append_alert<S>(&self, source: S)
+    where
+        S: Source + Send + 'static,
+    {
+        self.queue(source, Some(Instant::now() + ALERT_LATE));
+    }
+
+    fn queue<S>(&self, source: S, starts_by: Option<Instant>)
+    where
+        S: Source + Send + 'static,
+    {
         if !self.player.is_paused() {
             self.output.wake(Open::Soon);
         }
         self.player.append(Heard {
             source,
             heard: self.output.0.heard.clone(),
+            starts_by,
         });
     }
 
@@ -200,9 +221,8 @@ impl SharedOutput {
         self.outlet_when(Open::Now)
     }
 
-    /// [`Self::outlet`] for a sound nothing waits on (a notification, a
-    /// call tone): a closed device opens off the calling thread. `None`
-    /// only when no device opened lately.
+    /// [`Self::outlet`] for a notification: a closed device opens off the
+    /// calling thread. `None` only when no device opened lately.
     pub(in crate::ui) fn outlet_soon(&self) -> Option<Outlet> {
         self.outlet_when(Open::Soon)
     }
@@ -302,7 +322,11 @@ impl OutputState {
             self.device = None;
             self.failed_at = None;
         }
-        if self.device.is_some() || self.opening {
+        if self.device.is_some() {
+            self.watch(output);
+            return true;
+        }
+        if self.opening {
             return true;
         }
         if self.failed_at.is_some_and(|at| at.elapsed() < RETRY_AFTER) {
@@ -332,6 +356,12 @@ impl OutputState {
     fn install(&mut self, device: Device, output: &Arc<Output>) {
         self.device = Some(device);
         self.failed_at = None;
+        self.watch(output);
+    }
+
+    /// Make sure a watch looks after the open device; one that failed to
+    /// start is tried again, or the device would never close.
+    fn watch(&mut self, output: &Arc<Output>) {
         if !self.watched {
             let watched = output.clone();
             let spawned = std::thread::Builder::new()
@@ -438,18 +468,19 @@ fn watch(output: &Arc<Output>) {
         if !stale && !quiet.long_enough(sounded, Instant::now()) {
             continue;
         }
-        // Dropped after the lock: stopping a device takes a while.
         let closed = state.device.take();
         state.watched = false;
+        drop(state);
+        // Dropped unlocked, as stopping a stream takes a while, and before
+        // a new one opens.
+        drop(closed);
         if stale {
             debug_log("audio: output: reopening the default output device");
             // The new device gets a watch of its own.
-            state.open(output, Open::Soon);
+            output.lock().open(output, Open::Soon);
         } else {
             debug_log("audio: output: closing the output device after silence");
         }
-        drop(state);
-        drop(closed);
         return;
     }
 }
@@ -478,12 +509,17 @@ impl Quiet {
 struct Heard<S> {
     source: S,
     heard: Arc<AtomicBool>,
+    /// Ends unplayed when first pulled after this.
+    starts_by: Option<Instant>,
 }
 
 impl<S: Source> Iterator for Heard<S> {
     type Item = f32;
 
     fn next(&mut self) -> Option<f32> {
+        if self.starts_by.take().is_some_and(|by| Instant::now() > by) {
+            return None;
+        }
         let sample = self.source.next();
         if sample.is_some() {
             self.heard.store(true, Ordering::Relaxed);
@@ -746,12 +782,31 @@ mod tests {
         let mut heard = Heard {
             source: SamplesBuffer::new(channels, rate, vec![0.5; 8000]),
             heard: Arc::new(AtomicBool::new(false)),
+            starts_by: None,
         };
         assert_eq!(heard.channels(), channels);
         assert_eq!(heard.sample_rate(), rate);
         assert_eq!(heard.total_duration(), Some(Duration::from_secs(1)));
         heard.try_seek(Duration::from_millis(500)).unwrap();
         assert_eq!(heard.by_ref().count(), 4000);
+    }
+
+    /// An alert that couldn't start in time is dropped unplayed; one that
+    /// starts in time plays in full.
+    #[test]
+    fn a_late_alert_is_dropped() {
+        let (channels, rate) = mono(8000);
+        let alert = |starts_by| Heard {
+            source: SamplesBuffer::new(channels, rate, vec![0.5; 800]),
+            heard: Arc::new(AtomicBool::new(false)),
+            starts_by: Some(starts_by),
+        };
+        let now = Instant::now();
+        assert_eq!(
+            alert(now.checked_sub(Duration::from_millis(1)).unwrap()).count(),
+            0
+        );
+        assert_eq!(alert(now + Duration::from_secs(3600)).count(), 800);
     }
 
     /// The device side plays what the app mixer has and silence after it,

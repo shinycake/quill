@@ -95,7 +95,7 @@ impl CallSounds {
         if !self.enabled && !rings {
             return;
         }
-        let Some(outlet) = self.output.outlet_soon() else {
+        let Some(outlet) = self.output.outlet() else {
             return;
         };
         let player = outlet.player();

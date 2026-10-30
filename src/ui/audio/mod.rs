@@ -302,12 +302,12 @@ impl NotificationSounds {
     /// Like [`Self::play`], with a per-chat or per-scope volume percent
     /// that replaces the app-wide one (`quill::notify_volume`).
     pub(super) fn play_at(&mut self, sound: NotificationSound, volume_percent: Option<u8>) {
-        let Some(outlet) = self.output.outlet_soon() else {
-            return;
-        };
         if let Some(old) = self.player.take() {
             old.stop();
         }
+        let Some(outlet) = self.output.outlet_soon() else {
+            return;
+        };
         let player = outlet.player();
         // Settings > Notifications volume (tdesktop `notificationsVolume`).
         player.set_volume(quill::notify_volume::resolve_gain(
@@ -319,8 +319,8 @@ impl NotificationSounds {
             NotificationSound::DefaultTone => None,
         };
         match source {
-            Some(source) => player.append(source),
-            None => player.append(default_tone()),
+            Some(source) => player.append_alert(source),
+            None => player.append_alert(default_tone()),
         }
         self.player = Some(player);
     }
