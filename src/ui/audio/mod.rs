@@ -302,7 +302,7 @@ impl NotificationSounds {
     /// Like [`Self::play`], with a per-chat or per-scope volume percent
     /// that replaces the app-wide one (`quill::notify_volume`).
     pub(super) fn play_at(&mut self, sound: NotificationSound, volume_percent: Option<u8>) {
-        let Some(outlet) = self.output.outlet() else {
+        let Some(outlet) = self.output.outlet_soon() else {
             return;
         };
         if let Some(old) = self.player.take() {
