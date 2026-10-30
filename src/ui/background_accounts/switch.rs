@@ -22,7 +22,7 @@ impl QuillApp {
             || live.driver.session.calls.active_group_call.is_some();
         self.background.clients.retain(|client| client.key != key);
         if !status.stops_client() && !in_call && !live.bridge.stopped_unexpectedly() {
-            let _ = live.driver.deselect_chat();
+            let _ = live.driver.leave_for_background();
             let _ = live.driver.set_online(false);
             let unread = AccountUnread::of(&live.driver.session);
             self.background.clients.push(BackgroundClient {

@@ -82,4 +82,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.leave_open_chat();
         Ok(())
     }
+
+    /// The account goes to the background (another one comes forward): no
+    /// chat stays open, and the one it showed is trimmed to a tail at
+    /// once. On screen, the frame settles that release once the UI's claims
+    /// are in; no frame runs for a background account and nothing on
+    /// screen claims its chats, so the chat kept its whole window (up to
+    /// the page cap) for as long as the account ran there.
+    pub fn leave_for_background(&mut self) -> Result<(), ConnectSendError> {
+        let closed = self.deselect_chat();
+        self.session.set_history_holds([]);
+        closed
+    }
 }

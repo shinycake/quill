@@ -96,6 +96,25 @@ fn message_json(chat: i64, id: i64, outgoing: bool) -> String {
 }
 
 #[test]
+fn an_account_going_to_the_background_trims_the_chat_it_showed() {
+    let mut h = Harness::two_chats();
+    let page = h.driver.select_chat(ALICE).unwrap().unwrap();
+    let ids: Vec<i64> = (1..=80).collect();
+    h.answer(ALICE, page, &ids);
+    assert_eq!(h.history(ALICE).messages.len(), 80);
+
+    h.driver.leave_for_background().unwrap();
+    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.sent("closeChat", ALICE).len(), 1);
+    assert_eq!(
+        h.history(ALICE).messages.len(),
+        crate::state::CLOSED_TAIL_KEEP,
+        "trimmed without a frame to settle it"
+    );
+    assert_eq!(h.history(ALICE).newest_id(), Some(MessageId(80)));
+}
+
+#[test]
 fn a_window_chat_opens_and_pages_beside_the_main_chat() {
     let mut h = Harness::two_chats();
     let main_page = h.driver.select_chat(ALICE).unwrap().unwrap();
