@@ -341,7 +341,9 @@ impl QuillApp {
                 .justify_center()
                 .opacity(alpha)
                 .child(super::anim_layer::occluder(
-                    super::conversation::date_pill_button(&label, cx),
+                    // Floats over the history: its click opens the
+                    // calendar only, never the media under it.
+                    super::conversation::date_pill_button(&label, cx).block_mouse_except_scroll(),
                 ))
                 .into_any_element(),
         )

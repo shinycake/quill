@@ -15,6 +15,7 @@ use crate::ui::shell::QuillShell;
 use crate::ui::video_player::{PlayState, VideoPlayer};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{Bounds, Pixels, Point};
 use gpui_kit::{Modifiers, ScrollDelta, ScrollEvent, point};
 use quill::ids::ChatId;
 use std::cell::RefCell;
@@ -153,8 +154,12 @@ fn history_passes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, times: us
 }
 
 fn scroll(vcx: &mut VisualTestContext, dy: f32) {
+    scroll_at(vcx, point(px(800.), px(300.)), dy);
+}
+
+fn scroll_at(vcx: &mut VisualTestContext, at: Point<Pixels>, dy: f32) {
     vcx.simulate_event(ScrollEvent {
-        position: point(px(800.), px(300.)),
+        position: at,
         delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
         modifiers: Modifiers::default(),
         ..Default::default()
@@ -366,4 +371,101 @@ fn only_a_shown_jump_button_covers_the_clips(cx: &mut TestAppContext) {
             && button.size.height < px(60.),
         "{button:?}"
     );
+}
+
+fn viewer_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| app.viewer.state.is_open())
+}
+
+fn scrolled_up(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, cx| {
+        app.history.scroller.read(cx).is_scrolled_up()
+    })
+}
+
+/// Scroll the history, with the wheel at `at`, until the clip covers `at`;
+/// its bounds then.
+fn scroll_clip_under(vcx: &mut VisualTestContext, at: Point<Pixels>) -> Bounds<Pixels> {
+    let mut steps = 0;
+    loop {
+        let tile = vcx.debug_bounds("video-204");
+        if let Some(tile) = tile.filter(|tile| tile.contains(&at)) {
+            return tile;
+        }
+        steps += 1;
+        assert!(steps < 100, "the clip never reached {at:?}: {tile:?}");
+        let below = tile.is_some_and(|tile| tile.top() > at.y);
+        scroll_at(vcx, at, if below { -20. } else { 20. });
+    }
+}
+
+fn jump_button(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Bounds<Pixels> {
+    let covered = app.read_with(vcx, |app, _| app.slices.conversation_occluders());
+    let [button] = covered.as_slice() else {
+        panic!("the jump button shows: {covered:?}");
+    };
+    *button
+}
+
+/// One press on the jump button floating over a clip jumps to the latest
+/// message and leaves the clip alone: the button takes the click, the
+/// media viewer under it stays closed. A press on the clip beside the
+/// button still opens the viewer.
+#[gpui_kit::test]
+fn the_jump_button_over_a_clip_takes_the_click(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    // Unread messages below show the button wherever the list is scrolled.
+    app.update_in(vcx, |app, _, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session
+            .chats
+            .get_mut(&TILE.0)
+            .expect("the chat")
+            .unread_count = 2;
+        app.notify_conversation(cx);
+    });
+    // At the top of the chat the clip sits highest; the button stays at
+    // the bottom. Shorten the window until the button is over the clip's
+    // lower part.
+    let mut top = None;
+    for steps in 0.. {
+        assert!(steps < 50, "never reached the top: {top:?}");
+        scroll(vcx, 200.);
+        let tile = vcx.debug_bounds("video-204");
+        if tile.is_some() && tile == top {
+            break;
+        }
+        top = tile;
+    }
+    let tile = top.expect("the clip");
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    settle(vcx);
+    let raise = jump_button(&app, vcx).center().y - (tile.bottom() - px(40.));
+    vcx.simulate_resize(size(px(1100.), px(900.) - raise));
+    settle(vcx);
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    settle(vcx);
+    let button = jump_button(&app, vcx);
+    let press = button.center();
+    scroll_clip_under(vcx, press);
+    assert!(scrolled_up(&app, vcx));
+    assert!(!viewer_open(&app, vcx));
+
+    vcx.simulate_click(press, Modifiers::none());
+    settle(vcx);
+    assert!(!scrolled_up(&app, vcx), "jumped to the latest message");
+    assert!(!viewer_open(&app, vcx), "the clip under the button opened");
+
+    // Beside the button, the clip takes the click.
+    let tile = scroll_clip_under(vcx, press);
+    let beside = point(tile.left() + px(20.), press.y);
+    assert!(!button.contains(&beside), "{beside:?} is on {button:?}");
+    vcx.simulate_click(beside, Modifiers::none());
+    settle(vcx);
+    assert!(viewer_open(&app, vcx), "a press on the clip opens it");
 }
