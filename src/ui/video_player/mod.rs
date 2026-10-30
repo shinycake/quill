@@ -611,9 +611,19 @@ impl VideoPlayer {
         self.with_inner(|inner| inner.estimator.set_period(period));
     }
 
-    /// The content grid of the display it is drawn on (`frame_grid`).
-    pub(super) fn set_content_grid(&self, grid: Option<super::frame_grid::ContentGrid>) {
-        self.with_inner(|inner| inner.estimator.set_grid(grid));
+    /// The content grid of the display it is drawn on (`frame_grid`), and
+    /// whether something else animates there.
+    pub(super) fn set_content_grid(
+        &self,
+        grid: Option<super::frame_grid::ContentGrid>,
+        shared: bool,
+    ) {
+        self.with_inner(|inner| inner.estimator.set_grid(grid, shared));
+    }
+
+    /// The process-unique player id.
+    pub(super) fn id(&self) -> u64 {
+        self.read_inner(|inner| inner.id).unwrap_or_default()
     }
 
     pub(super) fn pull(&self, now: Instant, hint: Option<(Instant, u64)>) -> Option<Picture> {
@@ -738,7 +748,7 @@ impl VideoPlayer {
                 plays_sound: transport.has_sound && transport.volume > 0.0,
                 next_due,
                 interval: inner.estimator.interval(),
-                lead: inner.estimator.lead(),
+                lead: inner.estimator.request_lead(),
                 requested: self.0.requested.clone(),
             }
         })

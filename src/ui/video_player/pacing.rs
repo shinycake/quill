@@ -44,8 +44,13 @@ pub(crate) struct PresentEstimator {
     /// The vsyncs content draws on, on a display faster than 60 Hz
     /// (`frame_grid`).
     grid: Option<ContentGrid>,
+    /// Something else animates on that display: the clip may share its
+    /// grid vsyncs.
+    shared: bool,
     /// How the clip's pictures are spaced.
     cadence: Cadence,
+    /// The picture asked for last draws on the grid.
+    on_grid: bool,
 }
 
 impl PresentEstimator {
@@ -104,17 +109,36 @@ impl PresentEstimator {
     }
 
     /// The content grid of the window's display, or `None` (60 Hz, or no
-    /// vsync times).
-    pub(crate) fn set_grid(&mut self, grid: Option<ContentGrid>) {
+    /// vsync times), and whether something else animates there.
+    pub(crate) fn set_grid(&mut self, grid: Option<ContentGrid>, shared: bool) {
         self.grid = grid;
+        self.shared = shared;
     }
 
-    /// When to show the next picture, due at `due`: on the next grid vsync,
-    /// so it shares a window frame with the other animated content, unless
-    /// the clip's pictures come faster than the grid.
+    /// When to show the next picture, due at `due`: while something else
+    /// animates on the display, on the next grid vsync, so it shares a
+    /// window frame with that, if the clip's pictures come a whole number
+    /// of grid vsyncs apart (`Cadence::on_grid`); else when it is due.
     pub(crate) fn on_grid(&mut self, due: Instant) -> Instant {
-        self.cadence.note(due);
-        self.cadence.on_grid(due, self.grid.as_ref())
+        self.cadence.note(due, self.grid.as_ref());
+        let grid = self.grid.as_ref().filter(|_| self.shared);
+        self.on_grid = grid.is_some() && self.cadence.even();
+        self.cadence.on_grid(due, grid)
+    }
+
+    /// How long before a picture is shown to have asked for its frame
+    /// (`request_policy`): the lead, and on the grid a quarter frame more,
+    /// so that a late timer still makes the grid vsync, as the frame
+    /// clock's does (`frame_grid::clock_tick`). Each wakes three quarters
+    /// of a frame before its frame starts, never before the frame ahead of
+    /// it started: the lead is measured from the draw's start, after the
+    /// display link's call.
+    pub(crate) fn request_lead(&self) -> Duration {
+        if self.on_grid {
+            self.lead() + self.interval() / 4
+        } else {
+            self.lead()
+        }
     }
 
     /// The display's frame interval: the platform's refresh period, else

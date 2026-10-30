@@ -21,7 +21,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::frame_clock::{VideoFrameAsk, request_video_frame};
-use super::super::frame_grid::ContentGrid;
+use super::super::frame_grid::{self, ContentGrid, Source};
 #[cfg(target_os = "macos")]
 use super::super::frame_grid::{Vsync, display_grid};
 use super::{Picture, PlayState, VideoPlayer};
@@ -106,7 +106,12 @@ impl RenderOnce for VideoFrame {
         let now = Instant::now();
         let (hint, period, grid) = present_hint(window, cx, now);
         self.player.set_refresh_period(period);
-        self.player.set_content_grid(grid);
+        // On the display's grid only while something else animates there.
+        let source = Source::Clip(self.player.id());
+        let display = grid.map(|(display, _)| display);
+        let shared = display.is_some_and(|display| frame_grid::shared(display, source, now));
+        self.player
+            .set_content_grid(grid.map(|(_, grid)| grid), shared);
         let picture = self.player.pull(now, hint);
         let target = window.current_view();
         self.player.note_live_view(target);
@@ -164,6 +169,10 @@ impl RenderOnce for VideoFrame {
                 // A live picture off screen asks nothing: its feed stops
                 // redrawing it too.
                 if demand.animates && (visible || !player.is_live()) {
+                    if let Some(display) = display {
+                        let next = demand.next_due.unwrap_or(now);
+                        frame_grid::note_playing(display, source, now, next);
+                    }
                     request_video_frame(
                         target,
                         VideoFrameAsk {
@@ -298,11 +307,11 @@ fn paint_corner_mask(
 fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: [Hsla; 4], _: &mut Window) {}
 
 /// What [`present_hint`] reports: the next present time (with its host
-/// ticks), the refresh period and the display's content grid.
+/// ticks), the refresh period, and the display with its content grid.
 type Hint = (
     Option<(Instant, u64)>,
     Option<Duration>,
-    Option<ContentGrid>,
+    Option<(u64, ContentGrid)>,
 );
 
 /// The display link's next present time (with its host ticks) and refresh
@@ -316,9 +325,9 @@ fn present_hint(window: &Window, cx: &App, now: Instant) -> Hint {
     };
     let display = u64::from(display.id());
     let (hint, period) = gpui_macos::present_timing(display);
-    let grid = hint
-        .zip(period)
-        .and_then(|((at, _), period)| display_grid(display, Vsync { at, period }, now));
+    let grid = hint.zip(period).and_then(|((at, _), period)| {
+        Some((display, display_grid(display, Vsync { at, period }, now)?))
+    });
     (hint, period.or_else(|| window.refresh_interval(cx)), grid)
 }
 

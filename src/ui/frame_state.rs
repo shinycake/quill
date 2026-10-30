@@ -32,9 +32,9 @@ pub(crate) struct FrameUi {
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
     pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
-    /// The vsync each animation layer of the main window last drew on
+    /// What the main window's animation layers drew since their ticks
     /// (`QuillApp::note_layer_drawn`).
-    pub(super) layers_drawn: std::cell::RefCell<Vec<(EntityId, std::time::Instant)>>,
+    pub(super) layers_drawn: std::cell::RefCell<super::frame_clock::LayerDraws>,
     /// History motion: new-message reveal and selection-mode fades.
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
