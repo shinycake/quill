@@ -8,7 +8,7 @@ use super::CaptureError;
 use super::system_audio::{SystemAudioCapture, SystemAudioMix};
 use crate::calls::engine::EXTERNAL_AUDIO_RATE;
 use crate::cpal_stream::{StreamErrors, downmix_into};
-use crate::voice_opus::Resampler;
+use crate::resample::Resampler;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, I24, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::sync::Arc;
@@ -66,7 +66,7 @@ where
     T: SizedSample,
     f32: FromSample<T>,
 {
-    let mut resampler = Resampler::new(rate);
+    let mut resampler = Resampler::new(rate, EXTERNAL_AUDIO_RATE);
     let mut mono = Vec::new();
     let mut resampled = Vec::new();
     let needs_resampling = rate != EXTERNAL_AUDIO_RATE;
