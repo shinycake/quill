@@ -86,8 +86,13 @@ fn registry_path(app_root: &Path) -> PathBuf {
 /// then. The UI asks for the active account on every frame (the agent
 /// request check), and reading and parsing the file each time showed in an
 /// idle profile at 60 frames a second. A write in this process, or any
-/// change to the file's size or modification time, reads it again.
+/// change to the file's size or modification time, reads it again. A file
+/// changed within `SETTLED` isn't kept: on a file system with coarse times
+/// (1 s on HFS+, 2 s on FAT) an edit of the same length made in the same
+/// tick would otherwise look unchanged.
 static LOADED: std::sync::Mutex<Option<Loaded>> = std::sync::Mutex::new(None);
+
+const SETTLED: std::time::Duration = std::time::Duration::from_secs(3);
 
 struct Loaded {
     path: PathBuf,
@@ -125,7 +130,9 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
         }
         None => return AccountRegistry::default(),
     };
-    if let Some(stamp) = stamp {
+    let settled = stamp
+        .is_some_and(|(modified, _)| modified.elapsed().is_ok_and(|elapsed| elapsed >= SETTLED));
+    if let Some(stamp) = stamp.filter(|_| settled) {
         *loaded = Some(Loaded {
             path,
             writes,
@@ -161,7 +168,8 @@ fn tidy_registry(mut registry: AccountRegistry) -> AccountRegistry {
 }
 
 /// Counts registry writes in this process. A reader that caches the registry
-/// (the Dock and Window menus) compares it to know a write happened since.
+/// (`load_registry`, the Dock and Window menus) compares it to know a write
+/// happened since.
 static REGISTRY_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// How many times this process has written `accounts.json`; it moves on
@@ -172,6 +180,8 @@ pub fn registry_writes() -> u64 {
 
 fn save_registry(app_root: &Path, registry: &AccountRegistry) -> std::io::Result<()> {
     let written = write_json_atomic(&registry_path(app_root), registry);
+    // After the write: a reader that saw the old count can only have read
+    // the file before this write or after it, and the next one reads again.
     REGISTRY_WRITES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     // The active account may have changed; the in-memory test flag follows.
     crate::advanced::test_environment::invalidate_active_test(app_root);
@@ -606,6 +616,13 @@ mod account_registry_tests {
         let root = tmp_root("edited");
         let work = add_account(&root, "Work").expect("add works");
         set_active_account(&root, &work).expect("set works");
+        // A file changed within `SETTLED` is never kept; age it so this
+        // read keeps it.
+        std::fs::File::options()
+            .write(true)
+            .open(root.join("accounts.json"))
+            .and_then(|file| file.set_modified(std::time::SystemTime::now() - 2 * SETTLED))
+            .unwrap();
         assert_eq!(active_account(&root), work);
         let edited =
             r#"{"accounts":[{"key":"primary","display_name":"Primary"}],"active":"primary"}"#;
