@@ -79,6 +79,41 @@ silent and Linux/macOS no longer shell out. A custom file that can't be
 decoded falls back to the default tone. `SoundCommand`, `ffplay`, `afplay`
 and `osascript` paths and their tests were removed from `quill::notify`.
 
+## The output closes when nothing plays (2026-10-30)
+
+The shared output used to open the default device for the first sound and
+keep it open for the life of the app. On macOS an open output keeps the
+audio hardware running: coreaudiod held a "prevent idle system sleep"
+assertion for the built-in speaker for hours after a single notification
+sound, and CoreAudio kept calling Quill's mixer to play silence. tdesktop
+detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
+`media_audio_track.cpp`).
+
+- `src/ui/audio/output.rs`: every player connects to one app mixer, made
+  with the first device's channels and rate and kept for the app's life. A
+  device plays it through a feed that takes 256 frames at a time. The
+  players never see the device come and go, so a paused voice note or video
+  carries on with the next device.
+- A sound counts as playing while its player pulls it: `Outlet::append`
+  wraps each queued sound in `Heard`, which marks the output on every
+  sample. A paused player, or one with nothing queued, plays silence
+  without pulling it. A watch thread looks every 250 ms and closes the
+  device after 500 ms with nothing heard, then ends. Measuring the samples
+  instead would close the device during silence inside a track, such as
+  the quiet start of many songs, and leave the track stalled.
+- Opening: every new sound (`SharedOutput::outlet`) and every resume
+  (`AudioEngine::resume`, a restart landing, `StreamSound::play`) calls
+  `wake`, which opens the device if it was closed. The video decoder keeps
+  time from what the output pulls, so a soundtrack that resumes without a
+  device would also freeze the picture.
+- A call sound that loops takes a `Hold` while it loops, so the device stays
+  open through the gaps between rings (1 s and 2.5 s) and is not reopened
+  for every ring.
+- A stale device (Windows `StreamInvalidated`, a device that went away)
+  moves the app mixer to the new default device at the watch's next look,
+  so a track that is playing carries on there. Before, the track stayed on
+  the dead stream until the next sound.
+
 ## Verified
 
 - Unit tests (`cargo test --features ui --bin quill audio`): codec selection

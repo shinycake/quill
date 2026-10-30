@@ -1,0 +1,563 @@
+//! The app's one audio output device, open only while something plays.
+//!
+//! Every player connects to one app mixer that never goes away. A device
+//! plays it while any player's sound is being pulled ([`Heard`]), and is
+//! closed once nothing has played for [`QUIET_FOR`] (tdesktop detaches its
+//! device after 500 ms of silence, `kDetachDeviceTimeout`). An open output
+//! keeps the audio hardware running: on macOS coreaudiod holds an assertion
+//! that keeps the Mac from idle sleep, and the device's threads and buffers
+//! stay alive. Starting or resuming a sound opens it again
+//! ([`SharedOutput::wake`]). See `docs/decisions/codex-audio-in-process.md`.
+#![deny(clippy::indexing_slicing)]
+
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+use quill::advanced::debug_mode::debug_log;
+use quill::cpal_stream::StreamErrors;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
+use rodio::mixer::{Mixer, MixerSource};
+use rodio::source::SeekError;
+use rodio::{
+    ChannelCount, CpalError, DeviceSinkBuilder, DeviceSinkError, MixerDeviceSink, Player,
+    SampleRate, Source,
+};
+
+/// How long nothing may play before the device is closed.
+const QUIET_FOR: Duration = Duration::from_millis(500);
+/// How often an open device is checked for silence.
+const LOOK_EVERY: Duration = Duration::from_millis(250);
+/// How long after a device failed to open the next sound tries again.
+const RETRY_AFTER: Duration = Duration::from_secs(5);
+/// Frames the device takes from the app mixer at a time (about 5 ms).
+const FEED_FRAMES: usize = 256;
+
+/// The app's one audio output, shared by the playback engines, the
+/// notification sounds, the call tones and video soundtracks. `None` from
+/// [`Self::outlet`] when the machine has no usable device (retried after
+/// [`RETRY_AFTER`]).
+///
+/// The device is the system *default* output, so on macOS (cpal 0.18) its
+/// stream follows a new default device by itself. Where the stream cannot
+/// follow (Windows reports the change as `StreamInvalidated`), or the
+/// device went away, the error callback marks it stale and the output
+/// opens the new default: the app mixer, and every player on it, moves
+/// over.
+#[derive(Clone, Default)]
+pub(in crate::ui) struct SharedOutput(Arc<Output>);
+
+#[derive(Default)]
+struct Output {
+    state: Mutex<OutputState>,
+    /// Set by every sound a player pulls, cleared by the watch.
+    heard: Arc<AtomicBool>,
+    /// Open [`Hold`]s.
+    holds: AtomicUsize,
+    /// Tests: stands in for the device (`Some(None)` is "no device").
+    #[cfg(test)]
+    forced: Option<Option<Mixer>>,
+}
+
+#[derive(Default)]
+struct OutputState {
+    /// Made with the first device's layout and kept for the app's life.
+    app: Option<AppMixer>,
+    device: Option<Device>,
+    failed_at: Option<Instant>,
+    /// A watch thread looks after the open device.
+    watched: bool,
+}
+
+struct AppMixer {
+    mixer: Mixer,
+    /// Pulled by one device at a time ([`Feed`]).
+    sound: Arc<Mutex<MixerSource>>,
+}
+
+struct Device {
+    _sink: MixerDeviceSink,
+    /// Set from cpal's audio thread when the stream ended.
+    stale: Arc<AtomicBool>,
+}
+
+/// Where players connect: the app mixer, and the output to keep open while
+/// their sound plays.
+#[derive(Clone)]
+pub(in crate::ui) struct Outlet {
+    mixer: Mixer,
+    heard: Arc<AtomicBool>,
+}
+
+impl Outlet {
+    pub(in crate::ui) fn player(&self) -> Player {
+        Player::connect_new(&self.mixer)
+    }
+
+    /// Queue `source` on `player`, marked so the output stays open while
+    /// the player pulls it.
+    pub(in crate::ui) fn append<S>(&self, player: &Player, source: S)
+    where
+        S: Source + Send + 'static,
+    {
+        player.append(Heard {
+            source,
+            heard: self.heard.clone(),
+        });
+    }
+}
+
+impl SharedOutput {
+    /// Tests: an output that hands out `mixer` (or nothing) instead of
+    /// opening a device.
+    #[cfg(test)]
+    pub(in crate::ui) fn for_test(mixer: Option<Mixer>) -> Self {
+        Self(Arc::new(Output {
+            forced: Some(mixer),
+            ..Output::default()
+        }))
+    }
+
+    /// The app mixer, with the device open to play it. Every new sound
+    /// connects here.
+    pub(in crate::ui) fn outlet(&self) -> Option<Outlet> {
+        #[cfg(test)]
+        if let Some(forced) = &self.0.forced {
+            return forced.clone().map(|mixer| Outlet {
+                mixer,
+                heard: self.0.heard.clone(),
+            });
+        }
+        let mut state = self.0.lock();
+        if !state.open(&self.0) {
+            return None;
+        }
+        let app = state.app.as_ref()?;
+        Some(Outlet {
+            mixer: app.mixer.clone(),
+            heard: self.0.heard.clone(),
+        })
+    }
+
+    /// Keep the device open, once a sound opened it, until the hold drops.
+    pub(in crate::ui) fn hold(&self) -> Hold {
+        self.0.holds.fetch_add(1, Ordering::Relaxed);
+        Hold(self.0.clone())
+    }
+
+    /// Open the device for a player about to play again. False when there
+    /// is none.
+    pub(in crate::ui) fn wake(&self) -> bool {
+        #[cfg(test)]
+        if let Some(forced) = &self.0.forced {
+            return forced.is_some();
+        }
+        self.0.lock().open(&self.0)
+    }
+}
+
+impl Output {
+    fn lock(&self) -> MutexGuard<'_, OutputState> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether anything played since the last look, or a hold is open.
+    fn sounded(&self) -> bool {
+        self.heard.swap(false, Ordering::Relaxed) || self.holds.load(Ordering::Relaxed) > 0
+    }
+}
+
+/// Keeps the device open, once a sound opened it, while held: between the
+/// rings of a call sound that loops, so it isn't reopened for every ring.
+pub(in crate::ui) struct Hold(Arc<Output>);
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.0.holds.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl OutputState {
+    /// Make sure a live device plays the app mixer, and that a watch closes
+    /// it once nothing plays. Counts as sound, so the watch gives a player
+    /// about to start [`QUIET_FOR`] to do so.
+    fn open(&mut self, output: &Arc<Output>) -> bool {
+        output.heard.store(true, Ordering::Relaxed);
+        if self.device.as_ref().is_some_and(Device::is_stale) {
+            debug_log("audio: output: reopening the default output device");
+            self.device = None;
+            self.failed_at = None;
+        }
+        if self.device.is_none() {
+            if self.failed_at.is_some_and(|at| at.elapsed() < RETRY_AFTER) {
+                return false;
+            }
+            if !self.attach() {
+                self.failed_at = Some(Instant::now());
+                return false;
+            }
+        }
+        if !self.watched {
+            let watched = output.clone();
+            let spawned = std::thread::Builder::new()
+                .name("quill-audio-idle".into())
+                .spawn(move || watch(&watched));
+            self.watched = spawned.is_ok();
+        }
+        true
+    }
+
+    /// Open the default device and feed it the app mixer, made now from the
+    /// device's layout if this is the first one.
+    fn attach(&mut self) -> bool {
+        let stale = Arc::new(AtomicBool::new(false));
+        let mut sink = match open_default_output(output_error_callback(stale.clone())) {
+            Ok(sink) => sink,
+            Err(_) => return false,
+        };
+        sink.log_on_drop(false);
+        let app = self.app.get_or_insert_with(|| {
+            let config = sink.config();
+            let (mixer, sound) = rodio::mixer::mixer(config.channel_count(), config.sample_rate());
+            AppMixer {
+                mixer,
+                sound: Arc::new(Mutex::new(sound)),
+            }
+        });
+        sink.mixer().add(Feed::new(app.sound.clone()));
+        self.device = Some(Device { _sink: sink, stale });
+        true
+    }
+}
+
+impl Device {
+    fn is_stale(&self) -> bool {
+        self.stale.load(Ordering::Relaxed)
+    }
+}
+
+/// Looks after the open device: closes it once nothing has played for
+/// [`QUIET_FOR`], and moves the app mixer to the new default device when
+/// the stream ended while something plays. Ends with the device.
+fn watch(output: &Arc<Output>) {
+    let mut quiet = Quiet::default();
+    loop {
+        std::thread::sleep(LOOK_EVERY);
+        let mut state = output.lock();
+        let heard = output.sounded();
+        let Some(device) = &state.device else {
+            state.watched = false;
+            return;
+        };
+        let stale = device.is_stale();
+        if quiet.long_enough(heard, Instant::now()) {
+            debug_log("audio: output: closing the output device after silence");
+            state.device = None;
+            state.watched = false;
+            return;
+        }
+        if stale {
+            debug_log("audio: output: reopening the default output device");
+            state.device = None;
+            if !state.attach() {
+                state.watched = false;
+                return;
+            }
+        }
+    }
+}
+
+/// Counts the silence the watch sees.
+#[derive(Default)]
+struct Quiet {
+    since: Option<Instant>,
+}
+
+impl Quiet {
+    /// Whether nothing has played for [`QUIET_FOR`], given whether anything
+    /// did since the last look.
+    fn long_enough(&mut self, heard: bool, now: Instant) -> bool {
+        if heard {
+            self.since = None;
+            return false;
+        }
+        let since = *self.since.get_or_insert(now);
+        now.saturating_duration_since(since) >= QUIET_FOR
+    }
+}
+
+/// A player's sound that marks the output as playing each time it is
+/// pulled. A paused player, or one with nothing queued, doesn't pull it.
+struct Heard<S> {
+    source: S,
+    heard: Arc<AtomicBool>,
+}
+
+impl<S: Source> Iterator for Heard<S> {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        let sample = self.source.next();
+        if sample.is_some() {
+            self.heard.store(true, Ordering::Relaxed);
+        }
+        sample
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.source.size_hint()
+    }
+}
+
+impl<S: Source> Source for Heard<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.source.current_span_len()
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.source.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.source.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.source.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
+        self.source.try_seek(pos)
+    }
+}
+
+/// The app mixer's sound on a device, taken a block at a time. Endless:
+/// silence when nothing plays.
+struct Feed {
+    sound: Arc<Mutex<MixerSource>>,
+    channels: ChannelCount,
+    rate: SampleRate,
+    block: Vec<f32>,
+    at: usize,
+}
+
+impl Feed {
+    fn new(sound: Arc<Mutex<MixerSource>>) -> Self {
+        let (channels, rate) = {
+            let sound = sound.lock().unwrap_or_else(PoisonError::into_inner);
+            (sound.channels(), sound.sample_rate())
+        };
+        let len = FEED_FRAMES * usize::from(channels.get());
+        Self {
+            sound,
+            channels,
+            rate,
+            block: vec![0.0; len],
+            at: len,
+        }
+    }
+}
+
+impl Iterator for Feed {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        if self.at >= self.block.len() {
+            let mut sound = self.sound.lock().unwrap_or_else(PoisonError::into_inner);
+            for slot in &mut self.block {
+                *slot = sound.next().unwrap_or(0.0);
+            }
+            self.at = 0;
+        }
+        let sample = self.block.get(self.at).copied().unwrap_or(0.0);
+        self.at += 1;
+        Some(sample)
+    }
+}
+
+impl Source for Feed {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.channels
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+
+    fn try_seek(&mut self, _pos: Duration) -> Result<(), SeekError> {
+        Err(SeekError::NotSupported {
+            underlying_source: std::any::type_name::<Self>(),
+        })
+    }
+}
+
+/// rodio's own callback prints every error to stderr, xruns and reroutes
+/// included. This one logs through Quill's debug log, rate-limited, and
+/// marks the output stale when the stream ended.
+fn output_error_callback(stale: Arc<AtomicBool>) -> impl FnMut(CpalError) + Send + Clone + 'static {
+    let mut errors = StreamErrors::new("output");
+    move |err| {
+        if errors.check(err).is_some() {
+            stale.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// `DeviceSinkBuilder::open_default_sink` with `on_error` in place of
+/// rodio's printing callback: the default device first, then any other
+/// output that is not the null device.
+fn open_default_output<E>(on_error: E) -> Result<MixerDeviceSink, DeviceSinkError>
+where
+    E: FnMut(CpalError) + Send + Clone + 'static,
+{
+    DeviceSinkBuilder::from_default_device()
+        .and_then(|builder| builder.with_error_callback(on_error.clone()).open_stream())
+        .or_else(|first| {
+            let devices = match rodio::cpal::default_host().output_devices() {
+                Ok(devices) => devices,
+                Err(err) => {
+                    debug_log(&format!("audio: output: can't list output devices: {err}"));
+                    return Err(first);
+                }
+            };
+            devices
+                .filter(|device| {
+                    device
+                        .description()
+                        .is_ok_and(|desc| desc.driver().is_some_and(|driver| driver != "null"))
+                })
+                .find_map(|device| {
+                    DeviceSinkBuilder::from_device(device)
+                        .ok()?
+                        .with_error_callback(on_error.clone())
+                        .open_sink_or_fallback()
+                        .ok()
+                })
+                .ok_or(first)
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput};
+    use rodio::buffer::SamplesBuffer;
+    use rodio::mixer::mixer;
+    use rodio::{ChannelCount, Player, SampleRate, Source};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    fn mono(rate: u32) -> (ChannelCount, SampleRate) {
+        (
+            ChannelCount::new(1).unwrap(),
+            SampleRate::new(rate).unwrap(),
+        )
+    }
+
+    #[test]
+    fn the_device_closes_after_half_a_second_of_silence() {
+        let mut quiet = Quiet::default();
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert!(!quiet.long_enough(true, at(0)));
+        // The first silent look starts the count.
+        assert!(!quiet.long_enough(false, at(250)));
+        assert!(!quiet.long_enough(false, at(500)));
+        assert!(quiet.long_enough(false, at(250) + QUIET_FOR));
+    }
+
+    #[test]
+    fn a_sound_in_between_restarts_the_count() {
+        let mut quiet = Quiet::default();
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        assert!(!quiet.long_enough(false, at(0)));
+        assert!(!quiet.long_enough(false, at(400)));
+        assert!(!quiet.long_enough(true, at(600)));
+        assert!(!quiet.long_enough(false, at(800)));
+        assert!(!quiet.long_enough(false, at(1200)));
+        assert!(quiet.long_enough(false, at(1300)));
+    }
+
+    /// Only a player that pulls its sound counts as playing: not one that
+    /// is paused, nor one whose sound ran out.
+    #[test]
+    fn only_a_playing_player_marks_the_output() {
+        let (channels, rate) = mono(8000);
+        let (mixer, mut device) = mixer(channels, rate);
+        let output = SharedOutput::for_test(Some(mixer));
+        let outlet = output.outlet().unwrap();
+        let heard = |device: &mut rodio::mixer::MixerSource| {
+            outlet.heard.store(false, Ordering::Relaxed);
+            for _ in 0..400 {
+                device.next();
+            }
+            outlet.heard.load(Ordering::Relaxed)
+        };
+
+        let player: Player = outlet.player();
+        player.pause();
+        outlet.append(&player, SamplesBuffer::new(channels, rate, vec![0.0; 200]));
+        assert!(!heard(&mut device), "paused");
+        player.play();
+        assert!(heard(&mut device), "playing, even a silent sound");
+        assert!(!heard(&mut device), "ran out");
+    }
+
+    #[test]
+    fn a_marked_sound_still_seeks_and_reports_its_layout() {
+        let (channels, rate) = mono(8000);
+        let mut heard = Heard {
+            source: SamplesBuffer::new(channels, rate, vec![0.5; 8000]),
+            heard: Arc::new(AtomicBool::new(false)),
+        };
+        assert_eq!(heard.channels(), channels);
+        assert_eq!(heard.sample_rate(), rate);
+        assert_eq!(heard.total_duration(), Some(Duration::from_secs(1)));
+        heard.try_seek(Duration::from_millis(500)).unwrap();
+        assert_eq!(heard.by_ref().count(), 4000);
+    }
+
+    /// The device side plays what the app mixer has and silence after it,
+    /// without ever ending.
+    #[test]
+    fn the_feed_plays_the_app_mixer_then_silence() {
+        let (channels, rate) = mono(8000);
+        let (mixer, sound) = mixer(channels, rate);
+        let mut feed = Feed::new(Arc::new(Mutex::new(sound)));
+        assert_eq!(feed.channels(), channels);
+        assert_eq!(feed.sample_rate(), rate);
+        mixer.add(SamplesBuffer::new(channels, rate, vec![0.25; 300]));
+        let played: Vec<f32> = feed.by_ref().take(1000).collect();
+        assert_eq!(played.iter().filter(|s| **s == 0.25).count(), 300);
+        assert!(played.iter().skip(300).all(|s| *s == 0.0));
+        assert!(feed.next().is_some());
+    }
+
+    #[test]
+    fn a_hold_counts_as_sound_until_dropped() {
+        let output = SharedOutput::default();
+        assert!(!output.0.sounded());
+        let hold = output.hold();
+        assert!(output.0.sounded());
+        assert!(output.0.sounded(), "every look while held");
+        drop(hold);
+        assert!(!output.0.sounded());
+    }
+
+    #[test]
+    fn a_test_output_wakes_only_with_a_device() {
+        assert!(!SharedOutput::for_test(None).wake());
+        assert!(SharedOutput::for_test(None).outlet().is_none());
+        let (channels, rate) = mono(8000);
+        assert!(SharedOutput::for_test(Some(mixer(channels, rate).0)).wake());
+    }
+}
