@@ -125,18 +125,24 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
     let parsed = std::fs::read(&path)
         .ok()
         .map(|bytes| serde_json::from_slice::<AccountRegistry>(&bytes));
-    let registry = match parsed {
-        Some(Ok(registry)) => tidy_registry(registry),
+    let (registry, keep) = match parsed {
+        Some(Ok(registry)) => {
+            let settled = stamp.is_some_and(|(modified, _)| {
+                modified.elapsed().is_ok_and(|elapsed| elapsed >= SETTLED)
+            });
+            (tidy_registry(registry), settled)
+        }
         Some(Err(_)) => {
             quarantine_registry(&path);
             return AccountRegistry::default();
         }
-        None if stamp.is_none() => AccountRegistry::default(),
+        // No file, before and at the read: the default is kept until one
+        // appears. (A file that appeared in between was read, and isn't
+        // kept under the missing file's stamp.)
+        None if stamp.is_none() => (AccountRegistry::default(), true),
         None => return AccountRegistry::default(),
     };
-    let settled = stamp
-        .is_none_or(|(modified, _)| modified.elapsed().is_ok_and(|elapsed| elapsed >= SETTLED));
-    if settled {
+    if keep {
         *loaded = Some(Loaded {
             path,
             writes,
