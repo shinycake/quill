@@ -11,7 +11,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ErrorKind, FromSample, I24, SampleFormat, SizedSample, Stream, StreamConfig};
 
 use crate::cpal_stream::{StreamErrors, downmix_into};
-use crate::voice_opus::Resampler;
+use crate::resample::Resampler;
 
 /// An open, running input stream. Dropping it stops the microphone.
 pub struct MicStream {
@@ -86,7 +86,7 @@ where
     T: SizedSample,
     f32: FromSample<T>,
 {
-    let mut resampler = Resampler::new(rate);
+    let mut resampler = Resampler::new(rate, crate::voice_opus::RATE);
     let mut mono = Vec::new();
     device
         .build_input_stream(

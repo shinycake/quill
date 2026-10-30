@@ -19,7 +19,7 @@ pub mod ring;
 pub mod watch;
 
 use crate::locks::LockExt;
-use crate::voice_opus::Resampler;
+use crate::resample::Resampler;
 use gain::Gain;
 use ring::SampleRing;
 use std::cell::Cell;
@@ -70,7 +70,7 @@ impl StreamAudio {
             ),
             gain: Gain::new(volume, muted),
             convert: Mutex::new(RateConversion {
-                resampler: Resampler::between(SOURCE_RATE, rate),
+                resampler: Resampler::new(SOURCE_RATE, rate),
                 mixed: Vec::new(),
                 converted: Vec::new(),
             }),
