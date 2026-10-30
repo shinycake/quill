@@ -50,6 +50,31 @@ Considered and not done:
   Control, Full Keyboard Access, automation tools) would read a tree with
   holes in it on every frame a slice replays.
 
+## Measured
+
+On the Mac (M1 Pro), release `demo-capture` builds of the offline demo,
+frontmost, a clip playing on screen, 60 s per reading, frames steady at 47
+to 49 a second. Before is main 3833e5f75; after is this change.
+
+| State | CPU before | CPU after | Slice renders/s before | after |
+| --- | --- | --- | --- | --- |
+| Fresh, tree off | 14.9 to 15.6% | 15.0 to 15.6% | 0 | 0 |
+| One `AXChildren` query | 24.3 to 26.7% | 15.3 to 15.8% | 47 to 48 | 0 |
+| One real click with Tiles running | 25.7% | 15.8% | 47 | 0 |
+
+In a busier stretch of the same session the tree-off baseline rose to
+about 25% on both builds (cause unknown); there the tree took the old
+build to 30% and left the new one at 25 to 26%. So the tree's cost was 5
+to 10 points of a core with a clip playing, and the change removes it.
+
+With the tree on, the after build's tree matched the before build's
+(where every slice renders) in every attribute read (role, subrole,
+title, description, value, placeholder, position, size, actions) across
+three walks, with slices at 0 renders/s. Through the real AccessKit path,
+`AXPress` on a chat row opened that chat and setting `AXValue` on the
+composer put the text in it. The demo's tree has about 50 nodes; replay
+works per node, so a long chat costs more, unmeasured.
+
 ## Tests
 
 `src/ui/a11y_replay_tests.rs`: with the tree built, a frame in which only
