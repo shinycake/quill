@@ -82,11 +82,13 @@ fn registry_path(app_root: &Path) -> PathBuf {
     app_root.join("accounts.json")
 }
 
-/// The registry as last read from a readable file, and how the file looked
-/// then. The UI asks for the active account on every frame (the agent
-/// request check), and reading and parsing the file each time showed in an
-/// idle profile at 60 frames a second. A write in this process, or any
-/// change to the file's size or modification time, reads it again. A file
+/// The registry as last read from a readable file, or the default when
+/// there was none, and how the file looked then. The UI asks for the active
+/// account on every frame (the agent request check), and reading and
+/// parsing the file each time showed in an idle profile at 60 frames a
+/// second; so did trying to open a missing one, as a single-account setup
+/// has no file. A write in this process, the file appearing, or any change
+/// to its size or modification time, reads it again. A file
 /// changed within `SETTLED` isn't kept: on a file system with coarse times
 /// (1 s on HFS+, 2 s on FAT) an edit of the same length made in the same
 /// tick would otherwise look unchanged.
@@ -97,7 +99,8 @@ const SETTLED: std::time::Duration = std::time::Duration::from_secs(3);
 struct Loaded {
     path: PathBuf,
     writes: u64,
-    stamp: (std::time::SystemTime, u64),
+    /// `None`: there was no file.
+    stamp: Option<(std::time::SystemTime, u64)>,
     registry: AccountRegistry,
 }
 
@@ -112,7 +115,7 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
     let writes = registry_writes();
     let stamp = file_stamp(&path);
     let mut loaded = crate::locks::lock_or_recover(&LOADED);
-    if let (Some(last), Some(stamp)) = (loaded.as_ref(), stamp)
+    if let Some(last) = loaded.as_ref()
         && last.path == path
         && last.writes == writes
         && last.stamp == stamp
@@ -128,11 +131,12 @@ fn load_registry(app_root: &Path) -> AccountRegistry {
             quarantine_registry(&path);
             return AccountRegistry::default();
         }
+        None if stamp.is_none() => AccountRegistry::default(),
         None => return AccountRegistry::default(),
     };
     let settled = stamp
-        .is_some_and(|(modified, _)| modified.elapsed().is_ok_and(|elapsed| elapsed >= SETTLED));
-    if let Some(stamp) = stamp.filter(|_| settled) {
+        .is_none_or(|(modified, _)| modified.elapsed().is_ok_and(|elapsed| elapsed >= SETTLED));
+    if settled {
         *loaded = Some(Loaded {
             path,
             writes,
@@ -629,6 +633,20 @@ mod account_registry_tests {
         std::fs::write(root.join("accounts.json"), edited).unwrap();
         assert_eq!(active_account(&root), AccountKey::primary());
         assert_eq!(list_accounts(&root).len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no file the default is kept between reads; a file written
+    /// outside Quill afterwards shows on the next one.
+    #[test]
+    fn a_registry_that_appears_on_disk_is_read() {
+        let root = tmp_root("appears");
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(active_account(&root), AccountKey::primary());
+        assert_eq!(active_account(&root), AccountKey::primary());
+        let written = r#"{"accounts":[{"key":"primary","display_name":"Primary"},{"key":"account-1","display_name":"Work"}],"active":"account-1"}"#;
+        std::fs::write(root.join("accounts.json"), written).unwrap();
+        assert_eq!(active_account(&root), AccountKey::new("account-1").unwrap());
         let _ = std::fs::remove_dir_all(&root);
     }
 
