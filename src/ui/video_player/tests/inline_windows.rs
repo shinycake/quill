@@ -367,19 +367,21 @@ fn a_hidden_windows_clips_keep_their_picture_till_their_new_players_first(cx: &m
     }
     assert_sleeps_out_of_sight(&app, vcx, &scripts);
     let sleeping = [ROUND, TILE].map(|key| player(&app, vcx, key));
+    let last = sleeping.each_ref().map(painted);
     let waiting = hold_new_pictures(&scripts);
 
     // Shown again: from its first frame until the new players' first
-    // pictures, each tile paints a picture, never what lies under it.
+    // pictures, each tile paints its last picture, never what lies under.
     vcx.simulate_visibility_change(WindowVisibility::Visible);
     for frame in 0..3 {
         vcx.run_until_parked();
         draw_main(&app, vcx);
-        for key in [ROUND, TILE] {
-            let painted = player(&app, vcx, key).current_picture();
+        for (key, last) in [ROUND, TILE].iter().zip(last) {
+            let painted = painted(&player(&app, vcx, *key));
             assert!(
-                painted.is_some(),
-                "{key:?} painted no picture {frame} frames after its window showed"
+                painted.is_some() && painted == last,
+                "{key:?} painted {painted:?}, not its last picture {last:?}, \
+                 {frame} frames after its window showed"
             );
         }
     }
@@ -395,6 +397,23 @@ fn a_hidden_windows_clips_keep_their_picture_till_their_new_players_first(cx: &m
         draw_main(&app, vcx);
     }
     assert_plays(&app, vcx, &[ROUND, TILE]);
+    let handed: Vec<usize> = waiting
+        .iter()
+        .flat_map(|script| script.borrow().handed.clone())
+        .collect();
+    for key in [ROUND, TILE] {
+        let painted = painted(&player(&app, vcx, key));
+        assert!(
+            painted.is_some_and(|id| handed.contains(&id)),
+            "{key:?} paints {painted:?}, not its new backend's picture ({handed:?})"
+        );
+    }
+}
+
+/// The id of the picture `player` shows now.
+fn painted(player: &VideoPlayer) -> Option<usize> {
+    let picture = player.current_picture()?;
+    picture.image().map(|image| image.id.0)
 }
 
 #[gpui_kit::test]

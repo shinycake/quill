@@ -184,8 +184,17 @@ Both paths now keep the picture: a sleeping inline clip keeps its last picture
 (`VideoPlayer::hibernate_on_last_picture`) and paints it, and the player reopened for it shows that
 picture until its own first one (`VideoPlayer::take_picture_from`). One picture costs a fraction of
 what sleep frees: the FFmpeg decoder queues three pictures (`OpenOptions::inline`) besides the one on
-screen, plus its codec state and thread, and AVPlayer holds a pool of buffers. A kept FFmpeg image
-that its decoder retired stays in the atlas only while a player holds it (`image_budget::retired`).
+screen, plus its codec state and thread, and AVPlayer holds a pool of buffers. The kept pictures sit
+outside `INLINE_DECODE_BUDGET`: a sleeping slot counts 0 bytes (`slot.bytes`, set as it sleeps). They
+are bounded by the rows the windows render instead, since a slot goes once no window renders its row.
+
+An FFmpeg picture is a `RenderImage` in GPUI's atlas, which the decoder retires as it goes
+(`image_budget::retire_all`), stamped with that frame. A kept one is painted after that, for seconds
+or minutes, so the stamp would let the sweep drop it from the atlas while a frame, or a cached slice
+that rendered with it, may still show it. The player therefore retires it again when it leaves the
+screen (`Inner::orphan`): replaced by the new player's first picture, or dropped with a sleeping or
+new player, so its stamps follow the last frames that painted it.
+
 Video userpics (`userpic_videos`) sleep and wake the same way and still drop their picture; they are
 not changed here.
 
@@ -234,7 +243,13 @@ The same file has more tests. Each fails with its fix reverted:
   picture, and reads what each tile painted on every frame. Without the kept picture: `(11, 611) painted
   no picture 0 frames after its window showed`. The single-window path is covered by
   `a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back` (`tests/inline.rs`): `the reopened
-  round video paints no picture before its first`.
+  round video paints no picture before its first`. It also checks that each tile goes from the kept
+  picture to its new backend's own.
+- `a_kept_picture_leaves_the_atlas_after_the_frame_that_last_painted_it` (`video_player/tests.rs`)
+  keeps a picture its backend retired, paints it over later frames, and releases it three ways: the new
+  player's first picture, the new player dropped, the sleeping one dropped. The picture stays through
+  the frame that last painted it and leaves after the next one. With only the backend's stamp:
+  `dropped from the atlas while the frame that painted it may show it`.
 
 Unit tests in `windows.rs` cover the pass and sweep rules for one window, two windows, and a clip both
 show. They also cover per-window marks, and which windows count as out of sight (none with one window or

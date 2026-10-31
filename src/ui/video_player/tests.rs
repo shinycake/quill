@@ -61,6 +61,8 @@ struct Script {
     presents: Vec<Instant>,
     /// A picture to hand out on the next pull.
     picture: bool,
+    /// The ids of the pictures it handed out.
+    handed: Vec<usize>,
     next_due: Option<Instant>,
     /// The buffer ran dry while playing.
     stalled: bool,
@@ -143,7 +145,9 @@ impl Backend for Scripted {
     fn take_picture(&mut self, present: &Present) -> Pulled {
         let mut script = self.0.borrow_mut();
         script.presents.push(present.at);
-        let picture = std::mem::take(&mut script.picture).then(|| Picture::Image(image()));
+        let picture = std::mem::take(&mut script.picture).then(image);
+        script.handed.extend(picture.iter().map(|image| image.id.0));
+        let picture = picture.map(Picture::Image);
         Pulled {
             display_secs: picture.as_ref().map(|_| script.position),
             picture,
@@ -387,6 +391,93 @@ fn the_picture_trace_line_has_the_documented_columns() {
         picture_trace_line(7, &stats),
         "VF,7,nv12,1920,1080,3110400,412"
     );
+}
+
+/// How a kept picture leaves the screen.
+#[derive(Clone, Copy, Debug)]
+enum KeptUntil {
+    /// The new player's own first picture replaces it.
+    OwnPicture,
+    /// The new player goes before its first picture (its slot dropped).
+    NewPlayerDropped,
+    /// The sleeping player goes, never woken.
+    SleeperDropped,
+}
+
+/// A picture a sleeping player kept, painted over later frames, leaves
+/// the atlas only after the frame that last painted it: its backend
+/// retired it as it went, so it is retired again as it leaves the
+/// screen. Stamped at the sleep only, a replayed slice that rendered it
+/// later could point at its freed atlas tile.
+#[test]
+fn a_kept_picture_leaves_the_atlas_after_the_frame_that_last_painted_it() {
+    use crate::ui::image_budget::{begin_frame, retire_all, take_unshowable};
+    let painted = |player: &VideoPlayer| {
+        player
+            .pull(Instant::now(), None)
+            .and_then(|picture| picture.image())
+            .map(|image| image.id.0)
+    };
+    for until in [
+        KeptUntil::OwnPicture,
+        KeptUntil::NewPlayerDropped,
+        KeptUntil::SleeperDropped,
+    ] {
+        let (sleeping, script) = scripted(true);
+        sleeping.play();
+        script.borrow_mut().picture = true;
+        let kept = sleeping
+            .pull(Instant::now(), None)
+            .and_then(|picture| picture.image())
+            .expect("a picture");
+        let (id, held) = (kept.id.0, Arc::downgrade(&kept));
+        // Its backend retires it as it goes, as the FFmpeg backend does.
+        retire_all([kept]);
+        sleeping.hibernate_on_last_picture();
+        assert!(script.borrow().dropped, "{until:?}: the backend goes");
+        begin_frame();
+        assert_eq!(painted(&sleeping), Some(id), "{until:?}: asleep on it");
+        begin_frame();
+        match until {
+            KeptUntil::SleeperDropped => drop(sleeping),
+            KeptUntil::OwnPicture | KeptUntil::NewPlayerDropped => {
+                let (woken, script) = scripted(true);
+                woken.play();
+                woken.take_picture_from(&sleeping);
+                drop(sleeping);
+                assert_eq!(painted(&woken), Some(id), "{until:?}: handed over");
+                begin_frame();
+                assert_eq!(painted(&woken), Some(id), "{until:?}: until its own");
+                if let KeptUntil::OwnPicture = until {
+                    script.borrow_mut().picture = true;
+                    let own = painted(&woken);
+                    assert!(own.is_some() && own != Some(id), "{until:?}: {own:?}");
+                    assert_eq!(own, script.borrow().handed.last().copied());
+                } else {
+                    drop(woken);
+                }
+            }
+        }
+        // Released now: the frame that last painted it may still show it.
+        let swept: Vec<usize> = take_unshowable(true, &[])
+            .iter()
+            .map(|image| image.id.0)
+            .collect();
+        assert!(
+            !swept.contains(&id),
+            "{until:?}: dropped from the atlas while the frame that painted it may show it"
+        );
+        begin_frame();
+        let swept: Vec<usize> = take_unshowable(true, &[])
+            .iter()
+            .map(|image| image.id.0)
+            .collect();
+        assert!(
+            swept.contains(&id),
+            "{until:?}: it leaves after the next frame"
+        );
+        assert_eq!(held.strong_count(), 0, "{until:?}: nothing holds it");
+    }
 }
 
 /// Inline tiles and round videos in a chat on scripted players.

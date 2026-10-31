@@ -238,6 +238,12 @@ struct Inner {
     /// from the GPU atlas when replaced; `raw`'s own image is the
     /// backend's to retire.
     turned_image: Option<Arc<RenderImage>>,
+    /// `raw`'s image once the backend that made it is gone
+    /// ([`VideoPlayer::hibernate_on_last_picture`]): the backend retired
+    /// it as it went, but it stays on screen, so it is retired again
+    /// when it leaves (replaced, or with the player), stamped after the
+    /// frames that painted it meanwhile.
+    orphan: Option<Arc<RenderImage>>,
     turns: u8,
     mirrored: bool,
     error: Option<PlayerError>,
@@ -319,6 +325,7 @@ impl VideoPlayer {
                 raw: None,
                 shown: None,
                 turned_image: None,
+                orphan: None,
                 turns: 0,
                 mirrored: false,
                 error: None,
@@ -446,15 +453,17 @@ impl VideoPlayer {
             inner.awaiting = None;
             inner.asleep = true;
             if keep_picture {
-                return None;
+                inner.orphan = inner.raw.as_ref().and_then(Picture::image);
+                return Vec::new();
             }
             inner.raw = None;
             inner.shown = None;
-            inner.turned_image.take()
+            [inner.turned_image.take(), inner.orphan.take()]
+                .into_iter()
+                .flatten()
+                .collect()
         });
-        if let Some(image) = dropped.flatten() {
-            super::image_budget::retire_all([image]);
-        }
+        super::image_budget::retire_all(dropped.unwrap_or_default());
         drop(self.0.backend.take());
     }
 
@@ -464,11 +473,12 @@ impl VideoPlayer {
         if self.current_picture().is_some() {
             return;
         }
-        let Some((raw, shown, turned)) = sleeping.with_inner(|inner| {
+        let Some((raw, shown, turned, orphan)) = sleeping.with_inner(|inner| {
             (
                 inner.raw.take(),
                 inner.shown.take(),
                 inner.turned_image.take(),
+                inner.orphan.take(),
             )
         }) else {
             return;
@@ -477,6 +487,7 @@ impl VideoPlayer {
             inner.raw = raw;
             inner.shown = shown;
             inner.turned_image = turned;
+            inner.orphan = orphan;
         });
     }
 
@@ -851,6 +862,12 @@ impl Inner {
         if let Some(old) = std::mem::replace(&mut self.turned_image, image) {
             super::image_budget::retire_all([old]);
         }
+        // Gone from the screen, unless it is the orphan turned again.
+        let replaced =
+            |orphan: &mut Arc<RenderImage>| raw.image().is_none_or(|image| image.id != orphan.id);
+        if let Some(orphan) = self.orphan.take_if(replaced) {
+            super::image_budget::retire_all([orphan]);
+        }
         self.shown = Some(turned.unwrap_or_else(|| raw.clone()));
         self.raw = Some(raw);
     }
@@ -858,9 +875,8 @@ impl Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        if let Some(old) = self.turned_image.take() {
-            super::image_budget::retire_all([old]);
-        }
+        let images = [self.turned_image.take(), self.orphan.take()];
+        super::image_budget::retire_all(images.into_iter().flatten());
     }
 }
 
