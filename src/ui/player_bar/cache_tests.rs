@@ -1,8 +1,10 @@
 //! The player bar's playlist is kept per state of the chat's messages and
-//! gives what a fresh scan gives, over the `ready-audio` demo (two music
-//! files in chat 11, the first playing). Nothing reaches Telegram.
+//! gives what a fresh scan gives, and the bar's Previous / Next follow
+//! it, over the `ready-audio` demo (two music files in chat 11, the
+//! first playing). Nothing reaches Telegram.
 use super::PlaylistCache;
 use crate::ui::app::QuillApp;
+use crate::ui::frame_clock::frames_over as frames;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -10,6 +12,8 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
+use quill::state::RedrawNeed;
 use quill::telegram::envelope::MessageContent;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -44,6 +48,22 @@ fn apply(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &str) {
         let owned = quill::telegram::client::copy_and_parse(json, &seq, &sink)
             .unwrap_or_else(|| panic!("parses: {json}"));
         session.apply(owned);
+    });
+}
+
+/// Apply `json` as the poll does an update for a chat not on screen:
+/// it redraws the chat list and nothing else.
+fn apply_off_screen(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &str) {
+    app.update(vcx, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let seq = AtomicU64::new(session.last_seq + 1);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let owned = quill::telegram::client::copy_and_parse(json, &seq, &sink)
+            .unwrap_or_else(|| panic!("parses: {json}"));
+        let need = quill::state::redraw_need(session, &owned.envelope);
+        assert_eq!(need, RedrawNeed::ChatList, "only the chat list redraws");
+        session.apply(owned);
+        app.notify_chat_list(cx);
     });
 }
 
@@ -125,4 +145,60 @@ fn the_cache_recomputes_for_another_chat_or_revision() {
     assert_eq!(&*ids(2, 11, &[7]), &[7], "another chat");
     assert_eq!(&*ids(1, 11, &[4]), &[4], "back to the first chat");
     assert_eq!(computed, 4);
+}
+
+/// Whether the player bar's Next is disabled, from the accessibility tree.
+fn next_disabled(vcx: &mut VisualTestContext) -> bool {
+    let label = tr(keys::Q_AV_NEXT_TRACK);
+    vcx.update(|window, _| {
+        let tree = window.a11y_tree_snapshot().expect("a tree");
+        let mut next = tree
+            .nodes
+            .iter()
+            .filter(|node| node.label.as_deref() == Some(label));
+        let node = next.next().expect("the bar shows Next");
+        assert!(next.next().is_none(), "one Next");
+        node.disabled
+    })
+}
+
+/// With the song paused and another chat open, a song arriving in the
+/// song's chat turns Next on. That message redraws only the chat list,
+/// and a paused song's progress tick no longer redraws the bar.
+#[gpui_kit::test]
+fn next_turns_on_for_a_song_arriving_off_screen_while_paused(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| {
+        window.activate_window();
+        window.set_a11y_forced(true);
+    });
+    app.update(vcx, |app, cx| app.toggle_active_playback(cx));
+    assert!(app.read_with(vcx, |app, _| !app.playback.is_playing()));
+    // One song left, and another chat open.
+    apply(
+        &app,
+        vcx,
+        r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[802],"is_permanent":true,"from_cache":false}"#,
+    );
+    let other = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|session| {
+                session
+                    .ordered_chats()
+                    .into_iter()
+                    .map(|chat| chat.id)
+                    .find(|id| *id != CHAT)
+            })
+            .expect("the demo lists another chat")
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.select_listed_chat(other, window, cx));
+    });
+    let _ = frames(vcx, 1);
+    assert!(next_disabled(vcx), "one song: nothing to go to");
+
+    apply_off_screen(&app, vcx, &new_track(803));
+    let _ = frames(vcx, 1);
+    assert!(!next_disabled(vcx), "the new song is next");
 }

@@ -491,6 +491,7 @@ impl QuillApp {
         self.windows.dialog_closed_in(Some(chat_id));
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);
+        self.playback.stickers.window_closed(chat_id);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_chat_window(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {

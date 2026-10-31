@@ -24,6 +24,20 @@ pub(crate) struct SeekHover {
     pub(crate) at: f32,
 }
 
+/// The active track as the seek bars, the player bar and the Touch Bar
+/// draw it (`PlaybackUi::track_shown`). A paused track's stays the same
+/// until its chat gains or loses a song.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TrackShown {
+    state: super::audio::EngineState,
+    position_bits: Option<u64>,
+    error: Option<super::audio::AudioError>,
+    /// Previous / next (`QuillApp::playlist_can_move`): the songs loaded
+    /// in the track's chat, which a message arriving there off screen
+    /// changes without redrawing the bar.
+    can_move: (bool, bool),
+}
+
 pub(crate) struct PlaybackUi {
     /// History row whose voice note is playing.
     pub(super) player: super::player_bar::PlayerBarState,
@@ -52,6 +66,9 @@ pub(crate) struct PlaybackUi {
     pub(super) seek_hover: Option<SeekHover>,
     /// Guard for the playback progress tick task.
     pub(super) tick: bool,
+    /// What the seek bars, the player bar and the Touch Bar showed of the
+    /// track at the last tick: the tick redraws them only when it changed.
+    pub(super) tick_shown: Option<TrackShown>,
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
@@ -119,6 +136,17 @@ impl PlaybackUi {
         self.engine_state() == super::audio::EngineState::Playing
     }
 
+    /// What the seek bars, the player bar and the Touch Bar draw of the
+    /// active track, with the playlist's `can_move`.
+    pub(super) fn track_shown(&self, can_move: (bool, bool)) -> TrackShown {
+        TrackShown {
+            state: self.engine_state(),
+            position_bits: self.active_position_secs().map(f64::to_bits),
+            error: self.audio.error(),
+            can_move,
+        }
+    }
+
     /// Where the active track is, in seconds, from the frames the output
     /// consumed. `None` with no active track.
     pub(super) fn active_position_secs(&self) -> Option<f64> {
@@ -141,6 +169,7 @@ impl PlaybackUi {
             seek_preview_secs: None,
             seek_hover: None,
             tick: false,
+            tick_shown: None,
             positions: HashMap::new(),
             stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
             emoji_plays: std::cell::RefCell::default(),

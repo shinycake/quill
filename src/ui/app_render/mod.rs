@@ -47,6 +47,8 @@ impl Render for QuillApp {
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
+        // Before this frame counts: what showed stayed until now.
+        self.sticker_frame_starts(None, cx);
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();

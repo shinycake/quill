@@ -286,8 +286,8 @@ fn the_seek_slider_follows_a_position_tick_that_notifies_only_slices(cx: &mut Te
     let rendered = crate::ui::frame_clock::take_slice_renders();
     assert!(rendered.contains_key("conversation"), "{rendered:?}");
     assert!(!rendered.contains_key("(app notified)"), "{rendered:?}");
-    // The demo clock keeps running, so the slider is at or past the seek
-    // target, never left at the value before the tick.
+    // The demo's sound keeps the test clock, which stands still here: the
+    // slider shows the seek target, not the value before the tick.
     let Some(SliderValue::Single(shown)) = value(&app, vcx) else {
         panic!("the seek slider holds one value");
     };

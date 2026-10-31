@@ -297,7 +297,7 @@ impl QuillApp {
         self.sound_starts(cx);
         self.stop_voice_playback();
         self.stop_audio_playback();
-        if self.start_player(&path, 0.0, seconds) {
+        if self.start_player(&path, 0.0, seconds, cx) {
             let mut clock = PlaybackClock::new(seconds);
             clock.resume();
             self.recording.preview = Some(clock);

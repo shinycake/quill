@@ -251,8 +251,11 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
                 );
             });
             // The overlay already ran for this frame: ask for another to
-            // start an effect that has not played.
-            if unwatched {
+            // start an effect that has not played. Not in an inactive
+            // window, where nothing counts as shown (`shown_unwatched`):
+            // each frame would ask for the next one, at the display's
+            // rate, until the window is activated, which redraws anyway.
+            if unwatched && (window.is_window_active() || super::frame_clock::assume_active()) {
                 window.request_animation_frame();
             }
         },

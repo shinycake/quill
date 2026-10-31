@@ -278,6 +278,10 @@ impl QuillApp {
     pub(super) fn notify_chat_list(&self, cx: &mut Context<Self>) {
         if self.pane_mode() == super::app::PaneMode::Ready {
             self.notify_sidebar(cx);
+            // The Touch Bar's pinned chats show these rows' badges and
+            // online dots, and it mirrors by itself only on an app notify.
+            #[cfg(target_os = "macos")]
+            super::touch_bar::request_sync(cx);
         } else {
             cx.notify();
         }
