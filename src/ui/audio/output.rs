@@ -14,8 +14,8 @@
 //! is. See `docs/decisions/codex-audio-in-process.md`.
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use quill::advanced::debug_mode::debug_log;
@@ -70,6 +70,8 @@ struct Output {
     pulled: Arc<AtomicBool>,
     /// Open [`Hold`]s.
     holds: AtomicUsize,
+    /// Numbers the players, for their parked sounds ([`Parked`]).
+    players: AtomicU64,
     /// Tests: stands in for the app mixer and a device that is always up
     /// (`Some(None)` is "no device").
     #[cfg(test)]
@@ -110,13 +112,17 @@ struct Device {
     _sink: Option<MixerDeviceSink>,
     /// Set from cpal's audio thread when the stream ended.
     stale: Arc<AtomicBool>,
+    /// Tests: tells the gate when the device is dropped.
+    #[cfg(test)]
+    _gate: Option<gate::Dropped>,
 }
 
-/// A player's sound, waiting for a device to come up.
+/// A player's sound, waiting for a device to come up. Dropped with its
+/// player, as nothing else would ever play it: a video's soundtrack lets
+/// go of the decoder at once (the picture then runs on the wall clock).
 struct Parked {
     queue: SourcesQueueOutput,
-    /// Gone with its player, whose sound then never plays.
-    player: Weak<()>,
+    player: u64,
 }
 
 /// Where players connect: the app mixer.
@@ -128,12 +134,12 @@ pub(in crate::ui) struct Outlet {
 impl Outlet {
     pub(in crate::ui) fn player(&self) -> OutputPlayer {
         let (player, queue) = Player::new();
-        let alive = Arc::new(());
-        self.output.connect(queue, &alive);
+        let id = self.output.0.players.fetch_add(1, Ordering::Relaxed);
+        self.output.connect(queue, id);
         OutputPlayer {
             player,
             output: self.output.clone(),
-            _alive: alive,
+            id,
         }
     }
 }
@@ -144,8 +150,14 @@ impl Outlet {
 pub(in crate::ui) struct OutputPlayer {
     player: Player,
     output: SharedOutput,
-    /// Tells a parked sound that its player is gone ([`Parked`]).
-    _alive: Arc<()>,
+    /// Names its parked sound ([`Parked`]).
+    id: u64,
+}
+
+impl Drop for OutputPlayer {
+    fn drop(&mut self) {
+        self.output.unpark(self.id);
+    }
 }
 
 impl OutputPlayer {
@@ -271,7 +283,7 @@ impl SharedOutput {
     /// Connect a new player's sound to the app mixer, or park it until a
     /// device is up: the app mixer may not be made yet, and a sound waiting
     /// there for a device that never comes would outlive its player.
-    fn connect(&self, queue: SourcesQueueOutput, player: &Arc<()>) {
+    fn connect(&self, queue: SourcesQueueOutput, player: u64) {
         #[cfg(test)]
         if let Some(Some(mixer)) = &self.0.forced {
             mixer.add(queue);
@@ -282,11 +294,19 @@ impl SharedOutput {
             app.mixer.add(queue);
             return;
         }
-        state.unpark_gone();
-        state.parked.push(Parked {
-            queue,
-            player: Arc::downgrade(player),
-        });
+        state.parked.push(Parked { queue, player });
+    }
+
+    /// Drop the parked sound of a player that is gone.
+    fn unpark(&self, player: u64) {
+        let mut state = self.0.lock();
+        let gone: Vec<Parked> = state
+            .parked
+            .extract_if(.., |parked| parked.player == player)
+            .collect();
+        drop(state);
+        // Unlocked: a video's soundtrack lets go of its decoder here.
+        drop(gone);
     }
 
     /// Tests: how many times a player asked for the device.
@@ -414,9 +434,7 @@ impl OutputState {
         }
         let opener = output.clone();
         let spawned = quill::thread_guard::spawn_guarded("quill-audio-open", move || {
-            // Stopping a stream takes a while too.
-            drop(stale);
-            reopen(&opener);
+            reopen(&opener, stale);
         });
         self.opening = spawned.is_ok();
         if !self.opening {
@@ -433,20 +451,12 @@ impl OutputState {
             .app
             .get_or_insert_with(|| AppMixer::new(sink.channels, sink.rate));
         for parked in self.parked.drain(..) {
-            if parked.player.strong_count() > 0 {
-                app.mixer.add(parked.queue);
-            }
+            app.mixer.add(parked.queue);
         }
         let feed = Feed::new(app.sound.clone(), output.pulled.clone());
         self.device = Some(sink.play(feed));
         self.failed_at = None;
         self.watch(output);
-    }
-
-    /// Drop the parked sounds whose players are gone.
-    fn unpark_gone(&mut self) {
-        self.parked
-            .retain(|parked| parked.player.strong_count() > 0);
     }
 
     /// Make sure a watch looks after the open device; one that failed to
@@ -469,9 +479,13 @@ impl OutputState {
 }
 
 /// Open the default device for the app mixer, on a thread of its own and
-/// without holding the output's lock while the device comes up.
-fn reopen(output: &Arc<Output>) {
+/// without holding the output's lock while the device comes up. `stale`
+/// is the device it replaces.
+fn reopen(output: &Arc<Output>, stale: Option<Device>) {
     let mut reopened = Reopened { output, sink: None };
+    // Stopping a stream takes a while too; a panic there still ends the
+    // open (`Reopened`).
+    drop(stale);
     #[cfg(test)]
     if let Some(gate) = &output.gate {
         reopened.sink = Gate::open(gate);
@@ -493,10 +507,7 @@ impl Drop for Reopened<'_> {
         state.opening = false;
         match self.sink.take() {
             Some(sink) => state.install(sink, self.output),
-            None => {
-                state.failed_at = Some(Instant::now());
-                state.unpark_gone();
-            }
+            None => state.failed_at = Some(Instant::now()),
         }
         drop(state);
         self.output.opened.notify_all();
@@ -555,6 +566,7 @@ impl OpenSink {
             return Device {
                 _sink: None,
                 stale: self.stale,
+                _gate: Some(gate::Dropped(gate.clone())),
             };
         }
         if let Some(sink) = &self.sink {
@@ -563,6 +575,8 @@ impl OpenSink {
         Device {
             _sink: self.sink,
             stale: self.stale,
+            #[cfg(test)]
+            _gate: None,
         }
     }
 }
@@ -580,31 +594,38 @@ fn watch(output: &Arc<Output>) {
     let mut quiet = Quiet::default();
     loop {
         std::thread::sleep(LOOK_EVERY);
-        let mut state = output.lock();
-        let sounded = output.sounded();
-        let Some(device) = &state.device else {
-            state.watched = false;
+        if !look(output, &mut quiet, Instant::now()) {
             return;
-        };
-        let stale = device.is_stale();
-        if !stale && !quiet.long_enough(sounded, Instant::now()) {
-            continue;
         }
-        let closed = state.device.take();
-        state.watched = false;
-        drop(state);
-        // Dropped unlocked, as stopping a stream takes a while, and before
-        // a new one opens.
-        drop(closed);
-        if stale {
-            debug_log("audio: output: reopening the default output device");
-            // The new device gets a watch of its own.
-            output.lock().open(output);
-        } else {
-            debug_log("audio: output: closing the output device after silence");
-        }
-        return;
     }
+}
+
+/// One look of the watch at `now`: whether to look again.
+fn look(output: &Arc<Output>, quiet: &mut Quiet, now: Instant) -> bool {
+    let mut state = output.lock();
+    let sounded = output.sounded();
+    let Some(device) = &state.device else {
+        state.watched = false;
+        return false;
+    };
+    if device.is_stale() {
+        // Under the lock, so that players always see a device up or
+        // opening: the opener takes the stale one and drops it. The new
+        // device gets a watch of its own.
+        state.watched = false;
+        state.open(output);
+        return false;
+    }
+    if !quiet.long_enough(sounded, now) {
+        return true;
+    }
+    let closed = state.device.take();
+    state.watched = false;
+    drop(state);
+    // Dropped unlocked, as stopping a stream takes a while.
+    drop(closed);
+    debug_log("audio: output: closing the output device after silence");
+    false
 }
 
 /// Counts the silence the watch sees.
@@ -799,6 +820,7 @@ mod gate {
     use super::{Feed, OpenSink};
     use rodio::{ChannelCount, SampleRate};
     use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
     use std::thread::ThreadId;
 
@@ -820,6 +842,31 @@ mod gate {
         asked: usize,
         /// The open device's side of the app mixer.
         feed: Option<Feed>,
+        /// The open device's stale flag.
+        stale: Option<Arc<AtomicBool>>,
+        /// Dropping a device waits while set, as stopping a stream takes a
+        /// while.
+        drops_held: bool,
+        /// Devices dropped, or being dropped.
+        dropped: usize,
+    }
+
+    /// In a device the gate opened: tells the gate when it is dropped.
+    pub(super) struct Dropped(pub(super) Arc<Gate>);
+
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            let gate = &self.0;
+            let mut state = gate.lock();
+            state.dropped += 1;
+            gate.changed.notify_all();
+            while state.drops_held {
+                state = gate
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        }
     }
 
     impl Gate {
@@ -851,11 +898,13 @@ mod gate {
             loop {
                 if let Some(answer) = state.answers.pop_front() {
                     let (channels, rate) = answer?;
+                    let stale = Arc::new(AtomicBool::new(false));
+                    state.stale = Some(stale.clone());
                     return Some(OpenSink {
                         sink: None,
                         channels: ChannelCount::new(channels).unwrap(),
                         rate: SampleRate::new(rate).unwrap(),
-                        stale: Arc::default(),
+                        stale,
                         gate: Some(gate.clone()),
                     });
                 }
@@ -890,6 +939,31 @@ mod gate {
             self.lock().asked
         }
 
+        /// The open device's stream ends, as when the default output
+        /// changes.
+        pub(in crate::ui) fn go_stale(&self) {
+            if let Some(stale) = &self.lock().stale {
+                stale.store(true, Ordering::Relaxed);
+            }
+        }
+
+        /// Make dropping a device wait (`true`) until let go (`false`).
+        pub(in crate::ui) fn hold_drops(&self, held: bool) {
+            self.lock().drops_held = held;
+            self.changed.notify_all();
+        }
+
+        /// Wait until `count` devices are dropped, or being dropped.
+        pub(in crate::ui) fn wait_dropped(&self, count: usize) {
+            let mut state = self.lock();
+            while state.dropped < count {
+                state = self
+                    .changed
+                    .wait(state)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        }
+
         /// The open device takes `samples` from the app mixer (none with
         /// no device).
         pub(in crate::ui) fn pull(&self, samples: usize) -> Vec<f32> {
@@ -904,12 +978,11 @@ mod gate {
 
 #[cfg(test)]
 mod tests {
-    use super::{FEED_FRAMES, Feed, Heard, QUIET_FOR, Quiet, SharedOutput};
+    use super::{Feed, Heard, QUIET_FOR, Quiet, SharedOutput, look};
     use rodio::buffer::SamplesBuffer;
     use rodio::mixer::mixer;
     use rodio::{ChannelCount, SampleRate, Source};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc::TryRecvError;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -1076,18 +1149,45 @@ mod tests {
         }
     }
 
-    /// A sound waiting for a device that doesn't come is dropped with its
-    /// player, not kept for whenever one opens.
+    /// A sound waiting for a device is dropped with its player at once,
+    /// not kept for whenever one opens: a video's soundtrack lets go of
+    /// the decoder, whose picture then runs on the wall clock.
     #[test]
     fn a_sound_waiting_for_a_device_goes_with_its_player() {
-        let (output, gate) = SharedOutput::gated();
+        let (output, _gate) = SharedOutput::gated();
         let dropped = Arc::new(AtomicBool::new(false));
         let player = output.outlet().unwrap().player();
         player.append(Tracked(dropped.clone()));
+        assert!(!dropped.load(Ordering::Relaxed));
         drop(player);
-        gate.answer(false);
-        output.settle_device();
         assert!(dropped.load(Ordering::Relaxed));
+    }
+
+    /// A stale device (the default output changed) is replaced with no
+    /// moment where a playing player has no device up or opening: it would
+    /// read as lost, and a voice note would stop with "no audio output
+    /// device". The new device plays on.
+    #[test]
+    fn a_stale_device_is_replaced_without_losing_its_players() {
+        let (channels, rate) = mono(8000);
+        let (output, gate) = SharedOutput::gated();
+        let player = output.outlet().unwrap().player();
+        player.append(SamplesBuffer::new(channels, rate, vec![0.5; 8000]));
+        gate.answer(true);
+        output.settle_device();
+        gate.go_stale();
+        gate.hold_drops(true);
+        // The watch's look, on a thread of its own as in the app.
+        let watched = output.0.clone();
+        std::thread::spawn(move || look(&watched, &mut Quiet::default(), Instant::now()));
+        // The stale stream is being stopped.
+        gate.wait_dropped(1);
+        assert!(!player.lost());
+        gate.hold_drops(false);
+        gate.answer(true);
+        output.settle_device();
+        assert!(!player.lost());
+        assert!(gate.pull(9600).iter().any(|s| *s > 0.4), "plays on");
     }
 
     /// A playing player whose device failed to open says so, so its owner
@@ -1109,32 +1209,21 @@ mod tests {
         assert!(!paused.lost());
     }
 
-    /// A seek waits, off the UI thread, for a device that is opening and
-    /// then for the audio thread; it fails once the device couldn't open.
+    /// A seek waits, off the UI thread, for a device that is opening: it
+    /// goes ahead once the device is up, and fails once it couldn't open.
     #[test]
     fn a_seek_waits_for_the_opening_device_and_fails_without_one() {
-        let (channels, rate) = mono(8000);
         for opens in [true, false] {
             let (output, gate) = SharedOutput::gated();
+            // Nothing queued: a seek with a device up needs no audio thread.
             let player = Arc::new(output.outlet().unwrap().player());
-            player.pause();
-            player.append(SamplesBuffer::new(channels, rate, vec![0.5; 8000]));
             let (done, seeked) = std::sync::mpsc::channel();
             let seeker = player.clone();
             std::thread::spawn(move || {
                 let _ = done.send(seeker.try_seek(Duration::from_millis(500)).is_ok());
             });
             gate.answer(opens);
-            // The audio thread takes a seek while it pulls the player.
-            let moved = loop {
-                gate.pull(FEED_FRAMES);
-                match seeked.try_recv() {
-                    Ok(moved) => break moved,
-                    Err(TryRecvError::Empty) => std::thread::yield_now(),
-                    Err(TryRecvError::Disconnected) => panic!("the seek thread died"),
-                }
-            };
-            assert_eq!(moved, opens);
+            assert_eq!(seeked.recv().unwrap(), opens);
         }
     }
 

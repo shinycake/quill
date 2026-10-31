@@ -100,11 +100,19 @@ impl CallSounds {
             return;
         };
         let player = outlet.player();
-        player.append(SamplesBuffer::new(
+        let samples = SamplesBuffer::new(
             NonZero::<u16>::MIN,
             NonZero::new(call_tones::SAMPLE_RATE).unwrap_or(NonZero::<u32>::MIN),
             sound.samples(),
-        ));
+        );
+        // A cue is pointless late (an End chime over a voice note minutes
+        // later, once some sound opens the device); a ring that loops is
+        // stopped with its loop.
+        if rings {
+            player.append(samples);
+        } else {
+            player.append_alert(samples);
+        }
         self.player = Some(player);
     }
 

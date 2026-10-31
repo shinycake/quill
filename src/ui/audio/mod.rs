@@ -221,6 +221,13 @@ impl StreamSound {
         self.player.pause();
     }
 
+    /// Playing, but the device failed to open: nothing pulls the sound, so
+    /// the decoder's clock would hold the picture still. Dropping the
+    /// sound lets the clip run on its wall clock.
+    pub(super) fn lost(&self) -> bool {
+        self.player.lost()
+    }
+
     pub(super) fn set_volume(&self, volume: f32) {
         self.player.set_volume(volume.clamp(0.0, 1.0));
     }

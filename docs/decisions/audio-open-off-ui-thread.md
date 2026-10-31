@@ -32,22 +32,30 @@ the calling thread, under the output's lock.
   from that device's own channels and rate if it is the first (as before,
   so a 44.1 kHz file on a 44.1 kHz output is not resampled), connects the
   parked queues, then starts the feed. A later device with another layout
-  converts the mix, as before. A parked queue whose player is gone is
-  dropped when the next player parks or an open fails, so a machine with
-  no device keeps no sounds.
+  converts the mix, as before. A parked queue is dropped with its player,
+  so a machine with no device keeps no sounds, and a video soundtrack lets
+  go of its decoder at once.
 - Every open runs on `quill-audio-open`; nothing on the UI thread waits for
   it. `outlet`, `play` and a sound queued on a playing player start an open
   and return. `play` is false only when no device opened in the last 5 s.
 - A player that plays while no device is up or opening is `lost`: its
   device failed to open. The engine's `settle` (the 250 ms tick and every
   command) pauses such a track and shows "no audio output device"; a call
-  ring that loops counts it as finished and tries again after its gap.
+  ring that loops counts it as finished and tries again after its gap; the
+  FFmpeg video backend drops a lost soundtrack, so the clip runs on its
+  wall clock as it did when there was no device, instead of holding its
+  first picture. Call cues (connect, end, busy, mute) are alerts: dropped
+  unless they start within 2 s, not played over a voice note once some
+  later sound opens the device.
 - Only `OutputPlayer::try_seek` waits for an opening device, and only the
   engine's seek worker calls it, so a seek still gets an answer or fails.
 - A video soundtrack's seek sets a flag that the stretcher reads at its
   next pull (`Flushed`), so it neither waits for the audio thread nor opens
   the device.
-- A stale device is dropped on the opener thread.
+- A stale device is dropped on the opener thread, which the watch starts
+  under the output's lock: players never see a moment with no device up
+  or opening. The opener's guard exists before that drop, so a panic there
+  still ends the open.
 
 No "starting" engine state: while the device opens the row shows the
 track playing at its start, as it did during the device's first buffer.
@@ -88,6 +96,8 @@ put back, the new tests fail with "opened the device on the UI thread".
 - `the_app_mixer_takes_the_first_devices_layout` (a 44.1 kHz mono device
   gets a 44.1 kHz mono sound sample for sample)
 - `a_sound_waiting_for_a_device_goes_with_its_player`
+- `a_stale_device_is_replaced_without_losing_its_players`
+- `a_clip_whose_device_fails_to_open_runs_on_its_wall_clock`
 
 The UI thread's part of a first sound (outlet, queue, play) took about
 50 to 230 µs in tests on Linux, mostly a thread spawn.

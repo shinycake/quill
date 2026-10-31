@@ -130,8 +130,11 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   device opens: the engine shows the track playing, and its next `settle`
   (the 250 ms tick, or the next command) pauses a track whose device then
   failed to open (`OutputPlayer::lost`) and shows no output. A call ring
-  that loops counts a lost ring as finished and tries again after its gap.
-  Only `try_seek` waits for a device that is opening, and only the
+  that loops counts a lost ring as finished and tries again after its gap;
+  the other call cues are alerts, dropped if they can't start within 2 s.
+  A video soundtrack that is lost is let go (the FFmpeg backend drops it,
+  which frees the decoder's tap at once), so the clip runs on its wall
+  clock as with no device instead of holding its picture. Only `try_seek` waits for a device that is opening, and only the
   engine's seek worker calls it; a video soundtrack's seek just tells the
   stretcher to start over at its next pull. A closed device is dropped off
   the UI thread, since stopping a stream also takes a while.
@@ -140,7 +143,10 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   for every ring.
 - A stale device (Windows `StreamInvalidated`, a device that went away)
   moves the app mixer to the new default device at the watch's next look,
-  so a track that is playing carries on there. Before, the track stayed on
+  so a track that is playing carries on there. The watch starts the new
+  open under the output's lock and the opener drops the stale stream, so a
+  player never sees a moment with no device up or opening (it would read
+  as lost). Before, the track stayed on
   the dead stream until the next sound.
 
 ## Verified
