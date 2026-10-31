@@ -28,31 +28,30 @@ fn digest_file_is_lowercase_hex_sha256() {
 
 #[test]
 fn the_version_probe_checks_both_answers_and_times_out() {
-    let dir = crate::scratch::process_dir("quill-probe");
-    let good = dir.join("good");
-    script(
-        &good,
-        "if [ \"$1\" = --build-info ]; then echo ui; else echo 'Quill 0.2.0'; fi",
-    );
-    assert!(probe_binary(&good, "0.2.0").is_ok());
-    assert!(probe_binary(&good, "0.3.0").is_err());
-    let core = dir.join("core");
-    script(
-        &core,
-        "if [ \"$1\" = --build-info ]; then echo core; else echo 'Quill 0.2.0'; fi",
-    );
-    assert!(probe_binary(&core, "0.2.0").is_err(), "a core-only build");
-    let slow = dir.join("slow");
-    script(&slow, "sleep 30");
-    let started = Instant::now();
+    use std::os::unix::process::ExitStatusExt;
+    let new = fixture("new.sh");
+    assert!(probe_binary(&new, "999.0.0").is_ok());
+    assert!(probe_binary(&new, "999.0.1").is_err());
     assert!(
-        wait_with_timeout(
-            &mut Command::new(&slow).spawn().unwrap(),
-            Duration::from_millis(200)
-        )
-        .is_err()
+        probe_binary(&fixture("core-only.sh"), "999.0.0").is_err(),
+        "a core-only build"
     );
-    assert!(started.elapsed() < Duration::from_secs(5));
+    // A child that cannot finish by itself (`cat` waits for the end of an
+    // input this test holds open), with no time left: killed and reported.
+    // If `wait_with_timeout` stopped enforcing its deadline this would hang
+    // instead of failing; the CI step's timeout bounds that (as in #1273).
+    let mut stuck = Command::new("cat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let waited = wait_with_timeout(&mut stuck, Duration::ZERO);
+    assert_eq!(waited.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    let status = stuck.try_wait().unwrap();
+    assert_eq!(
+        status.and_then(|status| status.signal()),
+        Some(libc::SIGKILL)
+    );
 }
 
 #[test]
@@ -109,11 +108,12 @@ fn exited_pid() -> u32 {
     pid
 }
 
-fn script(path: &Path, body: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+/// A stand-in app from `tests/fixtures/update-install`, checked in with its
+/// executable bit.
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/update-install")
+        .join(name)
 }
 
 /// What a fixture app answers: the probes, or records its arguments.
@@ -138,15 +138,16 @@ impl App {
     }
 }
 
-/// Starts the fixture executable itself (the helper's real starter goes
-/// through LaunchServices on macOS, which a test bundle must not).
+/// Runs the fixture executable itself (the helper's real starter goes
+/// through LaunchServices on macOS, which a test bundle must not) until it
+/// exits, so what it records is complete once the helper returns.
 fn start_directly(target: &Path, args: &[String]) -> std::io::Result<()> {
     Command::new(target)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
+        .status()
         .map(|_| ())
 }
 
@@ -177,15 +178,13 @@ impl Fixture {
         claim::take_over(&self.plan_path).ok().unwrap()
     }
 
-    /// What the started version got, once it ran (spawned, so polled).
+    /// What the started version got. [`start_directly`] waited for it to
+    /// exit, so the file holds all it wrote (a poll for the file while it
+    /// ran could read it created and still empty).
     fn started(&self) -> Option<String> {
-        for _ in 0..100 {
-            if let Ok(args) = fs::read_to_string(self.root.join("opt/started")) {
-                return Some(args.trim().to_string());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        None
+        fs::read_to_string(self.root.join("opt/started"))
+            .ok()
+            .map(|args| args.trim().to_string())
     }
 
     /// No update file is left where plans live.
@@ -220,16 +219,22 @@ impl Fixture {
 fn write_app(package: &Path, app: App, payload: &[u8]) {
     #[cfg(not(target_os = "macos"))]
     {
-        let body = match app {
-            App::New => {
-                "case \"$1\" in --version) echo 'Quill 999.0.0';; --build-info) echo ui;; \
-                 *) echo \"$@\" > \"$(dirname \"$0\")/../started\";; esac"
-            }
-            App::Old => "echo \"$@\" > \"$(dirname \"$0\")/../started\"",
-            App::BadProbe => "echo 'Quill 0.0.1'",
-        };
-        script(&package.join("quill"), body);
+        let script = fixture(match app {
+            App::New => "new.sh",
+            App::Old => "old.sh",
+            App::BadProbe => "bad-probe.sh",
+        });
         fs::create_dir_all(package.join("lib")).unwrap();
+        // Copied by `cp`, not written by this process: a child another test
+        // thread is starting shares this process's open files until its
+        // exec, and an executable still open for writing anywhere fails to
+        // start with `ETXTBSY` ("Text file busy").
+        let copied = Command::new("cp")
+            .arg(script)
+            .arg(package.join("quill"))
+            .status()
+            .unwrap();
+        assert!(copied.success());
         fs::write(package.join("lib/libtdjson.so"), payload).unwrap();
     }
     #[cfg(target_os = "macos")]
