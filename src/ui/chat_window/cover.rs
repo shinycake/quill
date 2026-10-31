@@ -10,6 +10,30 @@
 //! while the active chat window's frame holds the main window's on the same
 //! display, and start again once any part of it shows (`frame_clock`).
 //! Background: `docs/decisions/covered-main-window.md`.
+//!
+//! This rests on the active window being in front of the app's others; a
+//! visible main window must never hold still. Where that is not sure, the
+//! main window never counts as covered:
+//!
+//! - Linux: Wayland gives no window positions, and an X11 window manager may
+//!   focus a window without raising it.
+//! - Windows, while "Activate a window by hovering over it with the mouse"
+//!   is on (`SPI_GETACTIVEWINDOWTRACKING`): the window under the pointer
+//!   becomes active, raised or not (`SPI_GETACTIVEWNDTRKZORDER`, which this
+//!   does not trust). Read at each check, so a change in Settings counts
+//!   from the next activation or move, the events that could put an active
+//!   chat window behind the main window.
+//! - Fullscreen windows (a Space of their own on macOS).
+//!
+//! macOS has no such setting. Ways it orders a window without making it key
+//! (a Cmd-click or Cmd-drag on a background window) need a visible part of
+//! the main window to click; Quill brings the main window forward only with
+//! `makeKeyAndOrderFront` (`activate_window`, `window_control::set_visible`)
+//! and never lifts it or a chat window above the normal level
+//! (`set_always_on_top` is for call and Picture-in-Picture windows).
+//! Switching Spaces makes a window on the new one key. A chat window that is
+//! a native tab of the main window covers it while its tab is the selected
+//! one, which is right: the main window's tab is hidden then.
 
 use super::super::app::QuillApp;
 use super::super::window_control::{Backend, backend};
@@ -26,10 +50,7 @@ pub(super) struct WindowPlace {
 
 impl WindowPlace {
     /// `window`'s place on `display`. `None` when it can't tell what
-    /// covers what: off any display; fullscreen (a Space of its own on
-    /// macOS, so a window on the desktop beside it may show); on Linux,
-    /// where Wayland gives no window positions and an X11 window manager
-    /// may focus a window without raising it.
+    /// covers what: off any display, fullscreen, or on Linux (see above).
     pub(super) fn of(window: &Window, display: Option<DisplayId>) -> Option<Self> {
         let active_in_front = matches!(
             backend(window),
@@ -67,7 +88,7 @@ impl ChatWindows {
         self.open.iter().any(|open| {
             let slot = open.slot.borrow();
             slot.active && slot.place.is_some_and(|place| place.covers(&main))
-        })
+        }) && !hover_activates()
     }
 
     /// `chat_id`'s window is active or not and stands at `place`.
@@ -78,6 +99,31 @@ impl ChatWindows {
             slot.place = place;
         }
     }
+}
+
+/// Windows activates the window under the pointer, maybe without raising
+/// it. A failed read counts as on: the main window animates as before.
+#[cfg(windows)]
+fn hover_activates() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SPI_GETACTIVEWINDOWTRACKING, SystemParametersInfoW,
+    };
+    let mut on: i32 = 0;
+    // SAFETY: SPI_GETACTIVEWINDOWTRACKING writes one BOOL to the pointer.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETACTIVEWINDOWTRACKING,
+            0,
+            (&mut on as *mut i32).cast(),
+            0,
+        )
+    };
+    ok == 0 || on != 0
+}
+
+#[cfg(not(windows))]
+fn hover_activates() -> bool {
+    false
 }
 
 impl QuillApp {

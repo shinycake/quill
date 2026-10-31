@@ -36,11 +36,33 @@ frame clock that the chat windows' content ticks through, and presence and notif
   lets its layers ask again. A closed chat window already redraws the app; the main window's own moves and
   activation redraw it.
 - Bounds are compared on one display only (macOS measures a window from its screen, Windows in its monitor's
-  scale). A fullscreen window has no place (on macOS it has a Space of its own, so the desktop beside it may
-  show), and neither does a window on Linux: Wayland gives no window positions, and an X11 window manager may
-  focus a window without raising it.
+  scale).
 
 A partly covered main window, or one covered by two chat windows together, animates as before.
+
+## Where the main window never counts as covered
+
+All of this rests on the active window being in front of the app's other windows. A visible main window must
+never hold still, so where that is not sure, the main window animates as before:
+
+- Fullscreen windows: on macOS a fullscreen window has a Space of its own, so the desktop beside it may show.
+- Linux: Wayland gives no window positions, and an X11 window manager may focus a window without raising it.
+- Windows, while "Activate a window by hovering over it with the mouse" is on (`SPI_GETACTIVEWINDOWTRACKING`):
+  the window under the pointer becomes active, and whether it is raised depends on another setting
+  (`SPI_GETACTIVEWNDTRKZORDER`) that this does not trust. The setting is read each time the check runs,
+  only once a chat window's bounds already hold the main window's (one `SystemParametersInfoW` call). It
+  runs at the main window's render and at each activation, move or resize of a chat window, which are the
+  events that could put an active chat window behind the main window, so a changed setting counts from the
+  next one. A failed read counts as on. It needs no new crate feature (`windows-sys`
+  `Win32_UI_WindowsAndMessaging` was already on).
+
+macOS has no such setting. The ways it orders a window without making it key (a Cmd-click or Cmd-drag on a
+background window) need a visible part of the main window to click. Quill brings the main window forward
+only with `makeKeyAndOrderFront` (GPUI's `activate_window`, `window_control::set_visible`), and never lifts
+the main window or a chat window above the normal level (`set_always_on_top` is for the call and
+Picture-in-Picture windows); a change there must revisit this. Switching Spaces makes a window on the new
+Space key. A chat window opened as a native tab of the main window counts as covering it while its tab is the
+selected one, which is right: the main window's tab is hidden then.
 
 ## Tests
 
@@ -75,5 +97,5 @@ an edge starts the stickers again at once.
 
 - GPUI's own `with_animation` (the kit's `Skeleton` and `Spinner`) and the playback progress tick still
   redraw a covered main window, as they do behind another app.
-- On Windows with "activate a window by hovering" and no raise, an active chat window can sit behind the
-  main window; if its bounds hold the main window's, the main window would hold still while in view.
+- The Windows check above was not compiled here (a Linux machine without the MSVC toolchain); it makes the same
+  call as `src/screen_reader.rs` with another action.
