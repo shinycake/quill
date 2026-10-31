@@ -295,3 +295,32 @@ manager such as Tiles) turns the tree on until Quill quits.
   a replayed node its provenance.
 
 Quill's `a11y_replay_tests` cover it.
+
+## Live entity and subscription counts for tests
+
+Added in 2026 for the memory sweep (`docs/decisions/entity-leaks.md`).
+Upstream's `LeakDetector` only exists in leak-detection builds (gpui-pre's
+own tests, the `leak-detection` feature, or `GPUI_LEAK_DETECTION` set at
+build time; Quill's builds use none of them), and its
+`assert_no_new_leaks` checks nothing in a plain `test-support` build, so a
+Quill test could not tell whether closing a surface let go of what opening
+it made. Everything here is
+`test-support` only.
+
+- `src/app/entity_map.rs`: `EntityMap` keeps each live entity's type name
+  (`type_names`, filled in `insert`, emptied in `take_dropped`, so an entity
+  leased for an update still counts); `live_counts` tallies them by type.
+- `src/subscription.rs`: `SubscriberSet::subscriber_count`, the
+  subscribers over every emitter that have not been dropped.
+- `src/app.rs`: `App::live_entity_counts` (live entities by type name) and
+  `App::live_subscription_counts` (observers, event listeners, release
+  listeners, global, new-entity, keystroke and window-closed observers).
+- `src/window.rs`: `Window::live_subscription_counts` (focus, bounds,
+  appearance, activation, visibility, display and pending-input
+  observers).
+- `src/executor.rs`: `ForegroundExecutor::live_tasks`, the foreground
+  tasks of this thread that have neither finished nor been dropped, by the
+  `#[track_caller]` location of the spawn (`cx.spawn` and friends pass the
+  caller through; `App::spawn_with_priority` gained the attribute for
+  this). `spawn`, `spawn_with_priority` and `spawn_when_idle` wrap the
+  future in a guard (`LiveTask`) that counts it while it exists.

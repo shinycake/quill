@@ -32,6 +32,47 @@ pub struct ForegroundExecutor {
     not_send: PhantomData<Rc<()>>,
 }
 
+#[cfg(feature = "test-support")]
+thread_local! {
+    /// [`ForegroundExecutor::live_tasks`].
+    static LIVE_TASKS: std::cell::RefCell<
+        std::collections::BTreeMap<&'static core::panic::Location<'static>, usize>,
+    > = std::cell::RefCell::default();
+}
+
+/// Counts one foreground task in [`LIVE_TASKS`] while its future exists.
+#[cfg(feature = "test-support")]
+struct LiveTask(&'static core::panic::Location<'static>);
+
+#[cfg(feature = "test-support")]
+impl LiveTask {
+    #[track_caller]
+    fn wrap<R>(future: impl Future<Output = R> + 'static) -> impl Future<Output = R> + 'static {
+        let at = core::panic::Location::caller();
+        LIVE_TASKS.with(|tasks| *tasks.borrow_mut().entry(at).or_default() += 1);
+        let live = LiveTask(at);
+        async move {
+            let _live = live;
+            future.await
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl Drop for LiveTask {
+    fn drop(&mut self) {
+        let _ = LIVE_TASKS.try_with(|tasks| {
+            let mut tasks = tasks.borrow_mut();
+            if let Some(count) = tasks.get_mut(self.0) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    tasks.remove(self.0);
+                }
+            }
+        });
+    }
+}
+
 /// Extension trait for `Task<Result<T, E>>` that adds `detach_and_log_err` with an `&App` context.
 ///
 /// This trait is automatically implemented for all `Task<Result<T, E>>` types.
@@ -355,7 +396,20 @@ impl ForegroundExecutor {
     where
         R: 'static,
     {
+        #[cfg(feature = "test-support")]
+        let future = LiveTask::wrap(future);
         self.inner.spawn(future.boxed_local())
+    }
+
+    /// The tasks spawned on this thread's foreground executors that have
+    /// neither finished nor been dropped, counted by where they were
+    /// spawned. A test reads it to check that closing a surface ends the
+    /// tasks opening it started.
+    #[cfg(feature = "test-support")]
+    pub fn live_tasks(
+        &self,
+    ) -> std::collections::BTreeMap<&'static core::panic::Location<'static>, usize> {
+        LIVE_TASKS.with(|tasks| tasks.borrow().clone())
     }
 
     /// Enqueues the given Task to run on the main thread with the given priority.
@@ -369,6 +423,8 @@ impl ForegroundExecutor {
         R: 'static,
     {
         // Priority is ignored for foreground tasks - they run in order on the main thread
+        #[cfg(feature = "test-support")]
+        let future = LiveTask::wrap(future);
         self.inner.spawn(future)
     }
 
@@ -393,6 +449,8 @@ impl ForegroundExecutor {
         let dispatcher = self.dispatcher.clone();
         #[cfg(feature = "profiler")]
         let foreground_runnables = self.foreground_runnables.clone();
+        #[cfg(feature = "test-support")]
+        let future = LiveTask::wrap(future);
         self.inner
             .spawn_with_dispatch(future.boxed_local(), move |runnable| {
                 #[cfg(feature = "profiler")]

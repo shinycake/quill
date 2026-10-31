@@ -29,6 +29,12 @@ pub(crate) struct FrameUi {
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
+    /// The main window's display and frame lead, for the frame clock's
+    /// content grid (`frame_clock::ClockTiming`).
+    pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
+    /// What the main window's animation layers drew since their ticks
+    /// (`QuillApp::note_layer_drawn`).
+    pub(super) layers_drawn: std::cell::RefCell<super::frame_clock::LayerDraws>,
     /// History motion: new-message reveal and selection-mode fades.
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
@@ -69,6 +75,8 @@ impl FrameUi {
             title_badge: Default::default(),
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
+            clock_timing: Default::default(),
+            layers_drawn: Default::default(),
             motion: Default::default(),
             sidebar_width: px(
                 stored.map_or(quill::settings::DEFAULT_SIDEBAR_WIDTH, |state| {

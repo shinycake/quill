@@ -62,3 +62,36 @@ fn a_search_without_matches_says_no_groups_found(cx: &mut TestAppContext) {
     });
     assert_eq!(label.as_deref(), Some("No groups found"));
 }
+
+/// Closing the profile lets go of its search field: opening a profile
+/// makes a fresh, empty one anyway.
+#[gpui_kit::test]
+fn closing_the_profile_lets_go_of_its_search_field(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let slot_in = slot.clone();
+    let demo = ScreenshotDemo::named("ready-info-common-groups");
+    let handle = cx.open_window(size(px(1200.), px(2400.)), move |window, cx| {
+        let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        let shell = cx.new(|_| QuillShell::new(view.clone()));
+        *slot_in.borrow_mut() = Some(view);
+        Root::new(shell, window, cx)
+    });
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    let Some(app) = slot.borrow().clone() else {
+        panic!("the window opened");
+    };
+    let search = app.read_with(&vcx, |app, _| {
+        app.common_groups
+            .search_input()
+            .map(|input| input.downgrade())
+    });
+    let search = search.expect("the profile has a search field");
+    app.update(&mut vcx, |app, cx| app.close_info_panel(cx));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    assert!(search.upgrade().is_none(), "the search field is gone");
+}

@@ -115,7 +115,11 @@ impl FfmpegBackend {
         let options = options(purpose);
         let player = Player::open(path, options.clone())
             .map_err(|err| PlayerError::new(ErrorKind::Unsupported, err))?;
-        Ok(Self {
+        Ok(Self::with_player(path, options, player))
+    }
+
+    fn with_player(path: &Path, options: OpenOptions, player: Player) -> Self {
+        Self {
             path: path.to_path_buf(),
             output: options.output,
             options,
@@ -127,7 +131,7 @@ impl FfmpegBackend {
             surface: None,
             nv12_paused_until: None,
             pending_step: None,
-        })
+        }
     }
 
     /// Whether to hand over NV12 surfaces now: on Windows, unless the
@@ -136,8 +140,13 @@ impl FfmpegBackend {
         surface::NV12_SURFACES && nv12_allowed(self.nv12_paused_until, now)
     }
 
-    /// Connect the soundtrack once the decoder found one.
+    /// Connect the soundtrack once the decoder found one. One whose device
+    /// failed to open is let go, as with no device at all: the clip then
+    /// runs on its wall clock instead of holding its picture.
     fn attach_sound(&mut self) {
+        if self.sound.as_ref().is_some_and(StreamSound::lost) {
+            self.sound = None;
+        }
         if self.sound.is_some() {
             return;
         }
@@ -419,9 +428,79 @@ pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{NV12_RETRY, nv12_allowed, output_for};
-    use quill::video_decode::PixelOutput;
+    use super::super::Backend;
+    use super::{FfmpegBackend, NV12_RETRY, nv12_allowed, output_for};
+    use crate::ui::audio::{SharedOutput, share_output_with_video};
+    use quill::video_decode::{
+        AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Player,
+    };
+    use std::path::Path;
+    use std::sync::mpsc;
     use std::time::Instant;
+
+    /// A clip that is all sound; says when the decoder starts on it (its
+    /// sound end, the tap, is made by then).
+    struct Tone {
+        started: Option<mpsc::Sender<()>>,
+        pts: f64,
+    }
+
+    impl Demuxer for Tone {
+        fn info(&self) -> MediaInfo {
+            MediaInfo {
+                frame_rate: 25.0,
+                has_audio: true,
+                sample_rate: 1000,
+                channels: 1,
+                ..MediaInfo::default()
+            }
+        }
+
+        fn next(&mut self) -> Result<Option<Item>, String> {
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
+            let pts = self.pts;
+            self.pts += 0.02;
+            Ok(Some(Item::Audio(AudioChunk {
+                pts,
+                samples: vec![0.25; 20],
+            })))
+        }
+
+        fn seek(&mut self, secs: f64) -> Result<(), String> {
+            self.pts = secs;
+            Ok(())
+        }
+    }
+
+    /// While the soundtrack is attached it is the clip's clock. A playing
+    /// clip whose device fails to open lets go of it, so the clip runs on
+    /// its wall clock instead of holding its first picture.
+    #[test]
+    fn a_clip_whose_device_fails_to_open_runs_on_its_wall_clock() {
+        let (output, gate) = SharedOutput::gated();
+        share_output_with_video(&output);
+        let (started, decoding) = mpsc::channel();
+        let options = OpenOptions {
+            want_audio: true,
+            ..OpenOptions::viewer()
+        };
+        let tone = Tone {
+            started: Some(started),
+            pts: 0.0,
+        };
+        let player = Player::with_demuxer(Box::new(tone), options.clone()).unwrap();
+        let mut backend = FfmpegBackend::with_player(Path::new("tone"), options, player);
+        backend.player.play();
+        decoding.recv().unwrap();
+        assert!(backend.status().has_sound);
+        assert!(backend.player.has_sound(), "the sound is the clock");
+        gate.answer(false);
+        output.settle_device();
+        assert!(!backend.status().has_sound);
+        assert!(!backend.player.has_sound(), "the wall clock is");
+    }
 
     #[test]
     fn a_refused_surface_pauses_nv12_for_a_while() {

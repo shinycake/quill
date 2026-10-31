@@ -50,6 +50,7 @@ impl Render for QuillApp {
         // Bounded image memory: retired images and path images nothing can
         // show any more leave the atlas (`image_budget`).
         super::image_budget::begin_frame();
+        self.note_frame_timing(window, cx);
         super::image_budget::sweep(window, cx);
         super::glyph_sweep::start_frame(window, cx);
         self.sync_emoji_style(cx);

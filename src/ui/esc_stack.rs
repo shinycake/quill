@@ -711,3 +711,9 @@ mod dispatch_tests {
         }
     }
 }
+
+/// Closing each surface lets go of what opening it made.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "entity_leaks_tests.rs"]
+pub(in crate::ui) mod entity_leaks_tests;

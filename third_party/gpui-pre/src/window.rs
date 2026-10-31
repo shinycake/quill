@@ -2427,6 +2427,40 @@ impl Window {
             .map(|view| view.clone().downcast::<E>().ok())
     }
 
+    /// How many subscriptions this window holds, by kind; see
+    /// [`App::live_subscription_counts`].
+    #[cfg(feature = "test-support")]
+    pub fn live_subscription_counts(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("focus_listeners", self.focus_listeners.subscriber_count());
+        counts.insert(
+            "focus_lost_listeners",
+            self.focus_lost_listeners.subscriber_count(),
+        );
+        counts.insert("bounds_observers", self.bounds_observers.subscriber_count());
+        counts.insert(
+            "appearance_observers",
+            self.appearance_observers.subscriber_count(),
+        );
+        counts.insert(
+            "activation_observers",
+            self.activation_observers.subscriber_count(),
+        );
+        counts.insert(
+            "visibility_observers",
+            self.visibility_observers.subscriber_count(),
+        );
+        counts.insert(
+            "display_observers",
+            self.display_observers.subscriber_count(),
+        );
+        counts.insert(
+            "pending_input_observers",
+            self.pending_input_observers.subscriber_count(),
+        );
+        counts
+    }
+
     /// Obtain a handle to the window that belongs to this context.
     pub fn window_handle(&self) -> AnyWindowHandle {
         self.handle

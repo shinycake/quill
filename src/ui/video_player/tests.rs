@@ -402,6 +402,11 @@ mod on_demand;
 #[cfg(feature = "demo-capture")]
 mod pip;
 
+/// The viewer playing a clip and Picture-in-Picture leave nothing behind
+/// when they close.
+#[cfg(feature = "demo-capture")]
+mod entity_leaks_tests;
+
 /// Picture-in-Picture's lifetime: history paging, deletion, lock,
 /// accounts, albums, reopening from the chat.
 #[cfg(feature = "demo-capture")]
