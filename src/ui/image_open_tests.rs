@@ -6,7 +6,9 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::composer::{AttachmentExtras, AttachmentKind, ComposerAttachment};
+use quill::ids::FileId;
 use quill::sticker_set_box::SetKind;
+use quill::telegram::envelope::{LocalFileState, ParsedFile, StickerFormat};
 use std::path::{Path, PathBuf};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -90,6 +92,78 @@ fn photo_editor_failure_shows_the_status_note(cx: &mut TestAppContext) {
         assert_eq!(
             app.connection.status_note().to_string(),
             quill::lang::tr(quill::lang::keys::Q_MISC_COULDNT_OPEN_THIS_IMAGE_FOR).to_string()
+        );
+    });
+}
+
+/// Opens the editor on a small picture and offers `path` as a sticker file.
+fn editor_with_sticker_file(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    path: &str,
+) -> FileId {
+    let png = scratch("sticker-base.png");
+    image::RgbaImage::from_pixel(8, 4, image::Rgba([1, 2, 3, 255]))
+        .save(&png)
+        .expect("png");
+    attach(app, vcx, png);
+    app.update_in(vcx, |app, _, cx| app.open_photo_editor(0, cx));
+    vcx.run_until_parked();
+    let file = FileId(9_001);
+    let path = crate::ui::demo::demo_media_allowlist()
+        .join(path)
+        .to_string_lossy()
+        .into_owned();
+    app.update_in(vcx, |app, _, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.media.files.insert(ParsedFile {
+            id: file,
+            size: 1,
+            expected_size: 1,
+            uploading: false,
+            local: LocalFileState {
+                path,
+                can_be_downloaded: false,
+                is_downloading_active: false,
+                is_downloading_completed: true,
+                downloaded_size: 1,
+            },
+        });
+    });
+    file
+}
+
+#[gpui_kit::test]
+fn a_sticker_lands_on_the_photo_when_its_decode_resolves(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let file = editor_with_sticker_file(&app, &mut vcx, "demo-sticker.tgs");
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.place_editor_sticker(file, StickerFormat::Tgs, cx);
+        // Nothing decoded on the calling stack.
+        let editor = app.viewer.photo_editor.as_ref().expect("editor open");
+        assert!(editor.placed.is_empty());
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        let editor = app.viewer.photo_editor.as_ref().expect("editor open");
+        assert_eq!(editor.placed.len(), 1);
+    });
+}
+
+#[gpui_kit::test]
+fn a_sticker_that_will_not_decode_shows_the_status_note(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let file = editor_with_sticker_file(&app, &mut vcx, "demo-notes.txt");
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.place_editor_sticker(file, StickerFormat::Tgs, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        let editor = app.viewer.photo_editor.as_ref().expect("editor open");
+        assert!(editor.placed.is_empty());
+        assert_eq!(
+            app.connection.status_note().to_string(),
+            quill::lang::tr(quill::lang::keys::Q_MISC_COULDNT_USE_THAT_STICKER).to_string()
         );
     });
 }
