@@ -179,12 +179,12 @@ function setupCopy() {
   }
 }
 
-// One install panel at a time: the visitor's own system first, or the one a
-// link (#windows-install, a platform card, the hero button) names. Without
-// script every panel shows, each under its own heading.
-function setupInstallTabs() {
-  const list = document.querySelector(".os-tabs");
-  if (!list) return;
+// One panel per system at a time, the visitor's own first. `root` holds an
+// .os-tabs list whose tabs name their panels. Without script every panel
+// shows, each under its own heading.
+function setupOsTabs(root) {
+  const list = root && root.querySelector(".os-tabs");
+  if (!list) return null;
   const tabs = [...list.querySelectorAll("[role=tab]")];
   const panelOf = (tab) => document.getElementById(tab.getAttribute("aria-controls"));
   function select(tab, focus) {
@@ -197,14 +197,6 @@ function setupInstallTabs() {
     }
     if (focus) tab.focus();
   }
-  const byPanel = (id) => tabs.find((t) => t.getAttribute("aria-controls") === id);
-  function fromHash(instant) {
-    const tab = byPanel(location.hash.slice(1));
-    if (!tab) return false;
-    select(tab, false);
-    document.getElementById("install").scrollIntoView({ behavior: instant === true ? "instant" : "auto" });
-    return true;
-  }
   tabs.forEach((tab, i) => {
     tab.addEventListener("click", () => select(tab, false));
     tab.addEventListener("keydown", (e) => {
@@ -214,12 +206,27 @@ function setupInstallTabs() {
       select(tabs[(to + tabs.length) % tabs.length], true);
     });
   });
-  document.getElementById("install").classList.add("js-tabs");
+  root.classList.add("js-tabs");
   list.hidden = false;
-  if (!fromHash()) {
-    const own = PLATFORMS.find((p) => p.id === detectPlatform());
-    select(byPanel(own ? own.panel : "mac-install"), false);
+  const own = detectPlatform();
+  select(tabs.find((t) => t.dataset.os === own) || tabs[0], false);
+  return { tabs, select };
+}
+
+// The install tabs also follow links that name a panel (#windows-install, a
+// platform card, the hero button).
+function setupInstallTabs() {
+  const install = document.getElementById("install");
+  const group = setupOsTabs(install);
+  if (!group) return null;
+  function fromHash(instant) {
+    const tab = group.tabs.find((t) => t.getAttribute("aria-controls") === location.hash.slice(1));
+    if (!tab) return false;
+    group.select(tab, false);
+    install.scrollIntoView({ behavior: instant === true ? "instant" : "auto" });
+    return true;
   }
+  fromHash();
   window.addEventListener("hashchange", fromHash);
   return fromHash;
 }
@@ -530,6 +537,7 @@ function setupTitleQuill() {
 setupTitleQuill();
 setupCopy();
 const showInstallFromHash = setupInstallTabs();
+setupOsTabs(document.getElementById("agents"));
 setupHeroVideo();
 setupGallery();
 // The release cards and notes arrive late and push the install
