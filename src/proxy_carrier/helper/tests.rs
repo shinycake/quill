@@ -1,5 +1,7 @@
-//! The host against stand-in helpers (`true`, scripts that wait for the
-//! close command, exit like a missing library, or ignore everything).
+//! The host against stand-in helpers: `true`, and the scripts in
+//! `tests/fixtures/carrier-helper` (ones that wait for the close command,
+//! exit like a missing library, say `unsupported`, post a page message, or
+//! ignore everything).
 use super::*;
 use std::sync::mpsc::Receiver;
 
@@ -40,40 +42,50 @@ fn host_with(
     (host, rx)
 }
 
-fn wait_failure(host: &mut HelperCarrierHost) -> Option<(i32, CarrierError)> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if let Some(failure) = host.poll().into_iter().next() {
-            return Some(failure);
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    None
+/// A stand-in helper from `tests/fixtures/carrier-helper`, checked in with
+/// its executable bit. Never written by a test: a script written and then
+/// started at once failed now and then with `ETXTBSY` (the open was
+/// `Terminated`), because a child another test thread was starting at that
+/// moment had inherited the write descriptor and held it until its exec.
+fn stand_in(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/carrier-helper")
+        .join(name)
 }
 
-/// An executable script in a fresh temp folder.
-fn script(name: &str, body: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = crate::scratch::process_dir("carrier-host").join(name);
-    let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("helper.sh");
-    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path
+/// The first failure the host reports (what the next `poll` returns),
+/// waited for on its channel instead of polled against a clock. It always
+/// comes: the reader reports the helper's exit, and the writer's watchdog
+/// fails a helper that never gets to `ready`.
+fn next_failure(host: &HelperCarrierHost) -> (i32, CarrierError) {
+    host.failures.recv().unwrap()
 }
 
-/// A stand-in that stays up until the `close` command (or the end of its
-/// input), as the real helper does. Not `/bin/cat`: the host starts
-/// helpers with `--carrier`, which cat rejects, exiting at once. Not one
-/// that waits for the end of its input either: on macOS a child another
-/// test starts at the same moment can inherit this helper's stdin and keep
-/// it open. One per test (`name`), so no test rewrites a script another is
-/// starting.
-fn stays_up(name: &str) -> PathBuf {
-    script(
-        name,
-        r#"while read -r line; do case "$line" in *'"kind":"close"'*) exit 0 ;; esac; done"#,
-    )
+/// Every failure reported until all carrier threads have ended, for a host
+/// whose carriers are all closed. With the host's own sender dropped, the
+/// channel closes with the last thread's, and each ends on an event: the
+/// writer once it sent the close, the reader once the helper's output ends
+/// (at the latest when the helper is killed after its grace).
+fn reports_until_threads_end(host: &mut HelperCarrierHost) -> Vec<(i32, CarrierError)> {
+    host.failures_tx = channel().0;
+    host.failures.iter().collect()
+}
+
+/// A span no test outlives: as a shutdown ceiling, the wait ends only once
+/// every helper is gone.
+const LONGER_THAN_ANY_TEST: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// What [`CarrierHost::shutdown`] does (`stop(true)`), and what its wait
+/// for exiting helpers came to.
+fn shutdown_outcome(host: &mut HelperCarrierHost) -> Waited {
+    host.stop(true)
+}
+
+/// The process id of carrier `carrier_id`'s helper.
+fn helper_pid(host: &HelperCarrierHost, carrier_id: i32) -> u32 {
+    let running = host.carriers.get(&carrier_id).unwrap();
+    let child = running.shared.child.lock().unwrap();
+    child.as_ref().map(Child::id).unwrap()
 }
 
 /// Whether carrier `carrier_id`'s helper process is still running.
@@ -109,45 +121,38 @@ fn a_helper_that_exits_before_ready_is_terminated() {
     // `true` reads nothing and exits 0: a crash, not a missing library.
     let (mut host, _) = host(Some("/usr/bin/true".into()));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(wait_failure(&mut host), Some((4, CarrierError::Terminated)));
+    assert_eq!(next_failure(&host), (4, CarrierError::Terminated));
     assert!(host.available());
 }
 
 #[test]
 fn a_missing_web_view_library_turns_hosting_off() {
-    // 127 is what the dynamic loader exits with when a library is missing.
-    let (mut host, _) = host(Some(script("missing-library", "exit 127")));
+    // It exits with 127, as the dynamic loader does when a library is
+    // missing.
+    let (mut host, _) = host(Some(stand_in("missing-library.sh")));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(
-        wait_failure(&mut host),
-        Some((4, CarrierError::Unsupported))
-    );
+    assert_eq!(next_failure(&host), (4, CarrierError::Unsupported));
     assert!(!host.available());
     assert_eq!(host.open(&request(5)), Err(CarrierError::Unsupported));
 }
 
 #[test]
 fn a_helper_saying_unsupported_turns_hosting_off() {
-    let (mut host, _) = host(Some(script(
-        "says-unsupported",
-        r#"read line; echo '{"kind":"failed","failure":{"kind":"unsupported"}}'; read line"#,
-    )));
+    let (mut host, _) = host(Some(stand_in("says-unsupported.sh")));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(
-        wait_failure(&mut host),
-        Some((4, CarrierError::Unsupported))
-    );
+    assert_eq!(next_failure(&host), (4, CarrierError::Unsupported));
     assert!(!host.available());
 }
 
 #[test]
 fn page_messages_go_straight_to_tdlib() {
-    let (mut host, relayed) = host(Some(script(
-        "posts",
-        r#"read line; echo '{"kind":"ready"}'; echo '{"kind":"text","text":"hi"}'; sleep 5"#,
-    )));
+    let (mut host, relayed) = host(Some(stand_in("posts.sh")));
     assert_eq!(host.open(&request(7)), Ok(()));
-    let sent = relayed.recv_timeout(Duration::from_secs(10)).unwrap();
+    // Only the carrier's reader holds the relay now: had the message not
+    // come, the wait would end with that thread (the watchdog ends a helper
+    // that goes quiet) instead of hanging.
+    host.relay = Arc::new(|_: &str| false);
+    let sent = relayed.recv().unwrap();
     let sent: serde_json::Value = serde_json::from_str(&sent).unwrap();
     assert_eq!(sent["@type"], "processWebProxyCarrierMessage");
     assert_eq!(sent["@extra"], CARRIER_RELAY_EXTRA.as_extra());
@@ -156,48 +161,29 @@ fn page_messages_go_straight_to_tdlib() {
     host.shutdown();
 }
 
-/// The close tests below need a helper that is still up when they close
-/// it; one that exits by itself first is a real failure, and the test
-/// then only passes when the close wins the race.
-#[test]
-fn the_stand_in_helper_stays_up_until_closed() {
-    let (mut host, _) = host(Some(stays_up("stays-up")));
-    assert_eq!(host.open(&request(5)), Ok(()));
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(host.poll(), Vec::new());
-    assert!(helper_running(&host, 5));
-    host.shutdown();
-}
-
+/// `stays-up.sh` leaves only on the close command (or the end of its
+/// input): it is running when closed here, and its exit follows the close.
 #[test]
 fn a_closed_carrier_reports_no_failure() {
-    let (mut host, _) = host(Some(stays_up("closed")));
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
     assert_eq!(host.open(&request(5)), Ok(()));
-    std::thread::sleep(Duration::from_millis(100));
     assert!(helper_running(&host, 5));
     host.close(5, false);
     // It exits once the close reaches it; that exit is no failure.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while host.exiting() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(!host.exiting());
-    std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(host.poll(), Vec::new());
+    assert_eq!(reports_until_threads_end(&mut host), Vec::new());
 }
 
 #[test]
 fn data_for_a_carrier_the_host_does_not_run_fails_it() {
-    let (mut host, _) = host(Some(stays_up("not-running")));
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
     host.deliver(9, "AAAA".into());
     assert_eq!(host.poll(), vec![(9, CarrierError::Terminated)]);
 }
 
 #[test]
 fn shutdown_ends_every_helper_at_once() {
-    let (mut host, _) = host(Some(stays_up("shutdown")));
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
     assert_eq!(host.open(&request(5)), Ok(()));
-    std::thread::sleep(Duration::from_millis(100));
     assert!(helper_running(&host, 5));
     let shared = host
         .carriers
@@ -206,50 +192,37 @@ fn shutdown_ends_every_helper_at_once() {
         .unwrap();
     host.shutdown();
     assert!(shared.take_child().is_none());
-    assert_eq!(host.poll(), Vec::new());
+    assert_eq!(reports_until_threads_end(&mut host), Vec::new());
 }
 
 #[test]
 fn a_shutdown_with_nothing_running_or_exiting_does_not_wait() {
-    let (mut host, _) = host(Some(stays_up("idle-shutdown")));
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
     assert!(!host.exiting());
-    let started = Instant::now();
-    host.shutdown();
-    assert!(started.elapsed() < Duration::from_millis(200));
+    assert_eq!(shutdown_outcome(&mut host), Waited::NotAtAll);
 }
 
-/// A helper that ignores the close command: shutdown gives up at its
-/// ceiling.
+/// A helper that ignores the close command: once the ceiling is reached
+/// (here at once) shutdown gives up on it instead of waiting.
 #[test]
 fn a_shutdown_waits_for_helpers_at_most_its_ceiling() {
-    let (mut host, _) = host(Some(script("stuck", "exec sleep 30")));
+    let (mut host, _) = host(Some(stand_in("stuck.sh")));
+    host.shutdown_wait = Duration::ZERO;
     assert_eq!(host.open(&request(5)), Ok(()));
     assert!(host.exiting());
-    let started = Instant::now();
-    host.shutdown();
-    let took = started.elapsed();
-    assert!(
-        took >= SHUTDOWN_WAIT.saturating_sub(Duration::from_millis(100)),
-        "{took:?}"
-    );
-    assert!(
-        took < SHUTDOWN_WAIT + Duration::from_millis(500),
-        "{took:?}"
-    );
+    assert_eq!(shutdown_outcome(&mut host), Waited::GaveUp);
     assert!(!host.exiting());
 }
 
+/// A closed helper that leaves on the close ends the shutdown's wait:
+/// with no ceiling to reach, only its exit can.
 #[test]
 fn a_closed_helper_that_exits_ends_the_wait() {
-    let (mut host, _) = host(Some(stays_up("exits")));
+    let (mut host, _) = host(Some(stand_in("stays-up.sh")));
+    host.shutdown_wait = LONGER_THAN_ANY_TEST;
     assert_eq!(host.open(&request(5)), Ok(()));
-    if let Some(running) = host.carriers.get(&5) {
-        running.shared.kill();
-    }
     host.close(5, false);
-    let started = Instant::now();
-    host.shutdown();
-    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(shutdown_outcome(&mut host), Waited::UntilAllGone);
 }
 
 #[test]
@@ -267,32 +240,33 @@ fn cookie_in(dir: &Path) -> PathBuf {
 }
 
 /// The account's next host starts while the last one is still tearing
-/// down (a helper that ignores the close keeps it waiting): neither the
-/// new host's sweep nor the old teardown touches the other's folder.
+/// down (a helper that ignores the close keeps it waiting, with no
+/// ceiling, until the test kills it): neither the new host's sweep nor the
+/// old teardown touches the other's folder.
 #[test]
 fn a_late_teardown_leaves_the_next_hosts_folder_alone() {
     let root = crate::scratch::process_dir("carrier-host")
         .join("late-teardown")
         .join("webview-carrier");
-    let (mut old, _) = host_with(
-        Some(script("late-stuck", "exec sleep 30")),
-        Some(root.clone()),
-    );
+    let (mut old, _) = host_with(Some(stand_in("stuck.sh")), Some(root.clone()));
+    old.shutdown_wait = LONGER_THAN_ANY_TEST;
     assert_eq!(old.open(&request(5)), Ok(()));
+    let stuck = helper_pid(&old, 5);
     let old_cookie = cookie_in(old.data_folder().unwrap());
-    let started = Instant::now();
     let teardown =
         crate::thread_guard::spawn_guarded("test-teardown", move || old.shutdown()).unwrap();
-    let (new, _) = host_with(Some(stays_up("late-new")), Some(root.clone()));
+    let (new, _) = host_with(Some(stand_in("stays-up.sh")), Some(root.clone()));
     let new_cookie = cookie_in(new.data_folder().unwrap());
     if let Some(sweep) = data_folder::sweep_in_background(root.clone()) {
         let _ = sweep.join();
     }
-    assert!(
-        started.elapsed() < SHUTDOWN_WAIT,
-        "the teardown is still waiting"
-    );
+    // The teardown cannot end while its helper runs.
     assert!(old_cookie.exists());
+    let killed = Command::new("kill")
+        .args(["-9", &stuck.to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
     let _ = teardown.join();
     assert!(!old_cookie.exists());
     assert!(new_cookie.exists());
@@ -308,11 +282,15 @@ fn without_a_folder_of_its_own_no_carrier_opens() {
     std::fs::create_dir_all(&base).unwrap();
     let root = base.join("webview-carrier");
     std::fs::write(&root, b"not a folder").unwrap();
-    let (mut host, _) = host_with(Some(stays_up("no-folder-helper")), Some(root.clone()));
+    let failed_at = Instant::now();
+    let (mut host, _) = host_with(Some(stand_in("stays-up.sh")), Some(root.clone()));
     assert_eq!(host.data_folder(), None);
     assert_eq!(host.open(&request(5)), Err(CarrierError::Terminated));
     std::fs::remove_file(&root).unwrap();
-    // Not tried again on every open: the next claim waits out the backoff.
+    // Not tried again on every open: the next claim waits out the backoff,
+    // and an open before then is refused although a claim would now work.
+    assert!(host.claim_after >= Some(failed_at + CLAIM_BACKOFF));
+    host.claim_after = Some(Instant::now() + LONGER_THAN_ANY_TEST);
     assert_eq!(host.open(&request(6)), Err(CarrierError::Terminated));
     host.claim_after = Some(Instant::now());
     assert_eq!(host.open(&request(6)), Ok(()));

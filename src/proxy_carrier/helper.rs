@@ -265,6 +265,19 @@ pub struct HelperCarrierHost {
     /// Closed helpers still on their way out; each hears once its helper
     /// is gone.
     exiting: Vec<Receiver<()>>,
+    /// [`SHUTDOWN_WAIT`]; tests set their own.
+    shutdown_wait: Duration,
+}
+
+/// What [`HelperCarrierHost::stop`]'s wait for exiting helpers came to.
+#[derive(Debug, PartialEq, Eq)]
+enum Waited {
+    /// None was exiting.
+    NotAtAll,
+    /// Each was gone before the ceiling.
+    UntilAllGone,
+    /// The ceiling came first, or the caller would not wait.
+    GaveUp,
 }
 
 impl HelperCarrierHost {
@@ -291,6 +304,7 @@ impl HelperCarrierHost {
             failures_tx,
             failures,
             exiting: Vec::new(),
+            shutdown_wait: SHUTDOWN_WAIT,
         }
     }
 
@@ -461,8 +475,8 @@ impl CarrierHost for HelperCarrierHost {
 }
 
 impl HelperCarrierHost {
-    fn stop(&mut self, wait: bool) {
-        let deadline = Instant::now() + SHUTDOWN_WAIT;
+    fn stop(&mut self, wait: bool) -> Waited {
+        let deadline = Instant::now() + self.shutdown_wait;
         for (_, running) in self.carriers.drain() {
             running.shared.closing.store(true, Ordering::Release);
             if !wait {
@@ -474,16 +488,26 @@ impl HelperCarrierHost {
                 last: true,
             });
             if let Some(child) = running.shared.take_child() {
-                self.exiting
-                    .push(crate::child_reap::reap_after_notice(child, SHUTDOWN_WAIT));
+                self.exiting.push(crate::child_reap::reap_after_notice(
+                    child,
+                    self.shutdown_wait,
+                ));
             }
         }
+        let mut waited = if self.exiting.is_empty() {
+            Waited::NotAtAll
+        } else {
+            Waited::UntilAllGone
+        };
         for exiting in self.exiting.drain(..) {
             let left = deadline.saturating_duration_since(Instant::now());
             if !wait || left.is_zero() {
+                waited = Waited::GaveUp;
                 break;
             }
-            let _ = exiting.recv_timeout(left);
+            if let Err(RecvTimeoutError::Timeout) = exiting.recv_timeout(left) {
+                waited = Waited::GaveUp;
+            }
         }
         if let Some(generation) = self.generation.take() {
             if wait {
@@ -492,6 +516,7 @@ impl HelperCarrierHost {
                 generation.remove_in_background(data_folder::RETRY_FOR);
             }
         }
+        waited
     }
 
     /// Whether helpers are still running or on their way out.
