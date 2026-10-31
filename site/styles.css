@@ -368,6 +368,7 @@ html { scrollbar-color: color-mix(in srgb, var(--accent) 35%, var(--surface)) va
 .agent-step p code, .agent-panel .method code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 .agent-panel .method { margin: 0; }
 .agent-panel[hidden] { display: none; }
+.js-tabs .agent-panel.os-panel { margin-top: 16px; }
 @media (max-width: 600px) { .agent-panel { padding: 18px 16px; } }
 @media (max-width: 600px) { .report th, .report td { padding: 12px 12px; font-size: 14.5px; } }
 

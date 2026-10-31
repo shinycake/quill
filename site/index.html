@@ -156,7 +156,7 @@
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
         <div>
           <h2 id="notice-title">Experimental software</h2>
-          <p>Quill is early and changes every week. Use it at your own risk. It comes with no warranty, and the maintainers aren't responsible for lost data, account restrictions or bans, missed messages, or any other damage. Keep an official Telegram app installed alongside it.</p>
+          <p>Quill is early and changes quickly. Use it at your own risk. It comes with no warranty, and the maintainers aren't responsible for lost data, account restrictions or bans, missed messages, or any other damage. Keep an official Telegram app installed alongside it.</p>
         </div>
       </div>
     </section>
@@ -193,7 +193,7 @@
         <article class="card">
           <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 0 0 0 20c.9 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.7 1.7-1.7h2a5.6 5.6 0 0 0 5.4-5.6C22 6 17.5 2 12 2z"/></svg></div>
           <h3>Appearance and accounts</h3>
-          <p>Light and dark themes with automatic night mode, accent colors, chat wallpapers, text size, and bubble or plain message layouts. Several accounts side by side.</p>
+          <p>Light and dark themes with automatic night mode, accent colors, chat wallpapers, text size, and bubble or plain message layouts. Several accounts, all signed in at once.</p>
         </article>
       </div>
     </section>
@@ -258,9 +258,9 @@
 
     <section class="built agents wrap" id="agents" aria-labelledby="agents-title">
       <h2 class="section-title" id="agents-title">Use Quill with an AI agent</h2>
-      <p class="section-lede">Agent access lets an AI agent on your computer, such as Claude Code, Claude Desktop or Cursor, read and send your Telegram messages through the Quill you already have open. It's off until you turn it on in Settings → Advanced → Agent access. That page shows each setup command below with Quill's real path, and a setup prompt you can paste into any agent so it connects itself.</p>
+      <p class="section-lede">Agent access lets an AI agent on your computer, such as Claude Code, Codex, Claude Desktop or Cursor, read and send your Telegram messages through the Quill you already have open. It's off until you turn it on in Settings → Advanced → Agent access. That page shows the MCP setup lines with Quill's real path, and a setup prompt you can paste into any agent so it connects itself.</p>
       <div class="agent-setup">
-        <div class="os-tabs" role="tablist" aria-label="Operating system" hidden>
+        <div class="os-tabs" role="tablist" aria-label="Agent setup by system" hidden>
           <button type="button" role="tab" id="agents-tab-mac" data-os="mac" aria-controls="agents-mac">macOS</button>
           <button type="button" role="tab" id="agents-tab-win" data-os="win" aria-controls="agents-win">Windows</button>
           <button type="button" role="tab" id="agents-tab-linux" data-os="linux" aria-controls="agents-linux">Linux</button>
@@ -269,9 +269,18 @@
           <h4 class="os-name">On a Mac</h4>
           <div class="agent-step">
             <h5>Claude Code</h5>
+            <p><code>--scope user</code> makes Quill available in every project.</p>
             <div class="cmd">
-              <code id="agent-mac-claude">claude mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp</code>
+              <code id="agent-mac-claude">claude mcp add --scope user quill -- /Applications/Quill.app/Contents/MacOS/quill mcp</code>
               <button type="button" class="copy" aria-describedby="agent-mac-claude">Copy</button>
+            </div>
+          </div>
+          <div class="agent-step">
+            <h5>Codex</h5>
+            <p>Adds Quill to <code>~/.codex/config.toml</code>, for the Codex CLI and IDE extension.</p>
+            <div class="cmd">
+              <code id="agent-mac-codex">codex mcp add quill -- /Applications/Quill.app/Contents/MacOS/quill mcp</code>
+              <button type="button" class="copy" aria-describedby="agent-mac-codex">Copy</button>
             </div>
           </div>
           <div class="agent-step">
@@ -290,15 +299,24 @@
               <button type="button" class="copy" aria-describedby="agent-mac-status">Copy</button>
             </div>
           </div>
-          <p class="method">These lines assume Quill is in Applications, where the installer puts it. <code>/Applications/Quill.app/Contents/MacOS/quill agent install-skill</code> adds the Quill skill to Claude Code.</p>
+          <p class="method">These lines assume Quill is in /Applications, where the installer puts it. If you can't write there, the installer uses ~/Applications instead, so start the path with ~ in that case. <code>/Applications/Quill.app/Contents/MacOS/quill agent install-skill</code> adds the Quill skill to Claude Code.</p>
         </div>
         <div class="os-panel agent-panel" id="agents-win" aria-labelledby="agents-tab-win">
           <h4 class="os-name">On Windows (PowerShell)</h4>
           <div class="agent-step">
             <h5>Claude Code</h5>
+            <p><code>--scope user</code> makes Quill available in every project.</p>
             <div class="cmd">
-              <code id="agent-win-claude">claude mcp add quill -- "$env:LOCALAPPDATA\Programs\Quill\quill.exe" mcp</code>
+              <code id="agent-win-claude">claude mcp add --scope user quill -- "$env:LOCALAPPDATA\Programs\Quill\quill.exe" mcp</code>
               <button type="button" class="copy" aria-describedby="agent-win-claude">Copy</button>
+            </div>
+          </div>
+          <div class="agent-step">
+            <h5>Codex</h5>
+            <p>Adds Quill to <code>~/.codex/config.toml</code>, for the Codex CLI and IDE extension.</p>
+            <div class="cmd">
+              <code id="agent-win-codex">codex mcp add quill -- "$env:LOCALAPPDATA\Programs\Quill\quill.exe" mcp</code>
+              <button type="button" class="copy" aria-describedby="agent-win-codex">Copy</button>
             </div>
           </div>
           <div class="agent-step">
@@ -317,15 +335,24 @@
               <button type="button" class="copy" aria-describedby="agent-win-status">Copy</button>
             </div>
           </div>
-          <p class="method">These lines assume Quill is in <code>%LOCALAPPDATA%\Programs\Quill</code>, where the installer puts it. Run commands with <code>quill-cli.exe</code>, which waits for the answer and passes the exit code on. <code>quill.exe</code> is a windowed program, so a terminal doesn't wait for it. <code>quill-cli.exe agent install-skill</code> adds the Quill skill to Claude Code.</p>
+          <p class="method">These lines assume Quill is in <code>%LOCALAPPDATA%\Programs\Quill</code>, where the installer puts it. Run commands with <code>quill-cli.exe</code>, which waits for the answer and passes the exit code on. <code>quill.exe</code> is a windowed program, so a terminal doesn't wait for it. <code>&amp; "$env:LOCALAPPDATA\Programs\Quill\quill-cli.exe" agent install-skill</code> adds the Quill skill to Claude Code.</p>
         </div>
         <div class="os-panel agent-panel" id="agents-linux" aria-labelledby="agents-tab-linux">
           <h4 class="os-name">On Linux</h4>
           <div class="agent-step">
             <h5>Claude Code</h5>
+            <p><code>--scope user</code> makes Quill available in every project.</p>
             <div class="cmd">
-              <code id="agent-linux-claude">claude mcp add quill -- ~/.local/bin/quill mcp</code>
+              <code id="agent-linux-claude">claude mcp add --scope user quill -- ~/.local/bin/quill mcp</code>
               <button type="button" class="copy" aria-describedby="agent-linux-claude">Copy</button>
+            </div>
+          </div>
+          <div class="agent-step">
+            <h5>Codex</h5>
+            <p>Adds Quill to <code>~/.codex/config.toml</code>, for the Codex CLI and IDE extension.</p>
+            <div class="cmd">
+              <code id="agent-linux-codex">codex mcp add quill -- ~/.local/bin/quill mcp</code>
+              <button type="button" class="copy" aria-describedby="agent-linux-codex">Copy</button>
             </div>
           </div>
           <div class="agent-step">
@@ -344,7 +371,7 @@
               <button type="button" class="copy" aria-describedby="agent-linux-status">Copy</button>
             </div>
           </div>
-          <p class="method">These lines assume the installer's <code>~/.local/bin/quill</code>. If you run Quill from an unpacked tarball, use the <code>quill</code> in that folder. Claude Desktop has no official Linux build. For unofficial builds, <code>connect claude-desktop</code> writes <code>~/.config/Claude/claude_desktop_config.json</code>. <code>quill agent install-skill</code> adds the Quill skill to Claude Code.</p>
+          <p class="method">These lines assume the installer's <code>~/.local/bin/quill</code>. If you run Quill from an unpacked tarball, use the <code>quill</code> in that folder. Claude Desktop has no official Linux build. For unofficial builds, <code>connect claude-desktop</code> writes <code>~/.config/Claude/claude_desktop_config.json</code>. <code>~/.local/bin/quill agent install-skill</code> adds the Quill skill to Claude Code.</p>
         </div>
       </div>
       <div class="built-grid">
@@ -392,7 +419,7 @@
       <div class="platforms" id="platforms" hidden></div>
       <section class="install" id="install" aria-labelledby="install-title">
         <h3 class="inst-title" id="install-title">Installing Quill</h3>
-        <div class="os-tabs" role="tablist" aria-label="Operating system" hidden>
+        <div class="os-tabs" role="tablist" aria-label="Install instructions by system" hidden>
           <button type="button" role="tab" id="tab-mac" data-os="mac" aria-controls="mac-install">macOS</button>
           <button type="button" role="tab" id="tab-win" data-os="win" aria-controls="windows-install">Windows</button>
           <button type="button" role="tab" id="tab-linux" data-os="linux" aria-controls="linux-install">Linux</button>
