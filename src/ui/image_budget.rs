@@ -184,6 +184,13 @@ pub(super) struct PaintStamp {
     frame: u64,
 }
 
+impl PaintStamp {
+    /// Whether both were painted in the same slice (or both outside any).
+    pub(super) fn same_place(self, other: PaintStamp) -> bool {
+        self.scope == other.scope
+    }
+}
+
 /// A stamp for content painted now.
 pub(super) fn paint_stamp() -> PaintStamp {
     PaintStamp {

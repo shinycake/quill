@@ -51,9 +51,9 @@ has no GPUI types. The UI half is `src/ui/sticker_player`.
   One byte budget of 96 MB covers every clip's store. Frames are evicted
   least recently used first, and a clip painted in the last 500 ms keeps
   its frames. Clips nobody painted for 5 s close and free their ThorVG
-  canvas. (Since `sticker-clip-memory.md`: also when nothing paints, unless
-  their frame is still on screen; a clip's frames are packed into 256 KiB
-  blocks.)
+  canvas. (Since `sticker-clip-memory.md`: clips close 5 s after no window
+  shows them, between frames, also when nothing paints; a clip's frames
+  are packed into 256 KiB blocks.)
 - Views request ticks from the existing frame clock, at the
   rate their clip plays. The frame clock now allows up to 120 ticks a
   second (`MAX_TICK_FPS`). The fine grid is used only when the display is

@@ -2,8 +2,8 @@
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
 use super::super::image_budget::{begin_frame, take_unshowable};
-use super::{ClipSpec, DISPLAY, HeadId, Player, ViewAsk};
-use quill::ids::FileId;
+use super::{CLOSE_AFTER, ClipSpec, DISPLAY, HeadId, Player, ViewAsk};
+use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
 use quill::sticker_playback::player::{DecodedFrames, PlayMode, Rest, edge_for};
 use quill::telegram::envelope::StickerFormat;
@@ -46,7 +46,7 @@ fn player(count: u8) -> (Player, ClipSpec) {
 /// what it asked for.
 fn shown(player: &Player, spec: &ClipSpec, head: HeadId, mode: PlayMode, at: Instant) -> u8 {
     let image = player
-        .frame(spec, head, mode, EDGE, false, at)
+        .frame(spec, head, mode, EDGE, false, None, at)
         .expect("a frame");
     let first = image
         .as_bytes(0)
@@ -102,7 +102,7 @@ fn a_frame_not_drawn_in_time_keeps_the_last_one_up_and_counts_as_late() {
     assert_eq!(shown(&player, &spec, head, PlayMode::Loop, t0), 0);
     // Frame 5 was never asked for (the head jumped past the frames ahead).
     let image = player
-        .frame(&spec, head, PlayMode::Loop, EDGE, false, t0 + ms(167))
+        .frame(&spec, head, PlayMode::Loop, EDGE, false, None, t0 + ms(167))
         .and_then(|image| image.as_bytes(0).and_then(|b| b.first().copied()));
     assert!(
         image.is_some_and(|fill| fill < 5),
@@ -125,7 +125,7 @@ fn every_frame_a_late_head_showed_leaves_once_the_clip_stops() {
     for step in 0..24 {
         let at = t0 + ms(167) * step;
         let image = player
-            .frame(&spec, head, PlayMode::Loop, EDGE, false, at)
+            .frame(&spec, head, PlayMode::Loop, EDGE, false, None, at)
             .expect("a frame");
         showed.push((image.id, Arc::downgrade(&image)));
         player.settle();
@@ -167,7 +167,15 @@ fn a_clip_no_view_draws_closes_with_nothing_drawing() {
     let t0 = Instant::now();
     begin_frame();
     let image = player
-        .frame(&spec, HeadId::of("panel"), PlayMode::Loop, EDGE, false, t0)
+        .frame(
+            &spec,
+            HeadId::of("panel"),
+            PlayMode::Loop,
+            EDGE,
+            false,
+            None,
+            t0,
+        )
         .expect("a frame");
     let shown = Arc::downgrade(&image);
     drop(image);
@@ -175,39 +183,122 @@ fn a_clip_no_view_draws_closes_with_nothing_drawing() {
     assert!(player.engine().stats().store_bytes > 0);
     // The next frame no longer draws it.
     begin_frame();
-    assert_eq!(player.close_stale(t0 + ms(1000)), Some(ms(4000)));
-    assert_eq!(player.engine().stats().clips, 1, "too soon");
-    assert_eq!(player.close_stale(t0 + ms(5000)), None, "nothing left");
+    let closed = player.close_stale(t0 + ms(1000));
+    assert_eq!((closed.clips, closed.next), (0, Some(ms(4000))), "too soon");
+    let closed = player.close_stale(t0 + ms(5000));
+    assert_eq!((closed.clips, closed.open), (1, false), "nothing left");
     let stats = player.engine().stats();
     assert_eq!((stats.clips, stats.store_bytes), (0, 0));
-    begin_frame();
-    begin_frame();
-    drop(take_unshowable());
-    assert_eq!(
-        shown.strong_count(),
-        0,
-        "its frame left the atlas and memory"
+    assert!(
+        closed
+            .frames
+            .iter()
+            .any(|frame| shown.upgrade().is_some_and(|s| Arc::ptr_eq(frame, &s))),
+        "its frame goes to the atlas sweep with the clip"
     );
+    drop(closed);
+    assert_eq!(shown.strong_count(), 0, "nothing else holds its frame");
 }
 
 /// A view at rest is not drawn again while nothing changes, but its frame
 /// is on screen: closing its clip would show the still at the next draw.
+/// Once a frame leaves it out, it closes [`CLOSE_AFTER`] later.
 #[test]
 fn a_clip_whose_frame_is_on_screen_stays_open() {
     let (player, spec) = player(4);
     let t0 = Instant::now();
     begin_frame();
     let rest = PlayMode::Once(Rest::First);
-    let _ = player.frame(&spec, HeadId::of("rest"), rest, EDGE, false, t0);
+    let _ = player.frame(&spec, HeadId::of("rest"), rest, EDGE, false, None, t0);
     player.settle();
-    assert_eq!(
-        player.close_stale(t0 + ms(60_000)),
-        None,
-        "nothing to wait for"
-    );
-    assert_eq!(player.engine().stats().clips, 1);
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!((closed.clips, closed.next), (0, None), "on screen");
     // A frame without it.
     begin_frame();
-    assert_eq!(player.close_stale(t0 + ms(60_000)), None);
-    assert_eq!(player.engine().stats().clips, 0);
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!((closed.clips, closed.next), (0, Some(CLOSE_AFTER)));
+    assert_eq!(player.close_stale(t0 + ms(65_000)).clips, 1);
+}
+
+/// A clip on screen for a minute with nothing drawn leaves it at the next
+/// frame: its wait starts there, not at the closer's last look.
+#[test]
+fn a_clip_waits_its_full_time_from_the_frame_that_left_it_out() {
+    let (player, spec) = player(4);
+    let t0 = player.now();
+    begin_frame();
+    let _ = player.frame(
+        &spec,
+        HeadId::of("left"),
+        PlayMode::Loop,
+        EDGE,
+        false,
+        None,
+        t0,
+    );
+    player.settle();
+    assert!(player.close_stale(t0).open);
+    let mut next_frame = player.next_frame();
+    player.skip(ms(60_000));
+    player.frame_starts(None);
+    begin_frame();
+    assert_eq!(next_frame.try_recv(), Ok(Some(())), "the closer wakes");
+    let left = player.now();
+    let closed = player.close_stale(left + ms(4_000));
+    assert_eq!((closed.clips, closed.open), (0, true), "too soon");
+    assert_eq!(player.close_stale(left + CLOSE_AFTER).clips, 1);
+}
+
+/// A frame paints its views one by one. Painting one never closes a clip
+/// at rest that the frame has not painted yet, however long nothing drew:
+/// closed, it would show nothing, then its still, then play again.
+#[test]
+fn painting_a_view_closes_no_clip_the_frame_has_not_painted_yet() {
+    let (player, spec) = player(4);
+    let rest = PlayMode::Once(Rest::First);
+    let t0 = Instant::now();
+    begin_frame();
+    let _ = player.frame(&spec, HeadId::of("a"), rest, EDGE, false, None, t0);
+    let _ = player.frame(&spec, HeadId::of("b"), rest, EDGE * 2, false, None, t0);
+    player.settle();
+    let _ = player.frame(&spec, HeadId::of("b"), rest, EDGE * 2, false, None, t0);
+    let first = player.first_frames();
+    assert_eq!(first.iter().flatten().count(), 2, "both show a frame");
+    // Nothing drew for a minute; the next frame paints `a` first.
+    begin_frame();
+    let later = t0 + ms(60_000);
+    let _ = player.frame(&spec, HeadId::of("a"), rest, EDGE, false, None, later);
+    assert_eq!(player.first_frames(), first, "`b` is still open");
+}
+
+/// A chat window's clips are judged by its own frames: the main window may
+/// stop drawing (minimized, covered) or draw on without them.
+#[test]
+fn each_window_judges_the_clips_it_drew_by_its_own_frames() {
+    let (player, spec) = player(4);
+    let (chat, rest) = (ChatId(11), PlayMode::Once(Rest::First));
+    let t0 = Instant::now();
+    player.frame_starts(Some(chat));
+    let _ = player.frame(&spec, HeadId::of("chat"), rest, EDGE, false, Some(chat), t0);
+    player.settle();
+    // The main window draws on: the chat window still shows it.
+    begin_frame();
+    begin_frame();
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!(
+        (closed.clips, closed.next),
+        (0, None),
+        "on screen in its window"
+    );
+    // The main window stops; the chat window draws a frame without it.
+    player.frame_starts(Some(chat));
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!((closed.clips, closed.next), (0, Some(CLOSE_AFTER)));
+    assert_eq!(player.close_stale(t0 + ms(65_000)).clips, 1);
+    // Drawn in a window that then closed: nothing shows it.
+    player.frame_starts(Some(chat));
+    let _ = player.frame(&spec, HeadId::of("chat"), rest, EDGE, false, Some(chat), t0);
+    player.window_closed(chat);
+    let closed = player.close_stale(t0 + ms(1_000));
+    assert_eq!((closed.clips, closed.next), (0, Some(ms(4_000))));
 }
