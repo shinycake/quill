@@ -48,6 +48,9 @@ use std::time::{Duration, Instant};
 
 mod cache_scope;
 pub(in crate::ui) use cache_scope::CacheScope;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod gif_still_tests;
 mod retired;
 #[cfg(test)]
 pub(in crate::ui) use retired::take_unshowable;
