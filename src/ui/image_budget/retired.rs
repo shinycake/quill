@@ -145,8 +145,10 @@ pub(super) fn close_main_frame() -> usize {
 /// leave.
 pub(in crate::ui) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage>>) {
     let (frame, sweep) = (frame(), SWEEPS.get());
+    let mut any = false;
     RETIRED.with(|retired| {
         retired.borrow_mut().extend(images.into_iter().map(|image| {
+            any = true;
             (
                 image.id.0,
                 Retired {
@@ -157,7 +159,11 @@ pub(in crate::ui) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage
             )
         }));
     });
-    wake();
+    // The sticker player hands over an empty list for every frame it
+    // fetches: no sweep for those.
+    if any {
+        wake();
+    }
 }
 
 /// Something may have become sweepable: wake the sweeper task, if any
@@ -200,17 +206,23 @@ pub(in crate::ui) fn start_sweeper(cx: &mut App) {
     SEEN.with(|seen| seen.borrow_mut().clear());
     let closed = cx.on_window_closed(|_, _| wake());
     cx.set_global(Sweeper { _closed: closed });
+    // Armed now, not when the task first runs: a wake before then counts.
+    let mut woken = arm();
     cx.spawn(async move |cx| {
-        loop {
-            let (wake, woken) = oneshot::channel();
-            WAKE.with(|slot| *slot.borrow_mut() = Some(wake));
-            if woken.await.is_err() {
-                break;
-            }
+        while woken.await.is_ok() {
             cx.update(|cx| sweep(None, cx));
+            woken = arm();
         }
     })
     .detach();
+}
+
+/// A fresh wake for the sweeper task. A wake while it sweeps is not
+/// needed: that sweep comes after it.
+fn arm() -> oneshot::Receiver<()> {
+    let (wake, woken) = oneshot::channel();
+    WAKE.with(|slot| *slot.borrow_mut() = Some(wake));
+    woken
 }
 
 /// Drop the retired images no window can show any more from every

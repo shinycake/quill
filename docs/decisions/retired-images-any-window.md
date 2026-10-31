@@ -81,12 +81,49 @@ its cached slices would count as gone, and a picture only a slice replays
 would leave the atlas while the main window still showed it, a blank on
 its next present or a reload when it comes back.
 
+### Windows that replay cached views
+
+The rule for windows other than the main one takes a newer frame to
+redraw everything. The 1:1 call and video chat windows replay cached
+views (`calls/call_video.rs` 307, 319, 326; `group_call_window.rs` 272,
+279), so a newer frame can show what an older one painted. Their video
+is still safe: a `VideoFrame` pulls its picture when its view renders
+(`video_player/element.rs` 115), and the player lets go of (retires) the
+picture it showed only on such a pull, so a video frame is retired in a
+frame where its view rendered again, never while a replay can still show
+it. Live call video keeps the picture before the one shown for one more
+pull and drops its own pictures. The backdrop under the 1:1 call's views
+is drawn by the window's root, which renders every frame. A picture
+retired while a cached view in such a window still replays it, without
+that view being redrawn, would leave too soon here, as it left after two
+main frames before; none is known.
+
+### What a window that stops drawing keeps
+
+A window that stops drawing (minimized, covered, hidden) keeps every
+retired picture that existed when its last frame was done, not only what
+it painted, until it draws again or closes. Example: a chat window
+minimized while the main window switches chats. Stopping the old chat's
+stickers retires every clip's buffered frames, which before left within
+two main frames and now stay until the chat window draws or closes. This
+is bounded: a picture made after that frame never counts, so the set
+cannot grow while the window stays as it is. Keeping only what the window
+painted needs to know what it painted. Paints cannot be observed, and the
+real atlases (Metal, wgpu, DirectX) answer "does this window's atlas hold
+this image" only in test builds; asking them would mean changing all
+three vendored backends. Before, those pictures left after two main
+frames even when the idle window's last frame showed them, so the window
+could show a missing tile when presented again.
+
 ## Cost
 
-One task wake and one sweep after each frame that retires something (the
-main window's own frames sweep as before): for each open window other
-than the main one, a lease to read its frame count, and one pass over the
-retired list, which now holds a frame or two of pictures.
+One task wake and one sweep after each frame that retires something, and
+after a chat window's frame while anything waits. The sticker player
+hands over an empty list for every frame it fetches; that wakes nothing.
+While the main window draws, its frames also sweep, as before. A sweep
+leases each open window other than the main one to read its frame count
+and makes one pass over the retired list, which now holds a frame or two
+of pictures.
 
 ## Tests
 
@@ -104,6 +141,14 @@ retired list, which now holds a frame or two of pictures.
   slice bounds set only as the next main frame starts (the old
   `begin_frame`), the slice that rendered in the main window's last frame
   keeps all 61.
+- `..::a_picture_a_chat_window_shows_stays_until_that_window_draws_again`:
+  through the real sweep, a chat window stand-in lets go of the picture its
+  frame on screen shows without drawing. The picture stays in its atlas
+  through three main window frames, and leaves once the chat window draws
+  without it. Checked: it fails with a sweep that reads no window but the
+  main one (the picture goes at once) and with a constant frame count for
+  other windows (it never goes). The old code dropped such a picture
+  after two main frames, which this test also rejects.
 - `..::retired_pictures_leave_with_the_windows_that_showed_them`: the main
   window closes while the chat window plays (its picture leaves, the chat
   window stays bounded), then the chat window closes: every picture goes,

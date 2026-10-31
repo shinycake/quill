@@ -127,12 +127,12 @@ fn a_window_that_stops_drawing_keeps_only_what_its_last_frame_may_show() {
 
 #[cfg(feature = "demo-capture")]
 mod windows {
-    use super::super::super::{slice_rendered, slice_shown};
+    use super::super::super::{BoundedImageCache, slice_rendered, slice_shown};
     use super::super::{begin_main_frame, retire_all, start_sweeper};
     use super::picture;
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
-        AnyWindowHandle, AppContext, Context, EntityId, IntoElement, ParentElement, Render,
+        AnyWindowHandle, AppContext, Context, Entity, EntityId, IntoElement, ParentElement, Render,
         RenderImage, Styled, TestAppContext, Window, div, img, px, size,
     };
     use std::sync::{Arc, Weak};
@@ -194,6 +194,21 @@ mod windows {
     impl Drop for ChatWindow {
         fn drop(&mut self) {
             retire_all(self.shown.take());
+        }
+    }
+
+    /// Shows one picture until told otherwise, as a chat window at rest
+    /// does, starting each frame as a chat window does (its cache).
+    struct StillWindow {
+        cache: Entity<BoundedImageCache>,
+        shown: Option<Arc<RenderImage>>,
+    }
+
+    impl Render for StillWindow {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.cache
+                .update(cx, |cache, cx| cache.begin_window_frame(window, cx));
+            div().children(self.shown.clone().map(|picture| img(picture).size(px(40.))))
         }
     }
 
@@ -283,6 +298,51 @@ mod windows {
         for picture in kept {
             assert_eq!(picture.strong_count(), 0, "gone once no frame shows it");
         }
+    }
+
+    /// A chat window lets go of the picture its frame on screen shows, and
+    /// draws later (or never: minimized). The picture stays in its atlas,
+    /// however many frames the main window draws meanwhile, until the chat
+    /// window draws without it.
+    #[gpui_kit::test]
+    fn a_picture_a_chat_window_shows_stays_until_that_window_draws_again(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            start_sweeper(cx);
+        });
+        let main = cx.open_window(size(px(200.), px(200.)), |_, _| MainWindow {
+            own: None,
+            in_slice: None,
+            slice_renders: true,
+        });
+        // A sweep after the main window's frame bounds what that frame
+        // shows: the chat window's picture, made after, is not in it.
+        retire_all([picture()]);
+        cx.run_until_parked();
+        let chat = cx.open_window(size(px(200.), px(200.)), |_, cx| StillWindow {
+            cache: cx.new(|_| BoundedImageCache::for_window()),
+            shown: Some(picture()),
+        });
+        let chat_view = chat.root(cx).expect("the chat view");
+        let shown = chat_view.update(cx, |chat, _| chat.shown.take().expect("shown"));
+        let (kept, shown_probe) = (Arc::downgrade(&shown), probe(&shown));
+        retire_all([shown]);
+        cx.run_until_parked();
+        assert_eq!(kept.strong_count(), 1, "its frame on screen shows it");
+        assert!(in_atlas(cx, chat.into(), &shown_probe));
+        for _ in 0..3 {
+            draw(cx, main.into());
+        }
+        assert_eq!(
+            kept.strong_count(),
+            1,
+            "the main window's frames say nothing"
+        );
+        assert!(in_atlas(cx, chat.into(), &shown_probe));
+
+        draw(cx, chat.into());
+        assert_eq!(kept.strong_count(), 0, "drawn without it: gone");
+        assert!(!in_atlas(cx, chat.into(), &shown_probe));
     }
 
     /// The main window closed while a chat window played stickers grew as
