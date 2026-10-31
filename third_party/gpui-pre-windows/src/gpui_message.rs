@@ -5,36 +5,32 @@ const WM_USER: u32 = 0x0400;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiMessageId(u32);
 
-pub(crate) const WM_GPUI_CURSOR_STYLE_CHANGED: GpuiMessageId = GpuiMessageId(WM_USER + 1);
-pub(crate) const WM_GPUI_CLOSE_ONE_WINDOW: GpuiMessageId = GpuiMessageId(WM_USER + 2);
-pub(crate) const WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD: GpuiMessageId = GpuiMessageId(WM_USER + 3);
-pub(crate) const WM_GPUI_DOCK_MENU_ACTION: GpuiMessageId = GpuiMessageId(WM_USER + 4);
-pub(crate) const WM_GPUI_FORCE_UPDATE_WINDOW: GpuiMessageId = GpuiMessageId(WM_USER + 5);
-pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: GpuiMessageId = GpuiMessageId(WM_USER + 6);
-pub(crate) const WM_GPUI_GPU_DEVICE_LOST: GpuiMessageId = GpuiMessageId(WM_USER + 7);
-pub(crate) const WM_GPUI_DISPLAYS_CHANGED: GpuiMessageId = GpuiMessageId(WM_USER + 10);
-/// Quill: destroy this window because its GPU device is gone and could not be recreated.
-pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: GpuiMessageId = GpuiMessageId(WM_USER + 11);
-/// Quill: tells the platform window that the GPU device is gone for good (see
-/// `WindowsPlatformInner::handle_device_gone`).
-pub(crate) const WM_GPUI_GPU_DEVICE_GONE: GpuiMessageId = GpuiMessageId(WM_USER + 12);
+macro_rules! gpui_message_ids {
+    ($($(#[$doc:meta])* $name:ident = WM_USER + $offset:literal;)*) => {
+        $($(#[$doc])* pub(crate) const $name: GpuiMessageId = GpuiMessageId(WM_USER + $offset);)*
+        const ALL_IDS: &[GpuiMessageId] = &[$($name),*];
+    };
+}
 
-const ALL_IDS: [GpuiMessageId; 10] = [
-    WM_GPUI_CURSOR_STYLE_CHANGED,
-    WM_GPUI_CLOSE_ONE_WINDOW,
-    WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD,
-    WM_GPUI_DOCK_MENU_ACTION,
-    WM_GPUI_FORCE_UPDATE_WINDOW,
-    WM_GPUI_KEYBOARD_LAYOUT_CHANGED,
-    WM_GPUI_GPU_DEVICE_LOST,
-    WM_GPUI_DISPLAYS_CHANGED,
-    WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
-    WM_GPUI_GPU_DEVICE_GONE,
-];
+gpui_message_ids! {
+    WM_GPUI_CURSOR_STYLE_CHANGED = WM_USER + 1;
+    WM_GPUI_CLOSE_ONE_WINDOW = WM_USER + 2;
+    WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD = WM_USER + 3;
+    WM_GPUI_DOCK_MENU_ACTION = WM_USER + 4;
+    WM_GPUI_FORCE_UPDATE_WINDOW = WM_USER + 5;
+    WM_GPUI_KEYBOARD_LAYOUT_CHANGED = WM_USER + 6;
+    WM_GPUI_GPU_DEVICE_LOST = WM_USER + 7;
+    WM_GPUI_DISPLAYS_CHANGED = WM_USER + 10;
+    /// Quill: destroy this window because its GPU device is gone and could not be recreated.
+    WM_GPUI_DESTROY_AFTER_DEVICE_LOST = WM_USER + 11;
+    /// Quill: tells the platform window that the GPU device is gone for good (see
+    /// `WindowsPlatformInner::handle_device_gone`).
+    WM_GPUI_GPU_DEVICE_GONE = WM_USER + 12;
+}
 
 impl GpuiMessageId {
     pub(crate) fn from_raw(raw: u32) -> Option<Self> {
-        ALL_IDS.into_iter().find(|id| id.0 == raw)
+        ALL_IDS.iter().copied().find(|id| id.0 == raw)
     }
 }
 
@@ -82,7 +78,7 @@ mod tests {
     fn every_message_arrives_at_a_receiver_with_the_same_number() {
         let number = ValidationNumber::new(NUMBER);
 
-        for id in ALL_IDS {
+        for &id in ALL_IDS {
             let (raw, wparam, lparam) = number.message(id, 7).raw();
 
             assert_eq!(GpuiMessageId::from_raw(raw), Some(id));
