@@ -158,7 +158,9 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
 }
 
 fn clipped(primitive: &Primitive) -> Rect {
-    primitive.bounds().intersect(&primitive.content_mask().bounds)
+    primitive
+        .bounds()
+        .intersect(&primitive.content_mask().bounds)
 }
 
 #[derive(Clone)]
@@ -173,6 +175,17 @@ enum Step {
 struct View {
     steps: Vec<Step>,
     cached: bool,
+}
+
+impl View {
+    /// What this view leaves in a scene: the content mask can clip a
+    /// primitive away entirely.
+    fn drawn_tags(&self) -> impl Iterator<Item = u32> + '_ {
+        self.steps.iter().filter_map(|step| match step {
+            Step::Draw(primitive) if !clipped(primitive).is_empty() => Some(tag_of(primitive)),
+            _ => None,
+        })
+    }
 }
 
 fn paint(scene: &mut Scene, steps: &[Step]) {
@@ -305,6 +318,25 @@ fn assert_same_picture(case: u64, reference: &Scene, replayed: &Scene, views: &[
     }
 }
 
+/// The order each tagged primitive of `scene` was given.
+fn orders(scene: &Scene) -> HashMap<u32, u32> {
+    let quads = scene.quads.iter();
+    quads
+        .map(|quad| (quad.border_widths.left.0 as u32, quad.order))
+        .chain(scene.shadows.iter().map(|s| (s.pad, s.order)))
+        .chain(scene.underlines.iter().map(|s| (s.pad, s.order)))
+        .chain(scene.monochrome_sprites.iter().map(|s| (s.pad, s.order)))
+        .chain(scene.subpixel_sprites.iter().map(|s| (s.pad, s.order)))
+        .chain(scene.polychrome_sprites.iter().map(|s| (s.pad, s.order)))
+        .chain(
+            scene
+                .paths
+                .iter()
+                .map(|path| (path.vertices[0].st_position.x as u32, path.order)),
+        )
+        .collect()
+}
+
 struct Painter {
     dice: Dice,
     next_tag: u32,
@@ -419,24 +451,74 @@ fn a_replay_draws_what_painting_again_would_draw() {
     }
 }
 
+/// Views side by side, so no box of one meets a box of another.
+fn columns(painter: &mut Painter) -> Vec<View> {
+    let columns = 4;
+    let width = CANVAS / columns;
+    (0..columns)
+        .map(|column| View {
+            cached: true,
+            ..painter.view_in(rect(column * width, 0, width, CANVAS))
+        })
+        .collect()
+}
+
+/// A layer takes an order whether anything draws in it or not, and a replay
+/// only knows the orders its primitives stored. So a view that opens with a
+/// layer that drew nothing can slide down to order 1 as a whole, and land in
+/// other batches, more of them or fewer. The rest batch as they painted.
 #[test]
 fn views_that_do_not_touch_batch_as_if_painted_again() {
+    let mut unmoved = 0;
     for case in 0..200 {
         let mut painter = Painter::new(case);
-        let columns = 4;
-        let width = CANVAS / columns;
-        let mut views: Vec<View> = (0..columns)
-            .map(|column| painter.view_in(rect(column * width, 0, width, CANVAS)))
-            .collect();
-        // An empty layer takes an order, which a replay does not keep.
-        for view in &mut views {
-            view.steps.retain(|step| matches!(step, Step::Draw(_)));
-            view.cached = true;
-        }
+        let views = columns(&mut painter);
         let (first, ranges) = frame(&views, None);
         let (second, _) = frame(&views, Some((&first, &ranges)));
-        let labels = |scene: &Scene| scene.batches().map(|b| b.label()).collect::<Vec<_>>();
-        assert_eq!(labels(&painted(&views)), labels(&second), "case {case}");
+        let reference = painted(&views);
+        let (want, got) = (orders(&reference), orders(&second));
+
+        let mut moved = false;
+        for view in &views {
+            let tags: Vec<u32> = view.drawn_tags().collect();
+            let (Some(was), Some(now)) = (
+                tags.iter().map(|tag| want[tag]).min(),
+                tags.iter().map(|tag| got[tag]).min(),
+            ) else {
+                continue;
+            };
+            assert!(now == was || now == 1, "case {case}: {was} became {now}");
+            moved |= now != was;
+            for tag in &tags {
+                assert_eq!(got[tag] - now, want[tag] - was, "case {case}");
+            }
+        }
+        if !moved {
+            unmoved += 1;
+            let labels = |scene: &Scene| scene.batches().map(|b| b.label()).collect::<Vec<_>>();
+            assert_eq!(labels(&reference), labels(&second), "case {case}");
+        }
+    }
+    assert!(unmoved > 100, "only {unmoved} cases compared their batches");
+}
+
+#[test]
+fn a_view_replayed_frame_after_frame_keeps_its_orders() {
+    for case in 0..200 {
+        let mut painter = Painter::new(case);
+        let views: Vec<View> = (0..4)
+            .map(|_| View {
+                cached: true,
+                ..painter.view()
+            })
+            .collect();
+        let (mut last, mut ranges) = frame(&views, None);
+        (last, ranges) = frame(&views, Some((&last, &ranges)));
+        let settled = orders(&last);
+        for _ in 0..3 {
+            (last, ranges) = frame(&views, Some((&last, &ranges)));
+            assert_eq!(orders(&last), settled, "case {case}");
+        }
     }
 }
 
@@ -564,6 +646,8 @@ fn a_view_with_nothing_but_empty_layers_replays_as_it_painted() {
     second.replay(0..operations, &first);
     second.replay(operations..operations, &first);
     assert_eq!(second.len(), operations);
+    second.insert_primitive(quad(1, canvas()));
+    assert_eq!(second.quads.first().map(|quad| quad.order), Some(1));
 }
 
 #[test]
