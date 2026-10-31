@@ -36,6 +36,7 @@ fn closing_a_playing_clip_lets_go_of_what_it_made(cx: &mut TestAppContext) {
         }
         cx.notify();
     });
+    h.settle();
     let failures = check(
         &mut h,
         &[
@@ -48,6 +49,7 @@ fn closing_a_playing_clip_lets_go_of_what_it_made(cx: &mut TestAppContext) {
                 name: "Picture-in-Picture",
                 open: |h| {
                     open_clip(h);
+                    h.settle();
                     h.act(|app, _, cx| app.open_video_pip(cx));
                 },
                 close: |h| h.act(|app, _, cx| app.close_video_pip(cx)),

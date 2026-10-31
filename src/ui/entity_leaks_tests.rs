@@ -2,6 +2,10 @@
 //! opens and closes once (what stays then is a cache filled on first use),
 //! then `CYCLES` more times, after which the app must hold no more
 //! entities, subscriptions or running tasks than after the first close.
+//! Every open and close is followed by a frame of each open window, a
+//! second of test clock and another frame, so views made after the first
+//! frame are made. Counts are read after a further minute of test clock,
+//! so a task still running then never ends.
 //! Counts come from gpui-pre's test-support hooks
 //! (`docs/decisions/entity-leaks.md`).
 use crate::ui::actions::CloseWindow;
@@ -12,7 +16,6 @@ use crate::ui::media_panel::PanelTab;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::{Root, WindowExt};
-use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, Entity, Focusable, TestAppContext, VisualTestContext,
     Window, point, px, size,
@@ -27,6 +30,15 @@ use std::time::Duration;
 
 /// Opens and closes after the first one.
 const CYCLES: usize = 3;
+
+/// How far the test clock runs after each open and close: past closing
+/// animations and debounces.
+const SETTLE: Duration = Duration::from_secs(1);
+
+/// How far it runs before counting: a task or timer still alive after
+/// this never ends, rather than not having finished yet. Only while the
+/// surface is closed: a live call ticks through every frame of it.
+const QUIET: Duration = Duration::from_secs(60);
 
 /// Live entities by type, subscriptions by kind and running tasks by
 /// where they were spawned.
@@ -68,25 +80,36 @@ pub(in crate::ui) fn new_app(cx: &mut TestAppContext, demo: &'static str) -> Har
     let mut h = Harness { app, main, vcx };
     // Some demos start on a Settings page.
     h.act(|app, _, _| app.close_settings());
+    h.settle();
     h
 }
 
 impl Harness {
-    /// Draw and let timers (closing animations, debounces) run out.
-    pub(in crate::ui) fn settle(&mut self) {
-        for _ in 0..3 {
-            self.vcx.run_until_parked();
-            self.vcx.update(|window, cx| {
-                window.refresh();
-                window.render_frame(cx);
+    /// One display frame: run what is ready, then draw every open window
+    /// (call, stream, chat and Picture-in-Picture windows too) as the
+    /// screen does, redrawing only what changed.
+    fn frame(&mut self) {
+        self.vcx.run_until_parked();
+        let windows = self.vcx.update(|_, cx| cx.windows());
+        for handle in windows {
+            // A window that closed in the meantime has nothing to draw.
+            let _ = self.vcx.cx.update_window(handle, |_, window, cx| {
+                window.draw(cx).clear(cx);
             });
-            self.vcx
-                .executor()
-                .advance_clock(Duration::from_millis(500));
         }
         self.vcx.run_until_parked();
     }
 
+    /// A frame, [`SETTLE`] of test clock, and a frame: what opening made
+    /// is drawn (also what loaded after the first frame), and what
+    /// closing let go of is gone.
+    pub(in crate::ui) fn settle(&mut self) {
+        self.frame();
+        self.vcx.executor().advance_clock(SETTLE);
+        self.frame();
+    }
+
+    /// Change the app as a click or key would; [`Harness::settle`] draws it.
     pub(in crate::ui) fn act(
         &mut self,
         f: impl FnOnce(&mut QuillApp, &mut Window, &mut Context<QuillApp>),
@@ -94,13 +117,12 @@ impl Harness {
         let app = self.app.clone();
         self.vcx
             .update(|window, cx| app.update(cx, |app, cx| f(app, window, cx)));
-        self.settle();
+        self.vcx.run_until_parked();
     }
 
     /// Escape, as the user presses it.
     pub(in crate::ui) fn escape(&mut self) {
         self.vcx.simulate_keystrokes("escape");
-        self.settle();
     }
 
     fn other_windows(&mut self) -> Vec<AnyWindowHandle> {
@@ -121,7 +143,7 @@ impl Harness {
                 });
             });
         }
-        self.settle();
+        self.vcx.run_until_parked();
     }
 
     /// What shows over the chats: kit dialogs, the layers Escape closes,
@@ -144,17 +166,20 @@ impl Harness {
                     search.is_some_and(|s| s.history_calendar.is_some()),
                 ),
                 ("edit-profile", app.dialogs.edit_profile_dialog.is_some()),
-                ("settings", app.settings.open),
             ];
             let others = others
                 .into_iter()
                 .filter(|(_, open)| *open)
                 .map(|(name, _)| name);
-            dialogs
+            let mut shown: Vec<String> = dialogs
                 .chain(layers)
                 .chain(others)
                 .map(String::from)
-                .collect()
+                .collect();
+            if app.settings.open {
+                shown.push(format!("settings {:?}", app.settings.page));
+            }
+            shown
         });
         if self.vcx.update(|window, cx| window.has_active_dialog(cx)) {
             shown.push("kit-dialog".into());
@@ -165,7 +190,10 @@ impl Harness {
         shown
     }
 
+    /// What is alive once [`QUIET`] has passed.
     fn counts(&mut self) -> Counts {
+        self.vcx.executor().advance_clock(QUIET);
+        self.frame();
         self.vcx.update(|window, cx| {
             let mut counts: Counts = cx
                 .live_entity_counts()
@@ -179,7 +207,13 @@ impl Harness {
                 counts.insert(format!("subscriptions: main window {kind}"), n);
             }
             for (at, n) in cx.foreground_executor().live_tasks() {
-                counts.insert(format!("task spawned at {}:{}", at.file(), at.line()), n);
+                let at = format!(
+                    "task spawned at {}:{}:{}",
+                    at.file(),
+                    at.line(),
+                    at.column()
+                );
+                *counts.entry(at).or_default() += n;
             }
             counts
         })
@@ -205,10 +239,12 @@ pub(in crate::ui) fn check(h: &mut Harness, surfaces: &[Surface]) -> Vec<String>
         // Whether the surface opened and closed again.
         let cycle = |h: &mut Harness| -> Result<(), String> {
             (surface.open)(h);
+            h.settle();
             if h.shown() == idle {
                 return Err(format!("{} did not open", surface.name));
             }
             (surface.close)(h);
+            h.settle();
             let left = h.shown();
             if left != idle {
                 return Err(format!("{} did not close: {left:?}", surface.name));
@@ -391,7 +427,7 @@ const MAIN_WINDOW: &[Surface] = &[
                 app.open_forward_picker(window, cx);
             })
         },
-        // Escape twice: the picker, then the forward draft it was for.
+        // Cancels the forward: the picker and the draft it was for.
         close: |h| h.act(|app, window, cx| app.clear_forward(window, cx)),
     },
     Surface {
@@ -500,44 +536,74 @@ thread_local! {
     static KEPT: std::cell::RefCell<Vec<Entity<KeptView>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// The check names each kind of leak: a view kept by something that
-/// outlives the box, a subscription detached onto a long-lived emitter
-/// and a task that never ends.
+/// The check names each kind of leak (a view kept by something that
+/// outlives the box, subscriptions detached onto the app and the window,
+/// a task that never ends) and each row that does not open or close.
 #[gpui_kit::test]
 fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
     let mut h = new_app(cx, "ready-chats");
     let failures = check(
         &mut h,
-        &[Surface {
-            name: "leaky poll box",
-            open: |h| {
-                h.act(|app, window, cx| {
-                    app.open_poll_dialog(window, cx);
-                    let kept = cx.new(|_| KeptView);
-                    KEPT.with(|kept_views| kept_views.borrow_mut().push(kept));
-                    cx.observe_global::<Unset>(|_, _| {}).detach();
-                    cx.spawn(async |_, _| std::future::pending::<()>().await)
-                        .detach();
-                })
+        &[
+            Surface {
+                name: "leaky poll box",
+                open: |h| {
+                    h.act(|app, window, cx| {
+                        app.open_poll_dialog(window, cx);
+                        let kept = cx.new(|_| KeptView);
+                        KEPT.with(|kept_views| kept_views.borrow_mut().push(kept));
+                        cx.observe_global::<Unset>(|_, _| {}).detach();
+                        cx.observe_window_activation(window, |_, _, _| {}).detach();
+                        cx.spawn(async |_, _| std::future::pending::<()>().await)
+                            .detach();
+                    })
+                },
+                close: |h| h.act(|app, _, cx| app.close_poll_dialog(cx)),
             },
-            close: |h| h.act(|app, _, cx| app.close_poll_dialog(cx)),
-        }],
+            Surface {
+                name: "box that never opens",
+                open: |_| {},
+                close: |_| {},
+            },
+            Surface {
+                name: "box that stays open",
+                open: |h| h.act(|app, window, cx| app.open_poll_dialog(window, cx)),
+                close: |_| {},
+            },
+        ],
     );
     KEPT.with(|kept_views| kept_views.borrow_mut().clear());
-    let [failure] = failures.as_slice() else {
-        panic!("one failing surface: {failures:?}");
+    let [leaky, never_opens, stays_open] = failures.as_slice() else {
+        panic!("three failing rows: {failures:?}");
     };
     for kept in [
         "entity_leaks_tests::KeptView +3",
         "subscriptions: app global_observers +3",
+        "subscriptions: main window activation_observers +3",
         "task spawned at src/ui/entity_leaks_tests.rs:",
     ] {
-        assert!(failure.contains(kept), "{failure} names {kept}");
+        assert!(leaky.contains(kept), "{leaky} names {kept}");
     }
+    assert_eq!(never_opens, "box that never opens did not open");
+    assert!(
+        stays_open.starts_with("box that stays open did not close: [")
+            && stays_open.contains(r#""poll-dialog""#),
+        "{stays_open}"
+    );
 }
 
 #[gpui_kit::test]
 fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
+    // The System page asks `xdg-mime` for the `tg:` handler; the test
+    // answers instead, so no process starts.
+    struct PinnedLinkHandler;
+    impl Drop for PinnedLinkHandler {
+        fn drop(&mut self) {
+            quill::link_handler::demo_pin(None);
+        }
+    }
+    quill::link_handler::demo_pin(Some(quill::link_handler::LinkHandlerState::Unset));
+    let _pinned = PinnedLinkHandler;
     let mut h = new_app(cx, "ready-chats");
     let mut failures = Vec::new();
     // One table row per page: `Surface` takes plain functions.
@@ -545,10 +611,14 @@ fn leaving_a_settings_page_lets_go_of_what_it_made(cx: &mut TestAppContext) {
         ($($page:ident),+ $(,)?) => {
             [$(Surface {
                 name: concat!("settings: ", stringify!($page)),
-                open: |h| h.act(|app, _, cx| {
-                    app.open_settings(Some(Page::$page));
-                    cx.notify();
-                }),
+                open: |h| {
+                    h.act(|app, _, cx| {
+                        app.open_settings(Some(Page::$page));
+                        cx.notify();
+                    });
+                    let page = h.app.read_with(&h.vcx, |app, _| app.settings.page);
+                    assert_eq!(page, Some(Page::$page), "the row opens its page");
+                },
                 close: |h| h.act(|app, _, cx| {
                     app.close_settings();
                     cx.notify();
@@ -592,6 +662,7 @@ fn switching_between_chats_lets_go_of_the_chats_left(cx: &mut TestAppContext) {
     let walk = |h: &mut Harness, chats: &[ChatId]| {
         for chat in chats.iter().copied().chain([ChatId(11)]) {
             h.act(|app, window, cx| app.select_listed_chat(chat, window, cx));
+            h.settle();
         }
     };
     walk(&mut h, &chats);
@@ -608,6 +679,7 @@ fn closing_the_story_viewer_lets_go_of_what_it_made(cx: &mut TestAppContext) {
     let mut h = new_app(cx, "ready-story-viewer");
     // The demo starts with Leo's story open.
     h.act(|app, _, cx| app.close_story_viewer(cx));
+    h.settle();
     let failures = check(
         &mut h,
         &[Surface {
@@ -648,6 +720,7 @@ fn closing_the_call_window_lets_go_of_what_it_made(cx: &mut TestAppContext) {
         })
     };
     end(&mut h);
+    h.settle();
     let failures = check(
         &mut h,
         &[Surface {

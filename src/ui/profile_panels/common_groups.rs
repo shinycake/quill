@@ -30,6 +30,14 @@ impl CommonGroupsUi {
     }
 }
 
+impl CommonGroupsUi {
+    /// The profile closed: its search field goes with it (opening a
+    /// profile makes a fresh, empty one).
+    pub(in crate::ui) fn close(&mut self) {
+        self.search = None;
+    }
+}
+
 impl QuillApp {
     /// A fresh, empty search field for `user_id`'s groups in common.
     pub(in crate::ui) fn reset_common_groups_search(

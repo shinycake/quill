@@ -39,7 +39,9 @@ where
         })))
     }
 
-    /// How many subscribers the set holds, over every emitter.
+    /// How many subscribers the set holds over every emitter, leaving out
+    /// those whose subscription was dropped while their emitter was being
+    /// notified (they stay in the set until it notifies again).
     #[cfg(feature = "test-support")]
     pub fn subscriber_count(&self) -> usize {
         let state = self.0.borrow();
@@ -47,8 +49,9 @@ where
             .subscribers
             .values()
             .flatten()
-            .map(BTreeMap::len)
-            .sum()
+            .flat_map(BTreeMap::values)
+            .filter(|subscriber| !subscriber.dropped.get())
+            .count()
     }
 
     /// Inserts a new [`Subscription`] for the given `emitter_key`. By default, subscriptions

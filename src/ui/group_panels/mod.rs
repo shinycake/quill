@@ -353,6 +353,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.users_state.open_info_panel = None;
         }
+        self.common_groups.close();
         cx.notify();
     }
 

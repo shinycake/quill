@@ -2483,6 +2483,7 @@ impl App {
     /// Spawns the future returned by the given function on the main thread with
     /// the given priority. The closure will be invoked with [AsyncApp], which
     /// allows the application state to be accessed across await points.
+    #[track_caller]
     pub fn spawn_with_priority<AsyncFn, R>(&self, priority: Priority, f: AsyncFn) -> Task<R>
     where
         AsyncFn: AsyncFnOnce(&mut AsyncApp) -> R + 'static,
