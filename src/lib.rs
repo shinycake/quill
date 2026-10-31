@@ -91,6 +91,7 @@ pub mod folders;
 pub mod font_choice;
 pub mod force_reply;
 pub mod forward_drag;
+pub mod free_heap;
 pub mod game_share;
 pub mod gif_grid;
 pub mod gift_colors;

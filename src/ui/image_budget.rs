@@ -305,8 +305,15 @@ pub(super) fn retire_all(images: impl IntoIterator<Item = Arc<RenderImage>>) {
 /// the start of a frame, before anything renders.
 pub(super) fn sweep(window: &mut Window, cx: &mut App) {
     for image in take_unshowable() {
+        note_dropped(&image);
         cx.drop_image(image, Some(&mut *window));
     }
+}
+
+/// `image` goes for good: its pixels go back at the idle heap release.
+pub(super) fn note_dropped(image: &RenderImage) {
+    let frames = (0..image.frame_count()).filter_map(|frame| image.as_bytes(frame));
+    quill::free_heap::note_freed(frames.map(<[u8]>::len).sum());
 }
 
 /// The retired images no frame can show any more and nothing else holds.
@@ -826,10 +833,6 @@ impl BoundedImageCache {
         for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
         }
-        // Even with nothing evicted here: what left the screen (a closed
-        // viewer's full-size photo, a chat's sticker frames) was freed
-        // meanwhile.
-        super::free_heap::release();
     }
 
     /// Remove entries past `budget`; their loaded images, for the caller
@@ -852,6 +855,7 @@ impl BoundedImageCache {
             };
             self.bytes -= entry.bytes.unwrap_or(0);
             if let Some(Ok(image)) = entry.load.get() {
+                note_dropped(&image);
                 images.push(image);
             }
         }

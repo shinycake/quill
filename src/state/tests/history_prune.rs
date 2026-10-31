@@ -884,3 +884,37 @@ fn a_report_answered_after_the_drop_still_hides_its_ad() {
         "the reported ad stays hidden"
     );
 }
+
+/// Closing a chat frees the messages it no longer keeps; that is noted for
+/// the idle heap release (`free_heap`), which hands them back once, after
+/// Quill went quiet.
+#[test]
+fn closing_long_chats_asks_for_one_heap_release_once_idle() {
+    use crate::free_heap::{AFTER_FREE, IdleRelease, WORTH_RELEASING, freed, releases};
+    let message = std::mem::size_of::<super::HistoryMessage>();
+    let (mut session, _sink) = session();
+    let mut chat = 7;
+    switch(&mut session, chat);
+    while freed() < WORTH_RELEASING {
+        feed(&mut session, chat, 1000);
+        let before = freed();
+        switch(&mut session, chat + 1);
+        let dropped = 1000 - CLOSED_TAIL_KEEP;
+        assert_eq!(len(&session, chat), CLOSED_TAIL_KEEP);
+        assert_eq!(freed() - before, dropped * message, "chat {chat}");
+        chat += 1;
+    }
+    let mut idle = IdleRelease::default();
+    let start = std::time::Instant::now();
+    assert_eq!(idle.look(start, 0, false), Some(AFTER_FREE));
+    assert_eq!(releases(), 0, "not before Quill went quiet");
+    for step in 1..=100 {
+        let _ = idle.look(
+            start + std::time::Duration::from_millis(100 * step),
+            0,
+            false,
+        );
+    }
+    assert_eq!(releases(), 1);
+    assert_eq!(freed(), 0);
+}

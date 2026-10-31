@@ -290,6 +290,7 @@ impl QuillApp {
                     let player = this.playback.stickers.clone();
                     let closed = player.close_stale(player.now());
                     drop_frames(closed.frames, cx);
+                    this.schedule_heap_release(cx);
                     player.trace_closed(closed.clips);
                     if !closed.open {
                         player.closer.set(false);
@@ -654,6 +655,7 @@ fn drop_frames(frames: Vec<Arc<RenderImage>>, cx: &mut App) {
     let mut held = Vec::new();
     for image in frames {
         if Arc::strong_count(&image) == 1 {
+            super::super::image_budget::note_dropped(&image);
             cx.drop_image(image, None);
         } else {
             held.push(image);

@@ -512,3 +512,42 @@ fn past_the_budget_the_least_recently_used_sizes_go(cx: &mut TestAppContext) {
     assert_eq!(used(&pool), vec![12]);
     assert_eq!(pool.entries.len(), 1);
 }
+
+/// What the cache lets go is noted for the idle heap release
+/// (`quill::free_heap`), byte for byte as each layout was counted: layouts
+/// past the budget, and a widest line a frame never drew.
+#[gpui_kit::test]
+fn what_the_cache_lets_go_is_noted_for_the_heap_release(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let mut cache = Cache::default();
+    let eighth = LAID_OUT.bytes / 8;
+    fill(&mut cache, &paragraph, 6, eighth);
+    let before = quill::free_heap::freed();
+    // As in `both_kinds_keep_to_one_budget_of_bytes`: the four used at 1
+    // to 4 go.
+    cache.end_frame(4, 600.);
+    assert_eq!(quill::free_heap::freed() - before, 4 * eighth);
+
+    let natural = f32::from(paragraph.size().width);
+    let mut entry = Entry {
+        widths: vec![
+            // Unconstrained: a size only, as measured.
+            Width {
+                paragraph: None,
+                ..width(None, Some(&paragraph), 0, 1)
+            },
+            Width {
+                bytes: 3000,
+                ..width(Some(natural), Some(&paragraph), 0, 1)
+            },
+            Width {
+                bytes: 5000,
+                ..width(Some(natural / 2.), Some(&paragraph), 2, 2)
+            },
+        ],
+        used: 2,
+    };
+    let before = quill::free_heap::freed();
+    entry.settle(natural / 2.);
+    assert_eq!(quill::free_heap::freed() - before, 3000);
+}

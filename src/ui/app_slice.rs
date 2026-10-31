@@ -91,6 +91,10 @@ pub(super) struct Slices {
     image_cache: Option<Entity<super::image_budget::BoundedImageCache>>,
     /// Waits for the image cache's idle trim (`image_budget::IDLE_AFTER`).
     idle_trim: Option<Task<()>>,
+    /// When freed heap goes back to the system (`quill::free_heap`), and
+    /// the task that waits for it.
+    heap: quill::free_heap::IdleRelease,
+    heap_release: Option<Task<()>>,
     /// The slice whose content is being rendered, laid out or painted
     /// (`None`: `QuillApp` itself).
     scope: Rc<Cell<Option<EntityId>>>,
@@ -212,12 +216,15 @@ impl QuillApp {
         }
     }
 
+    /// A window begins a frame: schedule what waits for Quill to go idle.
     /// Once nothing new has been shown for `image_budget::IDLE_AFTER`,
     /// trim the image cache to its idle budget, drop the wallpaper
     /// pictures no area shows and sweep the emoji glyphs off screen
     /// (`glyph_sweep`). One waiting task at most; it sleeps past
-    /// every newer activity.
-    pub(super) fn schedule_idle_image_trim(&mut self, cx: &mut Context<Self>) {
+    /// every newer activity. Freed heap goes back on its own schedule
+    /// ([`Self::schedule_heap_release`]).
+    pub(super) fn schedule_idle_trims(&mut self, cx: &mut Context<Self>) {
+        self.schedule_heap_release(cx);
         if self.slices.idle_trim.is_some() || super::image_budget::idle_trim_due().is_none() {
             return;
         }
@@ -254,7 +261,46 @@ impl QuillApp {
                 }
                 cx.background_executor().timer(due - now).await;
             }
-            let _ = this.update(cx, |this, _| this.slices.idle_trim = None);
+            let _ = this.update(cx, |this, cx| {
+                this.slices.idle_trim = None;
+                // What the trim evicted goes back once Quill is quiet.
+                this.schedule_heap_release(cx);
+            });
+        }));
+    }
+
+    /// Once at least `free_heap::WORTH_RELEASING` was freed (laid-out
+    /// text, messages, pictures, sticker frames), hand the free pages back
+    /// to the system once, when Quill is idle: `AFTER_FREE` past the last
+    /// free, no window frame for `QUIET`, nothing animating. Call where a
+    /// frame begins or after something freed outside one. One waiting
+    /// task at most; it looks again until it released or nothing is left.
+    pub(super) fn schedule_heap_release(&mut self, cx: &mut Context<Self>) {
+        use quill::free_heap;
+        if self.slices.heap_release.is_some() || free_heap::freed() < free_heap::WORTH_RELEASING {
+            return;
+        }
+        self.slices.heap_release = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let frames = cx.update(frames_begun);
+                let wait = this.update(cx, |this, cx| {
+                    let now = cx.background_executor().now();
+                    let animating = this.frame.frame_clock_running.get();
+                    let (freed, released) = (free_heap::freed(), free_heap::releases());
+                    let wait = this.slices.heap.look(now, frames, animating);
+                    if free_heap::releases() > released && super::frame_clock::trace_ticks() {
+                        eprintln!("heap release: {:.1} MB freed", freed as f64 / 1048576.0);
+                    }
+                    if wait.is_none() {
+                        this.slices.heap_release = None;
+                    }
+                    wait
+                });
+                let Ok(Some(wait)) = wait else {
+                    break;
+                };
+                cx.background_executor().timer(wait).await;
+            }
         }));
     }
 
@@ -627,6 +673,15 @@ impl QuillApp {
     }
 }
 
+/// Frames begun so far in all of Quill's windows: a change means some
+/// window drew.
+fn frames_begun(cx: &mut App) -> u64 {
+    cx.windows()
+        .into_iter()
+        .filter_map(|window| window.update(cx, |_, window, _| window.frame_number()).ok())
+        .sum()
+}
+
 fn full() -> StyleRefinement {
     StyleRefinement::default().size_full()
 }
@@ -825,3 +880,8 @@ impl Element for MeasureHeight {
         self.child.paint(window, cx);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "idle_heap_tests.rs"]
+mod idle_heap_tests;

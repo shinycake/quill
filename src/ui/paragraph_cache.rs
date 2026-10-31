@@ -15,7 +15,8 @@
 //! once a frame that never drew it ends, if that is wider than the window,
 //! where nothing is drawn. Every other width stays laid out, the least
 //! recently used going first past the old cache's budget
-//! (`docs/decisions/paragraph-cache-widths.md`).
+//! (`docs/decisions/paragraph-cache-widths.md`). What it lets go is noted
+//! for the idle heap release (`quill::free_heap`).
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
@@ -137,8 +138,12 @@ impl Entry {
     fn settle(&mut self, window: f32) {
         let natural = self.natural();
         for width in &mut self.widths {
-            if width.drawn == 0 && unwrapped(width.wrap, natural) && wider(width.wrap, window) {
-                width.paragraph = None;
+            if width.drawn == 0
+                && unwrapped(width.wrap, natural)
+                && wider(width.wrap, window)
+                && width.paragraph.take().is_some()
+            {
+                quill::free_heap::note_freed(width.bytes);
             }
         }
     }
@@ -208,7 +213,14 @@ impl Pool {
                 .filter(|used| *used <= start)
                 .collect();
             if let Some(cutoff) = cutoff(excess, ages) {
-                self.entries.retain(|_, e| e.used > cutoff);
+                self.entries.retain(|_, e| {
+                    let keep = e.used > cutoff;
+                    if !keep {
+                        let laid_out = e.widths.iter().filter(|w| w.paragraph.is_some());
+                        quill::free_heap::note_freed(laid_out.map(|w| w.bytes).sum());
+                    }
+                    keep
+                });
             }
         }
         self.entries.entry(key).or_default()
@@ -308,8 +320,8 @@ fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: Budget) {
     let Some(cutoff) = cutoff else { return };
     for pool in pools.iter_mut() {
         for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
-            if width.used <= cutoff {
-                width.paragraph = None;
+            if width.used <= cutoff && width.paragraph.take().is_some() {
+                quill::free_heap::note_freed(width.bytes);
             }
         }
         pool.recount();

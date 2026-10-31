@@ -61,7 +61,7 @@ impl Render for QuillApp {
         if let Some(cache) = &image_cache {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
         }
-        self.schedule_idle_image_trim(cx);
+        self.schedule_idle_trims(cx);
         self.sync_capture_block(window);
         self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);

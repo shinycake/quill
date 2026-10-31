@@ -316,6 +316,19 @@ impl Default for HistoryMessages {
 /// from before the oldest of them builds its rows again.
 const REMOVED_LOG: usize = 64;
 
+/// What a message removed or dropped frees at least, for the idle heap
+/// release (`crate::free_heap`): its slot, without the text and media it
+/// owns.
+const MESSAGE_BYTES: usize = std::mem::size_of::<HistoryMessage>();
+
+/// A history dropped whole (a closed chat's, or one replaced) frees its
+/// messages.
+impl Drop for HistoryMessages {
+    fn drop(&mut self) {
+        crate::free_heap::note_freed(self.map.len() * MESSAGE_BYTES);
+    }
+}
+
 /// What changed in a [`HistoryMessages`] after a revision.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct HistoryChanges {
@@ -399,6 +412,7 @@ impl HistoryMessages {
 
     pub fn remove(&mut self, id: &i64) -> Option<HistoryMessage> {
         let removed = self.map.remove(id)?;
+        crate::free_heap::note_freed(MESSAGE_BYTES);
         self.changed_at.remove(id);
         self.ids_changed();
         self.removed.push_back((*id, self.revision));
