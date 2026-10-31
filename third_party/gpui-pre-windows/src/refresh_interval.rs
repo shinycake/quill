@@ -1,33 +1,31 @@
 // Added by the Quill project (2026). See third_party/gpui-pre-windows/QUILL-CHANGES.md.
-// std-only, so scripts/test-refresh-interval.sh runs its tests on any host.
-
-//! How long the vsync thread sleeps when `DwmFlush` does not wait.
 
 use std::time::Duration;
 
 pub(crate) const VSYNC_INTERVAL_THRESHOLD: Duration = Duration::from_millis(1);
 pub(crate) const DEFAULT_VSYNC_INTERVAL: Duration = Duration::from_micros(16_666); // ~60Hz
+const MAX_VSYNC_INTERVAL: Duration = Duration::from_millis(100);
 
+/// A 29 microsecond period was seen (from a `qpcRefreshPeriod` of 60).
 pub(crate) fn refresh_interval(
     qpc_period: u64,
     qpc_frequency: u64,
     rate_numerator: u32,
     rate_denominator: u32,
 ) -> Duration {
-    let interval = retrieve_duration(qpc_period, qpc_frequency);
-    // Check for interval values that are impossibly low. A 29 microsecond
-    // interval was seen (from a qpcRefreshPeriod of 60).
-    if interval < VSYNC_INTERVAL_THRESHOLD {
-        retrieve_duration(rate_denominator as u64, rate_numerator as u64)
-    } else {
-        interval
-    }
+    [
+        interval_from_counts(qpc_period, qpc_frequency),
+        interval_from_counts(rate_denominator.into(), rate_numerator.into()),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|interval| (VSYNC_INTERVAL_THRESHOLD..=MAX_VSYNC_INTERVAL).contains(interval))
+    .unwrap_or(DEFAULT_VSYNC_INTERVAL)
 }
 
-#[inline]
-fn retrieve_duration(counts: u64, ticks_per_second: u64) -> Duration {
-    let ticks_per_microsecond = ticks_per_second / 1_000_000;
-    Duration::from_micros(counts / ticks_per_microsecond)
+fn interval_from_counts(counts: u64, counts_per_second: u64) -> Option<Duration> {
+    let micros = (u128::from(counts) * 1_000_000).checked_div(counts_per_second.into())?;
+    u64::try_from(micros).ok().map(Duration::from_micros)
 }
 
 #[cfg(test)]
@@ -114,9 +112,9 @@ mod tests {
 
     #[test]
     fn a_period_too_long_to_count_does_not_wrap_into_a_usable_one() {
-        // Times 1,000,000 this is a multiple of 2^64 plus 16,640.
-        const WRAPS_TO_16_640: u64 = 285_186_663_379_549_668;
-        assert_eq!(refresh_interval(WRAPS_TO_16_640, 1, 0, 0), SIXTY_HZ);
+        let wraps_to_16_640 = (((15_460u128 << 64) + 16_640) / 1_000_000) as u64;
+        assert_eq!(wraps_to_16_640, 285_186_663_379_549_668);
+        assert_eq!(refresh_interval(wraps_to_16_640, 1, 0, 0), SIXTY_HZ);
     }
 
     #[test]

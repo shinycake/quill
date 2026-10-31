@@ -1,11 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // adds `FrameGate`, which lets the vsync thread sleep, with no timeout, while
-// every window is idle.
+// every window is idle, and takes the thread's interval from `refresh_interval`.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
-use std::{
-    sync::LazyLock,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use gpui::FrameRequestSource;
@@ -23,14 +20,6 @@ use windows::Win32::{
     Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
     System::Performance::QueryPerformanceFrequency,
 };
-
-static QPC_TICKS_PER_SECOND: LazyLock<u64> = LazyLock::new(|| {
-    let mut frequency = 0;
-    // On systems that run Windows XP or later, the function will always succeed and
-    // will thus never return zero.
-    unsafe { QueryPerformanceFrequency(&mut frequency).unwrap() };
-    frequency as u64
-});
 
 pub(crate) struct VSyncProvider {
     interval: Duration,
@@ -74,9 +63,12 @@ fn get_dwm_interval() -> Result<Duration> {
         ..Default::default()
     };
     unsafe { DwmGetCompositionTimingInfo(HWND::default(), &mut timing_info) }?;
+    let mut qpc_frequency = 0;
+    // SAFETY: `qpc_frequency` is valid for writes for the length of the call.
+    unsafe { QueryPerformanceFrequency(&mut qpc_frequency) }?;
     Ok(refresh_interval(
         timing_info.qpcRefreshPeriod,
-        *QPC_TICKS_PER_SECOND,
+        qpc_frequency as u64,
         timing_info.rateRefresh.uiNumerator,
         timing_info.rateRefresh.uiDenominator,
     ))

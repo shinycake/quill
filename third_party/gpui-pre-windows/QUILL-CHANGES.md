@@ -295,3 +295,24 @@ Added in 2026 (`docs/decisions/images-left-behind.md`):
   images get 512² textures, the same change as gpui-pre-apple's
   `metal_atlas.rs`. The tile-reuse test's keeper tile is 200². Not run on
   Windows by the author.
+
+## A bad DWM refresh report can't stop the vsync thread
+
+Added in 2026, listed in `docs/decisions/no-crash-audit.md` section 4:
+
+- `src/refresh_interval.rs` (new, std-only; unit tests run with
+  `scripts/test-refresh-interval.sh`, which CI's `linux-fmt-clippy-test` job
+  runs): `refresh_interval` replaces upstream's `retrieve_duration`. Upstream
+  divided by `ticks_per_second / 1_000_000`, and its low-period fallback passed
+  the refresh rate through the same code, so any rate numerator under 1,000,000
+  (60/1, 60000/1001) divided by zero and ended the thread with windows left on
+  screen. It also took any large period as the sleep. The new function divides
+  counts in `u128` with `checked_div` and returns the first of the two reports
+  between 1 ms and 100 ms, or the 60 Hz default.
+- `src/vsync.rs`: `get_dwm_interval` calls it. `QPC_TICKS_PER_SECOND` and its
+  `unwrap` are gone: a failed `QueryPerformanceFrequency` takes the same `Err`
+  path to the default as a failed `DwmGetCompositionTimingInfo`.
+- `src/gpui_windows.rs`: declares the new module.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
