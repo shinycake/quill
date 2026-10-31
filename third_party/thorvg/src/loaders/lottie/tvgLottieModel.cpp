@@ -672,7 +672,7 @@ void LottieLayer::prepare(RGB32* color)
         return;
     }
 
-    //QUILL: a precomp's children are set from its asset when the composition is built.
+    //QUILL
     if (type == LottieLayer::Precomp) clear();
 
     // prepare the viewport clipper or a solid fill in advance if it is a layer type.

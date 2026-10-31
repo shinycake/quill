@@ -96,7 +96,6 @@ fn photo_editor_failure_shows_the_status_note(cx: &mut TestAppContext) {
     });
 }
 
-/// Opens the editor on a small picture and offers `path` as a sticker file.
 fn editor_with_sticker_file(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
@@ -139,7 +138,6 @@ fn a_sticker_lands_on_the_photo_when_its_decode_resolves(cx: &mut TestAppContext
     let file = editor_with_sticker_file(&app, &mut vcx, "demo-sticker.tgs");
     app.update_in(&mut vcx, |app, _, cx| {
         app.place_editor_sticker(file, StickerFormat::Tgs, cx);
-        // Nothing decoded on the calling stack.
         let editor = app.viewer.photo_editor.as_ref().expect("editor open");
         assert!(editor.placed.is_empty());
     });

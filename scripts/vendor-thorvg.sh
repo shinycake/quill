@@ -62,9 +62,7 @@ copy src/loaders/lottie -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \) ! -name '
 copy src/loaders/lottie/rapidjson
 copy src/bindings/capi -maxdepth 1 \( -name '*.cpp' -o -name '*.h' \)
 
-# A hunk that no longer applies stops the script: port it, then regenerate the
-# patch with `git diff --relative=third_party/thorvg -- third_party/thorvg/src`.
-patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$DEST" <"$PATCH"
+[ -n "${THORVG_NO_PATCH:-}" ] || patch --quiet --fuzz=0 --no-backup-if-mismatch -p1 -d "$DEST" <"$PATCH"
 
 printf 'tag %s\ncommit %s\nversion %s\n' "$TAG" "$COMMIT" "$VERSION" >"$DEST/VERSION"
 echo "Vendored ThorVG $TAG ($COMMIT) into third_party/thorvg: $(find "$DEST" -type f | wc -l | tr -d ' ') files"

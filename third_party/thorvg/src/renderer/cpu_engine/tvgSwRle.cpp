@@ -198,7 +198,7 @@
 constexpr auto PIXEL_BITS = 8;   //must be at least 6 bits!
 constexpr auto ONE_PIXEL = (1 << PIXEL_BITS);
 
-//QUILL: an outline with this many points looks its cells up by column range within a row.
+//QUILL
 constexpr uint32_t BUSY_OUTLINE_PTS = 1024;
 constexpr auto ROW_BUCKETS = 64;
 
@@ -243,8 +243,8 @@ struct RleWorker
 
     SwCell** yCells;
     int32_t yCnt;
-    int32_t rowBuckets;  //QUILL: cell lists per row.
-    int32_t xShift;      //QUILL: column to list.
+    int32_t rowBuckets;  //QUILL
+    int32_t xShift;      //QUILL
 
     bool invalid;
     bool antiAlias;
@@ -426,8 +426,7 @@ static SwCell* _findCell(RleWorker& rw)
 }
 
 
-//QUILL: gives a shape that overflows the pool more cells, so that it does not walk
-//its whole outline again for each of many bands.
+//QUILL
 static bool _growCells(RleWorker& rw, SwCellPool* pool)
 {
     constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
@@ -515,6 +514,13 @@ static bool _moveTo(RleWorker& rw, const SwPoint& to)
 }
 
 
+//QUILL
+static bool _pastCells(const RleWorker& rw, const SwPoint& e1, const SwPoint& e2)
+{
+    return (e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y);
+}
+
+
 static bool _lineTo(RleWorker& rw, const SwPoint& to)
 {
     auto e1 = TRUNC(rw.pos);
@@ -537,16 +543,14 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
         e1 = TRUNC(line[1]);
         e2 = TRUNC(line[0]);
 
-        //QUILL: outside the visible cells, skip the cell by cell walk. No cell above,
-        //below or to the right of them is kept, so the piece only moves the pen.
-        if ((e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y)) {
+        if (_pastCells(rw, e1, e2)) {  //QUILL
             if (!_setCell(rw, e2)) return false;
             rw.pos = line[0];
             if (line-- == rw.lineStack) return true;
             continue;
         }
 
-        //QUILL: every cell to the left is one column, where only the rows a piece crosses count.
+        //QUILL
         if (e1.x < rw.cellMin.x && e2.x < rw.cellMin.x) {
             diff.x = 0;
             e2.x = e1.x;
@@ -659,7 +663,7 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
 }
 
 
-//QUILL: true when the arc's control points, and so the whole arc, are beside the visible cells.
+//QUILL
 static bool _besideCells(const RleWorker& rw, const SwPoint* arc)
 {
     auto min = arc[0].x;
@@ -706,14 +710,14 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, 
 
             //avoid possible arithmetic overflow below by splitting
             if (L > SHRT_MAX) {
-                if (_besideCells(rw, arc)) goto draw;  //QUILL: only the chord's rows matter out here.
+                if (_besideCells(rw, arc)) goto draw;  //QUILL
                 goto split;
             }
 
             //max deviation may be as much as (s/L) * 3/4 (if Hain's v = 1)
             auto sLimit = L * (ONE_PIXEL / 6);
 
-            //QUILL: these products can pass 32 bits.
+            //QUILL
             auto diff1 = arc[1] - arc[0];
             if (llabs((int64_t)diff.y * diff1.x - (int64_t)diff.x * diff1.y) > sLimit) goto split;
 
@@ -899,7 +903,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             }
 
         reduce_bands:
-            if (_growCells(rw, cellPool)) continue;  //QUILL: this band again, with room.
+            if (_growCells(rw, cellPool)) continue;  //QUILL
 
             /* render pool overflow: we will reduce the render band by half */
             auto bottom = band->min;

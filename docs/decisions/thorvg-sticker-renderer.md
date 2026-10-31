@@ -105,8 +105,10 @@ has none.
 Work is a rough cost of one frame once precomps, repeaters and modifiers are
 expanded: 16 per vertex, 64 per layer or shape in a paint, and 1,024 per mask,
 matte or drawn effect, since those copy the canvas. Everything before a repeater
-or path modifier in a list multiplies with it, and a list's total multiplies with
-its fills and strokes. A precomp is walked once and counted at each use. The check
+or path modifier in a list multiplies with it, nine times for an offset, whose
+curve splitting ThorVG holds to eight times its input, and twice for the others.
+A list's total multiplies with its fills and strokes. A precomp is walked once
+and counted at each use. The check
 itself took at most 2.2 ms on the costliest real document.
 
 ## Skin tones

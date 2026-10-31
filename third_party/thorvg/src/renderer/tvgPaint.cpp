@@ -31,7 +31,7 @@
 /* Internal Class Implementation                                        */
 /************************************************************************/
 
-//QUILL: a transform from a file can send a point past an int. A NaN goes to the lower end.
+//QUILL
 static int32_t _toInt(float v)
 {
     constexpr auto LIMIT = 2147483520.0f;  //the largest float under 2^31.

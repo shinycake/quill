@@ -27,8 +27,7 @@
 /* External Class Implementation                                        */
 /************************************************************************/
 
-//QUILL: the largest coordinate, in pixels, whose differences and sums the rasterizer's
-//24.8 fixed point can hold. A NaN goes to the lower end.
+//QUILL
 static inline float _rasterRange(float v)
 {
     constexpr auto LIMIT = 1048576.0f;

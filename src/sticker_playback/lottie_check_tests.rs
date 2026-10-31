@@ -182,7 +182,6 @@ fn a_precomp_cannot_reach_itself() {
 
 #[test]
 fn a_reference_goes_where_the_renderer_would_send_it() {
-    // Both names have one key in the renderer, and its lookup takes the first.
     let doc = with_assets(
         json!([precomp("a\u{0}x")]),
         json!([
@@ -321,7 +320,7 @@ fn a_long_path_counts_by_its_vertices() {
 }
 
 #[test]
-fn easing_counts_toward_a_count() {
+fn easing_counts_toward_a_repeat() {
     let eased = |y| {
         with_shapes(json!([{"ty": "sr", "pt": {"k": [
             {"s": [100], "e": [100], "i": {"y": [y]}, "o": {"y": [0]}},

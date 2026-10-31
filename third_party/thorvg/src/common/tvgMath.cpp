@@ -42,7 +42,7 @@ static float _length(const Point& pt1, const Point& pt2)
 }
 
 
-//QUILL: the depth is limited, since rounding can stop a split from getting any smaller.
+//QUILL
 template<typename LengthFunc>
 float _bezLength(const Bezier& cur, LengthFunc lineLengthFunc, int depth = 8)
 {

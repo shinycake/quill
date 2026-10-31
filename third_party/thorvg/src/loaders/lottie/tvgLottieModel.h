@@ -229,7 +229,7 @@ struct LottieMask
     LottiePathSet pathset;
     LottieFloat expand = 0.0f;
     LottieOpacity opacity = 255;
-    MaskMethod method = MaskMethod::None;  //QUILL: the mode is optional in the file.
+    MaskMethod method = MaskMethod::None;  //QUILL
     bool inverse = false;
 };
 
@@ -301,7 +301,7 @@ struct LottieObject
 struct LottieGlyph
 {
     Array<LottieObject*> children;   //glyph shapes.
-    float width = 0.0f;  //QUILL: optional in the file, as is the size.
+    float width = 0.0f;  //QUILL
     char* code = nullptr;
     char* family = nullptr;
     char* style = nullptr;
@@ -817,7 +817,7 @@ struct LottieGradient : LottieObject
         if (!colorStops.populated) {
             auto count = colorStops.count;  //colorstop count can be modified after population
             if (colorStops.frames) {
-                //QUILL: every keyframe has to hold the stops read from it.
+                //QUILL
                 auto least = UINT32_MAX;
                 ARRAY_FOREACH(v, *colorStops.frames) {
                     auto stops = populate(v->value, count);
@@ -1098,7 +1098,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
 
     bool reqFragment : 1;   //requirement to fragment the render context
     bool buildDone : 1;     //completed in building the composition.
-    bool building : 1;      //QUILL: set while this composition builds.
+    bool building : 1;      //QUILL
     bool trimpath : 1;      //this group has a trimpath.
     bool visible : 1;       //this group has visible contents.
     bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.

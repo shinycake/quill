@@ -178,7 +178,7 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
 
 void LottieBuilder::updateTransform(LottieLayer* layer, float frameNo)
 {
-    //QUILL: a loop, so that a parent chain's length costs no stack.
+    //QUILL
     Array<LottieLayer*> chain;
     for (; layer; layer = layer->parent) {
         if (tween.active) {
@@ -411,7 +411,7 @@ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>*
     Array<Shape*> shapes;
 
     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
-        //QUILL: repeaters multiply, so the product has a limit.
+        //QUILL
         constexpr uint64_t MAX_COPIES = 4096;
         if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
 
@@ -560,7 +560,7 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float 
 }
 
 
-//QUILL: limits an animated count where it sizes a loop. Real stickers stay far below this.
+//QUILL
 static float _limitCount(float count)
 {
     constexpr auto MAX_COUNT = 1024.0f;
@@ -1236,7 +1236,7 @@ static LottieGlyph* _searchGlyph(const LottieFont* font, const char* p, const Te
 {
     capScale = 1.0f;
     auto outCode = p;
-    char capCode[2] = {};  //QUILL: read by the search below.
+    char capCode[2] = {};  //QUILL
 
     // SmallCaps: lowercase letters are converted to uppercase with 70% scale
     if ((unsigned char)*p < 0x80 && doc.caps) {
@@ -1364,7 +1364,7 @@ void LottieBuilder::updateText(LottieLayer* layer, float frameNo)
 
     auto text = static_cast<LottieText*>(layer->children.first());
     auto& doc = text->doc(frameNo, exps);
-    if (!doc.text || !doc.name) return;  //QUILL: both are optional in the file.
+    if (!doc.text || !doc.name) return;  //QUILL
 
     if (text->font && text->font->origin == LottieFont::Origin::Local && !text->font->chars.empty()) {
         updateLocalFont(layer, frameNo, text, doc);
@@ -1636,7 +1636,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
     ARRAY_FOREACH(p, comp->assets) {
         if (layer->rid != (*p)->id) continue;
         if (layer->type == LottieLayer::Precomp) {
-            if ((*p)->type != LottieObject::Composition) break;  //QUILL: an image or audio asset has no layers.
+            if ((*p)->type != LottieObject::Composition) break;  //QUILL
             auto asset = static_cast<LottieRootLayer*>(*p);
             if (_buildComposition(comp, asset)) {
                 layer->children = asset->children;
@@ -1686,7 +1686,7 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
                 auto len = strlen(doc.name);
                 for (uint32_t i = 0; i < comp->fonts.count; ++i) {
                     auto font = comp->fonts[i];
-                    if (!font->name) continue;  //QUILL: optional in the file.
+                    if (!font->name) continue;  //QUILL
                     auto len2 = strlen(font->name);
                     if (len == len2 && !strcmp(font->name, doc.name)) {
                         text->font = font;
@@ -1704,7 +1704,7 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
 static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
 {
     if (parent->children.count == 0) return false;
-    if (parent->buildDone) return !parent->building;  //QUILL: only a finished composition is used.
+    if (parent->buildDone) return !parent->building;  //QUILL
     parent->buildDone = true;
     parent->building = true;
 
@@ -1736,7 +1736,7 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
         if (child->type == LottieLayer::Text) _attachFont(comp, child);
     }
 
-    //QUILL: matte links stay a short chain.
+    //QUILL
     ARRAY_FOREACH(p, parent->children) {
         auto child = static_cast<LottieLayer*>(*p);
         auto target = child->matteTarget;

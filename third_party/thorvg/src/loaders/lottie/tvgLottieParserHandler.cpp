@@ -60,7 +60,7 @@ bool LookaheadParserHandler::nextArrayValue()
 int LookaheadParserHandler::getInt()
 {
     if (state == kHasNumber) {
-        //QUILL: a file can write an integer as a float, or past an int.
+        //QUILL
         auto number = val.GetDouble();
         auto result = number <= INT_MIN ? INT_MIN : (number >= INT_MAX ? INT_MAX : (int)number);
         parseNext();

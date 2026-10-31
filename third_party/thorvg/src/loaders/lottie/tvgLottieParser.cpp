@@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
         //discard rest
         while (nextArrayValue()) getInt();
     } else {
-        val = (int8_t)tvg::clamp(getFloat(), -128.0f, 127.0f);  //QUILL: file values can be out of range.
+        val = (int8_t)tvg::clamp(getFloat(), -128.0f, 127.0f);  //QUILL
     }
     return false;
 }
@@ -255,7 +255,7 @@ bool LottieParser::getValue(uint8_t& val)
 {
     if (peekType() == kArrayType) {
         enterArray();
-        if (nextArrayValue()) val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);  //QUILL: file values can be out of range.
+        if (nextArrayValue()) val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);  //QUILL
         //discard rest
         while (nextArrayValue()) getFloat();
     } else {
@@ -382,7 +382,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
     LottieInterpolator* interpolator = nullptr;
 
     //get a cached interpolator if it has any.
-    //QUILL: search only the newest ones, to keep loading linear.
+    //QUILL
     constexpr uint32_t MAX_SEARCH = 1024;
     auto cached = comp->interpolators.count;
     for (uint32_t i = 0; i < cached && i < MAX_SEARCH; ++i) {
@@ -462,7 +462,7 @@ void LottieParser::parsePropertyInternal(T& prop)
         enterArray();
         while (nextArrayValue()) {
             if (peekType() == kObjectType) parseKeyFrame(prop);  //keyframes value
-            else if (peekType() == kNullType) getNull();  //QUILL: a value may be null.
+            else if (peekType() == kNullType) getNull();  //QUILL
             else if (getValue(prop.value)) break; //multi value property with no keyframes
         }
         prop.prepare();
@@ -516,7 +516,7 @@ bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const ch
     } else if (KEY_AS("x") && expressions) {
         getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
     } else if (KEY_AS("sid")) {
-        skip();  //QUILL: Quill does not override slots.
+        skip();  //QUILL
     } else return false;
     return true;
 }
@@ -641,7 +641,7 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
             if (KEY_AS("n")) style = getString();
             else if (KEY_AS("v")) {
                 if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
-                else if (!stroke->dashattr || stroke->dashattr->size < 64) parseProperty(stroke->dashValue());  //QUILL: its counters are 8 bits.
+                else if (!stroke->dashattr || stroke->dashattr->size < 64) parseProperty(stroke->dashValue());  //QUILL
                 else skip();
             } else skip();
         }
@@ -927,7 +927,7 @@ LottieObject* LottieParser::parseObject(const char* type)
 //capture the type name if the upcoming type is irregularly addressed after the actual properties.
 char* LottieParser::captureType()
 {
-    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL: only a key has a string to compare.
+    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL
 
     auto level = 0;
     for (auto p = getPos(); *p != '\0'; ++p) {
@@ -935,7 +935,7 @@ char* LottieParser::captureType()
         else if (*p == '}') {
             if (--level < 0) break;
         } else if (*p == '\"') {
-            //QUILL: read strings whole, and only a key counts.
+            //QUILL
             auto name = p + 1;
             for (++p; *p != '\0' && *p != '\"'; ++p) {
                 if (*p == '\\' && p[1] != '\0') ++p;
@@ -1180,7 +1180,7 @@ void LottieParser::parseChars(Array<LottieGlyph*>& glyphs)
         auto glyph = new LottieGlyph;
         while (auto key = nextObjectKey()) {
             if (KEY_AS("ch")) glyph->code = getStringCopy();
-            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(tvg::clamp(getFloat(), 0.0f, 65535.0f));  //QUILL: file values can be out of range.
+            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(tvg::clamp(getFloat(), 0.0f, 65535.0f));  //QUILL
             else if (KEY_AS("style")) glyph->style = getStringCopy();
             else if (KEY_AS("w")) glyph->width = getFloat();
             else if (KEY_AS("fFamily")) glyph->family = getStringCopy();
@@ -1645,7 +1645,7 @@ void LottieParser::postProcess(Array<LottieGlyph*>& glyphs)
         auto glyph = *g;
         ARRAY_FOREACH(f, comp->fonts) {
             auto font = *f;
-            if (!font->family || !glyph->family || !font->style || !glyph->style) continue;  //QUILL: both are optional in the file.
+            if (!font->family || !glyph->family || !font->style || !glyph->style) continue;  //QUILL
             if (!strcmp(font->family, glyph->family) && !strcmp(font->style, glyph->style)) {
                 font->chars.push(glyph);
                 free(glyph->family);

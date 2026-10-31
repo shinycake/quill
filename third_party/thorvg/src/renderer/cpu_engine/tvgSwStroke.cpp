@@ -61,7 +61,7 @@ static void _rotate(Point& pt, float radian)
 static void _growBorder(SwStrokeBorder* border, uint32_t newPts)
 {
     if (border->pts.count + newPts <= border->pts.reserved) return;
-    border->pts.grow(std::max(newPts * 20, border->pts.count / 2));  //QUILL: geometric, for long borders.
+    border->pts.grow(std::max(newPts * 20, border->pts.count / 2));  //QUILL
     border->tags = tvg::realloc<uint8_t>(border->tags, border->pts.reserved);      //align the pts / tags memory size
 }
 
@@ -364,8 +364,7 @@ static void _lineTo(SwStroke& stroke, const Point& to)
     stroke.length = length;
 }
 
-//QUILL: the step a float can still resolve around these points, at least TINY_STEP. Far from
-//the origin rounding is larger than that, and a curve would split into noise until the stack ends.
+//QUILL
 static float _tinyStep(const Point& a, const Point& b, const Point& c, const Point& d)
 {
     constexpr auto FLOAT_ROUNDING = 1.0f / 2097152.0f;

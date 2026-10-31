@@ -85,7 +85,7 @@ static inline constexpr const T& clamp(const T& v, const T& min, const T& max)
 template<typename T = uint8_t>
 static inline T remap255(float val)
 {
-    return static_cast<T>(nearbyintf(clamp(val, 0.0f, 1.0f) * 255.0f));  //QUILL: file values can be out of range.
+    return static_cast<T>(nearbyintf(clamp(val, 0.0f, 1.0f) * 255.0f));  //QUILL
 }
 
 /************************************************************************/
@@ -574,7 +574,7 @@ static inline T lerp(const T &start, const T &end, float t)
     return static_cast<T>(start + (end - start) * t);
 }
 
-//QUILL: a specialization, so calls that name the type get the clamp too. t comes from a file.
+//QUILL
 template <>
 inline uint8_t lerp<uint8_t>(const uint8_t& start, const uint8_t& end, float t)
 {

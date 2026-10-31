@@ -34,9 +34,11 @@ nothing, and a font with no name is passed over. The small caps buffer lives as
 long as the glyph search that reads it.
 
 `src/loaders/lottie/tvgLottieModifier.cpp`, `tvgLottieModifier.h`: a path with
-nothing to modify stays as it is. Rounding reads a polystar's layout once, and a
-second pass treats the result as a plain path. An offset adds no more than eight
-times its input's points by splitting curves.
+nothing to modify stays as it is: rounding leaves fewer than three points alone,
+and an offset closes only what it opened and reads a corner's second point only
+when it exists. Rounding reads a polystar's layout once, and a second pass treats
+the result as a plain path. An offset adds no more than eight times its input's
+points by splitting curves.
 
 `src/loaders/lottie/tvgLottieModel.cpp`, `tvgLottieModel.h`: a precomp layer's
 children come only from its asset, groups carry a flag for the time they build,

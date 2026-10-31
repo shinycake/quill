@@ -167,7 +167,7 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
 {
     constexpr auto ROUNDED_POLYSTAR_MAGIC_NUMBER = 0.47829f;
 
-    //QUILL: fewer than three points have no corner to round.
+    //QUILL
     if (in.pts.count < 3) {
         if (next) return next->path(in, out, nullptr);
         out.cmds.push(in.cmds);
@@ -230,7 +230,7 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
     }
     path.cmds.push(PathCommand::Close);
 
-    //QUILL: this path no longer has a polystar's layout.
+    //QUILL
     if (next) return next->path(path, out, nullptr);
 }
 
@@ -295,7 +295,7 @@ void LottieOffsetModifier::corner(RenderPath& out, Line& line, Line& nextLine, u
     if (intersected(line, nextLine, intersect, inside)) {
         if (inside) {
             if (nextClose) {
-                //QUILL: the start point may be all that is out so far.
+                //QUILL
                 if (movetoOutIndex + 1 < out.pts.count && tvg::zero(out.pts[movetoOutIndex] - out.pts[movetoOutIndex + 1])) out.pts[movetoOutIndex + 1] = intersect;
                 out.pts[movetoOutIndex] = intersect;
             }
@@ -434,7 +434,7 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out, 
     auto offset = clockwise(in.pts.data, in.pts.count) ? this->offset : -this->offset;
     auto threshold = 1.0f / fabsf(offset) + 1.0f;
     uint32_t pending{};
-    auto limit = path.pts.count + in.pts.count * 8;  //QUILL: the points that splitting curves may reach.
+    auto limit = path.pts.count + in.pts.count * 8;  //QUILL
 
     for (uint32_t iCmd = 0, iPt = 0; iCmd < in.cmds.count; ++iCmd) {
         switch (in.cmds[iCmd]) {
@@ -460,7 +460,7 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out, 
                 break;
             }
             default: {
-                if (state.moveto) break;  //QUILL: nothing is out, so nothing closes.
+                if (state.moveto) break;  //QUILL
                 if (!tvg::zero(in.pts[iPt - 1] - in.pts[state.movetoInIndex])) {
                     corner(path, state.line, state.firstLine, state.movetoOutIndex, true);
                 }

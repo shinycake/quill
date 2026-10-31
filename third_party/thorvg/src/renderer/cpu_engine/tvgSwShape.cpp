@@ -55,7 +55,7 @@ static void _dashLineTo(SwDashStroke& dash, const Point& to, bool validPoint)
         }
     //draw the current line partially
     } else {
-        while (len - dash.curLen > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL: see SwDashStroke::steps.
+        while (len - dash.curLen > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL
             --dash.steps;
             Line left, right;
             if (dash.curLen > 0) {
@@ -120,7 +120,7 @@ static void _dashCubicTo(SwDashStroke& dash, const Point& ctrl1, const Point& ct
         }
     //draw the current line partially
     } else {
-        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL: see SwDashStroke::steps.
+        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL
             --dash.steps;
             Bezier left, right;
             if (dash.curLen > 0) {

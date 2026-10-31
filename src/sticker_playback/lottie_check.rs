@@ -1,74 +1,41 @@
-//! Limits on a sticker's Lottie document, checked over the parsed JSON
-//! before any of it reaches the native renderer. Stickers come from any
-//! chat, so what a file may ask of the renderer is bounded here, and
-//! `tgs_json` hands ThorVG the document serialized from the value checked,
-//! so both read the same thing. The caps and the real stickers they were
-//! set against are in docs/decisions/thorvg-sticker-renderer.md.
+//! The caps and the real stickers they were set against are in
+//! docs/decisions/thorvg-sticker-renderer.md.
 #![deny(clippy::indexing_slicing)]
 
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_ulong};
 
-/// Largest magnitude of any number in an animation: coordinates, scales
-/// in percent, frame numbers.
 const MAX_NUMBER: f64 = 1_048_576.0;
-/// Layers in a document, precomps included.
 const MAX_LAYERS: usize = 8192;
-/// Masks on a layer.
 const MAX_MASKS: usize = 256;
-/// How deep precomps may nest.
 const MAX_PRECOMP_DEPTH: usize = 32;
-/// How deep shape groups may nest.
 const MAX_GROUP_DEPTH: usize = 64;
-/// Points of a star, copies of a repeater, ridges of a zigzag.
-const MAX_COUNT: f64 = 1024.0;
-/// Color stops of a gradient.
+const MAX_REPEATS: f64 = 1024.0;
 const MAX_GRADIENT_STOPS: u64 = 1024;
-/// Most work one frame may ask for: about fifteen times the costliest real
-/// document measured.
 const MAX_WORK: u64 = 1 << 22;
-/// The work of a vertex of a path.
 const VERTEX_WORK: u64 = 16;
-/// The work of a layer, or of a shape in a paint: one raster pass.
 const SHAPE_WORK: u64 = 64;
-/// The work of a mask, matte or effect: an offscreen copy of the canvas.
 const OFFSCREEN_WORK: u64 = 1024;
-/// How many plain paints a dashed stroke counts as.
 const DASHED_PAINTS: u64 = 16;
-/// How many times an offset can multiply a path's points. ThorVG holds
-/// its curve splitting to this.
 const OFFSET_COPIES: u64 = 9;
-/// The highest layer kind Lottie defines.
 const MAX_LAYER_KIND: u64 = 15;
-/// The layer kind that shows a precomp.
 const PRECOMP: u64 = 0;
-/// The layer kind that shows text.
 const TEXT: u64 = 5;
-/// The effect kind that only holds a value for other properties.
-const SLIDER: u64 = 5;
+const CUSTOM_EFFECT: u64 = 5;
+const ANIMATION_SECTIONS: [&str; 3] = ["layers", "assets", "chars"];
 
-/// Why a document was refused. Callers show one message for all of these;
-/// the reasons exist for tests and for checks against real stickers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Malformed {
-    /// A number outside [`MAX_NUMBER`].
     Number,
-    /// A key with a NUL in it.
     Key,
-    /// A null in an array, or a property array of mixed kinds.
     Array,
-    /// A layer list or layer that is not what a layer has to be.
     Layer,
-    /// A shape list or shape that is not what a shape has to be.
     Shape,
-    /// A precomp that is not usable, or contains itself.
     Asset,
-    /// More than the limits allow.
     TooComplex,
 }
 
-/// Checks `doc`, a whole Lottie document.
 pub(super) fn check(doc: &Value) -> Result<(), Malformed> {
     if work(doc)? > MAX_WORK {
         return Err(Malformed::TooComplex);
@@ -76,10 +43,8 @@ pub(super) fn check(doc: &Value) -> Result<(), Malformed> {
     Ok(())
 }
 
-/// The work of one frame of `doc`, once its structure has passed.
 fn work(doc: &Value) -> Result<u64, Malformed> {
-    // The rest of a document (fitz, markers, meta) is not animation data.
-    for section in ["layers", "assets", "chars"] {
+    for section in ANIMATION_SECTIONS {
         if let Some(value) = doc.get(section) {
             check_values(value)?;
         }
@@ -97,8 +62,7 @@ fn work(doc: &Value) -> Result<u64, Malformed> {
     Ok(cost.work)
 }
 
-/// Rules for every value, wherever it sits. `serde_json`'s recursion limit
-/// bounds the depth.
+/// `serde_json`'s recursion limit bounds the depth.
 fn check_values(value: &Value) -> Result<(), Malformed> {
     match value {
         Value::Number(number) => {
@@ -134,12 +98,14 @@ fn check_values(value: &Value) -> Result<(), Malformed> {
     }
 }
 
-/// The largest value a keyframed or static property can come to: its
-/// biggest number, widened by how far its easing handles overshoot.
 fn peak(property: &Value) -> f64 {
     let (mut biggest, mut handle) = (0.0, 0.0);
     scan(property, &mut biggest, &mut handle);
-    biggest * (1.0 + 2.0 * handle)
+    biggest * easing_overshoot(handle)
+}
+
+fn easing_overshoot(handle: f64) -> f64 {
+    1.0 + 2.0 * handle
 }
 
 /// `serde_json`'s recursion limit bounds the depth.
@@ -164,8 +130,7 @@ fn scan(value: &Value, biggest: &mut f64, handle: &mut f64) {
     }
 }
 
-/// The vertices of the longest path a path property holds. `serde_json`'s
-/// recursion limit bounds the depth.
+/// `serde_json`'s recursion limit bounds the depth.
 fn vertices(path: &Value) -> u64 {
     match path {
         Value::Array(items) => items.iter().map(vertices).max().unwrap_or(0),
@@ -183,24 +148,20 @@ fn vertices(path: &Value) -> u64 {
     }
 }
 
-/// A count a shape takes from `property`, within [`MAX_COUNT`].
-fn count(shape: &Map<String, Value>, property: &str) -> Result<u64, Malformed> {
-    let count = shape.get(property).map_or(0.0, peak);
-    if count > MAX_COUNT {
+fn repeats(shape: &Map<String, Value>, property: &str) -> Result<u64, Malformed> {
+    let repeats = shape.get(property).map_or(0.0, peak);
+    if repeats > MAX_REPEATS {
         return Err(Malformed::TooComplex);
     }
-    Ok(count as u64)
+    Ok(repeats as u64)
 }
 
-/// What a run of layers comes to once expanded.
 #[derive(Clone, Copy, Default)]
 struct Cost {
     work: u64,
-    /// Precomp levels below it.
-    height: usize,
+    levels_below: usize,
 }
 
-/// A precomp as the walk reaches it.
 enum Visit {
     NotYet,
     Open,
@@ -218,7 +179,6 @@ struct Walk<'a> {
     /// lookup, so this walks the graph ThorVG will build.
     by_key: HashMap<c_ulong, usize>,
     layers_seen: usize,
-    /// The work of the costliest glyph in the document's font.
     glyph_work: u64,
 }
 
@@ -272,8 +232,6 @@ impl<'a> Walk<'a> {
         Ok(walk)
     }
 
-    /// The work of drawing `layers` in a frame, once precomps, repeaters
-    /// and modifiers are expanded.
     fn layers(&mut self, layers: &'a [Value], depth: usize) -> Result<Cost, Malformed> {
         self.layers_seen = self.layers_seen.saturating_add(layers.len());
         if self.layers_seen > MAX_LAYERS {
@@ -287,7 +245,7 @@ impl<'a> Walk<'a> {
                 .work
                 .saturating_add(SHAPE_WORK)
                 .saturating_add(cost.work);
-            total.height = total.height.max(cost.height);
+            total.levels_below = total.levels_below.max(cost.levels_below);
         }
         Ok(total)
     }
@@ -319,7 +277,7 @@ impl<'a> Walk<'a> {
         }
         let effects = layer.get("ef").and_then(Value::as_array);
         let drawn = effects.into_iter().flatten();
-        let drawn = drawn.filter(|effect| effect.get("ty").and_then(Value::as_u64) != Some(SLIDER));
+        let drawn = drawn.filter(|effect| effect.get("ty").and_then(Value::as_u64) != Some(CUSTOM_EFFECT));
         let matte = ["tt", "td"].iter().any(|key| layer.contains_key(*key));
         let offscreen = drawn.count() as u64 + u64::from(matte);
         cost.work = cost
@@ -336,18 +294,15 @@ impl<'a> Walk<'a> {
         }
         if let Some(reference) = layer.get("refId") {
             let reference = reference.as_str().ok_or(Malformed::Layer)?;
-            // A reference to nothing shows nothing.
             if precomp && let Some(index) = self.by_key.get(&asset_key(reference)).copied() {
                 let shown = self.asset(index, depth + 1)?;
                 cost.work = cost.work.saturating_add(shown.work);
-                cost.height = shown.height + 1;
+                cost.levels_below = shown.levels_below + 1;
             }
         }
         Ok(cost)
     }
 
-    /// Each asset is walked once, so its height is kept with its cost: how
-    /// deep a later reference lands depends on where that reference sits.
     fn asset(&mut self, index: usize, depth: usize) -> Result<Cost, Malformed> {
         let Some(asset) = self.assets.get_mut(index) else {
             return Ok(Cost::default());
@@ -366,15 +321,17 @@ impl<'a> Walk<'a> {
                 cost
             }
         };
-        if depth.saturating_add(cost.height) > MAX_PRECOMP_DEPTH {
+        if lands_too_deep(depth, cost) {
             return Err(Malformed::TooComplex);
         }
         Ok(cost)
     }
 }
 
-/// The work of a shape list. Each fill or stroke in it paints its paths
-/// on its own.
+fn lands_too_deep(depth: usize, asset: Cost) -> bool {
+    depth.saturating_add(asset.levels_below) > MAX_PRECOMP_DEPTH
+}
+
 fn shape_list(shapes: &[Value], depth: usize) -> Result<u64, Malformed> {
     if depth > MAX_GROUP_DEPTH {
         return Err(Malformed::TooComplex);
@@ -389,11 +346,11 @@ fn shape_list(shapes: &[Value], depth: usize) -> Result<u64, Malformed> {
         };
         let own = match kind {
             Some("rp") => {
-                copies = copies.saturating_mul(count(shape, "c")?.max(1));
+                copies = copies.saturating_mul(repeats(shape, "c")?.max(1));
                 continue;
             }
             Some("zz") => {
-                copies = copies.saturating_mul(count(shape, "r")? * 2 + 2);
+                copies = copies.saturating_mul(repeats(shape, "r")? * 2 + 2);
                 continue;
             }
             Some("op") => {
@@ -408,7 +365,7 @@ fn shape_list(shapes: &[Value], depth: usize) -> Result<u64, Malformed> {
                 Some(items) => shape_list(items.as_array().ok_or(Malformed::Shape)?, depth + 1)?,
                 None => 0,
             },
-            Some("sr") => path_work(count(shape, "pt")? * 2),
+            Some("sr") => path_work(repeats(shape, "pt")? * 2),
             Some("sh") => path_work(shape.get("ks").map_or(0, vertices)),
             Some("rc" | "el") => path_work(4),
             Some("fl") => {
@@ -464,7 +421,6 @@ fn glyph_work(doc: &Value) -> Result<u64, Malformed> {
     Ok(work)
 }
 
-/// Bytes of the longest string a text layer shows.
 fn text_length(layer: &Map<String, Value>) -> u64 {
     let keyframes = layer
         .get("t")

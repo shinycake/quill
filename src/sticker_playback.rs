@@ -100,11 +100,10 @@ fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     {
         return Err("Invalid animated sticker duration".into());
     }
-    lottie_check::check(&value).map_err(|_| "Invalid animated sticker")?;
     apply_fitzpatrick(&mut value, fitz);
-    // ThorVG reads exactly the value checked above. serde_json keeps the
-    // file's key order (preserve_order), which ThorVG's streaming parser
-    // needs ("ty" first in a shape).
+    lottie_check::check(&value).map_err(|_| "Invalid animated sticker")?;
+    // serde_json keeps the file's key order (preserve_order), which ThorVG's
+    // streaming parser needs.
     let json = serde_json::to_vec(&value).map_err(|_| "Invalid animated sticker")?;
     Ok(Tgs { json, fps })
 }

@@ -33,7 +33,7 @@ struct PathSet
 {
     Point* pts = nullptr;
     PathCommand* cmds = nullptr;
-    uint32_t ptsCnt = 0;  //QUILL: 32 bits, for long paths.
+    uint32_t ptsCnt = 0;  //QUILL
     uint32_t cmdsCnt = 0;
 
     void convert(RenderPath& to)
@@ -83,7 +83,7 @@ struct ColorStop
 
 struct TextDocument
 {
-    //QUILL: every field here is optional in the file.
+    //QUILL
     char* text = nullptr;
     float height = 0.0f;
     float shift = 0.0f;
@@ -136,7 +136,7 @@ struct AssetSrc
 
 static inline RGB32 lerp(const RGB32& s, const RGB32& e, float t)
 {
-    //QUILL: clamped as a float, since t comes from a file.
+    //QUILL
     return {
         (int32_t)tvg::clamp(s.r + (e.r - s.r) * t, 0.0f, 255.0f),
         (int32_t)tvg::clamp(s.g + (e.g - s.g) * t, 0.0f, 255.0f),
