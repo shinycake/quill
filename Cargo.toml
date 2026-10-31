@@ -359,3 +359,6 @@ gpui-pre-windows = { path = "third_party/gpui-pre-windows" }
 gpui-pre-wgpu = { path = "third_party/gpui-pre-wgpu" }
 gpui-pre-apple = { path = "third_party/gpui-pre-apple" }
 gpui-pre = { path = "third_party/gpui-pre" }
+# Opus voice-note CPU (docs/decisions/opus-decode-cpu.md): opus-decoder 0.1.1
+# with the CELT inverse MDCT on a mixed-radix FFT instead of a direct DFT.
+opus-decoder = { path = "third_party/opus-decoder" }
