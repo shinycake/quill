@@ -193,3 +193,7 @@ fn widening_until_posts_fit_lays_out_none_again(cx: &mut TestAppContext) {
     );
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[path = "heap_return_tests.rs"]
+mod heap_return;

@@ -1,5 +1,9 @@
 # Freed heap goes back once Quill is idle, after any large free (2026-10-31)
 
+**Outcome: not worth merging** ([Recommendation](#recommendation)). The
+release runs as designed, but it saves nothing on macOS 27 and under
+10 MB at a time on Linux, memory that main also returns, later.
+
 ## What was wrong
 
 Measured on the owner's Mac (M1 Pro, offline demo, release build): after
@@ -157,30 +161,106 @@ release runs.
 - libmalloc can also run xzone malloc as the default zone
   (`CONFIG_XZONE_MALLOC` is 1 on 64-bit). Whether a given process gets it
   is decided at launch (`malloc_config_from_input`). These sources do not
-  settle whether Quill gets it on macOS 27, or what its pressure relief
-  does. `MallocReportConfig=1` prints "Enable Xzone Malloc: 0/1" at
-  launch. The sweep-r3 probe found that 1–4 KB blocks went back and
-  6,000 B and up did not. That boundary does not match the classic
-  zone's tiny/small split (1,008 B), so that probe may not have run on
-  the classic zone.
+  say what its pressure relief does. `MallocReportConfig=1` prints
+  "Enable Xzone Malloc: 0/1" at launch. The sweep-r3 probe found that
+  1–4 KB blocks went back and 6,000 B and up did not. That boundary does
+  not match the classic zone's tiny/small split (1,008 B), so that probe
+  may not have run on the classic zone. On macOS 27.0.1, Quill appears to
+  get xzone, and its relief does nothing (measured below).
 
-## If relief cannot return the Small pages
+## Measured on the Mac: no saving on macOS 27
 
-If the Mac shows the release running (the trace line) and "Malloc Small"
-dirty does not move, the free space sits between live blocks, or the
-allocator ignores the call. The next step, not built here, would make a
-freed layout free whole pages. Each cached layout's glyphs and clusters
-(two thirds of its bytes, `paragraph-cache-widths.md`) would go into one
-allocation per layout, sized from `BidiParagraph::heap_size`. A long
-post's layout is about 55 KB. Rounded up to `large_alloc`'s 64 KiB, it is
-served by the arena, which unmaps its pages when it is freed, as it
-already does for pictures. That costs up to one 16 KiB page of rounding
-per layout, for at most 2,048 layouts, and it needs a gpui-base change
-(`QUILL-CHANGES.md`). Short messages' layouts would stay in malloc.
+The owner's Mac on macOS 27.0.1: the 1,500-post scroll on `ad5487c6e` (the
+first version of this change) and on main, two runs each.
+
+- The trigger works as designed. One `heap release: 193.9 MB freed` line
+  came 3.6 to 4.6 s after the scroll ended, and the call took 0.01 ms.
+- `malloc_zone_pressure_relief` does nothing there. It returned 0, and
+  the footprint did not move.
+- A standalone probe that allocated 200 MB and freed all of it got the
+  same result, so fragmentation is not the cause. Freeing alone took the
+  probe's footprint from 202 MB to 75 MB, before any relief call. The
+  allocator looks like xzone malloc, which marks empty pages reclaimable
+  as they are freed, so relief finds nothing left to do.
+- Main and this branch idle at the same footprint, 134 to 135 MB. The
+  malloc zone had 87 MB allocated and only about 14 MB free inside it.
+
+So this change saves no memory on macOS 27. The call stays: it costs
+0.01 ms once per idle period, and on the classic allocator of older macOS
+it still madvises free small-region pages (above). The step that the
+first version of this doc proposed for when relief can't return the
+small pages (one allocation per cached layout, from `large_alloc`'s
+arena) isn't worth building: with about 14 MB free inside the zone, it
+has little to win.
+
+## Measured on Linux
+
+`src/ui/conversation/heap_return_tests.rs` (two ignored tests beside the
+paragraph cache's scroll tests) runs Quill's own allocations in the test
+build:
+
+1. The demo's group gets 1,500 posts of 110 words, a number and a link.
+   The test scrolls through them newest to oldest, a frame each, as
+   `paragraph-cache-widths.md` measured.
+2. It opens another chat and deletes the group's messages down to the 60
+   newest. That frees what the prune frees for a closed chat. (The demo
+   keeps every history, so the prune itself does not run.)
+3. It empties the paragraph cache. Quill never does this: the step shows
+   the most that laid-out text could give back.
+
+After each step, the test reads the resident size (`/proc/self/statm`)
+and malloc's heap in use (`mallinfo2`), calls `free_heap::release()`, and
+reads the resident size again. Setup: glibc 2.39, with `MALLOC_ARENA_MAX=1`
+so that the test thread uses the main arena, as Quill's UI thread does.
+
+Right-to-left posts, which the paragraph cache lays out (MB):
+
+| After | Resident | Heap in use | The release gives back |
+| --- | --- | --- | --- |
+| The posts loaded | 149.2 | 14.2 | |
+| The scroll (163.7 MB of layouts let go on the way) | 221.7 | 77.1 | 5.7 |
+| Leaving the chat (history cut to 60) | 216.4 | 66.9 | 9.9 |
+| Emptying the paragraph cache | 206.5 | 4.3 | 44.3 |
+
+Posts in Latin letters don't reach the paragraph cache: gpui lays them out
+in its own per-frame cache. The scroll grew the resident size by 1.1 MB,
+and the release gave back 0.6 MB. Leaving the chat freed 8.9 MB of heap,
+and the release gave back 9.0 MB.
+
+What the numbers mean:
+
+- After a long scroll, about 6 MB comes back. The paragraph cache stays at
+  its 64 MiB budget. The layouts that replace the ones it lets go reuse
+  most of their memory, so the 163.7 MB that it noted is turnover, not
+  free memory.
+- Leaving a chat of 1,500 long posts gives back about 10 MB.
+- Only freeing all laid-out text at once would give back much (44 MB),
+  and Quill never does that.
+- Main releases at none of these steps. Its image idle trim releases
+  once the pictures on screen change, which in real chats (avatars,
+  photos, stickers) happens often. The same memory then comes back,
+  later. What this branch gains on Linux is timing, in stretches with no
+  picture changes.
+
+## Recommendation
+
+Don't merge this branch. It saves nothing on macOS 27, and on Linux it
+returns under 10 MB at a time, which main returns too at the next
+picture change. That does not pay for its bookkeeping: freed-byte notes in
+four places (paragraph cache, history, image cache, sticker frames), the
+`IdleRelease` policy, input hooks in five places, and a module to schedule
+the release.
+
+Keep what was learned instead. A doc-only change to main could carry this
+file, mark the left-to-do item in `sweep-r3-browse-memory.md` as done
+with this outcome, and add a comment at main's `release()` saying that it
+does nothing on macOS 27. Main's release (once per window, after image
+activity) costs 0.01 ms on the Mac and is otherwise harmless.
 
 ## Tests
 
-All run on Linux, deterministically, with no wall-clock waits:
+All run on Linux, deterministically, with no wall-clock waits. The two
+measurements above are ignored tests that print instead of checking.
 
 - `free_heap::tests` (library) test the policy on fabricated instants:
   one release once quiet, none below 1 MiB, none while input comes and
@@ -220,24 +300,3 @@ rule), all three input and animation tests fail:
   and for 2 s after the last free those frames made. It released at
   about 4 s, past the 3 s that the test allows. The new rule releases
   2 s after the last wheel step.
-
-## What only the Mac can confirm
-
-Use the same 1,500-post scroll on main and on this branch, release builds
-with `--features demo-capture`, `QUILL_TRACE_TICKS=1` and
-`MallocReportConfig=1`. `QUILL_DEMO_STRESS_REDRAW=0` is optional now:
-the stress demo's 60 Hz redraw only moves the release to right after one
-of its frames. After the scroll, leave the window alone. Run
-`footprint -p <pid>` and `vmmap --summary <pid>` at 10 s and at 40 s of
-idle. Read the footprint, the "MALLOC_SMALL" dirty row, and the malloc
-zone table (allocated against dirty) for both builds.
-
-- Expected if relief works on these pages: one `heap release` line about
-  2 s after the last scroll input. The malloc zone's dirty memory falls
-  toward its allocated 49 MB, by up to the 25 MB free inside it, and the
-  footprint falls by the same.
-- If the line shows and the numbers stay where they were, relief cannot
-  return those pages: see the section above.
-- Check for hitches: a frame trace across the release, with a looping
-  emoji on screen. The release should sit between two ticks and delay
-  neither.

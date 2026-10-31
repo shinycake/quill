@@ -1,7 +1,9 @@
 //! Freed heap pages go back to the system once Quill goes idle.
 //!
-//! Allocators keep what is freed for reuse: glibc in its arenas, macOS's
-//! libmalloc in its tiny, small and medium regions. Quill now and then
+//! Allocators keep what is freed for reuse: glibc in its arenas, and the
+//! classic macOS allocator in its tiny, small and medium regions. (macOS 27
+//! runs xzone malloc, which gives empty pages back as they are freed: the
+//! release does nothing there, see [`release`].) Quill now and then
 //! frees a lot at once: laid-out text the paragraph cache lets go, the
 //! messages of chats left, decoded pictures and sticker frames. Each of
 //! those notes its bytes here ([`note_freed`]). Once enough was freed, the
@@ -54,7 +56,12 @@ pub fn releases() -> u64 {
 
 /// Hand the allocator's free pages back to the system.
 /// - macOS: `malloc_zone_pressure_relief` on every zone. Blocks of 64 KiB
-///   and up already went back when freed (`quill::large_alloc`).
+///   and up already went back when freed (`quill::large_alloc`). On macOS
+///   27 (xzone malloc) the call does nothing: measured on 27.0.1, it
+///   returned 0 and the footprint did not move, even in a probe that had
+///   just freed 200 MB, because freeing alone had already taken that
+///   probe's footprint from 202 to 75 MB. It stays for the classic
+///   allocator of older macOS, where it madvises free small-region pages.
 /// - Linux (glibc): `malloc_trim`.
 /// - Windows and other libcs: nothing; the Windows heap decommits large
 ///   free ranges on its own.
