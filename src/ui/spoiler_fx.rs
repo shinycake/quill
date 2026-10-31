@@ -349,43 +349,71 @@ pub(super) fn specks_fps() -> u32 {
 
 fn draw_text_specks(rect: Bounds<Pixels>, origin: Point<Pixels>, color: Hsla, window: &mut Window) {
     let now = loop_ms();
-    let (left, top) = (
-        (rect.left() - origin.x) / px(1.),
-        (rect.top() - origin.y) / px(1.),
-    );
-    let (right, bottom) = (
-        left + rect.size.width / px(1.),
-        top + rect.size.height / px(1.),
-    );
+    let area = Bounds::new(rect.origin - origin, rect.size);
+    // One draw order for all of them: specks overlap, so finding each its
+    // own in the scene's tree can't prune and costs more than painting them.
+    // They share a color, so their order doesn't show. A speck on the edge
+    // reaches past `rect` by half its size.
+    window.paint_layer(rect.dilate(px(TEXT.size_max / 2.)), |window| {
+        text_specks(area, now, |x, y, particle, opacity| {
+            let speck = Bounds::new(
+                point(
+                    origin.x + px(x - particle.w / 2.),
+                    origin.y + px(y - particle.h / 2.),
+                ),
+                size(px(particle.w), px(particle.h)),
+            );
+            window.paint_quad(
+                fill(speck, color.opacity(color.a * opacity))
+                    .corner_radii(px(particle.w.min(particle.h) / 2.)),
+            );
+        });
+    });
+}
+
+/// Calls `speck` with the center, particle and opacity of each speck that
+/// shows inside `area` (the field's points) `now` ms into the loop.
+fn text_specks(area: Bounds<Pixels>, now: f32, mut speck: impl FnMut(f32, f32, &Particle, f32)) {
+    let (left, top) = (area.left() / px(1.), area.top() / px(1.));
+    let (right, bottom) = (area.right() / px(1.), area.bottom() / px(1.));
     let first_col = (left / CANVAS).floor() as i32;
     let first_row = (top / CANVAS).floor() as i32;
     let last_col = (right / CANVAS).floor() as i32;
     let last_row = (bottom / CANVAS).floor() as i32;
-    for row in first_row..=last_row {
-        for col in first_col..=last_col {
-            let (tile_x, tile_y) = (col as f32 * CANVAS, row as f32 * CANVAS);
-            for particle in TEXT_FIELD.iter() {
-                let Some((x, y, opacity)) = place(&TEXT, particle, now) else {
-                    continue;
-                };
-                let (x, y) = (tile_x + x, tile_y + y);
-                if x < left || x > right || y < top || y > bottom {
+    for particle in live_text_particles(now) {
+        let Some((x, y, opacity)) = place(&TEXT, particle, now) else {
+            continue;
+        };
+        for row in first_row..=last_row {
+            let y = row as f32 * CANVAS + y;
+            if y < top || y > bottom {
+                continue;
+            }
+            for col in first_col..=last_col {
+                let x = col as f32 * CANVAS + x;
+                if x < left || x > right {
                     continue;
                 }
-                let speck = Bounds::new(
-                    point(
-                        origin.x + px(x - particle.w / 2.),
-                        origin.y + px(y - particle.h / 2.),
-                    ),
-                    size(px(particle.w), px(particle.h)),
-                );
-                window.paint_quad(
-                    fill(speck, color.opacity(color.a * opacity))
-                        .corner_radii(px(particle.w.min(particle.h) / 2.)),
-                );
+                speck(x, y, particle, opacity);
             }
         }
     }
+}
+
+/// The text particles alive `now` ms into the loop, and at most a few more.
+/// A particle's start rises with its index, so those are the ones that
+/// started in the last `lifetime()` ms: one run of the field, wrapping past
+/// its end early in the loop.
+fn live_text_particles(now: f32) -> impl Iterator<Item = &'static Particle> {
+    let per_ms = TEXT.count as f32 / LOOP_MS;
+    let oldest = ((now - TEXT.lifetime()) * per_ms).floor() as i64;
+    let newest = (now * per_ms).ceil() as i64;
+    let first = oldest.rem_euclid(TEXT.count as i64) as usize;
+    let (wrapped, from_first) = TEXT_FIELD.split_at_checked(first).unwrap_or_default();
+    from_first
+        .iter()
+        .chain(wrapped)
+        .take((newest - oldest + 1) as usize)
 }
 
 /// A spoiler key: (chat id, message id, run index, caption).
@@ -463,8 +491,11 @@ pub(super) fn revealing() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CANVAS, IMAGE, IMAGE_FIELD, LOOP_MS, TEXT, TEXT_FIELD, TILE_SCALE, place, speck_coverage,
+        CANVAS, FRAME_MS, FRAMES, IMAGE, IMAGE_FIELD, LOOP_MS, TEXT, TEXT_FIELD, TILE_SCALE,
+        live_text_particles, place, speck_coverage, text_specks,
     };
+    use gpui_kit::{Bounds, Pixels, point, px, size};
+    use std::collections::HashSet;
 
     #[test]
     fn specks_fade_in_and_out_over_their_life() {
@@ -494,6 +525,75 @@ mod tests {
             assert!((min - 0.01..=max + 0.01).contains(&speed));
             if let Some((x, y, _)) = place(&TEXT, particle, 1000.) {
                 assert!((0. ..CANVAS).contains(&x) && (0. ..CANVAS).contains(&y));
+            }
+        }
+    }
+
+    #[test]
+    fn the_live_run_holds_every_speck_that_shows() {
+        let frames = (0..FRAMES).map(|frame| frame as f32 * FRAME_MS);
+        let others = (0..200).map(|step| step as f32 * 3.17 + 0.05);
+        let edges = [0.1, 599.9, 600., 600.1, LOOP_MS - 0.001, LOOP_MS];
+        let lifetime_count = TEXT.count as f32 * TEXT.lifetime() / LOOP_MS;
+        for now in frames.chain(others).chain(edges) {
+            let run: HashSet<u32> = live_text_particles(now)
+                .map(|particle| particle.start.to_bits())
+                .collect();
+            assert!(run.len() as f32 <= lifetime_count + 4., "{now}: {}", run.len());
+            for particle in TEXT_FIELD.iter() {
+                if place(&TEXT, particle, now).is_some() {
+                    assert!(run.contains(&particle.start.to_bits()), "{now}: {}", particle.start);
+                }
+            }
+        }
+    }
+
+    /// `(x, y, opacity)` as bits, sorted: what a run paints, in any order.
+    fn sorted(mut specks: Vec<[f32; 3]>) -> Vec<[u32; 3]> {
+        let mut bits: Vec<_> = specks.drain(..).map(|speck| speck.map(f32::to_bits)).collect();
+        bits.sort_unstable();
+        bits
+    }
+
+    /// The field repeated tile by tile, each tile walking every particle.
+    fn tile_by_tile(area: Bounds<Pixels>, now: f32) -> Vec<[f32; 3]> {
+        let (left, top) = (area.left() / px(1.), area.top() / px(1.));
+        let (right, bottom) = (area.right() / px(1.), area.bottom() / px(1.));
+        let mut specks = Vec::new();
+        for row in (top / CANVAS).floor() as i32..=(bottom / CANVAS).floor() as i32 {
+            for col in (left / CANVAS).floor() as i32..=(right / CANVAS).floor() as i32 {
+                for particle in TEXT_FIELD.iter() {
+                    let Some((x, y, opacity)) = place(&TEXT, particle, now) else {
+                        continue;
+                    };
+                    let (x, y) = (col as f32 * CANVAS + x, row as f32 * CANVAS + y);
+                    if x >= left && x <= right && y >= top && y <= bottom {
+                        specks.push([x, y, opacity]);
+                    }
+                }
+            }
+        }
+        specks
+    }
+
+    #[test]
+    fn specks_land_where_a_walk_over_every_tile_puts_them() {
+        // One tile, across a seam, one wide line, a block of lines, and past
+        // the field's corner. The first moments wrap past the field's end.
+        let areas = [
+            (10., 10., 100., 20.),
+            (120., 120., 30., 22.),
+            (0., 44., 420., 20.),
+            (6., 3., 420., 264.),
+            (-40., -30., 80., 60.),
+        ];
+        for now in [0., 33., 300., 599., 990., LOOP_MS - 1.] {
+            for (x, y, width, height) in areas {
+                let area = Bounds::new(point(px(x), px(y)), size(px(width), px(height)));
+                let mut specks = Vec::new();
+                text_specks(area, now, |x, y, _, opacity| specks.push([x, y, opacity]));
+                assert!(!specks.is_empty());
+                assert_eq!(sorted(specks), sorted(tile_by_tile(area, now)), "{now}, {x}, {y}");
             }
         }
     }
