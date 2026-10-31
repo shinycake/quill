@@ -62,11 +62,7 @@ pub(super) fn run(demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: bo
 }
 
 impl Decoder {
-    pub(super) fn start(
-        demuxer: Box<dyn Demuxer>,
-        shared: &Arc<Shared>,
-        want_audio: bool,
-    ) -> Self {
+    pub(super) fn start(demuxer: Box<dyn Demuxer>, shared: &Arc<Shared>, want_audio: bool) -> Self {
         let info = demuxer.info();
         let has_video = info.has_video;
         let mut state = lock(&shared.state);

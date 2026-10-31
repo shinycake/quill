@@ -292,8 +292,7 @@ impl Api {
                 let open: OpenFn = *library.get(b"qv_open\0").map_err(incompatible)?;
                 let info: InfoFn = *library.get(b"qv_info\0").map_err(incompatible)?;
                 let next: NextFn = *library.get(b"qv_next\0").map_err(incompatible)?;
-                let next_sound: NextFn =
-                    *library.get(b"qv_next_sound\0").map_err(incompatible)?;
+                let next_sound: NextFn = *library.get(b"qv_next_sound\0").map_err(incompatible)?;
                 let seek: SeekFn = *library.get(b"qv_seek\0").map_err(incompatible)?;
                 let close: CloseFn = *library.get(b"qv_close\0").map_err(incompatible)?;
                 let set_output: SetOutputFn =

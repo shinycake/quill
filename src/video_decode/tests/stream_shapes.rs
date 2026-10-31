@@ -1,9 +1,9 @@
 use super::super::decode_loop::{Decoder, Turn};
+use super::super::ffi::FfiDemuxer;
 use super::super::{
     AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Clock, Demuxer, Item, MediaInfo,
     OpenOptions, Pixels, Player, Shared, State, VideoFrame, lock,
 };
-use super::super::ffi::FfiDemuxer;
 use super::{decode_all, decoder, fixture, frame};
 use std::collections::VecDeque;
 use std::path::Path;
@@ -359,7 +359,11 @@ fn the_picture_keeps_going_after_the_sound_stops() {
     let t0 = rig.start();
     let run = rig.run(t0, 125);
     assert!(run.sound > 0.99, "{} s of sound", run.sound);
-    assert!(run.last_shown() > 4.9, "picture stopped at {}", run.last_shown());
+    assert!(
+        run.last_shown() > 4.9,
+        "picture stopped at {}",
+        run.last_shown()
+    );
     assert!(run.shown.windows(2).all(|pair| pair[1] > pair[0]));
 }
 
@@ -370,7 +374,11 @@ fn a_seek_past_the_sound_before_any_played_leaves_the_clock_running() {
     rig.player.seek(1.0);
     rig.settle();
     let run = rig.run(t0, 25);
-    assert!(run.last_shown() > 1.9, "picture stopped at {}", run.last_shown());
+    assert!(
+        run.last_shown() > 1.9,
+        "picture stopped at {}",
+        run.last_shown()
+    );
 }
 
 #[test]
@@ -398,7 +406,11 @@ fn sound_filed_behind_its_pictures_plays_on_time() {
     let t0 = rig.start();
     let run = rig.run(t0, 125);
     let expected = 5.0 - FRAME_SECS;
-    assert!((run.last_shown() - expected).abs() < 0.1, "{}", run.last_shown());
+    assert!(
+        (run.last_shown() - expected).abs() < 0.1,
+        "{}",
+        run.last_shown()
+    );
     assert!((run.sound - 5.0).abs() < 1e-6, "{} s of sound", run.sound);
 }
 
@@ -414,7 +426,11 @@ fn sound_too_far_behind_to_reach_arrives_once_the_clock_moves_the_pictures() {
     let t0 = rig.start();
     let run = rig.run(t0, 100);
     assert!(run.sound > 0.0, "the sound stayed out of reach");
-    assert!(run.last_shown() > 1.0, "picture stopped at {}", run.last_shown());
+    assert!(
+        run.last_shown() > 1.0,
+        "picture stopped at {}",
+        run.last_shown()
+    );
 }
 
 #[test]
@@ -431,7 +447,10 @@ fn the_picture_catches_up_after_the_display_stalled() {
         }
     }
     let position = rig.player.position_at(now);
-    assert!((shown - position).abs() <= FRAME_SECS, "{shown} at {position}");
+    assert!(
+        (shown - position).abs() <= FRAME_SECS,
+        "{shown} at {position}"
+    );
 }
 
 #[test]
@@ -558,7 +577,10 @@ fn ffmpeg_keeps_showing_pictures_after_the_sound_stopped_and_ends() {
 }
 
 fn pts_and_pixels(frames: &[VideoFrame]) -> Vec<(f64, &Pixels)> {
-    frames.iter().map(|frame| (frame.pts, &frame.pixels)).collect()
+    frames
+        .iter()
+        .map(|frame| (frame.pts, &frame.pixels))
+        .collect()
 }
 
 #[test]
@@ -606,7 +628,10 @@ fn ffmpeg_sound_past_too_many_pictures_is_out_of_reach_until_some_move() {
     };
     assert!(late.pts > GAP_SOUND_RESUMES_SECS, "{}", late.pts);
     let must_move = GAP_PICTURES - SHIM_HELD_PACKETS;
-    assert!((1..=must_move).contains(&pictures), "{pictures} pictures taken");
+    assert!(
+        (1..=must_move).contains(&pictures),
+        "{pictures} pictures taken"
+    );
     while let Some(item) = demuxer.next().expect("decode") {
         pictures += usize::from(matches!(item, Item::Video(_)));
     }
