@@ -837,6 +837,7 @@ impl QuillApp {
                 let emoji = self.custom_emoji_images(
                     &quote.entities,
                     super::sticker_player::EmojiSide(14.),
+                    super::sticker_player::Part::Chrome,
                     cx,
                 );
                 div()
@@ -854,6 +855,7 @@ impl QuillApp {
                 let emoji = self.custom_emoji_images(
                     &text.entities,
                     super::sticker_player::EmojiSide(14.),
+                    super::sticker_player::Part::Chrome,
                     cx,
                 );
                 div()

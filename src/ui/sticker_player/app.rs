@@ -141,28 +141,24 @@ impl QuillApp {
         self.playback.emoji_plays.get_mut().clear();
     }
 
-    /// `window` let go of `chat` (`None`: the main window): another chat
-    /// opens there, the chat moves to a window of its own, or the window
-    /// closes. Its stickers and lone emoji play from the start when the
-    /// chat shows again (tdesktop clears the played set when the chat is
-    /// left), and the clips only it used close. What another window shows
-    /// plays on untouched: stopping everything here closed a chat window's
-    /// clips and restarted its stickers whenever the main window opened
-    /// another chat. So does the rest of the main window (`Part::Chrome`):
-    /// leaving by window restarted the chat list's emoji on every chat
-    /// switch.
+    /// `window` let go of `chat` (`None`: the main window), or of all of it
+    /// (`what`): another chat opens there, the chat moves to a window of its
+    /// own, or the window closes. Its stickers and lone emoji play from the
+    /// start when the chat shows again (tdesktop clears the played set when
+    /// the chat is left), and the clips only it used close. What another
+    /// window shows plays on untouched: stopping everything here closed a
+    /// chat window's clips and restarted its stickers whenever the main
+    /// window opened another chat. So does the rest of a window that only
+    /// lets go of its chat (`Part::Chrome`): leaving by window restarted the
+    /// chat list's emoji on every chat switch.
     pub(in crate::ui) fn leave_sticker_chat(
         &mut self,
         window: Option<ChatId>,
         chat: Option<ChatId>,
+        what: Leaving,
         cx: &mut Context<QuillApp>,
     ) {
-        let player = &self.playback.stickers;
-        let frames = match window {
-            None => player.leave(None, Leaving::Chat),
-            // A chat window lets go of its chat only as it closes.
-            Some(_) => player.leave(window, Leaving::Window),
-        };
+        let frames = self.playback.stickers.leave(window, what);
         // Lone emoji plays are kept by chat, which may still show in
         // another window.
         if let Some(chat) = chat
@@ -170,11 +166,11 @@ impl QuillApp {
         {
             self.playback.emoji_plays.get_mut().leave_chat(chat.0);
         }
-        match window {
-            // On screen until the main window draws again.
-            None => super::super::image_budget::retire_all(frames),
-            // The chat window closed: nothing shows them.
-            Some(_) => drop_frames(frames, cx),
+        match what {
+            // On screen until the window draws again.
+            Leaving::Chat => super::super::image_budget::retire_all(frames),
+            // The window closed: nothing shows them.
+            Leaving::Window => drop_frames(frames, cx),
         }
     }
 
@@ -552,7 +548,7 @@ impl QuillApp {
             || power_saving::on(power_saving::Flag::EmojiChat)
         {
             return PreviewEmoji {
-                still: self.custom_emoji_images(entities, EmojiSide(14.), cx),
+                still: self.custom_emoji_images(entities, EmojiSide(14.), Part::Chrome, cx),
                 layered: HashMap::new(),
             };
         }
@@ -595,13 +591,14 @@ impl QuillApp {
         out
     }
 
-    /// Images for the custom emoji among `entities`, `side` points across:
-    /// the frame due now when animated, the still meanwhile; unresolved
-    /// ones are absent.
+    /// Images for the custom emoji among `entities`, `side` points across,
+    /// shown in `part` of the window: the frame due now when animated, the
+    /// still meanwhile; unresolved ones are absent.
     pub(in crate::ui) fn custom_emoji_images(
         &self,
         entities: &[quill::text::TextEntity],
         side: EmojiSide,
+        part: Part,
         cx: &mut Context<QuillApp>,
     ) -> HashMap<i64, ImageSource> {
         use quill::text::TextEntityKind;
@@ -624,7 +621,7 @@ impl QuillApp {
                 continue;
             };
             let source = (!power_saving::on(power_saving::Flag::EmojiChat))
-                .then(|| self.custom_emoji_image(item.file_id, item.format, side.0, cx))
+                .then(|| self.custom_emoji_image(item.file_id, item.format, side.0, part, cx))
                 .flatten()
                 .map(ImageSource::from)
                 .or_else(|| {
@@ -642,15 +639,17 @@ impl QuillApp {
     }
 
     /// The frame due now of a custom emoji `side` points across (small,
-    /// many on screen), for an `img`.
+    /// many on screen), for an `img` in `part` of the window. Views of one
+    /// file there share a head.
     pub(in crate::ui) fn custom_emoji_image(
         &self,
         id: FileId,
         format: StickerFormat,
         side: f32,
+        part: Part,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        let head = HeadId::of(Part::Chrome, ("emoji-image", id.0));
+        let head = HeadId::of(part, ("emoji-image", id.0));
         let mode = self.sticker_mode();
         self.sticker_view(ViewAsk::emoji(id, format, head, mode, side), cx)?
             .frame_now()
@@ -663,19 +662,23 @@ impl QuillApp {
         id: FileId,
         format: StickerFormat,
         side: f32,
+        part: Part,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
-        let head = HeadId::of(Part::Chrome, ("emoji-image", id.0));
+        let head = HeadId::of(part, ("emoji-image", id.0));
         let at = PlayMode::At(Duration::ZERO);
         self.sticker_view(ViewAsk::emoji(id, format, head, at, side), cx)?
             .frame_now()
     }
 
-    /// The frame due now of a sticker in a panel cell `side` points across.
+    /// The frame due now of a sticker in a cell `side` points across, on
+    /// `head`: a panel's ([`panel_sticker_head`]), or one of the open
+    /// chat's (its greeting).
     pub(in crate::ui) fn sticker_image(
         &self,
         id: FileId,
         format: StickerFormat,
+        head: HeadId,
         side: f32,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
@@ -683,11 +686,16 @@ impl QuillApp {
         if power_saving::on(power_saving::Flag::StickersPanel) {
             return None;
         }
-        let head = HeadId::of(Part::Chrome, ("panel-sticker", id.0));
         let mode = self.sticker_mode();
         self.sticker_view(ViewAsk::sticker(id, format, head, mode, side), cx)?
             .frame_now()
     }
+}
+
+/// The head of sticker `file` in a panel, a suggestion or a picker: one per
+/// file, shared by the cells that show it.
+pub(in crate::ui) fn panel_sticker_head(file: FileId) -> HeadId {
+    HeadId::of(Part::Chrome, ("panel-sticker", file.0))
 }
 
 /// The head of custom emoji `id` in the chat list (previews, topic icons),

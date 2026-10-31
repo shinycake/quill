@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::pressable::PressableDiv;
+use super::sticker_player::{HeadId, Part, panel_sticker_head};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -123,7 +124,12 @@ impl QuillApp {
             .id("animated-emoji-suggestion")
             .flex()
             .gap_2()
-            .child(self.sticker_cell(sticker, "animated-emoji", cx));
+            .child(self.sticker_cell(
+                sticker,
+                "animated-emoji",
+                panel_sticker_head(sticker.file_id),
+                cx,
+            ));
         Some(row.into_any_element())
     }
 
@@ -163,14 +169,9 @@ impl QuillApp {
             .min_w_0()
             .gap_2()
             .overflow_x_scroll()
-            .children(
-                session
-                    .stickers
-                    .stickers
-                    .suggestions
-                    .iter()
-                    .map(|sticker| self.sticker_cell(sticker, "suggest", cx)),
-            );
+            .children(session.stickers.stickers.suggestions.iter().map(|sticker| {
+                self.sticker_cell(sticker, "suggest", panel_sticker_head(sticker.file_id), cx)
+            }));
         let close = Button::new("sticker-suggestions-close")
             .icon(IconName::Close)
             .xsmall()
@@ -189,10 +190,13 @@ impl QuillApp {
         )
     }
 
+    /// A sticker's cell, animated on `head` (a panel's, a suggestion's, or
+    /// one of the open chat's).
     pub(super) fn sticker_cell(
         &self,
         sticker: &quill::telegram::envelope::StickerItem,
         prefix: &str,
+        head: HeadId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let roots = self.media_display_roots();
@@ -216,7 +220,7 @@ impl QuillApp {
             emoji.clone()
         };
         let cell_id = format!("sticker-{prefix}-{}-{}", sticker.set_id, sticker.id);
-        let animated = self.sticker_image(file_id, sticker.format, 72., cx);
+        let animated = self.sticker_image(file_id, sticker.format, head, 72., cx);
         let source = animated
             .map(ImageSource::Render)
             .or_else(|| path.map(ImageSource::from));
@@ -332,7 +336,8 @@ impl QuillApp {
         {
             let _ = live.driver.ensure_media_files(&[file]);
         }
-        let cell = self.sticker_cell(&sticker, "greeting", cx);
+        let head = greeting_head(chat.id, sticker.file_id);
+        let cell = self.sticker_cell(&sticker, "greeting", head, cx);
         Some(
             div()
                 .id("greeting-intro")
@@ -572,7 +577,7 @@ impl QuillApp {
         let mut grid = div().id("sticker-grid").flex().flex_wrap().gap_2();
         for sticker in panel.visible_stickers() {
             let file_id = sticker.file_id;
-            let cell = self.sticker_cell(sticker, "pick", cx);
+            let cell = self.sticker_cell(sticker, "pick", panel_sticker_head(file_id), cx);
             let favorite = panel.favorites.iter().any(|item| item.file_id == file_id);
             let in_recent = panel.tab == StickerTab::Recent
                 && panel.recent.iter().any(|item| item.file_id == file_id);
@@ -779,6 +784,13 @@ impl QuillApp {
 
 /// The greeting a chat shows: stable per chat (tdesktop picks at random
 /// once per intro; keeping it by chat id avoids flicker on re-render).
+/// The head of an empty chat's greeting sticker: the chat's own, so it
+/// plays again when the chat opens again (tdesktop builds its empty-history
+/// greeting for each visit).
+pub(super) fn greeting_head(chat: quill::ids::ChatId, file: quill::ids::FileId) -> HeadId {
+    HeadId::of(Part::Chat, ("greeting", chat.0, file.0))
+}
+
 fn greeting_pick(
     list: &[quill::telegram::envelope::StickerItem],
     chat_id: i64,

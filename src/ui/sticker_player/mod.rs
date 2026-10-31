@@ -23,7 +23,7 @@ mod view;
 
 #[cfg(test)]
 pub(super) use app::sidebar_emoji_head;
-pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors};
+pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 

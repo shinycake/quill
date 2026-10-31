@@ -122,7 +122,9 @@ impl QuillApp {
             .flatten()
             .filter_map(|id| self.session()?.media.files.get(&id.0)?.usable_path())
             .find_map(|path| sandboxed_display_path(path, &roots));
-        let animated = self.sticker_image(sticker.file_id, sticker.format, size, cx);
+        // The settings preview, not a chat.
+        let head = crate::ui::sticker_player::panel_sticker_head(sticker.file_id);
+        let animated = self.sticker_image(sticker.file_id, sticker.format, head, size, cx);
         let source = animated
             .map(ImageSource::Render)
             .or_else(|| path.map(ImageSource::from));

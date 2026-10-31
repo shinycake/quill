@@ -491,7 +491,12 @@ impl QuillApp {
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);
         self.playback.stickers.window_closed(chat_id);
-        self.leave_sticker_chat(Some(chat_id), Some(chat_id), cx);
+        self.leave_sticker_chat(
+            Some(chat_id),
+            Some(chat_id),
+            super::sticker_player::Leaving::Window,
+            cx,
+        );
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_chat_window(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -553,7 +558,12 @@ impl QuillApp {
         }
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
-        self.leave_sticker_chat(None, self.open_chat_id(), cx);
+        self.leave_sticker_chat(
+            None,
+            self.open_chat_id(),
+            super::sticker_player::Leaving::Chat,
+            cx,
+        );
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.deselect_chat();
         } else if let Some(session) = self.demo_session.as_mut() {

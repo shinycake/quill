@@ -52,7 +52,9 @@ once-stickers and lone emoji again.
 
 In the main window, what only it used closes and forgets at once, as
 before, so memory is the same and its new chat shows no frame of the old
-one (one exception under "Not changed"). Clips are still closed at the
+one (one exception under "Not changed"). Since the follow-up at the end,
+that is what its chat used; the chat list and the rest of the window
+stay. Clips are still closed at the
 switch rather than left to the
 5 s closer (`sticker-clip-memory.md`): flicking through chats would
 otherwise keep each chat's clips, raw frames and canvases for 5 s more.
@@ -163,25 +165,47 @@ clip without a frame.
 - A head belongs to a part of its window (`HeadId::of(part, name)`,
   `sticker_player::Part`): `Chat` (the window's open chat: history rows,
   dice, custom emoji in messages, lone emoji, effects, the header's and a
-  sender's status, the profile column, which follows the open chat) or
-  `Chrome` (the rest: the chat list, the composer and its emoji bar,
-  panels, the send-effect preview, the story viewer). Each place that
-  makes a head names its part.
+  sender's status, the profile column, which follows the open chat, and an
+  empty chat's greeting sticker or business intro sticker) or `Chrome`
+  (the rest: the chat list, the composer with its reply bar and
+  suggestions, the emoji bar, panels, the send-effect preview and strip,
+  the story viewer, Settings). Each place that makes a head names its
+  part: the shared helpers take it from their callers (`sticker_image`
+  takes the head, so a panel cell passes `panel_sticker_head` and the
+  greeting `greeting_head`, keyed by its chat; `custom_emoji_image`,
+  `custom_emoji_image_parked` and `custom_emoji_images` take the part,
+  and every caller today passes `Chrome`).
 - The player notes where each clip and head is used as a window and part
   (`Place`). A main-window chat switch (or its chat moving to a window)
-  lets go of that window's `Chat` part only (`Leaving::Chat`); a chat
-  window closing lets go of all of it (`Leaving::Window`), as before.
+  lets go of that window's `Chat` part only (`Leaving::Chat`, passed by
+  `select_chat_with` and `leave_open_chat`); a chat window closing lets go
+  of all of it (`Leaving::Window`, passed by `forget_chat_window`), as
+  before.
 - So the chat list's emoji keep their heads (where they rested) and clips
   (their frames) across a switch: no restart and no frame without a view.
   The left chat still forgets its heads and closes its clips at once, so
   its once-stickers and lone emoji play again when it opens again.
 
 Memory stays bounded: a `Chrome` clip nothing shows any more closes
-through the closer 5 s later (`sticker-clip-memory.md`), and a `Chrome`
-head goes after `HEAD_TTL` (10 min) or `MAX_HEADS`. What this keeps past a
-switch is what the chat list shows anyway; the sticker and emoji panels,
-which a switch closes, now close their clips 5 s later instead of at the
-switch, as they do when closed without a switch.
+through the closer 5 s later (`sticker-clip-memory.md`). A `Chrome` head
+goes once not drawn for `HEAD_TTL` (10 min), or past `MAX_HEADS`; the
+trim runs only inside `Player::frame`, so while no view draws at all the
+heads stay until the next draw. Only a draw makes a head, so they stay
+bounded by `MAX_HEADS` all the same (about 150 bytes each, under 1 MB).
+What this keeps past a switch is what the chat list shows anyway. What a
+switch takes off screen but files as `Chrome` now closes its clips 5 s
+later instead of at the switch, as it does when it goes without a switch:
+the sticker and emoji panels, the old draft's custom emoji in the
+composer, the reply bar's quote, sticker and animated-emoji suggestions.
+
+A `Chat` clip can also wait for the closer. A view whose clip is still
+opening borrows the frame of the same file at another size
+(`Player::frame`, "another size's frame meanwhile") and notes its place on
+that clip, since that frame is on screen in its box. So a 14 pt chat-list
+emoji that opens while the history shows the same emoji at 22 pt marks
+the history's clip `Chrome` too, and after a switch that clip closes
+through the closer (6 s at most) rather than at once. It has to: closing
+it would blank the row until its own clip has a frame.
 
 Notes:
 
@@ -208,6 +232,20 @@ Notes:
   through the next frame and a settle. On main it fails right at the
   switch: `[Some((0ns, 1s)) ×3, None]` against
   `[Some((2.5s, 1s)) ×4]`.
+- The same test checks, right at the switch, that the chat's own bigger
+  clips of the emoji closed (fewer `CUSTOM_FILE` clips than before). With
+  `message-emoji` and `big-custom-emoji` filed as `Chrome`, every other
+  check there still passed; this one fails.
+- `animated_emoji::tests::an_empty_chats_greeting_closes_with_the_chat_and_plays_again`:
+  an empty private chat's greeting, looping off, played to rest; another
+  chat opens and the greeting has no clip and no head; opened again it
+  plays from 0. On the greeting filed as `Chrome` (the panel's head, as
+  first pushed) it fails: one clip still open.
+- `animated_emoji::tests::the_headers_status_plays_again_on_return_and_the_rows_stays_at_rest`:
+  the open chat's status in its header and its row, both at rest after
+  two loops; a switch forgets the header's head and keeps the row's, and
+  back in the chat the header's plays from 0. With the header filed as
+  `Chrome` it fails at the switch.
 - `sticker_player::tests::a_window_leaving_its_chat_keeps_the_rest_of_it`:
   the main window's chat-only clip closes and its head goes; the chat
   list's clip, a clip both parts draw and a chat window's chrome stay,
