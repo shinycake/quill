@@ -1,6 +1,6 @@
 "use strict";
 
-// On load, a quill writes the headline by hand in a thin cursive. The nib
+// On load, a quill writes the headline by hand. The nib
 // follows each letter's strokes in the order a hand forms them, and the ink
 // appears under it, glossy at first and drying behind the pen. As the pen
 // lifts off, a wave runs through the handwriting and each letter's ink
@@ -497,10 +497,6 @@ function makeMorph(canvas) {
   };
 }
 
-// The handwriting is set this many times the headline's size, which puts
-// its small letters a little under the headline's in height and keeps its
-// loops clear of the text below.
-const HAND_SCALE = 1.25;
 const HAND_FONT = '"Quill Hand"';
 
 function setupTitleQuill() {
@@ -613,7 +609,9 @@ function write(title, pen, data) {
     line.letters.push(l);
   }
   probe.font = handAt(size);
-  let hs = size * HAND_SCALE;
+  // The stroke file says how large to set the handwriting against the
+  // headline.
+  let hs = size * data.scale;
   for (const line of lines) hs = Math.min(hs, (size * frame.width) / probe.measureText(line.text).width);
   probe.font = handAt(hs);
   for (const line of lines) {
