@@ -77,13 +77,15 @@ fn the_settings_and_lock_chords_open_nothing_for_an_agent(cx: &mut TestAppContex
     );
     assert!(!vcx.update(|_, cx| app.read(cx).account.passcode.locked));
 
-    // Minimise: the chord list refuses Cmd+M, and off macOS the handler
-    // refuses Ctrl+M, which the list does not name.
-    let refusals = press(&app, vcx, &primary("m"));
-    assert!(
-        refusals.iter().any(|r| r.contains("minimise")),
-        "{refusals:?}"
-    );
+    // Minimise: the chord list refuses Cmd+M before the step runs, and off
+    // macOS the handler refuses Ctrl+M, which the list does not name.
+    let chords = parse_sequence(&primary("m")).unwrap_or_default();
+    let refusal = match drive(&app, vcx, UiCommand::PressKeys { chords }) {
+        Ok(UiReply::Refused(reason)) => reason,
+        Ok(UiReply::Done { refusals, .. }) => refusals.join(" "),
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    assert!(refusal.contains("minimise"), "{refusal}");
 
     // The user's own Cmd/Ctrl+, still opens Settings.
     vcx.simulate_keystrokes(&primary(","));
