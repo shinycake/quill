@@ -13,7 +13,10 @@ use gpui_util::ResultExt;
 use parking_lot::{Condvar, Mutex, RwLock};
 use smallvec::SmallVec;
 
-use crate::vsync_has_work;
+use crate::{
+    refresh_interval::{DEFAULT_VSYNC_INTERVAL, VSYNC_INTERVAL_THRESHOLD, refresh_interval},
+    vsync_has_work,
+};
 
 use windows::Win32::{
     Foundation::HWND,
@@ -28,9 +31,6 @@ static QPC_TICKS_PER_SECOND: LazyLock<u64> = LazyLock::new(|| {
     unsafe { QueryPerformanceFrequency(&mut frequency).unwrap() };
     frequency as u64
 });
-
-const VSYNC_INTERVAL_THRESHOLD: Duration = Duration::from_millis(1);
-const DEFAULT_VSYNC_INTERVAL: Duration = Duration::from_micros(16_666); // ~60Hz
 
 pub(crate) struct VSyncProvider {
     interval: Duration,
@@ -74,17 +74,12 @@ fn get_dwm_interval() -> Result<Duration> {
         ..Default::default()
     };
     unsafe { DwmGetCompositionTimingInfo(HWND::default(), &mut timing_info) }?;
-    let interval = retrieve_duration(timing_info.qpcRefreshPeriod, *QPC_TICKS_PER_SECOND);
-    // Check for interval values that are impossibly low. A 29 microsecond
-    // interval was seen (from a qpcRefreshPeriod of 60).
-    if interval < VSYNC_INTERVAL_THRESHOLD {
-        Ok(retrieve_duration(
-            timing_info.rateRefresh.uiDenominator as u64,
-            timing_info.rateRefresh.uiNumerator as u64,
-        ))
-    } else {
-        Ok(interval)
-    }
+    Ok(refresh_interval(
+        timing_info.qpcRefreshPeriod,
+        *QPC_TICKS_PER_SECOND,
+        timing_info.rateRefresh.uiNumerator,
+        timing_info.rateRefresh.uiDenominator,
+    ))
 }
 
 /// Quill: which windows' vsync invalidations are parked (see `frame_idle`).
@@ -192,12 +187,6 @@ impl ParkedWindows {
     pub(crate) fn contains(&self, hwnd: HWND) -> bool {
         self.0.contains(&hwnd_key(hwnd))
     }
-}
-
-#[inline]
-fn retrieve_duration(counts: u64, ticks_per_second: u64) -> Duration {
-    let ticks_per_microsecond = ticks_per_second / 1_000_000;
-    Duration::from_micros(counts / ticks_per_microsecond)
 }
 
 #[cfg(test)]

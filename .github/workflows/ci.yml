@@ -95,6 +95,9 @@ jobs:
       # their shared idle-frame decision is std-only and tested standalone.
       - name: tests (vendored GPUI frame idle)
         run: bash scripts/test-frame-idle.sh
+      # The Windows backend's vsync interval is std-only too.
+      - name: tests (vendored GPUI refresh interval)
+        run: bash scripts/test-refresh-interval.sh
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh

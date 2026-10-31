@@ -22,6 +22,7 @@ pub mod native_frame;
 pub mod notification_extras;
 mod surface_support;
 mod platform;
+mod refresh_interval;
 mod system_notifications;
 mod system_settings;
 mod util;
