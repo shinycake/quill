@@ -31,6 +31,7 @@
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 mod body;
+mod cover;
 mod recording;
 mod saved;
 mod scoped;
@@ -40,6 +41,7 @@ mod tests;
 mod view;
 
 use super::app::QuillApp;
+use cover::WindowPlace;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
@@ -63,6 +65,8 @@ pub(crate) struct ChatWindows {
     dialog_host: Option<Option<ChatId>>,
     /// The main window, as last rendered.
     pub(super) main: Option<AnyWindowHandle>,
+    /// Where the main window stood at its last render (`cover`).
+    main_place: Option<WindowPlace>,
     /// New windows cascade from the main window; this counts them.
     cascade: u32,
     /// A write of the open windows is scheduled (`saved`).
@@ -100,6 +104,7 @@ impl ChatWindows {
             last_input: None,
             dialog_host: None,
             main: None,
+            main_place: None,
             cascade: 0,
             save_pending: false,
             closed: Vec::new(),
@@ -199,12 +204,6 @@ impl ChatWindows {
     /// A chat window is the active one (the frame clock runs for it).
     pub(super) fn any_active(&self) -> bool {
         self.open.iter().any(|open| open.slot.borrow().active)
-    }
-
-    pub(super) fn note_active(&self, chat_id: ChatId, active: bool) {
-        if let Some(slot) = self.slot_for(chat_id) {
-            slot.borrow_mut().active = active;
-        }
     }
 
     /// Whether the window `host` (`None`: the main window) may open the

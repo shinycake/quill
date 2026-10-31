@@ -237,6 +237,19 @@ impl QuillApp {
         if !tick_wanted(self.frame.window_active.get(), plays_sound) {
             return;
         }
+        // Nor in a main window the active chat window hides whole
+        // (`chat_window::cover`): its slices and their layers ask for no
+        // tick, nor the app outside any chat window's scope. A chat
+        // window's content (asking with its state in place) redraws its
+        // window alone then, not the main window with it.
+        let target = match (target, self.windows.scope) {
+            _ if plays_sound || !self.frame.main_covered.get() => target,
+            (None, Some(chat)) => match self.windows.view_id_for(chat) {
+                Some(view) => Some(view),
+                None => return,
+            },
+            _ => return,
+        };
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
         // second per call site), to hunt idle redraws.
         if trace_ticks() {

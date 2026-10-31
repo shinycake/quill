@@ -172,6 +172,20 @@ impl TestWindow {
         }
     }
 
+    /// Moves the window's top left corner to `origin`, as the platform
+    /// reports a window the user dragged (Quill).
+    pub fn simulate_move(&self, origin: Point<Pixels>) {
+        let callback = {
+            let mut state = self.0.lock();
+            state.bounds.origin = origin;
+            state.moved_callback.take()
+        };
+        if let Some(mut callback) = callback {
+            callback();
+            self.0.lock().moved_callback = Some(callback);
+        }
+    }
+
     /// Moves the window to the display with the given ID.
     pub fn simulate_move_to_display(&self, display_id: DisplayId) {
         let callback = {
