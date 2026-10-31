@@ -9,6 +9,8 @@
 //! The main window's own animations now hold still, as behind another app,
 //! while the active chat window's frame holds the main window's on the same
 //! display, and start again once any part of it shows (`frame_clock`).
+//! Ticks for the whole app, which any window's content may ask for, redraw
+//! every other window then ([`QuillApp::tick_app`]).
 //! Background: `docs/decisions/covered-main-window.md`.
 //!
 //! This rests on the active window being in front of the app's others; a
@@ -36,6 +38,7 @@
 //! one, which is right: the main window's tab is hidden then.
 
 use super::super::app::QuillApp;
+use super::super::frame_clock::assume_active;
 use super::super::window_control::{Backend, backend};
 use super::ChatWindows;
 use gpui_kit::*;
@@ -138,8 +141,9 @@ impl QuillApp {
     }
 
     /// `chat_id`'s window was activated or deactivated, moved, resized or
-    /// went to another display: a main window it no longer hides draws
-    /// again, and its content asks for ticks again.
+    /// went to another display: a main window it now hides holds still at
+    /// once (it is not active while a chat window is), and one it no longer
+    /// hides draws again, its content asking for ticks again.
     pub(super) fn chat_window_placed(
         &mut self,
         chat_id: ChatId,
@@ -148,8 +152,26 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.windows.note_place(chat_id, active, place);
-        if self.frame.main_covered.get() && !self.windows.main_covered() {
+        let covered = self.windows.main_covered() && !assume_active();
+        if self.frame.main_covered.replace(covered) && !covered {
             cx.notify();
+        }
+    }
+
+    /// A frame-clock tick for the whole app redraws every window, as any
+    /// change to the app does. Under the active chat window, every window
+    /// but the main one: a call window, or a dialog in the chat window,
+    /// asks for these ticks too, whichever window's state is in place.
+    pub(in crate::ui) fn tick_app(&self, cx: &mut Context<Self>) {
+        if !self.frame.main_covered.get() {
+            cx.notify();
+            return;
+        }
+        let main = self.windows.main.map(|main| main.window_id());
+        for window in cx.windows() {
+            if Some(window.window_id()) != main {
+                let _ = window.update(cx, |_, window, _| window.refresh());
+            }
         }
     }
 }

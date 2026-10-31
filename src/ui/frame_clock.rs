@@ -238,18 +238,12 @@ impl QuillApp {
             return;
         }
         // Nor in a main window the active chat window hides whole
-        // (`chat_window::cover`): its slices and their layers ask for no
-        // tick, nor the app outside any chat window's scope. A chat
-        // window's content (asking with its state in place) redraws its
-        // window alone then, not the main window with it.
-        let target = match (target, self.windows.scope) {
-            _ if plays_sound || !self.frame.main_covered.get() => target,
-            (None, Some(chat)) => match self.windows.view_id_for(chat) {
-                Some(view) => Some(view),
-                None => return,
-            },
-            _ => return,
-        };
+        // (`chat_window::cover`): its slices and their layers get no tick.
+        // A tick for the whole app still comes, whichever window asks; it
+        // redraws every window but that one then (`tick_app`).
+        if target.is_some() && self.frame.main_covered.get() {
+            return;
+        }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
         // second per call site), to hunt idle redraws.
         if trace_ticks() {
@@ -300,9 +294,11 @@ impl QuillApp {
                                 this.frame.layers_drawn.borrow_mut().ticked(*id);
                             }
                             if targets.contains(&None) {
-                                cx.notify();
-                            } else {
-                                // Only the slices with animated content redraw.
+                                this.tick_app(cx);
+                            } else if !this.frame.main_covered.get() {
+                                // Only the slices with animated content
+                                // redraw; none under a chat window covering
+                                // the main window since they asked.
                                 let app: &mut App = cx;
                                 for id in targets.into_iter().flatten() {
                                     app.notify(id);

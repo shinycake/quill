@@ -21,20 +21,37 @@ stopped window gives back (`idle-drawables.md`). On a 60 Hz display: 29 frames a
 Turning the main window's gate off as a whole would not do: `frame.window_active` is also the gate of the one
 frame clock that the chat windows' content ticks through, and presence and notifications read it.
 
+Nor does it work to send a whole-app tick to one window. Every window's content asks through the same call
+(`request_animation_tick` with no slice in scope): a chat window's stickers, a dialog, sheet or toast in a chat
+window (the kit builds those after the window's view has put back the state it found, the main window's in
+live mode, so `style_preview.rs` and `peer_qr/surface.rs` ask with no chat in scope), and the group call
+window's microphone halo and speaking blobs (`group_call_panel.rs`, `group_call_speaker.rs`, which never put
+a chat window's state in place; `poll_live` puts the main window's back at every poll). The state in place at
+the request says nothing about which window asked. The first version of this change sent a tick asked in a
+chat window's scope to that window alone and dropped the rest, which froze the call window and those dialogs
+while the main window was covered, or redrew another chat window instead.
+
 ## What changed
 
 - `src/ui/chat_window/cover.rs`: `WindowPlace` is a window's bounds and display. The main window notes its own
   at each render. A chat window notes its own at each render and in its activation, bounds and display
   observers, which run even when the window does not draw (a minimized one may not). The main window counts as
   covered when it is not active itself and the active chat window's bounds hold its bounds on the same display.
-  `frame.main_covered` keeps the answer of the main window's last render.
-- `src/ui/frame_clock.rs` `request_tick`: while the main window is covered, its slices and layers, and the
-  app outside a chat window's scope, get no tick. A chat window's content gets its tick on that window's
-  view, not the whole app, so the main window under it does not redraw.
-- When a chat window is deactivated, moved, resized, goes to another display or fullscreen, and the main
-  window is no longer covered, the app redraws (`chat_window_placed`). The main window's next render then
-  lets its layers ask again. A closed chat window already redraws the app; the main window's own moves and
-  activation redraw it.
+  `frame.main_covered` keeps the answer, worked out again at each render of the main window and each change
+  of a chat window's place.
+- `src/ui/frame_clock.rs`: while the main window is covered, its slices and animation layers (the only ticks
+  aimed at a view: `tick_animation_layer`, the main window's own) get no tick, neither asked then nor asked
+  before it was covered. A tick for the whole app still runs, whoever asked, and redraws every window but the
+  main one (`QuillApp::tick_app`, `Window::refresh`), in place of the `QuillApp` notify that redraws them all
+  otherwise. A refresh also redraws a window that does not follow the app (Picture-in-Picture, a
+  notification popup), which the notify left alone; that costs only while the main window is covered and
+  something animates.
+- When a chat window is activated or deactivated, moved, resized, goes to another display or fullscreen,
+  `chat_window_placed` updates `frame.main_covered` at once: a main window it now hides holds still from that
+  moment (it is not active while a chat window is), and one it no longer hides gets an app redraw, whose
+  render lets its layers ask again. A closed chat window already redraws the app; the main window's own moves
+  and resizes redraw it (GPUI's `bounds_changed`) and its activation redraws the app, each recomputing the
+  answer.
 - Bounds are compared on one display only (macOS measures a window from its screen, Windows in its monitor's
   scale).
 
@@ -64,26 +81,46 @@ Picture-in-Picture windows); a change there must revisit this. Switching Spaces 
 Space key. A chat window opened as a native tab of the main window counts as covering it while its tab is the
 selected one, which is right: the main window's tab is hidden then.
 
+## What still shows a covered main window still
+
+While the chat window covers it, the main window keeps the last frame it drew. Wherever the system shows the
+main window by itself, that frame is what shows, until the user brings the main window forward: Mission
+Control and App Exposé thumbnails on macOS, taskbar and Alt-Tab previews on Windows, and a screen share of
+the main window alone. Nothing tells the app such a view is open, so this is inherent. Sharing the whole
+screen shows the chat window on top, which is right.
+
 ## Tests
 
 `chat_window::cover::tests` run the `ready-sticker-playback` demo (two 30 fps stickers in the open chat) with
-the main window at 1100 × 700 and count what it draws over 2 s of the test clock (`frames_over`):
+the main window at 1100 × 700 and count what it draws over 2 s of the test clock (`frames_over`), counted from
+the change itself with no time to settle, so animation that resumes late counts short. "Alone" is the main
+window counted the same way from coming back from behind another app (120 layer draws, 60 frames).
 
 - `a_covered_main_window_draws_nothing_until_the_chat_window_moves`: covered by the active chat window, no
-  layer draws and no frames, five times over; moved 40 px right, the same 120 layer draws and 60 frames as
-  alone in front.
+  layer draws and no frames, five times over; moved 40 px right, the same as alone.
 - `a_covered_main_window_animates_once_resized_past_or_closed`: resized to show the main window's right edge,
   then covering again, then closed with the main window activated as the platform does.
+- `a_covered_main_window_animates_once_moved_or_resized_out`: the main window moved or narrowed within the
+  chat window stays still; moved or resized so an edge shows, it animates as alone.
 - `a_chat_window_that_leaves_the_main_window_in_view_keeps_it_animating`: a chat window beside it, at covering
-  bounds on another display, and fullscreen: as alone in front.
+  bounds on another display, and fullscreen: as alone.
 - `a_covering_chat_window_keeps_its_own_stickers_animating`: chat 11 in its own window draws the same frames
-  covering the main window as beside it (64 in 2 s), and the main window under it draws nothing.
+  covering the main window as beside it, and the main window under it draws nothing.
+- `a_call_window_keeps_animating_under_a_covering_chat_window`: a window that follows the app and asks for
+  whole-app ticks while it draws, like the group call window, draws as many frames while a chat window covers
+  the main window as with none, with the main window's state in place (live mode) or the chat window's; the
+  main window draws nothing.
+- `a_dialog_in_a_covering_chat_window_keeps_animating`: a kit dialog in the chat window that asks for ticks
+  while it is built, with the main window's state in place, draws as many frames covering the main window as
+  beside it.
 
-On the old code every test fails: the covered main window drew 120 layer draws and 60 frames in 2 s (30 a
-second, both layers each frame), also when only the chat window animated. Without the redraw in
-`chat_window_placed`, the main window stayed still after the chat window moved, shrank or went fullscreen.
-The test platform gained `simulate_window_move` and `simulate_window_move_to_display`
-(`third_party/gpui-pre/QUILL-CHANGES.md`).
+Every test checks that a covered main window draws nothing, which the code before this change (04644b4a3)
+never does: it drew 120 layer draws and 60 frames in 2 s, also when only the chat window animated. On the
+first version of this change (1b0ce0b15) the call window and the chat window with the dialog drew 1 frame in
+2 s instead of 60 while the main window was covered, and the main window drew one more frame after a chat
+window came over it (it learned so at its next render; `chat_window_placed` now says so at once). Counted from
+the change, a resume that starts late counts short and fails too. The test platform gained
+`simulate_window_move` and `simulate_window_move_to_display` (`third_party/gpui-pre/QUILL-CHANGES.md`).
 
 ## To measure on a Mac
 
