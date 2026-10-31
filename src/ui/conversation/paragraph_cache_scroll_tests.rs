@@ -8,9 +8,14 @@ const POSTS: i64 = 40;
 /// A long post in a right-to-left script, about 300 characters, with a
 /// number and a link: letters picked by code point from `n`.
 fn post(n: i64) -> String {
+    format!("{} https://example.com/{n}", words(n, 60))
+}
+
+/// `count` words in a right-to-left script, the 31st a number.
+fn words(n: i64, count: usize) -> String {
     let mut seed = n as u64 * 7919 + 1;
     let mut words = Vec::new();
-    for w in 0..60 {
+    for w in 0..count {
         seed = seed
             .wrapping_mul(6_364_136_223_846_793_005)
             .wrapping_add(1_442_695_040_888_963_407);
@@ -23,10 +28,19 @@ fn post(n: i64) -> String {
             words.push("2024,".into());
         }
     }
-    format!("{} https://example.com/{n}", words.join(" "))
+    words.join(" ")
 }
 
 fn rtl_group(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> usize {
+    rtl_group_of(app, cx, post)
+}
+
+/// The group, with [`POSTS`] posts from `post`.
+fn rtl_group_of(
+    app: &Entity<QuillApp>,
+    cx: &mut VisualTestContext,
+    post: fn(i64) -> String,
+) -> usize {
     paragraph_cache::reset_in_tests();
     open_group(app, cx);
     let updates: Vec<String> = (0..POSTS)
@@ -71,7 +85,7 @@ fn redraw(cx: &mut VisualTestContext) {
 }
 
 #[gpui_kit::test]
-fn a_scrolled_history_keeps_each_paragraph_laid_out_once(cx: &mut TestAppContext) {
+fn a_scrolled_history_keeps_no_layout_at_a_widest_line(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     let rows = rtl_group(&app, vcx);
@@ -82,11 +96,9 @@ fn a_scrolled_history_keeps_each_paragraph_laid_out_once(cx: &mut TestAppContext
         held.drawn >= POSTS as usize,
         "every post was drawn: {held:?}"
     );
-    // Layout measures each post at about four widths; only the one it is
-    // drawn at stays laid out, and a row measured just outside the
-    // viewport keeps one layout for when it scrolls in.
-    assert_eq!(held.laid_out, held.drawn, "{held:?}");
-    assert!(held.waiting_laid_out <= held.waiting, "{held:?}");
+    // Layout measures each post unconstrained and at its widest line too,
+    // wider than the window: those keep only their size.
+    assert_eq!(held.unwrapped_undrawn, 0, "{held:?}");
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
 
@@ -125,9 +137,7 @@ fn resizing_lays_out_each_width_once(cx: &mut TestAppContext) {
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
     let held = paragraph_cache::held_in_tests(false);
     assert!(held.drawn > 0, "{held:?}");
-    // Widths only measured let their layouts go once their frame was over,
-    // but for the one a paragraph measured and not drawn waits on.
-    assert!(held.most_measured_only <= 1, "{held:?}");
+    assert_eq!(held.unwrapped_undrawn, 0, "{held:?}");
 }
 
 /// A history narrower than a bubble's widest, as with a panel closed (A),
@@ -151,16 +161,35 @@ fn going_back_to_an_earlier_width_lays_out_nothing(cx: &mut TestAppContext) {
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
 
-/// A splitter dragged across a dozen widths and back over them.
+/// A window dragged narrower 8 px a step, each step a new history width
+/// (from the widest down to 288, with the chat list beside it and then
+/// without), and back: each post is laid out at over a hundred widths on
+/// the way, and the way back lays none of them out again.
 #[gpui_kit::test]
-fn dragging_back_over_widths_lays_out_nothing(cx: &mut TestAppContext) {
+fn dragging_back_over_widths_lays_out_none_again(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     rtl_group(&app, vcx);
-    let out: Vec<f32> = (0..12).map(|step| 750. - 10. * step as f32).collect();
+    let out: Vec<f32> = (0..90).map(|step| 1000. - 8. * step as f32).collect();
     assert!(layouts_resizing(&app, vcx, &out) > 0, "the posts rewrapped");
     let back: Vec<f32> = out.iter().rev().copied().collect();
-    assert_eq!(layouts_resizing(&app, vcx, &back), 0);
-    assert_eq!(layouts_resizing(&app, vcx, &out), 0);
+    layouts_resizing(&app, vcx, &back);
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
+}
+
+/// Posts that wrap in a narrow window and fit a line once it is widened,
+/// where each bubble shrinks to its widest line: measured there while it
+/// wrapped, and drawn there now.
+#[gpui_kit::test]
+fn widening_until_posts_fit_lays_out_none_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    resize(&app, vcx, 640., 800.);
+    rtl_group_of(&app, vcx, |n| words(n, 8));
+    redraw(vcx);
+    assert!(
+        layouts_resizing(&app, vcx, &[1000.]) > 0,
+        "the posts rewrapped"
+    );
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }

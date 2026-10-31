@@ -9,7 +9,8 @@ use crate::ui::selectable_text::SelectableRichText;
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, SharedString, StyleRefinement,
-    Styled, StyledText, TestAppContext, TextRun, VisualTestContext, Window, div, font, px, size,
+    Styled, StyledText, TestAppContext, TextRun, VisualTestContext, Window, WindowHandle, div,
+    font, px, size,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -78,14 +79,8 @@ impl Render for Columns {
 }
 
 /// Draws `view` for a few frames: the first frame lays each width out
-/// once, the later ones lay nothing out, and the one paragraph stays laid
-/// out at no more than `laid_out` widths.
-fn draws_each_width_once<V: Render>(
-    cx: &mut TestAppContext,
-    view: V,
-    one_line: bool,
-    laid_out: usize,
-) {
+/// once, and the later ones lay nothing out.
+fn draws_each_width_once<V: Render>(cx: &mut TestAppContext, view: V, one_line: bool) {
     reset_in_tests();
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(600.), px(800.)), move |_, _| view);
@@ -104,8 +99,7 @@ fn draws_each_width_once<V: Render>(
     assert_eq!(layouts_in_tests(), first, "later frames reuse every width");
     let held = held_in_tests(one_line);
     assert_eq!(held.drawn, 1, "{held:?}");
-    assert!(held.laid_out <= laid_out, "{held:?}");
-    assert_eq!(held.most_measured_only, 0, "{held:?}");
+    assert_eq!(held.unwrapped_undrawn, 0, "{held:?}");
 }
 
 #[gpui_kit::test]
@@ -114,7 +108,7 @@ fn quotes_cut_short_at_four_widths_are_laid_out_once(cx: &mut TestAppContext) {
         text: rtl_text(40),
         widths: vec![60., 80., 100., 120.],
     };
-    draws_each_width_once(cx, quotes, true, super::SIZES);
+    draws_each_width_once(cx, quotes, true);
 }
 
 #[gpui_kit::test]
@@ -123,7 +117,7 @@ fn quotes_that_fit_at_four_widths_are_laid_out_once(cx: &mut TestAppContext) {
         text: rtl_text(2),
         widths: vec![300., 340., 380., 420.],
     };
-    draws_each_width_once(cx, quotes, true, super::SIZES);
+    draws_each_width_once(cx, quotes, true);
 }
 
 #[gpui_kit::test]
@@ -132,8 +126,7 @@ fn a_paragraph_wrapped_at_four_widths_is_laid_out_once(cx: &mut TestAppContext) 
         text: rtl_text(80),
         widths: vec![200., 260., 320., 380.],
     };
-    // Laid out at the four widths drawn, and at none only measured.
-    draws_each_width_once(cx, columns, false, 4);
+    draws_each_width_once(cx, columns, false);
 }
 
 /// One quote line in a view of its own, as a reply's bubble is.
@@ -207,10 +200,55 @@ fn quotes_drawn_again_after_a_replay_are_laid_out_once(cx: &mut TestAppContext) 
     assert_eq!(relayouts_in_tests(), 0);
 }
 
-/// Past the budget, the least recently used layouts go, down to three
-/// quarters of it, and never one the frame being ended used.
+/// A bubble's paragraph `step` frames into a splitter drag that narrows it
+/// a pixel a frame: drawn at its room, and measured at a narrower width too
+/// (a column of its own here).
+fn dragged(step: usize) -> Vec<f32> {
+    let step = step as f32;
+    vec![404. - step, 318. - step]
+}
+
+/// Layouts made while the drag goes through each of `steps`, a frame each.
+fn layouts_dragging(
+    window: WindowHandle<Columns>,
+    cx: &mut VisualTestContext,
+    steps: impl Iterator<Item = usize>,
+) -> u64 {
+    let before = layouts_in_tests();
+    for step in steps {
+        window
+            .update(cx, |columns, _, _| columns.widths = dragged(step))
+            .expect("the window is open");
+        redraw(cx);
+    }
+    layouts_in_tests() - before
+}
+
+/// A splitter dragged slowly over 64 frames and back: the paragraph is laid
+/// out at 128 widths on the way, and the way back finds every one, as the
+/// old cache's 2,048 entries did.
 #[gpui_kit::test]
-fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
+fn dragging_back_over_128_widths_lays_out_nothing(cx: &mut TestAppContext) {
+    reset_in_tests();
+    cx.update(gpui_kit::init);
+    let columns = Columns {
+        text: rtl_text(80),
+        widths: dragged(0),
+    };
+    let window = cx.open_window(size(px(600.), px(800.)), move |_, _| columns);
+    let vcx = &mut VisualTestContext::from_window(window.into(), cx);
+    redraw(vcx);
+    let out = layouts_dragging(window, vcx, 1..64);
+    assert!(out >= 2 * 63, "each frame laid out two widths: {out}");
+    assert_eq!(layouts_dragging(window, vcx, (0..64).rev()), 0);
+    assert_eq!(relayouts_in_tests(), 0);
+    let held = held_in_tests(false);
+    assert!(held.laid_out >= 128, "{held:?}");
+}
+
+/// A short right-to-left paragraph laid out unconstrained, to fill a
+/// cache's widths with.
+fn a_paragraph(cx: &mut TestAppContext) -> Rc<BidiParagraph> {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(200.), px(100.)), |_, _| Columns {
         text: SharedString::default(),
@@ -226,10 +264,98 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
         underline: None,
         strikethrough: None,
     };
-    let paragraph = vcx
-        .update(|window, _| BidiParagraph::layout(&text, &[run], px(14.), px(20.), None, window))
+    vcx.update(|window, _| BidiParagraph::layout(&text, &[run], px(14.), px(20.), None, window))
         .map(Rc::new)
-        .expect("right-to-left text takes the bidi layout");
+        .expect("right-to-left text takes the bidi layout")
+}
+
+fn width(wrap: Option<f32>, paragraph: Option<&Rc<BidiParagraph>>, drawn: u64, used: u64) -> Width {
+    Width {
+        wrap: wrap.map(f32::to_bits),
+        size: paragraph.map(|p| p.size()).unwrap_or_default(),
+        paragraph: paragraph.cloned(),
+        drawn,
+        used,
+    }
+}
+
+/// When a frame of a window ends, a wrapped paragraph lets go of the
+/// layouts at its widest line or wider that were never drawn, if wider than
+/// the window, and keeps every other: a row measured just off screen at one
+/// width and drawn at another finds the first laid out when the window goes
+/// back to it, and a paragraph that fits the window finds its widest line
+/// laid out when its box grows to fit it.
+#[gpui_kit::test]
+fn a_frame_lets_go_only_of_widest_line_layouts_wider_than_its_window(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let natural = f32::from(paragraph.size().width);
+    let p = Some(&paragraph);
+    let laid_out_after_a_frame = |window: f32| {
+        let mut entry = Entry {
+            widths: vec![
+                // Unconstrained: a size only, as measured.
+                Width {
+                    paragraph: None,
+                    ..width(None, p, 0, 1)
+                },
+                width(Some(natural), p, 0, 2),
+                width(Some(natural + 100.), p, 0, 3),
+                width(Some(natural + 200.), p, 4, 4),
+                width(Some(natural / 2.), p, 0, 5),
+                width(Some(natural / 3.), p, 6, 6),
+            ],
+            used: 6,
+        };
+        entry.settle(window);
+        entry
+            .widths
+            .iter()
+            .filter(|w| w.paragraph.is_some())
+            .map(|w| w.used)
+            .collect::<Vec<u64>>()
+    };
+    // In a window narrower than its widest line, the widest line and wider,
+    // never drawn, go; drawn ones and narrower ones only measured stay.
+    assert_eq!(laid_out_after_a_frame(natural / 2.), vec![4, 5, 6]);
+    // In a window it fits, only what is wider than the window goes.
+    assert_eq!(laid_out_after_a_frame(natural + 50.), vec![2, 4, 5, 6]);
+}
+
+/// Past its paragraphs, a pool lets the least recently used one go for each
+/// new one, never one the frame being drawn used.
+#[gpui_kit::test]
+fn past_its_paragraphs_the_least_recently_used_goes(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let key = |n: u64| Key {
+        text: n.to_string().into(),
+        runs: 0,
+        font_size: 0,
+        line_height: 0,
+    };
+    let mut pool = Pool::new(4, true);
+    for n in 1..=4u64 {
+        pool.entry(key(n), 4)
+            .add(width(Some(100.), Some(&paragraph), n, n));
+    }
+    let held = |pool: &Pool| {
+        let mut used: Vec<u64> = pool.entries.values().map(|e| e.used).collect();
+        used.sort_unstable();
+        used
+    };
+    pool.entry(key(5), 4)
+        .add(width(Some(100.), Some(&paragraph), 5, 5));
+    assert_eq!(held(&pool), vec![2, 3, 4, 5]);
+    // A frame that began at 1 used them all: they stay.
+    pool.entry(key(6), 1)
+        .add(width(Some(100.), Some(&paragraph), 6, 6));
+    assert_eq!(held(&pool), vec![2, 3, 4, 5, 6]);
+}
+
+/// Past the budget, the least recently used layouts go, down to three
+/// quarters of it, and never one the frame being ended used.
+#[gpui_kit::test]
+fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
     let mut pool = Pool::new(16, true);
     // Ten paragraphs, each drawn at one width, the nth used at clock n.
     for n in 1..=10u64 {
@@ -239,21 +365,11 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
             font_size: 0,
             line_height: 0,
         };
-        let width = Width {
-            wrap: Some(1),
-            size: paragraph.size(),
-            paragraph: Some(paragraph.clone()),
-            drawn: n,
+        let entry = Entry {
+            widths: vec![width(Some(100.), Some(&paragraph), n, n)],
             used: n,
         };
-        pool.entries.insert(
-            key,
-            Entry {
-                widths: vec![width],
-                measured: None,
-                used: n,
-            },
-        );
+        pool.entries.insert(key, entry);
     }
     let laid_out = |pool: &Pool| {
         let mut used: Vec<u64> = pool
@@ -267,11 +383,67 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
         used
     };
     // A budget of eight: down to six, the four oldest out.
-    pool.trim(7, 8);
+    pool.trim_layouts(7, 8);
     assert_eq!(laid_out(&pool), vec![5, 6, 7, 8, 9, 10]);
     assert_eq!(pool.laid_out, 6);
     // A frame that began at 7 used 8 to 10: those stay, whatever the budget.
-    pool.trim(7, 2);
+    pool.trim_layouts(7, 2);
     assert_eq!(laid_out(&pool), vec![8, 9, 10]);
     assert_eq!(pool.laid_out, 3);
+}
+
+/// Past the budget of widths, the least recently used that keep only a
+/// size go, never a laid-out one and never one the frame being ended used;
+/// a paragraph left with no width goes too.
+#[gpui_kit::test]
+fn past_the_budget_the_least_recently_used_sizes_go(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let mut pool = Pool::new(16, true);
+    let key = |n: u64| Key {
+        text: n.to_string().into(),
+        runs: 0,
+        font_size: 0,
+        line_height: 0,
+    };
+    // Paragraph 1: sizes at clock 1 to 6, laid out at 7. Paragraph 2: a
+    // size at 8, laid out at 9, sizes at 10 to 12.
+    let mut first = Entry::default();
+    for n in 1..=6 {
+        first.add(width(Some(n as f32), None, 0, n));
+    }
+    first.add(width(Some(7.), Some(&paragraph), 7, 7));
+    let mut second = Entry::default();
+    second.add(width(Some(8.), None, 0, 8));
+    second.add(width(Some(9.), Some(&paragraph), 9, 9));
+    for n in 10..=12 {
+        second.add(width(Some(n as f32), None, 0, n));
+    }
+    pool.entries.insert(key(1), first);
+    pool.entries.insert(key(2), second);
+    let used = |pool: &Pool| {
+        let mut used: Vec<u64> = pool
+            .entries
+            .values()
+            .flat_map(|e| &e.widths)
+            .map(|w| w.used)
+            .collect();
+        used.sort_unstable();
+        used
+    };
+    // Twelve against a budget of eight: down to six, the six oldest sizes
+    // out.
+    pool.trim_widths(11, 8);
+    assert_eq!(used(&pool), vec![7, 8, 9, 10, 11, 12]);
+    assert_eq!(pool.widths, 6);
+    // Against a budget of two, with a frame that began at 9: the layouts
+    // at 7 and 9 and the sizes used at 10 to 12 stay; only 8 goes.
+    pool.trim_widths(9, 2);
+    assert_eq!(used(&pool), vec![7, 9, 10, 11, 12]);
+    // Once their layouts have gone, paragraph 1 goes with its last width.
+    for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
+        width.paragraph = None;
+    }
+    pool.trim_widths(12, 2);
+    assert_eq!(used(&pool), vec![12]);
+    assert_eq!(pool.entries.len(), 1);
 }
