@@ -782,8 +782,6 @@ impl QuillApp {
     }
 }
 
-/// The greeting a chat shows: stable per chat (tdesktop picks at random
-/// once per intro; keeping it by chat id avoids flicker on re-render).
 /// The head of an empty chat's greeting sticker: the chat's own, so it
 /// plays again when the chat opens again (tdesktop builds its empty-history
 /// greeting for each visit).
@@ -791,6 +789,8 @@ pub(super) fn greeting_head(chat: quill::ids::ChatId, file: quill::ids::FileId) 
     HeadId::of(Part::Chat, ("greeting", chat.0, file.0))
 }
 
+/// The greeting a chat shows: stable per chat (tdesktop picks at random
+/// once per intro; keeping it by chat id avoids flicker on re-render).
 fn greeting_pick(
     list: &[quill::telegram::envelope::StickerItem],
     chat_id: i64,

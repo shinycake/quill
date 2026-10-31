@@ -234,8 +234,10 @@ Notes:
   `[Some((2.5s, 1s)) ×4]`.
 - The same test checks, right at the switch, that the chat's own bigger
   clips of the emoji closed (fewer `CUSTOM_FILE` clips than before). With
-  `message-emoji` and `big-custom-emoji` filed as `Chrome`, every other
-  check there still passed; this one fails.
+  `big-custom-emoji` filed as `Chrome`, every other check there still
+  passed; this one fails. The demo history draws that emoji big only, so
+  `message-emoji` (custom emoji inside message text), `history` and `dice`
+  are not pinned by a test yet.
 - `animated_emoji::tests::an_empty_chats_greeting_closes_with_the_chat_and_plays_again`:
   an empty private chat's greeting, looping off, played to rest; another
   chat opens and the greeting has no clip and no head; opened again it
