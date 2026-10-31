@@ -32,8 +32,9 @@ closes each surface once, takes the counts, opens and closes it three
 more times and compares. What stays after the first close is a cache
 filled on first use; anything that grows after that is a leak.
 
-After every open and every close the harness draws a frame of each open
-window (call, stream, chat and Picture-in-Picture windows too), runs the
+After every open and every close the harness runs a frame of each open
+window (call, stream, chat and Picture-in-Picture windows too: their
+`on_next_frame` callbacks, then a draw, as the frame loop does), runs the
 test clock a second (`advance_clock`, never wall time) and draws again.
 So views a surface makes after its first frame (loaded history, tiles)
 are made and closing animations finish. Frames redraw only what changed,
@@ -77,9 +78,10 @@ Opening a profile always makes a fresh, empty one, so `close_info_panel`
 now drops it (`closing_the_profile_lets_go_of_its_search_field`).
 
 `a_surface_that_keeps_what_it_made_is_named` checks the check itself: a
-poll box that keeps a view in a thread-local, detaches a global observer
-and a window activation observer and detaches a task that never ends
-fails with all four named (`KeptView +3`, `global_observers +3`,
+poll box that keeps a view in a thread-local, detaches a global observer,
+a quit observer and a window activation observer and detaches a task
+that never ends fails with all five named (`KeptView +3`,
+`global_observers +3`, `quit_observers +3`,
 `main window activation_observers +3`, the spawn line). Rows that never
 open, or open and never close, fail by name.
 
@@ -96,3 +98,4 @@ row and names the type, subscription kind or spawn line that grew.
   anything needing a server reply).
 - Memory held outside entities (image and text caches) is covered by the
   other memory slices.
+- Background-executor tasks are not counted; only foreground ones are.

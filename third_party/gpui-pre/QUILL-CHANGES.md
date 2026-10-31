@@ -304,8 +304,9 @@ own tests, the `leak-detection` feature, or `GPUI_LEAK_DETECTION` set at
 build time; Quill's builds use none of them), and its
 `assert_no_new_leaks` checks nothing in a plain `test-support` build, so a
 Quill test could not tell whether closing a surface let go of what opening
-it made. Everything here is
-`test-support` only.
+it made. Everything here is `test-support` only, except the
+`#[track_caller]` on `App::spawn_with_priority`, which is in every build
+(it only changes the location a panic or a task reports).
 
 - `src/app/entity_map.rs`: `EntityMap` keeps each live entity's type name
   (`type_names`, filled in `insert`, emptied in `take_dropped`, so an entity
@@ -314,10 +315,12 @@ it made. Everything here is
   subscribers over every emitter that have not been dropped.
 - `src/app.rs`: `App::live_entity_counts` (live entities by type name) and
   `App::live_subscription_counts` (observers, event listeners, release
-  listeners, global, new-entity, keystroke and window-closed observers).
+  listeners, global, new-entity, keystroke, window-closed, keyboard-layout,
+  thermal, display, sleep, wake, lifecycle, memory-warning, quit and
+  restart observers).
 - `src/window.rs`: `Window::live_subscription_counts` (focus, bounds,
-  appearance, activation, visibility, display and pending-input
-  observers).
+  appearance, button-layout, activation, visibility, display and
+  pending-input observers).
 - `src/executor.rs`: `ForegroundExecutor::live_tasks`, the foreground
   tasks of this thread that have neither finished nor been dropped, by the
   `#[track_caller]` location of the spawn (`cx.spawn` and friends pass the
