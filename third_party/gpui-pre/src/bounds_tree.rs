@@ -1,3 +1,6 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.10 (Apache-2.0):
+// `insert_span`, one box standing for a range of orderings.
+// See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{Bounds, Half};
 use std::{
     cmp,
@@ -118,17 +121,26 @@ where
     /// The ordering is one greater than the maximum ordering of any
     /// existing bounds that intersect with the new bounds.
     pub fn insert(&mut self, new_bounds: Bounds<U>) -> u32 {
+        self.insert_span(new_bounds, 0)
+    }
+
+    /// QUILL: inserts bounds that stand for `extra + 1` consecutive orderings
+    /// and returns the first, one greater than the maximum ordering of any
+    /// existing bounds that intersect them. Later bounds that intersect them
+    /// come after the last.
+    pub fn insert_span(&mut self, new_bounds: Bounds<U>, extra: u32) -> u32 {
         // Find maximum ordering among intersecting bounds
         let max_intersecting = self.find_max_ordering(&new_bounds);
         let ordering = max_intersecting + 1;
+        let last_ordering = ordering.saturating_add(extra);
 
         // Insert the new leaf
-        let new_leaf_idx = self.insert_leaf(new_bounds, ordering);
+        let new_leaf_idx = self.insert_leaf(new_bounds, last_ordering);
 
         // Update max_leaf tracking
         self.max_leaf = match self.max_leaf {
             None => Some(new_leaf_idx),
-            Some(old_idx) if self.nodes[old_idx].max_order < ordering => Some(new_leaf_idx),
+            Some(old_idx) if self.nodes[old_idx].max_order < last_ordering => Some(new_leaf_idx),
             some => some,
         };
 

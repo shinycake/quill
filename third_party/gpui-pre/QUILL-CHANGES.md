@@ -348,3 +348,32 @@ moved callback, as a window the user dragged reports itself.
 `src/app/test_context.rs`: `TestAppContext::simulate_window_move` and
 `simulate_window_move_to_display` (the latter calls the existing
 `TestWindow::simulate_move_to_display`).
+
+## A replayed range enters the bounds tree once
+
+Changed in 2026 for the deep sweep. `Scene::replay` sent every primitive of a
+cached view back through `BoundsTree::insert`, every frame, to work out orders
+the last frame had already stored in `paint_operations`. On a real account that
+was 15 to 20% of `Window::draw` on each frame where a slice replays.
+
+- `src/bounds_tree.rs`: `insert_span(bounds, extra)` inserts one box standing
+  for `extra + 1` consecutive orderings and returns the first. `insert` is
+  `insert_span(bounds, 0)`.
+- `src/scene.rs`: `replay` keeps the `filtered` early return, then
+  `replay_as_one` takes the union of the range's clipped bounds and its lowest
+  and highest stored order, inserts that box once, and moves every primitive by
+  the same amount. `StartLayer` and `EndLayer` are copied, since a primitive in
+  a layer already stores the layer's order. A primitive in a layer counts in the
+  union even where it pokes out of the layer's bounds, which `insert_primitive`
+  never put in the tree. `insert_primitive` is split in two, and the second half,
+  `push_primitive`, is what both call. `PathId` is still assigned there.
+- `replay_each` is the old loop, for a replay into an open layer (a primitive
+  takes that layer's order) or while `suppressed`.
+- A later primitive over the box but over nothing the range drew sorts higher
+  than it needed to. That changes no pixels. It adds a batch only where two
+  ranges' boxes overlap, and each `Paths` batch is a render pass of its own.
+- `Scene::refuse_paint_for_test` (test support) sets `filtered` and `suppressed`.
+
+The crate's own tests do not build in Quill's tree, so `src/ui/scene_replay_tests.rs`
+holds the tests: random overlapping primitives with layers, replayed, replayed
+again through outer views, and compared with painting everything from scratch.
