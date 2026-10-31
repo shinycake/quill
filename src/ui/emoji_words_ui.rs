@@ -62,6 +62,9 @@ pub(super) struct EmojiWordsUi {
     /// Where the word's bar was painted, so moving the pointer from the
     /// word to it does not close it.
     strip_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// The pointer went somewhere else: the bar follows it when the
+    /// [`BAR_GRACE`] timer ends, unless the pointer comes back first.
+    pending: Option<(BarAim, Task<()>)>,
 }
 
 impl EmojiWordsUi {
@@ -74,11 +77,37 @@ impl EmojiWordsUi {
         self.hovered = None;
         self.pinned = false;
         self.strip_bounds.set(None);
+        self.pending = None;
     }
 }
 
 /// How far around the word and its bar the pointer may stray.
 const SLACK: f32 = 6.;
+/// How long the pointer may be off the way to an open bar, or resting on
+/// another word, before the bar follows it. Every matching word lights up,
+/// so the way up to the bar often crosses other words, and a hand rarely
+/// keeps to a straight line.
+pub(super) const BAR_GRACE: Duration = Duration::from_millis(400);
+
+/// Where the pointer is taking an open bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum BarAim {
+    /// Keep the bar: the pointer is on its word, on it, or on the way.
+    Hold,
+    /// To this other word's bar.
+    Word(Highlight),
+    Close,
+}
+
+/// What the pointer means for the bar of `shown`.
+fn bar_aim(under: Option<&Highlight>, shown: &Highlight, pinned: bool, on_the_way: bool) -> BarAim {
+    match under {
+        Some(word) if word == shown => BarAim::Hold,
+        Some(word) => BarAim::Word(word.clone()),
+        None if pinned || on_the_way => BarAim::Hold,
+        None => BarAim::Close,
+    }
+}
 
 /// Whether `p` is on the way between a word and its bar: inside either
 /// (with some slack) or in the band between them, which narrows from
@@ -216,38 +245,89 @@ impl QuillApp {
         self.answer_asked_word(cx);
     }
 
-    /// The pointer moved over the field: hover the highlight under it,
-    /// or close the strip when it is over plain text.
-    pub(super) fn hover_emoji_word(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    /// The pointer moved over the field, or anywhere in the window while a
+    /// word's bar shows: open the bar of the highlight under it, or let an
+    /// open bar follow the pointer.
+    pub(super) fn track_word_bar(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let bar = self.composer_ui.emoji_words.strip_bounds.get();
+        // A word scrolled out of the field keeps its rects: above the
+        // bar's bottom edge the pointer is over the history.
+        let in_field = bar.is_none_or(|bar| position.y >= bar.bottom());
         let state = self.composer.read(cx);
-        let under = self
-            .composer_ui
-            .emoji_words
+        let ui = &self.composer_ui.emoji_words;
+        let under = ui
             .highlights
             .iter()
             .find(|h| {
-                state
-                    .range_to_rects(&h.range)
-                    .iter()
-                    .any(|rect| rect.contains(&position))
+                in_field
+                    && state
+                        .range_to_rects(&h.range)
+                        .iter()
+                        .any(|rect| rect.contains(&position))
             })
             .cloned();
-        let ui = &self.composer_ui.emoji_words;
-        if ui.hovered.as_ref().map(|(h, _)| h) == under.as_ref() {
+        let aim = match ui.hovered.as_ref() {
+            Some((shown, _)) => bar_aim(
+                under.as_ref(),
+                shown,
+                ui.pinned,
+                self.pointer_on_the_way(position, cx),
+            ),
+            None => {
+                if let Some(word) = under {
+                    self.show_word_bar(Some(word), cx);
+                }
+                return;
+            }
+        };
+        self.aim_word_bar(aim, cx);
+    }
+
+    /// Hold the bar, or start the wait for it to follow the pointer. A wait
+    /// for the same place keeps running, so roaming off the way still
+    /// closes the bar, and sweeping across words only moves it once the
+    /// pointer rests on one.
+    pub(super) fn aim_word_bar(&mut self, aim: BarAim, cx: &mut Context<Self>) {
+        let ui = &mut self.composer_ui.emoji_words;
+        if aim == BarAim::Hold {
+            ui.pending = None;
             return;
         }
-        // A bar asked for from the menu stays until another word is
-        // pointed at.
-        if under.is_none() && (ui.pinned || self.pointer_on_the_way(position, cx)) {
+        if ui.pending.as_ref().is_some_and(|(to, _)| *to == aim) {
             return;
         }
-        let hovered = under.map(|h| {
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(BAR_GRACE).await;
+            let _ = this.update(cx, |this, cx| this.settle_word_bar(cx));
+        });
+        ui.pending = Some((aim, task));
+    }
+
+    /// The wait ended with the pointer still away.
+    fn settle_word_bar(&mut self, cx: &mut Context<Self>) {
+        let Some((aim, _)) = self.composer_ui.emoji_words.pending.take() else {
+            return;
+        };
+        match aim {
+            BarAim::Hold => {}
+            BarAim::Word(word) => self.show_word_bar(Some(word), cx),
+            BarAim::Close => {
+                self.show_word_bar(None, cx);
+                if self.composer_ui.suggest.active.is_none() {
+                    self.composer_ui.suggest.bar.reset();
+                }
+            }
+        }
+    }
+
+    fn show_word_bar(&mut self, word: Option<Highlight>, cx: &mut Context<Self>) {
+        let bar = word.map(|h| {
             let items = self.word_strip_items(&h);
             (h, items)
         });
         let ui = &mut self.composer_ui.emoji_words;
         ui.unhover();
-        ui.hovered = hovered.filter(|(_, items)| !items.is_empty());
+        ui.hovered = bar.filter(|(_, items)| !items.is_empty());
         cx.notify();
     }
 
@@ -265,25 +345,11 @@ impl QuillApp {
         }
     }
 
-    /// The pointer moved anywhere in the window while a word's bar shows
-    /// (or left the field or the bar): close it once the pointer is off
-    /// the way between the word and the bar.
+    /// The pointer left the field or the bar.
     pub(super) fn leave_word_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let position = window.mouse_position();
-        let ui = &self.composer_ui.emoji_words;
-        if ui.hovered.is_none() || self.pointer_on_the_way(position, cx) {
-            return;
+        if self.composer_ui.emoji_words.hovered.is_some() {
+            self.track_word_bar(window.mouse_position(), cx);
         }
-        // A pinned bar was asked for: it stays until the pointer goes to
-        // another word, Esc, or a pick.
-        if ui.pinned {
-            return;
-        }
-        self.composer_ui.emoji_words.unhover();
-        if self.composer_ui.suggest.active.is_none() {
-            self.composer_ui.suggest.bar.reset();
-        }
-        cx.notify();
     }
 
     /// The bar for a word: what `:word` would offer, custom emoji after.
@@ -376,7 +442,7 @@ impl QuillApp {
                 if !this.composer_ui.emoji_words.highlights.is_empty()
                     || this.composer_ui.emoji_words.hovered.is_some()
                 {
-                    this.hover_emoji_word(event.position, cx);
+                    this.track_word_bar(event.position, cx);
                 }
             }))
             .on_hover(cx.listener(|this, hovered: &bool, window, cx| {
@@ -516,6 +582,10 @@ fn paint_highlights(
     });
 }
 
+#[cfg(feature = "demo-capture")]
+#[path = "emoji_words_demo.rs"]
+mod demo;
+
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 #[path = "emoji_words_ui_tests.rs"]
@@ -523,8 +593,32 @@ mod tests;
 
 #[cfg(test)]
 mod way_tests {
-    use super::on_the_way;
+    use super::{BarAim, bar_aim, on_the_way};
     use gpui_kit::{Bounds, point, px, size};
+    use quill::emoji_words::Highlight;
+
+    fn word(start: usize, normalized: &str) -> Highlight {
+        Highlight {
+            range: start..start + normalized.len(),
+            normalized: normalized.into(),
+            emoji: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_word_on_the_way_waits_and_plain_text_on_the_way_holds() {
+        let (shown, other) = (word(0, "pizza"), word(6, "cake"));
+        let aim = |under, pinned, way| bar_aim(under, &shown, pinned, way);
+        assert_eq!(aim(Some(&shown), false, false), BarAim::Hold);
+        assert_eq!(aim(None, false, true), BarAim::Hold);
+        assert_eq!(aim(None, true, false), BarAim::Hold, "asked for: stays");
+        assert_eq!(aim(None, false, false), BarAim::Close);
+        assert_eq!(
+            aim(Some(&other), false, true),
+            BarAim::Word(other.clone()),
+            "crossing a lit word is not yet a switch: it goes through the wait"
+        );
+    }
 
     #[test]
     fn the_way_from_a_word_up_to_its_bar_keeps_it_open() {

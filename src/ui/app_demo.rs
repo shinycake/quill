@@ -412,6 +412,7 @@ impl QuillApp {
                             || this.close_mention_menu(cx)
                             || this.close_suggest_menu(true, cx)
                             || this.close_command_menu(cx)
+                            || this.dismiss_sticker_suggestions(window, cx)
                     })
                     .unwrap_or(false),
                 "up" => menu_app
