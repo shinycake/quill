@@ -40,7 +40,9 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy (core)
         run: cargo clippy --no-default-features --all-targets --locked -- -D warnings
+      # A test that hangs fails here instead of holding the job for 6 hours.
       - name: tests (core + replay)
+        timeout-minutes: 30
         run: cargo test --no-default-features --locked -- --nocapture
       # UI integration tests: windows, dialogs and clicks against the demo
       # app. GPUI's test platform is headless (no display, no-op text

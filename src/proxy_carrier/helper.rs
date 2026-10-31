@@ -265,6 +265,8 @@ pub struct HelperCarrierHost {
     /// Closed helpers still on their way out; each hears once its helper
     /// is gone.
     exiting: Vec<Receiver<()>>,
+    /// [`CLOSE_GRACE`]; tests set their own.
+    close_grace: Duration,
     /// [`SHUTDOWN_WAIT`]; tests set their own.
     shutdown_wait: Duration,
 }
@@ -304,6 +306,7 @@ impl HelperCarrierHost {
             failures_tx,
             failures,
             exiting: Vec::new(),
+            close_grace: CLOSE_GRACE,
             shutdown_wait: SHUTDOWN_WAIT,
         }
     }
@@ -438,8 +441,10 @@ impl CarrierHost for HelperCarrierHost {
             // It goes by itself after telling the page; if it does not (a
             // stuck loop, a writer stuck on a full pipe), it is killed.
             if let Some(child) = running.shared.take_child() {
-                self.exiting
-                    .push(crate::child_reap::reap_after_notice(child, CLOSE_GRACE));
+                self.exiting.push(crate::child_reap::reap_after_notice(
+                    child,
+                    self.close_grace,
+                ));
             }
         }
     }

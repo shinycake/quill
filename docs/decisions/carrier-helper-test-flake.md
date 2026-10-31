@@ -42,8 +42,14 @@ stand-in change alone; with the data folder tests alone, 0 of 200.
 - Waits are on the host's own events: the next failure is a blocking `recv` on the host's
   failure channel (was a 10 s poll with 20 ms sleeps); the page message is a blocking `recv`
   on the relay (was `recv_timeout(10 s)`), with the host's copy of the relay dropped so only
-  the reader holds it. Each wait ends on its own even if the code breaks: the writer's
-  watchdog fails a helper that never says `ready` or goes quiet.
+  the reader holds it. The failure wait drops the host's own sender too, so if no report
+  comes it ends, and the test fails, once the carrier's threads have ended: the reader at
+  the helper's exit, the writer at its first failed write or at the latest at its 60 s start
+  watchdog. Checked by making `Shared::fail` send nothing: the three tests that wait for a
+  failure panicked with "carrier threads ended without reporting a failure" after 60 s
+  (their writers had sent the open, so the start watchdog ended them) instead of hanging. The relay wait
+  ends at the latest at the writer's 15 s silence watchdog, which kills a helper that said
+  `ready` and nothing since.
 - The close tests no longer sleep 100 ms "to let it start" or poll `exiting()` for 2 s. They
   close, then collect every failure until the carrier's threads end (the host's sender is
   dropped, so the channel closes with the last thread's). That is exact: removing the
@@ -60,16 +66,22 @@ stand-in change alone; with the data folder tests alone, 0 of 200.
   asserted under 200 ms, under 1 s, and between the ceiling and the ceiling + 500 ms). The
   host takes its ceiling from a `shutdown_wait` field, always `SHUTDOWN_WAIT` outside tests,
   and its private `stop` (what `shutdown` runs) returns what the wait came to: `NotAtAll` (no
-  helper was exiting), `UntilAllGone` or `GaveUp`. Nothing running: `NotAtAll`. A helper that
-  ignores the close, with a ceiling of zero: `GaveUp`; with `stop` waiting without a ceiling
-  the test fails with `UntilAllGone`. A closed helper that leaves on the close, with a ceiling
-  of a day: `UntilAllGone`, so the wait ended because it left. The old version of that test
-  killed the helper first, which left `close` nothing to wait for, the same case as nothing
-  running.
+  helper was exiting), `UntilAllGone` or `GaveUp`. `close` likewise takes the grace it gives
+  a helper before killing it from a `close_grace` field, always `CLOSE_GRACE`.
+  - Nothing running: `NotAtAll`, decided before any wait, so this test shows there was
+    nothing to wait for, not that no wait happened.
+  - A helper that ignores the close, with a ceiling of zero: `GaveUp`. With `stop` waiting
+    without a ceiling the test fails with `UntilAllGone`. It covers only a ceiling already
+    reached: `stop` gives up before it waits at all, and `stays-up.sh` would give the same.
+    A ceiling that runs out during the wait is not covered; that needs a clock.
+  - A closed helper that leaves on the close, with a ceiling and a close grace of a day:
+    `UntilAllGone`. Neither can end the wait, so it ended because the helper left. The old
+    version of that test killed the helper first, which left `close` nothing to wait for,
+    the same case as nothing running.
 - The late teardown no longer checks that the new host's claim and sweep finished inside the
   old host's ceiling. The old host has a ceiling of a day and a helper that ignores the close,
-  so its teardown cannot end until the test kills that helper (by pid), after the new host's
-  sweep. The sweep may run before the teardown starts or while it waits; either way the old
+  so its teardown cannot end until the test kills that helper (`libc::kill` on its pid, not a
+  `kill` child process), after the new host's sweep. The sweep may run before the teardown starts or while it waits; either way the old
   folder is still held.
 - `stuck.sh` loops on `kill -0 $PPID` with 1 s sleeps instead of `exec sleep 30`, so it never
   leaves by itself while the test process lives (a 30 s sleep would end a slow run's
@@ -78,22 +90,29 @@ stand-in change alone; with the data folder tests alone, 0 of 200.
 - `without_a_folder_of_its_own_no_carrier_opens` checked the 10 s claim backoff by opening
   again at once. It now checks the backoff ends at least 10 s after the failed claim, and
   that an open before the backoff ends is refused, with the backoff set a day ahead.
-- Production behavior is the same: the field holds the constant, and `stop` computes the
+- Production behavior is the same: the fields hold the constants, and `stop` computes the
   outcome next to the loop it already ran.
 
-The production code keeps one bounded wait, described here, not tested by time: a reader
-that sees the helper's output end waits up to 500 ms (`EXIT_WAIT`) for the exit status, to
-tell a missing library (127) from a crash. The output ends only when the helper's own
-descriptors close on exit, just before it becomes reapable.
+A test that hangs now fails the CI step: "tests (core + replay)" has `timeout-minutes: 30`
+(it takes about 3 minutes on a warm cache) instead of GitHub's 6-hour default for the job.
+
+One bounded wait in production code remains, and
+`a_missing_web_view_library_turns_hosting_off` relies on it: a reader that sees the
+helper's output end waits up to 500 ms (`EXIT_WAIT`) for the exit status, to tell a missing
+library (127) from a crash. The output ends only when the helper's own descriptors close on
+exit, just before it becomes reapable, so on Linux the gap is microseconds; a 500 ms stall
+there would turn the expected `Unsupported` into `Terminated`.
 
 ## How measured
 All through `slot-cargo` on the final code, the binary run repeatedly by a cargo runner
 script (`--config target.<triple>.runner`):
-- `test --no-default-features --lib proxy_carrier::helper -- --test-threads=8`, 100 runs: 100
-  passed (24 tests each, 0.03 s per run; the suite took 3.5 s before).
-- The same with `update_install media_tools child_reap` in each run for load, 60 runs: no
-  carrier test failed. 8 runs failed in those other tests (`update_install` claim and
-  `tests.rs:318`, `media_tools.rs:565`; see below).
+- `test --no-default-features --lib proxy_carrier::helper -- --test-threads=8`: 60 runs, all
+  passed (24 tests each, 0.03 s per run; the suite took 3.5 s before). Before the review
+  fixes (`next_failure` closing its channel, `close_grace`), 100 runs, all passed.
+- The same with `update_install media_tools child_reap` in each run for load: 60 runs, no
+  carrier test failed, twice (before and after the review fixes). Each time 8 runs failed in
+  those other tests (`update_install` claim and `tests.rs:318`, `media_tools.rs:565`; see
+  below).
 - Before the shutdown rewrite, the stand-in change alone: 12 runs of the filter through
   `slot-cargo`, and 120 runs of a copy of that binary with the same load filters, had no
   carrier host failure.

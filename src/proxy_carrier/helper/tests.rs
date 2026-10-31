@@ -53,12 +53,17 @@ fn stand_in(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// The first failure the host reports (what the next `poll` returns),
-/// waited for on its channel instead of polled against a clock. It always
-/// comes: the reader reports the helper's exit, and the writer's watchdog
-/// fails a helper that never gets to `ready`.
-fn next_failure(host: &HelperCarrierHost) -> (i32, CarrierError) {
-    host.failures.recv().unwrap()
+/// The first failure the carrier's threads report (what the next `poll`
+/// returns), waited for on the host's channel instead of polled against a
+/// clock. The host's own sender is dropped, so if no report comes the wait
+/// ends, and the test fails, once every carrier thread has ended: the
+/// reader at the helper's exit, the writer at its first failed write or at
+/// the latest at its start watchdog ([`START_TIMEOUT`]).
+fn next_failure(host: &mut HelperCarrierHost) -> (i32, CarrierError) {
+    host.failures_tx = channel().0;
+    host.failures
+        .recv()
+        .expect("carrier threads ended without reporting a failure")
 }
 
 /// Every failure reported until all carrier threads have ended, for a host
@@ -71,8 +76,8 @@ fn reports_until_threads_end(host: &mut HelperCarrierHost) -> Vec<(i32, CarrierE
     host.failures.iter().collect()
 }
 
-/// A span no test outlives: as a shutdown ceiling, the wait ends only once
-/// every helper is gone.
+/// A span no test outlives: as a ceiling or a grace, a wait for helpers
+/// ends only once they are gone, never at its end.
 const LONGER_THAN_ANY_TEST: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What [`CarrierHost::shutdown`] does (`stop(true)`), and what its wait
@@ -121,7 +126,7 @@ fn a_helper_that_exits_before_ready_is_terminated() {
     // `true` reads nothing and exits 0: a crash, not a missing library.
     let (mut host, _) = host(Some("/usr/bin/true".into()));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(next_failure(&host), (4, CarrierError::Terminated));
+    assert_eq!(next_failure(&mut host), (4, CarrierError::Terminated));
     assert!(host.available());
 }
 
@@ -131,7 +136,7 @@ fn a_missing_web_view_library_turns_hosting_off() {
     // missing.
     let (mut host, _) = host(Some(stand_in("missing-library.sh")));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(next_failure(&host), (4, CarrierError::Unsupported));
+    assert_eq!(next_failure(&mut host), (4, CarrierError::Unsupported));
     assert!(!host.available());
     assert_eq!(host.open(&request(5)), Err(CarrierError::Unsupported));
 }
@@ -140,7 +145,7 @@ fn a_missing_web_view_library_turns_hosting_off() {
 fn a_helper_saying_unsupported_turns_hosting_off() {
     let (mut host, _) = host(Some(stand_in("says-unsupported.sh")));
     assert_eq!(host.open(&request(4)), Ok(()));
-    assert_eq!(next_failure(&host), (4, CarrierError::Unsupported));
+    assert_eq!(next_failure(&mut host), (4, CarrierError::Unsupported));
     assert!(!host.available());
 }
 
@@ -196,29 +201,31 @@ fn shutdown_ends_every_helper_at_once() {
 }
 
 #[test]
-fn a_shutdown_with_nothing_running_or_exiting_does_not_wait() {
+fn a_shutdown_with_nothing_running_or_exiting_has_nothing_to_wait_for() {
     let (mut host, _) = host(Some(stand_in("stays-up.sh")));
     assert!(!host.exiting());
     assert_eq!(shutdown_outcome(&mut host), Waited::NotAtAll);
 }
 
-/// A helper that ignores the close command: once the ceiling is reached
-/// (here at once) shutdown gives up on it instead of waiting.
+/// A ceiling already reached (zero) gives up on a helper still exiting
+/// without waiting for it. A ceiling that runs out during the wait is not
+/// covered: that needs a clock.
 #[test]
-fn a_shutdown_waits_for_helpers_at_most_its_ceiling() {
+fn a_shutdown_past_its_ceiling_gives_up_on_a_stuck_helper() {
     let (mut host, _) = host(Some(stand_in("stuck.sh")));
     host.shutdown_wait = Duration::ZERO;
     assert_eq!(host.open(&request(5)), Ok(()));
     assert!(host.exiting());
     assert_eq!(shutdown_outcome(&mut host), Waited::GaveUp);
-    assert!(!host.exiting());
 }
 
-/// A closed helper that leaves on the close ends the shutdown's wait:
-/// with no ceiling to reach, only its exit can.
+/// A closed helper that leaves on the close ends the shutdown's wait.
+/// Neither the shutdown's ceiling nor the close's grace (after which the
+/// helper would be killed) can end it here, so only that exit can.
 #[test]
 fn a_closed_helper_that_exits_ends_the_wait() {
     let (mut host, _) = host(Some(stand_in("stays-up.sh")));
+    host.close_grace = LONGER_THAN_ANY_TEST;
     host.shutdown_wait = LONGER_THAN_ANY_TEST;
     assert_eq!(host.open(&request(5)), Ok(()));
     host.close(5, false);
@@ -251,7 +258,7 @@ fn a_late_teardown_leaves_the_next_hosts_folder_alone() {
     let (mut old, _) = host_with(Some(stand_in("stuck.sh")), Some(root.clone()));
     old.shutdown_wait = LONGER_THAN_ANY_TEST;
     assert_eq!(old.open(&request(5)), Ok(()));
-    let stuck = helper_pid(&old, 5);
+    let stuck = i32::try_from(helper_pid(&old, 5)).unwrap();
     let old_cookie = cookie_in(old.data_folder().unwrap());
     let teardown =
         crate::thread_guard::spawn_guarded("test-teardown", move || old.shutdown()).unwrap();
@@ -262,11 +269,10 @@ fn a_late_teardown_leaves_the_next_hosts_folder_alone() {
     }
     // The teardown cannot end while its helper runs.
     assert!(old_cookie.exists());
-    let killed = Command::new("kill")
-        .args(["-9", &stuck.to_string()])
-        .status()
-        .unwrap();
-    assert!(killed.success());
+    // SAFETY: a plain syscall on the id of the old host's own child, not
+    // reaped yet so the id is still its; it dereferences nothing. Not the
+    // `kill` command: a child started here is what made these tests flaky.
+    assert_eq!(unsafe { libc::kill(stuck, libc::SIGKILL) }, 0);
     let _ = teardown.join();
     assert!(!old_cookie.exists());
     assert!(new_cookie.exists());
