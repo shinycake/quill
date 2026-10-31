@@ -3,7 +3,7 @@ name: package-macos
 # arm64 runner (never the personal self-hosted Mac). TDLib is built from source
 # (cached), libquill_calls (the call library) comes from quill-calls.yml, which
 # the caller runs first in the same run, with the FFmpeg it links (cached),
-# and OpenSSL is bundled from the runner's Homebrew by
+# and OpenSSL, built here for the deployment target, is bundled by
 # scripts/macos-package-smoke.sh.
 # Not notarized: there is no Developer ID (docs/decisions/codex-release-pipeline.md).
 # Signed with the owner's Apple Development identity when the caller passes
@@ -43,9 +43,10 @@ env:
 jobs:
   macos-package:
     name: macos-package
-    # macos-14 = Sonoma arm64, so the Homebrew OpenSSL bottles bundled into
-    # the app also target macOS 14.
-    runs-on: macos-14
+    # arm64. The deployment target above, not the runner, sets the oldest
+    # macOS Quill runs on; check-bundle-macho.sh fails on any library that
+    # needs a newer one.
+    runs-on: macos-15
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
@@ -60,14 +61,29 @@ jobs:
       - name: build tools
         run: |
           brew list gperf >/dev/null 2>&1 || brew install gperf
-          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: restore OpenSSL build
+        id: openssl-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: native/openssl/prefix
+          key: openssl-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-openssl.sh') }}
+      - name: build OpenSSL
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-openssl.sh
+      - name: save OpenSSL build
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: native/openssl/prefix
+          key: openssl-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-openssl.sh') }}
+      - name: use the built OpenSSL
+        run: echo "OPENSSL_ROOT_DIR=$PWD/native/openssl/prefix" >> "$GITHUB_ENV"
       - name: restore TDLib build
         id: tdlib-cache
         uses: actions/cache/restore@v6
         with:
           path: native/prefix
-          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'scripts/build-openssl.sh', 'native/patches/*') }}
       - name: build TDLib
         if: steps.tdlib-cache.outputs.cache-hit != 'true'
         env:
@@ -82,7 +98,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: native/prefix
-          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'native/patches/*') }}
+          key: tdlib-macos-${{ runner.arch }}-${{ hashFiles('src/pins.rs', 'scripts/build-tdlib.sh', 'scripts/build-openssl.sh', 'native/patches/*') }}
       # libquill_calls links FFmpeg dynamically; the app ships the build it
       # was linked against (same cache key as quill-calls.yml).
       - name: restore FFmpeg build

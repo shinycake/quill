@@ -3,6 +3,7 @@
 /native/td
 /native/build
 /native/prefix
+/native/openssl
 **/*.rs.bk
 .DS_Store
 .env
