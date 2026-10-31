@@ -296,11 +296,11 @@ impl QuillApp {
         if ui.pending.as_ref().is_some_and(|(to, _)| *to == aim) {
             return;
         }
-        let task = cx.spawn(async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(BAR_GRACE).await;
             let _ = this.update(cx, |this, cx| this.settle_word_bar(cx));
         });
-        ui.pending = Some((aim, task));
+        self.composer_ui.emoji_words.pending = Some((aim, task));
     }
 
     /// The wait ended with the pointer still away.
