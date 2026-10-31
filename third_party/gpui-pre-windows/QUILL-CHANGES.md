@@ -364,3 +364,18 @@ played at about 32 Hz. Telegram Desktop runs its animations on a
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
+
+## The file pickers free each path and skip items without one
+
+Added in 2026:
+
+- `src/platform.rs`: `file_system_path` copies `GetDisplayName(SIGDN_FILESYSPATH)`
+  into a `PathBuf` (as UTF-16, so a name that is not valid Unicode survives)
+  and frees the string with `CoTaskMemFree`. Upstream's open dialog never
+  freed it, and one item without a file system path (a phone, a library)
+  failed the whole selection; such items are now logged and skipped, and a
+  selection with none left reads as cancelled. The save dialog uses the same
+  helper.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.

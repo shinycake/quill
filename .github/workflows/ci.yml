@@ -33,6 +33,9 @@ jobs:
       # docs/decisions/sweep-window-slot-scope.md: async work names its window.
       - name: window scope
         run: python3 scripts/check-window-scope.py
+      # docs/decisions/platform-small-fixes.md: long paths and per-monitor DPI.
+      - name: windows manifest
+        run: python3 scripts/check-windows-manifest.py
       - name: hotspots
         if: github.event_name == 'pull_request'
         run: bash scripts/check-hotspots.sh ${{ github.event.pull_request.base.sha }}

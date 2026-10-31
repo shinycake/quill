@@ -12,7 +12,8 @@ the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
   dpiAware, Common-Controls 6, Win10 supportedOS, asInvoker, SegmentHeap). Adding Quill's own made the
   Windows link fail with CVT1100 (duplicate RT_MANIFEST 1, Windows CI on `cursor/platform-small-fixes`),
   even with `/MANIFEST:NO`. Only `longPathAware` and the UTF-8 code page are missing; a follow-up can
-  add them by patching the vendored gpui manifest rather than adding a second one.
+  add them by patching the vendored gpui manifest rather than adding a second one. `longPathAware`
+  was added that way later (`third_party/gpui-pre/QUILL-CHANGES.md`); the UTF-8 code page was not.
 - **P5 desktop id.** `assets/quill.desktop` is now `assets/org.shinycake.quill.desktop` with
   `StartupWMClass=org.shinycake.quill`, matching the window app_id. Package script, installer
   (`linux-install.sh`, keeps a hidden `NoDisplay` `quill.desktop` alias only where an old one existed,

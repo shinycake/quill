@@ -692,3 +692,21 @@ fn frame_steps_move_one_picture_while_paused() {
     player.play();
     assert!(player.step_forward().is_none());
 }
+
+#[cfg(unix)]
+#[test]
+fn ffmpeg_opens_a_path_that_is_not_utf8() {
+    use std::os::unix::ffi::OsStrExt;
+    if !decoder() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("quill-non-utf8-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let link = dir.join(std::ffi::OsStr::from_bytes(b"clip-\xff.mp4"));
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(fixture("clip-h264-aac.mp4"), &link).unwrap();
+    assert!(link.to_str().is_none());
+    let opened = super::ffi::FfiDemuxer::open(&link, &OpenOptions::viewer());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(opened.expect("open through the link").info().width, 96);
+}

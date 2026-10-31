@@ -81,6 +81,7 @@ pub mod event_log_filter;
 pub mod event_log_list;
 pub mod export;
 pub mod fast_buttons;
+pub mod ffi_path;
 pub mod file_prefs;
 pub mod folder_archive;
 pub mod folder_icons;

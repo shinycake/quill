@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // the vsync thread skips idle windows and sleeps while all are idle; a lost
 // GPU device or a failed DirectX start no longer panics, and recovery sends
-// to windows without holding the window list.
+// to windows without holding the window list; the file pickers free each
+// path string and skip items without a file system path.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
@@ -1658,11 +1659,26 @@ fn file_open_dialog(
     let mut paths = Vec::with_capacity(file_count as usize);
     for i in 0..file_count {
         let item = unsafe { results.GetItemAt(i)? };
-        let path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH)?.to_string()? };
-        paths.push(PathBuf::from(path));
+        // An item with no file system path (a phone, a library) is skipped,
+        // not the whole selection.
+        match file_system_path(&item) {
+            Ok(path) => paths.push(path),
+            Err(error) => log::warn!("skipping a picked item without a file path: {error}"),
+        }
     }
 
-    Ok(Some(paths))
+    Ok((!paths.is_empty()).then_some(paths))
+}
+
+fn file_system_path(item: &IShellItem) -> Result<PathBuf> {
+    // SAFETY: `GetDisplayName` returns a NUL-terminated string allocated
+    // with CoTaskMemAlloc; it is copied out before being freed once here.
+    unsafe {
+        let pwstr = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let path = PathBuf::from(OsString::from_wide(pwstr.as_wide()));
+        CoTaskMemFree(Some(pwstr.0 as _));
+        Ok(path)
+    }
 }
 
 fn file_save_dialog(
@@ -1711,13 +1727,7 @@ fn file_save_dialog(
         }
     }
     let shell_item = unsafe { dialog.GetResult()? };
-    let file_path_string = unsafe {
-        let pwstr = shell_item.GetDisplayName(SIGDN_FILESYSPATH)?;
-        let string = pwstr.to_string()?;
-        CoTaskMemFree(Some(pwstr.0 as _));
-        string
-    };
-    Ok(Some(PathBuf::from(file_path_string)))
+    Ok(Some(file_system_path(&shell_item)?))
 }
 
 fn load_icon() -> Result<HICON> {
