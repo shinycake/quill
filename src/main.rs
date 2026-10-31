@@ -187,14 +187,19 @@ fn ui_main(args: &[String]) {
     // Single instance (tdesktop `Core::Sandbox`): a second launch hands its
     // links to the running Quill and exits before touching the account
     // database or the media caches. `--quit` with no Quill running is done.
+    use quill::single_instance::Launch;
     let instance = single_instance(args);
-    if instance == Instance::Forwarded || quill::start_files::quit_requested(args) {
+    let quit = quill::start_files::quit_requested(args);
+    if instance == Launch::OwnerStuck && !quit {
+        ui::startup_failure::owner_stuck();
+    }
+    if matches!(instance, Launch::Forwarded | Launch::OwnerStuck) || quit {
         return;
     }
 
     // A staged update installs at the next start (tdesktop `checkReadyUpdate`),
     // only once no other Quill can be running from this install.
-    if instance == Instance::Primary && quill::update_install::apply_on_start(args) {
+    if instance == Launch::Primary && quill::update_install::apply_on_start(args) {
         return;
     }
 
@@ -328,41 +333,22 @@ fn ui_main(args: &[String]) {
     });
 }
 
+/// Tries to hand this launch to a running instance.
 #[cfg(feature = "ui")]
-#[derive(PartialEq, Eq)]
-enum Instance {
-    /// Handed to the running Quill, or that Quill is hung: exit.
-    Forwarded,
-    /// This process is the only Quill.
-    Primary,
-    /// The socket could not be set up; Quill starts anyway.
-    Unchecked,
-}
-
-/// Whether this launch was handed to an already-running instance (or must
-/// not start because that instance is stuck).
-#[cfg(feature = "ui")]
-fn single_instance(args: &[String]) -> Instance {
-    use quill::single_instance::{Acquired, Endpoint, acquire};
+fn single_instance(args: &[String]) -> quill::single_instance::Launch {
+    use quill::single_instance::{Endpoint, Launch, acquire};
     let Some(root) = quill::settings::safe_app_root() else {
-        return Instance::Unchecked;
+        return Launch::Unchecked;
     };
     let cwd = std::env::current_dir().unwrap_or_default();
     let forwarded = quill::start_files::forwarded_args(args.get(1..).unwrap_or_default(), &cwd);
-    match acquire(&Endpoint::for_root(&root), &forwarded, |args| {
+    let acquired = acquire(&Endpoint::for_root(&root), &forwarded, |args| {
         quill::start_files::handle_forwarded_launch(&args)
-    }) {
-        Ok(Acquired::Forwarded) => Instance::Forwarded,
-        Ok(Acquired::Primary) => Instance::Primary,
-        Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
-            eprintln!("quill: {error}; not starting a second instance.");
-            Instance::Forwarded
-        }
-        Err(error) => {
-            eprintln!("quill: single-instance check unavailable ({error}); continuing.");
-            Instance::Unchecked
-        }
+    });
+    if let Err(error) = &acquired {
+        eprintln!("quill: single-instance check: {error}");
     }
+    Launch::after(&acquired)
 }
 
 #[cfg(feature = "ui")]

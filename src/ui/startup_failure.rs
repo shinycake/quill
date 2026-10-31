@@ -30,6 +30,13 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     std::process::exit(1)
 }
 
+/// A running Quill did not answer this launch, and nothing else tells the
+/// user: a bundled app has no stderr.
+pub(crate) fn owner_stuck() {
+    let detail = tr(keys::Q_STARTUP_OWNER_STUCK_BODY);
+    show_alert(tr(keys::Q_STARTUP_OWNER_STUCK_TITLE), detail, detail);
+}
+
 /// The alert's body, and a short version for a desktop notification (which
 /// shows only a few lines). On Linux a missing Vulkan loader, driver or
 /// usable device gets the package to install; other graphics errors get the
@@ -71,12 +78,15 @@ fn is_vulkan_failure(detail: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn show_alert(title: &str, detail: &str, _summary: &str) {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::NSAlert;
+    use objc2_app_kit::{NSAlert, NSApplication};
     use objc2_foundation::NSString;
     // AppKit alerts need the main thread; GPUI runs foreground tasks there.
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
+    // A launch that exits again never started GPUI, which would have made
+    // the application object and brought it forward.
+    NSApplication::sharedApplication(mtm).activate();
     let alert = NSAlert::new(mtm);
     alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(detail));

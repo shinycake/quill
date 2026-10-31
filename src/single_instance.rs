@@ -130,6 +130,31 @@ pub enum Acquired {
     Forwarded,
 }
 
+/// What a launch does next.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Launch {
+    /// Handed to the running Quill: exit.
+    Forwarded,
+    /// This process is the only Quill.
+    Primary,
+    /// A Quill is running and does not answer: say so and exit.
+    OwnerStuck,
+    /// The endpoint could not be used; Quill starts anyway.
+    Unchecked,
+}
+
+impl Launch {
+    /// The decision for what [`acquire`] returned.
+    pub fn after(acquired: &io::Result<Acquired>) -> Self {
+        match acquired {
+            Ok(Acquired::Forwarded) => Self::Forwarded,
+            Ok(Acquired::Primary) => Self::Primary,
+            Err(error) if error.kind() == io::ErrorKind::TimedOut => Self::OwnerStuck,
+            Err(_) => Self::Unchecked,
+        }
+    }
+}
+
 /// Serializes the connect / unlink-stale / bind sequence across processes.
 struct AcquireLock {
     #[cfg(unix)]
@@ -486,6 +511,22 @@ pub fn acquire(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_silent_owner_is_stuck_and_any_other_failure_starts_quill() {
+        use std::io::{Error, ErrorKind};
+        let after = |result: std::io::Result<Acquired>| Launch::after(&result);
+        assert_eq!(
+            after(Err(Error::from(ErrorKind::TimedOut))),
+            Launch::OwnerStuck
+        );
+        assert_eq!(after(Ok(Acquired::Forwarded)), Launch::Forwarded);
+        assert_eq!(after(Ok(Acquired::Primary)), Launch::Primary);
+        assert_eq!(
+            after(Err(Error::from(ErrorKind::PermissionDenied))),
+            Launch::Unchecked
+        );
+    }
+
+    #[test]
     fn windows_root_keys_ignore_case_slashes_and_verbatim_prefix() {
         let a = super::windows_root_key(r"C:\Users\Me\AppData\Quill");
         assert_eq!(a, super::windows_root_key(r"c:\users\me\appdata\quill\"));
@@ -494,7 +535,7 @@ mod tests {
         assert_ne!(a, super::windows_root_key(r"C:\Users\Me\AppData\Other"));
     }
 
-    use super::{Acquired, ClientSlots, Endpoint, acquire, root_digest};
+    use super::{Acquired, ClientSlots, Endpoint, Launch, acquire, root_digest};
     use std::sync::mpsc;
     use std::time::Duration;
 
