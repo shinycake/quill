@@ -3,18 +3,24 @@
 //! message, under one decoded-memory budget.
 //!
 //! - A player starts the first time its row renders a downloaded clip,
-//!   and is dropped once its row has not rendered for a whole history
-//!   pass (scrolled away, chat changed, viewer open).
+//!   and is dropped once no window shows it: a clip leaves a window once
+//!   its row has not rendered for a whole pass of that window's history
+//!   (scrolled away, chat changed, viewer open) or the window closes
+//!   ([`windows`]). A chat window's clips play while the main window
+//!   draws another chat.
 //! - Off-screen policy: after each history pass the players whose picture
-//!   was not painted inside the visible area in that pass are paused at
-//!   once (no more decoding, no more frame requests), resumed when a sweep
-//!   sees them painted in view again, and put to sleep after
-//!   [`RELEASE_AFTER`] off screen ([`off_screen_step`]): the decoder goes,
-//!   the slot stays with a backend-less player that paints nothing over
-//!   the still and only counts being painted, so a row that keeps
+//!   was not painted inside the visible area in that pass (nor in the
+//!   last pass of another window showing them that the platform presents)
+//!   are paused at once (no more decoding, no more frame requests),
+//!   resumed when a sweep sees them painted in view again, and put to
+//!   sleep after [`RELEASE_AFTER`] off screen ([`off_screen_step`]): the
+//!   decoder goes, the slot stays with a backend-less player that paints
+//!   its last picture and counts being painted, so a row that keeps
 //!   rendering in the list's overdraw does not reopen its decoder every
 //!   pass. A sweep that sees a sleeping slot painted in view opens a new
-//!   player for it (`revive`). tdesktop pauses a clip that is not drawn
+//!   player for it (`revive`), which shows that picture until its first
+//!   own one: the tile never falls back to the still (which may be loading
+//!   or evicted) in between. tdesktop pauses a clip that is not drawn
 //!   the same way (its streamed player only decodes ahead of frames shown)
 //!   and unloads it once far from the visible area (`unloadHeavyViewParts`).
 //! - A round video message plays once with sound when clicked, then loops
@@ -29,16 +35,19 @@
 #![deny(clippy::indexing_slicing)]
 
 mod demand;
+mod windows;
 
 use super::inline_video::{InlineFrame, InlineTile};
 use super::video_player::{PlayState, Purpose, VideoPlayer};
 pub(super) use demand::Demand;
 use gpui_kit::*;
+use quill::ids::ChatId;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+use windows::{List, Seen, Sweep, Windows, note_sweep};
 
 /// `(chat id, message id)`.
 pub(super) type Key = (i64, i64);
@@ -47,7 +56,7 @@ pub(super) type Key = (i64, i64);
 /// results or the media panel's GIFs. Its players live under a chat id no
 /// chat uses; the history's off-screen sweep leaves them alone, and each
 /// panel's render passes reap only its own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Panel {
     InlineResults,
     Gifs,
@@ -232,15 +241,15 @@ struct Slot {
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
     /// aren't ours, and for a sleeping slot).
     bytes: usize,
-    /// Off screen for [`RELEASE_AFTER`]: the player has no backend
-    /// (`VideoPlayer::hibernate`) until a sweep sees it painted in view.
+    /// Off screen for [`RELEASE_AFTER`]: the player has no backend, only
+    /// its last picture (`VideoPlayer::hibernate_on_last_picture`), until
+    /// a sweep sees it painted in view.
     asleep: bool,
-    /// The pass its row last rendered in: the history's, or its panel's
-    /// for a [`Panel`] key.
-    seen: u64,
-    /// The player's paint count when the current pass began
-    /// (`VideoPlayer::shown_count`): more since means it was in view.
-    shown_mark: u64,
+    /// The windows its row renders in, each with the pass it last
+    /// rendered in there (the history's, or its panel's for a [`Panel`]
+    /// key), the paint count when that pass began, and whether that
+    /// window's last sweep found it in view.
+    windows: Windows,
     /// Off screen since then: paused, released after [`RELEASE_AFTER`].
     hidden_since: Option<Instant>,
     sound: bool,
@@ -314,36 +323,19 @@ impl Slot {
     }
 }
 
-/// Which pass a slot's row renders in: the history's or the GIF panel's
-/// (which renders in its own slice, at its own times).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Pass {
-    History(u64),
-    Panel(Panel, u64),
-}
-
-/// Whether the slot for `key`, whose row last rendered in pass `seen`,
-/// stays as `pass` begins: it rendered in the previous pass of its kind,
-/// or it belongs to the other kind.
-fn survives(key: Key, seen: u64, pass: Pass) -> bool {
-    match pass {
-        Pass::History(render) => is_panel(key.0) || seen.saturating_add(1) >= render,
-        Pass::Panel(panel, render) => key.0 != panel.chat() || seen.saturating_add(1) >= render,
-    }
-}
-
 #[derive(Default)]
 struct State {
     players: HashMap<Key, Slot>,
-    render: u64,
-    /// The view the history renders in (`begin_render`): redrawn once a
-    /// sleeping slot gets a new player, so its tile picks it up.
-    history_view: Option<EntityId>,
-    /// The panels' pass counts ([`InlineVideos::begin_panel_render`]).
-    inline_results_render: u64,
-    gifs_render: u64,
-    /// The history rendered (and swept the players) this frame.
-    swept: bool,
+    /// Each window's pass counts, of its history and of each panel
+    /// (`None`: the main window's).
+    passes: HashMap<(Option<ChatId>, List), u64>,
+    /// The view each window's history renders in (`begin_render`): redrawn
+    /// once a sleeping slot it shows gets a new player, so its tile picks
+    /// it up.
+    views: HashMap<Option<ChatId>, EntityId>,
+    /// The windows whose history rendered (and swept the players) since
+    /// their last frame began.
+    swept: HashSet<Option<ChatId>>,
     /// The window is in the background: muted loops hold still.
     inactive: bool,
     /// The window's display scale (device pixels per point); 0 until the
@@ -354,15 +346,14 @@ struct State {
     /// Clips asked for by a click (autoplay off, data saver, or not
     /// downloaded yet).
     on_demand: HashMap<Key, demand::OnDemand>,
-}
-
-impl State {
-    fn panel_render(&mut self, panel: Panel) -> &mut u64 {
-        match panel {
-            Panel::InlineResults => &mut self.inline_results_render,
-            Panel::Gifs => &mut self.gifs_render,
-        }
-    }
+    /// The windows whose presentation is watched (from their first frame
+    /// until they close).
+    watched: HashMap<Option<ChatId>, Subscription>,
+    /// The watched windows the platform does not present now.
+    unpresented: HashSet<Option<ChatId>>,
+    /// The active chat window hides the main window whole
+    /// (`chat_window::cover`): presented, it draws nothing.
+    main_covered: bool,
 }
 
 /// The players (see the module docs). Shared (`Rc`) with the history's
@@ -390,75 +381,32 @@ impl InlineVideos {
         Some(f(&mut state))
     }
 
-    /// The pass number `key`'s row renders in now.
-    fn pass_of(state: &State, key: Key) -> u64 {
-        match Panel::of(key.0) {
-            Some(Panel::InlineResults) => state.inline_results_render,
-            Some(Panel::Gifs) => state.gifs_render,
-            None => state.render,
-        }
-    }
-
-    /// Start a render pass of `panel`: its players whose cells did not
-    /// render in the last one (results that left the panel) stop. Called
-    /// at the top of the panel's render.
-    pub(super) fn begin_panel_render(&self, panel: Panel) {
+    /// Start a pass of `window`'s history (`None`: the main window's),
+    /// rendered in `view`: its clips whose rows didn't render in its last
+    /// pass leave it (and stop once no window shows them), and the paint
+    /// count of each clip it shows is noted. Once the pass has painted
+    /// (deferred to the end of this frame), its clips not painted in view
+    /// are paused ([`Self::sweep`]).
+    pub(super) fn begin_render(
+        self: &Rc<Self>,
+        window: Option<ChatId>,
+        view: Option<EntityId>,
+        cx: &mut App,
+    ) {
         let dropped = self.with(|state| {
-            let render = state.panel_render(panel);
-            *render += 1;
-            let pass = Pass::Panel(panel, *render);
-            let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
-                std::mem::take(&mut state.players)
-                    .into_iter()
-                    .partition(|(key, slot)| survives(*key, slot.seen, pass));
-            state.players = keep;
-            state.forget(&drop);
-            drop
-        });
-        drop(dropped);
-    }
-
-    /// `panel` closed: its players stop.
-    pub(super) fn clear_panel(&self, panel: Panel) {
-        let chat = panel.chat();
-        let dropped = self.with(|state| {
-            if !state.players.keys().any(|(key_chat, _)| *key_chat == chat) {
-                return HashMap::new();
-            }
-            let (drop, keep): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
-                std::mem::take(&mut state.players)
-                    .into_iter()
-                    .partition(|((key_chat, _), _)| *key_chat == chat);
-            state.players = keep;
-            state.forget(&drop);
-            drop
-        });
-        drop(dropped);
-    }
-
-    /// Start a history render pass: players whose rows didn't render in
-    /// the last pass stop, and each player's paint count is noted. Once the
-    /// pass has painted (deferred to the end of this frame), the players
-    /// not painted in view are paused ([`Self::sweep`]).
-    pub(super) fn begin_render(self: &Rc<Self>, view: Option<EntityId>, cx: &mut App) {
-        let dropped = self.with(|state| {
-            state.swept = true;
-            state.history_view = view;
-            state.render += 1;
-            let pass = Pass::History(state.render);
-            let (keep, drop): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
-                std::mem::take(&mut state.players)
-                    .into_iter()
-                    .partition(|(key, slot)| survives(*key, slot.seen, pass));
-            state.players = keep;
-            state.forget(&drop);
-            drop
+            state.swept.insert(window);
+            match view {
+                Some(view) => state.views.insert(window, view),
+                None => state.views.remove(&window),
+            };
+            state.begin_pass(window, List::History)
         });
         let marks: Vec<(Key, VideoPlayer)> = self
             .with(|state| {
                 state
                     .players
                     .iter()
+                    .filter(|(_, slot)| slot.windows.contains_key(&window))
                     .map(|(key, slot)| (*key, slot.player.clone()))
                     .collect()
             })
@@ -470,39 +418,50 @@ impl InlineVideos {
             .collect();
         self.with(|state| {
             for (key, mark) in marks {
-                if let Some(slot) = state.players.get_mut(&key) {
-                    slot.shown_mark = mark;
+                if let Some(seen) = state
+                    .players
+                    .get_mut(&key)
+                    .and_then(|slot| slot.windows.get_mut(&window))
+                {
+                    seen.mark = mark;
                 }
             }
         });
         drop(dropped);
         let videos = self.clone();
-        cx.defer(move |cx| videos.sweep(cx));
+        cx.defer(move |cx| videos.sweep(Sweep::Pass(window), cx));
     }
 
-    /// The off-screen policy after a history pass painted (or when the
-    /// release timer fires): pause what was not painted in view, resume
-    /// what was, put to sleep what has been off screen for
+    /// The off-screen policy after a window's history pass painted (for
+    /// the clips it shows), when the release timer fires, or when a window
+    /// is hidden or presented again: pause what no window has in view,
+    /// resume what one has, put to sleep what has been off screen for
     /// [`RELEASE_AFTER`], and give a sleeping slot painted in view a new
-    /// player.
-    pub(super) fn sweep(self: &Rc<Self>, cx: &mut App) {
+    /// player (behind another app, only on its window's pass).
+    fn sweep(self: &Rc<Self>, sweep: Sweep, cx: &mut App) {
         let now = cx.background_executor().now();
-        let players: Vec<(Key, VideoPlayer, u64)> = self
+        let players: Vec<(Key, VideoPlayer)> = self
             .with(|state| {
                 state
                     .players
                     .iter()
-                    .filter(|((chat, _), _)| !is_panel(*chat))
-                    .map(|(key, slot)| (*key, slot.player.clone(), slot.shown_mark))
+                    .filter(|((chat, _), slot)| {
+                        !is_panel(*chat)
+                            && match sweep {
+                                Sweep::Pass(window) => slot.windows.contains_key(&window),
+                                Sweep::Timer | Sweep::Recheck => true,
+                            }
+                    })
+                    .map(|(key, slot)| (*key, slot.player.clone()))
                     .collect()
             })
             .unwrap_or_default();
-        let visible: Vec<(Key, bool, PlayState, bool)> = players
+        let counted: Vec<(Key, u64, PlayState, bool)> = players
             .into_iter()
-            .map(|(key, player, mark)| {
+            .map(|(key, player)| {
                 (
                     key,
-                    player.shown_count() > mark,
+                    player.shown_count(),
                     player.state(),
                     player.wants_play(),
                 )
@@ -510,15 +469,20 @@ impl InlineVideos {
             .collect();
         let Some((commands, sleepers, revive, hidden)) = self.with(|state| {
             let inactive = state.inactive;
+            let unseen = state.unseen();
             let mut commands = Vec::new();
             let mut sleepers = Vec::new();
             let mut revive = Vec::new();
-            for (key, visible, play_state, running) in visible {
+            for (key, count, play_state, running) in counted {
                 let Some(slot) = state.players.get_mut(&key) else {
                     continue;
                 };
+                let visible = note_sweep(&mut slot.windows, sweep, count, &unseen);
                 if slot.asleep {
-                    if visible {
+                    // Behind another app only its window's own pass wakes
+                    // it: a recheck as every window is hidden (Cmd-H)
+                    // would open decoders for clips nobody sees.
+                    if visible && (!inactive || matches!(sweep, Sweep::Pass(_))) {
                         revive.push((key, slot.source.clone()));
                     }
                     continue;
@@ -551,7 +515,7 @@ impl InlineVideos {
         };
         run(commands);
         for player in sleepers {
-            player.hibernate();
+            player.hibernate_on_last_picture();
         }
         for (key, source) in revive {
             self.revive(key, source, cx);
@@ -562,16 +526,27 @@ impl InlineVideos {
     }
 
     /// A sleeping slot was painted in view: open a new player for it (if
-    /// the budget admits one) and redraw the history, whose tile still
-    /// holds the sleeping one.
+    /// the budget admits one), showing the sleeping one's last picture
+    /// until its own, and redraw the histories showing it, whose tiles
+    /// still hold the sleeping one.
     fn revive(&self, key: Key, source: Source, cx: &mut App) {
-        let Some((held, inactive, view)) = self.with(|state| {
-            (
-                state.players.values().map(|slot| slot.bytes).sum::<usize>(),
-                state.inactive,
-                state.history_view,
-            )
-        }) else {
+        let Some((held, inactive, views, sleeping)) = self
+            .with(|state| {
+                let slot = state.players.get(&key)?;
+                let views: Vec<EntityId> = slot
+                    .windows
+                    .keys()
+                    .filter_map(|window| state.views.get(window).copied())
+                    .collect();
+                Some((
+                    state.players.values().map(|slot| slot.bytes).sum::<usize>(),
+                    state.inactive,
+                    views,
+                    slot.player.clone(),
+                ))
+            })
+            .flatten()
+        else {
             return;
         };
         if !admits(held, source.bytes) {
@@ -587,6 +562,8 @@ impl InlineVideos {
         ) else {
             return;
         };
+        player.take_picture_from(&sleeping);
+        drop(sleeping);
         player.set_volume(0.0);
         player.set_looping(true);
         // It is in view: play, unless the window is behind another app.
@@ -598,12 +575,14 @@ impl InlineVideos {
             let slot = state.players.get_mut(&key)?;
             slot.asleep = false;
             slot.bytes = source.bytes;
-            slot.shown_mark = mark;
+            for seen in slot.windows.values_mut() {
+                seen.mark = mark;
+            }
             slot.hidden_since = None;
             Some(std::mem::replace(&mut slot.player, player))
         });
         drop(replaced);
-        if let Some(view) = view {
+        for view in views {
             cx.notify(view);
         }
     }
@@ -623,34 +602,22 @@ impl InlineVideos {
                 return;
             };
             videos.with(|state| state.release_timer = None);
-            cx.update(|cx| videos.sweep(cx));
+            cx.update(|cx| videos.sweep(Sweep::Timer, cx));
         });
         self.with(|state| state.release_timer = Some(timer));
     }
 
-    /// Called at the start of every app frame: when the last frame
-    /// rendered no history (no chat open, Contacts, Calls…), nothing can
-    /// show a clip, so every player stops. `scale` is the window's display
-    /// scale, for the size new players decode at.
-    pub(super) fn frame_start(&self, history_drawn: bool, scale: f32) {
+    /// The main window's display scale (device pixels per point), at the
+    /// start of each of its frames, for the size new players decode at.
+    pub(super) fn set_scale(&self, scale: f32) {
         let dropped = self.with(|state| {
             let mut dropped = HashMap::new();
-            if history_drawn && !state.swept {
-                // The panels' players have their own passes.
-                let (panel, history): (HashMap<Key, Slot>, HashMap<Key, Slot>) =
-                    std::mem::take(&mut state.players)
-                        .into_iter()
-                        .partition(|((chat, _), _)| is_panel(*chat));
-                state.players = panel;
-                dropped = history;
-            }
             // The display or interface scale changed: running players
             // decode at the old size, so restart them at the new one.
             if state.scale > 0. && (state.scale - scale).abs() > f32::EPSILON {
-                dropped.extend(std::mem::take(&mut state.players));
+                dropped = std::mem::take(&mut state.players);
+                state.forget(&dropped);
             }
-            state.forget(&dropped);
-            state.swept = false;
             state.scale = scale;
             dropped
         });
@@ -801,7 +768,8 @@ impl InlineVideos {
 
     /// This message's clip, starting its muted, looping player on first
     /// use (`path` is only resolved then), sized for `tile`; its row is
-    /// rendering. A player paused off screen stays paused until a sweep
+    /// rendering in `window` (`None`: the main window), which shows it from
+    /// now on. A player paused off screen stays paused until a sweep
     /// sees it painted in view (a paused player still paints its last
     /// picture, so scrolling back resumes it). A clip that would
     /// take the decoded memory past [`INLINE_DECODE_BUDGET`] doesn't start
@@ -809,6 +777,7 @@ impl InlineVideos {
     /// file's own is known.
     pub(super) fn frame(
         &self,
+        window: Option<ChatId>,
         key: Key,
         tile: InlineTile,
         duration: Option<f64>,
@@ -817,12 +786,22 @@ impl InlineVideos {
     ) -> Option<InlineFrame> {
         let exists = self.with(|state| state.players.contains_key(&key))?;
         if !exists {
-            self.open(key, tile, duration, path, cx)?;
+            self.open(window, key, tile, duration, path, cx)?;
         }
         let player = self.with(|state| {
-            let pass = Self::pass_of(state, key);
+            let pass = state.pass(window, List::of(key));
             let slot = state.players.get_mut(&key)?;
-            slot.seen = pass;
+            // A window that just began showing it counts its paints from
+            // now (a `Cell` read; no backend call).
+            let mark = slot.player.shown_count();
+            slot.windows
+                .entry(window)
+                .or_insert(Seen {
+                    pass,
+                    in_view: false,
+                    mark,
+                })
+                .pass = pass;
             Some(slot.player.clone())
         })??;
         self.settled_frame(key, &player)
@@ -848,8 +827,8 @@ impl InlineVideos {
         let (command, frame) = self.with(|videos| {
             let inactive = videos.inactive;
             let slot = videos.players.get_mut(&key)?;
-            // A sleeping slot's tile paints nothing over the still and
-            // only counts being painted; the sweep gives it a player.
+            // A sleeping slot's tile paints its last picture and counts
+            // being painted; the sweep gives it a player.
             let command = (!slot.asleep)
                 .then(|| slot.settle(state, running, inactive))
                 .flatten()
@@ -861,21 +840,23 @@ impl InlineVideos {
         Some(frame)
     }
 
-    /// Open the player for `key`, if the budget admits it.
+    /// Open the player for `key`, shown in `window`, if the budget admits
+    /// it.
     fn open(
         &self,
+        window: Option<ChatId>,
         key: Key,
         tile: InlineTile,
         duration: Option<f64>,
         path: impl FnOnce() -> Option<PathBuf>,
         cx: &mut App,
     ) -> Option<()> {
-        let (held, scale, inactive, render) = self.with(|state| {
+        let (held, scale, inactive, pass) = self.with(|state| {
             (
                 state.players.values().map(|slot| slot.bytes).sum::<usize>(),
                 state.scale,
                 state.inactive,
-                Self::pass_of(state, key),
+                state.pass(window, List::of(key)),
             )
         })?;
         let max_edge = tile.decode_edge(scale);
@@ -916,8 +897,14 @@ impl InlineVideos {
                     },
                     bytes,
                     asleep: false,
-                    seen: render,
-                    shown_mark: mark,
+                    windows: HashMap::from([(
+                        window,
+                        Seen {
+                            pass,
+                            in_view: false,
+                            mark,
+                        },
+                    )]),
                     hidden_since,
                     sound: false,
                     paused: false,
@@ -986,10 +973,7 @@ impl InlineVideos {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        INLINE_DECODE_BUDGET, OffScreenStep, Panel, Pass, RELEASE_AFTER, admits, off_screen_step,
-        survives,
-    };
+    use super::{INLINE_DECODE_BUDGET, OffScreenStep, RELEASE_AFTER, admits, off_screen_step};
     use crate::ui::inline_video::InlineTile;
     use std::time::{Duration, Instant};
 
@@ -1030,27 +1014,6 @@ mod tests {
             off_screen_step(false, Some(just_before), now),
             OffScreenStep::Stay
         );
-    }
-
-    #[test]
-    fn history_and_panel_passes_each_reap_only_their_own_players() {
-        let row = (11, 204);
-        let cell = (Panel::InlineResults.chat(), 7);
-        let gif = (Panel::Gifs.chat(), 7);
-        // A history pass keeps rows seen in the previous one, and every
-        // panel cell however old.
-        assert!(survives(row, 4, Pass::History(5)));
-        assert!(!survives(row, 3, Pass::History(5)));
-        assert!(survives(cell, 0, Pass::History(500)));
-        assert!(survives(gif, 0, Pass::History(500)));
-        // A panel pass reaps its cells that left the panel, never history
-        // rows or the other panel's cells.
-        let inline = |render| Pass::Panel(Panel::InlineResults, render);
-        assert!(survives(cell, 2, inline(3)));
-        assert!(!survives(cell, 1, inline(3)));
-        assert!(survives(row, 0, inline(500)));
-        assert!(survives(gif, 0, inline(500)));
-        assert!(!survives(gif, 1, Pass::Panel(Panel::Gifs, 3)));
     }
 
     #[test]

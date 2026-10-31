@@ -120,7 +120,8 @@ impl QuillApp {
         let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
             return;
         };
-        self.play_inline_on_demand(chat_id, message_id, file_id, demand, cx);
+        let window = self.windows.scope;
+        self.play_inline_on_demand(window, chat_id, message_id, file_id, demand, cx);
     }
 
     fn play_gif_file(&mut self, message_id: MessageId, file_id: FileId, cx: &mut Context<Self>) {

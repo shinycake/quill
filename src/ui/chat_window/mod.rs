@@ -484,12 +484,21 @@ impl QuillApp {
         }
         self.end_recording_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
+        // Its activation goes with it: GPUI drops the window before the
+        // platform reports it inactive, so its observer never runs, and a
+        // main window that draws nothing would leave the gate on. Only the
+        // active chat window covers the main one.
+        let covered = self.frame.main_covered.get() && self.windows.any_active();
+        self.frame.main_covered.set(covered);
+        self.follow_windows(cx);
+        self.drop_play_intent_in_window(chat_id);
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
         }
         self.windows.dialog_closed_in(Some(chat_id));
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);
+        self.playback.inline_videos.forget_window(chat_id, cx);
         self.playback.stickers.window_closed(chat_id);
         self.leave_sticker_chat(Some(chat_id), Some(chat_id), cx);
         if let Some(live) = self.live.as_mut() {

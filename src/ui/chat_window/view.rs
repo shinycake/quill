@@ -144,7 +144,11 @@ impl Render for ChatWindowView {
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let outer = app.update(cx, |app, cx| {
-            app.windows.note_place(chat_id, active, place);
+            if app.windows.note_place(chat_id, active, place) {
+                // The gate follows it now, not at the main window's next
+                // render, which a minimized main window never draws.
+                app.follow_windows(cx);
+            }
             app.set_window_chat_active(chat_id, active);
             if moved {
                 app.schedule_chat_windows_save(cx);
@@ -152,6 +156,9 @@ impl Render for ChatWindowView {
             app.sticker_frame_starts(Some(chat_id), cx);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
+            // Its body builds the history every frame (no cached slice):
+            // a frame without a history pass shows none of its clips.
+            app.inline_videos_frame_start(true, window, cx);
             outer
         });
         // The kit dialog this window hosts, built with its state in place.
@@ -367,6 +374,7 @@ pub(super) fn open_chat_window(
         app_id: Some("org.shinycake.quill".into()),
         focus: true,
         show: true,
+        inactive_frame_interval: Some(super::super::window_frame::INACTIVE_FRAME_INTERVAL),
         ..Default::default()
     };
     let built: Rc<RefCell<Option<(WeakEntity<ChatWindowView>, SharedSlot)>>> = Rc::default();

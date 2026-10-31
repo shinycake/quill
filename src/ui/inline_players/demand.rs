@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{InlineVideos, Key, Slot, State};
+use quill::ids::ChatId;
 use std::collections::HashMap;
 
 /// A clip asked to play by a click, whatever the autoplay settings.
@@ -19,6 +20,8 @@ pub(super) struct OnDemand {
     demand: Demand,
     /// The player opened and was started as asked.
     started: bool,
+    /// The window it was asked in (`None`: the main window).
+    pub(super) window: Option<ChatId>,
 }
 
 impl State {
@@ -38,14 +41,15 @@ impl InlineVideos {
     }
 
     /// Ask for `key`'s clip to play (`demand`) once its row renders it
-    /// downloaded, whatever the autoplay settings.
-    pub(in crate::ui) fn request(&self, key: Key, demand: Demand) {
+    /// downloaded, whatever the autoplay settings; asked in `window`.
+    pub(in crate::ui) fn request(&self, window: Option<ChatId>, key: Key, demand: Demand) {
         self.with(|state| {
             state.on_demand.insert(
                 key,
                 OnDemand {
                     demand,
                     started: false,
+                    window,
                 },
             )
         });

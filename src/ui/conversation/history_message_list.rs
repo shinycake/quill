@@ -331,13 +331,14 @@ impl QuillApp {
         // pages older history (the driver dedupes in-flight requests and
         // reports exhaustion; the loader notifies only when a request was
         // actually sent, so this cannot notify-loop while pinned at top).
-        // Inline players for rows that don't render this pass stop.
-        // Those not painted in view this pass pause once it has painted.
+        // Inline players for rows that don't render this pass leave this
+        // window. Those not painted in view this pass pause once it has
+        // painted.
+        let target = self.history_redraw_target();
         self.playback
             .inline_videos
-            .begin_render(self.slices.current(), cx);
+            .begin_render(self.windows.scope, target, cx);
         let surface = self.history_userpic_surface();
-        let target = self.history_redraw_target();
         self.playback
             .userpic_videos
             .begin_render(surface, target, cx);

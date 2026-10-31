@@ -238,6 +238,12 @@ struct Inner {
     /// from the GPU atlas when replaced; `raw`'s own image is the
     /// backend's to retire.
     turned_image: Option<Arc<RenderImage>>,
+    /// `raw`'s image once the backend that made it is gone
+    /// ([`VideoPlayer::hibernate_on_last_picture`]): the backend retired
+    /// it as it went, but it stays on screen, so it is retired again
+    /// when it leaves (replaced, or with the player), stamped after the
+    /// frames that painted it meanwhile.
+    orphan: Option<Arc<RenderImage>>,
     turns: u8,
     mirrored: bool,
     error: Option<PlayerError>,
@@ -319,6 +325,7 @@ impl VideoPlayer {
                 raw: None,
                 shown: None,
                 turned_image: None,
+                orphan: None,
                 turns: 0,
                 mirrored: false,
                 error: None,
@@ -425,16 +432,63 @@ impl VideoPlayer {
     /// tile released off screen can be reopened once it is seen again
     /// (`inline_players`). The open poll ends with the state.
     pub(crate) fn hibernate(&self) {
+        self.sleep(false);
+    }
+
+    /// [`Self::hibernate`], but the last picture stays on screen: the
+    /// element paints it while the player sleeps, and the player reopened
+    /// for the clip takes it over ([`Self::take_picture_from`]). A tile
+    /// that sleeps and wakes then keeps its picture throughout, instead of
+    /// showing what lies under it (the still, which may be loading or
+    /// evicted) until the new decoder's first picture. It costs one
+    /// picture, a fraction of the decoder's queue.
+    pub(crate) fn hibernate_on_last_picture(&self) {
+        self.sleep(true);
+    }
+
+    fn sleep(&self, keep_picture: bool) {
         let now = Instant::now();
-        self.with_inner(|inner| {
+        let dropped = self.with_inner(|inner| {
             inner.machine.sleep(now);
-            inner.raw = None;
-            inner.shown = None;
-            inner.turned_image = None;
             inner.awaiting = None;
             inner.asleep = true;
+            if keep_picture {
+                inner.orphan = inner.raw.as_ref().and_then(Picture::image);
+                return Vec::new();
+            }
+            inner.raw = None;
+            inner.shown = None;
+            [inner.turned_image.take(), inner.orphan.take()]
+                .into_iter()
+                .flatten()
+                .collect()
         });
+        super::image_budget::retire_all(dropped.unwrap_or_default());
         drop(self.0.backend.take());
+    }
+
+    /// Show `sleeping`'s last picture until this player, just opened for
+    /// the same clip, has one of its own ([`Self::hibernate_on_last_picture`]).
+    pub(crate) fn take_picture_from(&self, sleeping: &VideoPlayer) {
+        if self.current_picture().is_some() {
+            return;
+        }
+        let Some((raw, shown, turned, orphan)) = sleeping.with_inner(|inner| {
+            (
+                inner.raw.take(),
+                inner.shown.take(),
+                inner.turned_image.take(),
+                inner.orphan.take(),
+            )
+        }) else {
+            return;
+        };
+        self.with_inner(|inner| {
+            inner.raw = raw;
+            inner.shown = shown;
+            inner.turned_image = turned;
+            inner.orphan = orphan;
+        });
     }
 
     /// Seek precisely to `secs` (clamped to the clip).
@@ -808,6 +862,12 @@ impl Inner {
         if let Some(old) = std::mem::replace(&mut self.turned_image, image) {
             super::image_budget::retire_all([old]);
         }
+        // Gone from the screen, unless it is the orphan turned again.
+        let replaced =
+            |orphan: &mut Arc<RenderImage>| raw.image().is_none_or(|image| image.id != orphan.id);
+        if let Some(orphan) = self.orphan.take_if(replaced) {
+            super::image_budget::retire_all([orphan]);
+        }
         self.shown = Some(turned.unwrap_or_else(|| raw.clone()));
         self.raw = Some(raw);
     }
@@ -815,9 +875,8 @@ impl Inner {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        if let Some(old) = self.turned_image.take() {
-            super::image_budget::retire_all([old]);
-        }
+        let images = [self.turned_image.take(), self.orphan.take()];
+        super::image_budget::retire_all(images.into_iter().flatten());
     }
 }
 
