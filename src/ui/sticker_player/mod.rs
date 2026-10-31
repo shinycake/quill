@@ -213,6 +213,9 @@ pub(crate) struct Player {
     /// How far a test moved the clock on.
     #[cfg(test)]
     skew: Cell<Duration>,
+    /// Where a test stopped the clock (`freeze`).
+    #[cfg(test)]
+    frozen: Cell<Option<Instant>>,
     /// How many times `close_stale` looked (a test).
     #[cfg(test)]
     looks: Cell<usize>,
@@ -231,6 +234,8 @@ impl Player {
             #[cfg(test)]
             skew: Cell::new(Duration::ZERO),
             #[cfg(test)]
+            frozen: Cell::new(None),
+            #[cfg(test)]
             looks: Cell::new(0),
         }
     }
@@ -238,7 +243,7 @@ impl Player {
     /// The time views draw at and the closer judges by.
     pub(super) fn now(&self) -> Instant {
         #[cfg(test)]
-        return Instant::now() + self.skew.get();
+        return self.frozen.get().unwrap_or_else(Instant::now) + self.skew.get();
         #[cfg(not(test))]
         Instant::now()
     }
@@ -247,6 +252,13 @@ impl Player {
     #[cfg(test)]
     pub(super) fn skip(&self, by: Duration) {
         self.skew.set(self.skew.get() + by);
+    }
+
+    /// Stop [`Self::now`] where it is: from then on only [`Self::skip`]
+    /// moves it, so a test knows how far a head played.
+    #[cfg(test)]
+    pub(super) fn freeze(&self) {
+        self.frozen.set(Some(Instant::now()));
     }
 
     /// How many times the closer looked (a test).

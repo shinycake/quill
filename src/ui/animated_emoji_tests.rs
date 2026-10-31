@@ -391,10 +391,9 @@ fn a_chat_windows_emoji_at_rest_stay_open_while_the_main_window_draws(cx: &mut T
     assert_still_open(&app, &vcx, &first);
 }
 
-/// A chat window's emoji close once it closes, and their frames leave
-/// memory with nothing drawn after. (A main window that does not draw,
-/// minimized or covered, is `sticker_player::tests`: GPUI's test mode
-/// draws every window the app notifies.)
+/// A chat window's emoji close as it closes, and their frames leave
+/// memory then, not once the main window draws (it may not: minimized or
+/// covered).
 #[gpui_kit::test]
 fn a_chat_windows_emoji_close_with_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
@@ -421,7 +420,7 @@ fn a_chat_windows_emoji_close_with_it(cx: &mut TestAppContext) {
         assert_eq!(head, None, "its lone emoji's head");
         assert!(!app.playback.emoji_plays.borrow().has_played(key));
     });
-    idle(&app, &mut vcx, 8);
+    // Its clips close with it, not 5 s later, and their frames go.
     assert_eq!(hand_clips(&app, &vcx), 0, "closed with the window");
     assert_eq!(freed.strong_count(), 0, "their frames left memory");
 }
@@ -517,10 +516,104 @@ fn the_main_window_opening_a_chat_leaves_a_chat_windows_emoji_playing(cx: &mut T
 fn the_chat_the_main_window_leaves_plays_again_and_closes_its_clips(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let other = other_chat(&app, &vcx);
+    // The player's clock moves only as the test moves it: the lone emoji
+    // plays 500 ms, a paint every 100 ms.
+    app.read_with(&vcx, |app, _| app.playback.stickers.freeze());
+    main_frame(&app, &mut vcx);
+    for _ in 0..5 {
+        app.read_with(&vcx, |app, _| {
+            app.playback.stickers.skip(Duration::from_millis(100));
+        });
+        main_frame(&app, &mut vcx);
+    }
     let (head, played) = lone_emoji_play(&app, &vcx);
-    assert!(head.is_some() && played, "it played in the chat");
+    let pos = head.map(|(pos, _)| pos);
+    assert!(
+        pos >= Some(Duration::from_millis(500)) && played,
+        "{head:?}"
+    );
     assert!(hand_clips(&app, &vcx) > 0);
     open_in_main(&app, &mut vcx, other);
     assert_eq!(lone_emoji_play(&app, &vcx), (None, false), "forgotten");
     assert_eq!(hand_clips(&app, &vcx), 0, "its clips closed");
+    // Back in the chat: its clip opens, and the lone emoji plays again
+    // from its first frame.
+    open_in_main(&app, &mut vcx, ChatId(CHAT));
+    settle(&app, &mut vcx);
+    let (head, played) = lone_emoji_play(&app, &vcx);
+    assert_eq!(head.map(|(pos, _)| pos), Some(Duration::ZERO), "{head:?}");
+    assert!(played);
+    let frame = app
+        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .expect("a lone emoji's frame");
+    assert_eq!(frame.as_bytes(0).and_then(|b| b.first().copied()), Some(0));
+}
+
+/// The demo chat in its own window and in the main window too, drawn in
+/// both: a comment thread shows in the main window while its discussion
+/// group has a window of its own (`select_chat_with` with `thread_switch`).
+fn chat_in_both_windows(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> AnyWindowHandle {
+    let chat_window = chat_in_window(app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.select_chat_with(ChatId(CHAT), true, window, cx)
+        });
+    });
+    settle(app, vcx);
+    chat_window
+}
+
+fn close_window(vcx: &mut VisualTestContext, chat_window: AnyWindowHandle) {
+    vcx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::ui::actions::CloseWindow), cx);
+    })
+    .expect("the chat window closes");
+}
+
+/// The chat window closes while the main window shows the same chat: the
+/// lone emoji there keeps its played mark. Played marks are kept by chat,
+/// and closing the window cleared them for the main window too, so its
+/// lone emoji played again.
+#[gpui_kit::test]
+fn closing_a_chat_window_keeps_the_plays_of_a_chat_the_main_window_shows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let chat_window = chat_in_both_windows(&app, &mut vcx);
+    let (head, played) = lone_emoji_play(&app, &vcx);
+    assert!(head.is_some() && played, "it played");
+    close_window(&mut vcx, chat_window);
+    let (now, played) = lone_emoji_play(&app, &vcx);
+    assert!(now.is_some() && played, "still played: {now:?}");
+}
+
+/// The chat window closes first while the main window shows the same
+/// emoji: the clips they share stay open, and the frame the main window
+/// shows stays in its atlas.
+#[gpui_kit::test]
+fn closing_a_chat_window_keeps_the_clips_the_main_window_shares(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let chat_window = chat_in_both_windows(&app, &mut vcx);
+    let first = app.read_with(&vcx, |app, _| {
+        app.playback.stickers.first_frames_of(Some(HAND_FILE))
+    });
+    assert!(!first.is_empty() && first.iter().all(Option::is_some));
+    main_frame(&app, &mut vcx);
+    let frame = app
+        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .expect("a lone emoji's frame");
+    let probe = atlas_probe(&frame);
+    drop(frame);
+    assert!(vcx.update(|window, _| window.has_image_atlas_entry(&probe)));
+    close_window(&mut vcx, chat_window);
+    assert!(
+        vcx.update(|window, _| window.has_image_atlas_entry(&probe)),
+        "the main window's frame stays in its atlas"
+    );
+    for _ in 0..2 {
+        main_frame(&app, &mut vcx);
+        vcx.run_until_parked();
+    }
+    let now = app.read_with(&vcx, |app, _| {
+        app.playback.stickers.first_frames_of(Some(HAND_FILE))
+    });
+    assert_eq!(now, first, "none closed and opened again");
 }

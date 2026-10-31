@@ -500,6 +500,22 @@ impl QuillApp {
         }
     }
 
+    /// Whether a window other than `window` (`None`: the main window)
+    /// shows `chat`. A chat can show in two: the main window opens a
+    /// comment thread in its discussion group while the group has a window
+    /// of its own (`select_chat_with` with `thread_switch`).
+    pub(in crate::ui) fn chat_shown_elsewhere(
+        &mut self,
+        chat: ChatId,
+        window: Option<ChatId>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let in_chat_window = window != Some(chat) && self.windows.window_for(chat).is_some();
+        let in_main = window.is_some()
+            && self.in_window_scope(None, cx, |app, _| app.open_chat_id()) == Some(Some(chat));
+        in_chat_window || in_main
+    }
+
     /// Whether `chat_id`'s window is the active one, for the session's
     /// notification decision (a message shown in an active window is read
     /// on arrival, so it does not notify; Telegram Desktop reads it when

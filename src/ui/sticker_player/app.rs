@@ -153,10 +153,14 @@ impl QuillApp {
         &mut self,
         window: Option<ChatId>,
         chat: Option<ChatId>,
-        cx: &mut App,
+        cx: &mut Context<QuillApp>,
     ) {
         let frames = self.playback.stickers.leave(window);
-        if let Some(chat) = chat {
+        // Lone emoji plays are kept by chat, which may still show in
+        // another window.
+        if let Some(chat) = chat
+            && !self.chat_shown_elsewhere(chat, window, cx)
+        {
             self.playback.emoji_plays.get_mut().leave_chat(chat.0);
         }
         match window {
