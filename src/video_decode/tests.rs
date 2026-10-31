@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 mod decode_panic;
 mod hardware;
 mod nv12;
+mod stream_shapes;
 
 fn frame(pts: f64) -> VideoFrame {
     VideoFrame::bgra(pts, 1, 1, vec![0; 4])
