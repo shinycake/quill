@@ -96,6 +96,10 @@ jobs:
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh
+      # The vendored opus-decoder is not a workspace member; its FFT is
+      # std-only and tested standalone.
+      - name: tests (vendored opus-decoder FFT)
+        run: bash scripts/test-opus-fft.sh
       - name: secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v3
         env:
