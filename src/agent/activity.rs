@@ -440,6 +440,8 @@ mod tests {
 
     #[test]
     fn revoke_ends_the_connection_and_refuses_the_agent_until_allowed() {
+        // Turning agent access off in another test lets every agent in again.
+        let _lock = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
         let guard = connect("Revoke test");
         let bystander = connect("Bystander test");
         assert!(!refused("Revoke test"));
