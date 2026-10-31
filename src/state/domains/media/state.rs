@@ -8,6 +8,7 @@ pub struct MediaState {
     pub media_library: MediaLibrary,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: FileMap,
+    pub disk_holds_auto_downloads: bool,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
@@ -51,6 +52,7 @@ impl MediaState {
         Self {
             media_library: MediaLibrary::default(),
             files: FileMap::default(),
+            disk_holds_auto_downloads: false,
             downloads: DownloadIntents::default(),
             open_chat_media_downloads: HashSet::new(),
             avatar_file_refs: HashMap::new(),

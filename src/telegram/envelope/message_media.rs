@@ -179,6 +179,14 @@ impl ParsedFile {
             self.expected_size
         }
     }
+
+    /// Bytes still to come, as far as TDLib knows the size.
+    pub fn download_left(&self) -> u64 {
+        let left = self
+            .display_size()
+            .saturating_sub(self.local.downloaded_size);
+        u64::try_from(left).unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
