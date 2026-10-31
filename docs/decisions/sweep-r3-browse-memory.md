@@ -341,8 +341,9 @@ is left as a placeholder.
   display is free for the demo window.
 - Reuse the screen-share conversion buffer (`nv12_to_i420`) and measure
   CPU in a call.
-- Rate-limit `free_heap::release` on idle trim to at most once per 10 s, as
-  tdesktop does with `malloc_trim`.
+- ~~Rate-limit `free_heap::release` on idle trim to at most once per 10 s,
+  as tdesktop does with `malloc_trim`.~~ Dropped: the call takes 0.01 ms
+  and frees nothing on macOS 27 (`idle-heap-return.md`).
 - A macOS CI job that runs `cargo test --lib large_alloc` and clippy.
 - `src/ui/image_budget.rs` has 12 lines of headroom under the file-size
   limit; split it before its next change.

@@ -12,13 +12,15 @@ longer write-up.
 `malloc_trim` on glibc) runs only from the image cache's idle trim, so
 memory freed by a long scroll through text, or by pruning a closed chat's
 history, went back only once the pictures on screen changed. The branch
-counted the bytes every large free let go and released once, 2 s after
-the last free and the last input, in the gap after a drawn frame.
+counted the bytes every large free let go and released once a batch of
+1 MiB was 2 s old and no input had come for 2 s: at once if no window had
+drawn for 400 ms, otherwise right after the next drawn frame.
 
 ## macOS 27: the call does nothing
 
 Measured on the owner's Mac (macOS 27.0.1, M1 Pro, release demo build,
-1,500-post scroll, two runs each on the branch and on main):
+1,500-post scroll, two runs each on the branch's first version,
+`ad5487c6e`, and on main):
 
 - The release ran as designed, once, 3.6 to 4.6 s after the scroll, and
   took 0.01 ms. It returned 0 and the footprint did not move.
@@ -27,12 +29,14 @@ Measured on the owner's Mac (macOS 27.0.1, M1 Pro, release demo build,
   footprint from 202 MB to 75 MB before any relief call.
 - The allocator looks like xzone malloc, which marks empty pages
   reclaimable as they are freed. Relief finds nothing left to do.
-- Main and the branch idled at the same footprint, 134 to 135 MB, with
+- Main and that version idled at the same footprint, 134 to 135 MB, with
   87 MB allocated in the malloc zone and only about 14 MB free inside it.
 
-So on macOS the way to a smaller footprint is fewer live bytes, not
-returning freed ones. Putting cached layouts in `large_alloc`'s arena so
-whole pages go back has at most those 14 MB to win; not worth building.
+So pressure relief gains nothing on macOS 27. (Blocks of 64 KiB and up
+already go back when freed, through `large_alloc`; see
+`sweep-r3-browse-memory.md`.) Putting cached layouts in `large_alloc`'s
+arena too has little to win with about 14 MB free in the zone; not worth
+building.
 
 ## Linux: a little, and main returns it later anyway
 
