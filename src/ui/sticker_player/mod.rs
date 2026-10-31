@@ -21,8 +21,10 @@ mod app;
 mod spec;
 mod view;
 
+#[cfg(test)]
+pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors};
-pub(super) use spec::{ClipSpec, HeadId};
+pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
 use super::image_budget::PaintStamp;
@@ -117,8 +119,8 @@ struct UiClip {
     wants: Vec<(HeadId, u32, [Option<u32>; AHEAD], Instant)>,
     /// When its first frame arrived.
     ready_at: Option<Instant>,
-    /// The windows whose views asked for it since it opened.
-    windows: Windows,
+    /// Where views asked for it since it opened.
+    places: Places,
 }
 
 /// Where a view is in a clip.
@@ -126,17 +128,51 @@ struct Head {
     state: PlayHead,
     /// When a view last drew it.
     seen: Instant,
-    /// The windows whose views drew it.
-    windows: Windows,
+    /// Where views drew it.
+    places: Places,
 }
 
-/// Windows by the chat they show (`None`: the main window).
-type Windows = SmallVec<[Option<ChatId>; 2]>;
+/// Where a view shows: a window (`None`: the main window, else the chat
+/// window of that chat) and the part of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Place {
+    window: Option<ChatId>,
+    part: Part,
+}
 
-/// Note that a view in `window` used a clip or a head.
-fn note_window(windows: &mut Windows, window: Option<ChatId>) {
-    if !windows.contains(&window) {
-        windows.push(window);
+impl Place {
+    /// Where the view of `head` in `window` shows.
+    pub(super) fn of(head: HeadId, window: Option<ChatId>) -> Self {
+        Self {
+            window,
+            part: head.part(),
+        }
+    }
+}
+
+type Places = SmallVec<[Place; 2]>;
+
+/// Note that a view at `place` used a clip or a head.
+fn note_place(places: &mut Places, place: Place) {
+    if !places.contains(&place) {
+        places.push(place);
+    }
+}
+
+/// What a window lets go of ([`Player::leave`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Leaving {
+    /// Its chat: another chat opens there, or the chat moves to a window
+    /// of its own. The rest of the window stays as it is.
+    Chat,
+    /// All of it: the window closes.
+    Window,
+}
+
+impl Leaving {
+    /// Whether `window` letting go of this loses what views at `place` use.
+    fn loses(self, window: Option<ChatId>, place: Place) -> bool {
+        place.window == window && (self == Leaving::Window || place.part == Part::Chat)
     }
 }
 
@@ -408,10 +444,9 @@ impl Player {
         first
     }
 
-    /// Opens `spec` at `edge` for a view in `window` (`None`: the main
-    /// window) unless it is open; true once a frame of it (at any size)
-    /// can show.
-    pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32, window: Option<ChatId>) -> bool {
+    /// Opens `spec` at `edge` for a view at `place` unless it is open; true
+    /// once a frame of it (at any size) can show.
+    pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32, place: Place) -> bool {
         self.drain();
         let key = spec.key(edge);
         let Ok(mut inner) = self.inner.try_borrow_mut() else {
@@ -423,7 +458,7 @@ impl Player {
             UiClip::default()
         });
         clip.used = Some(now);
-        note_window(&mut clip.windows, window);
+        note_place(&mut clip.places, place);
         if clip.shown.is_some() || !clip.ready.is_empty() {
             return true;
         }
@@ -450,6 +485,7 @@ impl Player {
         self.drain();
         let key = spec.key(edge);
         let high_rate = high_rate && !self.engine.coarse(&key);
+        let place = Place::of(head, window);
         let mut retired: Vec<Arc<RenderImage>> = Vec::new();
         let shown = {
             let mut guard = self.inner.try_borrow_mut().ok()?;
@@ -467,7 +503,7 @@ impl Player {
             });
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
-            note_window(&mut clip.windows, window);
+            note_place(&mut clip.places, place);
             if clip.timeline.is_none() && !clip.failed {
                 match self.engine.state(&key) {
                     Some(ClipState::Ready(info)) => clip.timeline = Some(info.timeline),
@@ -480,10 +516,10 @@ impl Player {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
                         state: PlayHead::default(),
                         seen: now,
-                        windows: Windows::new(),
+                        places: Places::new(),
                     });
                     entry.seen = now;
-                    note_window(&mut entry.windows, window);
+                    note_place(&mut entry.places, place);
                     let head_state = &mut entry.state;
                     let pick = match mode {
                         PlayMode::At(_) => quill::sticker_playback::player::head::pick(
@@ -542,7 +578,7 @@ impl Player {
                         .find_map(|(_, clip)| clip.shown.is_some().then_some(clip));
                     other.and_then(|other| {
                         note_drawn(&mut other.drawn, drawn);
-                        note_window(&mut other.windows, window);
+                        note_place(&mut other.places, place);
                         other.shown.as_ref().map(|(_, image)| image.clone())
                     })
                 }
@@ -796,27 +832,29 @@ impl Player {
         );
     }
 
-    /// `window` let go of its chat (`None`: the main window): another chat
-    /// opened there, or the window closed. The heads only its views drew
-    /// are forgotten, so the chat plays from the start when it shows again
-    /// (tdesktop clears the played set when the chat is left), and the
-    /// clips only its views asked for close. What views in another window
-    /// use plays on untouched. Returns the frames of the clips it closed,
-    /// each once.
-    pub(super) fn leave(&self, window: Option<ChatId>) -> Vec<Arc<RenderImage>> {
+    /// `window` (`None`: the main window) let go of its chat, or of all
+    /// of it (`what`): another chat opened there, or the window closed.
+    /// The heads only views there drew are forgotten, so the chat plays
+    /// from the start when it shows again (tdesktop clears the played set
+    /// when the chat is left), and the clips only views there asked for
+    /// close. What views elsewhere use plays on untouched: in another
+    /// window, or in the rest of this one when only its chat goes (the
+    /// chat list keeps its emoji where they are, on their frames).
+    /// Returns the frames of the clips it closed, each once.
+    pub(super) fn leave(&self, window: Option<ChatId>, what: Leaving) -> Vec<Arc<RenderImage>> {
         let Ok(mut guard) = self.inner.try_borrow_mut() else {
             return Vec::new();
         };
         let inner = &mut *guard;
         inner.heads.retain(|_, head| {
-            head.windows.retain(|other| *other != window);
-            !head.windows.is_empty()
+            head.places.retain(|place| !what.loses(window, *place));
+            !head.places.is_empty()
         });
         let mut frames: Vec<Arc<RenderImage>> = Vec::new();
         let mut closed = Vec::new();
         inner.clips.retain(|key, clip| {
-            clip.windows.retain(|other| *other != window);
-            if !clip.windows.is_empty() {
+            clip.places.retain(|place| !what.loses(window, *place));
+            if !clip.places.is_empty() {
                 return true;
             }
             let shown = clip.shown.take().map(|(_, image)| image);

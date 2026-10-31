@@ -12,7 +12,7 @@ use super::super::chat_theme::{accent, bg_bubble_incoming, text_muted, text_prim
 use super::super::message_effect_badge::{self as badge, BadgeIcon};
 use super::super::motion::ease_out_circ;
 use super::super::nested_click::SwallowPress;
-use super::super::sticker_player::{HeadId, ViewAsk};
+use super::super::sticker_player::{HeadId, Part, ViewAsk};
 use super::super::wallpaper::paint_wallpaper;
 use super::super::wallpaper_cache::Slot;
 use super::{Preview, SendMenu, tracker};
@@ -118,7 +118,7 @@ impl QuillApp {
         let icon = badge::effect_icon(effect, &session.media.files, &self.media_display_roots());
         // The effect loops over the card; the sample is incoming, on the
         // left: mirrored (`request.mirrorHorizontal`).
-        let head = HeadId::of(("effect-preview", preview.effect_id));
+        let head = HeadId::of(Part::Chrome, ("effect-preview", preview.effect_id));
         let view = effect.animation().and_then(|animation| {
             let ask = ViewAsk::sticker(
                 animation.file,

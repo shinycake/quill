@@ -24,7 +24,7 @@
 
 use super::app::QuillApp;
 use super::premium_sticker_effect;
-use super::sticker_player::{HeadId, StickerView, ViewAsk};
+use super::sticker_player::{HeadId, Part, StickerView, ViewAsk};
 use gpui_kit::*;
 use quill::emoji_interaction::{EmojiEffect, MAX_PLAYS};
 use quill::ids::{ChatId, FileId, MessageId};
@@ -68,7 +68,7 @@ fn next_head() -> HeadId {
         next.set(id.wrapping_add(1));
         id
     });
-    HeadId::of(("effect", id))
+    HeadId::of(Part::Chat, ("effect", id))
 }
 
 /// The view an effect plays: once, mirrored for a message on the left,

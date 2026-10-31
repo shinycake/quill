@@ -617,3 +617,173 @@ fn closing_a_chat_window_keeps_the_clips_the_main_window_shares(cx: &mut TestApp
     });
     assert_eq!(now, first, "none closed and opened again");
 }
+
+/// The emoji status a chat-list row shows: a one-second clip of its own.
+const STATUS_ID: i64 = 8_804;
+const STATUS_FILE: i32 = 7_303;
+/// The demo's custom emoji, which the demo chat's row shows in its preview.
+const PREVIEW_IDS: [i64; 3] = [8_801, 8_802, 8_803];
+
+/// A chat in the list other than the demo chat and `other`, which now has
+/// an animated emoji status.
+fn give_a_row_a_status(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    other: ChatId,
+) -> ChatId {
+    use quill::telegram::envelope::{ChatKind, StickerFormat, StickerItem};
+    app.update(vcx, |app, _| {
+        app.playback.stickers.set_fixture(
+            STATUS_FILE,
+            Arc::new(|edge| DecodedFrames {
+                frames: (0..30u8)
+                    .map(|i| vec![i; (edge as usize).pow(2) * 4])
+                    .collect(),
+                fps: 30.0,
+            }),
+        );
+        let session = app.demo_session.as_mut().expect("the demo session");
+        let (chat, kind) = session
+            .ordered_chats()
+            .into_iter()
+            .map(|chat| (chat.id, chat.kind.clone()))
+            .find(|(id, _)| id.0 != CHAT && *id != other)
+            .expect("the demo lists a third chat");
+        match kind {
+            ChatKind::Private { user_id } => {
+                let user = session.users.entry(user_id.0).or_default();
+                user.id = user_id.0;
+                user.is_premium = true;
+                user.emoji_status_id = STATUS_ID;
+            }
+            ChatKind::Supergroup { .. } => {
+                let look = session.chats_state.chat_looks.entry(chat.0).or_default();
+                look.emoji_status_id = STATUS_ID;
+            }
+            kind => panic!("no emoji status on {kind:?}"),
+        }
+        session.stickers.emoji.custom_emoji_stickers.update(|list| {
+            list.push(StickerItem {
+                custom_emoji_id: Some(STATUS_ID),
+                id: STATUS_ID,
+                set_id: 0,
+                emoji: "⭐".into(),
+                width: 512,
+                height: 512,
+                format: StickerFormat::Tgs,
+                file_id: quill::ids::FileId(STATUS_FILE),
+                thumb_file_id: None,
+                thumb_width: 0,
+                thumb_height: 0,
+                requires_premium: false,
+                premium_animation: None,
+            });
+        });
+        chat
+    })
+}
+
+/// The chat list's animated emoji, looping off, played and at rest: a
+/// row's emoji status (two loops, then its first frame) and the custom
+/// emoji in the demo chat's preview (once, then its last frame). The main
+/// window opens another chat, and they stay as they were: on their clips,
+/// where they rested. Opening a chat closed every clip and forgot every
+/// head the main window used, the chat list's too, so each started over
+/// from its first frame, and a row built while its clip opened again
+/// showed its fallback (the star, the plain emoji) meanwhile.
+#[gpui_kit::test]
+fn the_chat_lists_emoji_stay_at_rest_when_the_main_window_opens_a_chat(cx: &mut TestAppContext) {
+    use crate::ui::status_emoji::{StatusSurface, status_head};
+    use crate::ui::sticker_player::sidebar_emoji_head;
+    let (app, mut vcx) = open_demo(cx);
+    let other = other_chat(&app, &vcx);
+    let status_chat = give_a_row_a_status(&app, &mut vcx, other);
+    // The demo chat's row previews its last message, of custom emoji.
+    let entities: Vec<String> = (0..)
+        .zip(PREVIEW_IDS)
+        .map(|(offset, id)| {
+            format!(
+                r#"{{"@type":"textEntity","offset":{offset},"length":1,"type":{{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"{id}"}}}}"#
+            )
+        })
+        .collect();
+    let last = FIRST_MESSAGE + 3;
+    receive(
+        &app,
+        &mut vcx,
+        &format!(
+            r#"{{"@type":"updateChatLastMessage","chat_id":{CHAT},"last_message":{{"id":{last},"chat_id":{CHAT},"is_outgoing":false,"date":1790640000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"⭐⭐⭐","entities":[{}]}}}}}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"30","is_pinned":true}}]}}"#,
+            entities.join(",")
+        ),
+    );
+    app.update(&mut vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("the demo session");
+        session.settings.media_prefs.loop_animated_stickers = false;
+        app.stop_sticker_playback();
+        app.playback.stickers.freeze();
+    });
+    settle(&app, &mut vcx);
+    // Two and a half seconds, a paint every 100 ms.
+    for _ in 0..25 {
+        app.read_with(&vcx, |app, _| {
+            app.playback.stickers.skip(Duration::from_millis(100));
+        });
+        main_frame(&app, &mut vcx);
+        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+    }
+    let heads: Vec<_> = PREVIEW_IDS
+        .map(|id| (sidebar_emoji_head(id), CUSTOM_FILE))
+        .into_iter()
+        .chain([(
+            status_head(StatusSurface::ListRow, status_chat.0, STATUS_ID),
+            STATUS_FILE,
+        )])
+        .collect();
+    let progress = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            heads
+                .iter()
+                .map(|(head, file)| app.playback.stickers.head_progress(*head, *file))
+                .collect::<Vec<_>>()
+        })
+    };
+    let rested = progress(&app, &vcx);
+    assert!(
+        rested
+            .iter()
+            .all(|head| head.is_some_and(|(pos, total)| pos >= total)),
+        "played and at rest: {rested:?}"
+    );
+    let clips = |app: &Entity<QuillApp>, vcx: &VisualTestContext, file| {
+        app.read_with(vcx, |app, _| {
+            app.playback.stickers.first_frames_of(Some(file))
+        })
+    };
+    let status_clips = clips(&app, &vcx, STATUS_FILE);
+    let custom_clips = clips(&app, &vcx, CUSTOM_FILE);
+    assert!(!status_clips.is_empty() && status_clips.iter().all(Option::is_some));
+    open_in_main(&app, &mut vcx, other);
+    let stayed = |app: &Entity<QuillApp>, vcx: &VisualTestContext, what: &str| {
+        assert_eq!(progress(app, vcx), rested, "{what}: where they rested");
+        assert_eq!(
+            clips(app, vcx, STATUS_FILE),
+            status_clips,
+            "{what}: the status's clip stays open"
+        );
+        // The demo chat's history shows the same custom emoji, bigger:
+        // those clips close with the chat, the preview's stays.
+        let custom = clips(app, vcx, CUSTOM_FILE);
+        assert!(
+            !custom.is_empty() && custom.iter().all(|at| custom_clips.contains(at)),
+            "{what}: the preview's clip stays open: {custom_clips:?} then {custom:?}"
+        );
+    };
+    stayed(&app, &vcx, "opened");
+    // The rows have their frames at once: no fallback while a clip opens.
+    let status_frame = app.read_with(&vcx, |app, _| app.playback.stickers.any_frame(STATUS_FILE));
+    assert!(status_frame.is_some(), "the status has a frame to show");
+    main_frame(&app, &mut vcx);
+    stayed(&app, &vcx, "the next frame");
+    settle(&app, &mut vcx);
+    stayed(&app, &vcx, "settled");
+}

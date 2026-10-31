@@ -9,17 +9,43 @@ use quill::telegram::envelope::StickerFormat;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
+/// The part of a window a view shows in, which says when its head is
+/// forgotten and its clip closes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(in crate::ui) enum Part {
+    /// The window's open chat: its history, its header and profile, and
+    /// the effects over them. They go when the window lets go of the chat,
+    /// so the chat plays from the start when it shows again (tdesktop
+    /// clears the played set when the chat is left).
+    Chat,
+    /// The rest of the window: the chat list, the composer, panels and
+    /// popups. Opening another chat leaves them as they are (tdesktop's
+    /// chat list rows keep their emoji); their clips close through the
+    /// closer once nothing shows them.
+    Chrome,
+}
+
 /// One view's play head: views with the same id share a position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::ui) struct HeadId(u64);
+pub(in crate::ui) struct HeadId {
+    id: u64,
+    part: Part,
+}
 
 impl HeadId {
-    /// The head named by `parts` (a place and what identifies the view
-    /// there, such as `("history", chat, message)`).
-    pub(in crate::ui) fn of(parts: impl Hash) -> Self {
+    /// The head in `part` named by `name` (a place and what identifies the
+    /// view there, such as `("history", chat, message)`).
+    pub(in crate::ui) fn of(part: Part, name: impl Hash) -> Self {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        parts.hash(&mut hasher);
-        Self(hasher.finish())
+        name.hash(&mut hasher);
+        Self {
+            id: hasher.finish(),
+            part,
+        }
+    }
+
+    pub(super) fn part(self) -> Part {
+        self.part
     }
 }
 
