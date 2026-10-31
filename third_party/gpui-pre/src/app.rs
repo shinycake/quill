@@ -1240,6 +1240,39 @@ impl App {
             "window_closed_observers",
             self.window_closed_observers.subscriber_count(),
         );
+        counts.insert(
+            "keyboard_layout_observers",
+            self.keyboard_layout_observers.subscriber_count(),
+        );
+        counts.insert(
+            "thermal_state_observers",
+            self.thermal_state_observers.subscriber_count(),
+        );
+        counts.insert(
+            "display_observers",
+            self.display_observers.subscriber_count(),
+        );
+        counts.insert(
+            "system_sleep_observers",
+            self.system_sleep_observers.subscriber_count(),
+        );
+        counts.insert(
+            "system_wake_observers",
+            self.system_wake_observers.subscriber_count(),
+        );
+        counts.insert(
+            "app_lifecycle_observers",
+            self.app_lifecycle_observers.subscriber_count(),
+        );
+        counts.insert(
+            "memory_warning_observers",
+            self.memory_warning_observers.subscriber_count(),
+        );
+        counts.insert("quit_observers", self.quit_observers.subscriber_count());
+        counts.insert(
+            "restart_observers",
+            self.restart_observers.subscriber_count(),
+        );
         counts
     }
 

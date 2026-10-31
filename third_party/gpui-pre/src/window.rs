@@ -2443,6 +2443,10 @@ impl Window {
             self.appearance_observers.subscriber_count(),
         );
         counts.insert(
+            "button_layout_observers",
+            self.button_layout_observers.subscriber_count(),
+        );
+        counts.insert(
             "activation_observers",
             self.activation_observers.subscriber_count(),
         );

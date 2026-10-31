@@ -85,15 +85,17 @@ pub(in crate::ui) fn new_app(cx: &mut TestAppContext, demo: &'static str) -> Har
 }
 
 impl Harness {
-    /// One display frame: run what is ready, then draw every open window
-    /// (call, stream, chat and Picture-in-Picture windows too) as the
-    /// screen does, redrawing only what changed.
+    /// One display frame: run what is ready, then for every open window
+    /// (call, stream, chat and Picture-in-Picture windows too) run its
+    /// `on_next_frame` callbacks and draw it, as the frame loop does,
+    /// redrawing only what changed.
     fn frame(&mut self) {
         self.vcx.run_until_parked();
         let windows = self.vcx.update(|_, cx| cx.windows());
         for handle in windows {
             // A window that closed in the meantime has nothing to draw.
             let _ = self.vcx.cx.update_window(handle, |_, window, cx| {
+                window.simulate_next_frame(cx);
                 window.draw(cx).clear(cx);
             });
         }
@@ -194,6 +196,9 @@ impl Harness {
     fn counts(&mut self) -> Counts {
         self.vcx.executor().advance_clock(QUIET);
         self.frame();
+        // An update frees what was released since the last one only as it
+        // ends, so the counting update would still see it.
+        self.vcx.update(|_, _| {});
         self.vcx.update(|window, cx| {
             let mut counts: Counts = cx
                 .live_entity_counts()
@@ -536,9 +541,10 @@ thread_local! {
     static KEPT: std::cell::RefCell<Vec<Entity<KeptView>>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// The check names each kind of leak (a view kept by something that
-/// outlives the box, subscriptions detached onto the app and the window,
-/// a task that never ends) and each row that does not open or close.
+/// The check names each kind of leak and each row that does not open or
+/// close. The leaky row keeps a view in something that outlives the box,
+/// detaches subscriptions onto the app (a global, quitting) and onto the
+/// window, and detaches a task that never ends.
 #[gpui_kit::test]
 fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
     let mut h = new_app(cx, "ready-chats");
@@ -553,6 +559,7 @@ fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
                         let kept = cx.new(|_| KeptView);
                         KEPT.with(|kept_views| kept_views.borrow_mut().push(kept));
                         cx.observe_global::<Unset>(|_, _| {}).detach();
+                        cx.on_app_quit(|_, _| async {}).detach();
                         cx.observe_window_activation(window, |_, _, _| {}).detach();
                         cx.spawn(async |_, _| std::future::pending::<()>().await)
                             .detach();
@@ -579,6 +586,7 @@ fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
     for kept in [
         "entity_leaks_tests::KeptView +3",
         "subscriptions: app global_observers +3",
+        "subscriptions: app quit_observers +3",
         "subscriptions: main window activation_observers +3",
         "task spawned at src/ui/entity_leaks_tests.rs:",
     ] {
