@@ -89,7 +89,7 @@ HAND_XH = 0.47
 # with the two-thirds power law of handwriting, speed growing with the cube
 # root of the bend's radius, down to BEND_FLOOR of VMAX. It eases in at the
 # start of a stroke and out at the end.
-VMAX_HEADLINE = 0.0385  # em of the headline per ms
+VMAX_HEADLINE = 0.0335  # em of the headline per ms
 VMAX = VMAX_HEADLINE  # em of the handwriting per ms; set in main()
 BEND_RADIUS = 0.3  # em; bends wider than this run at full speed
 BEND_FLOOR = 0.45
@@ -101,7 +101,7 @@ TIE = 0.0015
 
 # Lifting the pen, moving it d em and setting it down takes
 # HOP[0] + HOP[1] * sqrt(d) ms. The page uses the same rule between letters.
-HOP = (8, 29)
+HOP = (9, 33)
 
 
 def hop_ms(dist):
