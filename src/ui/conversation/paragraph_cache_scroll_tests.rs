@@ -61,20 +61,33 @@ fn scroll_through(
     }
 }
 
+/// One more frame that draws everything again, which ends the one before.
+fn redraw(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    });
+    cx.run_until_parked();
+}
+
 #[gpui_kit::test]
 fn a_scrolled_history_keeps_each_paragraph_laid_out_once(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     let rows = rtl_group(&app, vcx);
     scroll_through(&app, vcx, (0..rows).rev());
-    let held = paragraph_cache::held_in_tests();
+    redraw(vcx);
+    let held = paragraph_cache::held_in_tests(false);
     assert!(
         held.drawn >= POSTS as usize,
         "every post was drawn: {held:?}"
     );
     // Layout measures each post at about four widths; only the one it is
-    // drawn at stays laid out.
+    // drawn at stays laid out, and a row measured just outside the
+    // viewport keeps one layout for when it scrolls in.
     assert_eq!(held.laid_out, held.drawn, "{held:?}");
+    assert!(held.waiting_laid_out <= held.waiting, "{held:?}");
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
 
 #[gpui_kit::test]
@@ -83,24 +96,30 @@ fn scrolling_back_lays_out_nothing_again(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let rows = rtl_group(&app, vcx);
     scroll_through(&app, vcx, (0..rows).rev());
-    // Each width a post was measured at was laid out once, and drawing it
-    // took the measured layout instead of laying it out again.
-    let held = paragraph_cache::held_in_tests();
-    assert_eq!(paragraph_cache::layouts_in_tests(), held.widths, "{held:?}");
     let before = paragraph_cache::layouts_in_tests();
     scroll_through(&app, vcx, 0..rows);
+    redraw(vcx);
     assert_eq!(paragraph_cache::layouts_in_tests(), before);
+    // Drawing took the layout its measure made, never a second one.
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
 
 #[gpui_kit::test]
-fn resizing_keeps_two_widths_laid_out(cx: &mut TestAppContext) {
+fn resizing_lays_out_each_width_once_and_keeps_two(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     rtl_group(&app, vcx);
-    for width in [1100., 1080., 1060., 1040., 1020., 1000.] {
+    let before = paragraph_cache::layouts_in_tests();
+    for width in [1000., 900., 800., 700., 640.] {
         resize(&app, vcx, width, 800.);
     }
-    let held = paragraph_cache::held_in_tests();
+    redraw(vcx);
+    assert!(
+        paragraph_cache::layouts_in_tests() > before,
+        "the posts rewrapped"
+    );
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
+    let held = paragraph_cache::held_in_tests(false);
     assert!(held.drawn > 0, "{held:?}");
     assert!(held.laid_out <= 2 * held.drawn, "{held:?}");
 }

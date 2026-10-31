@@ -41,19 +41,39 @@ rather than copying them.
 
 - The cache keeps one entry per paragraph (text and style) with the sizes
   it was measured at, up to eight widths. Measuring returns the size;
-  drawing returns the laid-out paragraph. A width laid out by a measure
-  keeps its paragraph until the paragraph is drawn, which in practice is
-  the same frame, so drawing never lays it out a second time. Once drawn,
-  the widths it was only measured at let their paragraphs go, and at most
-  two drawn widths stay laid out (a panel opened and closed again finds
-  both). The unconstrained measure is never drawn and keeps only its size.
-- `CAPACITY` is now 512 paragraphs: what the 2,048 width entries held in
-  practice, so scrolling back finds the same messages laid out as before.
-  When full, the least recently used half goes, as before. The cache is
+  drawing returns the laid-out paragraph, laid out by the measure before
+  it in the same frame. The unconstrained measure is never drawn and
+  keeps only its size.
+- What a frame lays out stays laid out until that frame is over. The
+  cache tells frames apart by window and frame number
+  (`Window::frame_number`, `third_party/gpui-pre/QUILL-CHANGES.md`); the
+  first request of the next frame settles each wrapped paragraph the last
+  one used:
+  - every width the frame drew stays laid out, and earlier drawn widths
+    too, up to two in all (a panel opened and closed again finds both);
+  - widths it was only measured at let their layouts go;
+  - a paragraph the frame measured but did not draw (a row in the list's
+    overdraw, about to scroll in) keeps the width layout settled on, the
+    last one measured, and only that one.
+- One-line texts (chat list rows, quotes, names) keep every width they
+  were laid out at, up to eight, as every width was kept before. Most are
+  short; a row can measure one at the room it offers, draw it narrower,
+  and draw it at that room a few frames later; and a quote drawn from a
+  cached view's replay never reaches the cache, so the cache can't tell
+  which of its widths are still on screen.
+- So text drawn at several widths in one frame, such as replies quoting
+  the same message in bubbles of different widths, keeps each width laid
+  out, and the frames after it lay none out again. A first version of this
+  change let the other widths go as soon as one was drawn, which laid
+  such text out again every frame; the frame boundary is what fixes it.
+- Two counts: 512 wrapped paragraphs (what the 2,048 width entries held in
+  practice, so scrolling back finds the same messages laid out as before)
+  and 1,024 one-line texts (chat list rows, quotes, names: what the old
+  widths held of them, two each), so a long history can't push the chat
+  list out. When one is full, its least recently used half goes, as
+  before, but never anything the frame being drawn used. The cache is
   keyed by text, not by chat: a closed chat's paragraphs stay until newer
-  ones push them out, so it never holds more than 512. A paragraph measured
-  but never drawn (a row in the list's overdraw that is scrolled away
-  from) keeps its measured widths laid out until then.
+  ones push them out.
 - `BidiLine` (one-line previews) measures through the cache and draws the
   paragraph laid out for the room it was measured in, as it did with its
   own slot.
@@ -62,8 +82,8 @@ rather than copying them.
   (`third_party/gpui-base/QUILL-CHANGES.md`).
 
 Nothing about what is drawn changes, and no paragraph is laid out more
-often: each width is still laid out once, and drawing reuses the measured
-layout.
+often: each width is laid out once, drawing reuses the measured layout,
+and a width a frame drew is still laid out in the next frame.
 
 ## Measured
 
@@ -76,22 +96,39 @@ the cache and reads how much heap that frees (glibc `mallinfo2`).
 | | Before | After |
 | --- | --- | --- |
 | Laid-out paragraphs kept | 1,200 (4 per post) | 300 |
-| Heap they hold | 66.2 MB | 17.4 MB |
-| Per post | 220 KB | 58 KB |
-| Layouts, first pass | 1,188 | 1,188 |
+| Heap they hold | 66.2 MB | 17.0 MB |
+| Per post | 220 KB | 57 KB |
+| Widths laid out more than once | 0 | 0 |
 | Layouts, scrolling back, then down again | 0 | 0 |
 
 About 3 MB of the cut is the gpui-base trims (from the vectors'
-capacities); the rest is the widths nothing drew. A full cache now holds
-at most 512 drawn paragraphs, about 30 MB of posts this long, where its
+capacities); the rest is the widths nothing drew. Every width is laid out
+once, as before, so the layouts are the same. A full cache now holds at
+most 512 drawn paragraphs, about 30 MB of posts this long, where its
 2,048 widths held about 113 MB.
 
-Tests (`src/ui/conversation/paragraph_cache_scroll_tests.rs`):
-`a_scrolled_history_keeps_each_paragraph_laid_out_once` and
-`resizing_keeps_two_widths_laid_out` fail on the old cache (160 laid-out
-widths for 40 posts), and `scrolling_back_lays_out_nothing_again` checks
-that drawing reuses the measured layout and a scroll back lays out
-nothing.
+How many paragraphs one frame uses, against the two counts: the same
+test with 150 chats and 400 short posts and replies, every name, title,
+preview and post right-to-left, at the smallest message text (12 px),
+scrolled through at three window sizes. The most any frame drew:
+
+| Window | Wrapped paragraphs | One-line texts |
+| --- | --- | --- |
+| 2560 by 1600 | 15 | 30 |
+| 3840 by 2160 | 20 | 42 |
+| 6016 by 3384 | 32 | 67 |
+
+So each count holds the paragraphs of more than ten full screens, and the
+frame being drawn is never evicted from under itself.
+
+Tests: `src/ui/conversation/paragraph_cache_scroll_tests.rs` scrolls and
+resizes a history and counts layouts (one laid-out width per drawn post,
+nothing laid out twice, nothing laid out again on a scroll back, each
+width laid out once while resizing, at most two kept);
+`src/ui/paragraph_cache_tests.rs` draws one quote at four widths in the
+same frame, cut short or whole, and in cached views drawn again one at a
+time, and checks the frames after the first lay nothing out. Those fail
+on the first version, which let the other widths go at each draw.
 
 ## Not changed
 
