@@ -355,8 +355,9 @@ Added in 2026:
   and every window stayed open and blank. It now gets the number.
 - `src/events.rs`, `src/platform.rs`: `handle_msg` passes whatever it does not
   handle itself to `handle_gpui_events`, which parses the id with
-  `GpuiMessageId::from_raw` and then checks the number. The window's check logs
-  a wrong number, as the platform's always did.
+  `GpuiMessageId::from_raw` and then checks the number. The window's check now
+  calls `log::error!` on a wrong number, as the platform's always did. Quill
+  installs no `log` backend, so a shipped build still writes that nowhere.
 - `src/dispatcher.rs`, `src/window.rs`: `validation_number` is a
   `ValidationNumber`.
 - `src/gpui_windows.rs`: declares the new module.

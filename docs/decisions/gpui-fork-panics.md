@@ -80,8 +80,8 @@ changed file has the "Modified by the Quill project" header, and each crate's
 What a user sees after an unrecoverable device loss: Quill uses GPUI's
 default `QuitMode`, which on Windows (and Linux) is `LastWindowClosed`. So
 once the main window is destroyed and no other window is open, GPUI quits
-and Quill exits. It does not stay in the tray, and no message is shown;
-the reason is only in the log. If a picture-in-picture window is still open
+and Quill exits. It does not stay in the tray, no message is shown, and
+nothing records the reason, because Quill installs no `log` backend. If a picture-in-picture window is still open
 and only the main window's renderer failed, the process keeps running with
 just that window until it is closed. If the vsync thread's recovery failed,
 it closes every window, PiP included, and Quill exits.
