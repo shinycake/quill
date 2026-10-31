@@ -128,3 +128,24 @@ just above the field and as wide as it.
   Suggestions" with its note.
 - The test text system has no glyph positions, so pointer hit-testing was
   checked in demo captures instead.
+
+## Reaching the bar
+
+The bar sits above the field, and every matching word lights up, so the way
+from a word to the bar often crosses other lit words and rarely runs straight.
+Idan found this hit or miss on 2026-10-31: the bar swapped to the word crossed,
+or closed the moment the pointer left the band between word and bar.
+
+An open bar now moves only after `BAR_GRACE` (400 ms). The pointer on the word,
+on the bar or in the band holds it. Off the band it closes after the wait unless
+the pointer comes back. Over another word it swaps once the pointer has stayed
+on that word for the wait, so crossing a word on the way up changes nothing.
+Opening a bar from no bar stays instant. tdesktop has no hover bar to compare.
+
+## Closing sticker suggestions
+
+tdesktop hides its sticker autocomplete on Esc (`HistoryWidget::escape`) until
+the next field change brings it back (`updateStickersByEmoji`). Quill does the
+same for the sticker and animated emoji rows, keyed by chat and text, so a late
+TDLib answer cannot reopen them. tdesktop has no close button; Quill adds one
+because the row otherwise gives no sign that it can be closed.

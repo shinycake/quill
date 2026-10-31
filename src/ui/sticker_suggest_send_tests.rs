@@ -111,3 +111,31 @@ fn sending_an_emoji_dismisses_its_suggestions(cx: &mut TestAppContext) {
     );
     assert_eq!(shown(&app, vcx), (false, false));
 }
+
+#[gpui_kit::test]
+fn escape_closes_the_suggestions_until_the_text_changes(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.composer.update(cx, |input, cx| input.focus(window, cx));
+        });
+    });
+    vcx.simulate_input(EMOJI);
+    hold_suggestions(&app, vcx);
+    assert_eq!(shown(&app, vcx), (true, true));
+
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert_eq!(shown(&app, vcx), (false, false));
+
+    // TDLib's answers arriving again do not bring it back for this text.
+    hold_suggestions(&app, vcx);
+    assert_eq!(shown(&app, vcx), (false, false));
+
+    // A new emoji is new text.
+    vcx.simulate_input(" ");
+    vcx.simulate_input(EMOJI);
+    frames(vcx);
+    assert_eq!(shown(&app, vcx), (true, true));
+}

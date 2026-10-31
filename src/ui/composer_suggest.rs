@@ -16,6 +16,7 @@ use quill::composer_doc::ComposerTag;
 use quill::emoji::keyword_lookup::{
     keyword_emoji, normalize_query, prioritize_recent, push_unique, skip_exact_keyword,
 };
+use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::suggest::{
     EMOJI_LIMIT, RecentHashtags, SuggestKind, SuggestQuery, detect, emoji_name, search_emoji,
@@ -65,6 +66,10 @@ pub(super) struct SuggestUi {
     /// `(kind, trigger offset, query)` the user closed with Esc; stays
     /// closed until the query changes.
     pub dismissed: Option<(SuggestKind, usize, String)>,
+    /// The chat and text whose sticker suggestions the user closed; they
+    /// stay closed until the text changes (tdesktop hides its autocomplete
+    /// on Esc until the next field change).
+    pub stickers_dismissed: Option<(Option<ChatId>, String)>,
     pub hashtags: RecentHashtags,
     /// The keyword answers' generation `active` was built from.
     built_generation: u64,
