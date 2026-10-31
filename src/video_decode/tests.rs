@@ -1,6 +1,7 @@
+use super::decode_loop::wants_more;
 use super::{
     AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, Clock, Demuxer, Item,
-    MediaInfo, OpenOptions, PixelOutput, Player, VideoFrame, rotate_bgra, take_due, wants_more,
+    MediaInfo, OpenOptions, PixelOutput, Player, VideoFrame, rotate_bgra, take_due,
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};

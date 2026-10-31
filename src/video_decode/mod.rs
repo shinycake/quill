@@ -19,6 +19,7 @@
 //!   picture is shown ([`Clock`]). The picture shown is the newest one due.
 #![deny(clippy::indexing_slicing)]
 
+mod decode_loop;
 mod ffi;
 mod nv12;
 mod present;
@@ -407,17 +408,6 @@ pub fn synced_position(wall: f64, heard: Option<f64>) -> f64 {
     }
 }
 
-/// Whether the decode thread should decode more now: while pictures are
-/// short, or sound is below its low mark; never past the sound's cap.
-pub fn wants_more(video_queued: Option<(usize, usize)>, audio_buffered_secs: Option<f64>) -> bool {
-    if audio_buffered_secs.is_some_and(|secs| secs >= AUDIO_HIGH_SECS) {
-        return false;
-    }
-    let video_short = video_queued.is_some_and(|(queued, cap)| queued < cap.max(1));
-    let audio_low = audio_buffered_secs.is_some_and(|secs| secs < AUDIO_LOW_SECS);
-    video_short || audio_low
-}
-
 /// The sound shared between the decode thread and the audio output.
 struct AudioShared {
     rate: u32,
@@ -680,7 +670,7 @@ impl Player {
             // state instead of "loading" forever.
             let _exit = ExitReport(thread_shared.clone());
             match opener() {
-                Ok(demuxer) => decode_loop(demuxer, thread_shared, want_audio),
+                Ok(demuxer) => decode_loop::run(demuxer, thread_shared, want_audio),
                 Err(err) => {
                     let mut state = lock(&thread_shared.state);
                     state.error = Some(err);
@@ -776,13 +766,13 @@ impl Player {
 
     /// Playing, and not run out.
     pub fn is_playing(&mut self) -> bool {
-        self.update_ended();
+        self.update_ended(Instant::now());
         self.clock.is_playing() && !self.ended
     }
 
     /// Ran out at the end (until the next seek).
     pub fn ended(&mut self) -> bool {
-        self.update_ended();
+        self.update_ended(Instant::now());
         self.ended
     }
 
@@ -848,7 +838,7 @@ impl Player {
         self.position_at(Instant::now())
     }
 
-    fn update_ended(&mut self) {
+    fn update_ended(&mut self, now: Instant) {
         if self.ended {
             return;
         }
@@ -862,7 +852,6 @@ impl Player {
         if !drained {
             return;
         }
-        let now = Instant::now();
         // Done once the last picture was shown and its time came (a clip's
         // last frame stays up for its duration), and the sound played out.
         let sound_done = self.audio().is_none_or(|audio| audio.drained());
@@ -890,101 +879,6 @@ impl Drop for Player {
         drop(tap);
         // The thread exits within one decode step; don't block the UI on it.
         self.shared.wake.notify_all();
-    }
-}
-
-fn decode_loop(mut demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: bool) {
-    let info = demuxer.info();
-    let has_video = info.has_video;
-    {
-        let mut state = lock(&shared.state);
-        if want_audio && info.has_audio {
-            let audio = Arc::new(AudioShared {
-                rate: info.sample_rate,
-                channels: info.channels.max(1),
-                queue: Mutex::new(AudioQueue::default()),
-                generation: AtomicU64::new(0),
-                played: AtomicU64::new(0f64.to_bits()),
-                played_generation: AtomicU64::new(u64::MAX),
-                detached: AtomicBool::new(false),
-            });
-            state.tap = Some(AudioTap {
-                shared: audio.clone(),
-                wake: shared.clone(),
-                chunk: Vec::new(),
-                at: 0,
-                chunk_pts: 0.0,
-                generation: 0,
-                sounding: false,
-            });
-            state.audio = Some(audio);
-        }
-        state.info = Some(info);
-    }
-    // The layout last passed to the demuxer (none yet).
-    let mut applied: Option<PixelOutput> = None;
-    loop {
-        let mut state = lock(&shared.state);
-        if state.stop {
-            return;
-        }
-        if let Some(target) = state.seek.take() {
-            let epoch = state.epoch;
-            drop(state);
-            let result = demuxer.seek(target);
-            let mut state = lock(&shared.state);
-            if state.epoch == epoch
-                && let Err(err) = result
-            {
-                state.error = Some(err);
-                state.eof = true;
-            }
-            continue;
-        }
-        let audio = state
-            .audio
-            .clone()
-            .filter(|audio| !audio.detached.load(Ordering::Relaxed));
-        let video_queued = has_video.then_some((state.video.len(), state.video_cap));
-        let audio_buffered = audio.as_ref().map(|audio| audio.buffered_secs());
-        if state.eof || !wants_more(video_queued, audio_buffered) {
-            let (guard, _) = shared
-                .wake
-                .wait_timeout(state, idle_wait(audio.is_some()))
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            drop(guard);
-            continue;
-        }
-        let epoch = state.epoch;
-        let output = state.output;
-        drop(state);
-        if applied != Some(output) {
-            demuxer.set_output(output);
-            applied = Some(output);
-        }
-        let item = demuxer.next();
-        let mut state = lock(&shared.state);
-        if state.epoch != epoch || state.seek.is_some() || state.stop {
-            continue;
-        }
-        match item {
-            Ok(Some(Item::Video(frame))) => {
-                if has_video {
-                    state.video.push_back(frame);
-                }
-            }
-            Ok(Some(Item::Audio(chunk))) => {
-                drop(state);
-                if let Some(audio) = audio {
-                    audio.push(chunk);
-                }
-            }
-            Ok(None) => state.eof = true,
-            Err(err) => {
-                state.error = Some(err);
-                state.eof = true;
-            }
-        }
     }
 }
 
