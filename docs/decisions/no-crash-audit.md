@@ -290,6 +290,7 @@ The ones a user can hit:
 | --- | --- | --- | --- |
 | `gpui-pre-windows/src/platform.rs:488`, `src/events.rs:1321` `panic!("Device lost: ..")` | GPU driver reset or update while Quill runs, if the renderer cannot be recreated | P0 (Windows) | Retry recreation with backoff; if it still fails, log and close the window cleanly instead of panicking. Patch in our fork and record it in `QUILL-CHANGES.md`. |
 | `gpui-pre-windows/src/platform.rs:410` `panic!("failed to initialize DirectX")` | No usable GPU / remote desktop session | P1 (Windows) | Return the error up to `main.rs` so §3.6's startup alert shows it. |
+| `gpui-pre-windows/src/vsync.rs` `retrieve_duration` divides by `ticks_per_second / 1_000_000` | DWM reports a refresh period under 1 ms and a refresh rate numerator under 1,000,000, or a QPC clock under 1 MHz | P0 (Windows) | The vsync thread dies and no window repaints. Fixed in the fork: `refresh_interval` is total, recorded in `QUILL-CHANGES.md`. |
 | `gpui-pre-windows/src/platform.rs:749,754` `unimplemented!()` in `hide_other_apps` / `unhide_other_apps` | Only if something calls them; Quill does not today (`src/ui/interface_zoom.rs:390` just forwards) | P2 | Make them no-ops in the fork. |
 | `gpui-pre-macos/src/display.rs:63` `panic!` when `CGGetActiveDisplayList` fails | Display reconfiguration races (sleep/wake, monitor unplug) | P1 (macOS) | Return an empty list. |
 | `gpui-pre-macos/src/text_system.rs:580-605` four `unwrap`s on CoreText run attributes | Malformed font or unusual glyph run | P1 (macOS) | Skip the run. |

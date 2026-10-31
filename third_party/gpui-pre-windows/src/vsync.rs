@@ -1,11 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // adds `FrameGate`, which lets the vsync thread sleep, with no timeout, while
-// every window is idle.
+// every window is idle, and takes the thread's interval from `refresh_interval`.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
-use std::{
-    sync::LazyLock,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use gpui::FrameRequestSource;
@@ -13,24 +10,16 @@ use gpui_util::ResultExt;
 use parking_lot::{Condvar, Mutex, RwLock};
 use smallvec::SmallVec;
 
-use crate::vsync_has_work;
+use crate::{
+    refresh_interval::{DEFAULT_VSYNC_INTERVAL, VSYNC_INTERVAL_THRESHOLD, refresh_interval},
+    vsync_has_work,
+};
 
 use windows::Win32::{
     Foundation::HWND,
     Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
     System::Performance::QueryPerformanceFrequency,
 };
-
-static QPC_TICKS_PER_SECOND: LazyLock<u64> = LazyLock::new(|| {
-    let mut frequency = 0;
-    // On systems that run Windows XP or later, the function will always succeed and
-    // will thus never return zero.
-    unsafe { QueryPerformanceFrequency(&mut frequency).unwrap() };
-    frequency as u64
-});
-
-const VSYNC_INTERVAL_THRESHOLD: Duration = Duration::from_millis(1);
-const DEFAULT_VSYNC_INTERVAL: Duration = Duration::from_micros(16_666); // ~60Hz
 
 pub(crate) struct VSyncProvider {
     interval: Duration,
@@ -74,17 +63,15 @@ fn get_dwm_interval() -> Result<Duration> {
         ..Default::default()
     };
     unsafe { DwmGetCompositionTimingInfo(HWND::default(), &mut timing_info) }?;
-    let interval = retrieve_duration(timing_info.qpcRefreshPeriod, *QPC_TICKS_PER_SECOND);
-    // Check for interval values that are impossibly low. A 29 microsecond
-    // interval was seen (from a qpcRefreshPeriod of 60).
-    if interval < VSYNC_INTERVAL_THRESHOLD {
-        Ok(retrieve_duration(
-            timing_info.rateRefresh.uiDenominator as u64,
-            timing_info.rateRefresh.uiNumerator as u64,
-        ))
-    } else {
-        Ok(interval)
-    }
+    let mut qpc_frequency = 0;
+    // SAFETY: `qpc_frequency` is valid for writes for the length of the call.
+    unsafe { QueryPerformanceFrequency(&mut qpc_frequency) }?;
+    Ok(refresh_interval(
+        timing_info.qpcRefreshPeriod,
+        qpc_frequency as u64,
+        timing_info.rateRefresh.uiNumerator,
+        timing_info.rateRefresh.uiDenominator,
+    ))
 }
 
 /// Quill: which windows' vsync invalidations are parked (see `frame_idle`).
@@ -192,12 +179,6 @@ impl ParkedWindows {
     pub(crate) fn contains(&self, hwnd: HWND) -> bool {
         self.0.contains(&hwnd_key(hwnd))
     }
-}
-
-#[inline]
-fn retrieve_duration(counts: u64, ticks_per_second: u64) -> Duration {
-    let ticks_per_microsecond = ticks_per_second / 1_000_000;
-    Duration::from_micros(counts / ticks_per_microsecond)
 }
 
 #[cfg(test)]
