@@ -117,10 +117,12 @@ script (`--config target.<triple>.runner`):
   `slot-cargo`, and 120 runs of a copy of that binary with the same load filters, had no
   carrier host failure.
 
-## Found, not fixed
+## Found, fixed later
 `update_install` has its own flaky tests under parallel load, with no carrier test in the run:
 the pre-change binary, `update_install::claim update_install::tests`, `--test-threads=8`, failed
 32 of 80 runs (`claim.rs:343`, `:366`, `:396`, `tests.rs:318`, `:370`). Its fixtures are also
 written and then started (`src/update_install/tests.rs` `script`), as is
 `media_tools::tests::a_tool_that_exits_with_an_error_or_hangs_fails_the_self_test`, which
-failed at `assert!(runs(&script("good", "exit 0")))` in 2 of 60 loaded runs here.
+failed at `assert!(runs(&script("good", "exit 0")))` in 2 of 60 loaded runs here. Fixed in
+`fix-script-test-flakes.md`: the same sharing, of a claim's lock and of written scripts, plus a
+fixture file read before it was written.
