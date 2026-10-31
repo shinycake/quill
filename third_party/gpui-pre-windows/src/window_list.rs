@@ -2,6 +2,7 @@
 
 use std::ops::Deref;
 
+/// Never send under the lock: `SendMessageW` waits for the UI thread, which may wait in `write()`.
 pub(crate) fn for_each_after_unlock<Guard, Window, Handle>(
     windows: Guard,
     handle: impl Fn(&Window) -> Handle,
