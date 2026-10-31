@@ -161,12 +161,17 @@ pub fn system_woke() {
     let route = route_now();
     lock_or_recover(tracker()).woke(route);
     crate::wake::UPDATES.poke();
+    crate::system_proxy::refresh();
 }
 
 /// A backend's "look again". Runs on the watcher's thread.
 fn network_changed() {
     let route = route_now();
-    if lock_or_recover(tracker()).observe(route) {
+    let moved = lock_or_recover(tracker()).observe(route);
+    if moved {
         crate::wake::UPDATES.poke();
+    }
+    if moved || platform::EVENTS_COVER_PROXY {
+        crate::system_proxy::refresh();
     }
 }

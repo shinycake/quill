@@ -1,10 +1,13 @@
 use super::{
-    Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, is_system_entry, parse_proxy_url,
-    parse_scutil_proxy, parse_windows_proxy_server, plan_system_proxy, proxy_from_env,
-    proxy_from_gsettings,
+    Detected, REREAD_EVERY, SYSTEM_PROXY_COMMENT, SystemProxyStep, is_system_entry,
+    parse_proxy_url, parse_windows_proxy_server, plan_system_proxy, proxy_from_dictionary,
+    proxy_from_env, proxy_from_gsettings, reread_due, serve,
 };
 use crate::calls::proxy::ProxyKind;
 use crate::proxy::{ProxyDraft, ProxyEntry};
+use crate::telegram::envelope::ConnectionState;
+use std::sync::mpsc::sync_channel;
+use std::time::Instant;
 
 fn proxy(kind: ProxyKind, server: &str, port: u16) -> ProxyDraft {
     let mut proxy = ProxyDraft::empty(kind);
@@ -23,22 +26,104 @@ fn entry(id: i32, proxy: ProxyDraft, enabled: bool) -> ProxyEntry {
     }
 }
 
+fn dictionary(entries: &[(&str, &str)]) -> Option<ProxyDraft> {
+    proxy_from_dictionary(|key| {
+        let found = entries.iter().find(|(name, _)| *name == key)?;
+        Some(found.1.to_string())
+    })
+}
+
 #[test]
-fn scutil_prefers_socks_then_https_then_http() {
-    let text = "<dictionary> {\n  HTTPEnable : 1\n  HTTPPort : 3128\n  HTTPProxy : web.lan\n  \
-                HTTPSEnable : 1\n  HTTPSPort : 3129\n  HTTPSProxy : secure.lan\n  \
-                SOCKSEnable : 0\n  SOCKSPort : 1080\n  SOCKSProxy : socks.lan\n}";
+fn the_dictionary_prefers_socks_then_https_then_http() {
+    let mut entries = vec![
+        ("HTTPEnable", "1"),
+        ("HTTPPort", "3128"),
+        ("HTTPProxy", "web.lan"),
+        ("HTTPSEnable", "1"),
+        ("HTTPSPort", "3129"),
+        ("HTTPSProxy", "secure.lan"),
+        ("SOCKSEnable", "0"),
+        ("SOCKSPort", "1080"),
+        ("SOCKSProxy", "socks.lan"),
+    ];
     assert_eq!(
-        parse_scutil_proxy(text),
+        dictionary(&entries),
         Some(proxy(ProxyKind::Http, "secure.lan", 3129))
     );
-    let socks = text.replace("SOCKSEnable : 0", "SOCKSEnable : 1");
+    entries.push(("SOCKSEnable", "1"));
+    entries.swap_remove(6);
     assert_eq!(
-        parse_scutil_proxy(&socks),
+        dictionary(&entries),
         Some(proxy(ProxyKind::Socks5, "socks.lan", 1080))
     );
-    let off = "<dictionary> {\n  HTTPEnable : 0\n  HTTPSEnable : 0\n}";
-    assert_eq!(parse_scutil_proxy(off), None);
+    assert_eq!(
+        dictionary(&[("HTTPEnable", "0"), ("HTTPSEnable", "0")]),
+        None
+    );
+}
+
+fn reads_for(ask: impl Fn(&std::sync::mpsc::SyncSender<()>)) -> (usize, Vec<Detected>) {
+    let (asks, requests) = sync_channel(1);
+    ask(&asks);
+    drop(asks);
+    let mut reads = 0;
+    let mut published = Vec::new();
+    serve(
+        &requests,
+        || {
+            reads += 1;
+            Detected::Direct
+        },
+        |found| published.push(found),
+    );
+    (reads, published)
+}
+
+#[test]
+fn with_no_request_nothing_is_read() {
+    assert_eq!(reads_for(|_| {}), (0, vec![]));
+}
+
+#[test]
+fn a_request_reads_once_and_publishes() {
+    let (reads, published) = reads_for(|asks| {
+        let _ = asks.try_send(());
+    });
+    assert_eq!(reads, 1);
+    assert_eq!(published, [Detected::Direct]);
+}
+
+#[test]
+fn a_burst_of_requests_reads_once() {
+    let (reads, _) = reads_for(|asks| {
+        for _ in 0..50 {
+            let _ = asks.try_send(());
+        }
+    });
+    assert_eq!(reads, 1);
+}
+
+#[test]
+fn only_a_connection_being_opened_asks_again_and_not_too_often() {
+    let start = Instant::now();
+    for quiet in [
+        ConnectionState::Ready,
+        ConnectionState::Updating,
+        ConnectionState::WaitingForNetwork,
+        ConnectionState::Initial,
+    ] {
+        assert!(!reread_due(quiet, None, start));
+    }
+    let connecting = ConnectionState::Connecting;
+    assert!(reread_due(connecting, None, start));
+    assert!(reread_due(ConnectionState::ConnectingToProxy, None, start));
+    assert!(!reread_due(connecting, Some(start), start));
+    assert!(!reread_due(
+        connecting,
+        Some(start),
+        start + REREAD_EVERY / 2
+    ));
+    assert!(reread_due(connecting, Some(start), start + REREAD_EVERY));
 }
 
 #[test]

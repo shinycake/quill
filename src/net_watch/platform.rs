@@ -2,7 +2,8 @@
 //! [`super::network_changed`] when something about the network may have
 //! moved, and returns only when it cannot go on.
 
-/// macOS: `SCDynamicStore` on the watcher's own run loop.
+/// macOS: `SCDynamicStore` on the watcher's own run loop. The store also
+/// names the proxy settings, so an event can mean those changed alone.
 #[cfg(target_os = "macos")]
 mod backend {
     use core_foundation::array::{CFArray, CFArrayRef};
@@ -38,6 +39,8 @@ mod backend {
         ) -> CFRunLoopSourceRef;
     }
 
+    pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = true;
+
     unsafe extern "C" fn changed(_store: Store, _keys: CFArrayRef, _info: *mut c_void) {
         crate::thread_guard::ffi_boundary((), super::super::network_changed);
     }
@@ -64,6 +67,7 @@ mod backend {
         let keys = CFArray::from_CFTypes(&[
             CFString::new("State:/Network/Global/IPv4"),
             CFString::new("State:/Network/Global/IPv6"),
+            CFString::new("State:/Network/Global/Proxies"),
         ]);
         let patterns = CFArray::from_CFTypes(&[
             CFString::new("State:/Network/Interface/[^/]+/IPv4"),
@@ -98,6 +102,9 @@ mod backend {
 mod backend {
     use std::io;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+
+    /// Reading the proxy may start `gsettings`, and netlink is chatty.
+    pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
     const GROUPS: libc::c_int = libc::RTMGRP_LINK
         | libc::RTMGRP_IPV4_IFADDR
@@ -172,6 +179,9 @@ mod backend {
 mod backend {
     use windows_sys::Win32::NetworkManagement::IpHelper::NotifyAddrChange;
 
+    /// The registry holds the proxy, and nothing here is told when it moves.
+    pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
+
     pub(in crate::net_watch) fn watch() {
         // SAFETY: two null pointers ask for the blocking form, which writes
         // to neither.
@@ -183,7 +193,9 @@ mod backend {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 mod backend {
+    pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
+
     pub(in crate::net_watch) fn watch() {}
 }
 
-pub(super) use backend::watch;
+pub(super) use backend::{EVENTS_COVER_PROXY, watch};

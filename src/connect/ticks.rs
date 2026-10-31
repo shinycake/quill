@@ -86,6 +86,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Proxies: auto-switch.
         outcome.redraw(self.proxy_tick(crate::state::unix_ms_now()));
         // `parity:data-proxy-extras`: "Use system proxy settings".
+        self.reread_system_proxy(now);
         outcome.progress(
             self.system_proxy_tick(&crate::system_proxy::latest(self.wants_system_proxy())),
         );
@@ -119,6 +120,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 false
             }
+        }
+    }
+
+    /// tdesktop reads the OS proxy for each new connection, so ask while
+    /// TDLib is opening one.
+    fn reread_system_proxy(&mut self, now: Instant) {
+        if self.wants_system_proxy()
+            && crate::system_proxy::reread_due(
+                self.session.connection,
+                self.system_proxy_asked,
+                now,
+            )
+        {
+            self.system_proxy_asked = Some(now);
+            crate::system_proxy::refresh();
         }
     }
 

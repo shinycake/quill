@@ -13,7 +13,7 @@
 //! system proxy is not a list entry either.
 //!
 //! Where the configuration comes from:
-//! - macOS: `scutil --proxy` (the `SCDynamicStoreCopyProxies` dictionary).
+//! - macOS: the `SCDynamicStoreCopyProxies` dictionary.
 //! - Windows: the WinINet settings under `HKCU\Software\Microsoft\Windows\
 //!   CurrentVersion\Internet Settings` (`ProxyEnable`, `ProxyServer`), the
 //!   ones Qt's `systemProxyForQuery` reads through WinHTTP.
@@ -25,6 +25,13 @@
 //! TDLib reaches the servers through an HTTP proxy with `CONNECT`.
 //! Proxy auto-config scripts (PAC, WPAD) are not evaluated: with only a
 //! PAC URL configured Quill connects directly.
+//!
+//! tdesktop asks the system as it builds a connection, with no timer. Here a
+//! read happens when "use system proxy" comes on, when `net_watch` sees the
+//! network change or the computer wake, and every [`REREAD_EVERY`] while
+//! TDLib is trying to connect. On macOS the dynamic store also says when the
+//! proxy setting alone changed; elsewhere that takes effect at the next
+//! reconnect.
 #![deny(clippy::indexing_slicing)]
 
 mod platform;
@@ -32,10 +39,13 @@ mod platform;
 mod tests;
 
 use crate::calls::proxy::ProxyKind;
+use crate::locks::lock_or_recover;
 use crate::proxy::{ProxyDraft, ProxyEntry};
+use crate::telegram::envelope::ConnectionState;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The comment that marks the system proxy's entry in TDLib's list.
 /// How long a step TDLib refused waits before it is sent again.
@@ -54,8 +64,8 @@ pub struct SentStep {
 
 pub const SYSTEM_PROXY_COMMENT: &str = "Quill: system proxy";
 
-/// How often the OS configuration is read again while Quill runs.
-const REFRESH: Duration = Duration::from_secs(15);
+/// How often the OS configuration is read again while TDLib tries to connect.
+const REREAD_EVERY: Duration = Duration::from_secs(15);
 
 /// Whether `entry` is the system proxy's entry.
 pub fn is_system_entry(entry: &ProxyEntry) -> bool {
@@ -72,8 +82,8 @@ pub enum Detected {
     Proxy(ProxyDraft),
 }
 
-/// Read the OS proxy configuration now. Blocking (it may run `scutil` or
-/// `gsettings`), so call it off the UI thread; [`latest`] does.
+/// Read the OS proxy configuration now. Blocking (it may run `gsettings`),
+/// so call it off the UI thread; [`latest`] does.
 pub fn detect() -> Option<ProxyDraft> {
     platform::detect()
 }
@@ -82,47 +92,85 @@ pub fn detect() -> Option<ProxyDraft> {
 /// proxy settings" and no custom proxy is on).
 static WANTED: AtomicBool = AtomicBool::new(false);
 
-/// The OS proxy configuration while `wanted`, as last read by the
-/// background reader (it starts on the first wanted call and reads every
-/// [`REFRESH`] while wanted). Not wanted: `Direct`, which drops the hidden
-/// entry, and nothing is read. Never blocks.
-pub fn latest(wanted: bool) -> Detected {
-    WANTED.store(wanted, Ordering::Relaxed);
-    if !wanted {
-        return Detected::Direct;
+struct Reader {
+    detected: Arc<Mutex<Detected>>,
+    /// Holds one request: an ask while one waits changes nothing.
+    asks: SyncSender<()>,
+}
+
+static READER: OnceLock<Reader> = OnceLock::new();
+
+impl Reader {
+    fn ask(&self) {
+        let _ = self.asks.try_send(());
     }
-    static SLOT: OnceLock<Arc<Mutex<Detected>>> = OnceLock::new();
-    let slot = SLOT.get_or_init(|| {
-        let slot = Arc::new(Mutex::new(Detected::Unknown));
-        let writer = slot.clone();
+}
+
+fn serve(
+    requests: &Receiver<()>,
+    mut read: impl FnMut() -> Detected,
+    mut publish: impl FnMut(Detected),
+) {
+    while requests.recv().is_ok() {
+        publish(read());
+    }
+}
+
+fn reader() -> &'static Reader {
+    READER.get_or_init(|| {
+        let detected = Arc::new(Mutex::new(Detected::Unknown));
+        let (asks, requests) = sync_channel(1);
+        let writer = detected.clone();
         // The reader lives as long as the process; a failed spawn leaves
         // the slot at `Unknown`, which keeps the system mode inert.
         let _ = crate::thread_guard::spawn_guarded("quill-system-proxy", move || {
-            loop {
-                if WANTED.load(Ordering::Relaxed) {
-                    let found = match detect() {
-                        Some(proxy) => Detected::Proxy(proxy),
-                        None => Detected::Direct,
-                    };
-                    if let Ok(mut guard) = writer.lock() {
-                        let changed = *guard != found;
-                        *guard = found;
-                        drop(guard);
-                        if changed {
-                            // The poll loop applies it now, not at its next wake.
-                            crate::wake::UPDATES.poke();
-                        }
-                    }
+            let read = || detect().map_or(Detected::Direct, Detected::Proxy);
+            serve(&requests, read, |found| {
+                let mut slot = lock_or_recover(&writer);
+                let changed = *slot != found;
+                *slot = found;
+                drop(slot);
+                if changed {
+                    // The poll loop applies it now, not at its next wake.
+                    crate::wake::UPDATES.poke();
                 }
-                std::thread::sleep(REFRESH);
-            }
+            });
         });
-        slot
-    });
-    match slot.lock() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
+        Reader { detected, asks }
+    })
+}
+
+/// The OS proxy configuration while `wanted`, as last read by the background
+/// reader. Not wanted: `Direct`, which drops the hidden entry, and nothing
+/// is read. Never blocks.
+pub fn latest(wanted: bool) -> Detected {
+    let was_wanted = WANTED.swap(wanted, Ordering::Relaxed);
+    if !wanted {
+        return Detected::Direct;
     }
+    let reader = reader();
+    if !was_wanted {
+        reader.ask();
+    }
+    lock_or_recover(&reader.detected).clone()
+}
+
+/// Read the OS configuration again, when anyone is following it.
+pub fn refresh() {
+    if WANTED.load(Ordering::Relaxed)
+        && let Some(reader) = READER.get()
+    {
+        reader.ask();
+    }
+}
+
+/// Whether a poll should ask for a read: TDLib is opening a connection, and
+/// the last ask was at `asked`.
+pub fn reread_due(connection: ConnectionState, asked: Option<Instant>, now: Instant) -> bool {
+    matches!(
+        connection,
+        ConnectionState::Connecting | ConnectionState::ConnectingToProxy
+    ) && asked.is_none_or(|at| now.saturating_duration_since(at) >= REREAD_EVERY)
 }
 
 /// One change that brings TDLib's list in line with the proxy mode.
@@ -189,16 +237,10 @@ fn draft(kind: ProxyKind, server: &str, port: u16) -> Option<ProxyDraft> {
     Some(proxy)
 }
 
-/// macOS: the `scutil --proxy` dictionary. Keys are the
-/// `kSCPropNetProxies*` names; credentials live in the keychain and are
-/// not part of it.
-pub fn parse_scutil_proxy(text: &str) -> Option<ProxyDraft> {
-    let value = |key: &str| {
-        text.lines().find_map(|line| {
-            let (name, value) = line.split_once(" : ")?;
-            (name.trim() == key).then(|| value.trim().to_string())
-        })
-    };
+/// macOS: the `SCDynamicStoreCopyProxies` dictionary, read through `value`.
+/// Keys are the `kSCPropNetProxies*` names; credentials live in the keychain
+/// and are not part of it.
+pub fn proxy_from_dictionary(value: impl Fn(&str) -> Option<String>) -> Option<ProxyDraft> {
     let pick = |prefix: &str, kind: ProxyKind| {
         if value(&format!("{prefix}Enable")).as_deref() != Some("1") {
             return None;
