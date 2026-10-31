@@ -300,7 +300,8 @@ Rejected alternatives for the allocator itself:
 ## Rejected
 
 - `malloc_zone_pressure_relief` (already called at idle): returns 0 bytes
-  on macOS 27 for every size tested.
+  on macOS 27 for every size tested, and the footprint doesn't move either
+  (`idle-heap-return.md`).
 - `MallocLargeCache=0` / `MallocSpaceEfficient=1`: undocumented
   environment switches read at process start; not something an app can
   set for itself.
@@ -340,8 +341,9 @@ is left as a placeholder.
   display is free for the demo window.
 - Reuse the screen-share conversion buffer (`nv12_to_i420`) and measure
   CPU in a call.
-- Rate-limit `free_heap::release` on idle trim to at most once per 10 s, as
-  tdesktop does with `malloc_trim`.
+- ~~Rate-limit `free_heap::release` on idle trim to at most once per 10 s,
+  as tdesktop does with `malloc_trim`.~~ Dropped: the call takes 0.01 ms
+  and frees nothing on macOS 27 (`idle-heap-return.md`).
 - A macOS CI job that runs `cargo test --lib large_alloc` and clippy.
 - `src/ui/image_budget.rs` has 12 lines of headroom under the file-size
   limit; split it before its next change.

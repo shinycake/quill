@@ -21,6 +21,10 @@ pub(crate) struct FrameUi {
     /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
     /// stickers and emoji hold still while it isn't.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// The active chat window hid the main window whole at its last
+    /// render: the main window's own content asks for no ticks, as behind
+    /// another app (`chat_window::cover`).
+    pub(super) main_covered: std::cell::Cell<bool>,
     /// The title last handed to the platform window (`window_chrome`).
     pub(super) window_title_shown: std::cell::RefCell<String>,
     /// Unread badge memo for the title (`tray::badge_cache`).
@@ -71,6 +75,7 @@ impl FrameUi {
             animation_targets: Default::default(),
             animation_sound: Default::default(),
             window_active: std::cell::Cell::new(true),
+            main_covered: Default::default(),
             window_title_shown: Default::default(),
             title_badge: Default::default(),
             media_roots_frame: Default::default(),

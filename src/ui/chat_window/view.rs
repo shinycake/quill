@@ -3,8 +3,10 @@
 
 use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
+use super::super::frame_clock::follow_app;
 use super::super::image_budget::{BoundedImageCache, CacheScope};
 use super::super::shell::QuillShell;
+use super::cover::WindowPlace;
 use super::slot::{SharedSlot, WindowSlot, scope_probe};
 use gpui_kit::component::{Root, StyledExt, TitleBar};
 use gpui_kit::prelude::FluentBuilder;
@@ -32,6 +34,8 @@ pub(crate) struct ChatWindowView {
     /// frames; they go with the window.
     pub(super) images: Entity<BoundedImageCache>,
     _observe: Subscription,
+    /// The window's activation, bounds and display (`cover`).
+    _placed: [Subscription; 3],
 }
 
 impl ChatWindowView {
@@ -43,7 +47,12 @@ impl ChatWindowView {
     ) -> Self {
         let slot = owner.update(cx, |app, cx| WindowSlot::new(app, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
-        let observe = cx.observe(&owner, |_, _, cx| cx.notify());
+        let observe = follow_app(&owner, cx);
+        let placed = [
+            cx.observe_window_activation(window, Self::placed),
+            cx.observe_window_bounds(window, Self::placed),
+            cx.observe_window_display(window, Self::placed),
+        ];
         Self {
             owner: owner.downgrade(),
             chat_id,
@@ -54,7 +63,19 @@ impl ChatWindowView {
             closed: false,
             images: cx.new(|_| BoundedImageCache::for_window()),
             _observe: observe,
+            _placed: placed,
         }
+    }
+
+    /// The window was activated or deactivated, moved, resized or went to
+    /// another display: the app learns it at once, whether or not the
+    /// window draws (a minimized one may not).
+    fn placed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (chat_id, active) = (self.chat_id, window.is_window_active());
+        let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
+        let _ = self.owner.update(cx, |app, cx| {
+            app.chat_window_placed(chat_id, active, place, cx);
+        });
     }
 
     #[cfg(test)]
@@ -119,10 +140,11 @@ impl Render for ChatWindowView {
         let active = window.is_window_active();
         let bounds = window.bounds();
         let moved = self.bounds_seen.replace(bounds) != Some(bounds);
+        let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let outer = app.update(cx, |app, cx| {
-            app.windows.note_active(chat_id, active);
+            app.windows.note_place(chat_id, active, place);
             app.set_window_chat_active(chat_id, active);
             if moved {
                 app.schedule_chat_windows_save(cx);

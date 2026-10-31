@@ -43,8 +43,11 @@ pub(super) struct WindowSlot {
     pub(super) chat_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     pub(super) share: ShareUi,
-    /// The window was the active one at its last render.
+    /// The window was the active one at its last render or activation
+    /// change.
     pub(super) active: bool,
+    /// Where the window stood then (`cover`).
+    pub(super) place: Option<super::cover::WindowPlace>,
 }
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
@@ -83,6 +86,7 @@ impl WindowSlot {
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
             active: false,
+            place: None,
         }
     }
 }

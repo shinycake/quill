@@ -134,7 +134,10 @@ fn every_frame_a_late_head_showed_leaves_once_the_clip_stops() {
     player.stop();
     begin_frame();
     begin_frame();
-    let left: Vec<_> = take_unshowable().iter().map(|image| image.id).collect();
+    let left: Vec<_> = take_unshowable(true, &[])
+        .iter()
+        .map(|image| image.id)
+        .collect();
     let kept = showed.iter().filter(|(id, _)| !left.contains(id));
     assert_eq!(kept.count(), 0, "shown frames that never left the atlas");
     let held = showed.iter().filter(|(_, frame)| frame.strong_count() > 0);

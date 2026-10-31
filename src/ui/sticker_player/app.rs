@@ -679,9 +679,9 @@ impl QuillApp {
 }
 
 /// Free the frames of clips the closer closed. No window shows them, so
-/// each one nothing else holds leaves every window's atlas and memory now:
-/// with no frame drawn, the sweep of retired images (`image_budget::sweep`)
-/// never runs. One still held elsewhere waits for that sweep.
+/// each one nothing else holds leaves every window's atlas and memory now,
+/// without waiting for a sweep of retired images. One still held
+/// elsewhere is retired.
 fn drop_frames(frames: Vec<Arc<RenderImage>>, cx: &mut App) {
     let mut held = Vec::new();
     for image in frames {

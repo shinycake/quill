@@ -49,11 +49,10 @@ impl Render for QuillApp {
         self.sync_update_pill();
         // Before this frame counts: what showed stayed until now.
         self.sticker_frame_starts(None, cx);
-        // Bounded image memory: retired images and path images nothing can
-        // show any more leave the atlas (`image_budget`).
-        super::image_budget::begin_frame();
+        // Bounded image memory: retired images no window can show any
+        // more leave the atlas, then this frame counts (`image_budget`).
+        super::image_budget::begin_main_frame(window, cx);
         self.note_frame_timing(window, cx);
-        super::image_budget::sweep(window, cx);
         super::glyph_sweep::start_frame(window, cx);
         self.sync_emoji_style(cx);
         super::spoiler_fx::release_media_tile(Some(window), cx);
@@ -102,10 +101,11 @@ impl Render for QuillApp {
             }
         }
         // Animations run while any Quill window is in front, a chat
-        // window's included.
-        let active = window.is_window_active()
-            || self.windows.any_active()
-            || super::frame_clock::assume_active();
+        // window's included; the main window's own hold still while the
+        // active chat window hides it whole (`chat_window::cover`).
+        let main_active = window.is_window_active() || super::frame_clock::assume_active();
+        let active = main_active || self.windows.any_active();
+        self.note_main_place(window, main_active);
         if self.frame.window_active.replace(active) != active {
             self.playback.inline_videos.set_window_active(active);
         }

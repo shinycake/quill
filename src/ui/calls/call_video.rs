@@ -20,7 +20,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::app_theme::call_chrome;
 use crate::ui::call_panel::CallPanel;
 use crate::ui::call_panel_backdrop::backdrop;
-use crate::ui::frame_clock::trace_slice_render;
+use crate::ui::frame_clock::{follow_app, trace_slice_render};
 use crate::ui::video_player::{Purpose, VideoPlayer, video_frame};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -195,7 +195,7 @@ impl CallPictureView {
             picture,
             // A change to the call (a feed starting or ending) redraws the
             // picture; frames come with the player's waker.
-            _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            _observe: follow_app(owner, cx),
         }
     }
 }
@@ -253,7 +253,7 @@ impl CallWindowRoot {
         panel_view.set(Some(panel.entity_id()));
         Self {
             owner: owner.downgrade(),
-            _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            _observe: follow_app(owner, cx),
             panel,
             remote: cx.new(|cx| CallPictureView::new(owner, CallPicture::Remote, cx)),
             local: cx.new(|cx| CallPictureView::new(owner, CallPicture::Local, cx)),
