@@ -486,7 +486,10 @@ impl QuillApp {
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its activation goes with it: GPUI drops the window before the
         // platform reports it inactive, so its observer never runs, and a
-        // main window that draws nothing would leave the gate on.
+        // main window that draws nothing would leave the gate on. Only the
+        // active chat window covers the main one.
+        let covered = self.frame.main_covered.get() && self.windows.any_active();
+        self.frame.main_covered.set(covered);
         self.follow_windows(cx);
         self.drop_play_intent_in_window(chat_id);
         if self.windows.last_input == Some(chat_id) {

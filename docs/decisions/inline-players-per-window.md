@@ -137,7 +137,9 @@ needs its own call: GPUI drops the window (`gpui-pre` `app.rs`) before the platf
 so its observer never runs, and a main window that is minimized or hidden to the tray draws nothing.
 Without it the gate stayed on after the active chat window closed, with the user in other apps:
 `sync_presence` kept the account online, `poll_background` counted the app active and muted the
-background accounts' sounds, and muted clips kept playing.
+background accounts' sounds, and muted clips kept playing. The close also clears the main window's
+cover when no chat window is left active, since only the active one covers it: otherwise the main
+window's clips stayed out of the gate (`AppGate::held`) until its next render.
 
 Other effects of the change:
 
@@ -152,8 +154,40 @@ Other effects of the change:
 - macOS does not report one window of an app covering another of the same app. A chat window hidden
   whole behind the active main window, or behind another chat window, is still presented, so it now
   draws its clips at the inactive rate where no one sees them. Only the main window under its chat
-  window is handled (`chat_window::cover`). This is a known follow-up, not a regression against main:
-  before, such a chat window's clips froze instead.
+  window is handled (`chat_window::cover`). This is a known follow-up, not a regression against main,
+  where such a chat window's clips were reopened every frame while the main window drew. (They froze
+  only at d6e69c4d6, the first version of this change.)
+
+## A clip flashed its placeholder when its window showed again
+
+Traced on the Mac at c539f1d4a: with a video tile in the main window and a chat window focused on
+another chat, minimizing the main window (or covering it with the chat window) for more than 2 s and
+then restoring it showed the tile's old picture for about 0.25 s (the window's last frame, before it
+redraws), then the flat green placeholder for 17-133 ms, then the clip playing. It happened every time.
+The main window alone, minimized and restored, did not flash: with no other window presented its clips
+count as in view, so they never sleep.
+
+The 2 s is `RELEASE_AFTER`. A hidden window's clips now sleep while another window sweeps
+(`unseen`), and sleeping dropped every picture with the decoder (`VideoPlayer::hibernate`): the
+sleeping tile painted nothing, and the player reopened for it on the window's first pass
+(`InlineVideos::revive`) had no picture until its first decode. In both gaps the tile showed what
+lies under it: the still, drawn by an `img` that may still be loading or may have been evicted from
+the window's image cache while the window was in the background, and whose fallback is the green
+`success_bg`.
+
+A single window had the same gap: a clip scrolled out of view, still rendered in the list's overdraw
+for `RELEASE_AFTER`, sleeps the same way, and scrolled back it showed the still until its new player's
+first picture. It went unnoticed there because the tile comes in from the edge, usually over a loaded
+thumbnail.
+
+Both paths now keep the picture: a sleeping inline clip keeps its last picture
+(`VideoPlayer::hibernate_on_last_picture`) and paints it, and the player reopened for it shows that
+picture until its own first one (`VideoPlayer::take_picture_from`). One picture costs a fraction of
+what sleep frees: the FFmpeg decoder queues three pictures (`OpenOptions::inline`) besides the one on
+screen, plus its codec state and thread, and AVPlayer holds a pool of buffers. A kept FFmpeg image
+that its decoder retired stays in the atlas only while a player holds it (`image_budget::retired`).
+Video userpics (`userpic_videos`) sleep and wake the same way and still drop their picture; they are
+not changed here.
 
 ## Measured
 
@@ -187,6 +221,20 @@ The same file has more tests. Each fails with its fix reverted:
   window on the request: `the click plays it`.
 - `a_gif_panel_closed_in_the_main_window_leaves_the_chat_windows_open`. With the session's GIF flag:
   `GIF panel players opened again over 8 frames of each window: left 40, right 0`.
+- `the_gate_goes_off_as_the_active_chat_window_closes_over_a_minimized_main_window` reads the gate in
+  the same update as the close (the test platform would draw the main window after it). Without the
+  close's recompute: `the gate is off once the window closes: Some(true)`.
+  `the_gate_goes_off_when_the_app_loses_focus_with_a_chat_window_open` guards the other way.
+- `a_minimized_chat_windows_sleeping_clips_stay_asleep_as_the_app_hides`. With a recheck reviving them
+  behind another app: `(11, 611) sleeps on behind another app`.
+- `a_click_in_a_chat_window_closed_before_its_clip_lands_plays_nothing`. Without the close dropping the
+  click: `a request outlived its window, left: Some(Sound)`.
+- `a_hidden_windows_clips_keep_their_picture_till_their_new_players_first` sleeps the main window's clips
+  while it is minimized, then shows it with the reopened players' decoders holding back their first
+  picture, and reads what each tile painted on every frame. Without the kept picture: `(11, 611) painted
+  no picture 0 frames after its window showed`. The single-window path is covered by
+  `a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back` (`tests/inline.rs`): `the reopened
+  round video paints no picture before its first`.
 
 Unit tests in `windows.rs` cover the pass and sweep rules for one window, two windows, and a clip both
 show. They also cover per-window marks, and which windows count as out of sight (none with one window or
@@ -210,8 +258,10 @@ Then minimize the chat window with the main window in front. Its clips should pa
 their decoders within about 2 s, and CPU should fall to what the main window alone costs. When the window
 is restored, they should play again within a frame or two. Minimizing or covering the main window instead
 should do the same for the main window's clips while the chat window's play on, and so should a chat
-window dragged over all of the main window. Closing the GIF panel in one window should not change CPU or
-the GIFs playing in another window's panel.
+window dragged over all of the main window. Hidden for more than 2 s and then shown again, each tile
+should go from its last picture straight to the playing clip, with no green placeholder or still in
+between (at 60 samples/s, 0 green samples on restore and on uncover). Closing the GIF panel in one
+window should not change CPU or the GIFs playing in another window's panel.
 
 ## Not changed
 

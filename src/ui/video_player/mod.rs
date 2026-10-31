@@ -425,16 +425,59 @@ impl VideoPlayer {
     /// tile released off screen can be reopened once it is seen again
     /// (`inline_players`). The open poll ends with the state.
     pub(crate) fn hibernate(&self) {
+        self.sleep(false);
+    }
+
+    /// [`Self::hibernate`], but the last picture stays on screen: the
+    /// element paints it while the player sleeps, and the player reopened
+    /// for the clip takes it over ([`Self::take_picture_from`]). A tile
+    /// that sleeps and wakes then keeps its picture throughout, instead of
+    /// showing what lies under it (the still, which may be loading or
+    /// evicted) until the new decoder's first picture. It costs one
+    /// picture, a fraction of the decoder's queue.
+    pub(crate) fn hibernate_on_last_picture(&self) {
+        self.sleep(true);
+    }
+
+    fn sleep(&self, keep_picture: bool) {
         let now = Instant::now();
-        self.with_inner(|inner| {
+        let dropped = self.with_inner(|inner| {
             inner.machine.sleep(now);
-            inner.raw = None;
-            inner.shown = None;
-            inner.turned_image = None;
             inner.awaiting = None;
             inner.asleep = true;
+            if keep_picture {
+                return None;
+            }
+            inner.raw = None;
+            inner.shown = None;
+            inner.turned_image.take()
         });
+        if let Some(image) = dropped.flatten() {
+            super::image_budget::retire_all([image]);
+        }
         drop(self.0.backend.take());
+    }
+
+    /// Show `sleeping`'s last picture until this player, just opened for
+    /// the same clip, has one of its own ([`Self::hibernate_on_last_picture`]).
+    pub(crate) fn take_picture_from(&self, sleeping: &VideoPlayer) {
+        if self.current_picture().is_some() {
+            return;
+        }
+        let Some((raw, shown, turned)) = sleeping.with_inner(|inner| {
+            (
+                inner.raw.take(),
+                inner.shown.take(),
+                inner.turned_image.take(),
+            )
+        }) else {
+            return;
+        };
+        self.with_inner(|inner| {
+            inner.raw = raw;
+            inner.shown = shown;
+            inner.turned_image = turned;
+        });
     }
 
     /// Seek precisely to `secs` (clamped to the clip).

@@ -330,6 +330,73 @@ fn a_minimized_main_windows_clips_sleep_and_play_again_once_it_shows(cx: &mut Te
     assert_plays(&app, vcx, &[ROUND, TILE]);
 }
 
+/// The backends no player took yet: each hands out no picture until
+/// it is given one, so a player opened meanwhile waits for its first.
+fn hold_new_pictures(scripts: &[Rc<RefCell<Script>>]) -> Vec<Rc<RefCell<Script>>> {
+    let waiting: Vec<_> = scripts
+        .iter()
+        .filter(|script| {
+            let script = script.borrow();
+            script.calls.is_empty() && !script.dropped
+        })
+        .cloned()
+        .collect();
+    for script in &waiting {
+        script.borrow_mut().picture = false;
+    }
+    waiting
+}
+
+#[gpui_kit::test]
+fn a_hidden_windows_clips_keep_their_picture_till_their_new_players_first(cx: &mut TestAppContext) {
+    let scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    // The main window shows the clips; a chat window another chat.
+    let chat_window = open_window(&app, vcx, OTHER);
+    for _ in 0..4 {
+        draw_both(&app, chat_window, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+    vcx.simulate_visibility_change(WindowVisibility::Hidden);
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        draw_chat_window(chat_window, vcx);
+    }
+    assert_sleeps_out_of_sight(&app, vcx, &scripts);
+    let sleeping = [ROUND, TILE].map(|key| player(&app, vcx, key));
+    let waiting = hold_new_pictures(&scripts);
+
+    // Shown again: from its first frame until the new players' first
+    // pictures, each tile paints a picture, never what lies under it.
+    vcx.simulate_visibility_change(WindowVisibility::Visible);
+    for frame in 0..3 {
+        vcx.run_until_parked();
+        draw_main(&app, vcx);
+        for key in [ROUND, TILE] {
+            let painted = player(&app, vcx, key).current_picture();
+            assert!(
+                painted.is_some(),
+                "{key:?} painted no picture {frame} frames after its window showed"
+            );
+        }
+    }
+    for (key, sleeping) in [ROUND, TILE].iter().zip(&sleeping) {
+        let player = player(&app, vcx, *key);
+        assert!(!player.same_as(sleeping), "{key:?} has a new player");
+    }
+    // Their own pictures come, and they play on them.
+    for script in &waiting {
+        script.borrow_mut().picture = true;
+    }
+    for _ in 0..2 {
+        draw_main(&app, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+}
+
 #[gpui_kit::test]
 fn a_viewer_in_the_main_window_leaves_a_click_in_a_chat_window_alone(cx: &mut TestAppContext) {
     let _scripts = scripts();

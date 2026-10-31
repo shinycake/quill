@@ -15,10 +15,12 @@
 //!   resumed when a sweep sees them painted in view again, and put to
 //!   sleep after [`RELEASE_AFTER`] off screen ([`off_screen_step`]): the
 //!   decoder goes, the slot stays with a backend-less player that paints
-//!   nothing over the still and only counts being painted, so a row that
-//!   keeps rendering in the list's overdraw does not reopen its decoder
-//!   every pass. A sweep that sees a sleeping slot painted in view opens a new
-//!   player for it (`revive`). tdesktop pauses a clip that is not drawn
+//!   its last picture and counts being painted, so a row that keeps
+//!   rendering in the list's overdraw does not reopen its decoder every
+//!   pass. A sweep that sees a sleeping slot painted in view opens a new
+//!   player for it (`revive`), which shows that picture until its first
+//!   own one: the tile never falls back to the still (which may be loading
+//!   or evicted) in between. tdesktop pauses a clip that is not drawn
 //!   the same way (its streamed player only decodes ahead of frames shown)
 //!   and unloads it once far from the visible area (`unloadHeavyViewParts`).
 //! - A round video message plays once with sound when clicked, then loops
@@ -239,8 +241,9 @@ struct Slot {
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
     /// aren't ours, and for a sleeping slot).
     bytes: usize,
-    /// Off screen for [`RELEASE_AFTER`]: the player has no backend
-    /// (`VideoPlayer::hibernate`) until a sweep sees it painted in view.
+    /// Off screen for [`RELEASE_AFTER`]: the player has no backend, only
+    /// its last picture (`VideoPlayer::hibernate_on_last_picture`), until
+    /// a sweep sees it painted in view.
     asleep: bool,
     /// The windows its row renders in, each with the pass it last
     /// rendered in there (the history's, or its panel's for a [`Panel`]
@@ -512,7 +515,7 @@ impl InlineVideos {
         };
         run(commands);
         for player in sleepers {
-            player.hibernate();
+            player.hibernate_on_last_picture();
         }
         for (key, source) in revive {
             self.revive(key, source, cx);
@@ -523,22 +526,27 @@ impl InlineVideos {
     }
 
     /// A sleeping slot was painted in view: open a new player for it (if
-    /// the budget admits one) and redraw the histories showing it, whose
-    /// tiles still hold the sleeping one.
+    /// the budget admits one), showing the sleeping one's last picture
+    /// until its own, and redraw the histories showing it, whose tiles
+    /// still hold the sleeping one.
     fn revive(&self, key: Key, source: Source, cx: &mut App) {
-        let Some((held, inactive, views)) = self.with(|state| {
-            let views: Vec<EntityId> = state.players.get(&key).map_or(Vec::new(), |slot| {
-                slot.windows
+        let Some((held, inactive, views, sleeping)) = self
+            .with(|state| {
+                let slot = state.players.get(&key)?;
+                let views: Vec<EntityId> = slot
+                    .windows
                     .keys()
                     .filter_map(|window| state.views.get(window).copied())
-                    .collect()
-            });
-            (
-                state.players.values().map(|slot| slot.bytes).sum::<usize>(),
-                state.inactive,
-                views,
-            )
-        }) else {
+                    .collect();
+                Some((
+                    state.players.values().map(|slot| slot.bytes).sum::<usize>(),
+                    state.inactive,
+                    views,
+                    slot.player.clone(),
+                ))
+            })
+            .flatten()
+        else {
             return;
         };
         if !admits(held, source.bytes) {
@@ -554,6 +562,8 @@ impl InlineVideos {
         ) else {
             return;
         };
+        player.take_picture_from(&sleeping);
+        drop(sleeping);
         player.set_volume(0.0);
         player.set_looping(true);
         // It is in view: play, unless the window is behind another app.
@@ -817,8 +827,8 @@ impl InlineVideos {
         let (command, frame) = self.with(|videos| {
             let inactive = videos.inactive;
             let slot = videos.players.get_mut(&key)?;
-            // A sleeping slot's tile paints nothing over the still and
-            // only counts being painted; the sweep gives it a player.
+            // A sleeping slot's tile paints its last picture and counts
+            // being painted; the sweep gives it a player.
             let command = (!slot.asleep)
                 .then(|| slot.settle(state, running, inactive))
                 .flatten()
