@@ -8,8 +8,10 @@
 //! window's pass drop the clips only the other one showed, so a chat
 //! window's clips were reopened every frame while the main window drew.)
 //!
-//! A window the platform does not present (minimized, covered, on another
-//! Space) has none of its clips in view while another window is presented:
+//! A window the platform does not present (minimized, covered by another
+//! app, on another Space), or the main window while the active chat window
+//! hides it whole (`chat_window::cover`, which macOS does not report), has
+//! none of its clips in view while another window is presented:
 //! they pause, and sleep after [`super::RELEASE_AFTER`] like clips scrolled
 //! away, until it is presented again. With no window presented, or with
 //! one window, nothing changes.
@@ -116,9 +118,13 @@ fn unseen<'a>(
 }
 
 impl State {
-    /// [`unseen`] now.
+    /// [`unseen`] now; a covered main window counts as not presented.
     pub(super) fn unseen(&self) -> HashSet<Option<ChatId>> {
-        unseen(self.watched.keys(), &self.unpresented)
+        let mut out_of_sight = self.unpresented.clone();
+        if self.main_covered {
+            out_of_sight.insert(None);
+        }
+        unseen(self.watched.keys(), &out_of_sight)
     }
 
     /// The number of `window`'s current pass of `list`.
@@ -240,6 +246,15 @@ impl InlineVideos {
         if changed == Some(true) {
             let videos = self.clone();
             cx.defer(move |cx| videos.sweep(Sweep::Recheck, cx));
+        }
+    }
+
+    /// The active chat window hides the main window whole, or no longer
+    /// (`chat_window::cover`): the platform presents it, but it draws
+    /// nothing, so its clips are out of sight as in a minimized window.
+    pub(in crate::ui) fn set_main_covered(self: &Rc<Self>, covered: bool, cx: &mut App) {
+        if self.with(|state| state.main_covered != covered) == Some(true) {
+            self.rewatch(|state| state.main_covered = covered, cx);
         }
     }
 

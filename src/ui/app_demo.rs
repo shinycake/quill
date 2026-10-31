@@ -576,13 +576,11 @@ impl QuillApp {
             if active {
                 quill::wake::poke_on_activation();
             }
-            this.frame.window_active.set(active);
+            // The gate counts the chat windows too: one may be in front.
+            this.frame.main_active.set(active);
+            this.follow_windows(cx);
             super::glyph_sweep::window_activation(active);
             this.viewer_window_activation(window, cx);
-            this.playback
-                .inline_videos
-                .as_ref()
-                .set_window_active(active);
             // The system accent may have changed while another app was in
             // front.
             if active && this.appearance.system_accent {

@@ -348,6 +348,9 @@ struct State {
     watched: HashMap<Option<ChatId>, Subscription>,
     /// The watched windows the platform does not present now.
     unpresented: HashSet<Option<ChatId>>,
+    /// The active chat window hides the main window whole
+    /// (`chat_window::cover`): presented, it draws nothing.
+    main_covered: bool,
 }
 
 /// The players (see the module docs). Shared (`Rc`) with the history's

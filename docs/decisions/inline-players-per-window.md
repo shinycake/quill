@@ -42,11 +42,13 @@ and whether that window's last sweep found it in view (`src/ui/inline_players/wi
   what the other plays.
 - A window the platform does not present (`Window::is_visible`, watched with
   `observe_window_visibility` from its first frame until it closes) has none of its clips in view while
-  another Quill window is presented. A minimized chat window, or a main window that is covered or
-  minimized, pauses its clips at once and lets them sleep after `RELEASE_AFTER` (2 s), as clips scrolled
-  away do. When it is presented again, a recheck plays what it last had in view; a sleeping clip gets a new
-  player, which redraws that window's history. With no window presented, or with one window, nothing
-  changes from before.
+  another Quill window is presented. So has the main window while the active chat window hides it whole
+  (`chat_window::cover`, #1264), which macOS does not report as hidden: it draws nothing then. A minimized
+  chat window, or a main window that is minimized, covered by another app or hidden by its chat window,
+  pauses its clips at once and lets them sleep after `RELEASE_AFTER` (2 s), as clips scrolled away do.
+  When it is presented again, a recheck plays what it last had in view; a sleeping clip gets a new player,
+  which redraws that window's history. With no window presented, or with one window, nothing changes from
+  before.
 - Each window runs the frame start (`QuillApp::inline_videos_frame_start`) with its own state in place:
   the main window from its render, a chat window from its view's render. A frame with no history pass, a
   viewer over the window's chat, or a panel closed there takes that window's entries off. The chat window's
@@ -66,9 +68,59 @@ and whether that window's last sweep found it in view (`src/ui/inline_players/wi
 
 With one window every rule is the same as before: one entry per clip, the same pass numbers, the same
 sweep. Opening the viewer still clears the window's pending play-on-demand requests, through
-`leave_window`. A clip
-shown in both windows (the same GIF in both GIF panels) keeps one player. It stays while either window
-shows it and plays while either has it in view.
+`leave_window`. A clip shown in both windows (the same GIF in both GIF panels) keeps one player. It stays
+while either window shows it and plays while either has it in view.
+
+## A clip froze when its window lost focus
+
+Traced on the Mac at d6e69c4d6: a clip stopped as soon as its own window lost focus to another Quill window,
+and stayed stopped while still playing, in view, not paused and not asleep. With the clip alone in the chat
+window: 22.1 frames/s with the chat window focused, 0 once the main window was clicked, 21.3 once the chat
+window was clicked again. The same happened to a clip in the main window when a chat window took focus.
+
+`request_video_frame` (`src/ui/frame_clock.rs`) asked for the next picture's frame only while the clip's own
+window was active (`window.is_window_active()`), unless the clip had sound. The rest of the app counts any
+Quill window as active (`QuillApp::render`, the animation clock), so stickers and emoji kept animating in
+the unfocused window and kept redrawing a clip next to them. A clip alone had its last asks refused, and
+nothing drew its window again.
+
+- `request_video_frame` now asks while any Quill window is active, from the app's gate (`AppGate`, a GPUI
+  global that `QuillApp::follow_windows` sets with `frame.window_active`). The main window is left out while
+  the active chat window hides it whole (`chat_window::cover`), so a covered main window still draws
+  nothing. Behind another app nothing changes: only clips with sound, and Picture-in-Picture, ask then.
+- GPUI caps an unfocused window's next-frame callbacks at `WindowOptions::inactive_frame_interval`, by
+  default 33,333 µs. That is almost exactly two 60 Hz vsyncs, so a frame two vsyncs after the last one
+  often measured a hair under it, was skipped, and slipped a whole vsync, to about 50 ms. The Mac counted
+  6.2-8.2 such skips a second, 31-33.3 ms after the last frame. The main and chat windows now set it to
+  `window_frame::INACTIVE_FRAME_INTERVAL`, 30 ms, just under two 60 Hz vsyncs
+  (`window_frame::window_options` and `open_chat_window`). Picture-in-Picture keeps `None`.
+
+Measured on the Mac at 60 Hz, unfocused window, with the app-wide gate in place:
+
+| Case | frames/s, 33.3 ms cap | frames/s, 30 ms cap | CPU, 33.3 → 30 ms |
+|---|---|---|---|
+| Clip in the chat window, main window focused | 17.4 | 22.8 | 12.4% → 18.0% |
+| Clip in the main window, chat window focused | 16.4-17.4 | 22.1-22.5 | 9.2-11.0% → 11.6-12.8% |
+| Everything animating, both windows | 22.8 + 23.5 | 28.8 + 29.5 | 28.6% → 30.6% |
+
+The focused window's numbers did not change. The CPU rises because the frames are now drawn.
+
+At 120 Hz, from GPUI's throttle (`gpui-pre` `window.rs`): an unfocused window's frame with next-frame
+callbacks is skipped while less than the interval has passed since the last frame that went through, and
+retried at the next vsync. Vsyncs come every 8.3 ms, so with 30 ms the third vsync (25 ms) is held and the
+fourth (33.3 ms) goes through with 3.3 ms to spare: an unfocused window draws every fourth vsync, about
+30 frames/s. GPUI's default falls exactly on the fourth vsync, so jitter slipped some of those frames to
+the fifth (41.7 ms). A vsync with nothing asked also goes through and resets the count (`last_frame_time`),
+so a clip that asks between vsyncs (`SleepUntil`) gets its frame on the fourth vsync after the one before
+its ask: at most 33.3 ms late, the same bound as the second vsync at 60 Hz, and 3.3 ms of margin at both
+rates. The focused window is not throttled at either rate.
+
+The app's gate (`frame.window_active`) also had a gap, found in the code and not traced on the Mac: the
+main window's activation observer set it from the main window alone, and only the main window's render
+added the chat windows. A main window that does not draw (minimized while focused, so a chat window takes
+focus) left the gate off: that chat window's muted loops paused and its stickers held still. The gate is now
+recomputed at each activation change of any Quill window (`QuillApp::follow_windows`, from the main
+window's observer, a chat window's `placed` observer, and the main window's render).
 
 ## Measured
 
@@ -83,12 +135,21 @@ tile while the main window shows chat 12, and each window draws 8 frames in turn
 - After: no backend opened or dropped. The same players keep playing in view with a picture, and closing
   the window releases them.
 
-The same file has four more tests. Each fails with its fix reverted:
+The same file has more tests. Each fails with its fix reverted:
 
 - `a_minimized_chat_windows_clips_pause_then_sleep_while_the_main_window_draws` and
-  `a_covered_main_windows_clips_sleep_and_play_again_once_it_shows` hide one window with the test
+  `a_minimized_main_windows_clips_sleep_and_play_again_once_it_shows` hide one window with the test
   platform's visibility while the other draws. They advance the simulated clock by `RELEASE_AFTER` and
   show the window again. Without the visibility rule: `(11, 611) pauses out of sight`.
+- `a_main_window_its_chat_window_hides_pauses_its_clips_till_it_shows` opens a chat window over all of the
+  main window, then moves it off. Without the cover counting: `(11, 611) pauses out of sight`.
+- `a_chat_windows_clips_keep_their_frames_while_the_main_window_has_focus` and
+  `a_main_windows_clips_keep_their_frames_while_a_chat_window_has_focus` move focus between the windows
+  and count the clips' paints over a second of the simulated clock, running the window's next-frame
+  callbacks every 100 ms. With the own-window gate: `painted [3, 3] times in a second` for the chat
+  window's clips once the main window has focus, and `[1, 1]` for the main window's clips once a chat
+  window has. The test platform does not throttle unfocused windows, so the 30 ms interval is covered by
+  the reasoning above and the Mac's numbers, not by a test.
 - `a_viewer_in_the_main_window_leaves_a_click_in_a_chat_window_alone`, with autoplay off. Without the
   window on the request: `the click plays it`.
 - `a_gif_panel_closed_in_the_main_window_leaves_the_chat_windows_open`. With the session's GIF flag:
@@ -105,17 +166,25 @@ visible on another chat. Expect about 26% CPU (as with only stickers playing), b
 content's rate (about 29-30 frames/s, not 60), no reopens after the first open, and the round video's
 picture playing.
 
+Then move focus: click the main window, then the chat window, then the main window again. The chat
+window's clip should keep about its focused rate (22-23 frames/s alone) in every step, and with stickers
+and emoji animating too both windows should stay at about 29 frames/s. The same for a clip in the main
+window while a chat window has focus. Worth one run at 120 Hz: an unfocused window should draw at about
+30 frames/s. With the main window focused, minimize it with Cmd-M: the chat window's clip and stickers
+should keep animating.
+
 Then minimize the chat window with the main window in front. Its clips should pause at once and release
 their decoders within about 2 s, and CPU should fall to what the main window alone costs. When the window
 is restored, they should play again within a frame or two. Minimizing or covering the main window instead
-should do the same for the main window's clips while the chat window's play on. Closing the GIF panel in
-one window should not change CPU or the GIFs playing in another window's panel.
+should do the same for the main window's clips while the chat window's play on, and so should a chat
+window dragged over all of the main window. Closing the GIF panel in one window should not change CPU or
+the GIFs playing in another window's panel.
 
 ## Not changed
 
 - `image_budget` counts frames of the main window only (`FRAME`, `begin_frame` in `QuillApp::render`), so
-  how long a retired image may still show is judged by main window frames for every window. PR #1267
-  covers it.
+  how long a retired image may still show is judged by main window frames for every window. #1267
+  (merged) covers it.
 - The sticker player's per-window leave is in PR #1268.
 - Video userpics are kept per surface (`Surface::History(window)`), and message effects keep the badges of
   chats shown in other windows. Neither has this problem.

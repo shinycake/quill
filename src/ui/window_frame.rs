@@ -120,6 +120,20 @@ pub(crate) fn window_decorations() -> Option<WindowDecorations> {
     })
 }
 
+/// How often GPUI draws a Quill window that asks for frames while another
+/// window has focus (`WindowOptions::inactive_frame_interval`, for the main
+/// and chat windows). GPUI's default, 33,333 µs, is almost exactly two
+/// 60 Hz vsyncs: a frame two vsyncs after the last one often measures a hair
+/// under it, so it was skipped and slipped a whole vsync, to about 50 ms (a
+/// clip alone in a chat window with the main window focused: 17 frames/s
+/// instead of 23; with everything animating, 23 instead of 29). Just under
+/// two 60 Hz vsyncs, that frame is let through. At 120 Hz, three vsyncs
+/// (25 ms) are still held and the fourth (33.3 ms, 3.3 ms over) is not, so an
+/// unfocused window draws every fourth vsync, where the default's cap fell
+/// on the fourth and slipped some frames to the fifth (41.7 ms).
+pub(crate) const INACTIVE_FRAME_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(30);
+
 /// kit Phase 7: window options compatible with kit's `TitleBar`: the title
 /// bar owns dragging (double-click zoom included), so the platform must not
 /// also treat it as a system move region. The frame follows the saved choice.
@@ -136,6 +150,7 @@ pub(crate) fn window_options(title: &str) -> WindowOptions {
         }),
         app_owns_titlebar_drag: true,
         window_decorations: window_decorations(),
+        inactive_frame_interval: Some(INACTIVE_FRAME_INTERVAL),
         ..Default::default()
     }
 }

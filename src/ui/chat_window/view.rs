@@ -370,6 +370,7 @@ pub(super) fn open_chat_window(
         app_id: Some("org.shinycake.quill".into()),
         focus: true,
         show: true,
+        inactive_frame_interval: Some(super::super::window_frame::INACTIVE_FRAME_INTERVAL),
         ..Default::default()
     };
     let built: Rc<RefCell<Option<(WeakEntity<ChatWindowView>, SharedSlot)>>> = Rc::default();

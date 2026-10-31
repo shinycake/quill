@@ -17,13 +17,14 @@ use crate::ui::video_player::VideoPlayer;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Entity, TestAppContext, VisualTestContext, WindowVisibility, px,
-    size,
+    AnyWindowHandle, AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext,
+    WindowVisibility, point, px, size,
 };
 use quill::ids::{ChatId, MessageId};
 use quill::telegram::envelope::MessageContent;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 const CHAT: ChatId = ChatId(11);
 /// Another chat of the demo, with no clips: the main window shows it.
@@ -97,13 +98,14 @@ fn live(scripts: &[Rc<RefCell<Script>>]) -> usize {
         .count()
 }
 
-/// Open `chat` in a window of its own and return the window. Read first,
-/// so its window shows the messages loaded (an unread run would load
-/// around its bar, which the demo cannot).
-fn open_window(
+/// Open `chat` in a window of its own (at `bounds`, else cascaded) and
+/// return the window. Read first, so its window shows the messages loaded
+/// (an unread run would load around its bar, which the demo cannot).
+fn open_window_at(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
     chat: ChatId,
+    bounds: Option<Bounds<Pixels>>,
 ) -> AnyWindowHandle {
     app.update(vcx, |app, _| {
         if let Some(chat) = app
@@ -115,7 +117,7 @@ fn open_window(
         }
     });
     app.update_in(vcx, |app, window, cx| {
-        app.open_chat_in_new_window(chat, window, cx)
+        app.open_chat_window_at(chat, bounds, window, cx)
     });
     vcx.run_until_parked();
     let main = vcx.update(|window, _| window.window_handle().window_id());
@@ -123,6 +125,14 @@ fn open_window(
         .into_iter()
         .find(|handle| handle.window_id() != main)
         .expect("the chat window opened")
+}
+
+fn open_window(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    chat: ChatId,
+) -> AnyWindowHandle {
+    open_window_at(app, vcx, chat, None)
 }
 
 fn draw_chat_window(chat_window: AnyWindowHandle, vcx: &mut VisualTestContext) {
@@ -288,7 +298,7 @@ fn a_minimized_chat_windows_clips_pause_then_sleep_while_the_main_window_draws(
 }
 
 #[gpui_kit::test]
-fn a_covered_main_windows_clips_sleep_and_play_again_once_it_shows(cx: &mut TestAppContext) {
+fn a_minimized_main_windows_clips_sleep_and_play_again_once_it_shows(cx: &mut TestAppContext) {
     let scripts = scripts();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -301,7 +311,7 @@ fn a_covered_main_windows_clips_sleep_and_play_again_once_it_shows(cx: &mut Test
     }
     assert_plays(&app, vcx, &[ROUND, TILE]);
 
-    // Covered: the chat window draws on, the main window no more.
+    // Minimized: the chat window draws on, the main window no more.
     vcx.simulate_visibility_change(WindowVisibility::Hidden);
     vcx.run_until_parked();
     for _ in 0..2 {
@@ -424,4 +434,133 @@ fn a_gif_panel_closed_in_the_main_window_leaves_the_chat_windows_open(cx: &mut T
         "GIF panel players opened again over 8 frames of each window"
     );
     assert!(player(&app, vcx, gif).same_as(&kept), "the GIF reopened");
+}
+
+/// How many times each of `keys` is painted over a second of the test
+/// clock in which `window` runs the next-frame callbacks it asked for
+/// every 100 ms (GPUI runs them at most every `INACTIVE_FRAME_INTERVAL` in
+/// an unfocused window, which the test platform does not model).
+fn paints_in_a_second(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    window: AnyWindowHandle,
+    keys: &[(i64, i64)],
+) -> Vec<u64> {
+    let players: Vec<VideoPlayer> = keys.iter().map(|key| player(app, vcx, *key)).collect();
+    let before: Vec<u64> = players.iter().map(VideoPlayer::shown_count).collect();
+    for _ in 0..10 {
+        vcx.executor().advance_clock(Duration::from_millis(100));
+        vcx.run_until_parked();
+        vcx.update_window(window, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        vcx.run_until_parked();
+    }
+    players
+        .iter()
+        .zip(before)
+        .map(|(player, before)| player.shown_count() - before)
+        .collect()
+}
+
+/// `keys` play in `window`, and it keeps drawing their frames.
+fn assert_animates(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    window: AnyWindowHandle,
+    keys: &[(i64, i64)],
+    when: &str,
+) {
+    assert_plays(app, vcx, keys);
+    let paints = paints_in_a_second(app, vcx, window, keys);
+    assert!(
+        paints.iter().all(|paints| *paints >= 5),
+        "{when}: {keys:?} painted {paints:?} times in a second"
+    );
+}
+
+/// The main window's handle.
+fn main_window(vcx: &mut VisualTestContext) -> AnyWindowHandle {
+    vcx.update(|window, _| window.window_handle())
+}
+
+#[gpui_kit::test]
+fn a_chat_windows_clips_keep_their_frames_while_the_main_window_has_focus(cx: &mut TestAppContext) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    let chat_window = open_window(&app, vcx, CHAT);
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(OTHER, window, cx)
+    });
+    let focus = |vcx: &mut VisualTestContext, window: AnyWindowHandle| {
+        vcx.update_window(window, |_, window, _| window.activate_window())
+            .unwrap();
+        vcx.run_until_parked();
+    };
+    focus(vcx, chat_window);
+    settle(vcx);
+    for _ in 0..4 {
+        draw_both(&app, chat_window, vcx);
+    }
+    let clips = [ROUND, TILE];
+    assert_animates(&app, vcx, chat_window, &clips, "the chat window focused");
+    // A click in the main window: the chat window loses focus to it.
+    let main = main_window(vcx);
+    focus(vcx, main);
+    assert_animates(&app, vcx, chat_window, &clips, "the main window focused");
+    focus(vcx, chat_window);
+    assert_animates(&app, vcx, chat_window, &clips, "the chat window again");
+}
+
+#[gpui_kit::test]
+fn a_main_windows_clips_keep_their_frames_while_a_chat_window_has_focus(cx: &mut TestAppContext) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    // Another chat in a window beside the main one, which shows the clips.
+    let chat_window = open_window(&app, vcx, OTHER);
+    for _ in 0..4 {
+        draw_both(&app, chat_window, vcx);
+    }
+    let main = main_window(vcx);
+    let clips = [ROUND, TILE];
+    vcx.update_window(chat_window, |_, window, _| window.activate_window())
+        .unwrap();
+    vcx.run_until_parked();
+    assert_animates(&app, vcx, main, &clips, "the chat window focused");
+}
+
+#[gpui_kit::test]
+fn a_main_window_its_chat_window_hides_pauses_its_clips_till_it_shows(cx: &mut TestAppContext) {
+    let scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    for _ in 0..4 {
+        draw_main(&app, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+
+    // Another chat opens in a window over all of the main window, active:
+    // macOS still presents the main window, which draws nothing
+    // (`chat_window::cover`).
+    let over = Bounds::new(point(px(-20.), px(-30.)), size(px(1160.), px(1460.)));
+    let chat_window = open_window_at(&app, vcx, OTHER, Some(over));
+    for _ in 0..2 {
+        draw_chat_window(chat_window, vcx);
+    }
+    assert_sleeps_out_of_sight(&app, vcx, &scripts);
+
+    // Moved off it: the main window draws again, and its clips play.
+    vcx.simulate_window_move(chat_window, point(px(900.), px(100.)));
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        draw_main(&app, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
 }

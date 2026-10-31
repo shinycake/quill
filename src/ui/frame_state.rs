@@ -17,10 +17,14 @@ pub(crate) struct FrameUi {
     /// The next tick serves media playing with sound (allowed while the
     /// window is inactive).
     pub(super) animation_sound: std::cell::Cell<bool>,
-    /// Whether the main window is active this frame: like tdesktop
-    /// (`isGifPausedAtLeastFor` → `!widget()->isActive()`), animated
-    /// stickers and emoji hold still while it isn't.
+    /// Whether a Quill window is active, the main one or a chat window
+    /// (`QuillApp::follow_windows`): like tdesktop (`isGifPausedAtLeastFor`
+    /// → `!widget()->isActive()`), animated stickers and emoji hold still
+    /// while none is.
     pub(super) window_active: std::cell::Cell<bool>,
+    /// Whether the main window itself is active, as of its last activation
+    /// change or render.
+    pub(super) main_active: std::cell::Cell<bool>,
     /// The active chat window hid the main window whole at its last
     /// render: the main window's own content asks for no ticks, as behind
     /// another app (`chat_window::cover`).
@@ -75,6 +79,7 @@ impl FrameUi {
             animation_targets: Default::default(),
             animation_sound: Default::default(),
             window_active: std::cell::Cell::new(true),
+            main_active: std::cell::Cell::new(true),
             main_covered: Default::default(),
             window_title_shown: Default::default(),
             title_badge: Default::default(),

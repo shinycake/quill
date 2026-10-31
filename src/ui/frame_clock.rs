@@ -628,11 +628,17 @@ pub(super) fn video_request_done(requested: &FrameRequested, target: EntityId) {
 /// asked for at once (`pacing::request_policy`).
 ///
 /// Unlike [`QuillApp::request_animation_tick`] it runs at the display's own
-/// rate, so the picture lands on the vsync it is due for. GPUI still caps
-/// an unfocused window at 30 frames a second unless its
-/// `inactive_frame_interval` is `None`, as Picture-in-Picture's is.
+/// rate, so the picture lands on the vsync it is due for. GPUI caps an
+/// unfocused window's next-frame callbacks at its `inactive_frame_interval`
+/// (`window_frame::INACTIVE_FRAME_INTERVAL` for Quill's main and chat
+/// windows; `None` for Picture-in-Picture's).
+///
 /// Nothing is asked behind another app unless the clip has sound (or
-/// `keep_alive`), like the animation clock.
+/// `keep_alive`), like the animation clock: frames are asked while any
+/// Quill window is active ([`AppGate`]), not only the clip's own. Asked
+/// only while its own window was, a clip froze once its window lost focus
+/// to another Quill window: its last asks were refused, and nothing drew
+/// its window again.
 pub(crate) fn request_video_frame(
     target: EntityId,
     ask: VideoFrameAsk,
@@ -641,7 +647,11 @@ pub(crate) fn request_video_frame(
 ) {
     #[cfg(test)]
     VIDEO_TARGETS.with(|targets| targets.borrow_mut().push(target));
-    let active = window.is_window_active() || assume_active();
+    let active = window.is_window_active()
+        || assume_active()
+        || cx
+            .try_global::<AppGate>()
+            .is_some_and(|gate| gate.animates(window.window_handle().window_id()));
     if !tick_wanted(active, ask.plays_sound || ask.keep_alive) {
         return;
     }
@@ -704,6 +714,26 @@ pub(in crate::ui) fn follow_app<V: 'static>(
         cx.observe(app, |_, _, cx| cx.notify()),
         cx.subscribe(app, |_, _, _: &AppTick, cx| cx.notify()),
     )
+}
+
+/// The app's animation gate as `QuillApp::follow_windows` last set it, for
+/// the clips' frame requests, which only have their own window at hand.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct AppGate {
+    /// A Quill window is active (`FrameState::window_active`).
+    pub(super) active: bool,
+    /// The window whose own content holds still meanwhile: the main window
+    /// while the active chat window hides it whole (`chat_window::cover`).
+    pub(super) held: Option<WindowId>,
+}
+
+impl Global for AppGate {}
+
+impl AppGate {
+    /// Whether content in `window` animates under this gate.
+    fn animates(&self, window: WindowId) -> bool {
+        self.active && self.held != Some(window)
+    }
 }
 
 /// Whether a frame-clock tick may run: always while the window is active,
