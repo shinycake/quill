@@ -111,26 +111,33 @@ impl PollPace {
     }
 }
 
-/// Run `pass` until it returns `None`: today's rules, a poke ends the wait
-/// and the delay ramps from the gap to the ceiling.
+/// Run `pass` until it returns `None`, paced by `pace`. Every envelope
+/// pokes `signal`, and a future holds the main thread until it returns
+/// `Pending`, so a wait that a poke has already ended would run pass after
+/// pass with no frame or input between them. The gap is a plain timer for
+/// that reason.
 pub(super) async fn run_poll_loop(
     executor: BackgroundExecutor,
     signal: &'static Signal,
     pace: PollPace,
     mut pass: impl FnMut() -> Option<PassEnd>,
 ) {
-    let mut delay = pace.gap.saturating_mul(4);
+    let mut timer = RestTimer::default();
     loop {
+        // Taken before the pass, so nothing that arrives during it is missed.
         let seen = signal.epoch();
         let Some(end) = pass() else {
             break;
         };
-        delay = match end.due {
-            _ if end.backlog => pace.gap,
-            Some(due) => delay.saturating_mul(2).clamp(pace.gap, pace.ceiling).min(due.max(pace.gap)),
-            None => delay.saturating_mul(2).clamp(pace.gap, pace.ceiling),
-        };
-        sleep_or_wake(&executor, signal, seen, delay).await;
+        match pace.next(end, signal.epoch() != seen) {
+            NextPass::Yield(gap) => executor.timer(gap).await,
+            NextPass::Rest(longest) => {
+                let began = executor.now();
+                timer.rest(&executor, signal, seen, longest).await;
+                let rested = executor.now().saturating_duration_since(began);
+                executor.timer(pace.gap_left(rested)).await;
+            }
+        }
     }
 }
 
