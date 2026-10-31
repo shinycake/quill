@@ -153,7 +153,7 @@ impl QuillApp {
         // The sound was replaced, so a recording preview is over.
         self.recording.preview = None;
         self.playback.error = None;
-        let playing = self.start_player(path, offset_secs, duration_secs);
+        let playing = self.start_player(path, offset_secs, duration_secs, cx);
         match kind {
             PlaybackKind::Voice => self.playback.playing_voice = Some(message_id),
             PlaybackKind::Audio => self.playback.playing_audio = Some(message_id),
@@ -183,12 +183,14 @@ impl QuillApp {
     /// Start the in-process player on `path` at `offset_secs` with the
     /// current volume and speed. Returns true when it is playing; on false
     /// the engine is `Failed` and `audio.error()` says why. The screenshot
-    /// demos have no audio device and use the engine's explicit simulation.
+    /// demos have no audio device and use the engine's explicit simulation,
+    /// which keeps the app's time (the test clock in tests).
     pub(super) fn start_player(
         &mut self,
         path: &std::path::Path,
         offset_secs: f64,
         duration_secs: f64,
+        cx: &mut Context<Self>,
     ) -> bool {
         let simulation = self
             .demo_session
@@ -198,6 +200,8 @@ impl QuillApp {
                 stall: std::env::var_os("QUILL_DEMO_AUDIO_STALL").is_some(),
             });
         self.playback.audio.set_simulation(simulation);
+        let executor = cx.background_executor().clone();
+        self.playback.audio.set_sim_time(move || executor.now());
         match self.playback.audio.start(
             path,
             offset_secs,
@@ -294,6 +298,7 @@ impl QuillApp {
             return;
         }
         self.playback.tick = true;
+        self.playback.tick_shown = None;
         Self::spawn_main(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -338,9 +343,16 @@ impl QuillApp {
                             }
                         }
                         this.publish_now_playing();
+                        // A paused track shows the same every tick: only
+                        // the media keys need the tick then, not a redraw.
+                        // Unless its chat gains or loses a song: a message
+                        // in a chat not on screen redraws only the chat
+                        // list, so the tick watches Previous / Next too.
+                        let shown = this.playback.track_shown(this.playlist_can_move());
+                        let moved = this.playback.tick_shown.replace(shown) != Some(shown);
                         if finished {
                             cx.notify();
-                        } else {
+                        } else if moved {
                             this.notify_playback_position(cx);
                         }
                         true

@@ -322,13 +322,15 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The window's volume changed: it is the app's video volume too.
-    fn pip_volume(&mut self, volume: f32) {
+    /// The window's volume changed: it is the app's video volume too, and
+    /// the player bar's speaker shows it.
+    fn pip_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         if volume > 0.0 {
             self.playback.unmuted_volume = volume;
         }
         self.playback.volume = volume;
         self.playback.audio.set_volume(volume);
+        cx.notify();
     }
 }
 
@@ -347,7 +349,12 @@ fn pip_hooks(app: WeakEntity<QuillApp>) -> PipHooks {
             let _ = enlarge.update(cx, |app, cx| app.pip_enlarge_requested(cx));
         }),
         volume: Rc::new(move |volume, cx| {
-            let _ = app.update(cx, |app, _| app.pip_volume(volume));
+            let _ = app.update(cx, |app, cx| app.pip_volume(volume, cx));
         }),
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "pip_tests.rs"]
+mod tests;

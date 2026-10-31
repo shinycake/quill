@@ -87,6 +87,11 @@ impl BlinkCursor {
         self.paused || self.visible
     }
 
+    /// Whether a blink cycle is running: started and not stopped since.
+    pub(crate) fn is_blinking(&self) -> bool {
+        self.epoch != 0
+    }
+
     /// Show the cursor immediately and restart the idle delay before blinking resumes.
     ///
     /// This is a no-op on a cursor that is not blinking. `epoch` is zero only

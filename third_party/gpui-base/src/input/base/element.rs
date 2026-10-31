@@ -3579,6 +3579,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // QUILL: the caret blinks by the window it is drawn in.
+        self.state
+            .update(cx, |state, cx| state.sync_blink(window, cx));
         let (focus_handle, show_cursor, disabled, selected_range, editor_style, editor_paddings) = {
             let state = self.state.read(cx);
             (

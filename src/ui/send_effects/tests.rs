@@ -110,6 +110,37 @@ fn an_unread_message_plays_its_effect_once_when_it_shows(cx: &mut TestAppContext
     assert!(crate::ui::emoji_effect::message_effect_playing(key));
 }
 
+/// A message sent with an effect that arrives behind another app keeps its
+/// effect for when the window is activated (tdesktop `markingContentsRead`)
+/// and draws nothing meanwhile. Its badge asked for a frame on every paint
+/// to start the effect, and with nothing marking it seen in an inactive
+/// window that went on at the display's rate.
+#[gpui_kit::test]
+fn an_effect_that_arrives_behind_another_app_waits_without_drawing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let key = (CHAT, ARRIVING);
+    vcx.deactivate_window();
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            crate::ui::send_effects::demo::arrive(session);
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert!(shown(vcx, ("message-effect", ARRIVING as u64)));
+    // Let the arrival settle: a scrollbar a scroll shows hides 2 s later.
+    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
+    let drawn = crate::ui::frame_clock::frames_over(vcx, 60);
+    assert!(drawn.is_empty(), "drawn behind another app: {drawn:?}");
+    assert!(unwatched(&app, vcx, key), "not seen yet");
+
+    vcx.update(|window, _| window.activate_window());
+    frames(vcx);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    assert!(!unwatched(&app, vcx, key));
+}
+
 #[gpui_kit::test]
 fn power_saving_skips_the_effect_on_arrival_but_a_tap_plays_it(cx: &mut TestAppContext) {
     quill::power_saving::isolate_for_tests();

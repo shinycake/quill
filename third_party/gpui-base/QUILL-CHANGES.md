@@ -144,3 +144,33 @@ active window; activating the window starts it as before.
 The input tests' window (`InputView::build_with`) is activated, as a real
 window that takes a click or a key is, and the two tests that timed the
 blink after a focus wait for the focus handler's restart.
+
+The blur handler returns early while the code editor's completion or
+code-action menu is open, so the menu keeps the field looking focused
+(`show_cursor`). That left the blink running in two cases: the window
+deactivated with the menu open (the background window repainted twice a
+second until it was activated again), and the menu closed on a field that
+had lost its focus under it (the field repainted twice a second for good,
+with no caret drawn). The input's paint (`src/input/base/element.rs`,
+`InputBaseState::sync_blink`) now keeps the blink running exactly while the
+caret can show in the window painting the field (`caret_can_show`: focused
+there or under its menu, and the window active): it stops a blink that shows
+nothing and starts one no listener started. The paint, not a listener,
+because a field can be drawn in another window than the one it was made in
+(Quill's call window draws a message field the main window made), and the
+focus and activation listeners watch the window it was made in: stopping
+from them left such a field's caret hidden when its window came back. Only
+the window that started a blink (`blink_window`) stops it, so a field
+painted in two windows can't have them take turns. Background:
+`docs/decisions/idle-inactive-redraw.md`.
+
+## The scrollbar keeps the app's clock
+
+`src/scrollbar.rs`: the bar shows on a scroll and hides `DEFAULT_IDLE`
+later. It read the wall clock (`Instant::now()`) while its idle timer waited
+on the executor's timer. Under the test clock the timer's two seconds pass
+in a few real milliseconds, the wall clock said the idle was not over, and
+the timer was armed again, a redraw each time, until two seconds of real
+time had passed: a test counting a window's frames counted those, more on a
+faster machine. Every time the bar reads now comes from
+`cx.background_executor().now()`, which is the wall clock outside tests.

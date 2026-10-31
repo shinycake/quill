@@ -717,6 +717,35 @@ pub(crate) fn take_slice_renders() -> std::collections::BTreeMap<&'static str, u
     SLICE_RENDERS.with(|counts| std::mem::take(&mut *counts.borrow_mut()))
 }
 
+/// What a window drew over `secs` of the test clock, for tests: the
+/// slice renders by kind, with `(window frame)` once per frame (a test
+/// window draws as soon as it is dirty), and `(next frame)` for each
+/// callback that asked for a display frame (an animation frame), which
+/// a test window only runs when asked.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn frames_over(
+    vcx: &mut gpui_kit::VisualTestContext,
+    secs: u64,
+) -> std::collections::BTreeMap<&'static str, u32> {
+    let _ = take_slice_renders();
+    let mut next_frames = 0;
+    for _ in 0..secs * 10 {
+        vcx.executor().advance_clock(Duration::from_millis(100));
+        vcx.run_until_parked();
+        next_frames += vcx.update(|window, cx| window.simulate_next_frame(cx));
+        vcx.run_until_parked();
+    }
+    let mut drawn = take_slice_renders();
+    if next_frames > 0 {
+        drawn.insert(
+            "(next frame)",
+            u32::try_from(next_frames).unwrap_or(u32::MAX),
+        );
+    }
+    drawn
+}
+
 /// `QUILL_TRACE_TICKS=1` also counts slice renders (`app_slice`), logged
 /// once a second, to check that a tick redraws only what animates.
 pub(super) fn trace_slice_render(kind: &'static str) {
@@ -877,6 +906,11 @@ fn trace_caller(
         }
     });
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "idle_frames_tests.rs"]
+mod idle_frames_tests;
 
 #[cfg(test)]
 mod tests {
