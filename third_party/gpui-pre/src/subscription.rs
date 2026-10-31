@@ -39,6 +39,21 @@ where
         })))
     }
 
+    /// How many subscribers the set holds over every emitter, leaving out
+    /// those whose subscription was dropped while their emitter was being
+    /// notified (they stay in the set until it notifies again).
+    #[cfg(feature = "test-support")]
+    pub fn subscriber_count(&self) -> usize {
+        let state = self.0.borrow();
+        state
+            .subscribers
+            .values()
+            .flatten()
+            .flat_map(BTreeMap::values)
+            .filter(|subscriber| !subscriber.dropped.get())
+            .count()
+    }
+
     /// Inserts a new [`Subscription`] for the given `emitter_key`. By default, subscriptions
     /// are inert, meaning that they won't be listed when calling `[SubscriberSet::remove]` or `[SubscriberSet::retain]`.
     /// This method returns a tuple of a [`Subscription`] and an `impl FnOnce`, and you can use the latter
