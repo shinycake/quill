@@ -40,7 +40,7 @@ use windows::{
     core::*,
 };
 
-use crate::*;
+use crate::{window_list::for_each_after_unlock, *};
 use gpui::*;
 
 struct TrackedWindow {
@@ -1891,27 +1891,31 @@ fn handle_gpu_device_lost(
         text_system.handle_gpu_lost(&directx_devices)?;
     }
     if let Some(all_windows) = all_windows.upgrade() {
-        for window in all_windows.read().iter() {
+        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+            // SAFETY: `lparam` points at `directx_devices`, which outlives this synchronous call
+            // (see `handle_device_lost`). A handle that is gone only makes the call fail.
             unsafe {
                 SendMessageW(
-                    window.as_raw(),
+                    window,
                     WM_GPUI_GPU_DEVICE_LOST,
                     Some(WPARAM(validation_number)),
                     Some(lparam),
                 );
             }
-        }
+        });
         std::thread::sleep(std::time::Duration::from_millis(200));
-        for window in all_windows.read().iter() {
+        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+            // SAFETY: the message carries no pointer. A handle that is gone only makes the call
+            // fail.
             unsafe {
                 SendMessageW(
-                    window.as_raw(),
+                    window,
                     WM_GPUI_FORCE_UPDATE_WINDOW,
                     Some(WPARAM(validation_number)),
                     None,
                 );
             }
-        }
+        });
     }
     Ok(())
 }

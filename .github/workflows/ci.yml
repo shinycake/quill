@@ -97,6 +97,8 @@ jobs:
         run: bash scripts/test-frame-idle.sh
       - name: tests (vendored GPUI refresh interval)
         run: bash scripts/test-refresh-interval.sh
+      - name: tests (vendored GPUI window list)
+        run: bash scripts/test-window-list.sh
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh
