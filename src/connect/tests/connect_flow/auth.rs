@@ -709,6 +709,34 @@ fn a_parameters_request_lost_at_close_is_no_database_failure() {
 }
 
 #[test]
+fn a_cancelled_key_prompt_can_be_tried_again() {
+    let store = MemorySecretStore::new();
+    store.lock();
+    let dir = crate::scratch::unique_dir("quill-connect");
+    let open = || prepare_connect(&dir, AccountKey::primary(), &store, &test_credentials());
+    let blocker = open().map(drop).expect_err("the store is locked");
+    assert_eq!(blocker, ConnectBlocker::LockedStore);
+    assert_eq!(blocker.startup_failure(), Some(StartupFailure::KeyLocked));
+    store.unlock();
+    assert!(open().is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_data_folder_that_cannot_be_made_is_not_called_a_key_problem() {
+    let store = MemorySecretStore::new();
+    let dir = crate::scratch::unique_dir("quill-connect");
+    let paths = crate::settings::AccountPaths::for_root(&dir, &AccountKey::primary());
+    std::fs::create_dir_all(paths.root.parent().unwrap()).unwrap();
+    std::fs::write(&paths.root, b"not a folder").unwrap();
+    let blocker = prepare_connect(&dir, AccountKey::primary(), &store, &test_credentials())
+        .map(drop)
+        .expect_err("the folder cannot be created");
+    assert_eq!(blocker.startup_failure(), Some(StartupFailure::DataFolder));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn missing_tdjson_message_is_actionable() {
     let msg = ConnectBlocker::MissingTdjson.user_message();
     assert!(msg.contains("QUILL_TDJSON_PATH"));

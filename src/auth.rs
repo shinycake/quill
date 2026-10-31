@@ -46,19 +46,34 @@ pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
 /// answers an error and stays in `WaitTdlibParameters`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupFailure {
+    /// The system did not hand over the database key: its prompt was
+    /// cancelled, or the store is locked.
+    KeyLocked,
+    KeyUnreadable,
+    /// There is a database and no key for it.
+    KeyMissing,
     /// TDLib refused the database key.
     WrongKey,
-    /// TDLib could not open or create its database files. Its messages do
+    /// The data folder could not be opened or created. TDLib's messages do
     /// not tell a read-only folder from a full disk or a missing volume.
     DataFolder,
+    /// libtdjson is missing, damaged or the wrong version.
+    Library,
+    /// The system refused the receive thread.
+    NoThread,
 }
 
 impl StartupFailure {
     /// What the user reads on the failure card.
     pub fn reason(self) -> &'static str {
         match self {
+            Self::KeyLocked => tr(keys::Q_STARTUP_KEY_LOCKED),
+            Self::KeyUnreadable => tr(keys::Q_STARTUP_KEY_UNREADABLE),
+            Self::KeyMissing => tr(keys::Q_STARTUP_KEY_MISSING),
             Self::WrongKey => tr(keys::Q_STARTUP_WRONG_KEY),
             Self::DataFolder => tr(keys::Q_STARTUP_DATA_FOLDER),
+            Self::Library => tr(keys::Q_STARTUP_LIBRARY),
+            Self::NoThread => tr(keys::Q_STARTUP_NO_THREAD),
         }
     }
 }

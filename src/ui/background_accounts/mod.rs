@@ -300,9 +300,9 @@ impl QuillApp {
                     });
                     let (live, status) = match started {
                         Ok(live) => (Some(live), BackgroundStatus::Connecting),
-                        Err(blocker) => (
+                        Err(_) => (
                             None,
-                            BackgroundStatus::Failed(blocker.user_message().to_string()),
+                            BackgroundStatus::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).into()),
                         ),
                     };
                     this.background.clients.push(BackgroundClient {

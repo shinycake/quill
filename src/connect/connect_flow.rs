@@ -43,8 +43,8 @@ pub fn prepare_connect<S: SecretStore + ?Sized>(
             KeyDecision::Locked => ConnectBlocker::LockedStore,
             KeyDecision::Store(_) => ConnectBlocker::StoreError,
         })?;
-    std::fs::create_dir_all(&plan.paths.tdlib_database).map_err(|_| ConnectBlocker::StoreError)?;
-    std::fs::create_dir_all(&plan.paths.tdlib_files).map_err(|_| ConnectBlocker::StoreError)?;
+    std::fs::create_dir_all(&plan.paths.tdlib_database).map_err(|_| ConnectBlocker::DataFolder)?;
+    std::fs::create_dir_all(&plan.paths.tdlib_files).map_err(|_| ConnectBlocker::DataFolder)?;
     Ok(PreparedConnect {
         account: plan.account,
         paths: plan.paths,
