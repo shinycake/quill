@@ -185,3 +185,22 @@ fn leaving_the_chat_forgets_what_played() {
         EmojiPlay::Play { generation: 0 }
     );
 }
+
+/// Another window shows chat 2: leaving chat 1 keeps what played there.
+#[test]
+fn leaving_one_chat_keeps_what_played_in_another() {
+    let mut plays = EmojiPlays::default();
+    for key in [(1, 10), (2, 20)] {
+        plays.started(key);
+        plays.replay(key);
+        plays.started(key);
+    }
+    plays.leave_chat(1);
+    assert_eq!(
+        plays.play((1, 10), false),
+        EmojiPlay::Play { generation: 0 }
+    );
+    assert!(plays.has_played((2, 20)));
+    assert_eq!(plays.play((2, 20), false), EmojiPlay::Rest);
+    assert_eq!(plays.generation((2, 20)), 1);
+}

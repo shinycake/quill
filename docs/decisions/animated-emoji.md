@@ -50,8 +50,9 @@ The lone emoji plays through the streaming player (`sticker-player.md`) at
 - Each message plays at most once per chat visit. tdesktop keeps
   `HistoryInner::_animatedStickersPlayed` and clears it when the history
   widget is destroyed (`stickerClearLoopPlayed`). Quill keeps
-  `EmojiPlays` in the UI's playback state and clears it in
-  `stop_sticker_playback`, which runs when the chat closes.
+  `EmojiPlays` in the UI's playback state and clears a chat's part of it
+  in `leave_sticker_chat`, which runs when the window showing the chat
+  leaves it (`chat-switch-clips.md`).
 - Sent messages play as soon as they are drawn, and received ones play
   when they scroll into view. The player only starts a head once its first
   frame is on screen, so a message above the fold waits.

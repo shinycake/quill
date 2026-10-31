@@ -133,11 +133,39 @@ pub(in crate::ui) fn mirrors(has_premium_effect: bool, right_aligned: bool) -> b
 }
 
 impl QuillApp {
-    /// Close every clip and forget every head and every lone emoji played:
-    /// another chat opened, the chat closed, another account.
+    /// Close every clip and forget every head and every lone emoji played,
+    /// in every window: another account, the loop setting changed, the app
+    /// goes.
     pub(in crate::ui) fn stop_sticker_playback(&mut self) {
         self.playback.stickers.stop();
         self.playback.emoji_plays.get_mut().clear();
+    }
+
+    /// `window` let go of `chat` (`None`: the main window): another chat
+    /// opens there, the chat moves to a window of its own, or the window
+    /// closes. Its stickers and lone emoji play from the start when the
+    /// chat shows again (tdesktop clears the played set when the chat is
+    /// left), and the clips only it used close. What another window shows
+    /// plays on untouched: stopping everything here closed a chat window's
+    /// clips and restarted its stickers whenever the main window opened
+    /// another chat.
+    pub(in crate::ui) fn leave_sticker_chat(
+        &mut self,
+        window: Option<ChatId>,
+        chat: Option<ChatId>,
+        cx: &mut App,
+    ) {
+        let frames = self.playback.stickers.leave(window);
+        if let Some(chat) = chat {
+            self.playback.emoji_plays.get_mut().leave_chat(chat.0);
+        }
+        match window {
+            // On screen until the main window draws again.
+            None => super::super::image_budget::retire_all(frames),
+            // A chat window lets go of its chat only as it closes: nothing
+            // shows them.
+            Some(_) => drop_frames(frames, cx),
+        }
     }
 
     /// Whether looping is on (Settings → Chat → "Loop animated stickers").
@@ -217,7 +245,7 @@ impl QuillApp {
         };
         let edge = key.edge;
         let player = &self.playback.stickers;
-        let ready = player.prepare(&spec, edge);
+        let ready = player.prepare(&spec, edge, self.windows.scope);
         self.ensure_sticker_closer(cx);
         if !ready {
             return None;
