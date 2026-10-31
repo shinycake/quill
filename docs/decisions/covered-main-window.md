@@ -46,7 +46,7 @@ while the main window was covered, or redrew another chat window instead.
   app from other windows hear (`frame_clock::follow_app`: the chat, call, group call, stream, screen chooser
   and What's New views, which observed the app before). They redraw as on the notify. The main window keeps
   its frame, and so do a window that draws by its own clock (Picture-in-Picture, a notification popup) and a
-  cached view that does not follow the app (a call picture between its own frames), which the notify does not
+  cached view that does not follow the app (the call pictures do follow it, so they rebuild as before), which the notify does not
   redraw either. A first take refreshed every window but the main one, which redrew those two as well.
 - When a chat window is activated or deactivated, moved, resized, goes to another display or fullscreen,
   `chat_window_placed` updates `frame.main_covered` at once: a main window it now hides holds still from that
