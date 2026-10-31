@@ -162,7 +162,7 @@ pub fn unpack(zip: &[u8], dir: &Path) -> Result<(), UnpackError> {
         let old = parent.join(format!(".{name}.old"));
         let _ = std::fs::remove_dir_all(&old);
         let had_old = std::fs::rename(dir, &old).is_ok();
-        if let Err(err) = std::fs::rename(&tmp, dir) {
+        if let Err(err) = crate::fs_retry::rename_retrying(&tmp, dir, crate::fs_retry::SHORT) {
             if had_old {
                 let _ = std::fs::rename(&old, dir);
             }

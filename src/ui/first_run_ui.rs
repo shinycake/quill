@@ -115,7 +115,9 @@ fn intro_file() -> Option<PathBuf> {
         .ok()?;
     let written = file.write_all(INTRO_MP4).and_then(|()| file.sync_all());
     drop(file);
-    match written.and_then(|()| std::fs::rename(&partial, &path)) {
+    match written
+        .and_then(|()| quill::fs_retry::rename_retrying(&partial, &path, quill::fs_retry::SHORT))
+    {
         Ok(()) => Some(path),
         Err(_) => {
             let _ = std::fs::remove_file(&partial);

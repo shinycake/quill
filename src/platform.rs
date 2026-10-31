@@ -199,7 +199,8 @@ impl SecretStore for FileSecretStore {
         let written = write_key_file_0600(&tmp, &sealed);
         sealed.zeroize();
         written?;
-        std::fs::rename(&tmp, &path).map_err(|_| SecretStoreError::Platform)?;
+        crate::fs_retry::rename_retrying(&tmp, &path, crate::fs_retry::SHORT)
+            .map_err(|_| SecretStoreError::Platform)?;
         set_mode_0600(&path)?;
         Ok(())
     }
