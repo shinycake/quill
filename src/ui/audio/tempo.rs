@@ -8,7 +8,7 @@
 //! cross-correlation), which keeps voices free of the warble plain
 //! overlap-add produces. The natural continuation wins whenever it is in
 //! the window, so it is taken without a search; at 1x it always is, so 1x
-//! searches nothing and the output is the input.
+//! searches nothing and the output is the input within f32 rounding.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -185,24 +185,41 @@ impl<S: Source> Tempo<S> {
         let high = center + self.delta;
         // In the window the natural continuation wins unsearched: it counts
         // as a perfect match (1, the most a normalised correlation scores)
-        // and another position would have to beat it by 1e-4, more than f32
-        // rounding adds (docs/decisions/tempo-1x.md). At 1x it stays in the
-        // window, so 1x never searches; out of it (the stretch has pulled
-        // away) the best match within the window wins.
+        // and another position must beat it by 1e-4, which f32 rounding
+        // cannot add below about 83.7 kHz (docs/decisions/tempo-1x.md;
+        // tests run the search anyway and check it agrees). At 1x it stays
+        // in the window, so 1x never searches; out of it (the stretch has
+        // pulled away) the best match within the window wins.
         if (low..=high).contains(&natural) {
+            #[cfg(test)]
+            assert_eq!(self.best_match(natural, low, high, (natural, 1.0)), natural);
             return natural;
         }
-        let (mut best, mut best_score) = (center, f32::MIN);
+        #[cfg(test)]
+        {
+            self.tried += (high - low) / 2 + 1;
+        }
+        self.best_match(natural, low, high, (center, f32::MIN))
+    }
+
+    /// The even step from `low` to `high` whose slice best continues the
+    /// one at `natural`, or `best` unless a position beats its score by
+    /// 1e-4. `natural` itself is never scored.
+    fn best_match(
+        &self,
+        natural: usize,
+        low: usize,
+        high: usize,
+        (mut best, mut best_score): (usize, f32),
+    ) -> usize {
         let mut candidate = low;
         while candidate <= high {
-            #[cfg(test)]
-            {
-                self.tried += 1;
-            }
-            let score = self.score(natural, candidate);
-            if score > best_score + 1e-4 {
-                best = candidate;
-                best_score = score;
+            if candidate != natural {
+                let score = self.score(natural, candidate);
+                if score > best_score + 1e-4 {
+                    best = candidate;
+                    best_score = score;
+                }
             }
             candidate += 2;
         }
