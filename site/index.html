@@ -21,7 +21,17 @@
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="img/favicon-64.png" sizes="64x64">
   <link rel="stylesheet" href="styles.css">
+  <link rel="preload" href="fonts/headline.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- Hide the headline before first paint so the quill can write it. If the
+       writing script never runs, the headline shows after a moment anyway. -->
+  <script>
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      document.documentElement.classList.add("quill-writing", "quill-awaiting");
+      setTimeout(() => { if (!window.quillWrite) document.documentElement.classList.remove("quill-writing", "quill-awaiting"); }, 3000);
+    }
+  </script>
   <script src="app.js" defer></script>
+  <script src="quill-write.js" defer></script>
   <!-- Visit counts: GoatCounter sets no cookies and stores no personal data. -->
   <script data-goatcounter="https://quill.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
   <script type="application/ld+json">
