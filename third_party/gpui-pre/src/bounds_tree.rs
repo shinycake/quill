@@ -131,7 +131,7 @@ where
     pub fn insert_span(&mut self, new_bounds: Bounds<U>, extra: u32) -> u32 {
         // Find maximum ordering among intersecting bounds
         let max_intersecting = self.find_max_ordering(&new_bounds);
-        let ordering = max_intersecting + 1;
+        let ordering = max_intersecting.saturating_add(1);
         let last_ordering = ordering.saturating_add(extra);
 
         // Insert the new leaf

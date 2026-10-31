@@ -185,8 +185,10 @@ impl Scene {
     /// range, so only the range's place among the rest is new. It enters
     /// the bounds tree as one box holding every order it uses, and each
     /// primitive moves by the same amount. A later primitive over the box
-    /// but over nothing the range drew sorts higher than it had to, which
-    /// changes no pixels.
+    /// but over nothing the range drew sorts higher than it had to. That
+    /// changes no pixels unless one of the two is a shadow, whose blur
+    /// reaches past the bounds the tree sees: a tail can then land over a
+    /// neighbour it used to sit under.
     fn replay_as_one(&mut self, operations: &[PaintOperation]) {
         let extent = operations
             .iter()

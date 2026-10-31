@@ -351,10 +351,10 @@ moved callback, as a window the user dragged reports itself.
 
 ## A replayed range enters the bounds tree once
 
-Changed in 2026 for the deep sweep. `Scene::replay` sent every primitive of a
-cached view back through `BoundsTree::insert`, every frame, to work out orders
-the last frame had already stored in `paint_operations`. On a real account that
-was 15 to 20% of `Window::draw` on each frame where a slice replays.
+Changed in 2026 for the deep sweep. `Scene::replay` sent every layer, and every
+primitive outside a layer, back through `BoundsTree::insert` on each frame a
+cached view replays, to work out orders the last frame had already stored in
+`paint_operations`.
 
 - `src/bounds_tree.rs`: `insert_span(bounds, extra)` inserts one box standing
   for `extra + 1` consecutive orderings and returns the first. `insert` is
@@ -369,10 +369,17 @@ was 15 to 20% of `Window::draw` on each frame where a slice replays.
   `push_primitive`, is what both call. `PathId` is still assigned there.
 - `replay_each` is the old loop, for a replay into an open layer (a primitive
   takes that layer's order) or while `suppressed`.
-- A later primitive over the box but over nothing the range drew sorts higher
-  than it needed to. That changes no pixels. It adds a batch only where two
-  ranges' boxes overlap, and each `Paths` batch is a render pass of its own.
 - `Scene::refuse_paint_for_test` (test support) sets `filtered` and `suppressed`.
+
+Orders are not always what painting again would give, and overlapping primitives
+keep their order either way:
+
+- A later primitive over the box but over nothing the range drew sorts higher
+  than it had to, so it can land in another batch.
+- A layer takes an order whether anything draws in it or not, and a replay only
+  knows the orders primitives stored. A view that opens with a layer that drew
+  nothing slides down as a whole on its first replay. With views that do not
+  touch, that changed the batch count in 9 of 200 random cases, by -3 to +1.
 
 The crate's own tests do not build in Quill's tree, so `src/ui/scene_replay_tests.rs`
 holds the tests: random overlapping primitives with layers, replayed, replayed
