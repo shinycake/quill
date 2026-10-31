@@ -497,6 +497,7 @@ LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
 {
     reqFragment = false;
     buildDone = false;
+    building = false;
     trimpath = false;
     visible = false;
     allowMerge = true;
@@ -670,6 +671,9 @@ void LottieLayer::prepare(RGB32* color)
         clear();
         return;
     }
+
+    //QUILL: a precomp's children are set from its asset when the composition is built.
+    if (type == LottieLayer::Precomp) clear();
 
     // prepare the viewport clipper or a solid fill in advance if it is a layer type.
     if (type == LottieLayer::Precomp || (color && type == LottieLayer::Solid)) {

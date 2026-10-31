@@ -817,9 +817,13 @@ struct LottieGradient : LottieObject
         if (!colorStops.populated) {
             auto count = colorStops.count;  //colorstop count can be modified after population
             if (colorStops.frames) {
+                //QUILL: every keyframe has to hold the stops read from it.
+                auto least = UINT32_MAX;
                 ARRAY_FOREACH(v, *colorStops.frames) {
-                    colorStops.count = populate(v->value, count);
+                    auto stops = populate(v->value, count);
+                    if (stops < least) least = stops;
                 }
+                colorStops.count = least;
             } else {
                 colorStops.count = populate(colorStops.value, count);
             }
@@ -1094,6 +1098,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
 
     bool reqFragment : 1;   //requirement to fragment the render context
     bool buildDone : 1;     //completed in building the composition.
+    bool building : 1;      //QUILL: set while this composition builds.
     bool trimpath : 1;      //this group has a trimpath.
     bool visible : 1;       //this group has visible contents.
     bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.

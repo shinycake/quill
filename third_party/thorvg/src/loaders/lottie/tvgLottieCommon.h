@@ -33,8 +33,8 @@ struct PathSet
 {
     Point* pts = nullptr;
     PathCommand* cmds = nullptr;
-    uint16_t ptsCnt = 0;
-    uint16_t cmdsCnt = 0;
+    uint32_t ptsCnt = 0;  //QUILL: 32 bits, for long paths.
+    uint32_t cmdsCnt = 0;
 
     void convert(RenderPath& to)
     {

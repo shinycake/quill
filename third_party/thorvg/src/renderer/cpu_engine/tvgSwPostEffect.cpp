@@ -106,6 +106,10 @@ static int _gaussianInit(SwGaussianBlur* data, float sigma, int quality)
 
     if (tvg::zero(sigma)) return 0;
 
+    //QUILL: a kernel near 1024 px, past any canvas.
+    constexpr auto MAX_SIGMA = 1048576.0f;
+    if (!(sigma <= MAX_SIGMA)) sigma = MAX_SIGMA;
+
     data->level = int(SwGaussianBlur::MAX_LEVEL * ((quality - 1) * 0.01f)) + 1;
 
     //compute box kernel sizes

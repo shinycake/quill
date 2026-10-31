@@ -1,0 +1,571 @@
+diff --git a/src/common/tvgMath.h b/src/common/tvgMath.h
+index f09ca98eb..b1e7a66ef 100644
+--- a/src/common/tvgMath.h
++++ b/src/common/tvgMath.h
+@@ -85,7 +85,7 @@ static inline constexpr const T& clamp(const T& v, const T& min, const T& max)
+ template<typename T = uint8_t>
+ static inline T remap255(float val)
+ {
+-    return static_cast<T>(nearbyintf(val * 255.0f));
++    return static_cast<T>(nearbyintf(clamp(val, 0.0f, 1.0f) * 255.0f));  //QUILL: file values can be out of range.
+ }
+ 
+ /************************************************************************/
+@@ -576,7 +576,7 @@ static inline T lerp(const T &start, const T &end, float t)
+ 
+ static inline uint8_t lerp(const uint8_t& start, const uint8_t& end, float t)
+ {
+-    return static_cast<uint8_t>(clamp(static_cast<int>(start + (end - start) * t), 0, 255));
++    return static_cast<uint8_t>(clamp(start + (end - start) * t, 0.0f, 255.0f));  //QUILL: t comes from a file.
+ }
+ 
+ static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)
+diff --git a/src/loaders/lottie/tvgLottieBuilder.cpp b/src/loaders/lottie/tvgLottieBuilder.cpp
+index d4f7c385c..b88ff166b 100644
+--- a/src/loaders/lottie/tvgLottieBuilder.cpp
++++ b/src/loaders/lottie/tvgLottieBuilder.cpp
+@@ -178,25 +178,27 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
+ 
+ void LottieBuilder::updateTransform(LottieLayer* layer, float frameNo)
+ {
+-    if (!layer) return;
+-
+-    if (tween.active) {
+-        layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
+-    } else {
+-        if (tvg::equal(layer->cache.frameNo, frameNo)) return;
+-        layer->cache.frameNo = frameNo;
++    //QUILL: a loop, so that a parent chain's length costs no stack.
++    Array<LottieLayer*> chain;
++    for (; layer; layer = layer->parent) {
++        if (tween.active) {
++            layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
++        } else {
++            if (tvg::equal(layer->cache.frameNo, frameNo)) break;
++            layer->cache.frameNo = frameNo;
++        }
++        chain.push(layer);
+     }
+ 
+-    auto transform = layer->transform;
+-    auto parent = layer->parent;
+-
+-    if (parent) updateTransform(parent, frameNo);
++    for (auto i = chain.count; i > 0; --i) {
++        auto link = chain[i - 1];
++        auto parent = link->parent;
++        auto& matrix = link->cache.matrix;
+ 
+-    auto& matrix = layer->cache.matrix;
++        _update(link->transform, frameNo, matrix, link->cache.opacity, link->autoOrient, tween, exps);
+ 
+-    _update(transform, frameNo, matrix, layer->cache.opacity, layer->autoOrient, tween, exps);
+-
+-    if (parent) layer->cache.matrix = parent->cache.matrix * matrix;
++        if (parent) link->cache.matrix = parent->cache.matrix * matrix;
++    }
+ }
+ 
+ 
+@@ -409,6 +411,10 @@ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>*
+     Array<Shape*> shapes;
+ 
+     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
++        //QUILL: repeaters multiply, so the product has a limit.
++        constexpr uint64_t MAX_COPIES = 4096;
++        if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
++
+         shapes.reserve(repeater->cnt);
+ 
+         for (int i = 0; i < repeater->cnt; ++i) {
+@@ -554,6 +560,14 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float
+ }
+ 
+ 
++//QUILL: limits an animated count where it sizes a loop. Real stickers stay far below this.
++static float _limitCount(float count)
++{
++    constexpr auto MAX_COUNT = 1024.0f;
++    return (count > MAX_COUNT) ? MAX_COUNT : ((count >= 0.0f) ? count : 0.0f);
++}
++
++
+ static void _close(Array<Point>& pts, const Point& p, bool round)
+ {
+     if (round && tvg::zero(pts.last() - pts[pts.count - 2])) pts[pts.count - 2] = p;
+@@ -564,7 +578,7 @@ void LottieBuilder::updateStar(LottiePolyStar* star, float frameNo, Matrix* tran
+ {
+     static constexpr auto POLYSTAR_MAGIC_NUMBER = 0.47829f / 0.28f;
+ 
+-    auto ptsCnt = star->ptsCnt(frameNo, tween, exps);
++    auto ptsCnt = _limitCount(star->ptsCnt(frameNo, tween, exps));
+     if (ptsCnt < 1.0f) return;
+ 
+     auto innerRadius = star->innerRadius(frameNo, tween, exps);
+@@ -679,7 +693,7 @@ void LottieBuilder::updatePolygon(LottiePolyStar* star, float frameNo, Matrix* t
+ {
+     static constexpr auto POLYGON_MAGIC_NUMBER = 0.25f;
+ 
+-    auto ptsCnt = int(floor(star->ptsCnt(frameNo, tween, exps)));
++    auto ptsCnt = int(floor(_limitCount(star->ptsCnt(frameNo, tween, exps))));
+     if (ptsCnt < 1) return;
+ 
+     auto radius = star->outerRadius(frameNo, tween, exps);
+@@ -802,7 +816,7 @@ void LottieBuilder::updateZigZag(TVG_UNUSED LottieGroup* parent, LottieObject**
+     auto zigzag = static_cast<LottieZigZag*>(*child);
+     auto amplitude = zigzag->amplitude(frameNo, tween, exps);
+     if (tvg::zero(amplitude)) return;
+-    auto frequency = zigzag->frequency(frameNo, tween, exps);
++    auto frequency = (int)_limitCount(zigzag->frequency(frameNo, tween, exps));
+     auto point = (LottieZigZagModifier::PointType)zigzag->point(frameNo, tween, exps);
+     ctx->update(new LottieZigZagModifier(amplitude, frequency, point));
+ }
+@@ -812,7 +826,7 @@ void LottieBuilder::updateRepeater(TVG_UNUSED LottieGroup* parent, LottieObject*
+     auto repeater = static_cast<LottieRepeater*>(*child);
+ 
+     RenderRepeater r;
+-    r.cnt = static_cast<int>(repeater->copies(frameNo, tween, exps));
++    r.cnt = static_cast<int>(_limitCount(repeater->copies(frameNo, tween, exps)));
+     r.transform = ctx->propagator->transform();
+     r.offset = repeater->offset(frameNo, tween, exps);
+     r.position = repeater->position(frameNo, tween, exps);
+@@ -1222,12 +1236,13 @@ static LottieGlyph* _searchGlyph(const LottieFont* font, const char* p, const Te
+ {
+     capScale = 1.0f;
+     auto outCode = p;
++    char capCode[2] = {};  //QUILL: read by the search below.
+ 
+     // SmallCaps: lowercase letters are converted to uppercase with 70% scale
+     if ((unsigned char)*p < 0x80 && doc.caps) {
+         if (*p >= 'a' && *p <= 'z') {
+-            char capCode = *p + 'A' - 'a';
+-            outCode = &capCode;
++            capCode[0] = *p + 'A' - 'a';
++            outCode = capCode;
+             if (doc.caps == 2) capScale = 0.7f;
+         }
+     }
+@@ -1349,7 +1364,7 @@ void LottieBuilder::updateText(LottieLayer* layer, float frameNo)
+ 
+     auto text = static_cast<LottieText*>(layer->children.first());
+     auto& doc = text->doc(frameNo, exps);
+-    if (!doc.text) return;
++    if (!doc.text || !doc.name) return;  //QUILL: both are optional in the file.
+ 
+     if (text->font && text->font->origin == LottieFont::Origin::Local && !text->font->chars.empty()) {
+         updateLocalFont(layer, frameNo, text, doc);
+@@ -1621,6 +1636,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
+     ARRAY_FOREACH(p, comp->assets) {
+         if (layer->rid != (*p)->id) continue;
+         if (layer->type == LottieLayer::Precomp) {
++            if ((*p)->type != LottieObject::Composition) break;  //QUILL: an image or audio asset has no layers.
+             auto asset = static_cast<LottieRootLayer*>(*p);
+             if (_buildComposition(comp, asset)) {
+                 layer->children = asset->children;
+@@ -1670,6 +1686,7 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
+                 auto len = strlen(doc.name);
+                 for (uint32_t i = 0; i < comp->fonts.count; ++i) {
+                     auto font = comp->fonts[i];
++                    if (!font->name) continue;  //QUILL: optional in the file.
+                     auto len2 = strlen(font->name);
+                     if (len == len2 && !strcmp(font->name, doc.name)) {
+                         text->font = font;
+@@ -1687,8 +1704,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
+ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+ {
+     if (parent->children.count == 0) return false;
+-    if (parent->buildDone) return true;
++    if (parent->buildDone) return !parent->building;  //QUILL: only a finished composition is used.
+     parent->buildDone = true;
++    parent->building = true;
+ 
+     ARRAY_FOREACH(p, parent->children) {
+         auto child = static_cast<LottieLayer*>(*p);
+@@ -1717,6 +1735,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+         //attach the necessary font data
+         if (child->type == LottieLayer::Text) _attachFont(comp, child);
+     }
++
++    //QUILL: matte links stay a short chain.
++    ARRAY_FOREACH(p, parent->children) {
++        auto child = static_cast<LottieLayer*>(*p);
++        auto target = child->matteTarget;
++        for (auto i = 0; target && i < 16; ++i) target = target->matteTarget;
++        if (target) child->matteTarget = nullptr;
++    }
++
++    parent->building = false;
+     return true;
+ }
+ 
+diff --git a/src/loaders/lottie/tvgLottieCommon.h b/src/loaders/lottie/tvgLottieCommon.h
+index f91e6d8f8..6136ee803 100644
+--- a/src/loaders/lottie/tvgLottieCommon.h
++++ b/src/loaders/lottie/tvgLottieCommon.h
+@@ -33,8 +33,8 @@ struct PathSet
+ {
+     Point* pts = nullptr;
+     PathCommand* cmds = nullptr;
+-    uint16_t ptsCnt = 0;
+-    uint16_t cmdsCnt = 0;
++    uint32_t ptsCnt = 0;  //QUILL: 32 bits, for long paths.
++    uint32_t cmdsCnt = 0;
+ 
+     void convert(RenderPath& to)
+     {
+diff --git a/src/loaders/lottie/tvgLottieModel.cpp b/src/loaders/lottie/tvgLottieModel.cpp
+index e0cc2a647..0fd4416c8 100644
+--- a/src/loaders/lottie/tvgLottieModel.cpp
++++ b/src/loaders/lottie/tvgLottieModel.cpp
+@@ -497,6 +497,7 @@ LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
+ {
+     reqFragment = false;
+     buildDone = false;
++    building = false;
+     trimpath = false;
+     visible = false;
+     allowMerge = true;
+@@ -671,6 +672,9 @@ void LottieLayer::prepare(RGB32* color)
+         return;
+     }
+ 
++    //QUILL: a precomp's children are set from its asset when the composition is built.
++    if (type == LottieLayer::Precomp) clear();
++
+     // prepare the viewport clipper or a solid fill in advance if it is a layer type.
+     if (type == LottieLayer::Precomp || (color && type == LottieLayer::Solid)) {
+         auto obj = Shape::gen();
+diff --git a/src/loaders/lottie/tvgLottieModel.h b/src/loaders/lottie/tvgLottieModel.h
+index e9beabec6..e05d7b44e 100644
+--- a/src/loaders/lottie/tvgLottieModel.h
++++ b/src/loaders/lottie/tvgLottieModel.h
+@@ -817,9 +817,13 @@ struct LottieGradient : LottieObject
+         if (!colorStops.populated) {
+             auto count = colorStops.count;  //colorstop count can be modified after population
+             if (colorStops.frames) {
++                //QUILL: every keyframe has to hold the stops read from it.
++                auto least = UINT32_MAX;
+                 ARRAY_FOREACH(v, *colorStops.frames) {
+-                    colorStops.count = populate(v->value, count);
++                    auto stops = populate(v->value, count);
++                    if (stops < least) least = stops;
+                 }
++                colorStops.count = least;
+             } else {
+                 colorStops.count = populate(colorStops.value, count);
+             }
+@@ -1094,6 +1098,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
+ 
+     bool reqFragment : 1;   //requirement to fragment the render context
+     bool buildDone : 1;     //completed in building the composition.
++    bool building : 1;      //QUILL: set while this composition builds.
+     bool trimpath : 1;      //this group has a trimpath.
+     bool visible : 1;       //this group has visible contents.
+     bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.
+diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
+index 242d52a98..019716149 100644
+--- a/src/loaders/lottie/tvgLottieParser.cpp
++++ b/src/loaders/lottie/tvgLottieParser.cpp
+@@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
+         //discard rest
+         while (nextArrayValue()) getInt();
+     } else {
+-        val = (int8_t) getFloat();
++        val = (int8_t)tvg::clamp(getFloat(), -128.0f, 127.0f);  //QUILL: file values can be out of range.
+     }
+     return false;
+ }
+@@ -255,11 +255,11 @@ bool LottieParser::getValue(uint8_t& val)
+ {
+     if (peekType() == kArrayType) {
+         enterArray();
+-        if (nextArrayValue()) val = (uint8_t)(getFloat() * 2.55f);
++        if (nextArrayValue()) val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);  //QUILL: file values can be out of range.
+         //discard rest
+         while (nextArrayValue()) getFloat();
+     } else {
+-        val = (uint8_t)(getFloat() * 2.55f);
++        val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);
+     }
+     return false;
+ }
+@@ -382,8 +382,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+     LottieInterpolator* interpolator = nullptr;
+ 
+     //get a cached interpolator if it has any.
+-    ARRAY_FOREACH(p, comp->interpolators) {
+-        if (!strncmp((*p)->key, key, sizeof(buf))) interpolator = *p;
++    //QUILL: search only the newest ones, to keep loading linear.
++    constexpr uint32_t MAX_SEARCH = 1024;
++    auto cached = comp->interpolators.count;
++    for (uint32_t i = 0; i < cached && i < MAX_SEARCH; ++i) {
++        auto p = comp->interpolators[cached - 1 - i];
++        if (!strncmp(p->key, key, sizeof(buf))) {
++            interpolator = p;
++            break;
++        }
+     }
+ 
+     //new interpolator
+@@ -455,6 +462,7 @@ void LottieParser::parsePropertyInternal(T& prop)
+         enterArray();
+         while (nextArrayValue()) {
+             if (peekType() == kObjectType) parseKeyFrame(prop);  //keyframes value
++            else if (peekType() == kNullType) getNull();  //QUILL: a value may be null.
+             else if (getValue(prop.value)) break; //multi value property with no keyframes
+         }
+         prop.prepare();
+@@ -508,7 +516,7 @@ bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const ch
+     } else if (KEY_AS("x") && expressions) {
+         getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
+     } else if (KEY_AS("sid")) {
+-        registerSlot(obj, getString(), prop);
++        skip();  //QUILL: Quill does not override slots.
+     } else return false;
+     return true;
+ }
+@@ -633,7 +641,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
+             if (KEY_AS("n")) style = getString();
+             else if (KEY_AS("v")) {
+                 if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
+-                else parseProperty(stroke->dashValue());
++                else if (!stroke->dashattr || stroke->dashattr->size < 64) parseProperty(stroke->dashValue());  //QUILL: its counters are 8 bits.
++                else skip();
+             } else skip();
+         }
+     }
+@@ -918,25 +927,34 @@ LottieObject* LottieParser::parseObject(const char* type)
+ //capture the type name if the upcoming type is irregularly addressed after the actual properties.
+ char* LottieParser::captureType()
+ {
+-    if (!isPrimitive() || !strcmp(val.GetString(), "ty")) return nullptr;
++    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL: only a key has a string to compare.
+ 
+     auto level = 0;
+     for (auto p = getPos(); *p != '\0'; ++p) {
+         if (*p == '{') level++;
+         else if (*p == '}') {
+             if (--level < 0) break;
+-        } else if (level == 0) {
+-            if (!strncmp(p, "\"ty\"", 4)) {
+-                p += 4;
+-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+-                if (*p++ != ':') return nullptr;
+-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+-                if (*p++ != '\"') return nullptr;
+-                const char* start = p;
+-                while (*p != '\0' && *p != '\"') ++p;
+-                if (*p == '\"') return tvg::duplicate(start, p - start);
+-                return nullptr;
++        } else if (*p == '\"') {
++            //QUILL: read strings whole, and only a key counts.
++            auto name = p + 1;
++            for (++p; *p != '\0' && *p != '\"'; ++p) {
++                if (*p == '\\' && p[1] != '\0') ++p;
++            }
++            if (*p == '\0') return nullptr;
++            if (level != 0 || p - name != 2 || strncmp(name, "ty", 2)) continue;
++            ++p;
++            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
++            if (*p != ':') {
++                --p;
++                continue;
+             }
++            ++p;
++            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
++            if (*p++ != '\"') return nullptr;
++            const char* start = p;
++            while (*p != '\0' && *p != '\"') ++p;
++            if (*p == '\"') return tvg::duplicate(start, p - start);
++            return nullptr;
+         }
+     }
+     return nullptr;
+@@ -1627,6 +1645,7 @@ void LottieParser::postProcess(Array<LottieGlyph*>& glyphs)
+         auto glyph = *g;
+         ARRAY_FOREACH(f, comp->fonts) {
+             auto font = *f;
++            if (!font->family || !glyph->family || !font->style || !glyph->style) continue;  //QUILL: both are optional in the file.
+             if (!strcmp(font->family, glyph->family) && !strcmp(font->style, glyph->style)) {
+                 font->chars.push(glyph);
+                 free(glyph->family);
+diff --git a/src/renderer/cpu_engine/tvgSwCommon.h b/src/renderer/cpu_engine/tvgSwCommon.h
+index 4cd4d9934..6493c99c1 100644
+--- a/src/renderer/cpu_engine/tvgSwCommon.h
++++ b/src/renderer/cpu_engine/tvgSwCommon.h
+@@ -249,6 +249,7 @@ struct SwStroke
+ 
+ struct SwDashStroke
+ {
++    uint32_t steps = 8192;   //QUILL: dashes left to cut from this path.
+     RenderPath* path = nullptr;
+     float curLen = 0;
+     int32_t curIdx = 0;
+diff --git a/src/renderer/cpu_engine/tvgSwPostEffect.cpp b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
+index 513e497f1..5328bf56a 100644
+--- a/src/renderer/cpu_engine/tvgSwPostEffect.cpp
++++ b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
+@@ -106,6 +106,10 @@ static int _gaussianInit(SwGaussianBlur* data, float sigma, int quality)
+ 
+     if (tvg::zero(sigma)) return 0;
+ 
++    //QUILL: a kernel near 1024 px, past any canvas.
++    constexpr auto MAX_SIGMA = 1048576.0f;
++    if (!(sigma <= MAX_SIGMA)) sigma = MAX_SIGMA;
++
+     data->level = int(SwGaussianBlur::MAX_LEVEL * ((quality - 1) * 0.01f)) + 1;
+ 
+     //compute box kernel sizes
+diff --git a/src/renderer/cpu_engine/tvgSwRle.cpp b/src/renderer/cpu_engine/tvgSwRle.cpp
+index 3bc4b241c..51432b6b8 100644
+--- a/src/renderer/cpu_engine/tvgSwRle.cpp
++++ b/src/renderer/cpu_engine/tvgSwRle.cpp
+@@ -510,6 +510,24 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+     while (line < end) {
+         auto diff = line[0] - line[1];
+ 
++        e1 = TRUNC(line[1]);
++        e2 = TRUNC(line[0]);
++
++        //QUILL: outside the visible cells, skip the cell by cell walk. No cell above,
++        //below or to the right of them is kept, so the piece only moves the pen.
++        if ((e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y)) {
++            if (!_setCell(rw, e2)) return false;
++            rw.pos = line[0];
++            if (line-- == rw.lineStack) return true;
++            continue;
++        }
++
++        //QUILL: every cell to the left is one column, where only the rows a piece crosses count.
++        if (e1.x < rw.cellMin.x && e2.x < rw.cellMin.x) {
++            diff.x = 0;
++            e2.x = e1.x;
++        }
++
+         // avoid possible arithmetic overflow below by splitting
+         if (HYPOT(diff) > SHRT_MAX) {
+             _splitLine(line);
+@@ -517,9 +535,6 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+             continue;
+         }
+ 
+-        e1 = TRUNC(line[1]);
+-        e2 = TRUNC(line[0]);
+-
+         auto f1 = FRACT(line[1]);
+         SwPoint f2;
+ 
+@@ -620,6 +635,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+ }
+ 
+ 
++//QUILL: true when the arc's control points, and so the whole arc, are beside the visible cells.
++static bool _besideCells(const RleWorker& rw, const SwPoint* arc)
++{
++    auto min = arc[0].x;
++    auto max = arc[0].x;
++    for (auto i = 1; i < 4; ++i) {
++        if (arc[i].x < min) min = arc[i].x;
++        if (arc[i].x > max) max = arc[i].x;
++    }
++    return TRUNC(min) >= rw.cellMax.x || TRUNC(max) < rw.cellMin.x;
++}
++
++
+ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, const SwPoint& to)
+ {
+     auto arc = rw.bezStack;
+@@ -640,7 +668,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+         if (y > max) max = y;
+     }
+ 
+-    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y) goto draw;
++    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y || _besideCells(rw, arc)) goto draw;
+ 
+     /* Decide whether to split or draw. See `Rapid Termination          */
+     /* Evaluation for Recursive Subdivision of Bezier Curves' by Thomas */
+@@ -653,23 +681,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+             auto L = HYPOT(diff);
+ 
+             //avoid possible arithmetic overflow below by splitting
+-            if (L > SHRT_MAX) goto split;
++            if (L > SHRT_MAX) {
++                if (_besideCells(rw, arc)) goto draw;  //QUILL: only the chord's rows matter out here.
++                goto split;
++            }
+ 
+             //max deviation may be as much as (s/L) * 3/4 (if Hain's v = 1)
+             auto sLimit = L * (ONE_PIXEL / 6);
+ 
++            //QUILL: these products can pass 32 bits.
+             auto diff1 = arc[1] - arc[0];
+-            if (abs(diff.y * diff1.x - diff.x * diff1.y) > sLimit) goto split;
++            if (llabs((int64_t)diff.y * diff1.x - (int64_t)diff.x * diff1.y) > sLimit) goto split;
+ 
+             //s is L * the perpendicular distance from P2 to the line P0 - P3
+             auto diff2 = arc[2] - arc[0];
+-            if (abs(diff.y * diff2.x - diff.x * diff2.y) > sLimit) goto split;
++            if (llabs((int64_t)diff.y * diff2.x - (int64_t)diff.x * diff2.y) > sLimit) goto split;
+ 
+             /* Split super curvy segments where the off points are so far
+             from the chord that the angles P0-P1-P3 or P0-P2-P3 become
+             acute as detected by appropriate dot products */
+-            if (diff1.x * (diff1.x - diff.x) + diff1.y * (diff1.y - diff.y) > 0 ||
+-                diff2.x * (diff2.x - diff.x) + diff2.y * (diff2.y - diff.y) > 0)
++            if ((int64_t)diff1.x * (diff1.x - diff.x) + (int64_t)diff1.y * (diff1.y - diff.y) > 0 ||
++                (int64_t)diff2.x * (diff2.x - diff.x) + (int64_t)diff2.y * (diff2.y - diff.y) > 0)
+                 goto split;
+ 
+             //no reason to split
+diff --git a/src/renderer/cpu_engine/tvgSwShape.cpp b/src/renderer/cpu_engine/tvgSwShape.cpp
+index 974d7e524..3bfea0378 100644
+--- a/src/renderer/cpu_engine/tvgSwShape.cpp
++++ b/src/renderer/cpu_engine/tvgSwShape.cpp
+@@ -55,7 +55,8 @@ static void _dashLineTo(SwDashStroke& dash, const Point& to, bool validPoint)
+         }
+     //draw the current line partially
+     } else {
+-        while (len - dash.curLen > DASH_PATTERN_THRESHOLD) {
++        while (len - dash.curLen > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL: see SwDashStroke::steps.
++            --dash.steps;
+             Line left, right;
+             if (dash.curLen > 0) {
+                 len -= dash.curLen;
+@@ -119,7 +120,8 @@ static void _dashCubicTo(SwDashStroke& dash, const Point& ctrl1, const Point& ct
+         }
+     //draw the current line partially
+     } else {
+-        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD) {
++        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL: see SwDashStroke::steps.
++            --dash.steps;
+             Bezier left, right;
+             if (dash.curLen > 0) {
+                 len -= dash.curLen;
+diff --git a/src/renderer/cpu_engine/tvgSwUtil.cpp b/src/renderer/cpu_engine/tvgSwUtil.cpp
+index f7723a889..d4b730b4b 100644
+--- a/src/renderer/cpu_engine/tvgSwUtil.cpp
++++ b/src/renderer/cpu_engine/tvgSwUtil.cpp
+@@ -27,6 +27,15 @@
+ /* External Class Implementation                                        */
+ /************************************************************************/
+ 
++//QUILL: the largest coordinate, in pixels, whose differences and sums the rasterizer's
++//24.8 fixed point can hold. A NaN goes to the lower end.
++static inline float _rasterRange(float v)
++{
++    constexpr auto LIMIT = 1048576.0f;
++    return (v > LIMIT) ? LIMIT : ((v >= -LIMIT) ? v : -LIMIT);
++}
++
++
+ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
+ {
+     outline->out.reserve(outline->path->pts.count);
+@@ -35,6 +44,7 @@ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
+ 
+     ARRAY_FOREACH(pt, outline->path->pts) {
+         auto t = *pt * transform;
++        t = {_rasterRange(t.x), _rasterRange(t.y)};
+         if (bbox.min.x > t.x) bbox.min.x = t.x;
+         if (bbox.max.x < t.x) bbox.max.x = t.x;
+         if (bbox.min.y > t.y) bbox.min.y = t.y;

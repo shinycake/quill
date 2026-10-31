@@ -510,15 +510,30 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
     while (line < end) {
         auto diff = line[0] - line[1];
 
+        e1 = TRUNC(line[1]);
+        e2 = TRUNC(line[0]);
+
+        //QUILL: outside the visible cells, skip the cell by cell walk. No cell above,
+        //below or to the right of them is kept, so the piece only moves the pen.
+        if ((e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y)) {
+            if (!_setCell(rw, e2)) return false;
+            rw.pos = line[0];
+            if (line-- == rw.lineStack) return true;
+            continue;
+        }
+
+        //QUILL: every cell to the left is one column, where only the rows a piece crosses count.
+        if (e1.x < rw.cellMin.x && e2.x < rw.cellMin.x) {
+            diff.x = 0;
+            e2.x = e1.x;
+        }
+
         // avoid possible arithmetic overflow below by splitting
         if (HYPOT(diff) > SHRT_MAX) {
             _splitLine(line);
             ++line;
             continue;
         }
-
-        e1 = TRUNC(line[1]);
-        e2 = TRUNC(line[0]);
 
         auto f1 = FRACT(line[1]);
         SwPoint f2;
@@ -620,6 +635,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
 }
 
 
+//QUILL: true when the arc's control points, and so the whole arc, are beside the visible cells.
+static bool _besideCells(const RleWorker& rw, const SwPoint* arc)
+{
+    auto min = arc[0].x;
+    auto max = arc[0].x;
+    for (auto i = 1; i < 4; ++i) {
+        if (arc[i].x < min) min = arc[i].x;
+        if (arc[i].x > max) max = arc[i].x;
+    }
+    return TRUNC(min) >= rw.cellMax.x || TRUNC(max) < rw.cellMin.x;
+}
+
+
 static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, const SwPoint& to)
 {
     auto arc = rw.bezStack;
@@ -640,7 +668,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, 
         if (y > max) max = y;
     }
 
-    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y) goto draw;
+    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y || _besideCells(rw, arc)) goto draw;
 
     /* Decide whether to split or draw. See `Rapid Termination          */
     /* Evaluation for Recursive Subdivision of Bezier Curves' by Thomas */
@@ -653,23 +681,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, 
             auto L = HYPOT(diff);
 
             //avoid possible arithmetic overflow below by splitting
-            if (L > SHRT_MAX) goto split;
+            if (L > SHRT_MAX) {
+                if (_besideCells(rw, arc)) goto draw;  //QUILL: only the chord's rows matter out here.
+                goto split;
+            }
 
             //max deviation may be as much as (s/L) * 3/4 (if Hain's v = 1)
             auto sLimit = L * (ONE_PIXEL / 6);
 
+            //QUILL: these products can pass 32 bits.
             auto diff1 = arc[1] - arc[0];
-            if (abs(diff.y * diff1.x - diff.x * diff1.y) > sLimit) goto split;
+            if (llabs((int64_t)diff.y * diff1.x - (int64_t)diff.x * diff1.y) > sLimit) goto split;
 
             //s is L * the perpendicular distance from P2 to the line P0 - P3
             auto diff2 = arc[2] - arc[0];
-            if (abs(diff.y * diff2.x - diff.x * diff2.y) > sLimit) goto split;
+            if (llabs((int64_t)diff.y * diff2.x - (int64_t)diff.x * diff2.y) > sLimit) goto split;
 
             /* Split super curvy segments where the off points are so far
             from the chord that the angles P0-P1-P3 or P0-P2-P3 become
             acute as detected by appropriate dot products */
-            if (diff1.x * (diff1.x - diff.x) + diff1.y * (diff1.y - diff.y) > 0 ||
-                diff2.x * (diff2.x - diff.x) + diff2.y * (diff2.y - diff.y) > 0)
+            if ((int64_t)diff1.x * (diff1.x - diff.x) + (int64_t)diff1.y * (diff1.y - diff.y) > 0 ||
+                (int64_t)diff2.x * (diff2.x - diff.x) + (int64_t)diff2.y * (diff2.y - diff.y) > 0)
                 goto split;
 
             //no reason to split

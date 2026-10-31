@@ -81,8 +81,11 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   `scripts/release-lgpl-sources.sh` reads the pin for the LGPL source archive.
 - **ThorVG** (animated stickers, compiled in by `build.rs`): run
   `scripts/vendor-thorvg.sh <tag>`, which replaces `third_party/thorvg` with that
-  tag's CPU engine, Lottie loader, raw loader and C API and records the commit in
-  `VERSION`. Build (a new source file is picked up automatically; a new
+  tag's CPU engine, Lottie loader, raw loader and C API, applies
+  `native/patches/thorvg-sticker-limits.patch` and records the commit in `VERSION`.
+  If the patch stops applying, the script stops: port each change
+  (`third_party/thorvg/QUILL-CHANGES.md` says what each one is for) and regenerate
+  the patch. Build (a new source file is picked up automatically; a new
   `#include` of an unvendored file fails here, so extend the script's list), then
   regenerate the golden frames and look at every changed one:
   `QUILL_GOLDEN_DIFF=<dir> cargo test --no-default-features --test sticker_golden -- --ignored`

@@ -85,7 +85,7 @@ static inline constexpr const T& clamp(const T& v, const T& min, const T& max)
 template<typename T = uint8_t>
 static inline T remap255(float val)
 {
-    return static_cast<T>(nearbyintf(val * 255.0f));
+    return static_cast<T>(nearbyintf(clamp(val, 0.0f, 1.0f) * 255.0f));  //QUILL: file values can be out of range.
 }
 
 /************************************************************************/
@@ -576,7 +576,7 @@ static inline T lerp(const T &start, const T &end, float t)
 
 static inline uint8_t lerp(const uint8_t& start, const uint8_t& end, float t)
 {
-    return static_cast<uint8_t>(clamp(static_cast<int>(start + (end - start) * t), 0, 255));
+    return static_cast<uint8_t>(clamp(start + (end - start) * t, 0.0f, 255.0f));  //QUILL: t comes from a file.
 }
 
 static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)

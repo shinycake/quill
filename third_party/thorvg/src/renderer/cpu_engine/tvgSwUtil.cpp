@@ -27,6 +27,15 @@
 /* External Class Implementation                                        */
 /************************************************************************/
 
+//QUILL: the largest coordinate, in pixels, whose differences and sums the rasterizer's
+//24.8 fixed point can hold. A NaN goes to the lower end.
+static inline float _rasterRange(float v)
+{
+    constexpr auto LIMIT = 1048576.0f;
+    return (v > LIMIT) ? LIMIT : ((v >= -LIMIT) ? v : -LIMIT);
+}
+
+
 void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
 {
     outline->out.reserve(outline->path->pts.count);
@@ -35,6 +44,7 @@ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
 
     ARRAY_FOREACH(pt, outline->path->pts) {
         auto t = *pt * transform;
+        t = {_rasterRange(t.x), _rasterRange(t.y)};
         if (bbox.min.x > t.x) bbox.min.x = t.x;
         if (bbox.max.x < t.x) bbox.max.x = t.x;
         if (bbox.min.y > t.y) bbox.min.y = t.y;
