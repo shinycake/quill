@@ -27,6 +27,7 @@ pub fn is_device_login_qr(link: &str) -> bool {
         .is_ok_and(|bytes| !bytes.is_empty() && bytes.len() <= 1024)
 }
 
+use crate::lang::{keys, tr};
 use crate::telegram::envelope::{AuthorizationState, ErrorClass};
 
 /// Sign-in errors whose raw message is dropped later but which the UI
@@ -38,6 +39,27 @@ pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
         "PHONE_NUMBER_FLOOD" => Some(ErrorClass::PhoneFlood),
         "TASK_ALREADY_EXISTS" => Some(ErrorClass::TaskAlreadyExists),
         _ => None,
+    }
+}
+
+/// Why an account's client could not start. TDLib has no state for this: it
+/// answers an error and stays in `WaitTdlibParameters`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupFailure {
+    /// TDLib refused the database key.
+    WrongKey,
+    /// TDLib could not open or create its database files. Its messages do
+    /// not tell a read-only folder from a full disk or a missing volume.
+    DataFolder,
+}
+
+impl StartupFailure {
+    /// What the user reads on the failure card.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::WrongKey => tr(keys::Q_STARTUP_WRONG_KEY),
+            Self::DataFolder => tr(keys::Q_STARTUP_DATA_FOLDER),
+        }
     }
 }
 
@@ -71,6 +93,8 @@ pub enum AuthAction {
     /// on its own and never lands here).
     Closed,
     Closing,
+    /// The client could not start: say why and offer Retry.
+    StartupFailed,
 }
 
 pub fn view_for(state: &AuthorizationState) -> AuthView {
@@ -181,6 +205,12 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             title: "Connection closed",
             body: "The connection to Telegram was closed.".into(),
             action: AuthAction::Closed,
+            blocking: true,
+        },
+        AuthorizationState::StartupFailed(failure) => AuthView {
+            title: tr(keys::Q_STARTUP_FAILED_TITLE),
+            body: failure.reason().into(),
+            action: AuthAction::StartupFailed,
             blocking: true,
         },
     }

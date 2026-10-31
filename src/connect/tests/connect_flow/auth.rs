@@ -1,5 +1,6 @@
 //! Driver tests: TDLib parameters, sign-in states, QR login, 2FA, close and logout.
 use super::*;
+use crate::auth::{AuthAction, StartupFailure};
 
 #[test]
 fn driver_sends_parameters_then_reaches_wait_phone_via_injection() {
@@ -645,6 +646,66 @@ fn request_logout_sends_logout_then_logging_out_then_closed() {
     drop(driver);
     drop(recorder);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What `setTdlibParameters` answers from the real TDLib 1.8.69 for a
+/// read-only folder and a parent that is a file (`TdDb.cpp` for the key).
+#[test]
+fn a_refused_database_replaces_connecting_with_the_reason() {
+    for (code, message, failure) in [
+        (
+            400,
+            r#"File \"/data/td.binlog\" can't be opened/created for reading and writing"#,
+            StartupFailure::DataFolder,
+        ),
+        (
+            400,
+            "Can't init database in the directory \\\"/data/db\\\": [PosixError : Not a directory : 20]",
+            StartupFailure::DataFolder,
+        ),
+        (
+            401,
+            "Wrong database encryption key",
+            StartupFailure::WrongKey,
+        ),
+    ] {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+        let mut driver =
+            ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+        driver.kickoff().unwrap();
+        let seq = AtomicU64::new(0);
+        let answer =
+            format!(r#"{{"@type":"error","code":{code},"message":"{message}","@extra":"2"}}"#);
+        driver
+            .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+            .unwrap();
+        assert_eq!(
+            driver.session.auth,
+            AuthorizationState::StartupFailed(failure)
+        );
+        assert_eq!(driver.session.auth_view.action, AuthAction::StartupFailed);
+        assert_eq!(driver.session.auth_view.body, failure.reason());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn a_parameters_request_lost_at_close_is_no_database_failure() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    driver.kickoff().unwrap();
+    let pending = driver.session.requests.take(RequestId(2)).unwrap();
+    driver.session.settle_lost_request(pending);
+    assert_eq!(driver.session.auth, AuthorizationState::WaitTdlibParameters);
 }
 
 #[test]
