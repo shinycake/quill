@@ -2,8 +2,6 @@
 
 const WM_USER: u32 = 0x0400;
 
-/// The id of one of GPUI's own window messages. The field is private, so an id reaches
-/// `PostMessageW` or `SendMessageW` only inside a [`GpuiMessage`], with the validation number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiMessageId(u32);
 
@@ -40,7 +38,6 @@ impl GpuiMessageId {
     }
 }
 
-/// Per-process number in every GPUI message's `wparam`. Receivers drop a message without it.
 #[derive(Clone, Copy)]
 pub(crate) struct ValidationNumber(usize);
 
@@ -62,7 +59,6 @@ impl ValidationNumber {
     }
 }
 
-/// A GPUI message ready to go. Only [`ValidationNumber::message`] makes one.
 #[derive(Clone, Copy)]
 pub(crate) struct GpuiMessage {
     id: u32,
