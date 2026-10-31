@@ -17,6 +17,7 @@ pub mod auto_delete;
 pub mod autoscroll;
 pub mod autostart;
 pub mod battery_saving;
+pub mod battery_signal;
 pub mod boost_box;
 pub mod bot_invite;
 pub mod bot_profile;

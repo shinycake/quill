@@ -127,13 +127,47 @@ fn probe_native() -> Option<bool> {
 
 #[cfg(target_os = "linux")]
 fn probe_native() -> Option<bool> {
-    let run = |args: &[&str]| -> Option<String> {
+    #[cfg(feature = "ui")]
+    let announced = crate::battery_signal::latest();
+    #[cfg(not(feature = "ui"))]
+    let announced = None;
+    probe_linux(announced, |args| {
         crate::child_timeout::stdout_within(
             "gdbus",
             args,
             crate::child_timeout::DESKTOP_QUERY_LIMIT,
         )
-    };
+    })
+}
+
+/// Start following the platform's announcements where it makes them, so
+/// [`probe`] needs no process (Linux, see `battery_signal`).
+pub fn start_events() {
+    #[cfg(all(target_os = "linux", feature = "ui"))]
+    crate::battery_signal::start();
+}
+
+/// Whether the answer arrives by signal, so the watcher need not poll.
+#[cfg(all(target_os = "linux", feature = "ui"))]
+pub fn event_driven() -> bool {
+    crate::battery_signal::latest().is_some()
+}
+
+#[cfg(not(all(target_os = "linux", feature = "ui")))]
+pub fn event_driven() -> bool {
+    false
+}
+
+/// The value the D-Bus listener last saw (`announced`), or else ask with
+/// `run`, which spawns `gdbus`.
+#[cfg(target_os = "linux")]
+pub(crate) fn probe_linux(
+    announced: Option<Option<bool>>,
+    run: impl Fn(&[&str]) -> Option<String>,
+) -> Option<bool> {
+    if let Some(answer) = announced {
+        return answer;
+    }
     // `org.freedesktop.portal.PowerProfileMonitor`, the property GIO's
     // `GPowerProfileMonitor` is backed by.
     run(&[
