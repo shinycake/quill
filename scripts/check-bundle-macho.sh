@@ -4,7 +4,9 @@
 #
 # Allowed references: /usr/lib/*, /System/Library/*, and @rpath/@loader_path/
 # @executable_path names that resolve to a file inside the bundle. Install ids
-# and LC_RPATH entries are held to the same rule.
+# and LC_RPATH entries are held to the same rule. With MACOSX_DEPLOYMENT_TARGET
+# set, as in CI, every file must also load on that macOS: a library built for a
+# newer one refuses to load there.
 #
 # Usage: scripts/check-bundle-macho.sh [path/to/Quill.app]
 set -euo pipefail
@@ -54,6 +56,13 @@ while IFS= read -r -d '' f; do
       *) if ! is_system "$rp"; then fail "${f#"$APP"/}" "LC_RPATH $rp"; fi ;;
     esac
   done < <(otool -l "$f" | awk '/cmd LC_RPATH/{r=1} r&&/ path /{print $2; r=0}')
+  if [[ -n "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
+    minos="$(otool -l "$f" | awk '/cmd LC_BUILD_VERSION/{r=1} r&&/ minos /{print $2; exit}')"
+    newest="$(printf '%s\n%s\n' "$minos" "$MACOSX_DEPLOYMENT_TARGET" | sort -V | tail -n 1)"
+    if [[ -n "$minos" && "$newest" == "$minos" && "$minos" != "$MACOSX_DEPLOYMENT_TARGET" ]]; then
+      fail "${f#"$APP"/}" "needs macOS $minos, newer than $MACOSX_DEPLOYMENT_TARGET"
+    fi
+  fi
 done < <(find "$APP" -type f ! -type l -print0)
 
 if (( bad )); then
