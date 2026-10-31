@@ -345,7 +345,10 @@ impl QuillApp {
                         this.publish_now_playing();
                         // A paused track shows the same every tick: only
                         // the media keys need the tick then, not a redraw.
-                        let shown = this.playback.sound_shown();
+                        // Unless its chat gains or loses a song: a message
+                        // in a chat not on screen redraws only the chat
+                        // list, so the tick watches Previous / Next too.
+                        let shown = this.playback.track_shown(this.playlist_can_move());
                         let moved = this.playback.tick_shown.replace(shown) != Some(shown);
                         if finished {
                             cx.notify();

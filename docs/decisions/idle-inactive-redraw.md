@@ -23,13 +23,25 @@ inactive one after a settle; the cases below came out of it. Timers, `spawn` loo
 paused (it also drains the media keys), and each tick redrew the open chat's conversation and composer slices
 and every chat window (`notify_playback_position`). A paused voice note or song left in the player bar drew 4
 frames a second, active or not, for as long as it stayed paused. The tick now redraws only when what the seek
-bars and the player bar show of the sound changed (`PlaybackUi::sound_shown`: engine state, position, error).
-Playing, the position moves every tick and it redraws as before.
+bars, the player bar and the Touch Bar show of the track changed (`PlaybackUi::track_shown`: engine state,
+position, error, and whether Previous / Next can move). Playing, the position moves every tick and it redraws
+as before.
 
-What else the paused tick happened to redraw had to notify for itself. One writer did not: a volume change
-from the Picture-in-Picture window (`media_viewer/pip.rs` `pip_volume`) left the player bar's speaker icon
-as it was; it now notifies, as the bar's own volume control does. The other writers of `PlaybackUi` notify,
-or go through a call that does.
+What else the paused tick happened to redraw had to be covered another way. Each input of the player bar and
+the Touch Bar's player:
+
+- Previous / Next (`playlist_can_move`) count the songs loaded in the track's chat, whose history is kept
+  while the track is active. A song arriving in that chat while another chat is open redraws only the chat
+  list (`state/redraw.rs`, `list_unless_shown`), so the tick compares them too and redraws when they change.
+- A volume change from the Picture-in-Picture window (`media_viewer/pip.rs` `pip_volume`) left the speaker
+  icon as it was; it now notifies, as the bar's own volume control does.
+- The track, its chat, title and length are set when it starts (`begin_track_playback`, whose callers
+  notify); repeat, order, speed, volume and the seek hover and preview change only through calls that notify.
+
+With a song active the Touch Bar shows the player, whose inputs are the ones above. With a voice note, or no
+track, it shows the pinned chats, whose badges and online dots change with chat-list-only updates; the
+paused tick used to sync it four times a second. A chat-list redraw now asks the Touch Bar to sync
+(`notify_chat_list`), which also covers the case with no track, where it waited for the next app notify.
 
 ### An unplayed message effect drew at the display's rate behind another app
 
@@ -67,7 +79,11 @@ also stops a call-window field's blink when it loses its focus there, which no l
   or behind another app and stays where it was paused, and playing again moves the seek bar on every tick.
 - `send_effects::tests::an_effect_that_arrives_behind_another_app_waits_without_drawing`: no frame in a
   minute, the effect still unplayed, and it plays on activation.
-- `media_viewer::pip::tests::muting_the_pip_window_shows_on_a_paused_player_bar`.
+- `media_viewer::pip::tests::muting_the_pip_window_shows_on_a_paused_player_bar`, drawn without moving the
+  clock, so no progress tick can redraw the bar.
+- `player_bar::cache_tests::next_turns_on_for_a_song_arriving_off_screen_while_paused`: one song left in the
+  paused track's chat and another chat open, a second song arriving there (a chat-list-only redraw) turns
+  Next on within a second.
 - gpui-base `an_open_completion_menu_does_not_blink_the_caret_in_the_background`,
   `a_caret_blinking_under_its_menu_stops_when_the_menu_closes_without_focus`,
   `a_field_drawn_in_another_window_blinks_by_that_window` and

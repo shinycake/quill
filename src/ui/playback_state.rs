@@ -24,13 +24,18 @@ pub(crate) struct SeekHover {
     pub(crate) at: f32,
 }
 
-/// The active sound as the seek bars and the player bar draw it
-/// (`PlaybackUi::sound_shown`). A paused track's stays the same.
+/// The active track as the seek bars, the player bar and the Touch Bar
+/// draw it (`PlaybackUi::track_shown`). A paused track's stays the same
+/// until its chat gains or loses a song.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct SoundShown {
+pub(super) struct TrackShown {
     state: super::audio::EngineState,
     position_bits: Option<u64>,
     error: Option<super::audio::AudioError>,
+    /// Previous / next (`QuillApp::playlist_can_move`): the songs loaded
+    /// in the track's chat, which a message arriving there off screen
+    /// changes without redrawing the bar.
+    can_move: (bool, bool),
 }
 
 pub(crate) struct PlaybackUi {
@@ -61,9 +66,9 @@ pub(crate) struct PlaybackUi {
     pub(super) seek_hover: Option<SeekHover>,
     /// Guard for the playback progress tick task.
     pub(super) tick: bool,
-    /// What the seek bars and the player bar showed of the sound at the
-    /// last tick: the tick redraws them only when it changed.
-    pub(super) tick_shown: Option<SoundShown>,
+    /// What the seek bars, the player bar and the Touch Bar showed of the
+    /// track at the last tick: the tick redraws them only when it changed.
+    pub(super) tick_shown: Option<TrackShown>,
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
@@ -131,12 +136,14 @@ impl PlaybackUi {
         self.engine_state() == super::audio::EngineState::Playing
     }
 
-    /// What the seek bars and the player bar draw of the active sound.
-    pub(super) fn sound_shown(&self) -> SoundShown {
-        SoundShown {
+    /// What the seek bars, the player bar and the Touch Bar draw of the
+    /// active track, with the playlist's `can_move`.
+    pub(super) fn track_shown(&self, can_move: (bool, bool)) -> TrackShown {
+        TrackShown {
             state: self.engine_state(),
             position_bits: self.active_position_secs().map(f64::to_bits),
             error: self.audio.error(),
+            can_move,
         }
     }
 
