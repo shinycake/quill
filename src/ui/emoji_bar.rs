@@ -237,7 +237,10 @@ impl QuillApp {
             Some(sticker) => {
                 let animated = (visible
                     && !quill::power_saving::on(quill::power_saving::Flag::EmojiPanel))
-                .then(|| self.custom_emoji_image(sticker.file_id, sticker.format, CUSTOM_SIDE, cx))
+                .then(|| {
+                    let part = super::sticker_player::Part::Chrome;
+                    self.custom_emoji_image(sticker.file_id, sticker.format, CUSTOM_SIDE, part, cx)
+                })
                 .flatten();
                 let still = self.panel_still(sticker);
                 if animated.is_none() && still.is_none() {

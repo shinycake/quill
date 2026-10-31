@@ -167,8 +167,8 @@ stickers), close the panel, and idle 30 s. Compare base and this branch:
 - `footprint -p` and `vmmap --summary` (MALLOC_SMALL resident): base keeps
   the store that the last trace line shows, plus the canvases; this branch
   should end near its value before the panel opened.
-- Then switch to another chat (which closes every clip the main window
-  used, on both builds; `chat-switch-clips.md`) and
+- Then switch to another chat (which closes the clips the main window's
+  chat used; `chat-switch-clips.md`) and
   idle 30 s: the difference left is the store held in small blocks, which
   this branch gives back.
 - Chat window: open a chat of animated emoji in its own window, maximize it

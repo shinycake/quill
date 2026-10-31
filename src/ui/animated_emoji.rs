@@ -14,7 +14,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::sticker_player::{HeadId, StickerView, ViewAsk};
+use super::sticker_player::{HeadId, Part, StickerView, ViewAsk};
 use gpui_kit::*;
 use quill::animated_emoji::{EmojiMedia, EmojiPlay, MessageKey, STICKER_SIDE};
 use quill::ids::{ChatId, FileId, MessageId};
@@ -42,12 +42,12 @@ pub(super) fn message_emoji_media(
 }
 
 fn play_head(key: MessageKey, generation: u32) -> HeadId {
-    HeadId::of(("animated-emoji", key.0, key.1, generation))
+    HeadId::of(Part::Chat, ("animated-emoji", key.0, key.1, generation))
 }
 
 /// The head of a lone emoji that rests on its first frame.
 fn rest_head(key: MessageKey) -> HeadId {
-    HeadId::of(("animated-emoji-rest", key.0, key.1))
+    HeadId::of(Part::Chat, ("animated-emoji-rest", key.0, key.1))
 }
 
 const FIRST_FRAME: PlayMode = PlayMode::At(Duration::ZERO);
@@ -316,7 +316,10 @@ impl QuillApp {
             let Some((file, format)) = cached.or(own) else {
                 continue;
             };
-            let head = HeadId::of(("big-custom-emoji", message.chat_id.0, message.id.0, *id));
+            let head = HeadId::of(
+                Part::Chat,
+                ("big-custom-emoji", message.chat_id.0, message.id.0, *id),
+            );
             if let Some(view) =
                 self.sticker_view(ViewAsk::sticker(file, format, head, mode, side), cx)
             {

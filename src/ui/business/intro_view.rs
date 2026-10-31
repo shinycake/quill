@@ -53,7 +53,13 @@ impl QuillApp {
             {
                 let _ = live.driver.ensure_media_files(&[file]);
             }
-            card = card.child(self.sticker_cell(&sticker, "start-page", cx));
+            // Shown in the empty chat: the chat's own head, as the plain
+            // greeting's.
+            let head = crate::ui::sticker_player::HeadId::of(
+                crate::ui::sticker_player::Part::Chat,
+                ("start-page", user_id, sticker.file_id.0),
+            );
+            card = card.child(self.sticker_cell(&sticker, "start-page", head, cx));
         }
         Some(
             div()

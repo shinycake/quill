@@ -17,7 +17,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::sticker_player::HeadId;
+use super::sticker_player::{HeadId, Part};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -328,7 +328,7 @@ impl QuillApp {
             let ask = super::emoji_effect::effect_ask(
                 seen.animation,
                 StickerFormat::Tgs,
-                HeadId::of(("premium-ready", key)),
+                HeadId::of(Part::Chat, ("premium-ready", key)),
                 side,
                 seen.outgoing,
             );

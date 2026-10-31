@@ -3,6 +3,7 @@
 //! `Selector` with its `Strip`, `about` and the expand button).
 
 use super::super::app::QuillApp;
+use super::super::sticker_player::Part;
 use super::{SendMenu, tracker};
 use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
@@ -41,9 +42,15 @@ impl QuillApp {
                 Motion::Playing(flag) => flag.is_none_or(|flag| !power_saving::on(flag)),
             };
             if play {
-                self.custom_emoji_image(sticker.file_id, sticker.format, side, cx)
+                self.custom_emoji_image(sticker.file_id, sticker.format, side, Part::Chrome, cx)
             } else {
-                self.custom_emoji_image_parked(sticker.file_id, sticker.format, side, cx)
+                self.custom_emoji_image_parked(
+                    sticker.file_id,
+                    sticker.format,
+                    side,
+                    Part::Chrome,
+                    cx,
+                )
             }
         });
         match frame {

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::sticker_player::{Part, panel_sticker_head};
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -28,9 +29,15 @@ impl QuillApp {
             // Battery and animations: the emoji panel shows stills.
             None
         } else if on_screen {
-            self.custom_emoji_image(file_id, item.format, CUSTOM_EMOJI_SIZE, cx)
+            self.custom_emoji_image(file_id, item.format, CUSTOM_EMOJI_SIZE, Part::Chrome, cx)
         } else {
-            self.custom_emoji_image_parked(file_id, item.format, CUSTOM_EMOJI_SIZE, cx)
+            self.custom_emoji_image_parked(
+                file_id,
+                item.format,
+                CUSTOM_EMOJI_SIZE,
+                Part::Chrome,
+                cx,
+            )
         };
         let still = self.panel_still(&item);
         let premium = self.session().is_some_and(|s| s.my_is_premium());
@@ -94,7 +101,10 @@ impl QuillApp {
         // Only the hovered sticker animates; the rest stay still.
         let animated = hovered
             // The cell less its padding (`p_1`).
-            .then(|| self.sticker_image(item.file_id, item.format, STICKER_CELL - 8., cx))
+            .then(|| {
+                let head = panel_sticker_head(item.file_id);
+                self.sticker_image(item.file_id, item.format, head, STICKER_CELL - 8., cx)
+            })
             .flatten();
         let still = self.panel_still(&item);
         let source = animated

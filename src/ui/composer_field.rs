@@ -464,6 +464,7 @@ impl QuillApp {
             self.custom_emoji_images(
                 &entities,
                 crate::ui::sticker_player::EmojiSide::default(),
+                crate::ui::sticker_player::Part::Chrome,
                 cx,
             )
         });

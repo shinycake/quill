@@ -15,7 +15,7 @@
 
 use super::anim_layer;
 use super::app::QuillApp;
-use super::sticker_player::{HeadId, StickerView, ViewAsk};
+use super::sticker_player::{HeadId, Part, StickerView, ViewAsk};
 use gpui_kit::*;
 use quill::power_saving;
 use quill::sticker_playback::player::PlayMode;
@@ -35,6 +35,19 @@ pub(super) enum StatusSurface {
     MessageName,
     /// The profile panel (owner: the peer).
     Profile,
+}
+
+impl StatusSurface {
+    /// The part of the window it shows in. A chat list row stays as it is
+    /// when another chat opens (tdesktop's rows keep their emoji); the
+    /// header, a sender's name and the profile column show the open chat,
+    /// which tdesktop builds again for the next one.
+    fn part(self) -> Part {
+        match self {
+            Self::ListRow => Part::Chrome,
+            Self::Header | Self::MessageName | Self::Profile => Part::Chat,
+        }
+    }
 }
 
 /// What a status shows right now.
@@ -69,7 +82,7 @@ impl QuillApp {
             && (self.slices.in_sidebar() || self.slices.in_conversation());
         // Each place counts its loops from its own first showing (the
         // view's head starts with its first frame on screen).
-        let head = HeadId::of(("status", surface, owner, id));
+        let head = status_head(surface, owner, id);
         let ask = ViewAsk::emoji(
             item.file_id,
             item.format,
@@ -82,6 +95,11 @@ impl QuillApp {
         }
         self.panel_still(&item).map(StatusGlyph::Still)
     }
+}
+
+/// The play head of status `id` for `owner` on `surface`.
+pub(super) fn status_head(surface: StatusSurface, owner: i64, id: i64) -> HeadId {
+    HeadId::of(surface.part(), ("status", surface, owner, id))
 }
 
 impl QuillApp {

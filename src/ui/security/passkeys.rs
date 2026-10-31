@@ -186,7 +186,10 @@ impl QuillApp {
             .iter()
             .find(|item| item.custom_emoji_id == Some(custom_emoji_id))?;
         let source = (!power_saving::on(power_saving::Flag::EmojiChat))
-            .then(|| self.custom_emoji_image(item.file_id, item.format, size, cx))
+            .then(|| {
+                let part = crate::ui::sticker_player::Part::Chrome;
+                self.custom_emoji_image(item.file_id, item.format, size, part, cx)
+            })
             .flatten()
             .map(ImageSource::from)
             .or_else(|| {

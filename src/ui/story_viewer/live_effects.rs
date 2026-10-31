@@ -7,7 +7,7 @@
 use super::live_state::{FlyingStars, effect_progress, level_color};
 use super::live_view::sender_avatar;
 use super::*;
-use crate::ui::sticker_player::{HeadId, StickerView, ViewAsk};
+use crate::ui::sticker_player::{HeadId, Part, StickerView, ViewAsk};
 use gpui_kit::assets::IconName;
 use quill::live_story::{
     STAR_EFFECT_CANVAS_H, STAR_EFFECT_CANVAS_W, STAR_EFFECT_SIZE, StarEffectFrame, burst_order,
@@ -49,7 +49,7 @@ impl StarBurst<'_> {
         ViewAsk::sticker(
             sticker.file_id,
             sticker.format,
-            HeadId::of(("star-burst", sticker.file_id.0, effect)),
+            HeadId::of(Part::Chrome, ("star-burst", sticker.file_id.0, effect)),
             PlayMode::At(age),
             STAR_EFFECT_SIZE,
         )
