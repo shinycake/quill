@@ -1,9 +1,10 @@
 //! One text drawn at several widths in the same frame: replies quoting the
 //! same message, each quote line as wide as its bubble, or a paragraph in
-//! columns of different widths; and the budget of laid-out widths
-//! (`docs/decisions/paragraph-cache-widths.md`).
+//! columns of different widths; and the budgets of laid-out widths, sizes
+//! and texts (`docs/decisions/paragraph-cache-widths.md`).
 use super::{
-    Entry, Key, Pool, Width, held_in_tests, layouts_in_tests, relayouts_in_tests, reset_in_tests,
+    Cache, Entry, Key, LAID_OUT, Pool, Width, held_in_tests, layouts_in_tests, relayouts_in_tests,
+    reset_in_tests, trim_layouts,
 };
 use crate::ui::selectable_text::SelectableRichText;
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
@@ -321,34 +322,73 @@ fn a_frame_lets_go_only_of_widest_line_layouts_wider_than_its_window(cx: &mut Te
     assert_eq!(laid_out_after_a_frame(natural + 50.), vec![2, 4, 5, 6]);
 }
 
-/// Past its paragraphs, a pool lets the least recently used one go for each
-/// new one, never one the frame being drawn used.
-#[gpui_kit::test]
-fn past_its_paragraphs_the_least_recently_used_goes(cx: &mut TestAppContext) {
-    let paragraph = a_paragraph(cx);
-    let key = |n: u64| Key {
+fn key(n: u64) -> Key {
+    Key {
         text: n.to_string().into(),
         runs: 0,
         font_size: 0,
         line_height: 0,
-    };
-    let mut pool = Pool::new(4, true);
-    for n in 1..=4u64 {
-        pool.entry(key(n), 4)
-            .add(width(Some(100.), Some(&paragraph), n, n));
     }
+}
+
+/// Past its paragraphs and an eighth more, a pool lets the least recently
+/// used go down to its count with the new one, never one the frame being
+/// drawn used.
+#[gpui_kit::test]
+fn past_its_paragraphs_the_least_recently_used_go(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let mut pool = Pool::new(8, true);
+    let add = |pool: &mut Pool, n: u64, start: u64| {
+        pool.entry(key(n), start)
+            .add(width(Some(100.), Some(&paragraph), n, n));
+    };
     let held = |pool: &Pool| {
         let mut used: Vec<u64> = pool.entries.values().map(|e| e.used).collect();
         used.sort_unstable();
         used
     };
-    pool.entry(key(5), 4)
-        .add(width(Some(100.), Some(&paragraph), 5, 5));
-    assert_eq!(held(&pool), vec![2, 3, 4, 5]);
-    // A frame that began at 1 used them all: they stay.
-    pool.entry(key(6), 1)
-        .add(width(Some(100.), Some(&paragraph), 6, 6));
-    assert_eq!(held(&pool), vec![2, 3, 4, 5, 6]);
+    for n in 1..=9 {
+        add(&mut pool, n, 9);
+    }
+    assert_eq!(held(&pool), (1..=9).collect::<Vec<_>>());
+    add(&mut pool, 10, 9);
+    assert_eq!(held(&pool), (3..=10).collect::<Vec<_>>());
+    add(&mut pool, 11, 10);
+    // A frame that began at 2 used them all: they stay.
+    add(&mut pool, 12, 2);
+    assert_eq!(held(&pool), (3..=12).collect::<Vec<_>>());
+}
+
+/// Wrapped paragraphs and one-line texts share one budget of laid-out
+/// widths, the old cache's: past it, the least recently used of either kind
+/// go.
+#[gpui_kit::test]
+fn both_kinds_keep_to_one_budget_of_layouts(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let mut cache = Cache::default();
+    // Each kind within the budget, both together past it.
+    let each = LAID_OUT as u64 * 9 / 16;
+    for n in 0..each {
+        for (one_line, used) in [(false, 2 * n + 1), (true, 2 * n + 2)] {
+            cache
+                .laid_out(key(n), one_line)
+                .add(width(Some(100.), Some(&paragraph), used, used));
+        }
+    }
+    cache.end_frame(2 * each, 600.);
+    let laid_out = |pool: &Pool| -> Vec<u64> {
+        pool.entries
+            .values()
+            .flat_map(|e| &e.widths)
+            .filter(|w| w.paragraph.is_some())
+            .map(|w| w.used)
+            .collect()
+    };
+    let (wrapped, lines) = (laid_out(&cache.paragraphs), laid_out(&cache.lines));
+    assert_eq!(wrapped.len() + lines.len(), LAID_OUT * 3 / 4);
+    assert_eq!(wrapped.len(), lines.len());
+    let oldest = wrapped.iter().chain(&lines).min().copied();
+    assert_eq!(oldest, Some(2 * each - LAID_OUT as u64 * 3 / 4 + 1));
 }
 
 /// Past the budget, the least recently used layouts go, down to three
@@ -359,17 +399,11 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
     let mut pool = Pool::new(16, true);
     // Ten paragraphs, each drawn at one width, the nth used at clock n.
     for n in 1..=10u64 {
-        let key = Key {
-            text: n.to_string().into(),
-            runs: 0,
-            font_size: 0,
-            line_height: 0,
-        };
         let entry = Entry {
             widths: vec![width(Some(100.), Some(&paragraph), n, n)],
             used: n,
         };
-        pool.entries.insert(key, entry);
+        pool.entries.insert(key(n), entry);
     }
     let laid_out = |pool: &Pool| {
         let mut used: Vec<u64> = pool
@@ -383,11 +417,11 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
         used
     };
     // A budget of eight: down to six, the four oldest out.
-    pool.trim_layouts(7, 8);
+    trim_layouts(&mut [&mut pool], 7, 8);
     assert_eq!(laid_out(&pool), vec![5, 6, 7, 8, 9, 10]);
     assert_eq!(pool.laid_out, 6);
     // A frame that began at 7 used 8 to 10: those stay, whatever the budget.
-    pool.trim_layouts(7, 2);
+    trim_layouts(&mut [&mut pool], 7, 2);
     assert_eq!(laid_out(&pool), vec![8, 9, 10]);
     assert_eq!(pool.laid_out, 3);
 }
@@ -399,12 +433,6 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
 fn past_the_budget_the_least_recently_used_sizes_go(cx: &mut TestAppContext) {
     let paragraph = a_paragraph(cx);
     let mut pool = Pool::new(16, true);
-    let key = |n: u64| Key {
-        text: n.to_string().into(),
-        runs: 0,
-        font_size: 0,
-        line_height: 0,
-    };
     // Paragraph 1: sizes at clock 1 to 6, laid out at 7. Paragraph 2: a
     // size at 8, laid out at 9, sizes at 10 to 12.
     let mut first = Entry::default();

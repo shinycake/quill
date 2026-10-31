@@ -61,10 +61,11 @@ rather than copying them.
   (replies quoting the same message, a paragraph in two panes) and a return
   to any earlier width lay nothing out again. There is no cap per
   paragraph.
-- Laid-out widths of each kind are kept to the old cache's budget, 2,048:
-  past it, at the end of a frame, the least recently used go down to three
-  quarters of it, never one the frame used, as the old cache let its least
-  recently used entries go. Their sizes stay.
+- Laid-out widths of both kinds together are kept to the old cache's one
+  budget, 2,048: past it, at the end of a frame, the least recently used
+  of either kind go down to three quarters of it, never one the frame
+  used, as the old cache let its least recently used entries go. Their
+  sizes stay.
 - Sizes are kept to 8,192 widths of each kind, laid out or not (about 40
   bytes each): past it, the least recently used of those holding only a
   size go down to three quarters of it, never one the frame used, and a
@@ -76,12 +77,14 @@ rather than copying them.
   one at the room it offers, draw it narrower, and draw it at that room a
   few frames later, and a quote drawn from a cached view's replay never
   reaches the cache.
-- Two counts: 512 wrapped paragraphs (what the old 2,048 widths held of
-  long posts, four widths each) and 1,024 one-line texts (two each), so a
-  long history can't push the chat list out. Past one, the least recently
-  used paragraph goes for each new one, never one the frame being drawn
-  used. The cache is keyed by text, not by chat: a closed chat's
-  paragraphs stay until newer ones push them out.
+- Each kind keeps up to 2,048 texts, as many as the old cache's 2,048
+  entries could be, counted apart so a long history can't push the chat
+  list out. A new text past that and an eighth more lets the least
+  recently used go, down to 2,048 with it, never one the frame being drawn
+  used: one search of the pool per 256 new texts, not one per text. The
+  layout and size budgets bound what the texts hold. The cache is keyed by
+  text, not by chat: a closed chat's paragraphs stay until newer ones push
+  them out.
 - `BidiLine` (one-line previews) measures through the cache and draws the
   paragraph laid out for the room it was measured in, as it did with its
   own slot.
@@ -93,8 +96,9 @@ rather than copying them.
 
 ## Every way a layout goes, against the old cache
 
-The old cache held the 2,048 most recently used (text, width) entries,
-each laid out. A layout goes here only:
+The old cache held up to 2,048 (text, width) entries of both kinds, each
+laid out, and when full kept the most recently used half. A layout goes
+here only:
 
 1. Unconstrained: never kept. Nothing draws at no width.
 2. At the widest line or wider, wider than the window, not drawn in the
@@ -103,15 +107,17 @@ each laid out. A layout goes here only:
    in the plain look), so in the history that is a window narrower than
    that (the narrowest is 380 px) widened until such a paragraph fits a
    line: it is laid out once more, where the old cache had it.
-3. Past 2,048 laid-out widths of a kind, least recently used first: the
-   old budget.
-4. With its paragraph, past 512 paragraphs (1,024 one-line texts), least
-   recently used first. The old cache held about 512 long posts; it could
-   hold more short messages, at two or three widths each, so a history of
-   short messages scrolled back past 512 lays out some it still held.
+3. Past 2,048 laid-out widths of both kinds together, least recently used
+   first: the old budget.
+4. With its text, past 2,048 texts of a kind, least recently used first:
+   the old cache's 2,048 entries never held more.
 
 Sizes go only past 8,192 widths of a kind, and only those without a
 layout, which keeps every width among the old 2,048.
+
+So once a frame is over this cache holds at most the old cache's 2,048
+layouts, plus up to 8,192 sizes of each kind (about 330 KB each) and the
+texts' keys.
 
 Earlier versions of this change let a paragraph's other widths go as soon
 as one was drawn (text drawn at several widths in one frame was laid out
@@ -142,13 +148,18 @@ how much heap that frees (glibc `mallinfo2`).
 
 The cut is the widest line and the unconstrained width, which nothing
 draws, and a few MB of vector slack gpui-base no longer keeps. Every width
-is laid out once, as before. Scrolled without resizing, a full cache holds
-512 such posts at two layouts each, about 64 MB, where the old one held
-512 at four, about 113 MB; after resizing, the widths drawn on the way can
-fill the budget, 2,048 layouts, as many as the old cache held whenever it
-was full.
+is laid out once, as before.
 
-How many paragraphs one frame uses, against the two counts: the same
+The budget is the old one in layouts, not in bytes. The layouts kept are
+the wrapped ones, 62.5 KB each for these posts, where the old cache's mix
+of wrapped and one-line layouts was 55 KB. Up to 1,024 such posts it
+holds two layouts each, where the old cache held four (up to 512 posts).
+Past that both hold part of 2,048 layouts: here three quarters to all of
+it, about 96 to 128 MB, and in the old cache half to all of it, about 56
+to 113 MB. At the budget this cache holds about 13% more than the old one
+did.
+
+How many texts one frame uses, against the counts: the same
 test with 150 chats and 400 short posts and replies, every name, title,
 preview and post right-to-left, at the smallest message text (12 px),
 scrolled through at three window sizes. The most any frame drew:
@@ -159,8 +170,8 @@ scrolled through at three window sizes. The most any frame drew:
 | 3840 by 2160 | 20 | 42 |
 | 6016 by 3384 | 32 | 67 |
 
-So each count holds the paragraphs of more than ten full screens, and the
-frame being drawn is never evicted from under itself.
+So each count holds the texts of many full screens, and the frame being
+drawn is never evicted from under itself.
 
 Tests: `src/ui/conversation/paragraph_cache_scroll_tests.rs` scrolls and
 resizes a history and counts layouts: no widest line kept, nothing laid
@@ -175,8 +186,9 @@ same frame (cut short or whole), the same quotes in cached views drawn
 again one at a time, one wrapped paragraph in four columns, and one in two
 columns dragged a pixel a frame across 64 frames and back (128 widths; 64
 laid out again with the 64-width cap); it checks the frames after the
-first lay nothing out, what a frame lets go, and that each budget and
-count lets the least recently used go and never the frame's.
+first lay nothing out, what a frame lets go, that each budget and count
+lets the least recently used go and never the frame's, and that both kinds
+together keep to one budget of layouts (2,304 held with one per kind).
 
 ## Not changed
 

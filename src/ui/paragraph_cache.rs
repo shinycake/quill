@@ -25,21 +25,18 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-/// Wrapped paragraphs kept, the least recently used going for each new one
-/// past it. The cache used to hold 2,048 laid-out widths, about four per
-/// message paragraph: about 512.
-const PARAGRAPHS: usize = 512;
+/// Texts each kind keeps (wrapped paragraphs, and one-line texts such as
+/// chat list rows, quotes and names, counted apart so a long history
+/// doesn't push the chat list out): as many as the 2,048 widths the cache
+/// used to hold could be, one each. The layout and size budgets bound what
+/// they hold.
+const TEXTS: usize = 2048;
 
-/// One-line texts (chat list rows, quotes, names) kept, counted apart so a
-/// long history doesn't push them out. The old widths held about 1,000 of
-/// them (two each).
-const LINES: usize = 1024;
-
-/// Laid-out widths each kind keeps once the frames that used them are over,
-/// least recently used out first: the 2,048 the cache used to hold. Layouts
-/// at a wrapped paragraph's widest line and wider than the window, never
-/// drawn, don't stay past their frame (see [`Entry::settle`]), so none of
-/// it goes to them.
+/// Laid-out widths both kinds keep together once the frames that used them
+/// are over, least recently used out first: the 2,048 the cache used to
+/// hold. Layouts at a wrapped paragraph's widest line and wider than the
+/// window, never drawn, don't stay past their frame (see
+/// [`Entry::settle`]), so none of it goes to them.
 const LAID_OUT: usize = 2048;
 
 /// Widths each kind remembers, laid out or keeping only a size (about 40
@@ -148,7 +145,8 @@ fn wider(wrap: Option<u32>, window: f32) -> bool {
 /// Paragraphs of one kind: wrapped, or one-line.
 struct Pool {
     entries: HashMap<Key, Entry>,
-    /// Paragraphs kept.
+    /// Paragraphs kept: up to an eighth more before the least recently used
+    /// go, so a new one doesn't search them all.
     capacity: usize,
     /// Whether layouts at a paragraph's widest line or wider, never drawn,
     /// let go when their frame ends ([`Entry::settle`]). One-line texts
@@ -174,52 +172,32 @@ impl Pool {
         }
     }
 
-    /// The entry for `key`. Past [`Self::capacity`] paragraphs, a new one
-    /// takes the place of the least recently used, never one used in the
-    /// frame begun at `start`.
+    /// The entry for `key`. A new paragraph past [`Self::capacity`] and
+    /// its slack lets the least recently used go, down to the capacity with
+    /// it, never one used in the frame begun at `start`.
     fn entry(&mut self, key: Key, start: u64) -> &mut Entry {
-        if !self.entries.contains_key(&key) && self.entries.len() >= self.capacity {
-            let oldest = self
+        let full = self.entries.len() >= self.capacity + self.capacity / 8;
+        if full && !self.entries.contains_key(&key) {
+            let excess = self.entries.len() + 1 - self.capacity;
+            let ages = self
                 .entries
-                .iter()
-                .filter(|(_, e)| e.used <= start)
-                .min_by_key(|(_, e)| e.used)
-                .map(|(key, _)| key.clone());
-            if let Some(oldest) = oldest {
-                self.entries.remove(&oldest);
+                .values()
+                .map(|e| e.used)
+                .filter(|used| *used <= start)
+                .collect();
+            if let Some(cutoff) = cutoff(excess, ages) {
+                self.entries.retain(|_, e| e.used > cutoff);
             }
         }
         self.entries.entry(key).or_default()
     }
 
     /// The frame begun at `start`, of a window `window` wide, is over:
-    /// settle what it used, and keep to the budgets.
-    fn end_frame(&mut self, start: u64, window: f32) {
+    /// settle what it used.
+    fn settle(&mut self, start: u64, window: f32) {
         if self.settles {
             for entry in self.entries.values_mut().filter(|e| e.used > start) {
                 entry.settle(window);
-            }
-        }
-        if self.laid_out > LAID_OUT {
-            self.trim_layouts(start, LAID_OUT);
-        }
-        if self.widths > WIDTHS {
-            self.trim_widths(start, WIDTHS);
-        }
-    }
-
-    /// Past `budget` laid-out widths, lets the least recently used ones go
-    /// down to three quarters of it, never one used in the frame begun at
-    /// `start`. Their sizes stay.
-    fn trim_layouts(&mut self, start: u64, budget: usize) {
-        let laid_out = |w: &Width| w.paragraph.is_some();
-        let held = self.count(laid_out);
-        self.laid_out = held;
-        if let Some(cutoff) = self.cutoff(held, budget, start, laid_out) {
-            for width in self.entries.values_mut().flat_map(|e| &mut e.widths) {
-                if width.used <= cutoff && width.paragraph.take().is_some() {
-                    self.laid_out -= 1;
-                }
             }
         }
     }
@@ -231,7 +209,8 @@ impl Pool {
         let held = self.count(|_| true);
         self.widths = held;
         let size_only = |w: &Width| w.paragraph.is_none();
-        if let Some(cutoff) = self.cutoff(held, budget, start, size_only) {
+        let ages = self.ages(start, size_only);
+        if let Some(cutoff) = excess(held, budget).and_then(|excess| cutoff(excess, ages)) {
             for entry in self.entries.values_mut() {
                 entry
                     .widths
@@ -250,28 +229,56 @@ impl Pool {
             .count()
     }
 
-    /// With `held` widths against `budget`, the last use at or before which
-    /// widths `which` picks go to bring it down to three quarters of the
-    /// budget, sparing those used after `start`; none while within it.
-    fn cutoff(
-        &self,
-        held: usize,
-        budget: usize,
-        start: u64,
-        which: impl Fn(&Width) -> bool,
-    ) -> Option<u64> {
-        let excess = held.checked_sub(budget * 3 / 4).filter(|_| held > budget)?;
-        let mut ages: Vec<u64> = self
-            .entries
+    /// When each width `which` picks was last used, but those used in the
+    /// frame begun at `start`.
+    fn ages(&self, start: u64, which: impl Fn(&Width) -> bool) -> Vec<u64> {
+        self.entries
             .values()
             .flat_map(|e| &e.widths)
             .filter(|w| which(w) && w.used <= start)
             .map(|w| w.used)
-            .collect();
-        match excess.checked_sub(1) {
-            Some(ix) if ix < ages.len() => Some(*ages.select_nth_unstable(ix).1),
-            _ => ages.iter().copied().max(),
+            .collect()
+    }
+}
+
+/// Past `budget` laid-out widths in `pools` together, lets the least
+/// recently used go down to three quarters of it, never one used in the
+/// frame begun at `start`, as the old cache's one budget did. Their sizes
+/// stay.
+fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: usize) {
+    let laid_out = |w: &Width| w.paragraph.is_some();
+    let held = pools.iter().map(|pool| pool.count(laid_out)).sum();
+    let ages = pools
+        .iter()
+        .flat_map(|pool| pool.ages(start, laid_out))
+        .collect();
+    let cutoff = excess(held, budget).and_then(|excess| cutoff(excess, ages));
+    for pool in pools.iter_mut() {
+        if let Some(cutoff) = cutoff {
+            for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
+                if width.used <= cutoff {
+                    width.paragraph = None;
+                }
+            }
         }
+        pool.laid_out = pool.count(laid_out);
+    }
+}
+
+/// How many of `held` go to bring it down to three quarters of `budget`;
+/// none while within it.
+fn excess(held: usize, budget: usize) -> Option<usize> {
+    (held > budget).then(|| held - budget * 3 / 4)
+}
+
+/// The last use at or before which `excess` of the uses in `ages` go, all
+/// of them if fewer; none if `excess` is 0.
+fn cutoff(excess: usize, mut ages: Vec<u64>) -> Option<u64> {
+    let ix = excess.checked_sub(1)?;
+    if ix < ages.len() {
+        Some(*ages.select_nth_unstable(ix).1)
+    } else {
+        ages.into_iter().max()
     }
 }
 
@@ -289,8 +296,8 @@ struct Cache {
 impl Default for Cache {
     fn default() -> Self {
         Self {
-            paragraphs: Pool::new(PARAGRAPHS, true),
-            lines: Pool::new(LINES, false),
+            paragraphs: Pool::new(TEXTS, true),
+            lines: Pool::new(TEXTS, false),
             clock: 0,
             pass: None,
             #[cfg(test)]
@@ -305,13 +312,31 @@ impl Cache {
     fn tick(&mut self, pass: Pass) -> u64 {
         if !self.pass.is_some_and(|(p, _)| p.same_frame(pass)) {
             if let Some((ended, start)) = self.pass {
-                self.paragraphs.end_frame(start, ended.width);
-                self.lines.end_frame(start, ended.width);
+                self.end_frame(start, ended.width);
             }
             self.pass = Some((pass, self.clock));
         }
         self.clock += 1;
         self.clock
+    }
+
+    /// The frame begun at `start`, of a window `window` wide, is over:
+    /// settle what it used, and keep to the budgets.
+    fn end_frame(&mut self, start: u64, window: f32) {
+        self.paragraphs.settle(start, window);
+        self.lines.settle(start, window);
+        if self.paragraphs.laid_out + self.lines.laid_out > LAID_OUT {
+            trim_layouts(
+                &mut [&mut self.paragraphs, &mut self.lines],
+                start,
+                LAID_OUT,
+            );
+        }
+        for pool in [&mut self.paragraphs, &mut self.lines] {
+            if pool.widths > WIDTHS {
+                pool.trim_widths(start, WIDTHS);
+            }
+        }
     }
 
     /// When the frame being drawn began.
