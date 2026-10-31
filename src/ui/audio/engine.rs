@@ -481,6 +481,9 @@ pub(in crate::ui) struct AudioEngine {
     /// Set by the screenshot demos only.
     simulation: Option<Simulation>,
     sim_clock: Option<PlaybackClock>,
+    /// The time the simulation keeps: the app's clock (`set_sim_time`),
+    /// which tests drive; the wall clock until one is set.
+    sim_time: Option<Box<dyn Fn() -> Instant>>,
     sim_duration: f64,
     /// Simulation only: when the first seek that hangs was posted.
     sim_stalled_since: Option<Duration>,
@@ -503,6 +506,7 @@ impl AudioEngine {
             error: None,
             simulation: None,
             sim_clock: None,
+            sim_time: None,
             sim_duration: 0.0,
             sim_stalled_since: None,
         }
@@ -512,6 +516,17 @@ impl AudioEngine {
     /// device-less demo simulation.
     pub(in crate::ui) fn set_simulation(&mut self, simulation: Option<Simulation>) {
         self.simulation = simulation;
+    }
+
+    /// Keep the simulation's time with `now`, the app's clock.
+    pub(in crate::ui) fn set_sim_time(&mut self, now: impl Fn() -> Instant + 'static) {
+        self.sim_time = Some(Box::new(now));
+    }
+
+    fn sim_now(&self) -> Instant {
+        self.sim_time
+            .as_ref()
+            .map_or_else(Instant::now, |now| now())
     }
 
     /// Why the last start, resume or seek failed, if it did and nothing has
@@ -545,7 +560,7 @@ impl AudioEngine {
             return EngineState::Failed;
         }
         if let Some(clock) = &self.sim_clock {
-            return if clock.finished() {
+            return if clock.finished_at(self.sim_now()) {
                 EngineState::Ended
             } else if clock.is_playing() {
                 EngineState::Playing
@@ -565,7 +580,7 @@ impl AudioEngine {
     /// or the parked position when nothing is consuming it.
     pub(in crate::ui) fn position_secs(&self) -> f64 {
         if let Some(clock) = &self.sim_clock {
-            return clock.elapsed_secs();
+            return clock.elapsed_secs_at(self.sim_now());
         }
         let Some(track) = self.track.as_ref().filter(|_| !self.failed && !self.stale) else {
             return self.parked_secs;
@@ -726,10 +741,11 @@ impl AudioEngine {
             if simulation.fail {
                 return Err(AudioError::NoOutput);
             }
+            let now = self.sim_now();
             let mut clock = PlaybackClock::new(self.sim_duration);
-            clock.set_rate(f64::from(self.speed.get()));
-            clock.seek(offset);
-            clock.resume();
+            clock.set_rate_at(f64::from(self.speed.get()), now);
+            clock.seek_at(offset, now);
+            clock.resume_at(now);
             self.sim_clock = Some(clock);
             return Ok(());
         }
@@ -759,8 +775,9 @@ impl AudioEngine {
 
     pub(in crate::ui) fn pause(&mut self) {
         self.settle();
+        let now = self.sim_now();
         if let Some(clock) = self.sim_clock.as_mut() {
-            clock.pause();
+            clock.pause_at(now);
         }
         if let Some(track) = &self.track {
             track.player.pause();
@@ -772,11 +789,12 @@ impl AudioEngine {
     /// from the top when it ended. On an error the state is what it was.
     pub(in crate::ui) fn resume(&mut self, offset_secs: f64) -> Result<(), AudioError> {
         self.settle();
+        let now = self.sim_now();
         if let Some(clock) = self.sim_clock.as_mut() {
-            if clock.finished() {
-                clock.seek(0.0);
+            if clock.finished_at(now) {
+                clock.seek_at(0.0, now);
             }
-            clock.resume();
+            clock.resume_at(now);
             self.error = None;
             return Ok(());
         }
@@ -827,8 +845,9 @@ impl AudioEngine {
 
     fn seek_to(&mut self, offset_secs: f64, playing: bool) -> Result<(), AudioError> {
         let offset = offset_secs.max(0.0);
+        let now = self.sim_now();
         if let Some(clock) = self.sim_clock.as_mut() {
-            clock.seek(offset);
+            clock.seek_at(offset, now);
             if self.simulation.is_some_and(|simulation| simulation.stall) {
                 self.sim_stalled_since.get_or_insert(self.clock.now());
             }
@@ -864,8 +883,9 @@ impl AudioEngine {
     /// Takes effect on the running sound at its next 20 ms block.
     pub(in crate::ui) fn set_speed(&mut self, speed: f64) {
         self.speed.set(speed);
+        let now = self.sim_now();
         if let Some(clock) = self.sim_clock.as_mut() {
-            clock.set_rate(speed);
+            clock.set_rate_at(speed, now);
         }
     }
 

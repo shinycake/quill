@@ -129,7 +129,8 @@ fn an_effect_that_arrives_behind_another_app_waits_without_drawing(cx: &mut Test
     });
     vcx.run_until_parked();
     assert!(shown(vcx, ("message-effect", ARRIVING as u64)));
-    let _ = crate::ui::frame_clock::frames_over(vcx, 1);
+    // Let the arrival settle: a scrollbar a scroll shows hides 2 s later.
+    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
     let drawn = crate::ui::frame_clock::frames_over(vcx, 60);
     assert!(drawn.is_empty(), "drawn behind another app: {drawn:?}");
     assert!(unwatched(&app, vcx, key), "not seen yet");

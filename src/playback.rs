@@ -55,10 +55,16 @@ impl PlaybackClock {
     /// elapsed position is frozen as the new base first, so changing
     /// speed never jumps the playhead (works while playing or paused).
     pub fn set_rate(&mut self, rate: f64) {
-        self.base_secs = self.elapsed_secs();
+        self.set_rate_at(rate, Instant::now());
+    }
+
+    /// [`Self::set_rate`] with the time given: for a clock kept on another
+    /// time source than the wall clock (the `_at` methods all take one).
+    pub fn set_rate_at(&mut self, rate: f64, now: Instant) {
+        self.base_secs = self.elapsed_secs_at(now);
         self.rate = rate.clamp(PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX);
         if self.started_at.is_some() {
-            self.started_at = Some(Instant::now());
+            self.started_at = Some(now);
         }
     }
 
@@ -69,9 +75,13 @@ impl PlaybackClock {
 
     /// Seconds elapsed, clamped to `[0, duration]`.
     pub fn elapsed_secs(&self) -> f64 {
+        self.elapsed_secs_at(Instant::now())
+    }
+
+    pub fn elapsed_secs_at(&self, now: Instant) -> f64 {
         let mut elapsed = self.base_secs;
         if let Some(started) = self.started_at {
-            elapsed += started.elapsed().as_secs_f64() * self.rate;
+            elapsed += now.saturating_duration_since(started).as_secs_f64() * self.rate;
         }
         elapsed.clamp(0.0, self.duration_secs)
     }
@@ -86,14 +96,22 @@ impl PlaybackClock {
 
     /// Freeze the clock at the current elapsed position.
     pub fn pause(&mut self) {
-        self.base_secs = self.elapsed_secs();
+        self.pause_at(Instant::now());
+    }
+
+    pub fn pause_at(&mut self, now: Instant) {
+        self.base_secs = self.elapsed_secs_at(now);
         self.started_at = None;
     }
 
     /// Continue advancing from the frozen position.
     pub fn resume(&mut self) {
+        self.resume_at(Instant::now());
+    }
+
+    pub fn resume_at(&mut self, now: Instant) {
         if self.started_at.is_none() {
-            self.started_at = Some(Instant::now());
+            self.started_at = Some(now);
         }
     }
 
@@ -101,15 +119,23 @@ impl PlaybackClock {
     /// playing/paused state: seeking while playing resumes from the new
     /// position, seeking while paused just moves the frozen offset.
     pub fn seek(&mut self, secs: f64) {
+        self.seek_at(secs, Instant::now());
+    }
+
+    pub fn seek_at(&mut self, secs: f64, now: Instant) {
         self.base_secs = secs.clamp(0.0, self.duration_secs);
         if self.started_at.is_some() {
-            self.started_at = Some(Instant::now());
+            self.started_at = Some(now);
         }
     }
 
     /// True when a running clock has reached the end of the track.
     pub fn finished(&self) -> bool {
-        self.is_playing() && self.elapsed_secs() >= self.duration_secs
+        self.finished_at(Instant::now())
+    }
+
+    pub fn finished_at(&self, now: Instant) -> bool {
+        self.is_playing() && self.elapsed_secs_at(now) >= self.duration_secs
     }
 }
 
@@ -230,5 +256,22 @@ mod tests {
         // Playing: no jump at the moment of the change.
         assert!((clock.elapsed_secs() - 20.0).abs() < 0.5);
         assert_eq!(clock.rate(), 0.5);
+    }
+
+    #[test]
+    fn a_clock_on_its_own_time_moves_with_that_time_only() {
+        let start = Instant::now();
+        let at = |secs| start + std::time::Duration::from_secs(secs);
+        let mut clock = PlaybackClock::new(20.0);
+        clock.seek_at(10.0, at(0));
+        clock.resume_at(at(0));
+        clock.set_rate_at(2.0, at(1));
+        assert_eq!(clock.elapsed_secs_at(at(1)), 11.0);
+        assert_eq!(clock.elapsed_secs_at(at(3)), 15.0);
+        clock.pause_at(at(3));
+        assert_eq!(clock.elapsed_secs_at(at(60)), 15.0);
+        clock.resume_at(at(60));
+        assert!(!clock.finished_at(at(62)));
+        assert!(clock.finished_at(at(63)));
     }
 }

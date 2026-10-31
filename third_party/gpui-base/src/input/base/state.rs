@@ -7,12 +7,12 @@
 //! https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/input.rs
 use gpui::TextAlign;
 use gpui::{
-    Action, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
-    Render, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, UTF16Selection, WeakFocusHandle, Window, actions, div, point,
-    prelude::FluentBuilder as _, px,
+    Action, AnyWindowHandle, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
+    KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
+    Pixels, Point, Render, ScrollEvent, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, UTF16Selection, WeakFocusHandle,
+    Window, actions, div, point, prelude::FluentBuilder as _, px,
 };
 use gpui::{Autocapitalize, TextInputAction, TextInputConfiguration};
 use ropey::{Rope, RopeSlice};
@@ -480,6 +480,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) scroll_beyond_last_line: Option<usize>,
     pub(super) cursor_surrounding_lines: Option<usize>,
     pub(super) blink_cursor: Entity<BlinkCursor>,
+    /// QUILL: the window that started the caret's blink, the one whose
+    /// paint may stop it (`sync_blink`).
+    pub(super) blink_window: Cell<Option<AnyWindowHandle>>,
     pub(super) loading: bool,
     /// The cursors and selections.
     ///
@@ -950,32 +953,15 @@ impl<M: InputModeKind> InputBaseState<M> {
                 }
             }),
             // Observe the blink cursor to repaint the view when it changes.
-            // QUILL: a blink the caret can't show stops instead of repainting.
-            // The blur handler leaves it running while the context menu is
-            // open, and nothing else stopped it once the menu closed on a
-            // field that had lost its focus.
-            cx.observe_in(&blink_cursor, window, |input, cursor, window, cx| {
-                if cursor.read(cx).is_blinking() && !input.caret_can_show(window, cx) {
-                    // Stopping notifies again, and that repaints the view.
-                    cursor.update(cx, |cursor, cx| cursor.stop(cx));
-                    return;
-                }
-                cx.notify();
-            }),
-            // Blink the cursor when the window is active, stop when it's not.
+            cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
+            // Blink the cursor when the window is active, pause when it's not.
+            // QUILL: the paint stops it in an inactive window (`sync_blink`).
             cx.observe_window_activation(window, |input, window, cx| {
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
                     if focus_handle.is_focused(window) {
-                        input.blink_cursor.update(cx, |blink_cursor, cx| {
-                            blink_cursor.start(cx);
-                        });
+                        input.start_blink_cursor(window, cx);
                     }
-                } else {
-                    // QUILL: the blur handler stops it too, but not while the
-                    // context menu is open, and an inactive window never
-                    // shows the caret.
-                    input.blink_cursor.update(cx, |cursor, cx| cursor.stop(cx));
                 }
             }),
             cx.on_focus(&focus_handle, window, Self::on_focus),
@@ -999,6 +985,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             scroll_beyond_last_line: None,
             cursor_surrounding_lines: None,
             blink_cursor,
+            blink_window: Cell::new(None),
             undo_manager,
             inline_tokens: None,
             pending_token: None,
@@ -3998,17 +3985,36 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Returns the true to let InputElement to render cursor, when Input is focused and current BlinkCursor is visible.
     pub(crate) fn show_cursor(&self, window: &Window, cx: &App) -> bool {
-        self.caret_can_show(window, cx)
-            && !self.disabled
-            && self.blink_cursor.read(cx).visible()
+        self.caret_can_show(window, cx) && !self.disabled && self.blink_cursor.read(cx).visible()
     }
 
-    /// QUILL: whether the caret can be drawn at all: the field is focused,
-    /// or its context menu keeps it looking focused, in an active window.
-    /// A blink is only worth its redraws while this holds.
+    /// QUILL: whether the caret can be drawn at all in `window`: the field
+    /// is focused there, or its context menu keeps it looking focused, and
+    /// the window is active. A blink is only worth its redraws while this
+    /// holds.
     fn caret_can_show(&self, window: &Window, cx: &App) -> bool {
         (self.focus_handle.is_focused(window) || M::is_context_menu_open(self, cx))
             && window.is_window_active()
+    }
+
+    /// QUILL: keep the caret's blink running exactly while the caret can
+    /// show in `window`, the window painting the field. That need not be
+    /// the window the field was made in, the one its focus and activation
+    /// listeners watch (a call window's message field is made by the main
+    /// window). So the paint starts a blink no listener started (its window
+    /// came back to the front, the field was focused there) and stops one
+    /// that shows nothing (the window went behind another app, or the field
+    /// lost its focus or its menu there). Only the window that started a
+    /// blink stops it, so a field painted in two windows can't have them
+    /// take turns.
+    pub(super) fn sync_blink(&self, window: &Window, cx: &mut Context<Self>) {
+        let can_show = self.caret_can_show(window, cx);
+        let blinking = self.blink_cursor.read(cx).is_blinking();
+        if can_show && !blinking {
+            self.start_blink_cursor(window, cx);
+        } else if !can_show && blinking && self.blink_window.get() == Some(window.window_handle()) {
+            self.blink_cursor.update(cx, |cursor, cx| cursor.stop(cx));
+        }
     }
 
     fn on_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4024,6 +4030,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !window.is_window_active() {
             return;
         }
+        self.blink_window.set(Some(window.window_handle()));
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.start(cx);
         });
@@ -10011,6 +10018,46 @@ mod tests {
             .advance_clock(std::time::Duration::from_millis(500));
         cx.run_until_parked();
         assert_eq!(caret_repaints(&view.input, &mut cx), 0, "no blink left behind");
+    }
+
+    /// QUILL: a field drawn in another window than the one it was made in
+    /// (a call window's message field is made by the main window) blinks by
+    /// the window it is drawn in: not while that window is behind another
+    /// app, again when it comes back, and not once the field loses its focus
+    /// there. The focus and activation listeners watch the window the field
+    /// was made in, so nothing started the blink again on the way back and
+    /// the caret stayed hidden until a click.
+    #[gpui::test]
+    fn a_field_drawn_in_another_window_blinks_by_that_window(cx: &mut TestAppContext) {
+        let view = InputView::<InputMode>::build(cx, |state| state);
+        let input = view.input.clone();
+        let other = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| cx.new(|_| TestRoot(input)))
+                .unwrap()
+        });
+        other
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        let mut cx = VisualTestContext::from_window(other.into(), cx);
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.run_until_parked();
+        assert!(caret_repaints(&view.input, &mut cx) >= 5, "it blinks");
+
+        cx.deactivate_window();
+        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not behind another app");
+
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        let shown = cx.update(|window, cx| view.input.read(cx).show_cursor(window, cx));
+        assert!(shown, "the caret is back with its window");
+        assert!(caret_repaints(&view.input, &mut cx) >= 5, "and blinks again");
+
+        cx.update(|window, cx| window.blur(cx));
+        cx.run_until_parked();
+        assert_eq!(caret_repaints(&view.input, &mut cx), 0, "not once it loses its focus");
     }
 
     #[gpui::test]

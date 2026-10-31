@@ -169,7 +169,13 @@ struct ScrollbarStateInner {
 
 impl Default for ScrollbarState {
     fn default() -> Self {
-        let now = Instant::now();
+        Self::new(Instant::now())
+    }
+}
+
+impl ScrollbarState {
+    /// QUILL: a state that starts at `now` on the app's clock.
+    fn new(now: Instant) -> Self {
         Self(Rc::new(Cell::new(ScrollbarStateInner {
             hovered_axis: None,
             hovered_on_thumb: None,
@@ -546,7 +552,7 @@ impl ScrollbarState {
                     return;
                 }
                 inner.drag_update_scheduled = false;
-                inner.last_update = Instant::now();
+                inner.last_update = cx.background_executor().now();
                 state.set(inner);
                 cx.update(|_, cx| cx.notify(view)).ok();
             })
@@ -555,7 +561,7 @@ impl ScrollbarState {
 }
 
 impl ScrollbarStateInner {
-    fn with_drag_pos(&self, axis: Axis, pos: Point<Pixels>) -> Self {
+    fn with_drag_pos(&self, axis: Axis, pos: Point<Pixels>, now: Instant) -> Self {
         let mut state = *self;
         if axis.is_vertical() {
             state.drag_pos.y = pos.y;
@@ -564,7 +570,7 @@ impl ScrollbarStateInner {
         }
 
         state.dragged_axis = Some(axis);
-        state.last_update = Instant::now();
+        state.last_update = now;
         state.drag_update_scheduled = false;
         state.drag_update_generation = state.drag_update_generation.wrapping_add(1);
         state
@@ -586,12 +592,12 @@ impl ScrollbarStateInner {
         state
     }
 
-    fn with_hovered_on_thumb(&self, axis: Option<Axis>) -> Self {
+    fn with_hovered_on_thumb(&self, axis: Option<Axis>, now: Instant) -> Self {
         let mut state = *self;
         state.hovered_on_thumb = axis;
-        if self.is_scrollbar_visible() {
+        if self.is_scrollbar_visible(now) {
             if axis.is_some() {
-                state.last_scroll_time = Some(Instant::now());
+                state.last_scroll_time = Some(now);
             }
         }
         state
@@ -620,8 +626,8 @@ impl ScrollbarStateInner {
         state
     }
 
-    fn is_scrollbar_visible(&self) -> bool {
-        self.dragged_axis.is_some() || self.visibility.sample(Instant::now()).opacity > 0.0
+    fn is_scrollbar_visible(&self, now: Instant) -> bool {
+        self.dragged_axis.is_some() || self.visibility.sample(now).opacity > 0.0
     }
 }
 
@@ -1302,11 +1308,16 @@ impl Element for Scrollbar {
         });
 
         let state = window
-            .use_state(cx, |_, _| ScrollbarState::default())
+            .use_state(cx, |_, cx| {
+                ScrollbarState::new(cx.background_executor().now())
+            })
             .read(cx)
             .clone();
 
-        let now = Instant::now();
+        // QUILL: the app's clock, which the idle timer below waits on: the
+        // wall clock lagged the test clock, so the timer was armed again
+        // and again until two seconds of real time had passed.
+        let now = cx.background_executor().now();
         let base_theme = cx.theme();
         let mode = self.mode.unwrap_or(base_theme.scrollbar.mode());
         let motion = base_theme.scrollbar.motion();
@@ -1661,7 +1672,7 @@ impl Element for Scrollbar {
                                 if scroll_handle.offset() != state.get().last_scroll_offset {
                                     state.set(state.get().with_last_scroll(
                                         scroll_handle.offset(),
-                                        Some(Instant::now()),
+                                        Some(cx.background_executor().now()),
                                     ));
                                     cx.notify(view_id);
                                 }
@@ -1690,6 +1701,7 @@ impl Element for Scrollbar {
                                 state.set(state.get().with_drag_pos(
                                     axis,
                                     event.start_position - thumb_bounds.origin,
+                                    cx.background_executor().now(),
                                 ));
                             } else if state.get().dragged_axis != Some(axis) {
                                 return;
@@ -1704,13 +1716,14 @@ impl Element for Scrollbar {
                             }
                             if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
                                 scroll_handle.end_drag();
-                                state.set(state.get().with_unset_drag_pos(Instant::now()));
+                                let now = cx.background_executor().now();
+                                state.set(state.get().with_unset_drag_pos(now));
                             }
                             window.prevent_default();
                             cx.stop_propagation();
                             if event.phase == TouchPhase::Moved {
                                 state.notify_drag(
-                                    Instant::now(),
+                                    cx.background_executor().now(),
                                     max_fps_duration,
                                     view_id,
                                     window,
@@ -1740,7 +1753,8 @@ impl Element for Scrollbar {
                                         let pos = event.position - thumb_bounds.origin;
 
                                         scroll_handle.start_drag();
-                                        state.set(state.get().with_drag_pos(axis, pos));
+                                        let now = cx.background_executor().now();
+                                        state.set(state.get().with_drag_pos(axis, pos, now));
                                         // Active styling can change the inset or minimum length.
                                         // Keep the original grab point under the pointer on that frame.
                                         scroll_handle.set_offset(active_geometry.drag_offset(
@@ -1775,6 +1789,7 @@ impl Element for Scrollbar {
                         let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
 
                         move |event: &MouseMoveEvent, _, window, cx| {
+                            let now = cx.background_executor().now();
                             let mut notify = false;
                             // When is hover to show mode or it was visible,
                             // we need to update the hovered state and increase the last_scroll_time.
@@ -1783,10 +1798,10 @@ impl Element for Scrollbar {
                             let bar_hovered = bar_hitbox.is_hovered(window);
                             if bar_hovered && need_hover_to_update {
                                 let hover_changed = state.get().hovered_axis != Some(axis);
-                                state.set(state.get().with_hovered(Some(axis), Instant::now()));
+                                state.set(state.get().with_hovered(Some(axis), now));
                                 notify |= hover_changed;
                             } else if state.get().hovered_axis == Some(axis) {
-                                state.set(state.get().with_hovered(None, Instant::now()));
+                                state.set(state.get().with_hovered(None, now));
                                 notify = true;
                             }
 
@@ -1796,12 +1811,12 @@ impl Element for Scrollbar {
                                 && thumb_bounds.contains(&event.position)
                             {
                                 if state.get().hovered_on_thumb != Some(axis) {
-                                    state.set(state.get().with_hovered_on_thumb(Some(axis)));
+                                    state.set(state.get().with_hovered_on_thumb(Some(axis), now));
                                     notify = true;
                                 }
                             } else {
                                 if state.get().hovered_on_thumb == Some(axis) {
-                                    state.set(state.get().with_hovered_on_thumb(None));
+                                    state.set(state.get().with_hovered_on_thumb(None, now));
                                     notify = true;
                                 }
                             }
@@ -1823,13 +1838,7 @@ impl Element for Scrollbar {
                                     notify = true;
                                 }
                                 if notify {
-                                    state.notify_drag(
-                                        Instant::now(),
-                                        max_fps_duration,
-                                        view_id,
-                                        window,
-                                        cx,
-                                    );
+                                    state.notify_drag(now, max_fps_duration, view_id, window, cx);
                                 }
                                 return;
                             }
@@ -1853,7 +1862,8 @@ impl Element for Scrollbar {
                                     scroll_handle.offset(),
                                 ));
                                 scroll_handle.end_drag();
-                                state.set(state.get().with_unset_drag_pos(Instant::now()));
+                                let now = cx.background_executor().now();
+                                state.set(state.get().with_unset_drag_pos(now));
                                 cx.notify(view_id);
                             }
                         }
@@ -2311,6 +2321,48 @@ mod tests {
         (cx, handle)
     }
 
+    /// QUILL: a scrolled bar hides `DEFAULT_IDLE` later on the app's clock,
+    /// and then nothing draws. It timed the idle by the wall clock while its
+    /// timer waited on the app's, so under the test clock the timer was
+    /// armed again and again, a redraw each time, until two seconds of real
+    /// time had passed.
+    #[gpui::test]
+    fn a_scrolled_bar_hides_on_the_app_clock_and_then_draws_nothing(cx: &mut TestAppContext) {
+        let handle = TestHandle::new(size(px(100.), px(500.)));
+        let (view, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollbarHarness {
+                handle,
+                axis: ScrollbarAxis::Vertical,
+                mode: ScrollbarMode::Scrolling,
+                scroll_viewport_size: None,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let draws = Rc::new(Cell::new(0));
+        let _watch = cx.update(|_, cx| {
+            let draws = draws.clone();
+            cx.observe(&view, move |_, _| draws.set(draws.get() + 1))
+        });
+        let wait = |cx: &mut VisualTestContext, secs: u64| {
+            for _ in 0..secs * 10 {
+                cx.executor().advance_clock(Duration::from_millis(100));
+                cx.run_until_parked();
+                cx.update(|window, cx| window.simulate_next_frame(cx));
+                cx.run_until_parked();
+            }
+        };
+
+        handle.set_offset(point(px(0.), px(-100.)));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        wait(cx, 3);
+        assert!(draws.get() > 0, "the bar hides after its idle");
+        draws.set(0);
+        wait(cx, 10);
+        assert_eq!(draws.get(), 0, "and nothing draws after that");
+    }
+
     #[gpui::test]
     fn thumb_drag_reaches_content_end_when_track_includes_padding(cx: &mut TestAppContext) {
         let handle = TestHandle::new(size(px(100.), px(160.)));
@@ -2691,7 +2743,9 @@ mod tests {
         let state = ScrollbarState::default();
         let now = Instant::now();
         let interval = Duration::from_secs_f64(1. / 30.);
-        let mut inner = state.get().with_drag_pos(Axis::Vertical, Point::default());
+        let mut inner = state
+            .get()
+            .with_drag_pos(Axis::Vertical, Point::default(), now);
         inner.last_update = now;
         state.set(inner);
         let update = |offset, elapsed, cx: &mut VisualTestContext| {

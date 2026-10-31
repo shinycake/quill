@@ -3,9 +3,7 @@
 //! inactive window, and in an active one without a frame other than the
 //! caret's. Each frame costs CPU and keeps the display link from idling,
 //! which holds a spare window-sized drawable on macOS. Over the demo;
-//! nothing reaches Telegram. The fixtures keep their scroll offset once
-//! open: the kit scrollbar times its fade by the wall clock, which the
-//! test clock outruns (`docs/decisions/idle-inactive-redraw.md`).
+//! nothing reaches Telegram.
 
 use crate::ui::app::QuillApp;
 use crate::ui::frame_clock::frames_over as frames;
@@ -102,7 +100,9 @@ fn a_dialog_draws_nothing_behind_another_app(cx: &mut TestAppContext) {
 
 /// A paused track's seek bars and player bar stay as they are, so nothing
 /// draws, in front or behind another app; the progress tick redrew them
-/// four times a second. Playing again moves them again.
+/// four times a second. Playing again, they move on every tick. The demo's
+/// sound keeps the test clock, so the note is paused where the demo put it
+/// however long the test takes to get there.
 #[gpui_kit::test]
 fn a_paused_track_draws_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx, "ready-voice-playing");
@@ -113,20 +113,26 @@ fn a_paused_track_draws_nothing(cx: &mut TestAppContext) {
         app.active_playback_id().is_some() && !app.playback.is_playing()
     });
     assert!(paused, "the voice note is paused, its bar still up");
-    let _ = frames(vcx, 1);
+    let at = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.playback.active_position_secs())
+    };
+    // The demo starts the 12 s note at 4.8 s.
+    assert_eq!(at(&app, vcx), Some(4.8));
+    let _ = frames(vcx, 5);
     let drawn = frames(vcx, 60);
     assert!(drawn.is_empty(), "drawn in front: {drawn:?}");
     vcx.deactivate_window();
-    let _ = frames(vcx, 1);
+    let _ = frames(vcx, 5);
     let drawn = frames(vcx, 60);
     assert!(drawn.is_empty(), "drawn behind another app: {drawn:?}");
+    assert_eq!(at(&app, vcx), Some(4.8), "still where it was paused");
 
     activate(vcx);
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
     assert!(app.read_with(vcx, |app, _| app.playback.is_playing()));
     let drawn = frames(vcx, 1);
-    assert!(
-        drawn.contains_key("conversation"),
-        "the seek bar moves: {drawn:?}"
-    );
+    let moves = drawn.get("conversation").copied().unwrap_or(0);
+    assert!(moves >= 4, "the seek bar moves every 250 ms: {drawn:?}");
+    let played = at(&app, vcx).unwrap_or(0.0) - 4.8;
+    assert!((played - 1.0).abs() < 1e-9, "a second played: {played}");
 }
