@@ -26,6 +26,7 @@ impl QuillApp {
         #[cfg(test)]
         quill::wake::isolate_current_thread();
         super::tooltip_timing::install(cx);
+        super::image_budget::start_sweeper(cx);
         quill::media_tools::warm_up();
         let chat = cx.new(SyntheticChat::new);
         // Send-key mode drives kit's newline-vs-submit behavior: plain
