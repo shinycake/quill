@@ -184,6 +184,13 @@ pub(super) struct PaintStamp {
     frame: u64,
 }
 
+impl PaintStamp {
+    /// Whether both were painted in the same slice (or both outside any).
+    pub(super) fn same_place(self, other: PaintStamp) -> bool {
+        self.scope == other.scope
+    }
+}
+
 /// A stamp for content painted now.
 pub(super) fn paint_stamp() -> PaintStamp {
     PaintStamp {
@@ -196,6 +203,21 @@ pub(super) fn paint_stamp() -> PaintStamp {
 /// slice may replay it), as of the start of the current frame.
 pub(super) fn may_still_show(stamp: PaintStamp) -> bool {
     may_be_visible(stamp.scope, stamp.frame)
+}
+
+/// Whether content painted at `stamp` is on screen now, between frames or
+/// while one paints: the latest frame drew it, or replays a slice render
+/// that did. ([`may_still_show`] also counts the frame before.)
+pub(super) fn shows_now(stamp: PaintStamp) -> bool {
+    let now = frame();
+    match stamp.scope {
+        None => stamp.frame >= now,
+        Some(id) => SLICES.with(|slices| {
+            let slices = slices.borrow();
+            let slice = slices.get(&id);
+            slice.is_some_and(|s| s.shown >= now && stamp.frame >= s.rendered)
+        }),
+    }
 }
 
 /// Whether an image used now in `scope`, last used there at `previous`,
@@ -996,8 +1018,8 @@ mod tests {
     }
 
     use super::{
-        Budget, IDLE_AFTER, begin_frame, idle_trim_due, may_be_visible, newly_shown, note_activity,
-        plan_eviction, slice_rendered, slice_shown,
+        Budget, IDLE_AFTER, PaintStamp, begin_frame, idle_trim_due, may_be_visible, newly_shown,
+        note_activity, plan_eviction, shows_now, slice_rendered, slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use super::{next_image_id, note_departures, replayable_slices, retired_may_show};
@@ -1109,6 +1131,37 @@ mod tests {
         slice_rendered(slice);
         begin_frame();
         assert!(!may_be_visible(Some(slice), used));
+    }
+
+    /// Between frames only the latest frame is on screen: what the frame
+    /// before drew and the latest did not (a closed panel) is gone.
+    #[test]
+    fn shows_now_is_the_latest_frame_or_the_slice_it_replays() {
+        let slice = EntityId::from((1_u64 << 32) | 17);
+        let first = begin_frame();
+        slice_rendered(slice);
+        let painted = |scope| PaintStamp {
+            scope,
+            frame: first,
+        };
+        assert!(shows_now(painted(None)) && shows_now(painted(Some(slice))));
+        begin_frame();
+        slice_shown(slice);
+        assert!(
+            !shows_now(painted(None)),
+            "the latest frame drew without it"
+        );
+        assert!(
+            may_be_visible(None, first),
+            "unlike at the start of a frame"
+        );
+        assert!(shows_now(painted(Some(slice))), "the slice replays it");
+        begin_frame();
+        slice_rendered(slice);
+        assert!(
+            !shows_now(painted(Some(slice))),
+            "rendered again without it"
+        );
     }
 
     #[test]

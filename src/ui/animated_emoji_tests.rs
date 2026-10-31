@@ -1,6 +1,7 @@
 //! UI tests on the `ready-animated-emoji` demo: a lone animated emoji is a
 //! sticker in its skin tone that plays once, rests, and plays again on a
-//! tap; leaving the chat forgets what played; custom emoji get their sizes.
+//! tap; leaving the chat forgets what played; custom emoji get their sizes;
+//! their clips close once no window shows them, and only then.
 
 use super::{message_emoji_media, play_head};
 use crate::ui::app::QuillApp;
@@ -9,7 +10,9 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{
+    AnyWindowHandle, AppContext, Entity, RenderImage, TestAppContext, VisualTestContext, px, size,
+};
 use quill::animated_emoji::EmojiMedia;
 use quill::ids::{ChatId, MessageId};
 use quill::state::HistoryMessage;
@@ -17,6 +20,7 @@ use quill::sticker_playback::FitzType;
 use quill::sticker_playback::player::DecodedFrames;
 use quill::telegram::envelope::MessageContent;
 use std::sync::Arc;
+use std::time::Duration;
 
 const CHAT: i64 = 11;
 /// The demo's first message (`demos/animated_emoji.rs`).
@@ -189,4 +193,223 @@ fn custom_emoji_messages_take_their_sizes(cx: &mut TestAppContext) {
             .expect("big custom emoji");
         assert_eq!(views.len(), count);
     }
+}
+
+/// Let `seconds` pass a second at a time, drawing nothing: the player's
+/// clock and the executor's move together, and timers due fire.
+fn idle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, seconds: u64) {
+    for _ in 0..seconds {
+        app.read_with(vcx, |app, _| {
+            app.playback.stickers.skip(Duration::from_secs(1));
+        });
+        vcx.executor().advance_clock(Duration::from_secs(1));
+        vcx.run_until_parked();
+    }
+}
+
+fn open_clips(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> usize {
+    app.read_with(vcx, |app, _| app.playback.stickers.engine().stats().clips)
+}
+
+fn hand_clips(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> usize {
+    app.read_with(vcx, |app, _| app.playback.stickers.clips_of(HAND_FILE))
+}
+
+/// Every clip open at `first` (`Player::first_frames`) still is, with the
+/// frames it had: none closed and opened again.
+fn assert_still_open(
+    app: &Entity<QuillApp>,
+    vcx: &VisualTestContext,
+    first: &[Option<std::time::Instant>],
+) {
+    let now = app.read_with(vcx, |app, _| app.playback.stickers.first_frames());
+    let gone: Vec<_> = first.iter().filter(|at| !now.contains(at)).collect();
+    assert!(gone.is_empty(), "closed and opened again: {gone:?}");
+}
+
+/// One frame of the main window.
+fn main_frame(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |_, cx| cx.notify());
+    vcx.update(|window, cx| window.render_frame(cx));
+}
+
+/// An image with `image`'s id, to ask the atlas about it once `image`
+/// itself is gone.
+fn atlas_probe(image: &RenderImage) -> RenderImage {
+    let mut probe = RenderImage::new(smallvec::SmallVec::from_buf([image::Frame::new(
+        image::RgbaImage::new(1, 1),
+    )]));
+    probe.id = image.id;
+    probe
+}
+
+/// The emoji at rest on the conversation's animation layer, with nothing
+/// drawn for longer than a clip may wait: on screen, they stay open, and
+/// through the next frames. The closer looks once a burst of frames, not
+/// at every frame.
+#[gpui_kit::test]
+fn emoji_at_rest_on_the_layer_stay_open_while_nothing_draws(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    // Played through: the lone emoji rest.
+    app.read_with(&vcx, |app, _| {
+        app.playback.stickers.skip(Duration::from_secs(2));
+    });
+    settle(&app, &mut vcx);
+    let open = open_clips(&app, &vcx);
+    assert!(open >= 3, "the emoji play: {open} clips");
+    let first = app.read_with(&vcx, |app, _| app.playback.stickers.first_frames());
+    idle(&app, &mut vcx, 10);
+    assert_eq!(open_clips(&app, &vcx), open, "on screen: open");
+    let looks = app.read_with(&vcx, |app, _| app.playback.stickers.looks());
+    for _ in 0..5 {
+        main_frame(&app, &mut vcx);
+        vcx.run_until_parked();
+    }
+    assert_still_open(&app, &vcx, &first);
+    let looked = app.read_with(&vcx, |app, _| app.playback.stickers.looks()) - looks;
+    assert!(looked <= 1, "the closer looked {looked} times in 5 frames");
+}
+
+/// The messages go while nothing else changes: the next frame shows none
+/// of their emoji, and no frame follows. Their clips close once due, and
+/// their frames leave the atlas and memory then: they used to wait for a
+/// frame to sweep them.
+#[gpui_kit::test]
+fn emoji_no_window_shows_close_and_free_their_frames_with_nothing_drawn(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    // The lone emoji show only in the messages (the chat list may show the
+    // custom ones too).
+    let frame = app
+        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .expect("a lone emoji's frame");
+    let probe = atlas_probe(&frame);
+    let freed = Arc::downgrade(&frame);
+    drop(frame);
+    assert!(vcx.update(|window, _| window.has_image_atlas_entry(&probe)));
+    let ids: Vec<String> = (FIRST_MESSAGE..FIRST_MESSAGE + 4)
+        .map(|id| id.to_string())
+        .collect();
+    receive(
+        &app,
+        &mut vcx,
+        &format!(
+            r#"{{"@type":"updateDeleteMessages","chat_id":{CHAT},"message_ids":[{}],"is_permanent":true,"from_cache":false}}"#,
+            ids.join(",")
+        ),
+    );
+    main_frame(&app, &mut vcx);
+    let drawn = crate::ui::image_budget::frame();
+    assert!(hand_clips(&app, &vcx) > 0);
+    idle(&app, &mut vcx, 8);
+    assert_eq!(crate::ui::image_budget::frame(), drawn, "nothing drew");
+    assert_eq!(hand_clips(&app, &vcx), 0, "closed with nothing drawn");
+    assert_eq!(freed.strong_count(), 0, "its frame left memory");
+    assert!(
+        !vcx.update(|window, _| window.has_image_atlas_entry(&probe)),
+        "and the atlas"
+    );
+}
+
+/// The demo chat moved to its own window (the main window leaves it),
+/// drawn there until its emoji play and rest.
+/// The demo session receives `json`.
+fn receive(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &str) {
+    app.update(vcx, |app, _| {
+        let sink: Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+        let session = app.demo_session.as_mut().expect("the demo session");
+        // `Session::apply` drops an envelope not newer than the last one.
+        let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
+        let owned = quill::telegram::client::copy_and_parse(json, &seq, &sink);
+        session.apply(owned.expect("the update parses"));
+    });
+}
+
+fn chat_in_window(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> AnyWindowHandle {
+    let main = vcx.update(|window, _| window.window_handle());
+    // Read: a window opens an unread chat at its read boundary, which the
+    // demo's history of four messages does not reach.
+    let last = FIRST_MESSAGE + 3;
+    receive(
+        app,
+        vcx,
+        &format!(
+            r#"{{"@type":"updateChatReadInbox","chat_id":{CHAT},"last_read_inbox_message_id":{last},"unread_count":0}}"#
+        ),
+    );
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_chat_in_new_window(ChatId(CHAT), window, cx)
+        });
+    });
+    vcx.run_until_parked();
+    let chat_window = vcx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main.window_id())
+        .expect("the chat window");
+    let draw = |vcx: &mut VisualTestContext| {
+        vcx.run_until_parked();
+        vcx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
+            .expect("the chat window draws");
+    };
+    for step in 0..4 {
+        draw(vcx);
+        app.read_with(vcx, |app, _| {
+            if step == 1 {
+                app.playback.stickers.skip(Duration::from_secs(2));
+            }
+            app.playback.stickers.settle();
+        });
+    }
+    draw(vcx);
+    chat_window
+}
+
+/// A chat window's emoji at rest stay open while the main window draws on
+/// without them: the main window's frames say nothing about that window.
+#[gpui_kit::test]
+fn a_chat_windows_emoji_at_rest_stay_open_while_the_main_window_draws(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let _chat_window = chat_in_window(&app, &mut vcx);
+    let open = open_clips(&app, &vcx);
+    let shown = app.read_with(&vcx, |app, _| {
+        let session = app.demo_session.as_ref().expect("the demo");
+        let history = session.histories.get(&CHAT).map(|h| h.messages.len());
+        let anchor = session.chats.get(&CHAT).and_then(|c| c.unread_anchor());
+        (history, anchor, app.playback.stickers.screen_stats())
+    });
+    assert!(
+        open >= 3,
+        "the emoji play in the chat window: {open} clips ({shown:?})"
+    );
+    let first = app.read_with(&vcx, |app, _| app.playback.stickers.first_frames());
+    for _ in 0..3 {
+        main_frame(&app, &mut vcx);
+    }
+    idle(&app, &mut vcx, 10);
+    assert_still_open(&app, &vcx, &first);
+}
+
+/// A chat window's emoji close once it closes, and their frames leave
+/// memory with nothing drawn after. (A main window that does not draw,
+/// minimized or covered, is `sticker_player::tests`: GPUI's test mode
+/// draws every window the app notifies.)
+#[gpui_kit::test]
+fn a_chat_windows_emoji_close_with_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let chat_window = chat_in_window(&app, &mut vcx);
+    assert!(hand_clips(&app, &vcx) > 0);
+    let frame = app
+        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .expect("a lone emoji's frame");
+    let freed = Arc::downgrade(&frame);
+    drop(frame);
+    vcx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::ui::actions::CloseWindow), cx);
+    })
+    .expect("the chat window closes");
+    vcx.run_until_parked();
+    idle(&app, &mut vcx, 8);
+    assert_eq!(hand_clips(&app, &vcx), 0, "closed with the window");
+    assert_eq!(freed.strong_count(), 0, "their frames left memory");
 }

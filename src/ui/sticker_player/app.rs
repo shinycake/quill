@@ -3,10 +3,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
-use super::{ClipSpec, DISPLAY, HeadId, StickerView, edge_for};
+use super::{CLOSE_SLACK, ClipSpec, DISPLAY, HeadId, StickerView, edge_for};
 use futures_channel::oneshot;
 use gpui_kit::*;
-use quill::ids::FileId;
+use quill::ids::{ChatId, FileId};
 use quill::local_path::sandboxed_display_path;
 use quill::locks::lock_or_recover;
 use quill::power_saving;
@@ -15,6 +15,7 @@ use quill::sticker_playback::{FitzType, Tint};
 use quill::telegram::envelope::{DicePhase, StickerFormat};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::future::Future;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -216,7 +217,9 @@ impl QuillApp {
         };
         let edge = key.edge;
         let player = &self.playback.stickers;
-        if !player.prepare(&spec, edge) {
+        let ready = player.prepare(&spec, edge);
+        self.ensure_sticker_closer(cx);
+        if !ready {
             return None;
         }
         let view = StickerView {
@@ -227,6 +230,7 @@ impl QuillApp {
             edge,
             max_fps: ask.max_fps,
             active: self.frame.window_active.get() || super::super::frame_clock::assume_active(),
+            window: self.windows.scope,
         };
         if super::super::anim_layer::current().is_none() {
             let fps = view.fps();
@@ -254,6 +258,60 @@ impl QuillApp {
     #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn sticker_failed(&self, ask: ViewAsk) -> bool {
         self.playback.stickers.failed_key(&ask.key())
+    }
+
+    /// A window starts a frame, before anything in it renders (`None`: the
+    /// main window).
+    pub(in crate::ui) fn sticker_frame_starts(
+        &self,
+        window: Option<ChatId>,
+        cx: &mut Context<QuillApp>,
+    ) {
+        self.playback.stickers.frame_starts(window);
+        self.ensure_sticker_closer(cx);
+    }
+
+    /// Starts the task closing clips once no window shows them, while any
+    /// is open. Before it, clips closed only while some view painted, so
+    /// with nothing animating (the emoji panel closed over a chat of text)
+    /// every clip stayed open with its frames and canvas. It looks between
+    /// frames, after the next frame of any window or when the next clip
+    /// off screen is due (each plus `CLOSE_SLACK`), and ends once no clip
+    /// is open.
+    fn ensure_sticker_closer(&self, cx: &mut Context<QuillApp>) {
+        let player = &self.playback.stickers;
+        if player.closer.get() || !player.has_clips() {
+            return;
+        }
+        player.closer.set(true);
+        cx.spawn(async move |this, cx| {
+            loop {
+                let wait = this.update(cx, |this, cx| {
+                    let player = this.playback.stickers.clone();
+                    let closed = player.close_stale(player.now());
+                    drop_frames(closed.frames, cx);
+                    player.trace_closed(closed.clips);
+                    if !closed.open {
+                        player.closer.set(false);
+                        return None;
+                    }
+                    Some((closed.next, player.next_frame()))
+                });
+                let Ok(Some((due, next_frame))) = wait else {
+                    break;
+                };
+                let executor = cx.background_executor().clone();
+                let after_frame = async {
+                    let _ = next_frame.await;
+                    executor.timer(CLOSE_SLACK).await;
+                };
+                match due {
+                    Some(due) => first_of(after_frame, executor.timer(due + CLOSE_SLACK)).await,
+                    None => after_frame.await,
+                }
+            }
+        })
+        .detach();
     }
 
     /// Starts the task that redraws the app when a clip opened or its first
@@ -586,4 +644,33 @@ impl QuillApp {
         self.sticker_view(ViewAsk::sticker(id, format, head, mode, side), cx)?
             .frame_now()
     }
+}
+
+/// Free the frames of clips the closer closed. No window shows them, so
+/// each one nothing else holds leaves every window's atlas and memory now:
+/// with no frame drawn, the sweep of retired images (`image_budget::sweep`)
+/// never runs. One still held elsewhere waits for that sweep.
+fn drop_frames(frames: Vec<Arc<RenderImage>>, cx: &mut App) {
+    let mut held = Vec::new();
+    for image in frames {
+        if Arc::strong_count(&image) == 1 {
+            cx.drop_image(image, None);
+        } else {
+            held.push(image);
+        }
+    }
+    super::super::image_budget::retire_all(held);
+}
+
+/// Wait until `a` or `b` is done.
+async fn first_of(a: impl Future<Output = ()>, b: impl Future<Output = ()>) {
+    let (mut a, mut b) = (std::pin::pin!(a), std::pin::pin!(b));
+    std::future::poll_fn(|cx| {
+        if a.as_mut().poll(cx).is_ready() || b.as_mut().poll(cx).is_ready() {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    })
+    .await;
 }

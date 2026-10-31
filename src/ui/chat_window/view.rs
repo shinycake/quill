@@ -127,6 +127,7 @@ impl Render for ChatWindowView {
             if moved {
                 app.schedule_chat_windows_save(cx);
             }
+            app.sticker_frame_starts(Some(chat_id), cx);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
             outer

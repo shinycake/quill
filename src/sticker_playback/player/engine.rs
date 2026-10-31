@@ -2,7 +2,7 @@
 //! frames asked for and the frames drawn.
 #![deny(clippy::indexing_slicing)]
 
-use super::store::StoredFrame;
+use super::store::{Store, StoredFrame};
 use super::{Cancel, ClipInfo, ClipKey, ClipState, Origin, Rendered, Timeline};
 use crate::locks::lock_or_recover;
 use std::collections::{HashMap, VecDeque};
@@ -40,8 +40,7 @@ pub(super) struct Clip {
     /// Set until a worker takes it to open the clip.
     pub(super) origin: Option<Origin>,
     pub(super) state: ClipState,
-    pub(super) store: HashMap<u32, StoredFrame>,
-    pub(super) store_bytes: usize,
+    pub(super) store: Store,
     /// Frames decoded up front live only in the store: dropping it closes
     /// the clip.
     pub(super) store_only: bool,
@@ -111,6 +110,10 @@ pub(super) struct State {
     pub(super) rendered: Vec<Rendered>,
     /// Clips each worker must drop.
     pub(super) closed: Vec<Vec<ClipKey>>,
+    /// Stores of closed clips and evicted ones, for a worker to free
+    /// outside the lock: each block a large allocation going back to the
+    /// system, which the UI thread (closing clips) should not wait for.
+    pub(super) freed: Vec<Store>,
     pub(super) stop: bool,
     pub(super) budget: usize,
     pub(super) store_bytes: usize,
@@ -151,6 +154,7 @@ impl Engine {
                 clips: HashMap::new(),
                 rendered: Vec::new(),
                 closed: vec![Vec::new(); workers],
+                freed: Vec::new(),
                 stop: false,
                 budget,
                 store_bytes: 0,
@@ -215,8 +219,7 @@ impl Engine {
                 worker,
                 origin: Some(origin),
                 state: ClipState::Opening,
-                store: HashMap::new(),
-                store_bytes: 0,
+                store: Store::default(),
                 store_only,
                 source_bytes: 0,
                 // Its first frame, for the still a view waits on.
@@ -362,7 +365,8 @@ impl State {
         let Some(clip) = self.clips.remove(key) else {
             return;
         };
-        self.store_bytes = self.store_bytes.saturating_sub(clip.store_bytes);
+        self.store_bytes = self.store_bytes.saturating_sub(clip.store.bytes());
+        self.freed.push(clip.store);
         clip.cancel
             .flag
             .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -400,7 +404,7 @@ impl State {
                 .filter(|(key, clip)| {
                     *key != keep
                         && !clip.busy
-                        && clip.store_bytes > 0
+                        && clip.store.bytes() > 0
                         && now.saturating_duration_since(clip.used) >= ON_SCREEN
                 })
                 .min_by_key(|(_, clip)| clip.used)
@@ -412,32 +416,41 @@ impl State {
             if store_only {
                 self.close(&key);
             } else if let Some(clip) = self.clips.get_mut(&key) {
-                self.store_bytes = self.store_bytes.saturating_sub(clip.store_bytes);
-                clip.store.clear();
-                clip.store_bytes = 0;
+                let store = std::mem::take(&mut clip.store);
+                self.store_bytes = self.store_bytes.saturating_sub(store.bytes());
+                self.freed.push(store);
             }
         }
     }
 
-    /// Stores `frame` as `key`'s frame `index` if it fits the budget (a
-    /// store-only clip's frames always go in: they are its source).
-    pub(super) fn store(&mut self, key: &ClipKey, index: u32, frame: StoredFrame) {
-        let bytes = frame.bytes();
-        let Some(store_only) = self.clips.get(key).map(|clip| clip.store_only) else {
-            return;
-        };
-        if !self.make_room(bytes, key) && !store_only {
+    /// Stores `packed` as `key`'s frame `index` if it fits the budget.
+    pub(super) fn store(&mut self, key: &ClipKey, index: u32, packed: &[u8]) {
+        if !self.clips.contains_key(key) || !self.make_room(packed.len(), key) {
             return;
         }
         let Some(clip) = self.clips.get_mut(key) else {
             return;
         };
-        if let Some(old) = clip.store.insert(index, frame) {
-            clip.store_bytes = clip.store_bytes.saturating_sub(old.bytes());
+        let before = clip.store.bytes();
+        clip.store.insert(index, packed);
+        let added = clip.store.bytes().saturating_sub(before);
+        self.store_bytes = self.store_bytes.saturating_add(added);
+    }
+
+    /// Gives a clip decoded up front its frames, `store`: they are its
+    /// source, so they go in whatever the budget.
+    pub(super) fn install(&mut self, key: &ClipKey, store: Store) {
+        self.make_room(store.bytes(), key);
+        let Some(clip) = self.clips.get_mut(key) else {
+            self.freed.push(store);
+            return;
+        };
+        self.store_bytes = self.store_bytes.saturating_add(store.bytes());
+        let old = std::mem::replace(&mut clip.store, store);
+        if old.bytes() > 0 {
             self.store_bytes = self.store_bytes.saturating_sub(old.bytes());
+            self.freed.push(old);
         }
-        clip.store_bytes = clip.store_bytes.saturating_add(bytes);
-        self.store_bytes = self.store_bytes.saturating_add(bytes);
     }
 
     /// The next job for worker `me`: a clip to open, else the soonest
@@ -470,7 +483,7 @@ impl State {
         clip.busy = true;
         clip.drawing = Some(index);
         clip.served = served;
-        let stored = clip.store.get(&index).cloned();
+        let stored = clip.store.get(index);
         Some(Job::Frame { key, index, stored })
     }
 }
