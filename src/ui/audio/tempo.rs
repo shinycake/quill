@@ -6,8 +6,9 @@
 //! by half. The slice start follows `block * hop * speed`, nudged within a
 //! +-12 ms window to where it best continues the previous slice (normalised
 //! cross-correlation), which keeps voices free of the warble plain
-//! overlap-add produces. At 1x the natural continuation always wins, so the
-//! output is the input.
+//! overlap-add produces. The natural continuation wins whenever it is in
+//! the window, so it is taken without a search; at 1x it always is, so 1x
+//! searches nothing and the output is the input within f32 rounding.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -71,6 +72,9 @@ pub(super) struct Tempo<S: Source> {
     /// Start of the previous slice.
     prev: Option<usize>,
     done: bool,
+    /// Tests: positions the search has scored.
+    #[cfg(test)]
+    tried: usize,
 }
 
 impl<S: Source> Tempo<S> {
@@ -99,6 +103,8 @@ impl<S: Source> Tempo<S> {
             nominal: 0.0,
             prev: None,
             done: false,
+            #[cfg(test)]
+            tried: 0,
         }
     }
 
@@ -171,18 +177,41 @@ impl<S: Source> Tempo<S> {
             return 0;
         };
         let natural = prev + self.hs;
+        // Read as far ahead as a search could look even when none runs: what
+        // is read is the player's position (`engine::Counted`) and a video's
+        // audio clock.
         self.fill_to(center + self.delta + self.n + self.hs);
         let low = center.saturating_sub(self.delta);
         let high = center + self.delta;
-        // The natural continuation is the best possible match (ties go to
-        // it), so at 1x nothing else can win. Out of the window (the
-        // stretch has pulled away from it) it simply isn't a candidate.
-        let in_window = (low..=high).contains(&natural);
-        let (mut best, mut best_score) = if in_window {
-            (natural, 1.0)
-        } else {
-            (center, f32::MIN)
-        };
+        // In the window the natural continuation wins unsearched: it counts
+        // as a perfect match (1, the most a normalised correlation scores)
+        // and another position must beat it by 1e-4, which f32 rounding
+        // cannot add below about 83.7 kHz (docs/decisions/tempo-1x.md;
+        // tests run the search anyway and check it agrees). At 1x it stays
+        // in the window, so 1x never searches; out of it (the stretch has
+        // pulled away) the best match within the window wins.
+        if (low..=high).contains(&natural) {
+            #[cfg(test)]
+            assert_eq!(self.best_match(natural, low, high, (natural, 1.0)), natural);
+            return natural;
+        }
+        #[cfg(test)]
+        {
+            self.tried += (high - low) / 2 + 1;
+        }
+        self.best_match(natural, low, high, (center, f32::MIN))
+    }
+
+    /// The even step from `low` to `high` whose slice best continues the
+    /// one at `natural`, or `best` unless a position beats its score by
+    /// 1e-4. `natural` itself is never scored.
+    fn best_match(
+        &self,
+        natural: usize,
+        low: usize,
+        high: usize,
+        (mut best, mut best_score): (usize, f32),
+    ) -> usize {
         let mut candidate = low;
         while candidate <= high {
             if candidate != natural {
@@ -294,3 +323,7 @@ impl<S: Source> Source for Tempo<S> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "tempo_tests.rs"]
+mod tests;
