@@ -89,7 +89,7 @@ Quill runs on your computer and keeps its data there. The local database is encr
 
 ## Use Quill with an AI agent
 
-Agent access lets an AI agent on your computer, such as Claude Code, Codex, Claude Desktop or Cursor, use your Telegram account through the Quill that is already running. It's off by default, and while it's off the only trace is one switch in Settings > Advanced. Turn it on in Settings > Advanced > Agent access. That page shows the MCP setup lines with this Quill's real path, and a setup prompt you can paste into any agent. The lines below assume Quill is where the one-line installer puts it.
+Agent access lets an AI agent on your computer, such as Claude Code, Codex, Claude Desktop or Cursor, use your Telegram account through the Quill that is already running. It's off by default, and while it's off the only trace is one switch in Settings > Advanced. Turn it on in Settings > Advanced > Agent access. That page shows setup commands with the path of your installed Quill, and a setup prompt you can paste into any agent. The lines below assume Quill is where the one-line installer puts it. On a Mac where /Applications isn't writable, the installer uses ~/Applications instead.
 
 macOS (Terminal):
 
@@ -118,7 +118,7 @@ codex mcp add quill -- ~/.local/bin/quill mcp                 # Codex
 ~/.local/bin/quill agent install-skill                        # Quill skill for Claude Code
 ```
 
-`agent connect` merges Quill into the app's MCP config after a backup. Other MCP apps take Quill's executable with the argument `mcp` as a stdio server. Scripts and agents that don't speak MCP use the same tools from the command line: `quill agent status`, `quill agent read --chat saved`, `quill agent send --chat @some_bot --text /start`, or `quill agent call <tool> --json '{…}'` for any tool. `quill agent --help` lists every command and exit code. On Windows, run these with `quill-cli.exe` instead of `quill.exe`. `quill.exe` is a windowed program, so a terminal doesn't wait for it or get its exit code, and `quill-cli.exe` does both.
+`agent connect` merges Quill into the app's MCP config after a backup. Any other MCP app can run Quill as a stdio server: the executable, with the argument `mcp`. Scripts and agents that don't speak MCP use the same tools from the command line: `quill agent status`, `quill agent read --chat saved`, `quill agent send --chat @some_bot --text /start`, or `quill agent call <tool> --json '{…}'` for any tool. `quill agent --help` lists every command and exit code. On Windows, run these with `quill-cli.exe` instead of `quill.exe`. `quill.exe` is a windowed program, so a terminal doesn't wait for it or get its exit code, and `quill-cli.exe` does both.
 
 Agents can read the chats you grant (by default Saved Messages, bots and your own channels), search them, send and edit messages, react, and manage drafts and folders. They can also make raw TDLib calls under the same grants and, if you turn on a second switch, click and type in Quill's window. Quill asks you before an agent goes outside its grants. Every send shows in an activity log, can wait for your click, and is paced to stay inside Telegram's limits.
 
