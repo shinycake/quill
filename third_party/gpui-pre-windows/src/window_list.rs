@@ -5,14 +5,14 @@ use std::ops::Deref;
 pub(crate) fn for_each_after_unlock<Guard, Window, Handle>(
     windows: Guard,
     handle: impl Fn(&Window) -> Handle,
-    mut send: impl FnMut(Handle),
+    send: impl FnMut(Handle),
 ) where
     Guard: Deref,
     Guard::Target: AsRef<[Window]>,
 {
-    for window in (*windows).as_ref() {
-        send(handle(window));
-    }
+    let handles: Vec<Handle> = (*windows).as_ref().iter().map(handle).collect();
+    drop(windows);
+    handles.into_iter().for_each(send);
 }
 
 #[cfg(test)]

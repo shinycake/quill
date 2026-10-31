@@ -316,3 +316,23 @@ Added in 2026, listed in `docs/decisions/no-crash-audit.md` section 4:
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
+
+## Device-loss recovery can't deadlock with a window opening or closing
+
+Added in 2026:
+
+- `src/window_list.rs` (new, std-only; unit tests run with
+  `scripts/test-window-list.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  `for_each_after_unlock` copies a handle out of each window, drops the list's
+  guard, then calls back with each handle.
+- `src/platform.rs`: `handle_gpu_device_lost` sends through it. Upstream held
+  `all_windows.read()` across `SendMessageW`, which waits for the UI thread,
+  while `open_window` and `close_one_window` block the UI thread in
+  `write()` without pumping messages, so neither thread could move. Every
+  other holder of the list either runs on the UI thread or makes only calls
+  that do not wait for it (`PostMessageW`, `IsWindowVisible`, `IsIconic`,
+  `RedrawWindow` with `RDW_INVALIDATE` alone).
+- `src/gpui_windows.rs`: declares the new module.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.

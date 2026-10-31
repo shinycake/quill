@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // the vsync thread skips idle windows and sleeps while all are idle; a lost
-// GPU device or a failed DirectX start no longer panics.
+// GPU device or a failed DirectX start no longer panics, and recovery sends
+// to windows without holding the window list.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
@@ -1892,8 +1893,8 @@ fn handle_gpu_device_lost(
     }
     if let Some(all_windows) = all_windows.upgrade() {
         for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
-            // SAFETY: `lparam` points at `directx_devices`, which outlives this synchronous call
-            // (see `handle_device_lost`). A handle that is gone only makes the call fail.
+            // SAFETY: `lparam` points at `directx_devices`, which outlives this synchronous call.
+            // A handle that is gone only makes the call fail.
             unsafe {
                 SendMessageW(
                     window,
