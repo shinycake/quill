@@ -198,6 +198,10 @@
 constexpr auto PIXEL_BITS = 8;   //must be at least 6 bits!
 constexpr auto ONE_PIXEL = (1 << PIXEL_BITS);
 
+//QUILL: an outline with this many points looks its cells up by column range within a row.
+constexpr uint32_t BUSY_OUTLINE_PTS = 1024;
+constexpr auto ROW_BUCKETS = 64;
+
 struct Band
 {
     int32_t min, max;
@@ -239,6 +243,8 @@ struct RleWorker
 
     SwCell** yCells;
     int32_t yCnt;
+    int32_t rowBuckets;  //QUILL: cell lists per row.
+    int32_t xShift;      //QUILL: column to list.
 
     bool invalid;
     bool antiAlias;
@@ -374,15 +380,18 @@ static void _sweep(RleWorker& rw)
     for (int y = 0; y < rw.yCnt; ++y) {
         auto cover = 0;
         auto x = 0;
-        auto cell = rw.yCells[y];
 
-        while (cell) {
-            if (cell->x > x && cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), cell->x - x);
-            cover += cell->cover;
-            auto area = cover * (ONE_PIXEL * 2) - cell->area;
-            if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
-            x = cell->x + 1;
-            cell = cell->next;
+        for (auto list = 0; list < rw.rowBuckets; ++list) {
+            auto cell = rw.yCells[y * rw.rowBuckets + list];
+
+            while (cell) {
+                if (cell->x > x && cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), cell->x - x);
+                cover += cell->cover;
+                auto area = cover * (ONE_PIXEL * 2) - cell->area;
+                if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
+                x = cell->x + 1;
+                cell = cell->next;
+            }
         }
 
         if (cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), rw.cellXCnt - x);
@@ -395,7 +404,7 @@ static SwCell* _findCell(RleWorker& rw)
     auto x = rw.cellPos.x;
     if (x > rw.cellXCnt) x = rw.cellXCnt;
 
-    auto pcell = &rw.yCells[rw.cellPos.y];
+    auto pcell = &rw.yCells[rw.cellPos.y * rw.rowBuckets + ((x + 1) >> rw.xShift)];
 
     while(true) {
         auto cell = *pcell;
@@ -414,6 +423,21 @@ static SwCell* _findCell(RleWorker& rw)
     *pcell = cell;
 
     return cell;
+}
+
+
+//QUILL: gives a shape that overflows the pool more cells, so that it does not walk
+//its whole outline again for each of many bands.
+static bool _growCells(RleWorker& rw, SwCellPool* pool)
+{
+    constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
+    if (pool->size > MAX_POOL_SIZE / 4) return false;
+    pool->size *= 4;
+    tvg::free(pool->buffer);
+    pool->buffer = tvg::malloc<SwCell>(pool->size);
+    rw.buffer = pool->buffer;
+    rw.bufferSize = pool->size;
+    return true;
 }
 
 
@@ -806,6 +830,13 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
     rw.bandSize = rw.bufferSize / (sizeof(SwCell) * 2);
     rw.bandShoot = 0;
     rw.antiAlias = antiAlias;
+    rw.rowBuckets = 1;
+    rw.xShift = 31;
+    if (outline->out.count >= BUSY_OUTLINE_PTS) {
+        rw.rowBuckets = ROW_BUCKETS;
+        rw.xShift = 0;
+        while (((rw.cellXCnt + 1) >> rw.xShift) >= ROW_BUCKETS) ++rw.xShift;
+    }
 
     if (!rle) rw.rle = new SwRle;
     else rw.rle = rle;
@@ -838,7 +869,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             rw.yCells = reinterpret_cast<SwCell**>(rw.buffer);
             rw.yCnt = band->max - band->min;
 
-            int cellStart = sizeof(SwCell*) * (int)rw.yCnt;
+            auto listCnt = rw.yCnt * rw.rowBuckets;
+            int cellStart = sizeof(SwCell*) * listCnt;
             int cellMod = cellStart % sizeof(SwCell);
 
             if (cellMod > 0) cellStart += sizeof(SwCell) - cellMod;
@@ -851,7 +883,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             rw.maxCells = cellsMax - rw.cells;
             if (rw.maxCells < 2) goto reduce_bands;
 
-            for (int y = 0; y < rw.yCnt; ++y)
+            for (int y = 0; y < listCnt; ++y)
                 rw.yCells[y] = nullptr;
 
             rw.cellsCnt = 0;
@@ -867,6 +899,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             }
 
         reduce_bands:
+            if (_growCells(rw, cellPool)) continue;  //QUILL: this band again, with room.
+
             /* render pool overflow: we will reduce the render band by half */
             auto bottom = band->min;
             auto top = band->max;

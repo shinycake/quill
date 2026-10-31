@@ -229,7 +229,7 @@ struct LottieMask
     LottiePathSet pathset;
     LottieFloat expand = 0.0f;
     LottieOpacity opacity = 255;
-    MaskMethod method;
+    MaskMethod method = MaskMethod::None;  //QUILL: the mode is optional in the file.
     bool inverse = false;
 };
 
@@ -301,11 +301,11 @@ struct LottieObject
 struct LottieGlyph
 {
     Array<LottieObject*> children;   //glyph shapes.
-    float width;
+    float width = 0.0f;  //QUILL: optional in the file, as is the size.
     char* code = nullptr;
     char* family = nullptr;
     char* style = nullptr;
-    uint16_t size;
+    uint16_t size = 0;
     uint8_t len;
 
     bool prepare()

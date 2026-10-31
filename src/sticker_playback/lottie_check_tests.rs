@@ -282,6 +282,17 @@ fn modifiers_in_a_list_multiply_the_paths_before_them() {
 }
 
 #[test]
+fn an_offset_multiplies_more_than_a_rounded_corner() {
+    let stacked = |kind: &str| {
+        let mut shapes = vec![json!({"ty": "rc"})];
+        shapes.extend(vec![json!({"ty": kind}); 6]);
+        with_shapes(json!(shapes))
+    };
+    assert_eq!(check(&stacked("rd")), Ok(()));
+    assert_eq!(check(&stacked("op")), Err(Malformed::TooComplex));
+}
+
+#[test]
 fn a_zigzag_multiplies_by_its_ridges() {
     let ridges = |count| json!({"ty": "zz", "r": {"k": count}});
     let rect = json!({"ty": "rc"});

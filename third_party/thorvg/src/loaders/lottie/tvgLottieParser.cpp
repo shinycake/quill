@@ -1180,7 +1180,7 @@ void LottieParser::parseChars(Array<LottieGlyph*>& glyphs)
         auto glyph = new LottieGlyph;
         while (auto key = nextObjectKey()) {
             if (KEY_AS("ch")) glyph->code = getStringCopy();
-            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(getFloat());
+            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(tvg::clamp(getFloat(), 0.0f, 65535.0f));  //QUILL: file values can be out of range.
             else if (KEY_AS("style")) glyph->style = getStringCopy();
             else if (KEY_AS("w")) glyph->width = getFloat();
             else if (KEY_AS("fFamily")) glyph->family = getStringCopy();

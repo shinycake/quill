@@ -574,9 +574,11 @@ static inline T lerp(const T &start, const T &end, float t)
     return static_cast<T>(start + (end - start) * t);
 }
 
-static inline uint8_t lerp(const uint8_t& start, const uint8_t& end, float t)
+//QUILL: a specialization, so calls that name the type get the clamp too. t comes from a file.
+template <>
+inline uint8_t lerp<uint8_t>(const uint8_t& start, const uint8_t& end, float t)
 {
-    return static_cast<uint8_t>(clamp(start + (end - start) * t, 0.0f, 255.0f));  //QUILL: t comes from a file.
+    return static_cast<uint8_t>(clamp(start + (end - start) * t, 0.0f, 255.0f));
 }
 
 static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)

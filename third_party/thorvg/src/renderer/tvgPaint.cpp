@@ -31,6 +31,15 @@
 /* Internal Class Implementation                                        */
 /************************************************************************/
 
+//QUILL: a transform from a file can send a point past an int. A NaN goes to the lower end.
+static int32_t _toInt(float v)
+{
+    constexpr auto LIMIT = 2147483520.0f;  //the largest float under 2^31.
+    if (!(v > -LIMIT)) return static_cast<int32_t>(-LIMIT);
+    if (v > LIMIT) return static_cast<int32_t>(LIMIT);
+    return static_cast<int32_t>(nearbyint(v));
+}
+
 #define PAINT_METHOD(ret, METHOD) \
     switch (paint->type()) { \
         case Type::Shape: ret = to<ShapeImpl>(paint)->METHOD; break; \
@@ -110,10 +119,10 @@ static bool _compFastTrack(RenderMethod* renderer, Paint* cmpTarget, const Matri
             if (v1.x > v2.x) std::swap(v1.x, v2.x);
             if (v1.y > v2.y) std::swap(v1.y, v2.y);
 
-            after.xMin = static_cast<int32_t>(nearbyint(v1.x));
-            after.yMin = static_cast<int32_t>(nearbyint(v1.y));
-            after.xMax = static_cast<int32_t>(nearbyint(v2.x));
-            after.yMax = static_cast<int32_t>(nearbyint(v2.y));
+            after.xMin = _toInt(v1.x);
+            after.yMin = _toInt(v1.y);
+            after.xMax = _toInt(v2.x);
+            after.yMax = _toInt(v2.y);
 
             if (after.xMax < after.xMin) after.xMax = after.xMin;
             if (after.yMax < after.yMin) after.yMax = after.yMin;

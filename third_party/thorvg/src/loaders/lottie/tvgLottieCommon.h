@@ -83,21 +83,22 @@ struct ColorStop
 
 struct TextDocument
 {
+    //QUILL: every field here is optional in the file.
     char* text = nullptr;
-    float height;
-    float shift;
-    RGB32 color;
+    float height = 0.0f;
+    float shift = 0.0f;
+    RGB32 color{};
     struct {
-        Point pos;
+        Point pos{};
         Point size{};
     } bbox;
     struct {
-        RGB32 color;
-        float width;
+        RGB32 color{};
+        float width = 0.0f;
         bool below = false;
     } stroke;
     char* name = nullptr;
-    float size;
+    float size = 0.0f;
     float tracking = 0.0f;
     float justify = 0.0f;    //horizontal alignment
     uint8_t caps = 0;        //0: Regular, 1: AllCaps, 2: SmallCaps
@@ -135,10 +136,11 @@ struct AssetSrc
 
 static inline RGB32 lerp(const RGB32& s, const RGB32& e, float t)
 {
+    //QUILL: clamped as a float, since t comes from a file.
     return {
-        tvg::clamp((int32_t)(s.r + (e.r - s.r) * t), (int32_t)0, (int32_t)255),
-        tvg::clamp((int32_t)(s.g + (e.g - s.g) * t), (int32_t)0, (int32_t)255),
-        tvg::clamp((int32_t)(s.b + (e.b - s.b) * t), (int32_t)0, (int32_t)255)
+        (int32_t)tvg::clamp(s.r + (e.r - s.r) * t, 0.0f, 255.0f),
+        (int32_t)tvg::clamp(s.g + (e.g - s.g) * t, 0.0f, 255.0f),
+        (int32_t)tvg::clamp(s.b + (e.b - s.b) * t, 0.0f, 255.0f)
     };
 }
 

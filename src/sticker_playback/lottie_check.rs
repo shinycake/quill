@@ -36,6 +36,9 @@ const SHAPE_WORK: u64 = 64;
 const OFFSCREEN_WORK: u64 = 1024;
 /// How many plain paints a dashed stroke counts as.
 const DASHED_PAINTS: u64 = 16;
+/// How many times an offset can multiply a path's points. ThorVG holds
+/// its curve splitting to this.
+const OFFSET_COPIES: u64 = 9;
 /// The highest layer kind Lottie defines.
 const MAX_LAYER_KIND: u64 = 15;
 /// The layer kind that shows a precomp.
@@ -393,7 +396,11 @@ fn shape_list(shapes: &[Value], depth: usize) -> Result<u64, Malformed> {
                 copies = copies.saturating_mul(count(shape, "r")? * 2 + 2);
                 continue;
             }
-            Some("rd" | "op" | "pb") => {
+            Some("op") => {
+                copies = copies.saturating_mul(OFFSET_COPIES);
+                continue;
+            }
+            Some("rd" | "pb") => {
                 copies = copies.saturating_mul(2);
                 continue;
             }

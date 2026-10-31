@@ -36,10 +36,11 @@ static inline float _sideToRotate(int32_t s)
     return (MATH_PI2 - float(s) * MATH_PI);
 }
 
-static inline bool _tiny(const Point& pt)
+static constexpr float TINY_STEP = 2.0f / 64.0f;
+
+static inline bool _tiny(const Point& pt, float limit = TINY_STEP)
 {
-    constexpr float EPSILON = 2.0f / 64.0f;
-    return fabsf(pt.x) < EPSILON && fabsf(pt.y) < EPSILON;
+    return fabsf(pt.x) < limit && fabsf(pt.y) < limit;
 }
 
 static inline float _mean(float angle1, float angle2)
@@ -60,7 +61,7 @@ static void _rotate(Point& pt, float radian)
 static void _growBorder(SwStrokeBorder* border, uint32_t newPts)
 {
     if (border->pts.count + newPts <= border->pts.reserved) return;
-    border->pts.grow(newPts * 20);
+    border->pts.grow(std::max(newPts * 20, border->pts.count / 2));  //QUILL: geometric, for long borders.
     border->tags = tvg::realloc<uint8_t>(border->tags, border->pts.reserved);      //align the pts / tags memory size
 }
 
@@ -363,22 +364,33 @@ static void _lineTo(SwStroke& stroke, const Point& to)
     stroke.length = length;
 }
 
-static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float& angleOut)
+//QUILL: the step a float can still resolve around these points, at least TINY_STEP. Far from
+//the origin rounding is larger than that, and a curve would split into noise until the stack ends.
+static float _tinyStep(const Point& a, const Point& b, const Point& c, const Point& d)
+{
+    constexpr auto FLOAT_ROUNDING = 1.0f / 2097152.0f;
+    auto farX = std::max(std::max(fabsf(a.x), fabsf(b.x)), std::max(fabsf(c.x), fabsf(d.x)));
+    auto farY = std::max(std::max(fabsf(a.y), fabsf(b.y)), std::max(fabsf(c.y), fabsf(d.y)));
+    return std::max(TINY_STEP, std::max(farX, farY) * FLOAT_ROUNDING);
+}
+
+
+static int _cubicAngle(const Point* base, float tiny, float& angleIn, float& angleMid, float& angleOut)
 {
     auto d1 = base[2] - base[3];
     auto d2 = base[1] - base[2];
     auto d3 = base[0] - base[1];
 
-    if (_tiny(d1)) {
-        if (_tiny(d2)) {
-            if (_tiny(d3)) {
+    if (_tiny(d1, tiny)) {
+        if (_tiny(d2, tiny)) {
+            if (_tiny(d3, tiny)) {
                 angleIn = angleMid = angleOut = 0;
                 return -1;  // ignoreable
             } else {
                 angleIn = angleMid = angleOut = tvg::atan(d3);
             }
         } else {
-            if (_tiny(d3)) {
+            if (_tiny(d3, tiny)) {
                 angleIn = angleMid = angleOut = tvg::atan(d2);
             } else {
                 angleIn = angleMid = tvg::atan(d2);
@@ -386,8 +398,8 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
             }
         }
     } else {
-        if (_tiny(d2)) {
-            if (_tiny(d3)) {
+        if (_tiny(d2, tiny)) {
+            if (_tiny(d3, tiny)) {
                 angleIn = angleMid = angleOut = tvg::atan(d1);
             } else {
                 angleIn = tvg::atan(d1);
@@ -395,7 +407,7 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
                 angleMid = _mean(angleIn, angleOut);
             }
         } else {
-            if (_tiny(d3)) {
+            if (_tiny(d3, tiny)) {
                 angleIn = tvg::atan(d1);
                 angleMid = angleOut = tvg::atan(d2);
             } else {
@@ -442,13 +454,14 @@ static void _cubicTo(SwStroke& stroke, const Point& ctrl1, const Point& ctrl2, c
     arc[3] = stroke.center;
 
     auto join = stroke.join; // backup
+    auto tiny = _tinyStep(to, ctrl2, ctrl1, stroke.center);
 
     while (arc >= bezStack) {
         float angleIn, angleOut, angleMid;
 
         //initialize with current direction
         angleIn = angleOut = angleMid = stroke.angleIn;
-        auto valid = _cubicAngle(arc, angleIn, angleMid, angleOut);
+        auto valid = _cubicAngle(arc, tiny, angleIn, angleMid, angleOut);
 
         //valid size
         if (valid > 0 && arc < limit) {
