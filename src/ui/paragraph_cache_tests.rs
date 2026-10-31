@@ -3,8 +3,8 @@
 //! columns of different widths; and the budgets of laid-out widths, sizes
 //! and texts (`docs/decisions/paragraph-cache-widths.md`).
 use super::{
-    Cache, Entry, Key, LAID_OUT, Pool, Width, held_in_tests, layouts_in_tests, relayouts_in_tests,
-    reset_in_tests, trim_layouts,
+    Budget, Cache, Entry, Key, LAID_OUT, Pool, Width, held_in_tests, layouts_in_tests,
+    relayouts_in_tests, reset_in_tests, trim_layouts,
 };
 use crate::ui::selectable_text::SelectableRichText;
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
@@ -275,6 +275,7 @@ fn width(wrap: Option<f32>, paragraph: Option<&Rc<BidiParagraph>>, drawn: u64, u
         wrap: wrap.map(f32::to_bits),
         size: paragraph.map(|p| p.size()).unwrap_or_default(),
         paragraph: paragraph.cloned(),
+        bytes: 0,
         drawn,
         used,
     }
@@ -359,6 +360,30 @@ fn past_its_paragraphs_the_least_recently_used_go(cx: &mut TestAppContext) {
     assert_eq!(held(&pool), (3..=12).collect::<Vec<_>>());
 }
 
+/// Lays out `texts` texts of each kind in `cache`, a width of `bytes` each,
+/// the nth wrapped one used at clock 2n + 1 and the nth one-line one at
+/// 2n + 2.
+fn fill(cache: &mut Cache, paragraph: &Rc<BidiParagraph>, texts: u64, bytes: usize) {
+    for n in 0..texts {
+        for (one_line, used) in [(false, 2 * n + 1), (true, 2 * n + 2)] {
+            cache.laid_out(key(n), one_line, bytes).add(Width {
+                bytes,
+                ..width(Some(100.), Some(paragraph), used, used)
+            });
+        }
+    }
+}
+
+/// When each layout `cache` holds was last used: wrapped, then one-line.
+fn laid_out(cache: &Cache) -> (Vec<u64>, Vec<u64>) {
+    let used = |pool: &Pool| {
+        let mut used: Vec<u64> = pool.laid_out_widths().map(|w| w.used).collect();
+        used.sort_unstable();
+        used
+    };
+    (used(&cache.paragraphs), used(&cache.lines))
+}
+
 /// Wrapped paragraphs and one-line texts share one budget of laid-out
 /// widths, the old cache's: past it, the least recently used of either kind
 /// go.
@@ -367,28 +392,36 @@ fn both_kinds_keep_to_one_budget_of_layouts(cx: &mut TestAppContext) {
     let paragraph = a_paragraph(cx);
     let mut cache = Cache::default();
     // Each kind within the budget, both together past it.
-    let each = LAID_OUT as u64 * 9 / 16;
-    for n in 0..each {
-        for (one_line, used) in [(false, 2 * n + 1), (true, 2 * n + 2)] {
-            cache
-                .laid_out(key(n), one_line)
-                .add(width(Some(100.), Some(&paragraph), used, used));
-        }
-    }
+    let each = LAID_OUT.layouts as u64 * 9 / 16;
+    fill(&mut cache, &paragraph, each, 0);
     cache.end_frame(2 * each, 600.);
-    let laid_out = |pool: &Pool| -> Vec<u64> {
-        pool.entries
-            .values()
-            .flat_map(|e| &e.widths)
-            .filter(|w| w.paragraph.is_some())
-            .map(|w| w.used)
-            .collect()
-    };
-    let (wrapped, lines) = (laid_out(&cache.paragraphs), laid_out(&cache.lines));
-    assert_eq!(wrapped.len() + lines.len(), LAID_OUT * 3 / 4);
+    let (wrapped, lines) = laid_out(&cache);
+    assert_eq!(wrapped.len() + lines.len(), LAID_OUT.layouts * 3 / 4);
     assert_eq!(wrapped.len(), lines.len());
-    let oldest = wrapped.iter().chain(&lines).min().copied();
-    assert_eq!(oldest, Some(2 * each - LAID_OUT as u64 * 3 / 4 + 1));
+    let oldest = wrapped.first().min(lines.first()).copied();
+    assert_eq!(oldest, Some(2 * each - LAID_OUT.layouts as u64 * 3 / 4 + 1));
+}
+
+/// Both kinds share one budget of bytes too: past it, the least recently
+/// used layouts of either kind go until they hold three quarters of it,
+/// however few they are, and never one the frame being ended used.
+#[gpui_kit::test]
+fn both_kinds_keep_to_one_budget_of_bytes(cx: &mut TestAppContext) {
+    let paragraph = a_paragraph(cx);
+    let mut cache = Cache::default();
+    let eighth = LAID_OUT.bytes / 8;
+    // Six of each kind, an eighth of the budget each: half as much again.
+    fill(&mut cache, &paragraph, 6, eighth);
+    // The frame being ended began at 4: what it used, 5 to 12, stays.
+    cache.end_frame(4, 600.);
+    assert_eq!(laid_out(&cache), (vec![5, 7, 9, 11], vec![6, 8, 10, 12]));
+    // One more, past the budget again: down to three quarters of it.
+    cache.laid_out(key(6), false, eighth).add(Width {
+        bytes: eighth,
+        ..width(Some(100.), Some(&paragraph), 13, 13)
+    });
+    cache.end_frame(13, 600.);
+    assert_eq!(laid_out(&cache), (vec![9, 11, 13], vec![8, 10, 12]));
 }
 
 /// Past the budget, the least recently used layouts go, down to three
@@ -417,11 +450,15 @@ fn past_the_budget_the_least_recently_used_layouts_go(cx: &mut TestAppContext) {
         used
     };
     // A budget of eight: down to six, the four oldest out.
-    trim_layouts(&mut [&mut pool], 7, 8);
+    let layouts = |layouts| Budget {
+        bytes: usize::MAX,
+        layouts,
+    };
+    trim_layouts(&mut [&mut pool], 7, layouts(8));
     assert_eq!(laid_out(&pool), vec![5, 6, 7, 8, 9, 10]);
     assert_eq!(pool.laid_out, 6);
     // A frame that began at 7 used 8 to 10: those stay, whatever the budget.
-    trim_layouts(&mut [&mut pool], 7, 2);
+    trim_layouts(&mut [&mut pool], 7, layouts(2));
     assert_eq!(laid_out(&pool), vec![8, 9, 10]);
     assert_eq!(pool.laid_out, 3);
 }

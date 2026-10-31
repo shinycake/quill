@@ -32,12 +32,29 @@ use std::rc::Rc;
 /// they hold.
 const TEXTS: usize = 2048;
 
-/// Laid-out widths both kinds keep together once the frames that used them
-/// are over, least recently used out first: the 2,048 the cache used to
-/// hold. Layouts at a wrapped paragraph's widest line and wider than the
-/// window, never drawn, don't stay past their frame (see
-/// [`Entry::settle`]), so none of it goes to them.
-const LAID_OUT: usize = 2048;
+/// What laid-out text both kinds keep together once the frames that used it
+/// are over, least recently used out first. Layouts at a wrapped
+/// paragraph's widest line and wider than the window, never drawn, don't
+/// stay past their frame (see [`Entry::settle`]), so none of it goes to
+/// them.
+const LAID_OUT: Budget = Budget {
+    // The old cache held 2,048 layouts of about 55 KB for a long post, up
+    // to 113 MB, and kept the newest half when full: 256 to 512 long
+    // posts. This holds about 560 at two layouts each, about 420 after a
+    // trim, and bounds posts of any length, which a count does not.
+    bytes: 64 << 20,
+    // A short text's layout is a few KB: no more of them than the old
+    // cache held.
+    layouts: 2048,
+};
+
+/// What laid-out text may hold: bytes, as [`BidiParagraph::heap_size`]
+/// counts them, and layouts.
+#[derive(Clone, Copy)]
+struct Budget {
+    bytes: usize,
+    layouts: usize,
+}
 
 /// Widths each kind remembers, laid out or keeping only a size (about 40
 /// bytes), least recently used sizes out first: four times the entries the
@@ -81,6 +98,9 @@ struct Width {
     wrap: Option<u32>,
     size: Size<Pixels>,
     paragraph: Option<Rc<BidiParagraph>>,
+    /// The heap the layout holds, counted when it was laid out
+    /// ([`BidiParagraph::heap_size`]).
+    bytes: usize,
     /// The clock at its last draw, 0 if never drawn.
     drawn: u64,
     used: u64,
@@ -154,9 +174,10 @@ struct Pool {
     /// widest, and a quote drawn from a cached view's replay never reaches
     /// the cache.
     settles: bool,
-    /// Laid-out widths at the last count plus those laid out since: never
-    /// fewer than are held.
+    /// Laid-out widths and their bytes at the last count plus those laid
+    /// out since: never fewer than are held.
     laid_out: usize,
+    bytes: usize,
     /// Widths, laid out or not, counted the same way.
     widths: usize,
 }
@@ -168,6 +189,7 @@ impl Pool {
             capacity,
             settles,
             laid_out: 0,
+            bytes: 0,
             widths: 0,
         }
     }
@@ -221,6 +243,20 @@ impl Pool {
         }
     }
 
+    /// Counts its layouts and their bytes again.
+    fn recount(&mut self) {
+        (self.laid_out, self.bytes) = self
+            .laid_out_widths()
+            .fold((0, 0), |(n, bytes), w| (n + 1, bytes + w.bytes));
+    }
+
+    fn laid_out_widths(&self) -> impl Iterator<Item = &Width> {
+        self.entries
+            .values()
+            .flat_map(|e| &e.widths)
+            .filter(|w| w.paragraph.is_some())
+    }
+
     fn count(&self, which: impl Fn(&Width) -> bool) -> usize {
         self.entries
             .values()
@@ -241,27 +277,42 @@ impl Pool {
     }
 }
 
-/// Past `budget` laid-out widths in `pools` together, lets the least
-/// recently used go down to three quarters of it, never one used in the
+/// Past `budget` in `pools` together, lets the least recently used layouts
+/// go until they are within three quarters of it, never one used in the
 /// frame begun at `start`, as the old cache's one budget did. Their sizes
 /// stay.
-fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: usize) {
-    let laid_out = |w: &Width| w.paragraph.is_some();
-    let held = pools.iter().map(|pool| pool.count(laid_out)).sum();
-    let ages = pools
-        .iter()
-        .flat_map(|pool| pool.ages(start, laid_out))
-        .collect();
-    let cutoff = excess(held, budget).and_then(|excess| cutoff(excess, ages));
+fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: Budget) {
+    let (mut layouts, mut bytes) = (0, 0);
+    let mut ages = Vec::new();
     for pool in pools.iter_mut() {
-        if let Some(cutoff) = cutoff {
-            for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
-                if width.used <= cutoff {
-                    width.paragraph = None;
-                }
+        pool.recount();
+        layouts += pool.laid_out;
+        bytes += pool.bytes;
+        ages.extend(
+            pool.laid_out_widths()
+                .filter(|w| w.used <= start)
+                .map(|w| (w.used, w.bytes)),
+        );
+    }
+    if layouts <= budget.layouts && bytes <= budget.bytes {
+        return;
+    }
+    ages.sort_unstable();
+    let mut cutoff = None;
+    for (used, size) in ages {
+        if layouts <= budget.layouts * 3 / 4 && bytes <= budget.bytes / 4 * 3 {
+            break;
+        }
+        (layouts, bytes, cutoff) = (layouts - 1, bytes - size, Some(used));
+    }
+    let Some(cutoff) = cutoff else { return };
+    for pool in pools.iter_mut() {
+        for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
+            if width.used <= cutoff {
+                width.paragraph = None;
             }
         }
-        pool.laid_out = pool.count(laid_out);
+        pool.recount();
     }
 }
 
@@ -325,7 +376,9 @@ impl Cache {
     fn end_frame(&mut self, start: u64, window: f32) {
         self.paragraphs.settle(start, window);
         self.lines.settle(start, window);
-        if self.paragraphs.laid_out + self.lines.laid_out > LAID_OUT {
+        let layouts = self.paragraphs.laid_out + self.lines.laid_out;
+        let bytes = self.paragraphs.bytes + self.lines.bytes;
+        if layouts > LAID_OUT.layouts || bytes > LAID_OUT.bytes {
             trim_layouts(
                 &mut [&mut self.paragraphs, &mut self.lines],
                 start,
@@ -352,11 +405,12 @@ impl Cache {
         }
     }
 
-    /// The entry for `key`, after a layout was made for it.
-    fn laid_out(&mut self, key: Key, one_line: bool) -> &mut Entry {
+    /// The entry for `key`, after a layout of `bytes` was made for it.
+    fn laid_out(&mut self, key: Key, one_line: bool, bytes: usize) -> &mut Entry {
         let start = self.start();
         let pool = self.pool(one_line);
         pool.laid_out += 1;
+        pool.bytes += bytes;
         pool.widths += 1;
         pool.entry(key, start)
     }
@@ -516,17 +570,20 @@ fn measured(
     }
     let paragraph = lay_out(window)?;
     let size = paragraph.size();
+    // Kept for the draw that usually follows; a paragraph is never drawn
+    // unconstrained.
+    let paragraph = wrap.is_some().then(|| Rc::new(paragraph));
+    let bytes = paragraph.as_ref().map_or(0, |p| p.heap_size());
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let now = cache.tick(pass);
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);
-        cache.laid_out(key, one_line).add(Width {
+        cache.laid_out(key, one_line, bytes).add(Width {
             wrap,
             size,
-            // Kept for the draw that usually follows; a paragraph is never
-            // drawn unconstrained.
-            paragraph: wrap.is_some().then(|| Rc::new(paragraph)),
+            paragraph,
+            bytes,
             drawn: 0,
             used: now,
         });
@@ -558,24 +615,27 @@ fn drawn(
         return hit;
     }
     let paragraph = Rc::new(lay_out(window)?);
+    let bytes = paragraph.heap_size();
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let now = cache.tick(pass);
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);
-        let entry = cache.laid_out(key, one_line);
+        let entry = cache.laid_out(key, one_line, bytes);
         match entry.width(wrap, now) {
             // Laid out again (its layout went, or the fonts it uses loaded
             // since): the size may have changed too.
             Some(width) => {
                 width.size = paragraph.size();
                 width.paragraph = Some(paragraph.clone());
+                width.bytes = bytes;
                 width.drawn = now;
             }
             None => entry.add(Width {
                 wrap,
                 size: paragraph.size(),
                 paragraph: Some(paragraph.clone()),
+                bytes,
                 drawn: now,
                 used: now,
             }),

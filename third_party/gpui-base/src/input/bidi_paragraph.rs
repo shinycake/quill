@@ -407,6 +407,14 @@ impl BidiParagraph {
         size(self.width, self.line_height * self.rows.len().max(1) as f32)
     }
 
+    /// About how many bytes the paragraph holds on the heap, counted from its parts: rows,
+    /// runs, shaped lines, glyphs, clusters and text. Allocator overhead is not counted.
+    /// For a cache that keeps laid-out paragraphs to a budget of bytes.
+    pub fn heap_size(&self) -> usize {
+        self.rows.capacity() * std::mem::size_of::<Row>()
+            + self.rows.iter().map(|row| row.line.heap_size()).sum::<usize>()
+    }
+
     /// Row height.
     pub fn line_height(&self) -> Pixels {
         self.line_height

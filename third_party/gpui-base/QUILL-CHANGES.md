@@ -184,3 +184,8 @@ line vectors for its runs instead of letting them double (a slot is 136
 bytes), and `layout_unchecked` drops the slack of its row vector (208 bytes
 a row). Each run's `ShapedLine` keeps its text, which `ShapedLine::cursor`
 and `split_at` read. What is drawn and measured is unchanged.
+
+`BidiParagraph::heap_size` (and `InputLine::heap_size` under it) counts
+about how many bytes a laid-out paragraph holds on the heap, from its rows,
+runs, shaped lines, glyphs, clusters and text, so Quill's cache keeps
+laid-out text to a budget of bytes rather than a count of paragraphs.

@@ -61,11 +61,14 @@ rather than copying them.
   (replies quoting the same message, a paragraph in two panes) and a return
   to any earlier width lay nothing out again. There is no cap per
   paragraph.
-- Laid-out widths of both kinds together are kept to the old cache's one
-  budget, 2,048: past it, at the end of a frame, the least recently used
-  of either kind go down to three quarters of it, never one the frame
-  used, as the old cache let its least recently used entries go. Their
-  sizes stay.
+- Laid-out text of both kinds together is kept to one budget of bytes,
+  64 MiB, and to the old cache's 2,048 layouts. Each layout's bytes are
+  counted once, when it is made, from its parts (gpui-base's
+  `BidiParagraph::heap_size`: rows, runs, shaped lines, glyphs, clusters
+  and text). Past either at the end of a frame, the least recently used
+  layouts of either kind go until both are within three quarters, never
+  one the frame used, as the old cache let its least recently used entries
+  go. Their sizes stay.
 - Sizes are kept to 8,192 widths of each kind, laid out or not (about 40
   bytes each): past it, the least recently used of those holding only a
   size go down to three quarters of it, never one the frame used, and a
@@ -107,17 +110,17 @@ here only:
    in the plain look), so in the history that is a window narrower than
    that (the narrowest is 380 px) widened until such a paragraph fits a
    line: it is laid out once more, where the old cache had it.
-3. Past 2,048 laid-out widths of both kinds together, least recently used
-   first: the old budget.
+3. Past 64 MiB or 2,048 layouts of both kinds together, least recently
+   used first, never the frame's: the budget below.
 4. With its text, past 2,048 texts of a kind, least recently used first:
    the old cache's 2,048 entries never held more.
 
 Sizes go only past 8,192 widths of a kind, and only those without a
 layout, which keeps every width among the old 2,048.
 
-So once a frame is over this cache holds at most the old cache's 2,048
-layouts, plus up to 8,192 sizes of each kind (about 330 KB each) and the
-texts' keys.
+So once a frame is over this cache holds at most 64 MiB of laid-out text
+in at most 2,048 layouts, plus up to 8,192 sizes of each kind (about
+330 KB each) and the texts' keys.
 
 Earlier versions of this change let a paragraph's other widths go as soon
 as one was drawn (text drawn at several widths in one frame was laid out
@@ -141,8 +144,8 @@ how much heap that frees (glibc `mallinfo2`).
 | | Before | After |
 | --- | --- | --- |
 | Laid-out paragraphs kept | 1,200 (4 per post) | 600 (2 per post) |
-| Heap they hold | 66.2 MB | 37.5 MB |
-| Per post | 220 KB | 125 KB |
+| Heap they hold | 66.2 MB | 35.8 MB |
+| Per post | 220 KB | 119 KB |
 | Widths laid out more than once | 0 | 0 |
 | Layouts, scrolling back, then down again | 0 | 0 |
 
@@ -150,14 +153,27 @@ The cut is the widest line and the unconstrained width, which nothing
 draws, and a few MB of vector slack gpui-base no longer keeps. Every width
 is laid out once, as before.
 
-The budget is the old one in layouts, not in bytes. The layouts kept are
-the wrapped ones, 62.5 KB each for these posts, where the old cache's mix
-of wrapped and one-line layouts was 55 KB. Up to 1,024 such posts it
-holds two layouts each, where the old cache held four (up to 512 posts).
-Past that both hold part of 2,048 layouts: here three quarters to all of
-it, about 96 to 128 MB, and in the old cache half to all of it, about 56
-to 113 MB. At the budget this cache holds about 13% more than the old one
-did.
+The budget is in bytes. `heap_size` counted 36.2 MB for these 600
+layouts, where emptying the cache freed 35.8 MB (keys and sizes
+included), so it counts what a layout holds to within a few percent. The
+old cache held 2,048 layouts of any size, about 55 KB each for these
+posts, and kept the newest half when full: 1,024 to 2,048 layouts, 256 to
+512 such posts, about 56 to 113 MB, and more for longer posts, with no
+bound in bytes. 64 MiB holds about 560 of these posts at two layouts
+each, and about 420 after a trim, so at least as many long posts as the
+old cache held, while laid-out text never holds more than 64 MiB once a
+frame is over, however long the posts.
+
+Scrolled through 1,500 such posts, newest to oldest (77 s in the test
+build), the cache held 1,045 layouts (522 posts): 63.1 MB counted, and
+62.9 MB freed when emptied, against 56 to 113 MB in the old cache.
+Nothing was laid out twice.
+
+The 2,048-layout count stays too. A short message's layout is a few KB,
+so 64 MiB alone would hold several times what the old cache held of them:
+2,048 texts at two or three layouts each, against 2,048 layouts. With both
+limits, a history of short messages holds no more layouts than the old
+cache did and fewer per message, so more messages.
 
 How many texts one frame uses, against the counts: the same
 test with 150 chats and 400 short posts and replies, every name, title,
@@ -188,7 +204,8 @@ columns dragged a pixel a frame across 64 frames and back (128 widths; 64
 laid out again with the 64-width cap); it checks the frames after the
 first lay nothing out, what a frame lets go, that each budget and count
 lets the least recently used go and never the frame's, and that both kinds
-together keep to one budget of layouts (2,304 held with one per kind).
+together keep to one budget of layouts (2,304 held with one per kind) and
+of bytes (13 layouts of an eighth of it each, which no count trims).
 
 ## Not changed
 

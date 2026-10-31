@@ -2,8 +2,11 @@
 // bidirectional text support and inline tokens in bidi rows. See
 // third_party/gpui-base/QUILL-CHANGES.md.
 //! A visual row whose offsets remain in source UTF-8 bytes.
-use super::bidi::{BidiLine, Fragment, clusters_from_glyphs, fragment_extent};
-use gpui::{App, Pixels, Point, ShapedLine, SharedString, TextAlign, Window, point, px};
+use super::bidi::{BidiLine, Cluster, Fragment, clusters_from_glyphs, fragment_extent};
+use gpui::{
+    App, LineLayout, Pixels, Point, ShapedGlyph, ShapedLine, ShapedRun, SharedString, TextAlign,
+    Window, point, px,
+};
 use std::ops::Range;
 
 pub(crate) struct InlineFragment {
@@ -33,6 +36,21 @@ enum Content {
         lines: Vec<Option<ShapedLine>>,
     },
 }
+/// About how many bytes a shaped line holds on the heap: its layout (with
+/// the reference counts it shares), runs, glyphs and text.
+fn shaped_heap_size(line: &ShapedLine) -> usize {
+    use std::mem::size_of;
+    2 * size_of::<usize>()
+        + size_of::<LineLayout>()
+        + line.runs.capacity() * size_of::<ShapedRun>()
+        + line
+            .runs
+            .iter()
+            .map(|run| run.glyphs.capacity() * size_of::<ShapedGlyph>())
+            .sum::<usize>()
+        + line.text.len()
+}
+
 impl From<ShapedLine> for InputLine {
     fn from(line: ShapedLine) -> Self {
         Self {
@@ -71,6 +89,36 @@ impl InputLine {
             text,
             content: Content::Bidi { geo, lines },
         }
+    }
+
+    /// About how many bytes this row holds on the heap
+    /// ([`crate::input::bidi_paragraph::BidiParagraph::heap_size`]).
+    pub(crate) fn heap_size(&self) -> usize {
+        use std::mem::size_of;
+        self.text.len()
+            + match &self.content {
+                Content::Text(line) => shaped_heap_size(line),
+                Content::Inline(fragments) => {
+                    fragments.capacity() * size_of::<InlineFragment>()
+                        + fragments
+                            .iter()
+                            .filter_map(|f| f.text.as_ref())
+                            .map(shaped_heap_size)
+                            .sum::<usize>()
+                }
+                Content::Bidi { geo, lines } => {
+                    geo.fragments.capacity() * size_of::<Fragment>()
+                        + geo
+                            .fragments
+                            .iter()
+                            .map(|f| {
+                                f.text.capacity() + f.clusters.capacity() * size_of::<Cluster>()
+                            })
+                            .sum::<usize>()
+                        + lines.capacity() * size_of::<Option<ShapedLine>>()
+                        + lines.iter().flatten().map(shaped_heap_size).sum::<usize>()
+                }
+            }
     }
 
     /// Whether this row holds bidi-laid-out content.
