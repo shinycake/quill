@@ -550,12 +550,19 @@ function write(title, pen, data) {
   const finish = () => {
     if (done) return;
     done = true;
-    window.removeEventListener("resize", finish);
+    window.removeEventListener("resize", resized);
     pen.remove();
     root.classList.remove("quill-awaiting");
     handOver();
   };
-  window.addEventListener("resize", finish);
+  // A new width reflows the headline, so stop and show it. A new height
+  // alone, like a phone's address bar folding away on scroll, changes
+  // nothing the quill depends on.
+  const width = window.innerWidth;
+  const resized = () => {
+    if (window.innerWidth !== width) finish();
+  };
+  window.addEventListener("resize", resized);
 
   // The feather settles into the ring and the full logo takes over.
   const land = () => {
