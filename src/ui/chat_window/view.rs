@@ -3,6 +3,7 @@
 
 use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
+use super::super::frame_clock::follow_app;
 use super::super::image_budget::{BoundedImageCache, CacheScope};
 use super::super::shell::QuillShell;
 use super::cover::WindowPlace;
@@ -46,7 +47,7 @@ impl ChatWindowView {
     ) -> Self {
         let slot = owner.update(cx, |app, cx| WindowSlot::new(app, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
-        let observe = cx.observe(&owner, |_, _, cx| cx.notify());
+        let observe = follow_app(&owner, cx);
         let placed = [
             cx.observe_window_activation(window, Self::placed),
             cx.observe_window_bounds(window, Self::placed),

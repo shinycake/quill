@@ -685,6 +685,27 @@ pub(crate) fn request_video_frame(
     }
 }
 
+/// A frame-clock tick for the whole app that leaves the main window out:
+/// sent while the active chat window covers it (`QuillApp::tick_app`), to
+/// the views that follow the app ([`follow_app`]).
+pub(in crate::ui) struct AppTick;
+
+impl EventEmitter<AppTick> for QuillApp {}
+
+/// Follow the app from a view in a window other than the main one: redraw
+/// on each change to the app and on each [`AppTick`], so content there that
+/// asks for whole-app ticks keeps animating while the main window does not
+/// redraw. A cached view that follows the app redraws with it.
+pub(in crate::ui) fn follow_app<V: 'static>(
+    app: &Entity<QuillApp>,
+    cx: &mut Context<V>,
+) -> Subscription {
+    Subscription::join(
+        cx.observe(app, |_, _, cx| cx.notify()),
+        cx.subscribe(app, |_, _, _: &AppTick, cx| cx.notify()),
+    )
+}
+
 /// Whether a frame-clock tick may run: always while the window is active,
 /// and in the background only for media playing with sound.
 fn tick_wanted(window_active: bool, plays_sound: bool) -> bool {

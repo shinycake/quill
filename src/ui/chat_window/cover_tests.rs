@@ -6,7 +6,7 @@
 
 use crate::ui::actions::CloseWindow;
 use crate::ui::app::QuillApp;
-use crate::ui::frame_clock::frames_over;
+use crate::ui::frame_clock::{follow_app, frames_over};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -14,11 +14,13 @@ use gpui_kit::component::{Root, WindowExt as _};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Context, DisplayId, Entity, IntoElement, ParentElement,
-    Pixels, Render, Styled, Subscription, TestAppContext, VisualTestContext, Window, WindowBounds,
-    WindowOptions, div, point, px, size,
+    Pixels, Render, StyleRefinement, Styled, Subscription, TestAppContext, VisualTestContext,
+    Window, WindowBounds, WindowOptions, div, point, px, size,
 };
 use quill::ids::ChatId;
 use quill::sticker_playback::player::DecodedFrames;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// The demo's open chat, with the two stickers, and another chat.
@@ -143,42 +145,77 @@ fn scope(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: Option<ChatI
 
 /// A window like the group call's: its view follows the app, and its
 /// content asks the app for ticks while it draws (the microphone halo,
-/// the speaking blobs), in whichever window's state is in place.
+/// the speaking blobs), in whichever window's state is in place. It holds
+/// a cached view that does not follow the app, like a call's picture
+/// between its own frames.
 struct CallWindow {
     app: Entity<QuillApp>,
-    _observe: Subscription,
+    picture: Entity<Built>,
+    _follow: Subscription,
 }
 
 impl Render for CallWindow {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.app
             .update(cx, |app, cx| app.request_animation_tick(30, cx));
+        div().size_full().child(
+            self.picture
+                .clone()
+                .cached(StyleRefinement::default().size_full()),
+        )
+    }
+}
+
+/// A view that counts how often it is built, and follows nothing.
+struct Built(Rc<Cell<u32>>);
+
+impl Render for Built {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.0.set(self.0.get() + 1);
         div().size_full()
     }
 }
 
-/// Open a [`CallWindow`] off to the side, not active (it never takes
+/// Open a window at `origin` off to the side, not active (it never takes
 /// focus here).
-fn open_call_window(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> AnyWindowHandle {
-    let app = app.clone();
+fn open_side_window<V: Render>(
+    vcx: &mut VisualTestContext,
+    origin: gpui_kit::Point<Pixels>,
+    build: impl FnOnce(&mut Context<V>) -> V + 'static,
+) -> AnyWindowHandle {
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-            point(px(1200.), px(0.)),
+            origin,
             size(px(360.), px(480.)),
         ))),
         ..Default::default()
     };
     let window = vcx.update(|_, cx| {
-        cx.open_window(options, |_, cx| {
-            cx.new(|cx| CallWindow {
-                _observe: cx.observe(&app, |_, _, cx| cx.notify()),
-                app,
-            })
-        })
-        .expect("the call window")
+        cx.open_window(options, |_, cx| cx.new(build))
+            .expect("the window")
     });
     vcx.run_until_parked();
     window.into()
+}
+
+/// Open a [`CallWindow`]; `builds` counts its picture's builds.
+fn open_call_window(
+    app: &Entity<QuillApp>,
+    builds: &Rc<Cell<u32>>,
+    vcx: &mut VisualTestContext,
+) -> AnyWindowHandle {
+    let (app, builds) = (app.clone(), builds.clone());
+    open_side_window(vcx, point(px(1200.), px(0.)), move |cx| CallWindow {
+        _follow: follow_app(&app, cx),
+        app,
+        picture: cx.new(|_| Built(builds)),
+    })
+}
+
+/// Open a window that does not follow the app and draws by its own clock,
+/// like Picture-in-Picture or a notification popup.
+fn open_own_clock_window(vcx: &mut VisualTestContext) -> AnyWindowHandle {
+    open_side_window(vcx, point(px(1200.), px(500.)), |_| Built(Rc::default()))
 }
 
 /// Open a kit dialog in `window` that asks the app for ticks while it is
@@ -339,7 +376,7 @@ fn a_covering_chat_window_keeps_its_own_stickers_animating(cx: &mut TestAppConte
 fn a_call_window_keeps_animating_under_a_covering_chat_window(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
-    let call = open_call_window(&app, vcx);
+    let call = open_call_window(&app, &Rc::default(), vcx);
     let alone = frames_of(call, vcx);
     assert!(alone > 0, "the call window animates");
     let chat = open_chat_window(&app, vcx, OTHER, beside());
@@ -377,5 +414,42 @@ fn a_dialog_in_a_covering_chat_window_keeps_animating(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     scope(&app, vcx, None);
     assert_eq!(frames_of(chat, vcx), shown, "covering the main window");
+    assert_eq!(main_draws(vcx), (0, 0), "the main window under it");
+}
+
+/// While the main window is covered, a tick for the whole app reaches the
+/// windows that follow the app and nothing else, as with the main window
+/// in view: a window that draws by its own clock draws no frame, and a
+/// cached view in the call window that does not follow the app is not
+/// built again, while the call window animates.
+#[gpui_kit::test]
+fn a_covered_main_window_leaves_windows_and_views_that_do_not_follow_the_app_alone(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let builds = Rc::default();
+    let call = open_call_window(&app, &builds, vcx);
+    let own_clock = open_own_clock_window(vcx);
+    let alone = frames_of(call, vcx);
+    assert!(alone > 0, "the call window animates");
+    let chat = open_chat_window(&app, vcx, OTHER, beside());
+    for covered in [false, true] {
+        if covered {
+            vcx.simulate_window_move(chat, covering().origin);
+            vcx.simulate_window_resize(chat, covering().size);
+            vcx.run_until_parked();
+        }
+        scope(&app, vcx, None);
+        let built = builds.get();
+        let call_frames = frames_of(call, vcx);
+        let rebuilt = builds.get() - built;
+        let own_clock_frames = frames_of(own_clock, vcx);
+        assert_eq!(
+            (call_frames, rebuilt, own_clock_frames),
+            (alone, 0, 0),
+            "call window frames, picture builds, own-clock window frames; covered: {covered}"
+        );
+    }
     assert_eq!(main_draws(vcx), (0, 0), "the main window under it");
 }

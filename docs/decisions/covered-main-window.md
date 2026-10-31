@@ -41,14 +41,17 @@ while the main window was covered, or redrew another chat window instead.
   of a chat window's place.
 - `src/ui/frame_clock.rs`: while the main window is covered, its slices and animation layers (the only ticks
   aimed at a view: `tick_animation_layer`, the main window's own) get no tick, neither asked then nor asked
-  before it was covered. A tick for the whole app still runs, whoever asked, and redraws every window but the
-  main one (`QuillApp::tick_app`, `Window::refresh`), in place of the `QuillApp` notify that redraws them all
-  otherwise. A refresh also redraws a window that does not follow the app (Picture-in-Picture, a
-  notification popup), which the notify left alone; that costs only while the main window is covered and
-  something animates.
+  before it was covered. A tick for the whole app still runs, whoever asked. In place of the `QuillApp` notify
+  that redraws every window, `QuillApp::tick_app` then emits `AppTick`, which only the views that follow the
+  app from other windows hear (`frame_clock::follow_app`: the chat, call, group call, stream, screen chooser
+  and What's New views, which observed the app before). They redraw as on the notify. The main window keeps
+  its frame, and so do a window that draws by its own clock (Picture-in-Picture, a notification popup) and a
+  cached view that does not follow the app (a call picture between its own frames), which the notify does not
+  redraw either. A first take refreshed every window but the main one, which redrew those two as well.
 - When a chat window is activated or deactivated, moved, resized, goes to another display or fullscreen,
   `chat_window_placed` updates `frame.main_covered` at once: a main window it now hides holds still from that
-  moment (it is not active while a chat window is), and one it no longer hides gets an app redraw, whose
+  moment (unless it is the active window, asked of the platform, since the main window's own activation
+  callback may come later), and one it no longer hides gets an app redraw, whose
   render lets its layers ask again. A closed chat window already redraws the app; the main window's own moves
   and resizes redraw it (GPUI's `bounds_changed`) and its activation redraws the app, each recomputing the
   answer.
@@ -113,6 +116,11 @@ window counted the same way from coming back from behind another app (120 layer 
 - `a_dialog_in_a_covering_chat_window_keeps_animating`: a kit dialog in the chat window that asks for ticks
   while it is built, with the main window's state in place, draws as many frames covering the main window as
   beside it.
+- `a_covered_main_window_leaves_windows_and_views_that_do_not_follow_the_app_alone`: while the call window
+  animates, a window that does not follow the app draws no frame and a cached view in the call window that
+  does not follow it is not built again, with the main window in view and covered alike. With the refresh of
+  every window but the main one (aeea77d00), the window drew 60 frames and the view was built 60 times in 2 s
+  while the main window was covered.
 
 Every test checks that a covered main window draws nothing, which the code before this change (04644b4a3)
 never does: it drew 120 layer draws and 60 frames in 2 s, also when only the chat window animated. On the
