@@ -22,7 +22,8 @@ Percentages that become 8-bit values and 8-bit file values are clamped, as is a
 glyph's size. A dash array keeps its first 64 entries.
 
 `src/loaders/lottie/tvgLottieParserHandler.cpp`: an integer written as a float
-reads as that number, and one past an `int` stops at its limit.
+reads as that number, and one past an `int` stops inside its limits, so a field
+read as a number minus one stays in range.
 
 `src/loaders/lottie/tvgLottieBuilder.cpp`: a composition builds once and is used
 only when finished, and only a composition asset can back a precomp. A matte chain
@@ -31,7 +32,8 @@ walks its parents in a loop. Star points, polygon points, zigzag ridges and
 repeater copies are limited to 1,024 where they size a loop, and the product of a
 list's repeaters to 4,096 copies. Text with no document or no font name draws
 nothing, and a font with no name is passed over. The small caps buffer lives as
-long as the glyph search that reads it.
+long as the glyph search that reads it, and a glyph draws only the paths in its
+groups.
 
 `src/loaders/lottie/tvgLottieModifier.cpp`, `tvgLottieModifier.h`: a path with
 nothing to modify stays as it is: rounding leaves fewer than three points alone,

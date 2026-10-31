@@ -1107,8 +1107,10 @@ Shape* LottieBuilder::textShape(LottieText* text, float frameNo, const TextDocum
     shape->reset();
 
     ARRAY_FOREACH(p, glyph->children) {
+        if ((*p)->type != LottieObject::Group) continue;  //QUILL
         auto group = static_cast<LottieGroup*>(*p);
         ARRAY_FOREACH(p, group->children) {
+            if ((*p)->type != LottieObject::Path) continue;  //QUILL
             static_cast<LottiePath*>(*p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
             PAINT(shape)->mark(RenderUpdateFlag::Path);
         }

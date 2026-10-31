@@ -62,7 +62,7 @@ int LookaheadParserHandler::getInt()
     if (state == kHasNumber) {
         //QUILL
         auto number = val.GetDouble();
-        auto result = number <= INT_MIN ? INT_MIN : (number >= INT_MAX ? INT_MAX : (int)number);
+        auto result = number <= -INT_MAX ? -INT_MAX : (number >= INT_MAX ? INT_MAX : (int)number);
         parseNext();
         return result;
     }
