@@ -28,7 +28,7 @@ jobs:
         include:
           - { target: linux-x86_64, runner: ubuntu-22.04, lib: libquill_calls.so }
           - { target: linux-aarch64, runner: ubuntu-22.04-arm, lib: libquill_calls.so }
-          - { target: macos-arm64, runner: macos-14, lib: libquill_calls.dylib }
+          - { target: macos-arm64, runner: macos-15, lib: libquill_calls.dylib }
           - { target: windows-x86_64, runner: windows-2022, lib: quill_calls.dll }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
@@ -55,8 +55,25 @@ jobs:
         run: |
           brew list ninja >/dev/null 2>&1 || brew install ninja
           brew list nasm >/dev/null 2>&1 || brew install nasm
-          brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
-          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+      - name: restore OpenSSL build
+        id: openssl-cache
+        if: runner.os == 'macOS'
+        uses: actions/cache/restore@v6
+        with:
+          path: native/openssl/prefix
+          key: openssl-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-openssl.sh') }}
+      - name: build OpenSSL
+        if: runner.os == 'macOS' && steps.openssl-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-openssl.sh
+      - name: save OpenSSL build
+        if: runner.os == 'macOS' && steps.openssl-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: native/openssl/prefix
+          key: openssl-macos-${{ runner.arch }}-${{ hashFiles('scripts/build-openssl.sh') }}
+      - name: use the built OpenSSL
+        if: runner.os == 'macOS'
+        run: echo "OPENSSL_ROOT_DIR=$PWD/native/openssl/prefix" >> "$GITHUB_ENV"
       # MSYS2 UCRT64 builds FFmpeg as package-windows does (MinGW, shared),
       # and gives the MSVC build make, perl and nasm (tdesktop's msys64 stage).
       - name: Windows build dependencies
