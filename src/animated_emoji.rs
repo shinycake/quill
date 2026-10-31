@@ -217,8 +217,17 @@ impl EmojiPlays {
         self.replays.insert(key);
     }
 
-    /// The chat was left: everything plays again next time (tdesktop
-    /// `stickerClearLoopPlayed` when `HistoryInner` goes).
+    /// `chat` was left: its emoji play again next time it shows (tdesktop
+    /// `stickerClearLoopPlayed` when its `HistoryInner` goes). Those of
+    /// chats other windows show stay as they are.
+    pub fn leave_chat(&mut self, chat: i64) {
+        self.played.retain(|key| key.0 != chat);
+        self.generations.retain(|key, _| key.0 != chat);
+        self.replays.retain(|key| key.0 != chat);
+    }
+
+    /// Every chat was left (another account, the loop setting changed):
+    /// everything plays again.
     pub fn clear(&mut self) {
         self.played.clear();
         self.generations.clear();

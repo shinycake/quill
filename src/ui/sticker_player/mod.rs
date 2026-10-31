@@ -19,9 +19,11 @@
 
 mod app;
 mod spec;
+mod view;
 
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors};
 pub(super) use spec::{ClipSpec, HeadId};
+pub(super) use view::StickerView;
 
 use super::image_budget::PaintStamp;
 use futures_channel::oneshot;
@@ -33,7 +35,6 @@ use quill::sticker_playback::player::{
 use smallvec::SmallVec;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -116,6 +117,27 @@ struct UiClip {
     wants: Vec<(HeadId, u32, [Option<u32>; AHEAD], Instant)>,
     /// When its first frame arrived.
     ready_at: Option<Instant>,
+    /// The windows whose views asked for it since it opened.
+    windows: Windows,
+}
+
+/// Where a view is in a clip.
+struct Head {
+    state: PlayHead,
+    /// When a view last drew it.
+    seen: Instant,
+    /// The windows whose views drew it.
+    windows: Windows,
+}
+
+/// Windows by the chat they show (`None`: the main window).
+type Windows = SmallVec<[Option<ChatId>; 2]>;
+
+/// Note that a view in `window` used a clip or a head.
+fn note_window(windows: &mut Windows, window: Option<ChatId>) {
+    if !windows.contains(&window) {
+        windows.push(window);
+    }
 }
 
 /// Where a view drew a clip, and in which frame: the main window (its
@@ -150,7 +172,7 @@ impl Drawn {
 #[derive(Default)]
 struct Inner {
     clips: HashMap<ClipKey, UiClip>,
-    heads: HashMap<(HeadId, i32), (PlayHead, Instant)>,
+    heads: HashMap<(HeadId, i32), Head>,
     stats: ScreenStats,
     trimmed: Option<Instant>,
     /// Each open chat window's latest frame, numbered across all chat
@@ -191,6 +213,9 @@ pub(crate) struct Player {
     /// How far a test moved the clock on.
     #[cfg(test)]
     skew: Cell<Duration>,
+    /// Where a test stopped the clock (`freeze`).
+    #[cfg(test)]
+    frozen: Cell<Option<Instant>>,
     /// How many times `close_stale` looked (a test).
     #[cfg(test)]
     looks: Cell<usize>,
@@ -209,6 +234,8 @@ impl Player {
             #[cfg(test)]
             skew: Cell::new(Duration::ZERO),
             #[cfg(test)]
+            frozen: Cell::new(None),
+            #[cfg(test)]
             looks: Cell::new(0),
         }
     }
@@ -216,7 +243,7 @@ impl Player {
     /// The time views draw at and the closer judges by.
     pub(super) fn now(&self) -> Instant {
         #[cfg(test)]
-        return Instant::now() + self.skew.get();
+        return self.frozen.get().unwrap_or_else(Instant::now) + self.skew.get();
         #[cfg(not(test))]
         Instant::now()
     }
@@ -225,6 +252,13 @@ impl Player {
     #[cfg(test)]
     pub(super) fn skip(&self, by: Duration) {
         self.skew.set(self.skew.get() + by);
+    }
+
+    /// Stop [`Self::now`] where it is: from then on only [`Self::skip`]
+    /// moves it, so a test knows how far a head played.
+    #[cfg(test)]
+    pub(super) fn freeze(&self) {
+        self.frozen.set(Some(Instant::now()));
     }
 
     /// How many times the closer looked (a test).
@@ -237,10 +271,23 @@ impl Player {
     /// closed and opened again has a later one, or none yet.
     #[cfg(test)]
     pub(super) fn first_frames(&self) -> Vec<Option<Instant>> {
+        self.first_frames_of(None)
+    }
+
+    /// [`Self::first_frames`] of `file`'s clips only (`None`: every clip).
+    #[cfg(test)]
+    pub(super) fn first_frames_of(&self, file: Option<i32>) -> Vec<Option<Instant>> {
         let mut first: Vec<Option<Instant>> = self
             .inner
             .try_borrow()
-            .map(|inner| inner.clips.values().map(|clip| clip.ready_at).collect())
+            .map(|inner| {
+                inner
+                    .clips
+                    .iter()
+                    .filter(|(key, _)| file.is_none_or(|file| key.file == file))
+                    .map(|(_, clip)| clip.ready_at)
+                    .collect()
+            })
             .unwrap_or_default();
         first.sort_unstable();
         first
@@ -361,9 +408,10 @@ impl Player {
         first
     }
 
-    /// Opens `spec` at `edge` unless it is open; true once a frame of it
-    /// (at any size) can show.
-    pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32) -> bool {
+    /// Opens `spec` at `edge` for a view in `window` (`None`: the main
+    /// window) unless it is open; true once a frame of it (at any size)
+    /// can show.
+    pub(super) fn prepare(&self, spec: &ClipSpec, edge: u32, window: Option<ChatId>) -> bool {
         self.drain();
         let key = spec.key(edge);
         let Ok(mut inner) = self.inner.try_borrow_mut() else {
@@ -375,6 +423,7 @@ impl Player {
             UiClip::default()
         });
         clip.used = Some(now);
+        note_window(&mut clip.windows, window);
         if clip.shown.is_some() || !clip.ready.is_empty() {
             return true;
         }
@@ -418,6 +467,7 @@ impl Player {
             });
             clip.used = Some(now);
             note_drawn(&mut clip.drawn, drawn);
+            note_window(&mut clip.windows, window);
             if clip.timeline.is_none() && !clip.failed {
                 match self.engine.state(&key) {
                     Some(ClipState::Ready(info)) => clip.timeline = Some(info.timeline),
@@ -427,11 +477,14 @@ impl Player {
             }
             match clip.timeline {
                 Some(timeline) => {
-                    let (head_state, seen) = inner
-                        .heads
-                        .entry((head, key.file))
-                        .or_insert_with(|| (PlayHead::default(), now));
-                    *seen = now;
+                    let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
+                        state: PlayHead::default(),
+                        seen: now,
+                        windows: Windows::new(),
+                    });
+                    entry.seen = now;
+                    note_window(&mut entry.windows, window);
+                    let head_state = &mut entry.state;
                     let pick = match mode {
                         PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                             Duration::ZERO,
@@ -489,6 +542,7 @@ impl Player {
                         .find_map(|(_, clip)| clip.shown.is_some().then_some(clip));
                     other.and_then(|other| {
                         note_drawn(&mut other.drawn, drawn);
+                        note_window(&mut other.windows, window);
                         other.shown.as_ref().map(|(_, image)| image.clone())
                     })
                 }
@@ -567,12 +621,12 @@ impl Player {
         inner.trimmed = Some(now);
         inner
             .heads
-            .retain(|_, (_, seen)| now.saturating_duration_since(*seen) < HEAD_TTL);
+            .retain(|_, head| now.saturating_duration_since(head.seen) < HEAD_TTL);
         if inner.heads.len() > MAX_HEADS {
-            let mut seen: Vec<Instant> = inner.heads.values().map(|(_, at)| *at).collect();
+            let mut seen: Vec<Instant> = inner.heads.values().map(|head| head.seen).collect();
             seen.sort_unstable();
             if let Some(cut) = seen.get(seen.len() / 2).copied() {
-                inner.heads.retain(|_, (_, at)| *at > cut);
+                inner.heads.retain(|_, head| head.seen > cut);
             }
         }
         let screen = inner.stats;
@@ -742,8 +796,47 @@ impl Player {
         );
     }
 
-    /// Close every clip and forget every head (another chat or account:
-    /// tdesktop clears the played set when the chat is left).
+    /// `window` let go of its chat (`None`: the main window): another chat
+    /// opened there, or the window closed. The heads only its views drew
+    /// are forgotten, so the chat plays from the start when it shows again
+    /// (tdesktop clears the played set when the chat is left), and the
+    /// clips only its views asked for close. What views in another window
+    /// use plays on untouched. Returns the frames of the clips it closed,
+    /// each once.
+    pub(super) fn leave(&self, window: Option<ChatId>) -> Vec<Arc<RenderImage>> {
+        let Ok(mut guard) = self.inner.try_borrow_mut() else {
+            return Vec::new();
+        };
+        let inner = &mut *guard;
+        inner.heads.retain(|_, head| {
+            head.windows.retain(|other| *other != window);
+            !head.windows.is_empty()
+        });
+        let mut frames: Vec<Arc<RenderImage>> = Vec::new();
+        let mut closed = Vec::new();
+        inner.clips.retain(|key, clip| {
+            clip.windows.retain(|other| *other != window);
+            if !clip.windows.is_empty() {
+                return true;
+            }
+            let shown = clip.shown.take().map(|(_, image)| image);
+            for image in std::mem::take(&mut clip.ready).into_values().chain(shown) {
+                if !frames.iter().any(|kept| Arc::ptr_eq(kept, &image)) {
+                    frames.push(image);
+                }
+            }
+            closed.push(*key);
+            false
+        });
+        drop(guard);
+        for key in &closed {
+            self.engine.close(key);
+        }
+        frames
+    }
+
+    /// Close every clip and forget every head, in every window (another
+    /// account, the loop setting changed, the app goes).
     pub(super) fn stop(&self) {
         let Ok(mut inner) = self.inner.try_borrow_mut() else {
             return;
@@ -767,14 +860,14 @@ impl Player {
         inner
             .heads
             .get(&(head, file))
-            .map(|(state, _)| state.started())
+            .map(|head| head.state.started())
     }
 
     /// How far `head` of `file` played and the clip's length, once its
     /// first frame showed.
     pub(super) fn head_progress(&self, head: HeadId, file: i32) -> Option<(Duration, Duration)> {
         let inner = self.inner.try_borrow().ok()?;
-        let (state, _) = inner.heads.get(&(head, file))?;
+        let state = &inner.heads.get(&(head, file))?.state;
         if !state.started() {
             return None;
         }
@@ -790,9 +883,9 @@ impl Player {
     /// Play `head` of `file` again from its first frame.
     pub(super) fn restart(&self, head: HeadId, file: i32) {
         if let Ok(mut inner) = self.inner.try_borrow_mut()
-            && let Some((state, _)) = inner.heads.get_mut(&(head, file))
+            && let Some(head) = inner.heads.get_mut(&(head, file))
         {
-            state.restart();
+            head.state.restart();
         }
     }
 
@@ -823,153 +916,6 @@ fn frame_image(edge: u32, pixels: Vec<u8>) -> Option<Arc<RenderImage>> {
     Some(Arc::new(RenderImage::new(SmallVec::from_buf([
         image::Frame::new(rgba),
     ]))))
-}
-
-/// One place a clip shows, with its own play head.
-#[derive(Clone)]
-pub(super) struct StickerView {
-    player: Rc<Player>,
-    spec: Rc<ClipSpec>,
-    head: HeadId,
-    mode: PlayMode,
-    /// The edge resolved while rendering (box × last scale factor), for
-    /// [`Self::frame_now`].
-    edge: u32,
-    /// Frames a second at most.
-    max_fps: u32,
-    /// The window was active when the view was made.
-    active: bool,
-    /// The window it shows in (`None`: the main window).
-    window: Option<ChatId>,
-}
-
-impl StickerView {
-    /// The square of `bounds`' longer side, centred on it: frames are
-    /// square, and a WebM sticker's square holds its video letterboxed to
-    /// the box's shape.
-    fn square(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-        let side = bounds.size.width.max(bounds.size.height);
-        Bounds::new(
-            point(
-                bounds.origin.x + (bounds.size.width - side) / 2.,
-                bounds.origin.y + (bounds.size.height - side) / 2.,
-            ),
-            size(side, side),
-        )
-    }
-
-    /// Paint the frame due now into `bounds`, drawn at their size on
-    /// this window.
-    pub(super) fn paint(&self, bounds: Bounds<Pixels>, window: &mut Window) {
-        let square = Self::square(bounds);
-        let edge = edge_for(f32::from(square.size.width) * window.scale_factor());
-        let active = window.is_window_active() || super::frame_clock::assume_active();
-        let shown = self.player.frame(
-            &self.spec,
-            self.head,
-            self.mode,
-            edge,
-            high_rate(active),
-            self.window,
-            self.player.now(),
-        );
-        if let Some(image) = shown {
-            let _ = window.paint_image(square, square, Corners::default(), image, 0, false);
-        }
-    }
-
-    /// The frame due now at the edge resolved while rendering, for views
-    /// shown as an `img` (panels, the composer).
-    pub(super) fn frame_now(&self) -> Option<Arc<RenderImage>> {
-        self.player.frame(
-            &self.spec,
-            self.head,
-            self.mode,
-            self.edge,
-            high_rate(self.active),
-            self.window,
-            self.player.now(),
-        )
-    }
-
-    /// Frames a second it needs now (0: it rests).
-    pub(super) fn fps(&self) -> u32 {
-        let Ok(inner) = self.player.inner.try_borrow() else {
-            return 0;
-        };
-        let key = self.spec.key(self.edge);
-        // The clip drawn at the painted size, else the one asked for while
-        // rendering.
-        let clip = inner
-            .clips
-            .iter()
-            .filter(|(other, _)| self.spec.same_file(other))
-            .max_by_key(|(_, clip)| clip.used)
-            .map(|(_, clip)| clip);
-        let Some(timeline) = clip.and_then(|clip| clip.timeline) else {
-            return if clip.is_none_or(|clip| clip.failed) {
-                0
-            } else {
-                OPENING_FPS.min(self.max_fps)
-            };
-        };
-        let head = inner
-            .heads
-            .get(&(self.head, key.file))
-            .map(|(head, _)| *head)
-            .unwrap_or_default();
-        // A clip held to its file's rate still ticks at the display's, so
-        // each of its frames stays up for the same number of refreshes.
-        let display_high = high_rate(self.active);
-        let high = display_high && !self.player.engine.coarse(&key);
-        let pick = match self.mode {
-            PlayMode::At(_) => quill::sticker_playback::player::head::pick(
-                Duration::ZERO,
-                self.mode,
-                timeline,
-                high,
-            ),
-            _ => {
-                let mut head = head;
-                head.advance(self.player.now(), self.mode, timeline, high)
-            }
-        };
-        match pick {
-            Some(pick) if pick.animating => {
-                (timeline.tick_fps(display_high).ceil() as u32).clamp(1, self.max_fps.max(1))
-            }
-            _ => 0,
-        }
-    }
-
-    /// When its clip's first frame arrived (at any size), the clip's
-    /// readiness for an effect that picks among ready clips.
-    pub(super) fn ready_at(&self) -> Option<Instant> {
-        let inner = self.player.inner.try_borrow().ok()?;
-        inner
-            .clips
-            .iter()
-            .filter(|(key, _)| self.spec.same_file(key))
-            .filter_map(|(_, clip)| clip.ready_at)
-            .min()
-    }
-
-    /// How far its head played and the clip's length, once its first
-    /// frame showed.
-    pub(super) fn progress(&self) -> Option<(Duration, Duration)> {
-        let inner = self.player.inner.try_borrow().ok()?;
-        let (head, _) = inner.heads.get(&(self.head, self.spec.file.0))?;
-        if !head.started() {
-            return None;
-        }
-        let total = inner
-            .clips
-            .iter()
-            .filter(|(key, _)| self.spec.same_file(key))
-            .find_map(|(_, clip)| clip.timeline)?
-            .duration();
-        Some((head.pos(), total))
-    }
 }
 
 #[cfg(test)]

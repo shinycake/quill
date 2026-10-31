@@ -491,11 +491,28 @@ impl QuillApp {
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);
         self.playback.stickers.window_closed(chat_id);
+        self.leave_sticker_chat(Some(chat_id), Some(chat_id), cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_chat_window(chat_id);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_window_chat(chat_id);
         }
+    }
+
+    /// Whether a window other than `window` (`None`: the main window)
+    /// shows `chat`. A chat can show in two: the main window opens a
+    /// comment thread in its discussion group while the group has a window
+    /// of its own (`select_chat_with` with `thread_switch`).
+    pub(in crate::ui) fn chat_shown_elsewhere(
+        &mut self,
+        chat: ChatId,
+        window: Option<ChatId>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let in_chat_window = window != Some(chat) && self.windows.window_for(chat).is_some();
+        let in_main = window.is_some()
+            && self.in_window_scope(None, cx, |app, _| app.open_chat_id()) == Some(Some(chat));
+        in_chat_window || in_main
     }
 
     /// Whether `chat_id`'s window is the active one, for the session's
@@ -536,7 +553,7 @@ impl QuillApp {
         }
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
-        self.stop_sticker_playback();
+        self.leave_sticker_chat(None, self.open_chat_id(), cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.deselect_chat();
         } else if let Some(session) = self.demo_session.as_mut() {

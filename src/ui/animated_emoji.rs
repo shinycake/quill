@@ -10,7 +10,7 @@
 //! (`EmojiInteractions::play_key`), so a message sent from here keeps
 //! playing when it gets its final id. Once played, a view whose head the
 //! player forgot shows the first frame without playing again until the
-//! chat is left (`stop_sticker_playback` clears the set).
+//! chat is left (`leave_sticker_chat` clears its part of the set).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;

@@ -170,7 +170,7 @@ impl QuillApp {
         // follows, as in Telegram Desktop).
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
-        self.stop_sticker_playback();
+        self.leave_sticker_chat(None, self.open_chat_id(), cx);
         if self.gif_panel_open() {
             if let Some(live) = self.live.as_mut() {
                 live.driver.close_gif_panel();

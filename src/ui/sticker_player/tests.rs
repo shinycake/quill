@@ -36,9 +36,9 @@ fn player(count: u8) -> (Player, ClipSpec) {
         hz: 60,
     };
     // Opens it; its first frame is drawn without anyone asking.
-    assert!(!player.prepare(&spec, EDGE));
+    assert!(!player.prepare(&spec, EDGE, None));
     player.settle();
-    assert!(player.prepare(&spec, EDGE));
+    assert!(player.prepare(&spec, EDGE, None));
     (player, spec)
 }
 
@@ -304,4 +304,63 @@ fn each_window_judges_the_clips_it_drew_by_its_own_frames() {
     player.window_closed(chat);
     let closed = player.close_stale(t0 + ms(1_000));
     assert_eq!((closed.clips, closed.next), (0, Some(ms(4_000))));
+}
+
+/// A window lets go of its chat (the main window opens another one): the
+/// heads and clips only its views used go, and what views in another
+/// window use stays as it is, frames and position. Stopping everything
+/// instead closed a chat window's clips and started its stickers over
+/// whenever the main window opened another chat.
+#[test]
+fn a_window_leaving_its_chat_keeps_what_another_window_uses() {
+    let (player, spec) = player(4);
+    let chat = ChatId(11);
+    let once = PlayMode::Once(Rest::Last);
+    let (main, own, both) = (HeadId::of("main"), HeadId::of("own"), HeadId::of("both"));
+    let main_only = HeadId::of("main-only");
+    let t0 = Instant::now();
+    begin_frame();
+    player.frame_starts(Some(chat));
+    // One clip both windows draw, one only the main window draws, and one
+    // the chat window is opening.
+    let views = [
+        (main, EDGE, None),
+        (both, EDGE, None),
+        (own, EDGE, Some(chat)),
+        (both, EDGE, Some(chat)),
+        (main_only, EDGE * 2, None),
+    ];
+    for _ in 0..2 {
+        for (head, edge, window) in views {
+            let _ = player.frame(&spec, head, once, edge, false, window, t0);
+        }
+        player.settle();
+    }
+    let _ = player.prepare(&spec, EDGE * 3, Some(chat));
+    player.settle();
+    let first = player.first_frames();
+    assert_eq!(player.engine().stats().clips, 3);
+
+    let frames = player.leave(None);
+    assert!(!frames.is_empty(), "the main window's own clip closed");
+    assert_eq!(player.engine().stats().clips, 2, "the chat window's stay");
+    let kept = player.first_frames();
+    assert!(
+        kept.iter().all(|at| first.contains(at)),
+        "none opened again: {first:?} {kept:?}"
+    );
+    assert_eq!(player.head_known(main, 7), None, "it plays again");
+    assert_eq!(player.head_known(main_only, 7), None);
+    assert_eq!(player.head_known(own, 7), Some(true), "where it was");
+    assert_eq!(
+        player.head_known(both, 7),
+        Some(true),
+        "the window draws it"
+    );
+
+    // The chat window closes too: nothing is left.
+    let frames = player.leave(Some(chat));
+    assert!(!frames.is_empty());
+    assert_eq!(player.engine().stats().clips, 0);
+    assert_eq!(player.head_known(both, 7), None);
 }
