@@ -19,7 +19,6 @@ use super::actions::{
 };
 use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
-use super::inline_players::Panel;
 use super::shell::title_bar;
 use super::shortcut_pack::HistoryKey;
 use gpui_kit::component::alert::Alert;
@@ -79,36 +78,18 @@ impl Render for QuillApp {
         // one) and swept no player orphans them.
         let history_drawn = self.slices.conversation_rendered.replace(false)
             || !self.slices.conversation_shown.replace(false);
-        self.playback
-            .inline_videos
-            .frame_start(history_drawn, window.scale_factor());
-        // A viewer covers the chat: its clips stop even if a cached
-        // conversation replays its animation layer; a closed panel stops
-        // its own.
+        self.playback.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
         self.check_video_pip(cx);
-        if self.viewer.state.is_open() || self.stories.viewer.is_open() {
-            self.playback.inline_videos.clear();
-        } else {
-            if !self.composer_ui.inline_results_open {
-                self.playback
-                    .inline_videos
-                    .clear_panel(Panel::InlineResults);
-            }
-            if !self.gif_panel_open() {
-                self.playback.inline_videos.clear_panel(Panel::Gifs);
-            }
-        }
+        self.inline_videos_frame_start(history_drawn, window, cx);
         // Animations run while any Quill window is in front, a chat
         // window's included; the main window's own hold still while the
         // active chat window hides it whole (`chat_window::cover`).
         let main_active = window.is_window_active() || super::frame_clock::assume_active();
-        let active = main_active || self.windows.any_active();
         self.note_main_place(window, main_active);
-        if self.frame.window_active.replace(active) != active {
-            self.playback.inline_videos.set_window_active(active);
-        }
+        self.frame.main_active.set(main_active);
+        let active = self.follow_windows(cx);
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);

@@ -261,10 +261,24 @@ fn a_clip_scrolled_out_of_view_pauses_is_released_and_comes_back(cx: &mut TestAp
         before,
         "a sleeping slot reopened its decoder"
     );
-    // Back in view: the sweep gives it a new player, which plays.
+    // Back in view: the sweep gives it a new player, which plays. Its
+    // decoder has no picture yet: the tile keeps the last one meanwhile.
+    for script in &scripts {
+        let mut script = script.borrow_mut();
+        if script.calls.is_empty() && !script.dropped {
+            script.picture = false;
+        }
+    }
     scroll_until_playing(&app, vcx, 40.);
     assert!(!app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(ROUND)));
     assert_eq!(used(&scripts), before + 1);
+    let player = app
+        .read_with(vcx, |app, _| app.playback.inline_videos.player(ROUND))
+        .expect("the new player");
+    assert!(
+        player.current_picture().is_some(),
+        "the reopened round video paints no picture before its first"
+    );
 }
 
 #[gpui_kit::test]

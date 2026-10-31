@@ -38,7 +38,7 @@
 //! one, which is right: the main window's tab is hidden then.
 
 use super::super::app::QuillApp;
-use super::super::frame_clock::{AppTick, assume_active};
+use super::super::frame_clock::{AppGate, AppTick, assume_active};
 use super::super::window_control::{Backend, backend};
 use super::ChatWindows;
 use gpui_kit::*;
@@ -94,13 +94,20 @@ impl ChatWindows {
         }) && !hover_activates()
     }
 
-    /// `chat_id`'s window is active or not and stands at `place`.
-    pub(super) fn note_place(&self, chat_id: ChatId, active: bool, place: Option<WindowPlace>) {
-        if let Some(slot) = self.slot_for(chat_id) {
-            let mut slot = slot.borrow_mut();
-            slot.active = active;
-            slot.place = place;
-        }
+    /// `chat_id`'s window is active or not and stands at `place`. Returns
+    /// whether its activation changed.
+    pub(super) fn note_place(
+        &self,
+        chat_id: ChatId,
+        active: bool,
+        place: Option<WindowPlace>,
+    ) -> bool {
+        let Some(slot) = self.slot_for(chat_id) else {
+            return false;
+        };
+        let mut slot = slot.borrow_mut();
+        slot.place = place;
+        std::mem::replace(&mut slot.active, active) != active
     }
 }
 
@@ -160,9 +167,49 @@ impl QuillApp {
                 .main
                 .is_some_and(|main| cx.active_window() == Some(main));
         let covered = !main_active && self.windows.main_covered();
-        if self.frame.main_covered.replace(covered) && !covered {
+        let uncovered = self.frame.main_covered.replace(covered) && !covered;
+        // The app came to the front through this window: the other windows'
+        // content asks for ticks again once redrawn.
+        let was_active = self.frame.window_active.get();
+        let woke = self.follow_windows(cx) && !was_active;
+        if uncovered {
             cx.notify();
+        } else if woke {
+            self.tick_app(cx);
         }
+    }
+
+    /// Animations run while any Quill window is active, a chat window's
+    /// included (`frame.window_active`), as of the main window's activation
+    /// (`frame.main_active`) and the chat windows', each noted as it
+    /// changes, whether or not its window draws: a minimized main window
+    /// draws nothing, so its render alone left the gate as its own
+    /// deactivation set it, and a chat window it had paused stayed paused.
+    /// Run at each activation change of a window (its observer, or a chat
+    /// window's render that finds it changed), at the main window's render,
+    /// and when a chat window closes. The inline players follow the gate
+    /// and the main window's cover. Returns the gate.
+    pub(in crate::ui) fn follow_windows(&self, cx: &mut App) -> bool {
+        let active = self.frame.main_active.get() || self.windows.any_active();
+        let covered = self.frame.main_covered.get();
+        let videos = &self.playback.inline_videos;
+        if self.frame.window_active.replace(active) != active {
+            videos.set_window_active(active);
+        }
+        videos.set_main_covered(covered, cx);
+        // For the clips' frame requests (`request_video_frame`).
+        let gate = AppGate {
+            active,
+            held: self
+                .windows
+                .main
+                .filter(|_| covered)
+                .map(|main| main.window_id()),
+        };
+        if cx.try_global::<AppGate>() != Some(&gate) {
+            cx.set_global(gate);
+        }
+        active
     }
 
     /// A frame-clock tick for the whole app redraws every window that

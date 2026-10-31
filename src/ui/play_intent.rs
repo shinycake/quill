@@ -26,11 +26,13 @@ pub(super) enum PlayTarget {
     },
     /// An `image/gif` file, decoded in process.
     Gif { message: MessageId },
-    /// A round video or MP4 GIF on the inline player.
+    /// A round video or MP4 GIF on the inline player, asked for in
+    /// `window` (`None`: the main window).
     Inline {
         chat: ChatId,
         message: MessageId,
         demand: Demand,
+        window: Option<ChatId>,
     },
     /// The media viewer's current clip.
     Viewer { message: MessageId },
@@ -139,6 +141,16 @@ impl QuillApp {
             .take_if(|intent| intent.target.message() == message);
     }
 
+    /// Drop a click to play parked in `chat`'s window, which closed: the
+    /// request it would leave once its file lands names a window gone, so
+    /// nothing would drop it, and the clip would start with sound wherever
+    /// the chat shows next.
+    pub(super) fn drop_play_intent_in_window(&mut self, chat: ChatId) {
+        self.playback.intent.take_if(|intent| {
+            matches!(intent.target, PlayTarget::Inline { window, .. } if window == Some(chat))
+        });
+    }
+
     /// Drop the target waiting on `file` (its download failed or stopped).
     pub(super) fn drop_play_intent_for(&mut self, file: FileId) {
         self.playback.intent.take_if(|intent| intent.file == file);
@@ -173,7 +185,8 @@ impl QuillApp {
                 chat,
                 message,
                 demand,
-            } => self.play_inline_on_demand(chat, message, file, demand, cx),
+                window,
+            } => self.play_inline_on_demand(window, chat, message, file, demand, cx),
             PlayTarget::Viewer { message } => {
                 let current = self
                     .viewer

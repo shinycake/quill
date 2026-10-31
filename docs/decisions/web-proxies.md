@@ -371,14 +371,14 @@ Carrier hosting:
   tests passed only when the close came first. Under CPU load (2 burner processes per core,
   a fresh copy of the test binary each run) they failed 1 run in 40, with
   `[(5, Terminated)]`, a real report of a helper that died. The stand-in is now a script that
-  waits for the `close` command, as the real helper does, and
-  `the_stand_in_helper_stays_up_until_closed` checks it is still running 300 ms in (with
-  `/bin/cat` that test and both close tests fail on every run). A stand-in that waited for the
+  waits for the `close` command, as the real helper does. A stand-in that waited for the
   end of its input instead stayed up past 2 s after a close in 1 run of 100: on macOS, std
   creates a pipe and only then sets close-on-exec, and does not ask `posix_spawn` to close
   inherited descriptors. So a child started at the same moment can inherit another child's
   stdin and hold it open. The real helper exits on the command, not on the end of its input, and
-  the host reaps it after `CLOSE_GRACE` either way.
+  the host reaps it after `CLOSE_GRACE` either way. The stand-ins are checked-in scripts
+  (`tests/fixtures/carrier-helper`) and the tests wait on the host's events, not on sleeps
+  (`docs/decisions/carrier-helper-test-flake.md`).
 - The real helper with WKWebView on macOS against a local relay page
   (`crates/webview-host/tests/carrier_live.rs`, ignored by default, run with
   `cargo test -p quill-webview --test carrier_live -- --ignored --test-threads=1`), 13 tests, all

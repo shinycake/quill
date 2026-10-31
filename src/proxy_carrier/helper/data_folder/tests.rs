@@ -123,6 +123,9 @@ fn a_held_generation_is_not_swept() {
     lock.lock().unwrap();
     swept(&root);
     assert!(root.join("9-0/EBWebView/Default/Cookies").exists());
+    // Unlocked, not only closed: a child another test thread is starting
+    // shares this open file, and with it the lock, until its exec.
+    lock.unlock().unwrap();
     drop(lock);
     swept(&root);
     assert_eq!(names(&root), Vec::<String>::new());
