@@ -380,12 +380,13 @@ impl Session {
         visible_tabs(kind, counts, gallery.media_split, gallery.active_tab)
     }
 
+    /// Only into the entry the gallery's counts fetch opened, as a `count`
+    /// answer does: an answer for a chat whose counts went meanwhile would
+    /// make a partial entry that stops the next fetch.
     fn set_profile_count(&mut self, chat_id: ChatId, key: u8, count: i32) {
-        self.media
-            .chat_media_counts
-            .entry(chat_id.0)
-            .or_default()
-            .insert(key, count);
+        if let Some(counts) = self.media.chat_media_counts.get_mut(&chat_id.0) {
+            counts.insert(key, count);
+        }
     }
 
     /// Ask for the thumbnails of the files (the next ingest downloads them).

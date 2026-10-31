@@ -143,9 +143,11 @@ chat keep the page cap as before this change. Live sessions are unchanged.
 
 ## Not covered
 
-Other per-chat side tables (translations, sponsored messages, media counts)
-are not pruned here. The media viewer's prev/next and the unread
-mention/reaction jump buttons read the shown chat only.
+Other per-chat side tables were not pruned here at first; translations,
+sponsored messages, the poll index, media counts and member lists now go
+with the chat (see below and `chat-side-tables-growth.md`). The media
+viewer's prev/next and the unread mention/reaction jump buttons read the
+shown chat only.
 
 ## Side tables that go with the chat (2026-10 memory sweep)
 

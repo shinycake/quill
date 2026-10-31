@@ -18,14 +18,17 @@
 //!   ([`CLOSED_TAIL_CAP`]) and count as use of the chat;
 //! - what is kept beside a chat's rows goes once nothing of the chat is
 //!   kept: the replied-to messages fetched for its rows, their
-//!   translations, and its pinned list (fetched again whenever the chat
-//!   opens). A kept tail keeps them all, so rows paged back in show their
-//!   reply strips and translations at once.
+//!   translations, its pinned list and sponsored messages (fetched again
+//!   whenever the chat opens; the ads the user reported stay hidden), the
+//!   index of its poll rows, and what its info panel loaded. A kept tail
+//!   keeps them all, so rows paged back in show their reply strips and
+//!   translations at once.
 //!
 //! A history is never pruned while any view shows it (the main window, a
 //! chat window, a topic or comment thread of it) or while the UI holds it
 //! ([`Session::set_history_holds`]: the source of a pending forward, the
-//! chat a reply bar points at, the chat of the playing track), and an entry
+//! chat a reply bar points at, the chat of the playing track, the chat an
+//! open management box reads the member lists of), and an entry
 //! with an unsent or failed local message is never dropped whole.
 //!
 //! A chat or topic that stops being shown is not trimmed in that same
@@ -231,7 +234,8 @@ impl Session {
 
     /// The UI's claim on histories that are read while their chat is not
     /// shown: the source chat of a pending forward, the chat a reply bar
-    /// points at, the chat of the playing track. Replaces the previous
+    /// points at, the chat of the playing track, the chat whose member
+    /// lists an open management box reads. Replaces the previous
     /// claim, then settles the release queue: held chats are never pruned,
     /// and a chat whose hold just lifted is released.
     pub fn set_history_holds(&mut self, chats: impl IntoIterator<Item = ChatId>) {
@@ -447,7 +451,9 @@ impl Session {
 
     /// Once nothing of `chat_id` is kept (no history entry, no topic),
     /// forget what was fetched beside its rows: the replied-to messages
-    /// (`reply_targets`) and the pinned list. Opening the chat fetches both
+    /// (`reply_targets`), the pinned list, the sponsored messages and the
+    /// index of its poll rows, and what its info panel loaded (member
+    /// lists, media counts). Opening the chat or its panel fetches them
     /// again. While a tail is kept they stay, so rows paged back in show
     /// their reply strips at once.
     fn forget_side_tables_once_unloaded(&mut self, chat_id: ChatId) {
@@ -472,6 +478,45 @@ impl Session {
         translate.jobs.retain(|_, job| {
             !matches!(job.target, TranslateTarget::Message { chat_id: chat, .. } if chat == chat_id.0)
         });
+        self.forget_sponsored_messages(chat_id);
+        self.messages.poll_messages.retain(|_, rows| {
+            rows.retain(|&(chat, _)| chat != chat_id.0);
+            !rows.is_empty()
+        });
+        self.forget_info_panel_data(chat_id);
+    }
+
+    /// What the info panel of `chat_id` loaded: its media counts and member
+    /// lists. The info panel and the boxes that read member lists hold
+    /// their chat (`ui::history_holds`), and a gallery shows its view's open
+    /// chat, so none of them reaches here. A list that goes marks the chat
+    /// in `member_list_stale`, as a membership change does, so any reader
+    /// asks again.
+    fn forget_info_panel_data(&mut self, chat_id: ChatId) {
+        // A count answer only fills the entry its fetch opened, so one
+        // still on its way cannot bring this back.
+        self.media.chat_media_counts.remove(&chat_id.0);
+        // A first page still on its way would; its answer is dropped.
+        let first_pages = self.requests.ids_for_chat_where(chat_id, |purpose| {
+            matches!(
+                purpose,
+                RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { .. })
+                    | RequestPurpose::GetBasicGroupFullInfo
+            )
+        });
+        for extra in first_pages {
+            self.requests.take(extra);
+        }
+        let groups = &mut self.groups;
+        let members = groups.supergroup_members.len();
+        groups
+            .supergroup_members
+            .retain(|(chat, _), _| *chat != chat_id.0);
+        let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
+            || groups.supergroup_members.len() != members;
+        if dropped && !groups.member_list_stale.contains(&chat_id.0) {
+            groups.member_list_stale.push(chat_id.0);
+        }
     }
 
     /// A chat that was left or deleted: its histories go when no view

@@ -11,6 +11,12 @@ fn open_user_gallery(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySi
         r#"{"@type":"updateNewChat","chat":{"id":6,"title":"alice","type":{"@type":"chatTypePrivate","user_id":78},"unread_count":0}}"#,
     );
     session.media.shared_media.open_for(ChatId(6));
+    // The counts entry the answers land in, as `fetch_profile_tabs` opens
+    // it before asking for any tab.
+    session
+        .media
+        .chat_media_counts
+        .insert(6, Default::default());
 }
 
 fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {

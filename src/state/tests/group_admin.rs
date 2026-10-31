@@ -413,6 +413,25 @@ fn basic_group_member_and_change_info_admin() {
 }
 
 #[test]
+fn basic_group_manage_counts_its_admins() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    basic_group(&mut session, &seq, &sink, CREATOR, 3);
+    // The member list is kept by chat, not by basic group id.
+    let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(30)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"basicGroupFullInfo","@extra":"{}","creator_user_id":7,"members":[{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":7}},"status":{{"@type":"chatMemberStatusCreator"}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":8}},"status":{{"@type":"chatMemberStatusAdministrator","rights":{{"@type":"chatAdministratorRights"}}}}}},{{"@type":"chatMember","member_id":{{"@type":"messageSenderUser","user_id":9}},"status":{{"@type":"chatMemberStatusMember"}}}}]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.manage_rows(ChatId(30)).administrators, Some(2));
+}
+
+#[test]
 fn supergroup_update_carries_join_to_send() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

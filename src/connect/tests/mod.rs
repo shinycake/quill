@@ -54,6 +54,7 @@ mod group_calls;
 mod group_type;
 mod groups;
 mod history_liveness;
+mod history_prune_answers;
 mod history_window;
 mod inline_gif_downloads;
 mod inline_members;

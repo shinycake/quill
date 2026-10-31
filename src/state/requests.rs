@@ -818,9 +818,18 @@ impl RequestRegistry {
 
     /// Ids of in-flight requests for `chat_id` with any of `purposes`.
     pub fn ids_for_chat(&self, purposes: &[RequestPurpose], chat_id: ChatId) -> Vec<RequestId> {
+        self.ids_for_chat_where(chat_id, |purpose| purposes.contains(&purpose))
+    }
+
+    /// Ids of in-flight requests for `chat_id` whose purpose `wanted` picks.
+    pub fn ids_for_chat_where(
+        &self,
+        chat_id: ChatId,
+        wanted: impl Fn(RequestPurpose) -> bool,
+    ) -> Vec<RequestId> {
         self.pending
             .values()
-            .filter(|p| p.chat_id == Some(chat_id) && purposes.contains(&p.purpose))
+            .filter(|p| p.chat_id == Some(chat_id) && wanted(p.purpose))
             .map(|p| p.id)
             .collect()
     }

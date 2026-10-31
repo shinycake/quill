@@ -1,10 +1,11 @@
 //! State reducer tests: histories of chats nobody is looking at are
 //! bounded (`state::history_prune`).
-use super::common::session;
+use super::common::{AtomicU64, MemorySink, apply_json, session};
 use super::{
-    CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX, ChannelMemberStatus,
-    ChatId, MessageContent, MessageId, ParsedMessage, ReplyTarget, Session, TopicHistory,
-    TranslateTarget, Translation, history_message,
+    Arc, CLOSED_CHATS_MAX, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP, CLOSED_TOPICS_MAX,
+    ChannelMemberStatus, ChatId, HashMap, InfoPanelTarget, MemberListFilter, MessageContent,
+    MessageId, ParsedMessage, ReplyTarget, RequestPurpose, Session, SupergroupMembersFetch,
+    TopicHistory, TranslateTarget, Translation, history_message,
 };
 
 fn live(chat: i64, id: i64) -> ParsedMessage {
@@ -559,4 +560,327 @@ fn a_session_without_a_server_keeps_every_history() {
     }
     assert!(session.histories.contains_key(&100), "no LRU eviction");
     assert!(session.histories.contains_key(&7));
+}
+
+/// What opening `chat` and its info panel leaves beside its rows: its ads,
+/// a poll row in the poll index, the panel's media counts and member lists.
+fn fill_side_tables(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, chat: i64) {
+    session.accept_sponsored_messages(ChatId(chat), Vec::new(), 0, &[]);
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"updateNewMessage","message":{{"id":90,"chat_id":{chat},"is_outgoing":false,"content":{{"@type":"messagePoll","poll":{{"@type":"poll","id":{chat},"question":{{"@type":"formattedText","text":"Q","entities":[]}},"options":[],"total_voter_count":0,"is_anonymous":true,"allows_multiple_answers":false,"allows_revoting":true,"is_closed":false,"type":{{"@type":"pollTypeRegular"}}}},"description":{{"@type":"formattedText","text":"","entities":[]}},"can_add_option":false}}}}}}"#
+        ),
+    );
+    session
+        .media
+        .chat_media_counts
+        .insert(chat, HashMap::from([(0, 3)]));
+    let loaded = || SupergroupMembersFetch::Loaded {
+        members: Vec::new(),
+        total_count: 200,
+    };
+    for filter in [MemberListFilter::Recent, MemberListFilter::Administrators] {
+        session
+            .groups
+            .supergroup_members
+            .insert((chat, filter), loaded());
+    }
+    session.groups.basic_group_members.insert(chat, loaded());
+}
+
+/// The chats each side table holds something for, sorted.
+fn side_table_chats(session: &Session) -> [Vec<i64>; 5] {
+    let sorted = |mut chats: Vec<i64>| {
+        chats.sort_unstable();
+        chats.dedup();
+        chats
+    };
+    [
+        sorted(session.messages.sponsored.keys().copied().collect()),
+        sorted(
+            session
+                .messages
+                .poll_messages
+                .values()
+                .flatten()
+                .map(|(chat, _)| *chat)
+                .collect(),
+        ),
+        sorted(session.media.chat_media_counts.keys().copied().collect()),
+        sorted(
+            session
+                .groups
+                .supergroup_members
+                .keys()
+                .map(|(chat, _)| *chat)
+                .collect(),
+        ),
+        sorted(session.groups.basic_group_members.keys().copied().collect()),
+    ]
+}
+
+#[test]
+fn side_tables_of_dropped_chats_go_back_to_empty() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let visited = 4 * CLOSED_CHATS_MAX as i64;
+    for chat in 1..=visited {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 80);
+        fill_side_tables(&mut session, &seq, &sink, chat);
+    }
+    leave(&mut session);
+    let mut kept: Vec<i64> = session.histories.keys().copied().collect();
+    kept.sort_unstable();
+    assert_eq!(kept.len(), CLOSED_CHATS_MAX, "only the newest tails stay");
+    for (table, chats) in side_table_chats(&session).iter().enumerate() {
+        assert_eq!(chats, &kept, "table {table} holds only the kept chats");
+    }
+    // As many chats again that leave nothing beside their rows push every
+    // kept tail out: the tables are back where they started.
+    for chat in (visited + 1)..=(visited + 1 + CLOSED_CHATS_MAX as i64) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    leave(&mut session);
+    for (table, chats) in side_table_chats(&session).iter().enumerate() {
+        assert!(chats.is_empty(), "table {table} still holds {chats:?}");
+    }
+    let stale = &session.groups.member_list_stale;
+    assert!(
+        (1..=visited).all(|chat| stale.contains(&chat)),
+        "an open member dialog of a dropped chat asks again"
+    );
+}
+
+/// The UI holds the group the info panel shows (`ui::history_holds`): a
+/// frame's claim, made here after each chat switch.
+fn switch_with_panel(session: &mut Session, chat: i64) {
+    session.open_chat(ChatId(chat));
+    let holds: Vec<ChatId> = session.info_panel_chat().into_iter().collect();
+    session.set_history_holds(holds);
+    feed(session, chat, 1);
+}
+
+/// The panel shows chat 1 while 17 other chats are used, then closes.
+fn panel_cycle(chat_type: &str, target: InfoPanelTarget) {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":1,"title":"G","type":{chat_type},"unread_count":0}}}}"#
+        ),
+    );
+    switch(&mut session, 1);
+    fill_side_tables(&mut session, &seq, &sink, 1);
+    session.set_open_info_panel(Some(target));
+    assert_eq!(session.info_panel_chat(), Some(ChatId(1)));
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch_with_panel(&mut session, chat);
+    }
+    assert_eq!(session.info_panel_chat(), Some(ChatId(1)), "not open");
+    assert!(session.histories.contains_key(&1), "the panel holds it");
+    let shown = side_table_chats(&session);
+    assert!(shown.iter().all(|chats| chats.contains(&1)), "{shown:?}");
+    // The panel closes: nothing of the chat stays once it is dropped.
+    session.set_open_info_panel(None);
+    for chat in 100..=(100 + CLOSED_CHATS_MAX as i64) {
+        switch_with_panel(&mut session, chat);
+    }
+    let dropped = side_table_chats(&session);
+    assert!(
+        dropped.iter().all(|chats| !chats.contains(&1)),
+        "{dropped:?}"
+    );
+}
+
+#[test]
+fn an_open_info_panel_keeps_what_it_shows() {
+    panel_cycle(
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":101,"is_channel":false}"#,
+        InfoPanelTarget::Supergroup(101),
+    );
+}
+
+#[test]
+fn a_basic_group_panel_keeps_what_it_shows() {
+    panel_cycle(
+        r#"{"@type":"chatTypeBasicGroup","basic_group_id":202}"#,
+        InfoPanelTarget::BasicGroup(202),
+    );
+}
+
+/// A box that reads the member lists of chat 1 (the Edit box's Manage
+/// rows, the member dialog) stays open while the main chat moves on.
+#[test]
+fn a_chat_an_open_box_holds_keeps_its_member_lists() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    fill_side_tables(&mut session, &seq, &sink, 1);
+    session.set_history_holds([ChatId(1)]);
+    let churn = |session: &mut Session, from: i64| {
+        for chat in from..=(from + CLOSED_CHATS_MAX as i64) {
+            switch(session, chat);
+            feed(session, chat, 1);
+        }
+    };
+    churn(&mut session, 2);
+    let held = side_table_chats(&session);
+    assert!(
+        held.iter().all(|chats| chats.contains(&1)),
+        "the box's lists stay: {held:?}"
+    );
+    assert!(!session.groups.member_list_stale.contains(&1));
+    // The box closes: the chat is an ordinary closed tail from then on.
+    session.set_history_holds([]);
+    churn(&mut session, 100);
+    let dropped = side_table_chats(&session);
+    assert!(
+        dropped.iter().all(|chats| !chats.contains(&1)),
+        "{dropped:?}"
+    );
+}
+
+#[test]
+fn a_forum_forgets_its_side_tables_with_its_last_topic() {
+    let (mut session, _sink) = session();
+    session.topic_history_entry(ChatId(70), 1);
+    session.accept_sponsored_messages(ChatId(70), Vec::new(), 0, &[]);
+    session
+        .media
+        .chat_media_counts
+        .insert(70, HashMap::from([(0, 3)]));
+    session.groups.supergroup_members.insert(
+        (70, MemberListFilter::Recent),
+        SupergroupMembersFetch::Loaded {
+            members: Vec::new(),
+            total_count: 200,
+        },
+    );
+    assert!(side_table_chats(&session)[0].contains(&70));
+    for topic in 1..=CLOSED_TOPICS_MAX as i32 {
+        session.topic_history_entry(ChatId(71), topic);
+    }
+    assert!(!session.threads.topic_histories.contains_key(&(70, 1)));
+    let tables = side_table_chats(&session);
+    assert!(
+        tables.iter().all(|chats| !chats.contains(&70)),
+        "{tables:?}"
+    );
+}
+
+/// The gallery shows its view's open chat, whose history entry stays while
+/// it is shown, so closed topics of that chat going leave its counts.
+#[test]
+fn the_open_chat_keeps_its_gallery_counts_while_its_topics_go() {
+    let (mut session, _sink) = session();
+    switch(&mut session, 1);
+    session.media.shared_media.open_for(ChatId(1));
+    session
+        .media
+        .chat_media_counts
+        .insert(1, HashMap::from([(0, 3)]));
+    for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 4) {
+        session.topic_history_entry(ChatId(1), topic);
+    }
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 4) {
+        session.history_entry(ChatId(chat));
+    }
+    assert!(!session.threads.topic_histories.contains_key(&(1, 1)));
+    assert!(session.media.shared_media.open);
+    assert!(session.media.chat_media_counts.contains_key(&1));
+}
+
+fn sponsored_answer(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, chat: i64) {
+    let extra = session.request(RequestPurpose::GetChatSponsoredMessages, Some(ChatId(chat)));
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"sponsoredMessages","@extra":"{}","messages_between":0,"messages":[{{"@type":"sponsoredMessage","message_id":9001,"is_recommended":false,"can_be_reported":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"ad","entities":[]}}}},"sponsor":{{"@type":"advertisementSponsor","url":"https://example.com","photo":{{"@type":"photo","has_stickers":false,"sizes":[]}},"info":""}},"title":"T","button_text":"Go","accent_color_id":0,"background_custom_emoji_id":"0","additional_info":""}}]}}"#,
+            extra.0
+        ),
+    );
+}
+
+#[test]
+fn a_reported_ad_stays_hidden_after_its_chat_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    let shown = |session: &Session| session.open_sponsored_tail().map(|ad| ad.message_id);
+    assert_eq!(shown(&session), Some(9001));
+    assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
+    let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"reportSponsoredResultOk","@extra":"{}"}}"#,
+            report.0
+        ),
+    );
+    assert_eq!(shown(&session), None, "the reported ad left the chat");
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    assert!(!session.histories.contains_key(&1), "its rows went");
+    assert!(
+        session.sponsored_message(ChatId(1), 9001).is_none(),
+        "and its ads"
+    );
+    assert!(session.sponsored_fetch_due(ChatId(1), std::time::Instant::now()));
+    // TDLib's list still has the ad when the chat opens again.
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.sponsored_message(ChatId(1), 9001).is_some());
+    assert_eq!(shown(&session), None, "the reported ad stays hidden");
+}
+
+/// A report still on its way when the chat goes (the UI holds the chat of
+/// an ad being reported, so this is the reducer's own fallback).
+#[test]
+fn a_report_answered_after_the_drop_still_hides_its_ad() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.begin_sponsored_report(ChatId(1), 9001).is_some());
+    let report = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(ChatId(1)));
+    for chat in 2..=(CLOSED_CHATS_MAX as i64 + 2) {
+        switch(&mut session, chat);
+        feed(&mut session, chat, 1);
+    }
+    assert!(
+        session.sponsored_message(ChatId(1), 9001).is_none(),
+        "dropped"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"reportSponsoredResultOk","@extra":"{}"}}"#,
+            report.0
+        ),
+    );
+    switch(&mut session, 1);
+    sponsored_answer(&mut session, &seq, &sink, 1);
+    assert!(session.sponsored_message(ChatId(1), 9001).is_some());
+    assert_eq!(
+        session.open_sponsored_tail().map(|ad| ad.message_id),
+        None,
+        "the reported ad stays hidden"
+    );
 }
