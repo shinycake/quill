@@ -542,15 +542,30 @@ fn os_open_now(target: &std::ffi::OsStr) -> bool {
 
 /// Windows calls `ShellExecuteW` directly: `cmd /C start` would re-parse
 /// `&`, `|` and `^` inside a link or file name and run whatever follows as
-/// a second command.
+/// a second command. It runs off the UI thread, since a cold browser or a
+/// network path can take seconds.
 #[cfg(all(windows, not(any(test, feature = "test-support"))))]
 fn os_open_now(target: &std::ffi::OsStr) -> bool {
+    open_off_thread(target, shell_execute, |_| {
+        eprintln!("quill: ShellExecuteW could not open a link or file");
+    })
+}
+
+#[cfg(all(windows, not(any(test, feature = "test-support"))))]
+fn shell_execute(target: &std::ffi::OsStr) -> bool {
     use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+    };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let file = wide(target);
     let verb = wide(std::ffi::OsStr::new("open"));
+    // SAFETY: called once on this thread before any COM use; balanced by
+    // `CoUninitialize` below when it succeeds. Shell extensions that
+    // ShellExecuteW may load expect an initialized apartment.
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
     // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive
     // the call; null HWND, parameters and directory are allowed.
     let result = unsafe {
@@ -563,8 +578,31 @@ fn os_open_now(target: &std::ffi::OsStr) -> bool {
             SW_SHOWNORMAL,
         )
     };
+    if com.is_ok() {
+        // SAFETY: matches the successful `CoInitializeEx` above, on the
+        // same thread.
+        unsafe { CoUninitialize() };
+    }
     // ShellExecuteW reports success with a value greater than 32.
     result as isize > 32
+}
+
+/// Runs `open` on a thread of its own and returns at once. Like `xdg-open`
+/// and `open`, true means the attempt started; a failure goes to `failed`
+/// on that thread.
+#[cfg(any(test, all(windows, not(feature = "test-support"))))]
+fn open_off_thread(
+    target: &std::ffi::OsStr,
+    open: impl FnOnce(&std::ffi::OsStr) -> bool + Send + 'static,
+    failed: impl FnOnce(&std::ffi::OsStr) + Send + 'static,
+) -> bool {
+    let target = target.to_os_string();
+    crate::thread_guard::spawn_guarded("os-open", move || {
+        if !open(&target) {
+            failed(&target);
+        }
+    })
+    .is_ok()
 }
 
 #[cfg(all(windows, any(test, feature = "test-support")))]
@@ -658,6 +696,51 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_runs_off_the_calling_thread_and_reports_a_failure() {
+        let caller = std::thread::current().id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let failed_tx = tx.clone();
+        let started = open_off_thread(
+            std::ffi::OsStr::new("https://example.com/a"),
+            move |target| {
+                let here = std::thread::current().id();
+                tx.send(("open", here, target.to_os_string())).unwrap();
+                false
+            },
+            move |target| {
+                let here = std::thread::current().id();
+                failed_tx
+                    .send(("failed", here, target.to_os_string()))
+                    .unwrap();
+            },
+        );
+        assert!(started);
+        let (step, thread, target) = rx.recv().unwrap();
+        assert_eq!(step, "open");
+        assert_ne!(thread, caller);
+        assert_eq!(target, "https://example.com/a");
+        let (step, _, target) = rx.recv().unwrap();
+        assert_eq!(step, "failed");
+        assert_eq!(target, "https://example.com/a");
+    }
+
+    #[test]
+    fn a_successful_open_reports_nothing() {
+        let (tx, rx) = std::sync::mpsc::channel::<&str>();
+        let failed_tx = tx.clone();
+        assert!(open_off_thread(
+            std::ffi::OsStr::new("C:/file.pdf"),
+            move |_| {
+                tx.send("open").unwrap();
+                true
+            },
+            move |_| failed_tx.send("failed").unwrap(),
+        ));
+        assert_eq!(rx.recv().unwrap(), "open");
+        assert!(rx.recv().is_err(), "the thread ended without a failure");
+    }
 
     #[test]
     fn mailto_accepts_plain_addresses_only() {
