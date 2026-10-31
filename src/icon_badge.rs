@@ -301,14 +301,14 @@ mod windows_overlay {
 /// Latest-wins mailbox between the UI thread and the D-Bus worker: a burst
 /// of unread changes while the worker is busy collapses to the newest count.
 #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
-struct LatestSlot<T> {
+pub(crate) struct LatestSlot<T> {
     value: std::sync::Mutex<Option<T>>,
     ready: std::sync::Condvar,
 }
 
 #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
 impl<T> LatestSlot<T> {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             value: std::sync::Mutex::new(None),
             ready: std::sync::Condvar::new(),
@@ -316,13 +316,13 @@ impl<T> LatestSlot<T> {
     }
 
     /// Replace any pending value; never blocks on the consumer.
-    fn put(&self, value: T) {
+    pub(crate) fn put(&self, value: T) {
         *crate::locks::lock_or_recover(&self.value) = Some(value);
         self.ready.notify_one();
     }
 
     /// Block until a value is pending, then take it.
-    fn take(&self) -> T {
+    pub(crate) fn take(&self) -> T {
         let mut guard = crate::locks::lock_or_recover(&self.value);
         loop {
             if let Some(value) = guard.take() {
