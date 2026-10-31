@@ -1,3 +1,7 @@
+// Modified by the Quill project (2026) from gpui-pre-windows 0.3.10 (Apache-2.0):
+// `dispatch_after` goes through `TimerThread` (high-resolution timers) and
+// falls back to the thread-pool timer only when that thread can't start. See
+// third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     ffi::c_void,
     ptr::NonNull,
@@ -20,7 +24,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging::PostMessageW,
 };
 
-use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
+use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD, timer_thread::TimerThread};
 use gpui::{
     PlatformDispatcher, Priority, PriorityQueueSender, RunnableVariant, TimerResolutionGuard,
 };
@@ -31,6 +35,7 @@ pub(crate) struct WindowsDispatcher {
     main_thread_id: ThreadId,
     pub(crate) platform_window_handle: SafeHwnd,
     validation_number: usize,
+    timers: Option<TimerThread>,
 }
 
 impl WindowsDispatcher {
@@ -48,6 +53,7 @@ impl WindowsDispatcher {
             platform_window_handle,
             validation_number,
             wake_posted: AtomicBool::new(false),
+            timers: TimerThread::start(),
         }
     }
 
@@ -145,6 +151,13 @@ impl PlatformDispatcher for WindowsDispatcher {
     }
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
+        let runnable = match &self.timers {
+            Some(timers) => match timers.schedule(duration, runnable) {
+                Ok(()) => return,
+                Err(runnable) => runnable,
+            },
+            None => runnable,
+        };
         self.dispatch_on_threadpool_after(runnable, duration);
     }
 

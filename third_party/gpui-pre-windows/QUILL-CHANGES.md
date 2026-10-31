@@ -336,3 +336,31 @@ Added in 2026:
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
+
+## Async timers fire on time, not on the 15.6 ms system tick
+
+Added in 2026. Upstream's `dispatch_after` armed a thread-pool timer per
+call, and those expire only on the system timer tick (15.6 ms by default), so
+a 15.3 ms frame-clock wait for a 60 fps sticker landed on 15.6 or 31.25 ms and
+played at about 32 Hz. Telegram Desktop runs its animations on a
+`Qt::PreciseTimer` for the same reason.
+
+- `src/timer_queue.rs` (new, std-only; unit tests run with
+  `scripts/test-timer-queue.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the deadline heap, earliest first, ties in the order added, and the wait
+  until the next deadline (none when empty).
+- `src/timer_thread.rs` (new): one "Timer" thread fires every
+  `dispatch_after` runnable from that heap. It sleeps on a waitable timer made
+  with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (Windows 10 1803 and later),
+  which needs no process-wide `timeBeginPeriod`, plus an event that a new
+  earliest deadline sets. With nothing pending it waits on the event alone,
+  with no timeout, so an idle app gains no wakeups. Where the flag is
+  rejected it uses a plain waitable timer and holds `timeBeginPeriod(1)` only
+  across waits shorter than 100 ms (animation frames), not idle ones.
+- `src/dispatcher.rs`: `dispatch_after` schedules on that thread; the
+  thread-pool timer remains only for when the thread could not start or has
+  stopped.
+- `src/gpui_windows.rs`: declares the new modules.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
