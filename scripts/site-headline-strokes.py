@@ -276,6 +276,12 @@ def timed(strokes):
             continue
         seg = np.hypot(*np.diff(s[:, :2], axis=0).T)
         arc = np.concatenate([[0], np.cumsum(seg)])
+        if len(s) < 3:
+            # Too short to bend: a tick at half speed.
+            ts = t + np.concatenate([[0], np.cumsum(seg / (VMAX / 2))])
+            out.append(np.concatenate([s, ts[:, None]], 1))
+            t = ts[-1]
+            continue
         heading = np.unwrap(np.arctan2(*np.diff(s[:, :2], axis=0).T[::-1]))
         bend = np.abs(np.gradient(heading)) / np.maximum(seg, 1e-6)
         bend = np.concatenate([bend[:1], ndimage.gaussian_filter1d(bend, 2)])

@@ -230,13 +230,14 @@ function setupTitleQuill() {
   }
   const cs = getComputedStyle(title);
   const font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
-  // On a slow connection, show the headline rather than keep it hidden.
+  // On a slow connection, show the headline rather than keep it hidden for
+  // more than about three seconds from the start of the page load.
   let late = false;
   const wait = setTimeout(() => {
     late = true;
     pen.remove();
     reveal();
-  }, 2500);
+  }, Math.max(0, 3000 - performance.now()));
   Promise.all([
     fetch("data/headline-strokes.json").then((r) => (r.ok ? r.json() : Promise.reject(r.status))),
     document.fonts.load(font),
@@ -571,7 +572,16 @@ function write(title, pen, data) {
   let last = null;
   let handedOver = false;
 
+  // A mistake in a frame must never leave the headline hidden.
   function tick(clock) {
+    try {
+      step(clock);
+    } catch {
+      finish();
+    }
+  }
+
+  function step(clock) {
     if (done) return;
     const now = clock - start;
     if (now < 0) return requestAnimationFrame(tick);
