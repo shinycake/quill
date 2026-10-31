@@ -66,7 +66,10 @@ mod tests {
     fn swept_ids() -> Vec<usize> {
         begin_frame();
         begin_frame();
-        take_unshowable().iter().map(|image| image.id.0).collect()
+        take_unshowable(true, &[])
+            .iter()
+            .map(|image| image.id.0)
+            .collect()
     }
 
     #[test]
