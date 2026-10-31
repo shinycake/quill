@@ -145,13 +145,12 @@ The input tests' window (`InputView::build_with`) is activated, as a real
 window that takes a click or a key is, and the two tests that timed the
 blink after a focus wait for the focus handler's restart.
 
-## A laid-out paragraph keeps one copy of its runs
+## A laid-out paragraph keeps no vector slack
 
 `src/input/bidi_paragraph.rs`: Quill caches laid-out paragraphs
 (`docs/decisions/paragraph-cache-widths.md`), so `BidiParagraph` no longer
 keeps space it does not use. `shape_row` sizes a row's fragment and shaped
 line vectors for its runs instead of letting them double (a slot is 136
-bytes), `layout_unchecked` drops the slack of its row vector (208 bytes a
-row), and each run's `ShapedLine` lets go of its copy of the run's text once
-the fragment is built: painting reads only the glyphs and decoration runs,
-and the fragment keeps the text. What is drawn and measured is unchanged.
+bytes), and `layout_unchecked` drops the slack of its row vector (208 bytes
+a row). Each run's `ShapedLine` keeps its text, which `ShapedLine::cursor`
+and `split_at` read. What is drawn and measured is unchanged.

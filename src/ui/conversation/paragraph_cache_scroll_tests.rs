@@ -104,22 +104,63 @@ fn scrolling_back_lays_out_nothing_again(cx: &mut TestAppContext) {
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }
 
+/// Layouts made while the window is resized to each of `widths`, a few
+/// frames each, as a window or splitter dragged across them.
+fn layouts_resizing(app: &Entity<QuillApp>, cx: &mut VisualTestContext, widths: &[f32]) -> u64 {
+    let before = paragraph_cache::layouts_in_tests();
+    for width in widths {
+        resize(app, cx, *width, 800.);
+    }
+    paragraph_cache::layouts_in_tests() - before
+}
+
 #[gpui_kit::test]
-fn resizing_lays_out_each_width_once_and_keeps_two(cx: &mut TestAppContext) {
+fn resizing_lays_out_each_width_once(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     rtl_group(&app, vcx);
-    let before = paragraph_cache::layouts_in_tests();
-    for width in [1000., 900., 800., 700., 640.] {
-        resize(&app, vcx, width, 800.);
-    }
+    let laid = layouts_resizing(&app, vcx, &[1000., 900., 800., 700., 640.]);
     redraw(vcx);
-    assert!(
-        paragraph_cache::layouts_in_tests() > before,
-        "the posts rewrapped"
-    );
+    assert!(laid > 0, "the posts rewrapped");
     assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
     let held = paragraph_cache::held_in_tests(false);
     assert!(held.drawn > 0, "{held:?}");
-    assert!(held.laid_out <= 2 * held.drawn, "{held:?}");
+    // Widths only measured let their layouts go once their frame was over,
+    // but for the one a paragraph measured and not drawn waits on.
+    assert!(held.most_measured_only <= 1, "{held:?}");
+}
+
+/// A history narrower than a bubble's widest, as with a panel closed (A),
+/// a panel open (B), the window maximized (C), then the panel closed again.
+#[gpui_kit::test]
+fn going_back_to_an_earlier_width_lays_out_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    rtl_group(&app, vcx);
+    // The window opens at C, where a bubble is as wide as it gets.
+    for width in [700., 640.] {
+        assert!(
+            layouts_resizing(&app, vcx, &[width]) > 0,
+            "the posts rewrapped at {width}"
+        );
+    }
+    assert_eq!(
+        layouts_resizing(&app, vcx, &[1000., 700., 640., 1000., 700.]),
+        0
+    );
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
+}
+
+/// A splitter dragged across a dozen widths and back over them.
+#[gpui_kit::test]
+fn dragging_back_over_widths_lays_out_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    rtl_group(&app, vcx);
+    let out: Vec<f32> = (0..12).map(|step| 750. - 10. * step as f32).collect();
+    assert!(layouts_resizing(&app, vcx, &out) > 0, "the posts rewrapped");
+    let back: Vec<f32> = out.iter().rev().copied().collect();
+    assert_eq!(layouts_resizing(&app, vcx, &back), 0);
+    assert_eq!(layouts_resizing(&app, vcx, &out), 0);
+    assert_eq!(paragraph_cache::relayouts_in_tests(), 0);
 }

@@ -11,8 +11,9 @@
 //! Layout asks for a message paragraph at about four widths (unconstrained,
 //! its widest line, the room offered and the final width) and it is drawn at
 //! one of them. Whatever a frame lays out stays until that frame ends; then
-//! only the widths it was drawn at stay laid out, and the others keep their
-//! size, which is all a measure needs. One-line texts keep every width
+//! the widths only measured let their layouts go and keep their size, which
+//! is all a measure needs. Widths drawn stay laid out, the least recently
+//! used going first past the old cache's budget
 //! (`docs/decisions/paragraph-cache-widths.md`).
 #![deny(clippy::indexing_slicing)]
 
@@ -32,17 +33,15 @@ const PARAGRAPHS: usize = 512;
 /// them (two each).
 const LINES: usize = 1024;
 
-/// Widths a paragraph remembers its size at.
-const SIZES: usize = 8;
+/// Widths a paragraph remembers, laid out or not: a window or splitter
+/// dragged across 30 or so widths and back finds every one.
+const SIZES: usize = 64;
 
-/// Widths a wrapped paragraph stays laid out at once the frames that drew
-/// them are over: two, so a panel opened and closed again finds both. Every
-/// width the last frame drew stays as well. One-line texts keep every width
-/// they were laid out at, up to [`SIZES`], as every width was kept before:
-/// most are short, a row measures one at a room it then draws narrower and
-/// may draw it at that room later, and a quote drawn in several replies can
-/// be drawn again from a cached view's replay, which the cache never sees.
-const DRAWN: usize = 2;
+/// Laid-out widths each kind keeps once the frames that used them are over,
+/// least recently used out first: the 2,048 the cache used to hold. A width
+/// a wrapped paragraph was only measured at doesn't stay laid out past its
+/// frame (see [`Entry::settle`]), so the budget goes to widths drawn.
+const LAID_OUT: usize = 2048;
 
 /// One frame of one window.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -95,62 +94,122 @@ impl Entry {
         Some(width)
     }
 
-    /// Adds `width`, forgetting the least recently used one past [`SIZES`]
-    /// unless every one was used in the frame begun at `start`.
+    /// Adds `width`, then forgets the least recently used widths past
+    /// [`SIZES`], never one used in the frame begun at `start`.
     fn add(&mut self, width: Width, start: u64) {
         self.used = width.used;
         self.widths.push(width);
-        if self.widths.len() > SIZES
-            && let Some(oldest) = self
+        while self.widths.len() > SIZES {
+            let Some(oldest) = self
                 .widths
                 .iter()
                 .enumerate()
                 .filter(|(_, w)| w.used <= start)
                 .min_by_key(|(_, w)| w.used)
                 .map(|(ix, _)| ix)
-        {
+            else {
+                break;
+            };
             self.widths.remove(oldest);
         }
     }
 
-    /// The frame begun at `start`, which used this paragraph, is over.
-    /// Widths it drew stay laid out, and so do the most recently drawn
-    /// others, up to [`DRAWN`] in all. Widths only measured let their
-    /// layout go, unless the paragraph was not drawn in that frame: then
-    /// the width layout settled on keeps it for the draw to come (a list
-    /// measures rows just outside its viewport before they scroll in).
+    /// The frame begun at `start`, which used this wrapped paragraph, is
+    /// over. Widths it was only measured at let their layout go, unless the
+    /// paragraph was not drawn in that frame: then the width layout settled
+    /// on keeps it for the draw to come (a list measures rows just outside
+    /// its viewport before they scroll in). Widths ever drawn keep theirs.
     fn settle(&mut self, start: u64) {
-        let drawn_now = self.widths.iter().filter(|w| w.drawn > start).count();
-        let mut earlier: Vec<u64> = self
-            .widths
-            .iter()
-            .filter(|w| w.paragraph.is_some() && w.drawn > 0 && w.drawn <= start)
-            .map(|w| w.drawn)
-            .collect();
-        earlier.sort_unstable_by(|a, b| b.cmp(a));
-        let keep_from = match DRAWN.saturating_sub(drawn_now).checked_sub(1) {
-            Some(last) => earlier.get(last).copied().unwrap_or(0),
-            None => u64::MAX,
-        };
+        let drawn_now = self.widths.iter().any(|w| w.drawn > start);
         for width in &mut self.widths {
-            let keep = if width.drawn > start {
-                true
-            } else if width.drawn > 0 {
-                width.drawn >= keep_from
-            } else {
-                drawn_now == 0 && width.wrap.is_some() && width.wrap == self.measured
-            };
-            if !keep {
+            let waiting = !drawn_now && width.wrap.is_some() && width.wrap == self.measured;
+            if width.drawn == 0 && !waiting {
                 width.paragraph = None;
             }
         }
     }
 }
 
-#[derive(Default)]
+/// Paragraphs of one kind: wrapped, or one-line.
+struct Pool {
+    entries: HashMap<Key, Entry>,
+    /// Paragraphs kept.
+    capacity: usize,
+    /// Whether widths only measured let their layouts go when their frame
+    /// ends. One-line texts keep them: most are short, a row measures one
+    /// at the room it offers, draws it narrower and may draw it at that
+    /// room later, and a quote drawn from a cached view's replay never
+    /// reaches the cache.
+    settles: bool,
+    /// Laid-out widths at the last count plus those laid out since: never
+    /// fewer than are held.
+    laid_out: usize,
+}
+
+impl Pool {
+    fn new(capacity: usize, settles: bool) -> Self {
+        Self {
+            entries: HashMap::new(),
+            capacity,
+            settles,
+            laid_out: 0,
+        }
+    }
+
+    fn entry(&mut self, key: Key, start: u64) -> &mut Entry {
+        if !self.entries.contains_key(&key) && self.entries.len() >= self.capacity {
+            // Keep the most recently used half, and whatever this frame used.
+            let mut ages: Vec<u64> = self.entries.values().map(|e| e.used).collect();
+            ages.sort_unstable();
+            let cutoff = ages.get(ages.len() / 2).copied().unwrap_or(0).min(start);
+            self.entries.retain(|_, e| e.used > cutoff);
+        }
+        self.entries.entry(key).or_default()
+    }
+
+    /// The frame begun at `start` is over: settle what it used, and keep
+    /// the layouts within `budget`.
+    fn end_frame(&mut self, start: u64, budget: usize) {
+        if self.settles {
+            for entry in self.entries.values_mut().filter(|e| e.used > start) {
+                entry.settle(start);
+            }
+        }
+        if self.laid_out > budget {
+            self.trim(start, budget);
+        }
+    }
+
+    /// Past `budget` laid-out widths, lets the least recently used ones go
+    /// down to three quarters of it, never one used in the frame begun at
+    /// `start`. Their sizes stay.
+    fn trim(&mut self, start: u64, budget: usize) {
+        let widths = || self.entries.values().flat_map(|e| &e.widths);
+        let held = widths().filter(|w| w.paragraph.is_some()).count();
+        self.laid_out = held;
+        if held <= budget {
+            return;
+        }
+        let excess = held - budget * 3 / 4;
+        let mut ages: Vec<u64> = widths()
+            .filter(|w| w.paragraph.is_some() && w.used <= start)
+            .map(|w| w.used)
+            .collect();
+        let cutoff = match excess.checked_sub(1) {
+            Some(ix) if ix < ages.len() => *ages.select_nth_unstable(ix).1,
+            _ => ages.iter().copied().max().unwrap_or(0),
+        };
+        for width in self.entries.values_mut().flat_map(|e| &mut e.widths) {
+            if width.used <= cutoff && width.paragraph.take().is_some() {
+                self.laid_out -= 1;
+            }
+        }
+    }
+}
+
 struct Cache {
-    paragraphs: HashMap<Key, Entry>,
-    lines: HashMap<Key, Entry>,
+    paragraphs: Pool,
+    lines: Pool,
     clock: u64,
     /// The frame being drawn, and the clock when it began.
     pass: Option<(Pass, u64)>,
@@ -159,16 +218,27 @@ struct Cache {
     laid: HashMap<(Key, bool, Option<u32>), u64>,
 }
 
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            paragraphs: Pool::new(PARAGRAPHS, true),
+            lines: Pool::new(LINES, false),
+            clock: 0,
+            pass: None,
+            #[cfg(test)]
+            laid: HashMap::new(),
+        }
+    }
+}
+
 impl Cache {
     /// The clock for a request from `pass`. The first request of a frame
     /// ends the one before it.
     fn tick(&mut self, pass: Pass) -> u64 {
         if self.pass.map(|(p, _)| p) != Some(pass) {
             if let Some((_, start)) = self.pass {
-                // One-line texts keep every width (see [`DRAWN`]).
-                for entry in self.paragraphs.values_mut().filter(|e| e.used > start) {
-                    entry.settle(start);
-                }
+                self.paragraphs.end_frame(start, LAID_OUT);
+                self.lines.end_frame(start, LAID_OUT);
             }
             self.pass = Some((pass, self.clock));
         }
@@ -181,7 +251,7 @@ impl Cache {
         self.pass.map_or(0, |(_, start)| start)
     }
 
-    fn map(&mut self, one_line: bool) -> &mut HashMap<Key, Entry> {
+    fn pool(&mut self, one_line: bool) -> &mut Pool {
         if one_line {
             &mut self.lines
         } else {
@@ -189,18 +259,12 @@ impl Cache {
         }
     }
 
-    fn entry(&mut self, key: Key, one_line: bool) -> &mut Entry {
+    /// The entry for `key`, after a layout was made for it.
+    fn laid_out(&mut self, key: Key, one_line: bool) -> &mut Entry {
         let start = self.start();
-        let capacity = if one_line { LINES } else { PARAGRAPHS };
-        let map = self.map(one_line);
-        if !map.contains_key(&key) && map.len() >= capacity {
-            // Keep the most recently used half, and whatever this frame used.
-            let mut ages: Vec<u64> = map.values().map(|e| e.used).collect();
-            ages.sort_unstable();
-            let cutoff = ages.get(ages.len() / 2).copied().unwrap_or(0).min(start);
-            map.retain(|_, e| e.used > cutoff);
-        }
-        map.entry(key).or_default()
+        let pool = self.pool(one_line);
+        pool.laid_out += 1;
+        pool.entry(key, start)
     }
 
     #[cfg(test)]
@@ -350,7 +414,7 @@ fn measured(
     let hit = CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let now = cache.tick(pass);
-        let entry = cache.map(one_line).get_mut(&key)?;
+        let entry = cache.pool(one_line).entries.get_mut(&key)?;
         if wrap.is_some() {
             entry.measured = wrap;
         }
@@ -367,7 +431,7 @@ fn measured(
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);
         let start = cache.start();
-        let entry = cache.entry(key, one_line);
+        let entry = cache.laid_out(key, one_line);
         if wrap.is_some() {
             entry.measured = wrap;
         }
@@ -398,7 +462,11 @@ fn drawn(
     let hit = CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let now = cache.tick(pass);
-        let width = cache.map(one_line).get_mut(&key)?.width(wrap, now)?;
+        let width = cache
+            .pool(one_line)
+            .entries
+            .get_mut(&key)?
+            .width(wrap, now)?;
         let paragraph = width.paragraph.clone()?;
         width.drawn = now;
         Some(paragraph)
@@ -413,9 +481,12 @@ fn drawn(
         #[cfg(test)]
         cache.count_layout(&key, one_line, wrap);
         let start = cache.start();
-        let entry = cache.entry(key, one_line);
+        let entry = cache.laid_out(key, one_line);
         match entry.width(wrap, now) {
+            // Laid out again (its layout went, or the fonts it uses loaded
+            // since): the size may have changed too.
             Some(width) => {
+                width.size = paragraph.size();
                 width.paragraph = Some(paragraph.clone());
                 width.drawn = now;
             }
@@ -443,6 +514,9 @@ pub(super) struct Held {
     pub(super) drawn: usize,
     /// Widths those paragraphs are laid out at.
     pub(super) laid_out: usize,
+    /// The most widths only measured, never drawn, one of those
+    /// paragraphs is laid out at.
+    pub(super) most_measured_only: usize,
     /// Paragraphs measured and never drawn.
     pub(super) waiting: usize,
     /// Widths those are laid out at.
@@ -454,7 +528,7 @@ pub(super) fn held_in_tests(one_line: bool) -> Held {
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         let mut held = Held::default();
-        for entry in cache.map(one_line).values() {
+        for entry in cache.pool(one_line).entries.values() {
             let laid_out = entry
                 .widths
                 .iter()
@@ -463,6 +537,12 @@ pub(super) fn held_in_tests(one_line: bool) -> Held {
             if entry.widths.iter().any(|w| w.drawn > 0) {
                 held.drawn += 1;
                 held.laid_out += laid_out;
+                let measured_only = entry
+                    .widths
+                    .iter()
+                    .filter(|w| w.paragraph.is_some() && w.drawn == 0)
+                    .count();
+                held.most_measured_only = held.most_measured_only.max(measured_only);
             } else {
                 held.waiting += 1;
                 held.waiting_laid_out += laid_out;
@@ -497,8 +577,33 @@ mod widths_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::runs_fingerprint;
-    use gpui_kit::{Hsla, TextRun, font};
+    use super::{Entry, SIZES, Width, runs_fingerprint};
+    use gpui_kit::{Hsla, Size, TextRun, font};
+
+    /// A frame may use more widths than a paragraph remembers; the next
+    /// width added after it trims back to [`SIZES`], oldest first.
+    #[test]
+    fn a_paragraph_trims_to_its_widths_once_their_frame_is_over() {
+        let width = |wrap: u64| Width {
+            wrap: Some(wrap as u32),
+            size: Size::default(),
+            paragraph: None,
+            drawn: 0,
+            used: wrap,
+        };
+        let mut entry = Entry::default();
+        let many = SIZES as u64 + 5;
+        // One frame, begun at clock 0, uses them all: all stay.
+        for wrap in 1..=many {
+            entry.add(width(wrap), 0);
+        }
+        assert_eq!(entry.widths.len(), SIZES + 5);
+        // The next frame begins.
+        entry.add(width(many + 1), many);
+        assert_eq!(entry.widths.len(), SIZES);
+        let oldest = entry.widths.iter().map(|w| w.used).min();
+        assert_eq!(oldest, Some(7), "the six oldest went");
+    }
 
     fn run(len: usize, color: Hsla) -> TextRun {
         TextRun {

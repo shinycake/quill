@@ -386,15 +386,12 @@ impl BidiParagraph {
                 slice.to_string()
             }
             .into();
-            let mut shaped = window
+            let shaped = window
                 .text_system()
                 .shape_line(shaped_text, font_size, &run_runs, None);
             let local = run_range.start - range.start..run_range.end - range.start;
             let fragment =
                 fragment_from_shaped(&shaped, local, rtl, x, slice, window.text_system());
-            // Painting reads the glyphs and decorations only, and the fragment keeps the
-            // run's text: a cached paragraph need not hold a second copy.
-            shaped.text = SharedString::default();
             x += px(fragment.width);
             fragments.push(fragment);
             shaped_lines.push(shaped);
