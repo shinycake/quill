@@ -415,7 +415,7 @@ fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
     let session = Session::new(AccountKey::primary(), sink.clone());
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
-    let mut ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
         driver
             .ingest(copy_and_parse(json, &seq, &sink).unwrap())
             .unwrap();
