@@ -163,15 +163,13 @@ impl Scene {
         }
         let operations = &prev_scene.paint_operations[range];
         if self.suppressed || !self.layer_stack.is_empty() {
-            self.replay_each(operations);
+            self.repaint_operations(operations);
         } else {
             self.replay_as_one(operations);
         }
     }
 
-    /// Inside an open layer a primitive takes that layer's order, and
-    /// refused paint is dropped, so each operation goes through again.
-    fn replay_each(&mut self, operations: &[PaintOperation]) {
+    fn repaint_operations(&mut self, operations: &[PaintOperation]) {
         for operation in operations {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
@@ -181,14 +179,6 @@ impl Scene {
         }
     }
 
-    /// QUILL: the stored orders already say what goes over what inside the
-    /// range, so only the range's place among the rest is new. It enters
-    /// the bounds tree as one box holding every order it uses, and each
-    /// primitive moves by the same amount. A later primitive over the box
-    /// but over nothing the range drew sorts higher than it had to. That
-    /// changes no pixels unless one of the two is a shadow, whose blur
-    /// reaches past the bounds the tree sees: a tail can then land over a
-    /// neighbour it used to sit under.
     fn replay_as_one(&mut self, operations: &[PaintOperation]) {
         let extent = operations
             .iter()
@@ -220,7 +210,6 @@ impl Scene {
         }
     }
 
-    /// QUILL: the two switches a paint filter drives, for tests.
     #[cfg(any(test, feature = "test-support"))]
     pub fn refuse_paint_for_test(&mut self, filtered: bool, suppressed: bool) {
         self.filtered = filtered;

@@ -1,8 +1,3 @@
-//! A cached view replays its last paint, and the window must look as if it
-//! had painted again. Each case compares a replayed scene with one painted
-//! from scratch by the order a renderer draws them: every overlapping pair
-//! keeps its order, and a later view draws over an earlier one.
-
 use gpui_kit::{
     AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, ContentMask, Corners, Edges, Hsla,
     MonochromeSprite, Path, PathId, PolychromeSprite, Primitive, PrimitiveBatch, Quad,
@@ -16,7 +11,6 @@ type Rect = Bounds<ScaledPixels>;
 
 const CANVAS: i32 = 64;
 
-/// Seeded, so a failing case reproduces.
 struct Dice(u64);
 
 impl Dice {
@@ -47,16 +41,37 @@ fn canvas() -> Rect {
     rect(0, 0, CANVAS, CANVAS)
 }
 
+#[derive(Clone, Copy)]
+enum Kind {
+    Quad,
+    Shadow,
+    Underline,
+    MonochromeSprite,
+    SubpixelSprite,
+    PolychromeSprite,
+    Path,
+}
+
+const KINDS: [Kind; 7] = [
+    Kind::Quad,
+    Kind::Shadow,
+    Kind::Underline,
+    Kind::MonochromeSprite,
+    Kind::SubpixelSprite,
+    Kind::PolychromeSprite,
+    Kind::Path,
+];
+
 fn quad(tag: u32, bounds: Rect) -> Primitive {
-    primitive(0, tag, bounds, canvas())
+    primitive(Kind::Quad, tag, bounds, canvas())
 }
 
 fn path(tag: u32, bounds: Rect) -> Primitive {
-    primitive(6, tag, bounds, canvas())
+    primitive(Kind::Path, tag, bounds, canvas())
 }
 
 fn sprite(tag: u32, bounds: Rect) -> Primitive {
-    primitive(3, tag, bounds, canvas())
+    primitive(Kind::MonochromeSprite, tag, bounds, canvas())
 }
 
 fn tile(tag: u32) -> AtlasTile {
@@ -71,12 +86,10 @@ fn tile(tag: u32) -> AtlasTile {
     }
 }
 
-/// A primitive of each kind carries `tag` in a field nothing reads, so it
-/// can be found again after `Scene::finish` sorted it.
-fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
+fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
     let content_mask = ContentMask { bounds: clip };
     match kind {
-        0 => Quad {
+        Kind::Quad => Quad {
             bounds,
             content_mask,
             border_widths: Edges {
@@ -86,7 +99,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             ..Quad::default()
         }
         .into(),
-        1 => Shadow {
+        Kind::Shadow => Shadow {
             order: 0,
             blur_radius: ScaledPixels(0.),
             bounds,
@@ -99,7 +112,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             pad: tag,
         }
         .into(),
-        2 => Underline {
+        Kind::Underline => Underline {
             order: 0,
             pad: tag,
             bounds,
@@ -109,7 +122,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             wavy: false.into(),
         }
         .into(),
-        3 => MonochromeSprite {
+        Kind::MonochromeSprite => MonochromeSprite {
             order: 0,
             pad: tag,
             tile: tile(tag),
@@ -119,7 +132,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             transformation: TransformationMatrix::unit(),
         }
         .into(),
-        4 => SubpixelSprite {
+        Kind::SubpixelSprite => SubpixelSprite {
             order: 0,
             pad: tag,
             tile: tile(tag),
@@ -129,7 +142,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             transformation: TransformationMatrix::unit(),
         }
         .into(),
-        5 => PolychromeSprite {
+        Kind::PolychromeSprite => PolychromeSprite {
             order: 0,
             pad: tag,
             tile: tile(tag),
@@ -140,7 +153,7 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
             corner_radii: Corners::default(),
         }
         .into(),
-        _ => {
+        Kind::Path => {
             let at = |x: ScaledPixels, y: ScaledPixels| point(px(x.0), px(y.0));
             let (left, top) = (bounds.origin.x, bounds.origin.y);
             let (right, bottom) = (left + bounds.size.width, top + bounds.size.height);
@@ -157,6 +170,14 @@ fn primitive(kind: i32, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
     }
 }
 
+fn quad_tag(quad: &Quad) -> u32 {
+    quad.border_widths.left.0 as u32
+}
+
+fn path_tag(path: &Path<ScaledPixels>) -> u32 {
+    path.vertices[0].st_position.x as u32
+}
+
 fn clipped(primitive: &Primitive) -> Rect {
     primitive
         .bounds()
@@ -170,7 +191,6 @@ enum Step {
     EndLayer,
 }
 
-/// What a view paints, in painter's order.
 #[derive(Clone)]
 struct View {
     steps: Vec<Step>,
@@ -178,8 +198,6 @@ struct View {
 }
 
 impl View {
-    /// What this view leaves in a scene: the content mask can clip a
-    /// primitive away entirely.
     fn drawn_tags(&self) -> impl Iterator<Item = u32> + '_ {
         self.steps.iter().filter_map(|step| match step {
             Step::Draw(primitive) if !clipped(primitive).is_empty() => Some(tag_of(primitive)),
@@ -198,7 +216,6 @@ fn paint(scene: &mut Scene, steps: &[Step]) {
     }
 }
 
-/// One frame: cached views replay `last`, the rest paint.
 fn frame(views: &[View], last: Option<(&Scene, &[Range<usize>])>) -> (Scene, Vec<Range<usize>>) {
     let mut scene = Scene::default();
     let mut ranges = Vec::with_capacity(views.len());
@@ -216,12 +233,10 @@ fn frame(views: &[View], last: Option<(&Scene, &[Range<usize>])>) -> (Scene, Vec
     (scene, ranges)
 }
 
-/// Every view painted from scratch.
 fn painted(views: &[View]) -> Scene {
     frame(views, None).0
 }
 
-/// Tags in the order a renderer draws them.
 fn drawn(scene: &Scene) -> Vec<u32> {
     let mut tags = Vec::new();
     for batch in scene.batches() {
@@ -230,18 +245,10 @@ fn drawn(scene: &Scene) -> Vec<u32> {
                 tags.extend(scene.shadows[range].iter().map(|shadow| shadow.pad));
             }
             PrimitiveBatch::Quads(range) => {
-                tags.extend(
-                    scene.quads[range]
-                        .iter()
-                        .map(|quad| quad.border_widths.left.0 as u32),
-                );
+                tags.extend(scene.quads[range].iter().map(quad_tag));
             }
             PrimitiveBatch::Paths(range) => {
-                tags.extend(
-                    scene.paths[range]
-                        .iter()
-                        .map(|path| path.vertices[0].st_position.x as u32),
-                );
+                tags.extend(scene.paths[range].iter().map(path_tag));
             }
             PrimitiveBatch::Underlines(range) => {
                 tags.extend(scene.underlines[range].iter().map(|line| line.pad));
@@ -272,8 +279,8 @@ fn positions(scene: &Scene) -> HashMap<u32, usize> {
 fn tag_of(primitive: &Primitive) -> u32 {
     match primitive {
         Primitive::Shadow(shadow) => shadow.pad,
-        Primitive::Quad(quad) => quad.border_widths.left.0 as u32,
-        Primitive::Path(path) => path.vertices[0].st_position.x as u32,
+        Primitive::Quad(quad) => quad_tag(quad),
+        Primitive::Path(path) => path_tag(path),
         Primitive::Underline(line) => line.pad,
         Primitive::MonochromeSprite(sprite) => sprite.pad,
         Primitive::SubpixelSprite(sprite) => sprite.pad,
@@ -282,8 +289,6 @@ fn tag_of(primitive: &Primitive) -> u32 {
     }
 }
 
-/// `replayed` draws the same primitives as `reference`, with each
-/// overlapping pair the same way round, and each view over the ones before.
 #[track_caller]
 fn assert_same_picture(case: u64, reference: &Scene, replayed: &Scene, views: &[View]) {
     let visible: Vec<(u32, Rect, usize)> = views
@@ -318,22 +323,16 @@ fn assert_same_picture(case: u64, reference: &Scene, replayed: &Scene, views: &[
     }
 }
 
-/// The order each tagged primitive of `scene` was given.
 fn orders(scene: &Scene) -> HashMap<u32, u32> {
     let quads = scene.quads.iter();
     quads
-        .map(|quad| (quad.border_widths.left.0 as u32, quad.order))
+        .map(|quad| (quad_tag(quad), quad.order))
         .chain(scene.shadows.iter().map(|s| (s.pad, s.order)))
         .chain(scene.underlines.iter().map(|s| (s.pad, s.order)))
         .chain(scene.monochrome_sprites.iter().map(|s| (s.pad, s.order)))
         .chain(scene.subpixel_sprites.iter().map(|s| (s.pad, s.order)))
         .chain(scene.polychrome_sprites.iter().map(|s| (s.pad, s.order)))
-        .chain(
-            scene
-                .paths
-                .iter()
-                .map(|path| (path.vertices[0].st_position.x as u32, path.order)),
-        )
+        .chain(scene.paths.iter().map(|path| (path_tag(path), path.order)))
         .collect()
 }
 
@@ -368,7 +367,8 @@ impl Painter {
         } else {
             area
         };
-        Step::Draw(primitive(self.dice.below(7), tag, bounds, clip))
+        let kind = KINDS[self.dice.below(KINDS.len() as i32) as usize];
+        Step::Draw(primitive(kind, tag, bounds, clip))
     }
 
     fn layer_in(&mut self, area: Rect, depth: u32, steps: &mut Vec<Step>) {
@@ -407,7 +407,6 @@ impl Painter {
     }
 }
 
-/// Merge consecutive views at random into outer views.
 fn grouped(ranges: &[Range<usize>], dice: &mut Dice) -> Vec<Range<usize>> {
     let mut groups: Vec<Range<usize>> = Vec::new();
     for (index, range) in ranges.iter().enumerate() {
@@ -427,15 +426,12 @@ fn a_replay_draws_what_painting_again_would_draw() {
         let mut views: Vec<View> = (0..count).map(|_| painter.view()).collect();
         let (first, ranges) = frame(&views, None);
 
-        // What rendered this frame paints something new.
         for view in views.iter_mut().filter(|view| !view.cached) {
             view.steps = painter.view().steps;
         }
         let (second, ranges) = frame(&views, Some((&first, &ranges)));
         assert_same_picture(case, &painted(&views), &second, &views);
 
-        // Replays of a replay, through outer views holding several of them,
-        // and something new painted over the result.
         let mut third = Scene::default();
         for group in grouped(&ranges, &mut painter.dice) {
             third.replay(group, &second);
@@ -451,7 +447,6 @@ fn a_replay_draws_what_painting_again_would_draw() {
     }
 }
 
-/// Views side by side, so no box of one meets a box of another.
 fn columns(painter: &mut Painter) -> Vec<View> {
     let columns = 4;
     let width = CANVAS / columns;
@@ -463,12 +458,8 @@ fn columns(painter: &mut Painter) -> Vec<View> {
         .collect()
 }
 
-/// A layer takes an order whether anything draws in it or not, and a replay
-/// only knows the orders its primitives stored. So a view that opens with a
-/// layer that drew nothing can slide down to order 1 as a whole, and land in
-/// other batches, more of them or fewer. The rest batch as they painted.
 #[test]
-fn views_that_do_not_touch_batch_as_if_painted_again() {
+fn views_that_do_not_touch_batch_as_painted_unless_they_slid_to_the_bottom() {
     let mut unmoved = 0;
     for case in 0..200 {
         let mut painter = Painter::new(case);
@@ -522,7 +513,6 @@ fn a_view_replayed_frame_after_frame_keeps_its_orders() {
     }
 }
 
-/// A scene holding `steps`, finished as a window's last frame is.
 fn last_frame(steps: &[Primitive]) -> Scene {
     let mut scene = Scene::default();
     for primitive in steps {
@@ -552,11 +542,11 @@ fn a_replay_is_one_box_in_the_bounds_tree() {
     ]);
     let mut second = Scene::default();
     second.replay(0..3, &first);
-    // Between the corners: over nothing the view drew, but inside its box.
-    second.insert_primitive(quad(4, rect(10, 10, 4, 4)));
-    let top = second.quads.iter().map(|quad| quad.order).max();
-    assert_eq!(second.quads.last().map(|quad| quad.order), top);
-    assert_eq!(top, Some(3));
+    let between_the_corners = rect(10, 10, 4, 4);
+    second.insert_primitive(quad(4, between_the_corners));
+    let top_of_the_replay = 2;
+    let orders: Vec<u32> = second.quads.iter().map(|quad| quad.order).collect();
+    assert_eq!(orders, [1, 2, 1, top_of_the_replay + 1]);
 }
 
 #[test]

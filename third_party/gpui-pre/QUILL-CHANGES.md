@@ -356,8 +356,9 @@ primitive outside a layer, back through `BoundsTree::insert` on each frame a
 cached view replays, to work out orders the last frame had already stored in
 `paint_operations`.
 
-- `src/bounds_tree.rs`: `insert_span(bounds, extra)` inserts one box standing
-  for `extra + 1` consecutive orderings and returns the first. `insert` is
+- `src/bounds_tree.rs`: `insert_span(bounds, orderings_after_first)` inserts one
+  box standing for that many orderings plus one and returns the first, one above
+  whatever it meets. Later bounds that meet it come after the last. `insert` is
   `insert_span(bounds, 0)`.
 - `src/scene.rs`: `replay` keeps the `filtered` early return, then
   `replay_as_one` takes the union of the range's clipped bounds and its lowest
@@ -367,7 +368,7 @@ cached view replays, to work out orders the last frame had already stored in
   union even where it pokes out of the layer's bounds, which `insert_primitive`
   never put in the tree. `insert_primitive` is split in two, and the second half,
   `push_primitive`, is what both call. `PathId` is still assigned there.
-- `replay_each` is the old loop, for a replay into an open layer (a primitive
+- `repaint_operations` is the old loop, for a replay into an open layer (a primitive
   takes that layer's order) or while `suppressed`.
 - `Scene::refuse_paint_for_test` (test support) sets `filtered` and `suppressed`.
 

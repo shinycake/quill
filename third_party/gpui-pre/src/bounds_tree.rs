@@ -124,15 +124,11 @@ where
         self.insert_span(new_bounds, 0)
     }
 
-    /// QUILL: inserts bounds that stand for `extra + 1` consecutive orderings
-    /// and returns the first, one greater than the maximum ordering of any
-    /// existing bounds that intersect them. Later bounds that intersect them
-    /// come after the last.
-    pub fn insert_span(&mut self, new_bounds: Bounds<U>, extra: u32) -> u32 {
+    pub fn insert_span(&mut self, new_bounds: Bounds<U>, orderings_after_first: u32) -> u32 {
         // Find maximum ordering among intersecting bounds
         let max_intersecting = self.find_max_ordering(&new_bounds);
         let ordering = max_intersecting.saturating_add(1);
-        let last_ordering = ordering.saturating_add(extra);
+        let last_ordering = ordering.saturating_add(orderings_after_first);
 
         // Insert the new leaf
         let new_leaf_idx = self.insert_leaf(new_bounds, last_ordering);
