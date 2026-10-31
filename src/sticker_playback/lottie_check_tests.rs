@@ -331,6 +331,8 @@ fn layers_that_draw_offscreen_cost_more() {
     assert_eq!(check(&with_layers(json!(effect))), Err(Malformed::TooComplex));
     let masked = vec![json!({"ty": 3, "masksProperties": [{}]}); 4000];
     assert_eq!(check(&with_layers(json!(masked))), Err(Malformed::TooComplex));
+    let slider = vec![json!({"ty": 3, "ef": [{"ty": 5}]}); 4000];
+    assert_eq!(check(&with_layers(json!(slider))), Ok(()));
 }
 
 #[test]

@@ -42,6 +42,8 @@ const MAX_LAYER_KIND: u64 = 15;
 const PRECOMP: u64 = 0;
 /// The layer kind that shows text.
 const TEXT: u64 = 5;
+/// The effect kind that only holds a value for other properties.
+const SLIDER: u64 = 5;
 
 /// Why a document was refused. Callers show one message for all of these;
 /// the reasons exist for tests and for checks against real stickers.
@@ -72,7 +74,7 @@ pub(super) fn check(doc: &Value) -> Result<(), Malformed> {
 }
 
 /// The work of one frame of `doc`, once its structure has passed.
-pub(super) fn work(doc: &Value) -> Result<u64, Malformed> {
+fn work(doc: &Value) -> Result<u64, Malformed> {
     // The rest of a document (fitz, markers, meta) is not animation data.
     for section in ["layers", "assets", "chars"] {
         if let Some(value) = doc.get(section) {
@@ -80,7 +82,6 @@ pub(super) fn work(doc: &Value) -> Result<u64, Malformed> {
         }
     }
     let mut walk = Walk::new(doc)?;
-    walk.glyph_work = glyph_work(doc)?;
     let root = doc
         .get("layers")
         .and_then(Value::as_array)
@@ -235,7 +236,7 @@ impl<'a> Walk<'a> {
             assets: Vec::new(),
             by_key: HashMap::new(),
             layers_seen: 0,
-            glyph_work: 0,
+            glyph_work: glyph_work(doc)?,
         };
         let Some(assets) = doc.get("assets") else {
             return Ok(walk);
@@ -313,11 +314,14 @@ impl<'a> Walk<'a> {
                     .saturating_add(OFFSCREEN_WORK)
             });
         }
-        let effects = layer.get("ef").and_then(Value::as_array).map_or(0, Vec::len);
+        let effects = layer.get("ef").and_then(Value::as_array);
+        let drawn = effects.into_iter().flatten();
+        let drawn = drawn.filter(|effect| effect.get("ty").and_then(Value::as_u64) != Some(SLIDER));
         let matte = ["tt", "td"].iter().any(|key| layer.contains_key(*key));
+        let offscreen = drawn.count() as u64 + u64::from(matte);
         cost.work = cost
             .work
-            .saturating_add((effects as u64 + u64::from(matte)).saturating_mul(OFFSCREEN_WORK));
+            .saturating_add(offscreen.saturating_mul(OFFSCREEN_WORK));
         if kind == Some(TEXT) {
             cost.work = cost
                 .work

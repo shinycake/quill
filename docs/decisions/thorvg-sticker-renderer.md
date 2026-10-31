@@ -68,8 +68,46 @@ un-premultiply passes in `src/ui/sticker_playback.rs` and `src/ui/editor_art.rs`
 are gone. The gift theme stills (`src/ui/peer_qr/gift_art.rs`) had been fed
 premultiplied pixels; they are straight now too.
 
-The validation in `tgs_json` is unchanged: 1 MiB file cap, 8 MiB gunzip cap,
-size 1 to 4096, frame rate 1 to 120, at most 30 s, no external image assets.
+`tgs_json` checks a document before ThorVG sees it: 1 MiB file cap, 8 MiB gunzip
+cap, size 1 to 4096, frame rate 1 to 120, at most 30 s, no external image assets,
+then the structural limits in `src/sticker_playback/lottie_check.rs` over the
+parsed JSON. It always hands ThorVG the document serialized from the value it
+checked, so the two read the same thing. Both load paths (the player and
+`decode_tgs_sized`) go through it. A refused file shows as a sticker that failed
+to load. The ThorVG side of the limits, for values only known while a frame is
+evaluated, is in `third_party/thorvg/QUILL-CHANGES.md`.
+
+### Limits and the real documents behind them
+
+Each limit sits well above what real documents use, since a wrong refusal costs a
+sticker tdesktop shows. The real set is 245 documents: every `.tgs` and Lottie JSON
+in the reference tdesktop and rlottie checkouts, plus the golden stickers. None is
+refused. `third_party/thorvg` vendors no samples.
+
+| Limit | Cap | Most in a real document | Headroom |
+| --- | --- | --- | --- |
+| Size of any number | 2^20 | 10,047 | 104x |
+| Layers in a document | 8,192 | 263 | 31x |
+| Masks on a layer | 256 | 3 | 85x |
+| Precomp depth | 32 | 5 | 6x |
+| Shape group depth | 64 | 6 | 10x |
+| Star points, at their largest value | 1,024 | 40 | 25x |
+| Repeater copies, at their largest value | 1,024 | 115 | 8.9x |
+| Color stops of a gradient | 1,024 | 15 | 68x |
+| Work per frame, see below | 2^22 | 288,624 | 14.5x |
+| Dash entries of a stroke (ThorVG side) | 64 | 3 | 21x |
+| Repeater copies in a list (ThorVG side) | 4,096 | 45 | 91x |
+
+A property's largest value counts how far its easing handles overshoot, so it can
+sit above the number the file states. Zigzags share the star limit; the real set
+has none.
+
+Work is a rough cost of one frame once precomps, repeaters and modifiers are
+expanded: 16 per vertex, 64 per layer or shape in a paint, and 1,024 per mask,
+matte or drawn effect, since those copy the canvas. Everything before a repeater
+or path modifier in a list multiplies with it, and a list's total multiplies with
+its fills and strokes. A precomp is walked once and counted at each use. The check
+itself took at most 2.2 ms on the costliest real document.
 
 ## Skin tones
 
@@ -132,8 +170,8 @@ tags a release.
   same except that an allocation failure returns null instead of throwing,
   and every party treats that as fatal anyway.
 - ThorVG aborts the process on allocation failure in its constructors
-  (the C API header says so). The size caps above bound what a sticker can
-  ask for.
+  (the C API header says so). The size caps and structural limits above bound
+  what a sticker can ask for.
 - Each thread that decodes keeps a ThorVG memory pool until exit. Decodes run
   on the fixed GPUI background pool, so this is bounded by its size.
 - Windows (MSVC) and Linux (GCC) builds are proven by CI, not locally. The
