@@ -417,10 +417,10 @@ function write(title, pen, data) {
       let dur = hopMs(d);
       let lift = 0.25 + 0.35 * clamp01(d / px);
       if (l.line !== prev.line) {
-        dur = 280;
+        dur = 364;
         lift = 1;
-      } else if (l.word !== prev.word) dur += 25;
-      if (prev.ch === ",") dur += 90;
+      } else if (l.word !== prev.word) dur += 33;
+      if (prev.ch === ",") dur += 117;
       moves.push({ kind: "hop", t0: t, t1: t + dur, from, to, lift });
       t += dur;
     }

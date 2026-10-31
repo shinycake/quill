@@ -81,7 +81,7 @@ STEP = 0.012  # em between output samples
 # with the two-thirds power law of handwriting, speed growing with the cube
 # root of the bend's radius, down to BEND_FLOOR of VMAX. It eases in at the
 # start of a stroke and out at the end.
-VMAX = 0.05  # em per ms
+VMAX = 0.0385  # em per ms
 BEND_RADIUS = 0.3  # em; bends wider than this run at full speed
 BEND_FLOOR = 0.45
 DAB_MS = 45
@@ -92,7 +92,7 @@ TIE = 0.0015
 
 # Lifting the pen, moving it d em and setting it down takes
 # HOP[0] + HOP[1] * sqrt(d) ms. The page uses the same rule between letters.
-HOP = (6, 22)
+HOP = (8, 29)
 
 
 def hop_ms(dist):
