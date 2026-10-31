@@ -239,6 +239,9 @@ fn a_quiet_pass_rests_until_the_sooner_of_its_due_time_and_the_ceiling() {
     };
     assert_eq!(PACE.next(IDLE, false), NextPass::Rest(PACE.ceiling));
     assert_eq!(PACE.next(due(ms(300)), false), NextPass::Rest(ms(300)));
-    assert_eq!(PACE.next(due(ms(9000)), false), NextPass::Rest(PACE.ceiling));
+    assert_eq!(
+        PACE.next(due(ms(9000)), false),
+        NextPass::Rest(PACE.ceiling)
+    );
     assert_eq!(PACE.next(due(ms(0)), false), NextPass::Rest(PACE.gap));
 }

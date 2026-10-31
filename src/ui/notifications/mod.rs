@@ -128,9 +128,8 @@ impl PolledRedraw {
 
     /// When the soonest owed redraw comes due, from `now`.
     pub(super) fn next_due(&self, active: bool, now: std::time::Instant) -> Option<Duration> {
-        let left = |gap: Duration, last: std::time::Instant| {
-            gap.saturating_sub(now.duration_since(last))
-        };
+        let left =
+            |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
         let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
         let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
         full.into_iter().chain(list).min()
@@ -195,9 +194,7 @@ impl QuillApp {
                     let active = this.frame.window_active.get();
                     let redraw = this.notify.polled_redraw.next_due(active, now);
                     this.live.as_ref().map(|live| {
-                        let timed = live
-                            .driver
-                            .next_deadline(now, quill::state::unix_ms_now());
+                        let timed = live.driver.next_deadline(now, quill::state::unix_ms_now());
                         PassEnd {
                             work_left,
                             due: redraw.into_iter().chain(timed).min(),
@@ -1008,13 +1005,15 @@ mod tests {
             let arrived = start + ms(100);
             let mut redraw = PolledRedraw::new(start);
             assert_eq!(redraw.decide(need, active, arrived), PolledAction::Wait);
-            let due = redraw.next_due(active, arrived);
-            let due = arrived + due.expect("a redraw is owed");
+            let wait = redraw.next_due(active, arrived);
+            let wait = wait.expect("a redraw is owed");
+            let early = arrived + wait.saturating_sub(ms(1));
             assert_eq!(
-                redraw.decide(RedrawNeed::Nothing, active, due - ms(1)),
+                redraw.decide(RedrawNeed::Nothing, active, early),
                 PolledAction::Wait,
                 "{need:?} early"
             );
+            let due = arrived + wait;
             assert_eq!(
                 redraw.decide(RedrawNeed::Nothing, active, due),
                 drawn,

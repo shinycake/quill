@@ -191,7 +191,11 @@ fn the_next_change_lands_where_the_countdown_shows_another_second() {
     let mut now_ms = 0;
     let mut seconds = vec![shown(now_ms)];
     while let Some(wait) = paid.next_change_ms(now_ms).filter(|wait| *wait > 0) {
-        assert_eq!(shown(now_ms + wait - 1), shown(now_ms), "no change before it");
+        assert_eq!(
+            shown(now_ms + wait - 1),
+            shown(now_ms),
+            "no change before it"
+        );
         now_ms += wait;
         seconds.push(shown(now_ms));
     }
