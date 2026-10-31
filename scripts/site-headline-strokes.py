@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Build the headline font and the pen strokes the site's quill writes with.
+"""Build the landing page's headline fonts and the strokes its quill writes.
 
-The landing page's headline is set in Inter Display at weight 750. On load a
-quill writes it: the nib follows each letter's centerline in the order a hand
-would form it, and the ink appears under the nib (site/quill-write.js). This
-script makes both files that depend on the font:
+The headline is set in Inter Display at weight 750. On load a quill writes
+it out by hand in Sacramento, a thin cursive, and then each handwritten
+letter flows into the Inter one (site/quill-write.js). The nib follows each
+handwritten letter's centerline in the order a hand would form it. This
+script makes the files that depend on the fonts:
 
   site/fonts/headline.woff2       Inter Display 750, Basic Latin, kerning only
-  site/data/headline-strokes.json the strokes, per character
+  site/fonts/hand.woff2           Sacramento, Basic Latin, kerning only,
+                                  renamed Quill Hand (its license reserves
+                                  the name Sacramento)
+  site/data/headline-strokes.json the handwriting's strokes, per character
 
-Get InterVariable.ttf from https://github.com/rsms/inter/releases (v4.1),
+Get InterVariable.ttf from https://github.com/rsms/inter/releases (v4.1) and
+Sacramento-Regular.ttf from https://github.com/google/fonts/tree/main/ofl/sacramento,
 then run, with fonttools, brotli, numpy, scipy, scikit-image and pillow:
 
-  python3 scripts/site-headline-strokes.py path/to/InterVariable.ttf
+  python3 scripts/site-headline-strokes.py path/to/InterVariable.ttf path/to/Sacramento-Regular.ttf
 
 Each stroke comes from a plan below: waypoints in the letter's ink box. The
 script draws the letter large, thins it to its centerline, snaps each
@@ -44,44 +49,46 @@ UNICODES = "U+0020-007E,U+00A0,U+2018,U+2019,U+201C,U+201D,U+2013,U+2014,U+2026"
 
 # Waypoints per stroke, in writing order, in the letter's ink box: (0, 0) is
 # its top left and (1, 1) its bottom right. A stroke with one waypoint is a
-# dab, like the dot on an i.
+# dab, like a full stop. These are the handwriting's letters (Sacramento):
+# most run as one stroke from the top or the left out to the joining stroke
+# on the right, the way the cursive is written.
 PLANS = {
-    "A": [[(0.03, 1), (0.5, 0.02), (0.97, 1)], [(0.24, 0.71), (0.76, 0.71)]],
-    "T": [[(0.0, 0.06), (1.0, 0.06)], [(0.5, 0.06), (0.5, 1)]],
-    "a": [[(0.1, 0.22), (0.45, 0.0), (0.82, 0.2), (0.86, 1)], [(0.84, 0.47), (0.3, 0.55), (0.06, 0.8), (0.35, 1), (0.84, 0.86)]],
-    "c": [[(0.95, 0.35), (0.5, 0.0), (0.05, 0.5), (0.5, 1), (0.95, 0.72)]],
-    "d": [[(0.8, 0.45), (0.45, 0.28), (0.05, 0.65), (0.4, 1), (0.8, 0.86)], [(0.9, 0.0), (0.9, 1)]],
-    "e": [[(0.14, 0.55), (0.8, 0.55), (0.6, 0.02), (0.05, 0.45), (0.5, 1), (0.95, 0.78)]],
-    "f": [[(0.98, 0.07), (0.6, 0.0), (0.4, 0.15), (0.4, 1)], [(0.0, 0.33), (0.96, 0.33)]],
-    "g": [[(0.86, 0.15), (0.45, 0.0), (0.05, 0.35), (0.45, 0.66), (0.86, 0.5)], [(0.92, 0.0), (0.92, 0.75), (0.5, 1), (0.06, 0.8)]],
-    "h": [[(0.1, 0.0), (0.1, 1)], [(0.1, 0.6), (0.5, 0.32), (0.9, 0.55), (0.9, 1)]],
-    "i": [[(0.5, 0.3), (0.5, 1)], [(0.5, 0.06)]],
-    "k": [[(0.1, 0.0), (0.1, 1)], [(0.9, 0.37), (0.15, 0.74)], [(0.45, 0.6), (0.96, 1)]],
-    "l": [[(0.5, 0.0), (0.5, 1)]],
-    "m": [[(0.06, 0.0), (0.06, 1)], [(0.06, 0.3), (0.3, 0.02), (0.53, 0.3), (0.53, 1)], [(0.53, 0.3), (0.77, 0.02), (0.94, 0.3), (0.94, 1)]],
-    "n": [[(0.1, 0.0), (0.1, 1)], [(0.1, 0.3), (0.5, 0.02), (0.9, 0.35), (0.9, 1)]],
-    "o": [[(0.6, 0.0), (0.05, 0.5), (0.5, 1), (0.95, 0.5), (0.5, 0.0)]],
-    "p": [[(0.1, 0.0), (0.1, 1)], [(0.1, 0.18), (0.6, 0.0), (0.95, 0.34), (0.6, 0.72), (0.1, 0.6)]],
-    "r": [[(0.15, 0.0), (0.15, 1)], [(0.15, 0.4), (0.55, 0.05), (0.97, 0.03)]],
-    "s": [[(0.92, 0.25), (0.5, 0.0), (0.1, 0.25), (0.5, 0.52), (0.9, 0.75), (0.5, 1), (0.06, 0.78)]],
-    "t": [[(0.4, 0.0), (0.4, 0.85), (0.65, 1), (0.95, 0.97)], [(0.0, 0.27), (0.95, 0.27)]],
-    "u": [[(0.1, 0.0), (0.1, 0.72), (0.45, 1), (0.9, 0.8)], [(0.92, 0.0), (0.92, 1)]],
-    "v": [[(0.03, 0.0), (0.5, 1), (0.97, 0.0)]],
-    "w": [[(0.02, 0.0), (0.25, 1), (0.5, 0.06), (0.75, 1), (0.98, 0.0)]],
-    "y": [[(0.04, 0.0), (0.5, 0.6)], [(0.96, 0.0), (0.45, 0.88), (0.1, 1)]],
-    ",": [[(0.75, 0.0), (0.25, 1)]],
+    "A": [[(0.02, 0.87), (0.2, 0.95), (0.55, 0.5), (0.85, 0.03), (0.86, 0.6), (0.86, 0.95)], [(0.19, 0.37), (0.14, 0.5), (0.3, 0.66), (0.6, 0.6), (0.98, 0.57)]],
+    "T": [[(0.33, 0.31), (0.15, 0.48), (0.03, 0.2), (0.4, 0.05), (0.7, 0.18), (0.98, 0.1)], [(0.75, 0.12), (0.66, 0.4), (0.55, 0.95), (0.25, 0.81)]],
+    "a": [[(0.5, 0.2), (0.2, 0.08), (0.05, 0.6), (0.25, 0.88), (0.44, 0.63), (0.44, 0.46), (0.5, 0.85), (0.7, 0.88), (0.92, 0.4)]],
+    "c": [[(0.45, 0.36), (0.45, 0.08), (0.08, 0.5), (0.4, 0.9), (0.9, 0.4)]],
+    "d": [[(0.38, 0.62), (0.1, 0.8), (0.2, 0.95), (0.42, 0.8), (0.5, 0.3), (0.6, 0.03), (0.66, 0.2), (0.45, 0.7), (0.6, 0.95), (0.92, 0.76)]],
+    "e": [[(0.17, 0.6), (0.45, 0.38), (0.45, 0.05), (0.1, 0.3), (0.1, 0.7), (0.45, 0.92), (0.9, 0.36)]],
+    "f": [[(0.15, 0.43), (0.5, 0.2), (0.35, 0.02), (0.12, 0.2), (0.1, 0.6), (0.12, 0.9), (0.35, 0.97), (0.6, 0.85), (0.18, 0.64), (0.88, 0.48)]],
+    "g": [[(0.55, 0.07), (0.15, 0.05), (0.1, 0.25), (0.4, 0.3), (0.49, 0.15), (0.5, 0.6), (0.3, 0.97), (0.12, 0.75), (0.45, 0.48), (0.9, 0.13)]],
+    "h": [[(0.09, 0.7), (0.35, 0.35), (0.2, 0.03), (0.07, 0.4), (0.07, 0.95), (0.45, 0.66), (0.5, 0.9), (0.7, 0.96), (0.92, 0.77)]],
+    "i": [[(0.18, 0.44), (0.25, 0.85), (0.45, 0.92), (0.88, 0.62)], [(0.25, 0.0), (0.08, 0.1), (0.25, 0.2), (0.38, 0.1), (0.25, 0.0)]],
+    "k": [[(0.1, 0.02), (0.08, 0.95)], [(0.1, 0.87), (0.45, 0.65), (0.58, 0.72), (0.3, 0.84), (0.5, 0.95), (0.92, 0.76)]],
+    "l": [[(0.15, 0.7), (0.45, 0.3), (0.35, 0.03), (0.12, 0.3), (0.15, 0.8), (0.4, 0.95), (0.88, 0.77)]],
+    "m": [[(0.03, 0.4), (0.13, 0.07), (0.15, 0.75), (0.3, 0.25), (0.38, 0.2), (0.4, 0.75), (0.55, 0.25), (0.62, 0.2), (0.65, 0.75), (0.78, 0.8), (0.95, 0.38)]],
+    "n": [[(0.05, 0.4), (0.2, 0.07), (0.22, 0.75), (0.5, 0.2), (0.6, 0.25), (0.65, 0.75), (0.75, 0.8), (0.95, 0.4)]],
+    "o": [[(0.25, 0.15), (0.05, 0.5), (0.35, 0.9), (0.55, 0.55), (0.38, 0.2), (0.5, 0.05), (0.58, 0.3), (0.55, 0.55), (0.9, 0.36)]],
+    "p": [[(0.33, 0.04), (0.3, 0.4), (0.15, 0.97), (0.05, 0.85), (0.3, 0.35)], [(0.27, 0.2), (0.35, 0.22), (0.6, 0.1), (0.68, 0.25), (0.55, 0.37), (0.42, 0.31)], [(0.55, 0.37), (0.93, 0.2)]],
+    "r": [[(0.17, 0.45), (0.2, 0.28), (0.12, 0.08), (0.22, 0.03), (0.25, 0.25), (0.4, 0.3), (0.42, 0.8), (0.6, 0.88), (0.92, 0.5)]],
+    "s": [[(0.13, 0.48), (0.22, 0.33), (0.22, 0.1), (0.42, 0.55), (0.3, 0.85), (0.1, 0.8)], [(0.28, 0.87), (0.55, 0.88), (0.9, 0.48)]],
+    "t": [[(0.38, 0.7), (0.5, 0.3), (0.45, 0.03), (0.35, 0.3), (0.36, 0.75), (0.5, 0.97), (0.75, 0.75)], [(0.03, 0.18), (0.97, 0.18)]],
+    "u": [[(0.17, 0.07), (0.08, 0.6), (0.25, 0.9), (0.44, 0.62), (0.47, 0.15), (0.45, 0.6), (0.6, 0.9), (0.95, 0.38)]],
+    "v": [[(0.1, 0.17), (0.12, 0.6), (0.25, 0.9), (0.5, 0.12), (0.52, 0.33), (0.75, 0.55), (0.92, 0.45)]],
+    "w": [[(0.13, 0.17), (0.08, 0.6), (0.2, 0.88), (0.35, 0.7), (0.37, 0.22), (0.36, 0.7), (0.5, 0.88), (0.63, 0.12), (0.66, 0.4), (0.8, 0.55), (0.94, 0.45)]],
+    "y": [[(0.18, 0.05), (0.05, 0.2), (0.25, 0.33), (0.45, 0.25), (0.53, 0.08), (0.48, 0.5), (0.3, 0.97), (0.1, 0.8), (0.48, 0.38), (0.92, 0.15)]],
+    ",": [[(0.9, 0.1), (0.1, 0.9)]],
     ".": [[(0.5, 0.5)]],
 }
 
 S = 600  # pixels per em while tracing
-PAD = 60
+PAD = 200
 STEP = 0.012  # em between output samples
 
 # Pen speed. Along a straight line the nib runs at VMAX; in a bend it slows
 # with the two-thirds power law of handwriting, speed growing with the cube
 # root of the bend's radius, down to BEND_FLOOR of VMAX. It eases in at the
 # start of a stroke and out at the end.
-VMAX = 0.0385  # em per ms
+VMAX = 0.0285  # em of the handwriting per ms; set 1.25 times its size, that is about 0.036 em of the headline
 BEND_RADIUS = 0.3  # em; bends wider than this run at full speed
 BEND_FLOOR = 0.45
 DAB_MS = 45
@@ -103,8 +110,8 @@ NB = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 
 def render(font, ch):
-    W, H = int(S * 1.3) + 2 * PAD, int(S * 1.35) + 2 * PAD
-    base = PAD + S
+    W, H = int(S * 1.6) + 2 * PAD, int(S * 2) + 2 * PAD
+    base = PAD + int(S * 1.1)
     im = Image.new("L", (W, H), 0)
     ImageDraw.Draw(im).text((PAD, base), ch, font=font, fill=255, anchor="ls")
     return np.array(im) > 127, base
@@ -366,18 +373,36 @@ def debug(ch, strokes, ink, base, path):
     img.save(path)
 
 
+def subset_hand(src, out_dir, sub):
+    """Sacramento, Basic Latin, kerning only, renamed: its license reserves
+    the name Sacramento for the original font."""
+    from fontTools.ttLib import TTFont
+
+    subprocess.run(["pyftsubset", src, f"--unicodes={UNICODES}", "--layout-features=kern", f"--output-file={sub}"], check=True)
+    font = TTFont(sub)
+    for rec in font["name"].names:
+        if rec.nameID in (1, 3, 4, 16):
+            rec.string = "Quill Hand"
+        elif rec.nameID == 6:
+            rec.string = "QuillHand-Regular"
+    font.save(sub)
+    font.flavor = "woff2"
+    font.save(os.path.join(out_dir, "hand.woff2"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inter_variable")
+    ap.add_argument("sacramento")
     ap.add_argument("--debug")
     args = ap.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         inst = os.path.join(tmp, "inst.ttf")
-        sub = os.path.join(tmp, "sub.ttf")
+        sub = os.path.join(tmp, "hand.ttf")
         subprocess.run(["fonttools", "varLib.instancer", args.inter_variable, "wght=750", "opsz=32", "-q", "-o", inst], check=True)
         common = [inst, f"--unicodes={UNICODES}", "--layout-features=kern"]
         subprocess.run(["pyftsubset", *common, "--flavor=woff2", f"--output-file={ROOT}/site/fonts/headline.woff2"], check=True)
-        subprocess.run(["pyftsubset", *common, f"--output-file={sub}"], check=True)
+        subset_hand(args.sacramento, f"{ROOT}/site/fonts", sub)
         font = ImageFont.truetype(sub, S)
         glyphs = {}
         for ch, plan in PLANS.items():
@@ -391,7 +416,7 @@ def main():
                 os.makedirs(args.debug, exist_ok=True)
                 debug(ch, strokes, ink, base, os.path.join(args.debug, f"{ord(ch):04x}.png"))
     with open(f"{ROOT}/site/data/headline-strokes.json", "w") as f:
-        json.dump({"font": "Inter Display 750", "hop": HOP, "glyphs": glyphs}, f, separators=(",", ":"))
+        json.dump({"font": "Sacramento", "hop": HOP, "glyphs": glyphs}, f, separators=(",", ":"))
         f.write("\n")
 
 
