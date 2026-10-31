@@ -21,6 +21,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::frame_clock::follow_app;
 use super::group_call_panel::{MEMBER_MUTED_ICON, MEMBERS_BG, MEMBERS_BG_OVER};
 use super::screen_share_state::{ChooserSource, ScreenFor};
 use crate::ui::status_note::StatusNote;
@@ -326,7 +327,7 @@ impl QuillApp {
                     });
                     let view = cx.new(|cx| ScreenChooserView {
                         owner: render_owner.downgrade(),
-                        _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                        _observe: follow_app(&render_owner, cx),
                     });
                     cx.new(|cx| Root::new(view, window, cx))
                 },

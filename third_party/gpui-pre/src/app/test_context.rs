@@ -467,6 +467,22 @@ impl TestAppContext {
         self.test_window(window_handle).simulate_resize(size);
     }
 
+    /// Simulates the user moving the window's top left corner to `origin`
+    /// (Quill).
+    pub fn simulate_window_move(&self, window_handle: AnyWindowHandle, origin: Point<Pixels>) {
+        self.test_window(window_handle).simulate_move(origin);
+    }
+
+    /// Simulates the window moving to the display `display_id` (Quill).
+    pub fn simulate_window_move_to_display(
+        &self,
+        window_handle: AnyWindowHandle,
+        display_id: DisplayId,
+    ) {
+        self.test_window(window_handle)
+            .simulate_move_to_display(display_id);
+    }
+
     /// Simulates a change in whether the platform is presenting the window.
     pub fn simulate_window_visibility_change(
         &self,

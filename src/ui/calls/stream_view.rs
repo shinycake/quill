@@ -20,7 +20,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::chat_row::initials_avatar;
-use crate::ui::frame_clock::trace_slice_render;
+use crate::ui::frame_clock::{follow_app, trace_slice_render};
 use crate::ui::group_call_panel::MEMBERS_BG;
 use crate::ui::group_call_stream_layout::stream_full;
 use crate::ui::video_player::controls::{
@@ -130,7 +130,7 @@ impl StreamPictureView {
             // panel), as the stream window's root does: the parts it reads
             // (the feed, the photo, the name) have no narrower signal.
             // Frames themselves come with the player's waker.
-            _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            _observe: follow_app(owner, cx),
             overlay: LiveOverlayClock::default(),
         }
     }

@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
+use super::frame_clock::follow_app;
 use super::window_frame::{FrameTitleBar, titlebar_hidden, window_decorations};
 use gpui_kit::component::button::*;
 use gpui_kit::component::spinner::Spinner;
@@ -122,7 +123,7 @@ fn open_window(owner: Entity<QuillApp>, cx: &mut App) -> Option<AnyWindowHandle>
         });
         window.activate_window();
         let view = cx.new(|cx| WhatsNewView {
-            _observe: cx.observe(&owner, |_, _, cx| cx.notify()),
+            _observe: follow_app(&owner, cx),
             owner: owner.downgrade(),
             focus: cx.focus_handle(),
         });

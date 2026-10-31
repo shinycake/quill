@@ -101,10 +101,11 @@ impl Render for QuillApp {
             }
         }
         // Animations run while any Quill window is in front, a chat
-        // window's included.
-        let active = window.is_window_active()
-            || self.windows.any_active()
-            || super::frame_clock::assume_active();
+        // window's included; the main window's own hold still while the
+        // active chat window hides it whole (`chat_window::cover`).
+        let main_active = window.is_window_active() || super::frame_clock::assume_active();
+        let active = main_active || self.windows.any_active();
+        self.note_main_place(window, main_active);
         if self.frame.window_active.replace(active) != active {
             self.playback.inline_videos.set_window_active(active);
         }

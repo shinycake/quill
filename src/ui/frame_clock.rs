@@ -237,6 +237,13 @@ impl QuillApp {
         if !tick_wanted(self.frame.window_active.get(), plays_sound) {
             return;
         }
+        // Nor in a main window the active chat window hides whole
+        // (`chat_window::cover`): its slices and their layers get no tick.
+        // A tick for the whole app still comes, whichever window asks; it
+        // redraws every window but that one then (`tick_app`).
+        if target.is_some() && self.frame.main_covered.get() {
+            return;
+        }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
         // second per call site), to hunt idle redraws.
         if trace_ticks() {
@@ -287,9 +294,11 @@ impl QuillApp {
                                 this.frame.layers_drawn.borrow_mut().ticked(*id);
                             }
                             if targets.contains(&None) {
-                                cx.notify();
-                            } else {
-                                // Only the slices with animated content redraw.
+                                this.tick_app(cx);
+                            } else if !this.frame.main_covered.get() {
+                                // Only the slices with animated content
+                                // redraw; none under a chat window covering
+                                // the main window since they asked.
                                 let app: &mut App = cx;
                                 for id in targets.into_iter().flatten() {
                                     app.notify(id);
@@ -674,6 +683,27 @@ pub(crate) fn request_video_frame(
             .detach();
         }
     }
+}
+
+/// A frame-clock tick for the whole app that leaves the main window out:
+/// sent while the active chat window covers it (`QuillApp::tick_app`), to
+/// the views that follow the app ([`follow_app`]).
+pub(in crate::ui) struct AppTick;
+
+impl EventEmitter<AppTick> for QuillApp {}
+
+/// Follow the app from a view in a window other than the main one: redraw
+/// on each change to the app and on each [`AppTick`], so content there that
+/// asks for whole-app ticks keeps animating while the main window does not
+/// redraw. A cached view that follows the app redraws with it.
+pub(in crate::ui) fn follow_app<V: 'static>(
+    app: &Entity<QuillApp>,
+    cx: &mut Context<V>,
+) -> Subscription {
+    Subscription::join(
+        cx.observe(app, |_, _, cx| cx.notify()),
+        cx.subscribe(app, |_, _, _: &AppTick, cx| cx.notify()),
+    )
 }
 
 /// Whether a frame-clock tick may run: always while the window is active,
