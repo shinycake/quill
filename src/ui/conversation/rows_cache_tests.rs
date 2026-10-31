@@ -527,3 +527,6 @@ mod splice;
 
 #[path = "rows_vanish_tests.rs"]
 mod vanish;
+
+#[path = "paragraph_cache_scroll_tests.rs"]
+mod paragraph_cache_scroll;

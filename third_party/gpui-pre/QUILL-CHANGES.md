@@ -327,3 +327,13 @@ it made. Everything here is `test-support` only, except the
   caller through; `App::spawn_with_priority` gained the attribute for
   this). `spawn`, `spawn_with_priority` and `spawn_when_idle` wrap the
   future in a guard (`LiveTask`) that counts it while it exists.
+
+## A window counts the frames it draws
+
+Changed in 2026 for the memory sweep
+(`docs/decisions/paragraph-cache-widths.md`). Quill's `paragraph_cache`
+lets the widths a paragraph was only measured at drop their layouts once
+the frame that measured them is over, and keeps every width a frame drew.
+It needs to tell one frame's requests from the next, in each window.
+`src/window.rs`: `Window::draw` adds one to `frames_begun` as it begins,
+and `Window::frame_number` returns it.

@@ -147,6 +147,8 @@ impl BidiParagraph {
             .map(|row| row.line.width)
             .max()
             .unwrap_or_default();
+        // Quill keeps laid-out paragraphs in a cache: no room for rows that never come.
+        rows.shrink_to_fit();
         Self {
             rows,
             line_height,
@@ -372,8 +374,8 @@ impl BidiParagraph {
             None if range.is_empty() => Vec::new(),
             None => vec![(range.clone(), false)],
         };
-        let mut fragments = Vec::new();
-        let mut shaped_lines = Vec::new();
+        let mut fragments = Vec::with_capacity(visual.len());
+        let mut shaped_lines = Vec::with_capacity(visual.len());
         let mut x = px(0.);
         for (run_range, rtl) in visual {
             let slice = &text[run_range.clone()];
@@ -403,6 +405,14 @@ impl BidiParagraph {
     /// reaches the right edge of whatever width the element is then given.
     pub fn size(&self) -> gpui::Size<Pixels> {
         size(self.width, self.line_height * self.rows.len().max(1) as f32)
+    }
+
+    /// About how many bytes the paragraph holds on the heap, counted from its parts: rows,
+    /// runs, shaped lines, glyphs, clusters and text. Allocator overhead is not counted.
+    /// For a cache that keeps laid-out paragraphs to a budget of bytes.
+    pub fn heap_size(&self) -> usize {
+        self.rows.capacity() * std::mem::size_of::<Row>()
+            + self.rows.iter().map(|row| row.line.heap_size()).sum::<usize>()
     }
 
     /// Row height.

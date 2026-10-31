@@ -174,3 +174,18 @@ the timer was armed again, a redraw each time, until two seconds of real
 time had passed: a test counting a window's frames counted those, more on a
 faster machine. Every time the bar reads now comes from
 `cx.background_executor().now()`, which is the wall clock outside tests.
+
+## A laid-out paragraph keeps no vector slack
+
+`src/input/bidi_paragraph.rs`: Quill caches laid-out paragraphs
+(`docs/decisions/paragraph-cache-widths.md`), so `BidiParagraph` no longer
+keeps space it does not use. `shape_row` sizes a row's fragment and shaped
+line vectors for its runs instead of letting them double (a slot is 136
+bytes), and `layout_unchecked` drops the slack of its row vector (208 bytes
+a row). Each run's `ShapedLine` keeps its text, which `ShapedLine::cursor`
+and `split_at` read. What is drawn and measured is unchanged.
+
+`BidiParagraph::heap_size` (and `InputLine::heap_size` under it) counts
+about how many bytes a laid-out paragraph holds on the heap, from its rows,
+runs, shaped lines, glyphs, clusters and text, so Quill's cache keeps
+laid-out text to a budget of bytes rather than a count of paragraphs.

@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
-// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`.
+// `Window::paint_surface_frame`; the paint filter and `Window::capture_frame`;
+// `Window::frame_number`.
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 #[cfg(feature = "profiler")]
 use crate::DebugFrameOverlayMode;
@@ -1283,6 +1284,8 @@ pub struct Window {
     pub(crate) element_opacity: f32,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
+    /// QUILL: frames this window began drawing ([`Window::frame_number`]).
+    frames_begun: u64,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
     /// window, so that only actual changes are forwarded (reconfiguring a live
     /// input session can restart the IME connection).
@@ -2202,6 +2205,7 @@ impl Window {
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
             requested_autoscroll: None,
+            frames_begun: 0,
             last_text_input_configuration: None,
             focused_text_input: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
@@ -3535,6 +3539,7 @@ impl Window {
         // Set up the per-App arena for element allocation during this draw.
         // This ensures that multiple test Apps have isolated arenas.
         let arena_scope = ElementArenaScope::enter(&cx.element_arena);
+        self.frames_begun += 1;
 
         if self.platform_window.prepare_frame() {
             self.refresh();
@@ -5365,6 +5370,13 @@ impl Window {
         }
 
         Ok(())
+    }
+
+    /// QUILL: how many frames this window has begun drawing, counting the one
+    /// being drawn. Work done while laying out or painting one frame shares
+    /// the number, so a cache can tell one frame's requests from the next.
+    pub fn frame_number(&self) -> u64 {
+        self.frames_begun
     }
 
     /// QUILL: how many color emoji glyphs this window's sprite atlas holds.
