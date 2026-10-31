@@ -32,8 +32,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-/// Sound the decoder keeps buffered at least (while the picture queue is
-/// full it still decodes until this much sound is ready).
+/// Sound the decoder keeps buffered at least.
 pub const AUDIO_LOW_SECS: f64 = 0.5;
 /// Sound the decoder never buffers beyond.
 pub const AUDIO_HIGH_SECS: f64 = 3.0;
@@ -258,6 +257,12 @@ pub trait Demuxer: Send {
     fn info(&self) -> MediaInfo;
     /// The next item, `None` at the end.
     fn next(&mut self) -> Result<Option<Item>, String>;
+    /// The next sound, with the pictures it was read past kept undecoded
+    /// for [`Demuxer::next`]. `None` when no sound is in reach: it ended,
+    /// or too many pictures wait.
+    fn next_sound(&mut self) -> Result<Option<AudioChunk>, String> {
+        Ok(None)
+    }
     /// Continue from `secs` (items before it are not returned).
     fn seek(&mut self, secs: f64) -> Result<(), String>;
     /// The picture layout wanted from the next picture on. Demuxers that
@@ -421,6 +426,7 @@ struct AudioShared {
     played_generation: AtomicU64,
     /// The output let go of the tap: sound is decoded for nobody.
     detached: AtomicBool,
+    starved: AtomicBool,
 }
 
 #[derive(Default)]
@@ -531,7 +537,7 @@ impl AudioTap {
                     self.wake.wake.notify_one();
                 }
                 None => {
-                    self.sounding = false;
+                    self.set_sounding(false);
                     return 0.0;
                 }
             }
@@ -551,8 +557,15 @@ impl AudioTap {
                 .played_generation
                 .store(self.generation, Ordering::Release);
         }
-        self.sounding = true;
+        self.set_sounding(true);
         sample
+    }
+
+    fn set_sounding(&mut self, sounding: bool) {
+        if self.sounding != sounding {
+            self.sounding = sounding;
+            self.shared.starved.store(!sounding, Ordering::Release);
+        }
     }
 }
 
@@ -804,11 +817,9 @@ impl Player {
         self.last_pts = None;
     }
 
-    /// What the output is playing to the ear, while the sound is the clock
-    /// (before it starts and after it ran out the wall clock carries on).
     fn heard(&self) -> Option<f64> {
         let audio = self.audio()?;
-        if self.sound_ran_out(&audio) {
+        if audio.starved.load(Ordering::Acquire) {
             return None;
         }
         audio
@@ -829,10 +840,6 @@ impl Player {
         }
     }
 
-    fn sound_ran_out(&self, audio: &AudioShared) -> bool {
-        lock(&self.shared.state).eof && audio.drained()
-    }
-
     /// The playback position in seconds.
     pub fn position(&self) -> f64 {
         self.position_at(Instant::now())
@@ -842,23 +849,22 @@ impl Player {
         if self.ended {
             return;
         }
-        let (drained, has_video) = {
+        let drained = {
             let state = lock(&self.shared.state);
-            (
-                state.eof && state.video.is_empty(),
-                state.info.as_ref().is_some_and(|info| info.has_video),
-            )
+            state.eof && state.video.is_empty()
         };
         if !drained {
             return;
         }
-        // Done once the last picture was shown and its time came (a clip's
-        // last frame stays up for its duration), and the sound played out.
+        let no_picture_coming = self.first;
+        if no_picture_coming {
+            self.clock.release(now);
+        }
         let sound_done = self.audio().is_none_or(|audio| audio.drained());
-        let picture_done = !has_video || !self.first;
         let end = self.duration().or(self.last_pts);
-        let reached = end.is_none_or(|end| self.position_at(now) + DUE_SLACK >= end);
-        if sound_done && picture_done && reached {
+        let reached =
+            no_picture_coming || end.is_none_or(|end| self.position_at(now) + DUE_SLACK >= end);
+        if sound_done && reached {
             // Settle the clock on the end so the position reads full.
             let end = end.unwrap_or_else(|| self.position_at(now));
             self.clock.follow(end, now);

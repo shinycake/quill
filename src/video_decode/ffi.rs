@@ -11,7 +11,7 @@ use super::nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, pack_nv12, plane_spa
 use super::{AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotate_bgra};
 
 /// `QV_ABI_VERSION` in `quillvideo.h`.
-const ABI_VERSION: i32 = 3;
+const ABI_VERSION: i32 = 4;
 const ITEM_VIDEO: i32 = 1;
 const ITEM_AUDIO: i32 = 2;
 /// `QV_PIXEL_*` in `quillvideo.h`.
@@ -206,6 +206,7 @@ struct Api {
     open: OpenFn,
     info: InfoFn,
     next: NextFn,
+    next_sound: NextFn,
     seek: SeekFn,
     close: CloseFn,
     set_output: SetOutputFn,
@@ -291,6 +292,8 @@ impl Api {
                 let open: OpenFn = *library.get(b"qv_open\0").map_err(incompatible)?;
                 let info: InfoFn = *library.get(b"qv_info\0").map_err(incompatible)?;
                 let next: NextFn = *library.get(b"qv_next\0").map_err(incompatible)?;
+                let next_sound: NextFn =
+                    *library.get(b"qv_next_sound\0").map_err(incompatible)?;
                 let seek: SeekFn = *library.get(b"qv_seek\0").map_err(incompatible)?;
                 let close: CloseFn = *library.get(b"qv_close\0").map_err(incompatible)?;
                 let set_output: SetOutputFn =
@@ -299,6 +302,7 @@ impl Api {
                     open,
                     info,
                     next,
+                    next_sound,
                     seek,
                     close,
                     set_output,
@@ -428,6 +432,28 @@ impl FfiDemuxer {
             trace_decoder(&self.info, "fell back");
         }
     }
+
+    fn sound(&self, item: &QvItem, pts: f64) -> AudioChunk {
+        let channels = usize::from(self.info.channels.max(1));
+        if item.samples <= 0 || item.data.is_null() {
+            return AudioChunk {
+                pts,
+                samples: Vec::new(),
+            };
+        }
+        let len = item.samples as usize * channels;
+        // SAFETY: `samples * channels` interleaved f32 owned by the shim
+        // until the next call; read unaligned to be safe.
+        let samples = unsafe {
+            let ptr = item.data.cast::<f32>();
+            if ptr.is_aligned() {
+                std::slice::from_raw_parts(ptr, len).to_vec()
+            } else {
+                (0..len).map(|i| ptr.add(i).read_unaligned()).collect()
+            }
+        };
+        AudioChunk { pts, samples }
+    }
 }
 
 fn trace_decoder(info: &MediaInfo, event: &str) {
@@ -465,29 +491,20 @@ impl Demuxer for FfiDemuxer {
                 self.refresh_hardware_flag();
                 frame.map(|frame| Some(Item::Video(frame)))
             }
-            ITEM_AUDIO => {
-                let channels = usize::from(self.info.channels.max(1));
-                if item.samples <= 0 || item.data.is_null() {
-                    return Ok(Some(Item::Audio(AudioChunk {
-                        pts,
-                        samples: Vec::new(),
-                    })));
-                }
-                let len = item.samples as usize * channels;
-                // SAFETY: `samples * channels` interleaved f32 owned by the
-                // shim until the next call; read unaligned to be safe.
-                let samples = unsafe {
-                    let ptr = item.data.cast::<f32>();
-                    if ptr.is_aligned() {
-                        std::slice::from_raw_parts(ptr, len).to_vec()
-                    } else {
-                        (0..len).map(|i| ptr.add(i).read_unaligned()).collect()
-                    }
-                };
-                Ok(Some(Item::Audio(AudioChunk { pts, samples })))
-            }
+            ITEM_AUDIO => Ok(Some(Item::Audio(self.sound(&item, pts)))),
             other => Err(format!("unknown decoder item {other}")),
         }
+    }
+
+    fn next_sound(&mut self) -> Result<Option<AudioChunk>, String> {
+        let mut item = QvItem::empty();
+        // SAFETY: live context, valid out pointer.
+        let r = unsafe { (self.api.next_sound)(self.ctx, &mut item) };
+        if r < 0 {
+            return Err(format!("decoding failed ({r})"));
+        }
+        let pts = if item.pts.is_finite() { item.pts } else { 0.0 };
+        Ok((r > 0).then(|| self.sound(&item, pts)))
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), String> {

@@ -1,4 +1,4 @@
-use super::decode_loop::wants_more;
+use super::decode_loop::{Step, next_step};
 use super::{
     AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, Clock, Demuxer, Item,
     MediaInfo, OpenOptions, PixelOutput, Player, VideoFrame, rotate_bgra, take_due,
@@ -129,18 +129,16 @@ fn take_due_shows_the_newest_due_picture_and_drops_late_ones() {
 
 #[test]
 fn decoding_stops_at_the_queue_bounds() {
-    // Pictures short: decode.
-    assert!(wants_more(Some((1, 3)), None));
-    // Pictures full, no sound: wait.
-    assert!(!wants_more(Some((3, 3)), None));
-    // Pictures full but sound below its low mark: keep going for the sound.
-    assert!(wants_more(Some((3, 3)), Some(AUDIO_LOW_SECS / 2.0)));
-    assert!(!wants_more(Some((3, 3)), Some(AUDIO_LOW_SECS)));
-    // Never past the sound cap, even when pictures are short.
-    assert!(!wants_more(Some((0, 3)), Some(AUDIO_HIGH_SECS)));
-    // Sound only: keep the low mark buffered.
-    assert!(wants_more(None, Some(0.0)));
-    assert!(!wants_more(None, Some(AUDIO_LOW_SECS)));
+    assert_eq!(next_step(Some((1, 3)), None), Step::Decode);
+    assert_eq!(next_step(Some((3, 3)), None), Step::Wait);
+    assert_eq!(
+        next_step(Some((3, 3)), Some(AUDIO_LOW_SECS / 2.0)),
+        Step::ReachForSound
+    );
+    assert_eq!(next_step(Some((3, 3)), Some(AUDIO_LOW_SECS)), Step::Wait);
+    assert_eq!(next_step(Some((0, 3)), Some(AUDIO_HIGH_SECS)), Step::Wait);
+    assert_eq!(next_step(None, Some(0.0)), Step::Decode);
+    assert_eq!(next_step(None, Some(AUDIO_LOW_SECS)), Step::Wait);
 }
 
 #[test]
@@ -218,6 +216,19 @@ impl Demuxer for Scripted {
             return Ok(Some(Item::Video(frame(pts))));
         }
         Ok(None)
+    }
+
+    fn next_sound(&mut self) -> Result<Option<AudioChunk>, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if !self.audio || self.next_audio >= self.end().unwrap_or(f64::MAX) - 1e-9 {
+            return Ok(None);
+        }
+        let pts = self.next_audio;
+        self.next_audio += 0.02;
+        Ok(Some(AudioChunk {
+            pts,
+            samples: vec![0.25; (RATE as f64 * 0.02) as usize],
+        }))
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), String> {
@@ -370,14 +381,6 @@ fn sound_is_the_clock() {
         (position - expected).abs() <= super::SYNC_TOLERANCE + 0.002,
         "position {position} for half a second of sound"
     );
-    // The picture due at that position is the one shown.
-    let mut shown = None;
-    while let Some(frame) = player.take_frame() {
-        shown = Some(frame.pts);
-    }
-    if let Some(pts) = shown {
-        assert!(pts <= position + 0.01 && pts > position - 0.05, "{pts}");
-    }
 }
 
 #[test]

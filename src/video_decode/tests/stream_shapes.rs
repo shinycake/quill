@@ -1,13 +1,12 @@
-//! The real decode loop and player fed the shapes real files come in. The
-//! test thread takes the decode thread's turns itself and supplies the time,
-//! so nothing here sleeps or waits.
-
 use super::super::decode_loop::{Decoder, Turn};
 use super::super::{
-    AUDIO_LOW_SECS, AudioChunk, AudioTap, Clock, Demuxer, Item, MediaInfo, Player, Shared, State,
-    lock,
+    AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Clock, Demuxer, Item, MediaInfo,
+    OpenOptions, Pixels, Player, Shared, State, VideoFrame, lock,
 };
-use super::frame;
+use super::super::ffi::FfiDemuxer;
+use super::{decode_all, decoder, fixture, frame};
+use std::collections::VecDeque;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -17,6 +16,13 @@ const FRAME_SECS: f64 = 1.0 / FPS;
 const RATE: u32 = 1000;
 const CHUNK_SECS: f64 = 0.02;
 const QUEUE: usize = 4;
+const SHIM_HELD_PACKETS: usize = 1024;
+const STOPS_EARLY_CLIP: &str = "clip-sound-stops-early.mp4";
+const STOPS_EARLY_PICTURES: usize = 30;
+const STOPS_EARLY_SOUND_SECS: f64 = 0.5;
+const GAP_CLIP: &str = "clip-sound-gap.mp4";
+const GAP_PICTURES: usize = 1105;
+const GAP_SOUND_RESUMES_SECS: f64 = 44.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Packet {
@@ -25,7 +31,6 @@ enum Packet {
 }
 
 impl Packet {
-    /// Whether this packet still covers `secs`, or comes after it.
     fn reaches(&self, secs: f64) -> bool {
         match self {
             Packet::Picture(pts) => pts + FRAME_SECS > secs + 1e-9,
@@ -34,29 +39,25 @@ impl Packet {
     }
 }
 
-/// What a file holds and where its sound sits.
 #[derive(Clone, Copy)]
 struct Shape {
     picture_secs: f64,
     sound_secs: f64,
-    /// Seconds the sound sits behind the pictures of the same time.
-    sound_behind: f64,
-    /// The header says there is a picture track, whether or not it has
-    /// any pictures in it.
+    sound_behind_secs: f64,
     declares_pictures: bool,
-    /// The header's duration.
     duration: f64,
+    held_packet_limit: usize,
 }
 
 impl Shape {
-    /// Pictures for `picture_secs`, sound side by side for `sound_secs`.
     fn clip(picture_secs: f64, sound_secs: f64) -> Self {
         Self {
             picture_secs,
             sound_secs,
-            sound_behind: 0.0,
+            sound_behind_secs: 0.0,
             declares_pictures: true,
             duration: picture_secs.max(sound_secs),
+            held_packet_limit: 1024,
         }
     }
 
@@ -69,11 +70,22 @@ impl Shape {
             .chain(
                 (0..sounds)
                     .map(|n| n as f64 * CHUNK_SECS)
-                    .map(|pts| (pts + self.sound_behind, Packet::Sound(pts))),
+                    .map(|pts| (pts + self.sound_behind_secs, Packet::Sound(pts))),
             )
             .collect();
         keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
         keyed.into_iter().map(|(_, packet)| packet).collect()
+    }
+}
+
+fn frames_to_the_end(secs: f64) -> usize {
+    ((secs + AUDIO_OUTPUT_LATENCY) / FRAME_SECS).ceil() as usize
+}
+
+fn sound(pts: f64) -> AudioChunk {
+    AudioChunk {
+        pts,
+        samples: vec![0.25; (f64::from(RATE) * CHUNK_SECS) as usize],
     }
 }
 
@@ -83,13 +95,12 @@ struct Counts {
     packets_read: AtomicUsize,
 }
 
-/// A demuxer that reads `packets` in file order.
 struct Filed {
     shape: Shape,
     packets: Vec<Packet>,
     read: usize,
-    /// Packets ending before this were seeked past.
-    from: f64,
+    skip_before_secs: f64,
+    held: VecDeque<f64>,
     counts: Arc<Counts>,
 }
 
@@ -100,10 +111,7 @@ impl Filed {
                 self.counts.decoded_pictures.fetch_add(1, Ordering::SeqCst);
                 Item::Video(frame(pts))
             }
-            Packet::Sound(pts) => Item::Audio(AudioChunk {
-                pts,
-                samples: vec![0.25; (f64::from(RATE) * CHUNK_SECS) as usize],
-            }),
+            Packet::Sound(pts) => Item::Audio(sound(pts)),
         }
     }
 
@@ -111,7 +119,7 @@ impl Filed {
         while let Some(packet) = self.packets.get(self.read).copied() {
             self.read += 1;
             self.counts.packets_read.fetch_add(1, Ordering::SeqCst);
-            if packet.reaches(self.from) {
+            if packet.reaches(self.skip_before_secs) {
                 return Some(packet);
             }
         }
@@ -135,17 +143,32 @@ impl Demuxer for Filed {
     }
 
     fn next(&mut self) -> Result<Option<Item>, String> {
-        Ok(self.read_on().map(|packet| self.item(packet)))
+        let packet = match self.held.pop_front() {
+            Some(pts) => Some(Packet::Picture(pts)),
+            None => self.read_on(),
+        };
+        Ok(packet.map(|packet| self.item(packet)))
+    }
+
+    fn next_sound(&mut self) -> Result<Option<AudioChunk>, String> {
+        while self.held.len() < self.shape.held_packet_limit {
+            match self.read_on() {
+                Some(Packet::Picture(pts)) => self.held.push_back(pts),
+                Some(Packet::Sound(pts)) => return Ok(Some(sound(pts))),
+                None => return Ok(None),
+            }
+        }
+        Ok(None)
     }
 
     fn seek(&mut self, secs: f64) -> Result<(), String> {
+        self.held.clear();
         self.read = 0;
-        self.from = secs;
+        self.skip_before_secs = secs;
         Ok(())
     }
 }
 
-/// A player and the decode loop that serves it, side by side on one thread.
 struct Rig {
     player: Player,
     decoder: Decoder,
@@ -161,9 +184,22 @@ impl Rig {
             shape,
             packets: shape.packets(),
             read: 0,
-            from: 0.0,
+            skip_before_secs: 0.0,
+            held: VecDeque::new(),
             counts: counts.clone(),
         };
+        Self::over(Box::new(demuxer), shape.sound_secs > 0.0, counts)
+    }
+
+    fn real(name: &str) -> Option<Self> {
+        if !decoder() {
+            return None;
+        }
+        let demuxer = FfiDemuxer::open(&fixture(name), &OpenOptions::viewer()).expect("open");
+        Some(Self::over(Box::new(demuxer), true, Arc::default()))
+    }
+
+    fn over(demuxer: Box<dyn Demuxer>, want_audio: bool, counts: Arc<Counts>) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 video_cap: QUEUE,
@@ -171,8 +207,7 @@ impl Rig {
             }),
             wake: Condvar::new(),
         });
-        let want_audio = shape.sound_secs > 0.0;
-        let decoder = Decoder::start(Box::new(demuxer), &shared, want_audio);
+        let decoder = Decoder::start(demuxer, &shared, want_audio);
         let mut player = Player {
             shared: shared.clone(),
             clock: Clock::new(),
@@ -193,7 +228,6 @@ impl Rig {
         rig
     }
 
-    /// Take decode turns until the loop has nothing left to do.
     fn settle(&mut self) {
         loop {
             match self.decoder.turn(&self.shared) {
@@ -223,22 +257,19 @@ impl Rig {
         self.counts.packets_read.load(Ordering::SeqCst)
     }
 
-    /// Pull `secs` of output the way the audio device does: silence when
-    /// nothing is queued. Returns the seconds of real sound.
     fn pull_sound(&mut self, secs: f64) -> f64 {
         let Some(tap) = &mut self.tap else {
             return 0.0;
         };
+        let rate = f64::from(tap.sample_rate()) * f64::from(tap.channels());
         let mut sounding = 0u32;
-        for _ in 0..(secs * f64::from(RATE)).round() as usize {
+        for _ in 0..(secs * rate).round() as usize {
             tap.next_sample();
             sounding += u32::from(tap.sounding());
         }
-        f64::from(sounding) / f64::from(RATE)
+        f64::from(sounding) / rate
     }
 
-    /// Pull until the decode loop has no sound left to give, with nobody
-    /// taking pictures. Returns the seconds of real sound.
     fn play_out_sound(&mut self) -> f64 {
         let mut sound = 0.0;
         loop {
@@ -251,18 +282,16 @@ impl Rig {
         }
     }
 
-    /// Show the first picture and start the clock.
     fn start(&mut self) -> Instant {
         self.player.play();
         let t0 = Instant::now();
-        let first = self.player.take_frame_for(t0, t0).map(|frame| frame.pts);
-        assert_eq!(first, Some(0.0), "the first picture shows at once");
+        assert!(
+            self.player.take_frame_for(t0, t0).is_some(),
+            "the first picture shows at once"
+        );
         t0
     }
 
-    /// Run the display at 25 fps from `from` for `frames`, with the sound
-    /// device pulling and the decode thread keeping up. Returns the time
-    /// reached, the pictures shown and the seconds of real sound pulled.
     fn run(&mut self, from: Instant, frames: usize) -> Run {
         let mut run = Run {
             now: from,
@@ -335,10 +364,21 @@ fn the_picture_keeps_going_after_the_sound_stops() {
 }
 
 #[test]
+fn a_seek_past_the_sound_before_any_played_leaves_the_clock_running() {
+    let mut rig = Rig::open(Shape::clip(4.0, 0.5));
+    let t0 = rig.start();
+    rig.player.seek(1.0);
+    rig.settle();
+    let run = rig.run(t0, 25);
+    assert!(run.last_shown() > 1.9, "picture stopped at {}", run.last_shown());
+}
+
+#[test]
 fn a_clip_ends_on_time_after_its_sound_stopped_early() {
     let mut rig = Rig::open(Shape::clip(2.0, 0.5));
     let t0 = rig.start();
-    let run = rig.run(t0, 49);
+    let frames = frames_to_the_end(2.0);
+    let run = rig.run(t0, frames - 1);
     rig.player.update_ended(run.now);
     assert!(!rig.player.ended, "{} of 2 s", run.last_shown());
     let run = rig.run(run.now, 1);
@@ -350,7 +390,7 @@ fn a_clip_ends_on_time_after_its_sound_stopped_early() {
 #[test]
 fn sound_filed_behind_its_pictures_plays_on_time() {
     let mut rig = Rig::open(Shape {
-        sound_behind: 2.0,
+        sound_behind_secs: 2.0,
         ..Shape::clip(20.0, 20.0)
     });
     assert!(rig.sound_buffered() >= AUDIO_LOW_SECS, "reached at open");
@@ -360,6 +400,38 @@ fn sound_filed_behind_its_pictures_plays_on_time() {
     let expected = 5.0 - FRAME_SECS;
     assert!((run.last_shown() - expected).abs() < 0.1, "{}", run.last_shown());
     assert!((run.sound - 5.0).abs() < 1e-6, "{} s of sound", run.sound);
+}
+
+#[test]
+fn sound_too_far_behind_to_reach_arrives_once_the_clock_moves_the_pictures() {
+    let mut rig = Rig::open(Shape {
+        sound_behind_secs: 2.0,
+        held_packet_limit: 10,
+        ..Shape::clip(10.0, 10.0)
+    });
+    assert_eq!(rig.sound_buffered(), 0.0, "out of reach at open");
+    assert_eq!(rig.decoded_pictures(), QUEUE);
+    let t0 = rig.start();
+    let run = rig.run(t0, 100);
+    assert!(run.sound > 0.0, "the sound stayed out of reach");
+    assert!(run.last_shown() > 1.0, "picture stopped at {}", run.last_shown());
+}
+
+#[test]
+fn the_picture_catches_up_after_the_display_stalled() {
+    let mut rig = Rig::open(Shape::clip(5.0, 5.0));
+    let t0 = rig.start();
+    rig.pull_sound(0.5);
+    let now = t0 + Duration::from_secs_f64(0.5);
+    let mut shown = 0.0;
+    for _ in 0..QUEUE {
+        rig.settle();
+        if let Some(frame) = rig.player.take_frame_for(now, now) {
+            shown = frame.pts;
+        }
+    }
+    let position = rig.player.position_at(now);
+    assert!((shown - position).abs() <= FRAME_SECS, "{shown} at {position}");
 }
 
 #[test]
@@ -438,6 +510,14 @@ fn a_clip_with_sound_but_no_pictures_fails() {
 }
 
 #[test]
+fn a_clip_with_long_sound_and_no_pictures_fails_once_the_file_is_read() {
+    let mut rig = Rig::open(Shape::clip(0.0, 60.0));
+    assert!(rig.player.error().is_none());
+    assert!(rig.play_out_sound() > 59.0);
+    assert!(rig.player.error().is_some());
+}
+
+#[test]
 fn a_seek_does_not_hide_that_a_clip_has_no_pictures() {
     let mut rig = Rig::open(Shape {
         duration: 3.0,
@@ -457,4 +537,130 @@ fn a_seek_to_the_end_before_any_picture_showed_is_not_a_failure() {
     assert!(rig.player.error().is_none());
     rig.player.update_ended(Instant::now());
     assert!(rig.player.ended);
+}
+
+#[test]
+fn ffmpeg_keeps_showing_pictures_after_the_sound_stopped_and_ends() {
+    let Some(mut rig) = Rig::real(STOPS_EARLY_CLIP) else {
+        return;
+    };
+    let t0 = rig.start();
+    let total = rig.player.duration().expect("a duration");
+    let run = rig.run(t0, frames_to_the_end(total));
+    let after_the_first = STOPS_EARLY_PICTURES - 1;
+    assert_eq!(run.shown.len(), after_the_first, "{:?}", run.shown);
+    assert!(run.shown.windows(2).all(|pair| pair[1] > pair[0]));
+    let sound_off = (run.sound - STOPS_EARLY_SOUND_SECS).abs();
+    assert!(sound_off < 0.05, "{} s of sound", run.sound);
+    rig.player.update_ended(run.now);
+    assert!(rig.player.ended);
+    assert!(rig.player.error().is_none());
+}
+
+fn pts_and_pixels(frames: &[VideoFrame]) -> Vec<(f64, &Pixels)> {
+    frames.iter().map(|frame| (frame.pts, &frame.pixels)).collect()
+}
+
+#[test]
+fn ffmpeg_reaching_for_sound_loses_no_picture_and_no_sound() {
+    if !decoder() {
+        return;
+    }
+    let clip = fixture("clip-h264-aac.mp4");
+    let options = OpenOptions::viewer();
+    let (_, pictures, samples) = decode_all(&clip, &options);
+    let mut demuxer = FfiDemuxer::open(&clip, &options).expect("open");
+    let mut reached = 0;
+    while let Some(chunk) = demuxer.next_sound().expect("sound") {
+        reached += chunk.samples.len();
+    }
+    assert_eq!(reached, samples);
+    let mut after = Vec::new();
+    while let Some(item) = demuxer.next().expect("decode") {
+        match item {
+            Item::Video(frame) => after.push(frame),
+            Item::Audio(_) => panic!("the sound was all reached"),
+        }
+    }
+    assert_eq!(pts_and_pixels(&after), pts_and_pixels(&pictures));
+}
+
+#[test]
+fn ffmpeg_sound_past_too_many_pictures_is_out_of_reach_until_some_move() {
+    if !decoder() {
+        return;
+    }
+    let clip = fixture(GAP_CLIP);
+    let mut demuxer = FfiDemuxer::open(&clip, &OpenOptions::viewer()).expect("open");
+    while demuxer.next_sound().expect("sound").is_some() {}
+    let mut pictures = 0;
+    let late = loop {
+        match demuxer.next().expect("decode") {
+            Some(Item::Video(_)) => pictures += 1,
+            Some(Item::Audio(_)) => continue,
+            None => panic!("the late sound never came in reach"),
+        }
+        if let Some(chunk) = demuxer.next_sound().expect("sound") {
+            break chunk;
+        }
+    };
+    assert!(late.pts > GAP_SOUND_RESUMES_SECS, "{}", late.pts);
+    let must_move = GAP_PICTURES - SHIM_HELD_PACKETS;
+    assert!((1..=must_move).contains(&pictures), "{pictures} pictures taken");
+    while let Some(item) = demuxer.next().expect("decode") {
+        pictures += usize::from(matches!(item, Item::Video(_)));
+    }
+    assert_eq!(pictures, GAP_PICTURES);
+}
+
+#[test]
+fn ffmpeg_a_seek_past_the_end_shows_the_last_picture_then_ends() {
+    let Some(mut rig) = Rig::real("clip-h264-aac.mp4") else {
+        return;
+    };
+    let t0 = rig.start();
+    let total = rig.player.duration().expect("a duration");
+    rig.player.seek(total);
+    rig.settle();
+    let last = rig.player.take_frame_for(t0, t0).map(|frame| frame.pts);
+    assert_eq!(last.map(|pts| (pts * 10.0).round()), Some(9.0), "{last:?}");
+    rig.settle();
+    rig.play_out_sound();
+    rig.player.update_ended(t0);
+    assert!(rig.player.ended);
+    assert_eq!(rig.player.position_at(t0), total);
+    assert!(rig.player.error().is_none());
+}
+
+fn corrupted_copy(name: &str, into: &Path) {
+    let mut bytes = std::fs::read(fixture(name)).expect("read the fixture");
+    let mut at = 0;
+    while at + 8 <= bytes.len() {
+        let size = u32::from_be_bytes(bytes[at..at + 4].try_into().expect("four bytes")) as usize;
+        if &bytes[at + 4..at + 8] == b"mdat" {
+            bytes[at + 8..at + size].fill(0xA5);
+        }
+        at += size.max(8);
+    }
+    std::fs::write(into, bytes).expect("write the copy");
+}
+
+#[test]
+fn ffmpeg_gives_up_on_a_stream_of_corrupt_packets() {
+    if !decoder() {
+        return;
+    }
+    let copy = std::env::temp_dir().join(format!("quill-corrupt-{}.mp4", std::process::id()));
+    corrupted_copy(STOPS_EARLY_CLIP, &copy);
+    let mut demuxer = FfiDemuxer::open(&copy, &OpenOptions::inline(96)).expect("the file opens");
+    let outcome = loop {
+        match demuxer.next() {
+            Ok(Some(_)) => {}
+            Ok(None) => break Ok(()),
+            Err(err) => break Err(err),
+        }
+    };
+    drop(demuxer);
+    let _ = std::fs::remove_file(&copy);
+    assert!(outcome.is_err(), "ran to the end without a word");
 }

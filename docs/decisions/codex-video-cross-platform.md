@@ -102,11 +102,18 @@ FFmpeg-based player including Telegram Desktop; noted in `THIRD_PARTY.md`.
 - One `Player` per clip, one `quill-video` thread per player. The file is
   opened on that thread, so opening a GIF tile never blocks a frame.
 - Bounded queues: the thread decodes while the picture queue
-  (`OpenOptions::video_frames`: 3 inline, 4 in the viewer) has room or the
-  sound buffer is below 0.5 s, and never past 3 s of sound
-  (`wants_more`); otherwise it sleeps. A paused clip costs nothing. Inline
-  clips are scaled in the decoder to fit 720 px and decoded with one thread
-  and no sound; the viewer caps pictures at 1920 px.
+  (`OpenOptions::video_frames`: 3 inline, 4 in the viewer) has room, and
+  never past 3 s of sound (`next_step`); otherwise it sleeps. A paused clip
+  costs nothing. Inline clips are scaled in the decoder to fit 720 px and
+  decoded with one thread and no sound; the viewer caps pictures at 1920 px.
+- Sound sits behind pictures in a file, by up to a second in an ordinary
+  MP4. When the picture queue is full and the sound buffer is below 0.5 s,
+  `qv_next_sound` reads on and decodes only the sound. The video packets it
+  passes wait undecoded in the shim, at most 1024 of them (tdesktop's
+  `kMaxQueuedPackets`) or 64 MiB. Past that, or at the end of the sound, no
+  sound is in reach and the thread sleeps until a picture moves. A picture
+  queue that grew to reach the sound was 8.3 MB per 1080p picture, and with
+  no sound left it grew to the end of the file.
 - Pictures come out as upright, tightly packed BGRA (swscale with the
   stream's BT.601/709/2020 matrix and range; display-matrix rotation applied
   in Rust, `rotate_bgra`).
@@ -117,8 +124,18 @@ FFmpeg-based player including Telegram Desktop; noted in `THIRD_PARTY.md`.
   smooth wall clock (`Clock`) that is pulled to the sound whenever they
   drift more than `SYNC_TOLERANCE` (40 ms, inside the ±45 ms lip-sync
   threshold), because the sound is pulled in ~20 ms bursts. Without sound
-  (muted inline loops, no output device) the wall clock alone; it holds
-  after a seek/open until the first picture is shown.
+  (muted inline loops, no output device), and whenever the output finds
+  nothing queued, the wall clock alone: pictures carry on after a soundtrack
+  that ends early, as tdesktop's do (its clock runs on from the mixer's last
+  time point). The clock holds after a seek/open until the first picture is
+  shown.
+- End of stream: the clip ends when the sound has played out and the last
+  picture has had its time. A seek past the last picture shows that picture
+  (the shim keeps the newest one it skipped, as tdesktop's first-frame read
+  does) and ends there. Reaching the end with no picture since the file
+  opened is a failure, like 10 corrupt video packets in a row (tdesktop's
+  `kSkipInvalidDataPackets`, Opus excepted there, and sound is not counted
+  here).
 - `take_due` shows the newest due picture and drops late ones.
 - Seek: the decoder seeks to the keyframe before the target and drops
   pictures and samples before it (in the shim, before conversion), stale

@@ -1,5 +1,3 @@
-//! The decode thread, one [`Decoder::turn`] at a time, so a test can run the
-//! real loop on its own thread and see exactly when it goes idle.
 #![deny(clippy::indexing_slicing)]
 
 use super::{
@@ -10,34 +8,40 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-/// Whether the decode thread should decode more now: while pictures are
-/// short, or sound is below its low mark; never past the sound's cap.
-pub fn wants_more(video_queued: Option<(usize, usize)>, audio_buffered_secs: Option<f64>) -> bool {
-    if audio_buffered_secs.is_some_and(|secs| secs >= AUDIO_HIGH_SECS) {
-        return false;
-    }
-    let video_short = video_queued.is_some_and(|(queued, cap)| queued < cap.max(1));
-    let audio_low = audio_buffered_secs.is_some_and(|secs| secs < AUDIO_LOW_SECS);
-    video_short || audio_low
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Step {
+    Wait,
+    Decode,
+    ReachForSound,
 }
 
-/// How a [`Decoder::turn`] came out.
+pub(super) fn next_step(
+    video_queued: Option<(usize, usize)>,
+    audio_buffered_secs: Option<f64>,
+) -> Step {
+    if audio_buffered_secs.is_some_and(|secs| secs >= AUDIO_HIGH_SECS) {
+        return Step::Wait;
+    }
+    let audio_low = audio_buffered_secs.is_some_and(|secs| secs < AUDIO_LOW_SECS);
+    match video_queued {
+        Some((queued, cap)) if queued < cap.max(1) => Step::Decode,
+        Some(_) if audio_low => Step::ReachForSound,
+        None if audio_low => Step::Decode,
+        _ => Step::Wait,
+    }
+}
+
 pub(super) enum Turn<'s> {
-    /// The player was dropped.
     Stop,
-    /// Something changed: take the next turn at once.
     Worked,
-    /// Nothing to do. The lock stays held, so a wake can't slip in between
-    /// this answer and the sleep on it.
     Idle(MutexGuard<'s, State>, Duration),
 }
 
-/// The decode thread's own state.
 pub(super) struct Decoder {
     demuxer: Box<dyn Demuxer>,
     has_video: bool,
-    /// The layout last passed to the demuxer (none yet).
-    applied: Option<PixelOutput>,
+    applied_output: Option<PixelOutput>,
+    decoded_a_picture: bool,
 }
 
 pub(super) fn run(demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: bool) {
@@ -58,7 +62,6 @@ pub(super) fn run(demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: bo
 }
 
 impl Decoder {
-    /// Publish what the file holds, and the sound's two ends if it is wanted.
     pub(super) fn start(
         demuxer: Box<dyn Demuxer>,
         shared: &Arc<Shared>,
@@ -76,6 +79,7 @@ impl Decoder {
                 played: AtomicU64::new(0f64.to_bits()),
                 played_generation: AtomicU64::new(u64::MAX),
                 detached: AtomicBool::new(false),
+                starved: AtomicBool::new(true),
             });
             state.tap = Some(AudioTap {
                 shared: audio.clone(),
@@ -93,11 +97,11 @@ impl Decoder {
         Self {
             demuxer,
             has_video,
-            applied: None,
+            applied_output: None,
+            decoded_a_picture: false,
         }
     }
 
-    /// Serve a seek, decode one item, or find there is nothing to do.
     pub(super) fn turn<'s>(&mut self, shared: &'s Shared) -> Turn<'s> {
         let mut state = lock(&shared.state);
         if state.stop {
@@ -124,17 +128,25 @@ impl Decoder {
             .has_video
             .then_some((state.video.len(), state.video_cap));
         let audio_buffered = audio.as_ref().map(|audio| audio.buffered_secs());
-        if state.eof || !wants_more(video_queued, audio_buffered) {
+        let step = next_step(video_queued, audio_buffered);
+        if state.eof || step == Step::Wait {
             return Turn::Idle(state, idle_wait(audio.is_some()));
         }
         let epoch = state.epoch;
         let output = state.output;
         drop(state);
-        if self.applied != Some(output) {
+        if self.applied_output != Some(output) {
             self.demuxer.set_output(output);
-            self.applied = Some(output);
+            self.applied_output = Some(output);
         }
-        let item = self.demuxer.next();
+        let reaching = step == Step::ReachForSound;
+        let item = if reaching {
+            let sound = self.demuxer.next_sound();
+            sound.map(|chunk| chunk.map(Item::Audio))
+        } else {
+            self.demuxer.next()
+        };
+        self.decoded_a_picture |= matches!(item, Ok(Some(Item::Video(_))));
         let mut state = lock(&shared.state);
         if state.epoch != epoch || state.seek.is_some() || state.stop {
             return Turn::Worked;
@@ -151,7 +163,13 @@ impl Decoder {
                     audio.push(chunk);
                 }
             }
-            Ok(None) => state.eof = true,
+            Ok(None) if reaching => return Turn::Idle(state, idle_wait(true)),
+            Ok(None) => {
+                if self.has_video && !self.decoded_a_picture {
+                    state.error = Some("The video has no pictures".to_string());
+                }
+                state.eof = true;
+            }
             Err(err) => {
                 state.error = Some(err);
                 state.eof = true;
