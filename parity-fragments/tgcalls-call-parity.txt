@@ -1,2 +1,0 @@
-# tgcalls parity: the peer's battery-low notice completes the 1:1 indicators
-parity:calls-peer-indicators
