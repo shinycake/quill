@@ -2,7 +2,7 @@ use std::{
     cell::{RefCell, RefMut},
     hash::Hash,
     os::{
-        fd::{AsRawFd, BorrowedFd, FromRawFd as _, RawFd},
+        fd::{AsRawFd, BorrowedFd, FromRawFd as _, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::PathBuf,
@@ -2067,17 +2067,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                         return;
                     }
                 };
-                let keymap = unsafe {
-                    xkb::Keymap::new_from_fd(
-                        &xkb_context,
-                        fd,
-                        size as usize,
-                        XKB_KEYMAP_FORMAT_TEXT_V1,
-                        KEYMAP_COMPILE_NO_FLAGS,
-                    )
-                    .log_err()
-                    .flatten()
-                    .expect("Failed to create keymap")
+                let Some(keymap) = compile_keymap(&xkb_context, fd, size) else {
+                    log::error!("cannot parse the compositor's keymap, keeping the previous one");
+                    return;
                 };
                 state.keymap_state = Some(xkb::State::new(&keymap));
                 state.compose_state = get_xkb_compose_state(&xkb_context);
@@ -2121,13 +2113,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
             } => {
                 let focused_window = state.keyboard_focused_window.clone();
 
-                let keymap_state = state.keymap_state.as_mut().unwrap();
-                let old_layout =
-                    keymap_state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
-                keymap_state.update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
-                state.modifiers = modifiers_from_xkb(keymap_state);
-                let keymap_state = state.keymap_state.as_mut().unwrap();
-                state.capslock = capslock_from_xkb(keymap_state);
+                let Some(update) = update_modifiers(
+                    state.keymap_state.as_mut(),
+                    [mods_depressed, mods_latched, mods_locked],
+                    group,
+                ) else {
+                    log::warn!("modifiers arrived before a usable keymap, dropped");
+                    return;
+                };
+                let old_layout = update.old_layout;
+                state.modifiers = update.modifiers;
+                state.capslock = update.capslock;
 
                 let input = PlatformInput::ModifiersChanged(ModifiersChangedEvent {
                     modifiers: state.modifiers,
@@ -2158,7 +2154,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                     return;
                 };
 
-                let keymap_state = state.keymap_state.as_ref().unwrap();
+                let Some(keymap_state) = state.keymap_state.as_ref() else {
+                    log::warn!("a key arrived before a usable keymap, dropped");
+                    return;
+                };
                 let keycode = Keycode::from(key + MIN_KEYCODE);
                 let keysym = keymap_state.key_get_one_sym(keycode);
 
@@ -2900,7 +2899,13 @@ impl Dispatch<wl_data_device::WlDataDevice, ()> for WaylandClientStatePtr {
                     const ACTIONS: DndAction = DndAction::Copy;
                     data_offer.set_actions(ACTIONS, ACTIONS);
 
-                    let pipe = Pipe::new().unwrap();
+                    let pipe = match Pipe::new() {
+                        Ok(pipe) => pipe,
+                        Err(err) => {
+                            log::error!("cannot read the dropped files, no pipe: {err:?}");
+                            return;
+                        }
+                    };
                     data_offer.receive(FILE_LIST_MIME_TYPE.to_string(), unsafe {
                         BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
                     });
@@ -3187,11 +3192,82 @@ impl Dispatch<XdgDialogV1, ()> for WaylandClientStatePtr {
     }
 }
 
+/// Quill: the compositor's keymap, or None when xkb cannot parse it (the
+/// caller keeps the keymap it had).
+fn compile_keymap(context: &xkb::Context, fd: OwnedFd, size: u32) -> Option<xkb::Keymap> {
+    // SAFETY: `fd` is the keymap file the compositor sent with `size`;
+    // `new_from_fd` maps it privately and reports a short or unreadable file
+    // as an error.
+    unsafe {
+        xkb::Keymap::new_from_fd(
+            context,
+            fd,
+            size as usize,
+            XKB_KEYMAP_FORMAT_TEXT_V1,
+            KEYMAP_COMPILE_NO_FLAGS,
+        )
+    }
+    .log_err()
+    .flatten()
+}
+
+struct ModifierUpdate {
+    modifiers: Modifiers,
+    capslock: Capslock,
+    old_layout: u32,
+}
+
+/// Quill: applies a `wl_keyboard.modifiers` event; None without a keymap
+/// (the compositor sent none, or one xkb could not parse).
+fn update_modifiers(
+    keymap_state: Option<&mut xkb::State>,
+    [depressed, latched, locked]: [u32; 3],
+    group: u32,
+) -> Option<ModifierUpdate> {
+    let keymap_state = keymap_state?;
+    let old_layout = keymap_state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
+    keymap_state.update_mask(depressed, latched, locked, 0, 0, group);
+    Some(ModifierUpdate {
+        modifiers: modifiers_from_xkb(keymap_state),
+        capslock: capslock_from_xkb(keymap_state),
+        old_layout,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn keyboard_events_without_a_keymap_are_dropped() {
+        assert!(update_modifiers(None, [1, 0, 0], 0).is_none());
+    }
+
+    #[test]
+    fn modifiers_apply_once_a_keymap_is_loaded() {
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&context, "", "", "us", "", None, KEYMAP_COMPILE_NO_FLAGS)
+                .expect("us keymap");
+        let mut state = xkb::State::new(&keymap);
+        let shift = 1 << keymap.mod_get_index(xkb::MOD_NAME_SHIFT);
+        let update = update_modifiers(Some(&mut state), [shift, 0, 0], 0).expect("a keymap");
+        assert!(update.modifiers.shift);
+        assert!(!update.modifiers.control);
+    }
+
+    #[test]
+    fn a_keymap_xkb_cannot_parse_is_refused() {
+        let path = std::env::temp_dir().join(format!("quill-bad-keymap-{}", std::process::id()));
+        let text = b"xkb_keymap { this is not a keymap };";
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        let context = new_xkb_context().unwrap();
+        assert!(compile_keymap(&context, OwnedFd::from(file), text.len() as u32).is_none());
+    }
 
     #[test]
     fn rejects_required_globals_below_supported_versions() {

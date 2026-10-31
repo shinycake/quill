@@ -75,3 +75,19 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   `image` dependency (no default features). Type-checked with
   `cargo check --target x86_64-unknown-linux-gnu` on macOS; not run on
   Linux by the author.
+
+The Quill project also changed it in 2026 so Wayland events the protocol
+allows no longer panic on the main thread (sweep finding linux-windows-5):
+
+- `src/linux/wayland/client.rs`: a keymap xkb cannot parse is logged and the
+  previous keymap kept (`compile_keymap`, was `expect`); `Modifiers` and `Key`
+  events that arrive with no keymap (a compositor that sent `no_keymap`, a
+  non-XkbV1 format, or one xkb refused) are dropped with a log
+  (`update_modifiers`, was `unwrap`); drag enter skips the offer when no
+  pipe can be made (was `Pipe::new().unwrap()`).
+- `src/linux/wayland/clipboard.rs`: a clipboard read returns nothing when no
+  pipe can be made, and `flush_for_reply` waits for a full socket
+  (`WouldBlock`, which `Connection::flush` reports as an error) to drain
+  instead of `flush().unwrap()`. Tests in both files ran with
+  `cargo test -p gpui-pre-linux -p quill --lib --features quill/demo-capture`
+  (the second package turns on `gpui/test-support`) on Linux.
