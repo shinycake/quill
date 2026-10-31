@@ -1,6 +1,6 @@
 use super::super::frame_clock::{
-    ClockRun, ClockTiming, LayerDraws, Woke, later_tick, note_clock_playing, video_request,
-    video_request_done,
+    ClockRun, ClockTiming, LayerDraws, Woke, later_tick, layer_redrawn_by_clip, note_clock_playing,
+    video_request, video_request_done,
 };
 use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, PresentEstimator};
@@ -224,7 +224,12 @@ fn a_late_tick_is_never_put_off() {
         let since = (now + lead).saturating_duration_since(t0);
         let frames = (since.as_secs_f64() / period.as_secs_f64()).floor() as u32;
         let at = t0 + period * frames;
-        Some((ClockTiming { display: 910, lead }, Vsync { at, period }))
+        let timing = ClockTiming {
+            display: 910,
+            period,
+            lead,
+        };
+        Some((timing, Vsync { at, period }))
     };
     let painter = EntityId::from(1u64);
     // A clip plays on the display too.
@@ -271,11 +276,11 @@ fn a_late_tick_is_never_put_off() {
 /// `lead` after the display link asks for them, with custom emoji on an
 /// animation layer the frame clock ticks, and a clip on that layer or a
 /// view of its own. It runs the app's scheduling (`ClockRun`, `later_tick`
-/// and `LayerDraws`, `note_clock_playing`, `ClockTiming::new`,
-/// `PresentEstimator`, `video_request`, the display's grid and what
-/// shares it) on a simulated clock, with the GPUI glue around them:
-/// timers fire late (`Late`), and a notified view draws on the next
-/// display frame.
+/// and `LayerDraws`, `layer_redrawn_by_clip`, `note_clock_playing`,
+/// `ClockTiming::sample`, `PresentEstimator`, `video_request`, the
+/// display's grid and what shares it) on a simulated clock, with the GPUI
+/// glue around them: timers fire late (`Late`), and a notified view draws
+/// on the next display frame.
 struct Sim {
     display: u64,
     t0: Instant,
@@ -291,9 +296,19 @@ struct Sim {
     dirty: Vec<EntityId>,
     /// Clip views whose frame request asked for the next display frame.
     next_frame: Vec<EntityId>,
+    /// The clip in a view of its own has started drawing.
+    clip_started: bool,
+    /// Frames on which the whole app redraws (`QuillApp::render`), from
+    /// the first display link call at or after each time, with how long
+    /// after that call each starts drawing.
+    app_draws: Vec<(Instant, Duration)>,
     emoji_fps: u32,
     clip: Option<Clip>,
     clock: Option<ClockRun>,
+    /// Times the frame clock started.
+    clock_starts: u32,
+    /// When the frame clock woke.
+    clock_wakes: Vec<Instant>,
     demand: u32,
     targets: HashSet<Option<EntityId>>,
     timing: Option<ClockTiming>,
@@ -331,6 +346,9 @@ struct Clip {
     fps: f64,
     /// When its first picture is due.
     start: Instant,
+    /// When it starts drawing, and stops.
+    from: Instant,
+    until: Option<Instant>,
     /// Drawn by the emoji's layer (an inline tile), not a view of its own.
     on_layer: bool,
     /// Due times are its pictures' own (FFmpeg), not the first vsync each
@@ -371,9 +389,13 @@ impl Sim {
             timers: Vec::new(),
             dirty: Vec::new(),
             next_frame: Vec::new(),
+            clip_started: false,
+            app_draws: vec![(t0, DRAW_START)],
             emoji_fps: 0,
             clip: None,
             clock: None,
+            clock_starts: 0,
+            clock_wakes: Vec::new(),
             demand: 0,
             targets: HashSet::new(),
             timing: None,
@@ -389,7 +411,6 @@ impl Sim {
     /// Custom emoji at `fps` on the layer.
     fn emoji(mut self, fps: u32) -> Self {
         self.emoji_fps = fps;
-        self.dirty.push(EntityId::from(PAINTER));
         self
     }
 
@@ -398,10 +419,11 @@ impl Sim {
         self.clip = Some(Clip {
             fps,
             start: self.t0,
+            from: self.t0,
+            until: None,
             on_layer: false,
             own_times: false,
         });
-        self.dirty.push(EntityId::from(CLIP_VIEW));
         self
     }
 
@@ -412,7 +434,23 @@ impl Sim {
             clip.on_layer = true;
             clip.start = self.t0 + offset;
         }
-        self.dirty = vec![EntityId::from(PAINTER)];
+        self
+    }
+
+    /// The clip plays from `from` on (until `until`), not from the start.
+    fn playing(mut self, from: Duration, until: Option<Duration>) -> Self {
+        let t0 = self.t0;
+        if let Some(clip) = self.clip.as_mut() {
+            clip.from = t0 + from;
+            clip.until = until.map(|until| t0 + until);
+        }
+        self
+    }
+
+    /// The whole app redraws at `at`, starting `late` after the display
+    /// link's call (a busy main thread).
+    fn app_draw(mut self, at: Duration, late: Duration) -> Self {
+        self.app_draws.push((self.t0 + at, late));
         self
     }
 
@@ -490,6 +528,7 @@ impl Sim {
         self.targets.insert(Some(target));
         if self.clock.is_none() {
             self.clock = Some(ClockRun::new());
+            self.clock_starts += 1;
             self.plan_tick();
         }
     }
@@ -509,6 +548,7 @@ impl Sim {
         let Some(mut run) = self.clock.take() else {
             return;
         };
+        self.clock_wakes.push(self.now);
         let redrawn = self.layers.redrawn(self.targets.iter().copied());
         let fps = run.fps.max(self.demand);
         let woke = match later_tick(self.display(), self.now, fps, planned, redrawn) {
@@ -539,24 +579,47 @@ impl Sim {
             video_request_done(&self.requested, target);
             self.dirty.push(target);
         }
+        let painter = EntityId::from(PAINTER);
+        let view = EntityId::from(CLIP_VIEW);
+        // A clip in a view of its own draws from when it starts.
+        if !self.clip_started
+            && self
+                .clip
+                .is_some_and(|clip| !clip.on_layer && clip.from <= call)
+        {
+            self.clip_started = true;
+            self.dirty.push(view);
+        }
+        let app = self
+            .app_draws
+            .first()
+            .copied()
+            .filter(|(at, _)| *at <= call);
+        if app.is_some() {
+            self.app_draws.remove(0);
+            // Every view redraws.
+            if self.emoji_fps > 0 || self.clip.is_some_and(|clip| clip.on_layer) {
+                self.dirty.push(painter);
+            }
+            if self.clip_started {
+                self.dirty.push(view);
+            }
+        }
         if self.dirty.is_empty() {
             return;
         }
         let dirty = std::mem::take(&mut self.dirty);
         self.draws.push(call);
-        self.now = call + DRAW_START;
+        self.now = call + app.map_or(DRAW_START, |(_, late)| late);
         let present = call + self.lead;
-        if self.grid {
+        if self.grid && app.is_some() {
             // `QuillApp::render`: `note_frame_timing`.
             let vsync = Vsync {
                 at: present,
                 period: self.period,
             };
-            if let Some(timing) = ClockTiming::new(self.display, vsync, self.now) {
-                self.timing = Some(timing);
-            }
+            self.timing = ClockTiming::sample(self.timing, self.display, vsync, self.now);
         }
-        let painter = EntityId::from(PAINTER);
         if dirty.contains(&painter) {
             if self.clip.is_some_and(|clip| clip.on_layer) {
                 self.draw_clip(painter, present);
@@ -572,10 +635,18 @@ impl Sim {
                 self.layers.drawn(painter, vsync.at);
             }
             if self.emoji_fps > 0 {
-                self.ask_tick(painter, self.emoji_fps);
+                let fps = self.emoji_fps;
+                // `QuillApp::layer_wants_tick`.
+                if layer_redrawn_by_clip(self.display(), painter, fps, self.now) {
+                    self.targets.remove(&Some(painter));
+                    if self.targets.is_empty() {
+                        self.demand = 0;
+                    }
+                } else {
+                    self.ask_tick(painter, fps);
+                }
             }
         }
-        let view = EntityId::from(CLIP_VIEW);
         if dirty.contains(&view) {
             self.draw_clip(view, present);
         }
@@ -588,6 +659,9 @@ impl Sim {
             return;
         };
         let now = self.now;
+        if now < clip.from || clip.until.is_some_and(|until| now >= until) {
+            return;
+        }
         let source = Source::Clip(PLAYER);
         // `present_hint` and `set_content_grid`.
         let vsync = Vsync {
@@ -625,9 +699,8 @@ impl Sim {
             note_playing(self.display, source, now, due);
         }
         let lead = self.estimator.request_lead();
-        let ask = video_request(self.requested.get(), target, now, Some(due), interval, lead);
-        if let Some((request, lost_at)) = ask {
-            self.requested.set(Some((target, lost_at)));
+        let ask = video_request(&self.requested, target, now, Some(due), interval, lead);
+        if let Some(request) = ask {
             match request {
                 FrameRequest::NextFrame => self.next_frame.push(target),
                 FrameRequest::SleepUntil(wake) => {
@@ -648,6 +721,15 @@ impl Sim {
         let to = self.warm() + Duration::from_secs(1);
         let warm = self.warm();
         self.draws
+            .iter()
+            .filter(|at| **at >= warm && **at < to)
+            .count()
+    }
+
+    /// Frame clock wakes in the second after warming up for half of one.
+    fn clock_wakes_in_a_second(&self) -> usize {
+        let (warm, to) = (self.warm(), self.warm() + Duration::from_secs(1));
+        self.clock_wakes
             .iter()
             .filter(|at| **at >= warm && **at < to)
             .count()
@@ -875,4 +957,99 @@ fn pictures_due_just_after_a_grid_vsync_draw_once() {
     assert!(draws <= 31, "{draws} window frames in a second");
     assert!(sim.clip_shows_every_picture_within(hz(60.0) + Duration::from_millis(1)));
     assert!(sim.emoji_plays_every_frame_once());
+}
+
+#[test]
+fn emoji_skip_no_frame_as_a_clip_starts_and_stops_beside_them() {
+    // Emoji animating alone tick off the grid; a clip starting beside them
+    // moves their ticks onto it, and one stopping moves them off again.
+    // Neither may hold an emoji frame too long, nor stop the clock (which
+    // restarts at 30 fps, holding a 60 fps sticker's frame too long).
+    let mut display = 100;
+    for emoji in [60, 30] {
+        for on_layer in [false, true] {
+            // Started at any phase of the emoji's ticks and the vsyncs.
+            for step in 0..12u32 {
+                display += 1;
+                let from = Duration::from_millis(600) + Duration::from_millis(23) * step;
+                let mut sim = Sim::new(display, 120.0, true).emoji(emoji).clip(30.0);
+                if on_layer {
+                    sim = sim.on_layer(Duration::ZERO);
+                }
+                let sim = sim
+                    .playing(from, Some(Duration::from_millis(1200)))
+                    .run(1.6);
+                let steps = sim.emoji_steps();
+                let case = format!("{emoji} fps, on layer: {on_layer}, from {from:?}");
+                assert!(steps.iter().all(|step| *step <= 1), "{case}: {steps:?}");
+                assert_eq!(sim.clock_starts, 1, "{case}");
+                assert!(sim.clip_shows_every_picture_within(on_time(&sim)), "{case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_frame_that_starts_late_keeps_ticks_on_the_grid() {
+    // A whole-app redraw starting most of a display frame after the display
+    // link's call (a busy main thread) makes frames look like they start
+    // later than they do. Ticks planned on that alone would miss their
+    // vsyncs from then on, each drawing a window frame after the clip's.
+    for (display, emoji, most) in [(130, 30, 31), (131, 60, 60)] {
+        let sim = Sim::new(display, 120.0, true)
+            .emoji(emoji)
+            .clip(30.0)
+            .app_draw(Duration::from_millis(300), hz(120.0) * 9 / 10)
+            .run(1.6);
+        let draws = sim.draws_in_a_second();
+        assert!(
+            draws <= most,
+            "{emoji} fps: {draws} window frames in a second"
+        );
+        assert!(sim.emoji_plays_every_frame_once(), "{emoji} fps");
+        assert!(sim.clip_shows_every_picture_within(on_time(&sim)));
+    }
+}
+
+#[test]
+fn a_clip_faster_than_the_emoji_on_its_layer_leaves_the_clock_idle() {
+    // A 60 fps clip on the layer of 30 fps emoji redraws them every other
+    // vsync: the clock has nothing to tick, so it stops instead of waking
+    // about 60 times a second to put its tick off again.
+    let mut display = 140;
+    for offset in [0, 5, 10] {
+        for late in [Late::Little, Late::Realistic] {
+            display += 1;
+            let sim = Sim::new(display, 120.0, true)
+                .emoji(30)
+                .clip(60.0)
+                .on_layer(Duration::from_millis(offset))
+                .late(late)
+                .run(1.6);
+            let wakes = sim.clock_wakes_in_a_second();
+            assert!(wakes <= 1, "{offset} ms, {late:?}: {wakes} clock wakes");
+            let steps = sim.emoji_steps();
+            assert!(steps.iter().all(|step| *step <= 1), "{steps:?}");
+            assert!(sim.clip_shows_every_picture_within(on_time(&sim)));
+        }
+    }
+    // Once the clip stops, the clock ticks the emoji again, none skipped.
+    let stop = Duration::from_millis(1000);
+    let sim = Sim::new(150, 120.0, true)
+        .emoji(30)
+        .clip(60.0)
+        .on_layer(Duration::ZERO)
+        .playing(Duration::ZERO, Some(stop))
+        .run(1.6);
+    let steps = sim.emoji_steps();
+    assert!(steps.iter().all(|step| *step <= 1), "{steps:?}");
+    let after = sim
+        .emoji_frames
+        .iter()
+        .filter(|(at, _)| *at > sim.t0 + stop + sim.lead)
+        .count();
+    assert!(
+        after >= 17,
+        "{after} emoji draws in the 0.6 s after the clip"
+    );
 }
