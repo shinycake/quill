@@ -38,6 +38,8 @@ fn the_version_probe_checks_both_answers_and_times_out() {
     );
     // A child that cannot finish by itself (`cat` waits for the end of an
     // input this test holds open), with no time left: killed and reported.
+    // If `wait_with_timeout` stopped enforcing its deadline this would hang
+    // instead of failing; the CI step's timeout bounds that (as in #1273).
     let mut stuck = Command::new("cat")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())

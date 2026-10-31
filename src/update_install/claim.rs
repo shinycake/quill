@@ -103,6 +103,16 @@ impl Claim {
     }
 }
 
+impl Drop for Claim {
+    /// Unlocked, not only closed: a child another thread is starting shares
+    /// the open file, and with it the lock, until its exec. After
+    /// [`Claim::release`] this runs once the claim is deleted, so no start
+    /// ever sees it unlocked.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// Claims mean "this process is handing the update off" until it exits.
 static HELD: Mutex<Vec<Claim>> = Mutex::new(Vec::new());
 
@@ -295,13 +305,6 @@ mod tests {
         path
     }
 
-    /// Lets go of `claim` as the exit of its process does. Unlocked, not
-    /// only closed: a child another test thread is starting shares the open
-    /// file, and with it the lock, until its exec.
-    fn let_go(claim: Claim) {
-        claim.file.unlock().unwrap();
-    }
-
     fn age(path: &Path, by: Duration) {
         let file = fs::File::options().write(true).open(path).unwrap();
         file.set_modified(SystemTime::now() - by).unwrap();
@@ -343,7 +346,7 @@ mod tests {
             liveness(&path, Kind::Claimed, now),
             Liveness::Live
         ));
-        let_go(held);
+        drop(held);
         // Nobody holds it, but its launch may just have exited.
         assert!(matches!(
             liveness(&path, Kind::Claimed, now),
@@ -366,13 +369,13 @@ mod tests {
         let ready = ready("applying");
         let held = claim(&ready, &plan()).unwrap();
         let (taken, _) = take_over(held.path()).ok().unwrap();
-        let_go(held);
+        drop(held);
         let path = taken.path().to_path_buf();
         assert!(matches!(
             liveness(&path, Kind::Applying, SystemTime::now()),
             Liveness::Live
         ));
-        let_go(taken);
+        drop(taken);
         let Liveness::Stale(stale) = liveness(&path, Kind::Applying, SystemTime::now()) else {
             panic!("a fresh .applying nobody holds is stale");
         };
@@ -402,7 +405,7 @@ mod tests {
         let ready = ready("future");
         let held = claim(&ready, &plan()).unwrap();
         let path = held.path().to_path_buf();
-        let_go(held);
+        drop(held);
         let past = SystemTime::now() - Duration::from_secs(3600);
         assert!(matches!(
             liveness(&path, Kind::Claimed, past),
