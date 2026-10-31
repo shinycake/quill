@@ -82,7 +82,7 @@ impl Render for QuillApp {
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
         self.check_video_pip(cx);
-        self.inline_videos_frame_start(history_drawn);
+        self.inline_videos_frame_start(history_drawn, window, cx);
         // Animations run while any Quill window is in front, a chat
         // window's included.
         let active = window.is_window_active()

@@ -7,11 +7,19 @@
 //! once no window shows it. (One pass count for every window let each
 //! window's pass drop the clips only the other one showed, so a chat
 //! window's clips were reopened every frame while the main window drew.)
+//!
+//! A window the platform does not present (minimized, covered, on another
+//! Space) has none of its clips in view while another window is presented:
+//! they pause, and sleep after [`super::RELEASE_AFTER`] like clips scrolled
+//! away, until it is presented again. With no window presented, or with
+//! one window, nothing changes.
 #![deny(clippy::indexing_slicing)]
 
 use super::{InlineVideos, Key, Panel, Slot, State};
+use gpui_kit::{App, Window};
 use quill::ids::ChatId;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// Where a slot's row renders: the history, or a panel's grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,6 +41,9 @@ pub(super) struct Seen {
     pub(super) pass: u64,
     /// That window's last sweep found the picture painted in view.
     pub(super) in_view: bool,
+    /// The player's paint count (`VideoPlayer::shown_count`) when that
+    /// window's current pass began: more since means it was in view.
+    pub(super) mark: u64,
 }
 
 /// The windows a slot shows in.
@@ -65,22 +76,51 @@ pub(super) enum Sweep {
     Pass(Option<ChatId>),
     /// Every one (the release timer).
     Timer,
+    /// Every one, by what the windows last found, as a window is hidden
+    /// or presented again.
+    Recheck,
 }
 
-/// Record what a sweep found of a slot (`painted`: its picture was painted
-/// in view since the pass mark) and return whether any window has it in
-/// view now. A pass's sweep speaks for its window; the timer's, which
-/// cannot tell which window painted it, for every one.
-pub(super) fn note_sweep(windows: &mut Windows, sweep: Sweep, painted: bool) -> bool {
+/// Record what a sweep found of a slot (`count`: its paint count now) and
+/// return whether a window has it in view now; no window in `unseen` does.
+/// A pass's sweep speaks for its window and the timer's for every one,
+/// each by the paints since that window's mark; a recheck only reads.
+pub(super) fn note_sweep(
+    windows: &mut Windows,
+    sweep: Sweep,
+    count: u64,
+    unseen: &HashSet<Option<ChatId>>,
+) -> bool {
     for (window, seen) in windows.iter_mut() {
         if sweep == Sweep::Timer || sweep == Sweep::Pass(*window) {
-            seen.in_view = painted;
+            seen.in_view = count > seen.mark;
         }
     }
-    windows.values().any(|seen| seen.in_view)
+    windows
+        .iter()
+        .any(|(window, seen)| seen.in_view && !unseen.contains(window))
+}
+
+/// The windows whose clips count as out of view, of the `watched` ones:
+/// those the platform does not present (`unpresented`), while another
+/// window is presented. With none presented, none.
+fn unseen<'a>(
+    mut watched: impl Iterator<Item = &'a Option<ChatId>>,
+    unpresented: &HashSet<Option<ChatId>>,
+) -> HashSet<Option<ChatId>> {
+    if watched.any(|window| !unpresented.contains(window)) {
+        unpresented.clone()
+    } else {
+        HashSet::new()
+    }
 }
 
 impl State {
+    /// [`unseen`] now.
+    pub(super) fn unseen(&self) -> HashSet<Option<ChatId>> {
+        unseen(self.watched.keys(), &self.unpresented)
+    }
+
     /// The number of `window`'s current pass of `list`.
     pub(super) fn pass(&self, window: Option<ChatId>, list: List) -> u64 {
         self.passes.get(&(window, list)).copied().unwrap_or(0)
@@ -131,29 +171,87 @@ impl InlineVideos {
         drop(dropped);
     }
 
-    /// Called at the start of every frame of `window`, before anything in
-    /// it renders: when its last frame drew no history pass where one was
-    /// due (`history_drawn`; no chat open, Contacts, Calls…), nothing there
-    /// can show a clip, so its history's clips leave it.
-    pub(in crate::ui) fn frame_start(&self, window: Option<ChatId>, history_drawn: bool) {
-        let dropped = self.with(|state| {
+    /// Called at the start of every frame of `window`, drawn in `host`,
+    /// before anything in it renders: when its last frame drew no history
+    /// pass where one was due (`history_drawn`; no chat open, Contacts,
+    /// Calls…), nothing there can show a clip, so its history's clips
+    /// leave it. The first frame starts watching whether the platform
+    /// presents the window.
+    pub(in crate::ui) fn frame_start(
+        self: &Rc<Self>,
+        window: Option<ChatId>,
+        history_drawn: bool,
+        host: &Window,
+        cx: &mut App,
+    ) {
+        let Some((dropped, watched)) = self.with(|state| {
             let swept = state.swept.remove(&window);
-            if history_drawn && !swept {
+            let dropped = if history_drawn && !swept {
                 state.leave(window, Some(List::History))
             } else {
                 HashMap::new()
+            };
+            (dropped, state.watched.contains_key(&window))
+        }) else {
+            return;
+        };
+        drop(dropped);
+        if watched {
+            return;
+        }
+        let videos = Rc::downgrade(self);
+        let watch = host.observe_window_visibility(move |visibility, _, cx| {
+            if let Some(videos) = videos.upgrade() {
+                videos.rewatch(
+                    |state| {
+                        if visibility.is_visible() {
+                            state.unpresented.remove(&window);
+                        } else {
+                            state.unpresented.insert(window);
+                        }
+                    },
+                    cx,
+                );
             }
         });
-        drop(dropped);
+        let presented = host.is_visible();
+        self.rewatch(
+            |state| {
+                state.watched.insert(window, watch);
+                if !presented {
+                    state.unpresented.insert(window);
+                }
+            },
+            cx,
+        );
     }
 
-    /// A viewer covers `window`'s chat: every clip leaves it, and the
-    /// demands no other window carries out go.
+    /// Change which windows are watched or presented (`change`); when that
+    /// changes which windows' clips count as out of view, recheck every
+    /// clip by what each window last found: a window presented again has
+    /// its clips that were in view there play again, a sleeping one with a
+    /// new player, which redraws its history.
+    fn rewatch(self: &Rc<Self>, change: impl FnOnce(&mut State), cx: &mut App) {
+        let changed = self.with(|state| {
+            let before = state.unseen();
+            change(state);
+            state.unseen() != before
+        });
+        if changed == Some(true) {
+            let videos = self.clone();
+            cx.defer(move |cx| videos.sweep(Sweep::Recheck, cx));
+        }
+    }
+
+    /// A viewer covers `window`'s chat: every clip leaves it, and so do
+    /// the clicks to play asked for there that no player carries out yet.
     pub(in crate::ui) fn leave_window(&self, window: Option<ChatId>) {
         let dropped = self.with(|state| {
             let dropped = state.leave(window, None);
             let players = &state.players;
-            state.on_demand.retain(|key, _| players.contains_key(key));
+            state
+                .on_demand
+                .retain(|key, asked| asked.window != window || players.contains_key(key));
             dropped
         });
         drop(dropped);
@@ -172,22 +270,33 @@ impl InlineVideos {
     }
 
     /// The chat window showing `chat` closed: its clips leave it.
-    pub(in crate::ui) fn forget_window(&self, chat: ChatId) {
+    pub(in crate::ui) fn forget_window(self: &Rc<Self>, chat: ChatId, cx: &mut App) {
         let window = Some(chat);
         let dropped = self.with(|state| {
             state.passes.retain(|(on, _), _| *on != window);
             state.views.remove(&window);
             state.swept.remove(&window);
+            state.on_demand.retain(|_, asked| asked.window != window);
             state.leave(window, None)
         });
         drop(dropped);
+        let mut gone = None;
+        self.rewatch(
+            |state| {
+                gone = state.watched.remove(&window);
+                state.unpresented.remove(&window);
+            },
+            cx,
+        );
+        drop(gone);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{List, Panel, Pass, Seen, Sweep, Windows, note_sweep, survives};
+    use super::{List, Panel, Pass, Seen, Sweep, Windows, note_sweep, survives, unseen};
     use quill::ids::ChatId;
+    use std::collections::HashSet;
 
     const MAIN: Option<ChatId> = None;
     const CHAT_WINDOW: Option<ChatId> = Some(ChatId(11));
@@ -202,6 +311,7 @@ mod tests {
                     Seen {
                         pass: *pass,
                         in_view: false,
+                        mark: 0,
                     },
                 )
             })
@@ -282,14 +392,73 @@ mod tests {
 
     #[test]
     fn a_clip_stays_in_view_while_any_window_shows_it_in_view() {
+        let none = HashSet::new();
         let mut windows = shown(&[(MAIN, 1), (CHAT_WINDOW, 1)]);
-        // In view in the chat window, off screen (overdraw) in the main one.
-        assert!(note_sweep(&mut windows, Sweep::Pass(CHAT_WINDOW), true));
-        assert!(note_sweep(&mut windows, Sweep::Pass(MAIN), false));
-        // Scrolled away in the chat window too: off screen everywhere.
-        assert!(!note_sweep(&mut windows, Sweep::Pass(CHAT_WINDOW), false));
+        let mark = |windows: &mut Windows, window, count| {
+            if let Some(seen) = windows.get_mut(&window) {
+                seen.mark = count;
+            }
+        };
+        // The chat window's pass began at 10 paints and painted it in
+        // view; the main window's began at 11 and painted it only off
+        // screen (overdraw).
+        mark(&mut windows, CHAT_WINDOW, 10);
+        mark(&mut windows, MAIN, 11);
+        assert!(note_sweep(
+            &mut windows,
+            Sweep::Pass(CHAT_WINDOW),
+            11,
+            &none
+        ));
+        assert!(note_sweep(&mut windows, Sweep::Pass(MAIN), 11, &none));
+        // Each window's pass is judged from its own mark: the main
+        // window's starting does not undo the chat window's paints.
+        mark(&mut windows, CHAT_WINDOW, 11);
+        assert!(!note_sweep(
+            &mut windows,
+            Sweep::Pass(CHAT_WINDOW),
+            11,
+            &none
+        ));
         // The timer judges for every window.
-        assert!(note_sweep(&mut windows, Sweep::Timer, true));
-        assert!(!note_sweep(&mut windows, Sweep::Timer, false));
+        assert!(note_sweep(&mut windows, Sweep::Timer, 12, &none));
+        assert!(!note_sweep(&mut windows, Sweep::Timer, 11, &none));
+    }
+
+    #[test]
+    fn a_clip_only_a_window_out_of_sight_shows_is_out_of_view() {
+        let mut windows = shown(&[(MAIN, 1), (CHAT_WINDOW, 1)]);
+        let hidden = HashSet::from([CHAT_WINDOW]);
+        // Painted in view in the chat window, which the platform does not
+        // present: out of view, until it is presented again (a recheck
+        // reads what the windows last found).
+        assert!(!note_sweep(
+            &mut windows,
+            Sweep::Pass(CHAT_WINDOW),
+            1,
+            &hidden
+        ));
+        assert!(!note_sweep(&mut windows, Sweep::Recheck, 1, &hidden));
+        assert!(note_sweep(&mut windows, Sweep::Recheck, 1, &HashSet::new()));
+        // In view in the main window too: in view.
+        assert!(note_sweep(&mut windows, Sweep::Pass(MAIN), 1, &hidden));
+    }
+
+    #[test]
+    fn only_a_window_out_of_sight_beside_one_presented_counts_unseen() {
+        let both = [MAIN, CHAT_WINDOW];
+        let hidden = |windows: &[Option<ChatId>]| -> HashSet<Option<ChatId>> {
+            windows.iter().copied().collect()
+        };
+        assert_eq!(
+            unseen(both.iter(), &hidden(&[CHAT_WINDOW])),
+            hidden(&[CHAT_WINDOW])
+        );
+        assert_eq!(unseen(both.iter(), &hidden(&[MAIN])), hidden(&[MAIN]));
+        // None presented (the app in the background), or a lone window
+        // minimized: as before, nothing counts unseen.
+        assert_eq!(unseen(both.iter(), &hidden(&both)), hidden(&[]));
+        assert_eq!(unseen([MAIN].iter(), &hidden(&[MAIN])), hidden(&[]));
+        assert_eq!(unseen(both.iter(), &hidden(&[])), hidden(&[]));
     }
 }

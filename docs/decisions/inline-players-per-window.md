@@ -30,22 +30,43 @@ panel was closed (lines 98, 101), even when a chat window showed them.
 ## What changed
 
 Each clip now records the windows that show it (`None` for the main window, the chat's id for a chat
-window), with the pass it last rendered in there and whether that window's last sweep found it in view
-(`src/ui/inline_players/windows.rs`).
+window), with the pass it last rendered in there, the player's paint count when that window's pass began,
+and whether that window's last sweep found it in view (`src/ui/inline_players/windows.rs`).
 
 - Pass counts are per window and list (history, inline results, GIFs). A window's pass takes only its own
   entry off a clip whose row it stopped rendering. The player goes when no window shows the clip.
-- A window's sweep judges only the clips that window shows, and marks only their paint counts. A clip is
-  paused when no window has it in view, so one window cannot pause what the other plays.
+- A window's sweep judges only the clips that window shows, each by the paints since that window's own
+  mark. One window's pass no longer resets the mark another window's sweep reads. Paints are still counted
+  per player, not per window, so a mark sees paints in any window; that can only call a clip in view that
+  another window has in view. A clip is paused when no window has it in view, so one window cannot pause
+  what the other plays.
+- A window the platform does not present (`Window::is_visible`, watched with
+  `observe_window_visibility` from its first frame until it closes) has none of its clips in view while
+  another Quill window is presented. A minimized chat window, or a main window that is covered or
+  minimized, pauses its clips at once and lets them sleep after `RELEASE_AFTER` (2 s), as clips scrolled
+  away do. When it is presented again, a recheck plays what it last had in view; a sleeping clip gets a new
+  player, which redraws that window's history. With no window presented, or with one window, nothing
+  changes from before.
 - Each window runs the frame start (`QuillApp::inline_videos_frame_start`) with its own state in place:
   the main window from its render, a chat window from its view's render. A frame with no history pass, a
   viewer over the window's chat, or a panel closed there takes that window's entries off. The chat window's
   close removes its entries (`InlineVideos::forget_window`).
+- Whether the GIF panel is open is read from that window's own media panel (`pickers.media_panel`, open on
+  the GIFs tab). The session's `stickers.gifs.open` is one flag for every window. When the main window
+  closed its GIF panel, the flag made each chat window frame take its GIF players off and its panel open
+  them again.
+- A play-on-demand request (a click with autoplay off) records the window it was asked in, carried through
+  a pending download (`PlayTarget::Inline::window`). A viewer drops only the requests of its own window.
+  Before, a viewer open in the main window dropped a request from a chat window before its player opened,
+  so the click did nothing.
+- A round video's sound ending redraws the history of the window it plays in (`history_redraw_target`),
+  not the main window's conversation slice.
 - A sleeping clip that wakes redraws the history views of every window showing it. Before, it redrew the
   history view of whichever window passed last.
 
 With one window every rule is the same as before: one entry per clip, the same pass numbers, the same
-sweep. Opening the viewer still clears pending play-on-demand requests, through `leave_window`. A clip
+sweep. Opening the viewer still clears the window's pending play-on-demand requests, through
+`leave_window`. A clip
 shown in both windows (the same GIF in both GIF panels) keeps one player. It stays while either window
 shows it and plays while either has it in view.
 
@@ -62,14 +83,33 @@ tile while the main window shows chat 12, and each window draws 8 frames in turn
 - After: no backend opened or dropped. The same players keep playing in view with a picture, and closing
   the window releases them.
 
-Unit tests in `windows.rs` cover the pass and sweep rules for one window, two windows, and a clip both show.
+The same file has four more tests. Each fails with its fix reverted:
+
+- `a_minimized_chat_windows_clips_pause_then_sleep_while_the_main_window_draws` and
+  `a_covered_main_windows_clips_sleep_and_play_again_once_it_shows` hide one window with the test
+  platform's visibility while the other draws. They advance the simulated clock by `RELEASE_AFTER` and
+  show the window again. Without the visibility rule: `(11, 611) pauses out of sight`.
+- `a_viewer_in_the_main_window_leaves_a_click_in_a_chat_window_alone`, with autoplay off. Without the
+  window on the request: `the click plays it`.
+- `a_gif_panel_closed_in_the_main_window_leaves_the_chat_windows_open`. With the session's GIF flag:
+  `GIF panel players opened again over 8 frames of each window: left 40, right 0`.
+
+Unit tests in `windows.rs` cover the pass and sweep rules for one window, two windows, and a clip both
+show. They also cover per-window marks, and which windows count as out of sight (none with one window or
+with every window hidden).
 
 ## Expected on the Mac
 
 Use the release demo build and the same setup: the round video in a chat window, and the main window
 visible on another chat. Expect about 26% CPU (as with only stickers playing), both windows at their
 content's rate (about 29-30 frames/s, not 60), no reopens after the first open, and the round video's
-picture playing. Minimizing the main window should change nothing.
+picture playing.
+
+Then minimize the chat window with the main window in front. Its clips should pause at once and release
+their decoders within about 2 s, and CPU should fall to what the main window alone costs. When the window
+is restored, they should play again within a frame or two. Minimizing or covering the main window instead
+should do the same for the main window's clips while the chat window's play on. Closing the GIF panel in
+one window should not change CPU or the GIFs playing in another window's panel.
 
 ## Not changed
 
@@ -82,5 +122,6 @@ picture playing. Minimizing the main window should change nothing.
 - A true `image/gif` file plays one at a time app-wide (`playing_animation`). Selecting a chat in the main
   window (`chat_list/mod.rs:171`) stops a GIF file playing in a chat window. That stop happens once; it
   does not repeat every frame.
-- A minimized chat window keeps its clips' players until it draws again, as the main window does when
-  minimized. While another Quill window is active, those muted loops stay in the playing state.
+- Paints are counted per player, not per window (`VideoPlayer::shown_count`). Counting them per window
+  would need the window in `video_frame`'s paint, outside the inline players, and would only change which
+  window a clip in view is credited to.

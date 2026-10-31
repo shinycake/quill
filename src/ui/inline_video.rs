@@ -11,6 +11,7 @@
 
 use super::app::QuillApp;
 use super::inline_players::{Demand, InlineVideos, Panel};
+use super::media_panel::PanelTab;
 use super::play_intent::PlayTarget;
 use super::video_player::VideoPlayer;
 use gpui_kit::*;
@@ -227,11 +228,16 @@ impl QuillApp {
     /// history pass where one was due (`history_drawn`) or when a viewer
     /// covers its chat (even if a cached conversation replays its
     /// animation layer), and the clips of a panel closed there leave it.
-    /// Other windows' clips play on.
-    pub(super) fn inline_videos_frame_start(&self, history_drawn: bool) {
+    /// Other windows' clips play on. `host` is the window being drawn.
+    pub(super) fn inline_videos_frame_start(
+        &self,
+        history_drawn: bool,
+        host: &Window,
+        cx: &mut App,
+    ) {
         let window = self.windows.scope;
         let videos = &self.playback.inline_videos;
-        videos.frame_start(window, history_drawn);
+        videos.frame_start(window, history_drawn, host, cx);
         if self.viewer.state.is_open() || self.stories.viewer.is_open() {
             videos.leave_window(window);
             return;
@@ -239,7 +245,10 @@ impl QuillApp {
         if !self.composer_ui.inline_results_open {
             videos.leave_panel(window, Panel::InlineResults);
         }
-        if !self.gif_panel_open() {
+        // This window's own media panel: the session's GIF flag is one for
+        // every window, cleared when another window leaves its GIF tab.
+        let panel = &self.pickers.media_panel;
+        if !(panel.open && panel.tab == PanelTab::Gifs) {
             videos.leave_panel(window, Panel::Gifs);
         }
     }
@@ -400,9 +409,10 @@ impl QuillApp {
             && super::anim_layer::current().is_some();
         if let Some(frame) = frame.as_ref().filter(|frame| frame.sound) {
             // Its end (back to the muted loop) redraws the history.
-            frame
-                .player
-                .watch(self.slices.current().unwrap_or_else(|| cx.entity_id()));
+            frame.player.watch(
+                self.history_redraw_target()
+                    .unwrap_or_else(|| cx.entity_id()),
+            );
         }
         // Seek rings spring in and out while the clip holds still.
         if self.playback.inline_videos.seek_animating() {
@@ -426,9 +436,11 @@ impl QuillApp {
     /// with autoplay off or data saver on, or on a clip not downloaded
     /// yet): downloaded first if need be, it starts once its row renders
     /// it local. Without an in-process player the viewer opens instead,
-    /// and says why it can't play.
+    /// and says why it can't play. Asked in `window` (`None`: the main
+    /// window), whose viewer cancels it.
     pub(super) fn play_inline_on_demand(
         &mut self,
+        window: Option<ChatId>,
         chat_id: ChatId,
         message_id: MessageId,
         file_id: FileId,
@@ -444,6 +456,7 @@ impl QuillApp {
                 chat: chat_id,
                 message: message_id,
                 demand,
+                window,
             };
             self.play_when_ready(file_id, target, cx);
             self.notify_conversation(cx);
@@ -452,7 +465,7 @@ impl QuillApp {
         self.playback.intent = None;
         self.playback
             .inline_videos
-            .request((chat_id.0, message_id.0), demand);
+            .request(window, (chat_id.0, message_id.0), demand);
         self.notify_conversation(cx);
         cx.notify();
     }
@@ -483,7 +496,8 @@ impl QuillApp {
             return;
         };
         self.press_media(play_id, cx, |this, cx| {
-            this.play_inline_on_demand(chat_id, message_id, play_id, Demand::Sound, cx);
+            let window = this.windows.scope;
+            this.play_inline_on_demand(window, chat_id, message_id, play_id, Demand::Sound, cx);
         });
     }
 }

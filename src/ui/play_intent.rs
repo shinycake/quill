@@ -26,11 +26,13 @@ pub(super) enum PlayTarget {
     },
     /// An `image/gif` file, decoded in process.
     Gif { message: MessageId },
-    /// A round video or MP4 GIF on the inline player.
+    /// A round video or MP4 GIF on the inline player, asked for in
+    /// `window` (`None`: the main window).
     Inline {
         chat: ChatId,
         message: MessageId,
         demand: Demand,
+        window: Option<ChatId>,
     },
     /// The media viewer's current clip.
     Viewer { message: MessageId },
@@ -173,7 +175,8 @@ impl QuillApp {
                 chat,
                 message,
                 demand,
-            } => self.play_inline_on_demand(chat, message, file, demand, cx),
+                window,
+            } => self.play_inline_on_demand(window, chat, message, file, demand, cx),
             PlayTarget::Viewer { message } => {
                 let current = self
                     .viewer
