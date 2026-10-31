@@ -88,6 +88,7 @@ mod frame_state;
 mod glyph_sweep;
 mod group_call_state;
 mod hdr_image;
+mod heap_release;
 mod history_a11y;
 mod history_state;
 mod host_os;

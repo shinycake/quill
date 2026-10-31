@@ -906,14 +906,10 @@ fn closing_long_chats_asks_for_one_heap_release_once_idle() {
     }
     let mut idle = IdleRelease::default();
     let start = std::time::Instant::now();
-    assert_eq!(idle.look(start, 0, false), Some(AFTER_FREE));
+    assert_eq!(idle.look(start, 0), Some(AFTER_FREE));
     assert_eq!(releases(), 0, "not before Quill went quiet");
     for step in 1..=100 {
-        let _ = idle.look(
-            start + std::time::Duration::from_millis(100 * step),
-            0,
-            false,
-        );
+        let _ = idle.look(start + std::time::Duration::from_millis(100 * step), 0);
     }
     assert_eq!(releases(), 1);
     assert_eq!(freed(), 0);

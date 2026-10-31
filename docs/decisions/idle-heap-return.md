@@ -70,30 +70,48 @@ full-size photo. On macOS those are arena blocks (`large_alloc`) that go
 back when freed. On Linux they go back with the next release that other
 frees trigger.
 
-`IdleRelease::look` (`src/free_heap.rs`) decides when. It releases once,
-at a look where all of these hold:
+`IdleRelease` (`src/free_heap.rs`) decides when. A batch is due once:
 
 - at least `WORTH_RELEASING` (1 MiB) was freed;
-- `AFTER_FREE` (2 s) has passed since the last look that found more
-  freed;
-- no window began a frame in the `QUIET` (400 ms) before the look. 400 ms
-  is longer than the gap between frames of a scroll, an animation at
-  30 fps and up, or a playing track's seek bar (250 ms). It is shorter
-  than the caret's blink (500 ms), so a focused field does not put the
-  release off for good;
-- the frame clock is not running, so no animated emoji, sticker or other
-  animation plays. While one plays, the task looks again every 2 s.
+- `AFTER_FREE` (2 s) has passed since the batch reached that, so frees
+  that come together go back in one release;
+- `AFTER_INPUT` (2 s) has passed since the last input: a key, a pointer
+  event, a scroll, a window moved or resized. Nothing is released while
+  the user scrolls, drags, types or resizes.
 
-`QuillApp::schedule_heap_release` (`src/ui/app_slice.rs`) runs that
-policy in one task. A frame of any window starts the task
-(`schedule_idle_trims`, called where the main window and chat windows
-begin a frame), and so does a free made outside a frame (after the image
-idle trim, after the sticker closer closes clips). The task starts only
-when 1 MiB or more is waiting. It sleeps until the next look is due,
-counts the frames that every window began (`Window::frame_number`), and
-ends once it has released. One release covers everything freed before it,
-every window included. A frame never calls the release, so no frame
-waits on it.
+Animations do not put it off. The first version of this change also
+waited for the frame clock to stop. A looping custom emoji or sticker
+keeps a window drawing for as long as it is on screen
+(`idle-drawables.md`), so such a window would never have released at all,
+which is worse than before. Where the due batch runs depends on whether
+anything draws:
+
+- No window began a frame for `QUIET` (400 ms): the task's timer releases
+  at once.
+- Frames keep coming with no input (animation ticks, a video, a redraw
+  that TDLib triggered): the next frame that begins once the batch is due
+  defers the release until that frame is drawn and presented
+  (`cx.defer` from the frame's render runs after the draw). The release
+  lands in the gap before the next tick, at least about 16 ms at 60 Hz.
+  The timer never releases while frames come within `QUIET`, because it
+  can't tell where a frame falls.
+
+`src/ui/heap_release.rs` wires it in:
+
+- `heap_frame_begins` runs where the main window and chat windows begin a
+  frame (`schedule_idle_trims`).
+- `note_heap_input` takes input from `note_window_input` (every key
+  through `intercept_keystrokes`, and pointer presses, moves and scrolls
+  through each window's `scope_probe`), and also takes window moves and
+  resizes (the main window's bounds observer, a chat window's `moved`).
+- `schedule_heap_release` starts the task once 1 MiB is waiting, from a
+  frame or after a free made outside one (after the image idle trim, after
+  the sticker closer). The task sleeps until the next look, counts the
+  frames that every window began (`Window::frame_number`), and ends once
+  the batch went back.
+
+A second window's frame that asked for the same batch finds it gone, so
+one release covers everything freed before it.
 
 `QUILL_TRACE_TICKS=1` prints `heap release: N MB freed` each time the
 release runs.
@@ -165,44 +183,61 @@ per layout, for at most 2,048 layouts, and it needs a gpui-base change
 All run on Linux, deterministically, with no wall-clock waits:
 
 - `free_heap::tests` (library) test the policy on fabricated instants:
-  one release once quiet; none below 1 MiB; none while frames are drawn
-  or something animates, then one once it ends; the last free and a
-  recent frame each put it off.
+  one release once quiet, none below 1 MiB, none while input comes and
+  one `AFTER_INPUT` after it, and with 60 Hz frames and no input exactly
+  one release, asked for by one frame and made once it is drawn, never
+  from the timer.
 - `state::tests::history_prune::closing_long_chats_asks_for_one_heap_release_once_idle`:
   closing a 1,000-message chat notes exactly 940 messages' bytes, then
   idle releases exactly once.
 - `paragraph_cache::widths_tests::what_the_cache_lets_go_is_noted_for_the_heap_release`:
   layouts past the budget and a widest line never drawn are noted, byte
   for byte.
-- `app_slice::idle_heap_tests` (demo app, test clock):
-  `a_large_free_goes_back_once_quiet` (none within 1 s, one after, still
-  one 30 s later), `a_scroll_in_progress_puts_it_off` (a frame every
-  50 ms for 5 s: none; then one), `an_animation_puts_it_off` (the frame
-  clock ticking for 5 s: none; then one), and
-  `an_idle_trim_that_freed_nothing_asks_for_no_release`.
+- `heap_release::tests` (demo app, test clock):
+  - `a_large_free_goes_back_once_quiet`: none within 1 s, one after, still
+    one 30 s later.
+  - `a_scroll_in_progress_puts_it_off`: wheel steps every 50 ms for 5 s
+    give none, then one within 3 s.
+  - `pointer_input_puts_it_off`: pointer moves every 100 ms for 5 s with
+    nothing drawn give none, then one.
+  - `an_animation_alone_gets_one_release_after_a_frame`: the frame clock
+    ticks for 5 s with no input. Exactly one release comes while it plays,
+    in a step that drew a frame, and none after.
+  - `an_idle_trim_that_freed_nothing_asks_for_no_release`.
 
-The old behaviour was restored once (the release back in `idle_trim`, no
-scheduler, no notes): every one of the last six tests failed. The first
-three in `idle_heap_tests` saw 0 releases where 1 was expected, the idle
-trim test saw 1 where 0 was expected, and the cache and history tests
-noted 0 bytes.
+Against main (the release back in `idle_trim`, no scheduler, no notes),
+the cache, history and first-version UI tests failed: 0 releases where 1
+was expected, 1 where 0 was expected, 0 bytes noted. Against the first
+version of this change (no release while the frame clock runs, no input
+rule), all three input and animation tests fail:
+
+- `pointer_input_puts_it_off` releases while the pointer moves, because
+  nothing was drawn.
+- `an_animation_alone_gets_one_release_after_a_frame` gets no release.
+- `a_scroll_in_progress_puts_it_off` makes none while it scrolls, as it
+  should under both. It fails at "once it stopped": the first version
+  waited for the frames that the scroll set off to end, about 1 s later,
+  and for 2 s after the last free those frames made. It released at
+  about 4 s, past the 3 s that the test allows. The new rule releases
+  2 s after the last wheel step.
 
 ## What only the Mac can confirm
 
 Use the same 1,500-post scroll on main and on this branch, release builds
-with `--features demo-capture`. Set `QUILL_DEMO_STRESS_REDRAW=0`: the
-stress demo otherwise redraws at 60 Hz forever, which counts as animating,
-and nothing is ever released. Also set `QUILL_TRACE_TICKS=1` and
-`MallocReportConfig=1`. After the scroll, leave the window alone. Run
+with `--features demo-capture`, `QUILL_TRACE_TICKS=1` and
+`MallocReportConfig=1`. `QUILL_DEMO_STRESS_REDRAW=0` is optional now:
+the stress demo's 60 Hz redraw only moves the release to right after one
+of its frames. After the scroll, leave the window alone. Run
 `footprint -p <pid>` and `vmmap --summary <pid>` at 10 s and at 40 s of
 idle. Read the footprint, the "MALLOC_SMALL" dirty row, and the malloc
 zone table (allocated against dirty) for both builds.
 
-- Expected if relief works on these pages: one `heap release` line 2 to 3 s
-  after the last scroll frame. The malloc zone's dirty memory falls
+- Expected if relief works on these pages: one `heap release` line about
+  2 s after the last scroll input. The malloc zone's dirty memory falls
   toward its allocated 49 MB, by up to the 25 MB free inside it, and the
   footprint falls by the same.
 - If the line shows and the numbers stay where they were, relief cannot
   return those pages: see the section above.
-- Check for hitches: a frame trace across the release, with the window
-  idle except for the caret.
+- Check for hitches: a frame trace across the release, with a looping
+  emoji on screen. The release should sit between two ticks and delay
+  neither.

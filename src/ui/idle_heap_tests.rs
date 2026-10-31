@@ -1,8 +1,8 @@
 //! Freed heap goes back to the system once Quill goes idle
-//! (`docs/decisions/idle-heap-return.md`): one release after a large free,
-//! once no window draws and nothing animates; none while a scroll or an
-//! animation runs, and none when nothing was freed. Over the demo, on the
-//! test clock; nothing reaches Telegram.
+//! (`docs/decisions/idle-heap-return.md`): one release after a large free;
+//! none while the user scrolls or moves the pointer; one, right after a
+//! frame, while only an animation draws; none when nothing was freed. Over
+//! the demo, on the test clock; nothing reaches Telegram.
 
 use crate::ui::app::QuillApp;
 use crate::ui::frame_clock::frames_over as frames;
@@ -10,7 +10,10 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{
+    AppContext, Entity, Modifiers, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext,
+    TouchPhase, VisualTestContext, point, px, size,
+};
 use quill::free_heap::{WORTH_RELEASING, note_freed, releases};
 use std::time::Duration;
 
@@ -65,41 +68,74 @@ fn a_large_free_goes_back_once_quiet(cx: &mut TestAppContext) {
     assert_eq!(releases(), before + 1, "once only");
 }
 
-/// A scroll draws frame after frame: five seconds of a frame every 50 ms
-/// put the release off until they stop. (Scrolling the history itself
-/// would also show the date pill, which fades on the wall clock.)
+/// Five seconds of scrolling the history, a wheel step every 50 ms: no
+/// release until `AFTER_INPUT` after the last step.
 #[gpui_kit::test]
 fn a_scroll_in_progress_puts_it_off(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     let before = releases();
     free_in_a_frame(vcx);
-    for _ in 0..100 {
+    for n in 0..100 {
+        vcx.simulate_event(ScrollEvent {
+            position: point(px(800.), px(400.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(if n % 40 < 20 { 30. } else { -30. }))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+            source: ScrollSource::Pointer,
+        });
         vcx.executor().advance_clock(Duration::from_millis(50));
         draw(vcx);
     }
-    assert_eq!(releases(), before, "not while frames are drawn");
-    let _ = frames(vcx, 1);
-    assert_eq!(releases(), before + 1, "once they stopped");
+    assert_eq!(releases(), before, "not while it scrolls");
+    let _ = frames(vcx, 3);
+    assert_eq!(releases(), before + 1, "once it stopped");
+}
+
+/// The pointer moving over the window every 100 ms for five seconds, with
+/// nothing drawn: no release until `AFTER_INPUT` after the last move.
+#[gpui_kit::test]
+fn pointer_input_puts_it_off(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let before = releases();
+    free_in_a_frame(vcx);
+    for n in 0..50 {
+        let x = px(600. + (n % 2) as f32);
+        vcx.simulate_mouse_move(point(x, px(400.)), None, Modifiers::default());
+        vcx.executor().advance_clock(Duration::from_millis(100));
+        vcx.run_until_parked();
+    }
+    assert_eq!(releases(), before, "not while the pointer moves");
+    let _ = frames(vcx, 3);
+    assert_eq!(releases(), before + 1, "once it stopped");
 }
 
 /// Animated content asks the frame clock for a tick every frame, for five
-/// seconds: the release waits until nothing animates.
+/// seconds, with no input: it gets one release while it plays, made in a
+/// step that drew a frame. The timer can't have made it (a frame came
+/// within `QUIET` all along), so it ran right after a frame was drawn.
 #[gpui_kit::test]
-fn an_animation_puts_it_off(cx: &mut TestAppContext) {
+fn an_animation_alone_gets_one_release_after_a_frame(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
     let vcx = &mut vcx;
     let before = releases();
     free_in_a_frame(vcx);
+    let frame = |vcx: &mut VisualTestContext| vcx.update(|window, _| window.frame_number());
+    let mut released_in = Vec::new();
     for _ in 0..250 {
+        let (drawn, released) = (frame(vcx), releases());
         app.update(vcx, |app, cx| app.request_animation_tick(30, cx));
         vcx.executor().advance_clock(Duration::from_millis(20));
         vcx.run_until_parked();
+        if releases() > released {
+            released_in.push(frame(vcx) > drawn);
+        }
     }
     assert!(app.read_with(vcx, |app, _| app.frame.frame_clock_running.get()));
-    assert_eq!(releases(), before, "not while it animates");
+    assert_eq!(released_in, vec![true], "one release, in a step that drew");
     let _ = frames(vcx, 6);
-    assert_eq!(releases(), before + 1, "once it stopped");
+    assert_eq!(releases(), before + 1, "and no other");
 }
 
 /// The image cache's idle trim frees nothing here (the demo's pictures fit

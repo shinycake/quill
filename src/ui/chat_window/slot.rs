@@ -170,11 +170,13 @@ impl QuillApp {
     }
 
     /// An input event started in `chat`'s window (`None`: the main
-    /// window): its state goes in place, and dialogs opened by what the
-    /// event does belong to that window.
-    pub(super) fn note_window_input(&mut self, chat: Option<ChatId>) {
+    /// window): its state goes in place, dialogs opened by what the event
+    /// does belong to that window, and freed heap waits for the input to
+    /// stop (`heap_release`).
+    pub(super) fn note_window_input(&mut self, chat: Option<ChatId>, cx: &App) {
         self.windows.last_input = chat;
         self.set_window_scope(chat);
+        self.note_heap_input(cx);
     }
 }
 
@@ -191,7 +193,7 @@ pub(in crate::ui) fn scope_probe(
             let note = {
                 let app = app.clone();
                 move |cx: &mut App| {
-                    let _ = app.update(cx, |app, _| app.note_window_input(chat));
+                    let _ = app.update(cx, |app, cx| app.note_window_input(chat, cx));
                 }
             };
             let on = note.clone();

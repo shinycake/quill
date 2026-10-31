@@ -125,6 +125,7 @@ impl Render for ChatWindowView {
             app.windows.note_active(chat_id, active);
             app.set_window_chat_active(chat_id, active);
             if moved {
+                app.note_heap_input(cx);
                 app.schedule_chat_windows_save(cx);
             }
             app.sticker_frame_starts(Some(chat_id), cx);
@@ -184,7 +185,7 @@ impl Render for ChatWindowView {
                 move |event: &KeyUpEvent, _, cx| {
                     let handled = app
                         .update(cx, |app, cx| {
-                            app.note_window_input(Some(chat_id));
+                            app.note_window_input(Some(chat_id), cx);
                             app.viewer_key_up(&event.keystroke.key, cx)
                         })
                         .unwrap_or(false);

@@ -89,9 +89,9 @@ impl ChatWindows {
         let app = cx.weak_entity();
         let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
             let id = window.window_handle().window_id();
-            let _ = app.update(cx, |app, _| {
+            let _ = app.update(cx, |app, cx| {
                 let chat = app.windows.chat_for_window(id);
-                app.note_window_input(chat);
+                app.note_window_input(chat, cx);
             });
         });
         Self {
