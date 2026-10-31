@@ -5,7 +5,9 @@
 /// blocks; without this the freed space stays resident as allocator free
 /// lists).
 /// - macOS: `malloc_zone_pressure_relief` on every zone. Blocks of 64 KiB
-///   and up already went back when freed (`quill::large_alloc`).
+///   and up already went back when freed (`quill::large_alloc`). Measured
+///   as a no-op on macOS 27, which appears to run xzone malloc
+///   (docs/decisions/idle-heap-return.md).
 /// - Linux (glibc): `malloc_trim`.
 /// - Windows and other libcs: nothing; the Windows heap decommits large
 ///   free ranges on its own.

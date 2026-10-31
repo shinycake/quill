@@ -593,3 +593,4 @@
 "lng_about_psa_default" = "This message provides you with a public service announcement. To remove it from your chat list, right click it and select **Hide**.";
 "lng_context_hide_psa" = "Hide this announcement";
 "qll_chat_could_not_hide_the_announcement" = "Could not hide the announcement";
+"qll_chat_sticker_suggestions_close" = "Close sticker suggestions";

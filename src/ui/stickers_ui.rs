@@ -40,6 +40,9 @@ impl QuillApp {
     /// asked only when the text ends in an emoji or something is still held
     /// to clear, and the composer is notified once.
     pub(super) fn sync_composer_suggestions(&mut self, text: &str, cx: &mut Context<Self>) {
+        if !self.stickers_dismissed_for(text) {
+            self.composer_ui.suggest.stickers_dismissed = None;
+        }
         if let Some(live) = self.live.as_mut()
             && !live.driver.composer_suggestions_idle(text)
         {
@@ -67,7 +70,46 @@ impl QuillApp {
     /// the one after Send sets the field without a change event.
     fn composer_suggests(&self, emoji: Option<&str>, cx: &Context<Self>) -> bool {
         let text = self.composer.read(cx).value();
-        emoji.is_some() && suggest_emoji_for(&text) == emoji
+        emoji.is_some() && suggest_emoji_for(&text) == emoji && !self.stickers_dismissed_for(&text)
+    }
+
+    /// Whether the user closed the sticker suggestions of `text` in the
+    /// open chat.
+    fn stickers_dismissed_for(&self, text: &str) -> bool {
+        self.composer_ui
+            .suggest
+            .stickers_dismissed
+            .as_ref()
+            .is_some_and(|(chat, closed)| *chat == self.open_chat_id() && closed == text)
+    }
+
+    /// Close the suggestion rows for the text in the field.
+    fn close_sticker_suggestions(&mut self, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).value().to_string();
+        self.composer_ui.suggest.stickers_dismissed = Some((self.open_chat_id(), text));
+        self.notify_composer(cx);
+    }
+
+    /// Esc in the composer while a suggestion row shows. True when consumed.
+    pub(super) fn dismiss_sticker_suggestions(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
+        let stickers = &session.stickers.stickers;
+        let emoji = &session.stickers.emoji;
+        let showing = (!stickers.suggestions.is_empty()
+            && self.composer_suggests(stickers.suggest_for.as_deref(), cx))
+            || (emoji.animated_emoji.is_some()
+                && self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx));
+        if !showing || !self.composer.read(cx).focus_handle(cx).is_focused(window) {
+            return false;
+        }
+        self.close_sticker_suggestions(cx);
+        true
     }
 
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -117,6 +159,8 @@ impl QuillApp {
         let row = div()
             .id("sticker-suggestions")
             .flex()
+            .flex_1()
+            .min_w_0()
             .gap_2()
             .overflow_x_scroll()
             .children(
@@ -127,7 +171,22 @@ impl QuillApp {
                     .iter()
                     .map(|sticker| self.sticker_cell(sticker, "suggest", cx)),
             );
-        Some(row.into_any_element())
+        let close = Button::new("sticker-suggestions-close")
+            .icon(IconName::Close)
+            .xsmall()
+            .ghost()
+            .accessibility_label(tr(keys::Q_CHAT_STICKER_SUGGESTIONS_CLOSE))
+            .tooltip(tr(keys::Q_CHAT_STICKER_SUGGESTIONS_CLOSE))
+            .on_click(cx.listener(|this, _, _, cx| this.close_sticker_suggestions(cx)));
+        Some(
+            div()
+                .flex()
+                .items_start()
+                .gap_1()
+                .child(row)
+                .child(close)
+                .into_any_element(),
+        )
     }
 
     pub(super) fn sticker_cell(

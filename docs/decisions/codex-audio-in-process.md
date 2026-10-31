@@ -61,7 +61,8 @@ family 0) are supported; surround voice notes do not exist.
 - Speed (0.5x to 2x, the existing cycle) keeps the pitch like ffplay's
   `atempo` did: a WSOLA time stretcher (`tempo.rs`) reads the speed from a
   shared atomic each 20 ms block, so changing speed no longer restarts
-  playback. At 1x it is bit-transparent apart from a 20 ms delay.
+  playback. At 1x it is transparent within f32 rounding apart from a 20 ms
+  delay, and it searches nothing (`docs/decisions/tempo-1x.md`).
 - Volume and mute apply live to the player.
 - Continue-to-next-voice-note was not implemented with ffplay either, so it
   is not part of this change.

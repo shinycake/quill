@@ -1,3 +1,0 @@
-# Conference calls: Add People from a 1:1 call, call links and invitations,
-# frames end-to-end encrypted through TDLib (docs/decisions/tgcalls-conference-calls.md)
-parity:calls-conference

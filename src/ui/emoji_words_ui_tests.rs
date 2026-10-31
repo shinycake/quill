@@ -4,6 +4,7 @@
 
 use crate::ui::actions::{EmojiWordBlock, EmojiWordSuggest};
 use crate::ui::app::QuillApp;
+use crate::ui::emoji_words_ui::{BAR_GRACE, BarAim};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -13,6 +14,7 @@ use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext,
 use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope_emoji::EmojiKeyword;
+use std::time::Duration;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -145,6 +147,69 @@ fn a_hovered_word_offers_its_emoji_and_becomes_one(cx: &mut TestAppContext) {
         (composer.selected_range(), composer.value().len())
     });
     assert_eq!(caret, len..len);
+}
+
+fn hovered_word(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
+    app.read_with(vcx, |app, _| {
+        let hovered = app.composer_ui.emoji_words.hovered.as_ref();
+        hovered.map(|(h, _)| h.normalized.clone())
+    })
+}
+
+fn aim(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, aim: BarAim) {
+    app.update(vcx, |app, cx| app.aim_word_bar(aim, cx));
+}
+
+fn wait(vcx: &mut VisualTestContext, time: Duration) {
+    vcx.executor().advance_clock(time);
+    vcx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn a_bar_survives_the_pointer_straying_and_coming_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| app.hover_highlight(0));
+    let almost = BAR_GRACE.saturating_sub(Duration::from_millis(1));
+
+    aim(&app, vcx, BarAim::Close);
+    wait(vcx, almost);
+    assert_eq!(hovered_word(&app, vcx).as_deref(), Some("pizza"));
+
+    aim(&app, vcx, BarAim::Hold);
+    wait(vcx, BAR_GRACE * 2);
+    assert_eq!(hovered_word(&app, vcx).as_deref(), Some("pizza"));
+
+    aim(&app, vcx, BarAim::Close);
+    wait(vcx, BAR_GRACE);
+    assert_eq!(hovered_word(&app, vcx), None);
+}
+
+#[gpui_kit::test]
+fn the_bar_moves_to_a_word_only_once_the_pointer_rests_on_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.simulate_input("we got pizza and cake for the party later tonight with friends ");
+    frame(vcx);
+    app.update(vcx, |app, _| app.hover_highlight(0));
+    let word = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, index: usize| {
+        app.read_with(vcx, |app, _| {
+            app.composer_ui.emoji_words.highlights[index].clone()
+        })
+    };
+    let (cake, party) = (word(&app, vcx, 1), word(&app, vcx, 2));
+
+    // Crossing cake on the way to party: the wait starts over.
+    aim(&app, vcx, BarAim::Word(cake));
+    wait(vcx, BAR_GRACE.saturating_sub(Duration::from_millis(1)));
+    aim(&app, vcx, BarAim::Word(party));
+    wait(vcx, BAR_GRACE.saturating_sub(Duration::from_millis(1)));
+    assert_eq!(hovered_word(&app, vcx).as_deref(), Some("pizza"));
+
+    wait(vcx, Duration::from_millis(1));
+    assert_eq!(hovered_word(&app, vcx).as_deref(), Some("party"));
 }
 
 #[gpui_kit::test]
@@ -300,7 +365,7 @@ fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContex
     assert_eq!(glyphs.first().map(String::as_str), Some("🍕"));
     // The pointer coming back from the menu over plain text keeps it.
     app.update(vcx, |app, cx| {
-        app.hover_emoji_word(gpui_kit::point(px(5.), px(5.)), cx)
+        app.track_word_bar(gpui_kit::point(px(5.), px(5.)), cx)
     });
     let open = app.read_with(vcx, |app, _| app.composer_ui.emoji_words.hovered.is_some());
     assert!(open, "a bar asked for stays open");

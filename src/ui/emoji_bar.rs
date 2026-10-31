@@ -489,8 +489,7 @@ impl QuillApp {
                     .bottom(relative(1.))
                     .pb_2()
                     .child(bar)
-                    // A word's bar closes once the pointer is off the way
-                    // between the word and the bar, wherever it went.
+                    // A word's bar follows the pointer wherever it goes.
                     .when(word_bar, |this| {
                         this.child(
                             canvas(
@@ -502,7 +501,7 @@ impl QuillApp {
                                                 return;
                                             }
                                             let _ = weak.update(cx, |this, cx| {
-                                                this.leave_word_bar(window, cx)
+                                                this.leave_word_bar(window, cx);
                                             });
                                         },
                                     );

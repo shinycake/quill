@@ -26,6 +26,7 @@ impl QuillApp {
         #[cfg(test)]
         quill::wake::isolate_current_thread();
         super::tooltip_timing::install(cx);
+        super::image_budget::start_sweeper(cx);
         quill::media_tools::warm_up();
         let chat = cx.new(SyntheticChat::new);
         // Send-key mode drives kit's newline-vs-submit behavior: plain
@@ -412,6 +413,7 @@ impl QuillApp {
                             || this.close_mention_menu(cx)
                             || this.close_suggest_menu(true, cx)
                             || this.close_command_menu(cx)
+                            || this.dismiss_sticker_suggestions(window, cx)
                     })
                     .unwrap_or(false),
                 "up" => menu_app
