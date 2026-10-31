@@ -393,6 +393,10 @@ fn the_picture_trace_line_has_the_documented_columns() {
 #[cfg(feature = "demo-capture")]
 mod inline;
 
+/// A chat window's clips while the main window draws another chat.
+#[cfg(feature = "demo-capture")]
+mod inline_windows;
+
 /// With autoplay off: a clicked round video plays with sound (downloaded
 /// first), a clicked MP4 GIF loops on the inline player.
 #[cfg(feature = "demo-capture")]

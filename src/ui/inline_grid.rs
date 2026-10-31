@@ -120,6 +120,7 @@ impl QuillApp {
             return None;
         }
         let frame = self.playback.inline_videos.frame(
+            self.windows.scope,
             (panel.chat(), i64::from(clip.0)),
             tile,
             None,
@@ -140,7 +141,7 @@ impl QuillApp {
         // Clips whose cells do not render in this pass stop.
         self.playback
             .inline_videos
-            .begin_panel_render(Panel::InlineResults);
+            .begin_panel_render(self.windows.scope, Panel::InlineResults);
         let mut panel = div()
             .id("inline-results")
             .flex()

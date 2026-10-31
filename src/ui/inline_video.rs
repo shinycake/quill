@@ -10,7 +10,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::inline_players::{Demand, InlineVideos};
+use super::inline_players::{Demand, InlineVideos, Panel};
 use super::play_intent::PlayTarget;
 use super::video_player::VideoPlayer;
 use gpui_kit::*;
@@ -222,6 +222,28 @@ impl QuillApp {
         )
     }
 
+    /// At the start of each frame of the window in scope, before anything
+    /// in it renders: its clips leave it when its last frame drew no
+    /// history pass where one was due (`history_drawn`) or when a viewer
+    /// covers its chat (even if a cached conversation replays its
+    /// animation layer), and the clips of a panel closed there leave it.
+    /// Other windows' clips play on.
+    pub(super) fn inline_videos_frame_start(&self, history_drawn: bool) {
+        let window = self.windows.scope;
+        let videos = &self.playback.inline_videos;
+        videos.frame_start(window, history_drawn);
+        if self.viewer.state.is_open() || self.stories.viewer.is_open() {
+            videos.leave_window(window);
+            return;
+        }
+        if !self.composer_ui.inline_results_open {
+            videos.leave_panel(window, Panel::InlineResults);
+        }
+        if !self.gif_panel_open() {
+            videos.leave_panel(window, Panel::Gifs);
+        }
+    }
+
     /// The inline frame for a history row's video or GIF, when it should
     /// play: the native player is available, no viewer covers the chat,
     /// it isn't secret or behind an unrevealed spoiler, the clip is downloaded, and
@@ -329,6 +351,7 @@ impl QuillApp {
         let duration = (duration > 0).then_some(f64::from(duration));
         let videos = &self.playback.inline_videos;
         let mut frame = videos.frame(
+            self.windows.scope,
             key,
             tile,
             duration,

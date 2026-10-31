@@ -182,7 +182,9 @@ impl QuillApp {
     /// The GIFs tab of the media panel.
     pub(super) fn gif_picker_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         // Clips whose tiles do not render in this pass stop.
-        self.playback.inline_videos.begin_panel_render(Panel::Gifs);
+        self.playback
+            .inline_videos
+            .begin_panel_render(self.windows.scope, Panel::Gifs);
         let no_panel = GifPanel::default();
         let panel = self
             .session()

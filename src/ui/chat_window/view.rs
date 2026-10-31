@@ -130,6 +130,9 @@ impl Render for ChatWindowView {
             app.sticker_frame_starts(Some(chat_id), cx);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
+            // Its body builds the history every frame (no cached slice):
+            // a frame without a history pass shows none of its clips.
+            app.inline_videos_frame_start(true);
             outer
         });
         // The kit dialog this window hosts, built with its state in place.
