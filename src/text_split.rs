@@ -11,7 +11,7 @@
 //! also fits whichever unit the server counts.
 #![deny(clippy::indexing_slicing)]
 
-use crate::composer::parse_format_markup;
+use crate::composer::{parse_format_markup, scan_work};
 
 /// UTF-16 code units of `text`.
 pub fn utf16_len(text: &str) -> usize {
@@ -54,6 +54,7 @@ fn break_level(prev: Option<char>, ch: char, next: Option<char>) -> Option<u8> {
 
 /// Largest char-boundary byte index `b` with `units(rest[..b]) <= max`.
 fn largest_fitting_prefix(rest: &str, max: usize) -> usize {
+    scan_work::add(rest.len());
     let bounds: Vec<usize> = rest
         .char_indices()
         .map(|(i, _)| i)
@@ -113,6 +114,7 @@ pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
         let half = largest_fitting_prefix(&rest, limit / 2);
         // Candidate seams in the second half of the window, best level
         // first, latest first within a level.
+        scan_work::add(rest.len());
         let chars: Vec<(usize, char)> = rest.char_indices().collect();
         let mut candidates: Vec<(u8, usize)> = Vec::new();
         for (n, &(at, ch)) in chars.iter().enumerate() {
@@ -150,6 +152,10 @@ pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
     }
     parts
 }
+
+#[cfg(test)]
+#[path = "text_split_scale_tests.rs"]
+mod scale_tests;
 
 #[cfg(test)]
 mod tests {

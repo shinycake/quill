@@ -22,6 +22,7 @@ pub(crate) mod markup_boundary;
 pub use markup_boundary::strip_barrier;
 #[cfg(test)]
 mod markup_boundary_tests;
+pub(crate) mod scan_work;
 mod media_options;
 mod media_prep;
 mod placeholder;

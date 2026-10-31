@@ -263,6 +263,7 @@ impl<'a> MarkupParser<'a> {
         let bytes = self.text.as_bytes();
         let mut i = from;
         while i < to {
+            super::scan_work::add(1);
             let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
             if top && line_start && self.text.get(i..to).unwrap_or_default().starts_with("> ") {
                 let content_start = i + 2;
@@ -273,6 +274,7 @@ impl<'a> MarkupParser<'a> {
                     .find('\n')
                     .map(|k| content_start + k)
                     .unwrap_or(to);
+                super::scan_work::add(line_end - content_start);
                 let entity_start = self.out16;
                 self.parse_span(content_start, line_end, false);
                 let entity_len = self.out16 - entity_start;
@@ -345,6 +347,7 @@ impl<'a> MarkupParser<'a> {
                 // Inline spans stay on one line (Telegram entities do).
                 let inner_start = i + open.len();
                 let line_end = after_open.find('\n').unwrap_or(after_open.len());
+                super::scan_work::add(line_end);
                 if let Some(inner_end) = super::markup_boundary::find_closer(
                     self.text,
                     inner_start,
@@ -374,10 +377,14 @@ impl<'a> MarkupParser<'a> {
 
     fn try_fenced(&mut self, i: usize, after: &str) -> Option<usize> {
         // Language = first line after the fence (may be empty).
-        let first_nl = after.find('\n')?;
+        let first_nl = after.find('\n');
+        super::scan_work::add(first_nl.unwrap_or(after.len()));
+        let first_nl = first_nl?;
         let language = after.get(..first_nl).unwrap_or_default().trim().to_string();
         let body_start = first_nl + 1;
-        let close_rel = after.get(body_start..).unwrap_or_default().find("```")?;
+        let close_rel = after.get(body_start..).unwrap_or_default().find("```");
+        super::scan_work::add(close_rel.unwrap_or(after.len() - body_start));
+        let close_rel = close_rel?;
         let inner = after
             .get(body_start..body_start + close_rel)
             .unwrap_or_default();
@@ -406,10 +413,14 @@ impl<'a> MarkupParser<'a> {
     fn try_custom_emoji(&mut self, i: usize, to: usize) -> Option<usize> {
         let rest = self.text.get(i..to).unwrap_or_default();
         let after_bang = rest.strip_prefix("![")?;
-        let close_bracket = after_bang.find("](")?;
+        let close_bracket = after_bang.find("](");
+        super::scan_work::add(close_bracket.unwrap_or(after_bang.len()));
+        let close_bracket = close_bracket?;
         let fallback = after_bang.get(..close_bracket).unwrap_or_default();
         let after_paren = after_bang.get(close_bracket + 2..).unwrap_or_default();
-        let close_paren = after_paren.find(')')?;
+        let close_paren = after_paren.find(')');
+        super::scan_work::add(close_paren.unwrap_or(after_paren.len()));
+        let close_paren = close_paren?;
         let url = after_paren.get(..close_paren).unwrap_or_default();
         let id = url.strip_prefix("tg://emoji?id=")?;
         if fallback.is_empty() || id.is_empty() || id.parse::<i64>().is_err() {
@@ -432,10 +443,13 @@ impl<'a> MarkupParser<'a> {
     fn try_link(&mut self, i: usize, to: usize) -> Option<usize> {
         let rest = self.text.get(i..to).unwrap_or_default();
         let after_bracket = rest.strip_prefix('[')?;
-        let close_bracket = after_bracket.find("](")?;
+        let close_bracket = after_bracket.find("](");
+        super::scan_work::add(close_bracket.unwrap_or(after_bracket.len()));
+        let close_bracket = close_bracket?;
         let after_paren = after_bracket.get(close_bracket + 2..).unwrap_or_default();
         // URL stays on one line.
         let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
+        super::scan_work::add(line_end);
         let close_paren = after_paren.get(..line_end).unwrap_or_default().find(')')?;
         let label = after_bracket.get(..close_bracket).unwrap_or_default();
         let url = after_paren.get(..close_paren).unwrap_or_default();
@@ -479,6 +493,7 @@ impl<'a> MarkupParser<'a> {
 /// The byte offset of the UTF-16 offset `units` in `text` (clamped).
 fn utf16_to_byte(text: &str, units: i32) -> usize {
     let mut count = 0;
+    super::scan_work::add(usize::try_from(units).unwrap_or(0));
     for (ix, ch) in text.char_indices() {
         if count >= units {
             return ix;
