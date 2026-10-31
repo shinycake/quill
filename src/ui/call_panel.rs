@@ -20,6 +20,7 @@ use super::call_panel_devices::{self as devices, DeviceMenuTarget};
 use super::call_panel_notices as notices;
 use super::calls::call_video::{CallPicture, CallWindowRoot};
 use super::chat_row::chat_avatar;
+use super::frame_clock::follow_app;
 use super::nested_click::SwallowPress;
 use crate::ui::app_theme::call_chrome;
 use crate::ui::status_note::StatusNote;
@@ -475,7 +476,7 @@ impl CallPanel {
     pub(crate) fn new(owner: &Entity<QuillApp>, cx: &mut Context<Self>) -> Self {
         Self {
             owner: owner.downgrade(),
-            _observe: cx.observe(owner, |_, _, cx| cx.notify()),
+            _observe: follow_app(owner, cx),
             pinned_on_top: false,
             devices_menu: demo_devices_menu(),
         }

@@ -337,3 +337,14 @@ the frame that measured them is over, and keeps every width a frame drew.
 It needs to tell one frame's requests from the next, in each window.
 `src/window.rs`: `Window::draw` adds one to `frames_begun` as it begins,
 and `Window::frame_number` returns it.
+
+## A test window can be moved
+
+Added in 2026 for the memory sweep (`docs/decisions/covered-main-window.md`),
+test support only. A test could resize a window but not move it, nor move it
+to another display through `TestAppContext`. `src/platform/test/window.rs`:
+`TestWindow::simulate_move` sets the window's origin and runs the platform's
+moved callback, as a window the user dragged reports itself.
+`src/app/test_context.rs`: `TestAppContext::simulate_window_move` and
+`simulate_window_move_to_display` (the latter calls the existing
+`TestWindow::simulate_move_to_display`).

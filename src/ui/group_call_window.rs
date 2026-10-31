@@ -12,7 +12,7 @@
 
 use super::app::QuillApp;
 use super::calls::stream_view::StreamPictureView;
-use super::frame_clock::trace_slice_render;
+use super::frame_clock::{follow_app, trace_slice_render};
 use super::group_call_panel::BG;
 use super::group_call_stream_layout::{
     leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
@@ -168,7 +168,7 @@ impl QuillApp {
                         let activation_owner = render_owner.downgrade();
                         GroupCallPanel {
                             owner: render_owner.downgrade(),
-                            _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                            _observe: follow_app(&render_owner, cx),
                             focus: cx.focus_handle(),
                             // A key-up can't arrive once the window is in
                             // the background: close the push-to-talk mic.
@@ -189,7 +189,7 @@ impl QuillApp {
                     let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
                     let root = cx.new(|cx| GroupCallRoot {
                         owner: render_owner.downgrade(),
-                        _observe: cx.observe(&render_owner, |_, _, cx| cx.notify()),
+                        _observe: follow_app(&render_owner, cx),
                         panel: view,
                         picture,
                     });
