@@ -11,7 +11,6 @@ const WIDTH: u32 = 160;
 const HEIGHT: u32 = 120;
 const FRAMES: u8 = 40;
 
-/// Red, then a run of frames with no red in them.
 fn many_frame_gif() -> Vec<u8> {
     let frames = (0..FRAMES).map(|index| {
         let color = match index {
@@ -51,7 +50,6 @@ impl Render for Picture {
     }
 }
 
-/// The picture's folder, removed however the test ends.
 struct Folder(PathBuf);
 
 impl Drop for Folder {
@@ -60,8 +58,6 @@ impl Drop for Folder {
     }
 }
 
-/// A `.gif` file shown as a picture costs one picture. Nothing draws its
-/// other frames: the one GIF that plays decodes through `GifClip`.
 #[gpui_kit::test]
 fn a_many_frame_gif_loads_as_its_first_frame_at_display_size(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

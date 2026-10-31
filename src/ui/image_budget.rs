@@ -363,9 +363,7 @@ pub(super) enum Fit {
 /// drawn in a `frame` of logical size, decoded no larger than that needs
 /// (device pixels), through the bounded cache. `dims` is the picture's
 /// own size when known, which keeps the decode tight for frames whose
-/// aspect differs from the picture's. A `.gif` shows its first frame:
-/// `GifClip` plays the GIF that plays, and the media viewer never comes
-/// here.
+/// aspect differs from the picture's.
 pub(super) fn sized_media(
     path: &Path,
     frame: (Pixels, Pixels),
