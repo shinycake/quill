@@ -249,6 +249,8 @@ fn ui_main(args: &[String]) {
         // kit Phase 9: honor the OS reduce-motion preference.
         ui::reduce_motion_probe::apply_at_startup(cx);
         ui::bind_keys(cx);
+        cx.on_system_wake(|_| quill::net_watch::system_woke())
+            .detach();
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
         ui::setup_app_menus(cx);

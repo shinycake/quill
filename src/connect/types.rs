@@ -352,6 +352,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// TDLib refused is not sent again until the OS setting changes or
     /// `system_proxy::RETRY` passes.
     pub(crate) system_proxy_sent: Option<crate::system_proxy::SentStep>,
+    /// The `net_watch` epoch this client last acted on.
+    pub(crate) network_seen: Option<u64>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
     /// `None` refuses them.
     pub(crate) carrier_host: Option<Box<dyn crate::proxy_carrier::CarrierHost>>,

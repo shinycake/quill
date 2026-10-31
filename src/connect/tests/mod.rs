@@ -74,6 +74,7 @@ mod message_effects;
 mod message_menu;
 mod message_ops;
 mod messaging;
+mod network_ticks;
 mod new_chat;
 mod new_contact;
 mod owned_bots;
