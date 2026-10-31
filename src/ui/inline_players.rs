@@ -434,7 +434,7 @@ impl InlineVideos {
     /// is hidden or presented again: pause what no window has in view,
     /// resume what one has, put to sleep what has been off screen for
     /// [`RELEASE_AFTER`], and give a sleeping slot painted in view a new
-    /// player.
+    /// player (behind another app, only on its window's pass).
     fn sweep(self: &Rc<Self>, sweep: Sweep, cx: &mut App) {
         let now = cx.background_executor().now();
         let players: Vec<(Key, VideoPlayer)> = self
@@ -476,7 +476,10 @@ impl InlineVideos {
                 };
                 let visible = note_sweep(&mut slot.windows, sweep, count, &unseen);
                 if slot.asleep {
-                    if visible {
+                    // Behind another app only its window's own pass wakes
+                    // it: a recheck as every window is hidden (Cmd-H)
+                    // would open decoders for clips nobody sees.
+                    if visible && (!inactive || matches!(sweep, Sweep::Pass(_))) {
                         revive.push((key, slot.source.clone()));
                     }
                     continue;

@@ -144,7 +144,11 @@ impl Render for ChatWindowView {
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let outer = app.update(cx, |app, cx| {
-            app.windows.note_place(chat_id, active, place);
+            if app.windows.note_place(chat_id, active, place) {
+                // The gate follows it now, not at the main window's next
+                // render, which a minimized main window never draws.
+                app.follow_windows(cx);
+            }
             app.set_window_chat_active(chat_id, active);
             if moved {
                 app.schedule_chat_windows_save(cx);

@@ -4,10 +4,12 @@
 //! other window shows, so the window's players stay open and play; they
 //! go when the window closes. A window the platform stops presenting
 //! (minimized, covered) pauses its clips and lets them sleep; one window's
-//! viewer or closed GIF panel leaves the other window's clips alone.
+//! viewer or closed GIF panel leaves the other window's clips alone. The
+//! app's animation gate follows every window's focus, a closed one's too.
 
 use super::{Script, queue_backend};
 use crate::ui::app::QuillApp;
+use crate::ui::frame_clock::AppGate;
 use crate::ui::inline_players::{Panel, RELEASE_AFTER};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::media_panel::PanelTab;
@@ -483,6 +485,24 @@ fn main_window(vcx: &mut VisualTestContext) -> AnyWindowHandle {
     vcx.update(|window, _| window.window_handle())
 }
 
+/// A click in `window` brings it to the front.
+fn focus(vcx: &mut VisualTestContext, window: AnyWindowHandle) {
+    vcx.update_window(window, |_, window, _| window.activate_window())
+        .unwrap();
+    vcx.run_until_parked();
+}
+
+/// The app's animation gate, as the frame clock and the clips' frame
+/// requests read it, and whether the two agree.
+fn gate(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.update(vcx, |app, cx| {
+        let active = app.frame.window_active.get();
+        let global = cx.try_global::<AppGate>().map(|gate| gate.active);
+        assert_eq!(global, Some(active), "the clips' gate is the app's");
+        active
+    })
+}
+
 #[gpui_kit::test]
 fn a_chat_windows_clips_keep_their_frames_while_the_main_window_has_focus(cx: &mut TestAppContext) {
     let _scripts = scripts();
@@ -494,11 +514,6 @@ fn a_chat_windows_clips_keep_their_frames_while_the_main_window_has_focus(cx: &m
     app.update_in(vcx, |app, window, cx| {
         app.select_listed_chat(OTHER, window, cx)
     });
-    let focus = |vcx: &mut VisualTestContext, window: AnyWindowHandle| {
-        vcx.update_window(window, |_, window, _| window.activate_window())
-            .unwrap();
-        vcx.run_until_parked();
-    };
     focus(vcx, chat_window);
     settle(vcx);
     for _ in 0..4 {
@@ -563,4 +578,199 @@ fn a_main_window_its_chat_window_hides_pauses_its_clips_till_it_shows(cx: &mut T
         draw_main(&app, vcx);
     }
     assert_plays(&app, vcx, &[ROUND, TILE]);
+}
+
+#[gpui_kit::test]
+fn the_gate_goes_off_when_the_app_loses_focus_with_a_chat_window_open(cx: &mut TestAppContext) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    let chat_window = open_window(&app, vcx, CHAT);
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(OTHER, window, cx)
+    });
+    focus(vcx, chat_window);
+    settle(vcx);
+    for _ in 0..4 {
+        draw_both(&app, chat_window, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+    assert!(gate(&app, vcx), "the chat window in front animates the app");
+
+    // Another app comes forward.
+    VisualTestContext::from_window(chat_window, &vcx.cx).deactivate_window();
+    vcx.run_until_parked();
+    assert!(!gate(&app, vcx), "no Quill window is active");
+    for key in [ROUND, TILE] {
+        let player = player(&app, vcx, key);
+        assert!(
+            !player.wants_play(),
+            "{key:?} holds still behind another app"
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn the_gate_goes_off_as_the_active_chat_window_closes_over_a_minimized_main_window(
+    cx: &mut TestAppContext,
+) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    let chat_window = open_window(&app, vcx, CHAT);
+    focus(vcx, chat_window);
+    vcx.simulate_visibility_change(WindowVisibility::Hidden);
+    vcx.run_until_parked();
+    assert!(gate(&app, vcx), "the chat window in front animates the app");
+
+    // Closed: GPUI drops the window before the platform reports it
+    // inactive, and the minimized main window draws nothing. The test
+    // platform would draw it after the update, so the gate is read in it.
+    app.update(vcx, |app, cx| {
+        app.chat_window_closed(CHAT, None, cx);
+        let global = cx.try_global::<AppGate>().map(|gate| gate.active);
+        assert!(
+            !app.frame.window_active.get() && global == Some(false),
+            "the gate is off once the window closes: {global:?}"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_minimized_chat_windows_sleeping_clips_stay_asleep_as_the_app_hides(cx: &mut TestAppContext) {
+    let scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    settle(vcx);
+    let chat_window = open_window(&app, vcx, CHAT);
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(OTHER, window, cx)
+    });
+    let main = main_window(vcx);
+    focus(vcx, main);
+    settle(vcx);
+    for _ in 0..4 {
+        draw_both(&app, chat_window, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+    vcx.simulate_window_visibility_change(chat_window, WindowVisibility::Hidden);
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        draw_main(&app, vcx);
+    }
+    assert_sleeps_out_of_sight(&app, vcx, &scripts);
+    let asleep = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, when: &str| {
+        for key in [ROUND, TILE] {
+            let asleep = app.read_with(vcx, |app, _| app.playback.inline_videos.is_asleep(key));
+            assert!(asleep, "{key:?} sleeps on {when}");
+        }
+        assert_eq!(live(&scripts), 0, "a decoder opened {when}");
+    };
+
+    // Cmd-H: behind another app, no window is presented any more.
+    vcx.deactivate_window();
+    vcx.simulate_visibility_change(WindowVisibility::Hidden);
+    vcx.run_until_parked();
+    asleep(&app, vcx, "behind another app");
+
+    // Back, with the chat window still minimized.
+    vcx.simulate_visibility_change(WindowVisibility::Visible);
+    focus(vcx, main);
+    for _ in 0..2 {
+        draw_main(&app, vcx);
+    }
+    asleep(&app, vcx, "in a window still minimized");
+
+    // Restored: they play again.
+    vcx.simulate_window_visibility_change(chat_window, WindowVisibility::Visible);
+    vcx.run_until_parked();
+    for _ in 0..2 {
+        draw_both(&app, chat_window, vcx);
+    }
+    assert_plays(&app, vcx, &[ROUND, TILE]);
+}
+
+/// The round video's clip (`apply_ready_video_note`).
+const ROUND_FILE: i32 = 92;
+
+#[gpui_kit::test]
+fn a_click_in_a_chat_window_closed_before_its_clip_lands_plays_nothing(cx: &mut TestAppContext) {
+    let _scripts = scripts();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, _| window.activate_window());
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("the demo session");
+        session.settings.media_prefs.autoplay_videos = false;
+        session.settings.media_prefs.autoplay_gifs = false;
+    });
+    let set_local = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, local: bool| {
+        app.update(vcx, |app, _| {
+            let session = app.demo_session.as_mut().expect("the demo session");
+            session.media.files.update(ROUND_FILE, |file| {
+                file.local.is_downloading_completed = local;
+                file.local.is_downloading_active = false;
+            });
+        });
+    };
+    set_local(&app, vcx, false);
+    settle(vcx);
+    let chat_window = open_window(&app, vcx, CHAT);
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(OTHER, window, cx)
+    });
+    settle(vcx);
+    draw_both(&app, chat_window, vcx);
+    let note = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|session| session.histories.get(&ROUND.0))
+            .and_then(|history| history.messages.get(&ROUND.1))
+            .map(|message| message.content.clone())
+    });
+    let Some(MessageContent::VideoNote(note)) = note else {
+        panic!("message 611 is a round video");
+    };
+
+    // A click on the round video in the chat window waits for its file.
+    app.update_in(vcx, |app, _, cx| {
+        app.in_window_scope(Some(CHAT), cx, |app, cx| {
+            app.play_video_note(CHAT, MessageId(ROUND.1), &note, cx);
+        })
+        .expect("the chat window's scope");
+    });
+    vcx.run_until_parked();
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.intent.is_some()),
+        "the click waits for the download"
+    );
+
+    // The window closes; the file lands; the main window shows the chat.
+    vcx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::ui::actions::CloseWindow), cx);
+    })
+    .unwrap();
+    vcx.run_until_parked();
+    set_local(&app, vcx, true);
+    app.update_in(vcx, |app, _, cx| app.resume_play_intent(cx));
+    app.update_in(vcx, |app, window, cx| {
+        app.select_listed_chat(CHAT, window, cx)
+    });
+    settle(vcx);
+    for _ in 0..2 {
+        draw_main(&app, vcx);
+    }
+    app.read_with(vcx, |app, _| {
+        let videos = &app.playback.inline_videos;
+        assert_eq!(videos.demand(ROUND), None, "a request outlived its window");
+        assert!(
+            !videos.is_sounding(ROUND),
+            "the round video plays with sound"
+        );
+        assert!(videos.player(ROUND).is_none(), "it rests on its still");
+    });
 }

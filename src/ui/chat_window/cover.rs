@@ -94,13 +94,20 @@ impl ChatWindows {
         }) && !hover_activates()
     }
 
-    /// `chat_id`'s window is active or not and stands at `place`.
-    pub(super) fn note_place(&self, chat_id: ChatId, active: bool, place: Option<WindowPlace>) {
-        if let Some(slot) = self.slot_for(chat_id) {
-            let mut slot = slot.borrow_mut();
-            slot.active = active;
-            slot.place = place;
-        }
+    /// `chat_id`'s window is active or not and stands at `place`. Returns
+    /// whether its activation changed.
+    pub(super) fn note_place(
+        &self,
+        chat_id: ChatId,
+        active: bool,
+        place: Option<WindowPlace>,
+    ) -> bool {
+        let Some(slot) = self.slot_for(chat_id) else {
+            return false;
+        };
+        let mut slot = slot.borrow_mut();
+        slot.place = place;
+        std::mem::replace(&mut slot.active, active) != active
     }
 }
 
@@ -178,8 +185,10 @@ impl QuillApp {
     /// changes, whether or not its window draws: a minimized main window
     /// draws nothing, so its render alone left the gate as its own
     /// deactivation set it, and a chat window it had paused stayed paused.
-    /// The inline players follow the gate and the main window's cover.
-    /// Returns the gate.
+    /// Run at each activation change of a window (its observer, or a chat
+    /// window's render that finds it changed), at the main window's render,
+    /// and when a chat window closes. The inline players follow the gate
+    /// and the main window's cover. Returns the gate.
     pub(in crate::ui) fn follow_windows(&self, cx: &mut App) -> bool {
         let active = self.frame.main_active.get() || self.windows.any_active();
         let covered = self.frame.main_covered.get();

@@ -58,13 +58,24 @@ and whether that window's last sweep found it in view (`src/ui/inline_players/wi
   closed its GIF panel, the flag made each chat window frame take its GIF players off and its panel open
   them again.
 - A play-on-demand request (a click with autoplay off) records the window it was asked in, carried through
-  a pending download (`PlayTarget::Inline::window`). A viewer drops only the requests of its own window.
-  Before, a viewer open in the main window dropped a request from a chat window before its player opened,
-  so the click did nothing.
+  a pending download (`PlayTarget::Inline::window`). The media viewer drops only the requests of its own
+  window. Before, a viewer open in the main window dropped a request from a chat window before its player
+  opened, so the click did nothing. The stories viewer is still one for the app: while it is open, every
+  window's frame start drops its clips and requests, and no window shows a clip inline
+  (`src/ui/inline_video.rs:241,268`). That predates this change.
+- A click parked for a download in a chat window that closes before the file lands is dropped with the
+  window (`drop_play_intent_in_window`, from `forget_chat_window`). Before, the request it left once the
+  file landed named the closed window, so nothing dropped it, and the clip started with sound the next
+  time its chat showed in any window.
 - A round video's sound ending redraws the history of the window it plays in (`history_redraw_target`),
   not the main window's conversation slice.
 - A sleeping clip that wakes redraws the history views of every window showing it. Before, it redrew the
   history view of whichever window passed last.
+- Behind another app, only a window's own history pass wakes a sleeping clip; a recheck or the release
+  timer does not. Otherwise, with a chat window minimized and its clips asleep, Cmd-H (or another app
+  covering the main window whole) left no window presented, which counts as nothing out of sight, and the
+  recheck opened a decoder for each of those clips at every app switch. Once the app is active again,
+  the window's next pass wakes what it has in view.
 
 With one window every rule is the same as before: one entry per clip, the same pass numbers, the same
 sweep. Opening the viewer still clears the window's pending play-on-demand requests, through
@@ -120,7 +131,29 @@ main window's activation observer set it from the main window alone, and only th
 added the chat windows. A main window that does not draw (minimized while focused, so a chat window takes
 focus) left the gate off: that chat window's muted loops paused and its stickers held still. The gate is now
 recomputed at each activation change of any Quill window (`QuillApp::follow_windows`, from the main
-window's observer, a chat window's `placed` observer, and the main window's render).
+window's observer, a chat window's `placed` observer, a chat window's render that finds its activation
+changed, and the main window's render), and when a chat window closes (`forget_chat_window`). The close
+needs its own call: GPUI drops the window (`gpui-pre` `app.rs`) before the platform reports it inactive,
+so its observer never runs, and a main window that is minimized or hidden to the tray draws nothing.
+Without it the gate stayed on after the active chat window closed, with the user in other apps:
+`sync_presence` kept the account online, `poll_background` counted the app active and muted the
+background accounts' sounds, and muted clips kept playing.
+
+Other effects of the change:
+
+- `AppGate::animates` applies to every window, so a call's or a live stream's video in its own window
+  asks for frames while the main window is active too. That matches the animation clock, which already
+  ran for any active Quill window.
+- The 30 ms interval also applies to a single window behind another app. A clip with sound there now
+  gets about 30 frames/s instead of 17-23.
+- At 100 Hz, vsyncs come every 10 ms and 30 ms falls exactly on the third, so jitter lets some frames
+  through at 30 ms and holds others to the fourth (40 ms). GPUI's default always waits for the fourth, so
+  this is no worse than the default.
+- macOS does not report one window of an app covering another of the same app. A chat window hidden
+  whole behind the active main window, or behind another chat window, is still presented, so it now
+  draws its clips at the inactive rate where no one sees them. Only the main window under its chat
+  window is handled (`chat_window::cover`). This is a known follow-up, not a regression against main:
+  before, such a chat window's clips froze instead.
 
 ## Measured
 

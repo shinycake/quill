@@ -141,6 +141,16 @@ impl QuillApp {
             .take_if(|intent| intent.target.message() == message);
     }
 
+    /// Drop a click to play parked in `chat`'s window, which closed: the
+    /// request it would leave once its file lands names a window gone, so
+    /// nothing would drop it, and the clip would start with sound wherever
+    /// the chat shows next.
+    pub(super) fn drop_play_intent_in_window(&mut self, chat: ChatId) {
+        self.playback.intent.take_if(|intent| {
+            matches!(intent.target, PlayTarget::Inline { window, .. } if window == Some(chat))
+        });
+    }
+
     /// Drop the target waiting on `file` (its download failed or stopped).
     pub(super) fn drop_play_intent_for(&mut self, file: FileId) {
         self.playback.intent.take_if(|intent| intent.file == file);
