@@ -76,27 +76,29 @@ fn reap(mut child: Child, grace: Duration) {
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use super::{Duration, Instant, kill_and_reap};
+    use super::kill_and_reap;
+    use std::io::Read;
     use std::process::{Command, Stdio};
 
+    /// The signal is sent before the call returns. The child is a shell
+    /// waiting for a line; the test closes its input right after the call,
+    /// so a child the call left running reads the end, says `survived` and
+    /// exits. The read of its output ends either way: at its death or at
+    /// that exit.
     #[test]
-    fn kill_and_reap_returns_at_once_and_ends_the_child() {
-        let Ok(child) = Command::new("sleep").arg("30").stdin(Stdio::null()).spawn() else {
-            return;
-        };
-        let pid = child.id();
-        let started = Instant::now();
+    fn kill_and_reap_kills_the_child_before_it_returns() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "read -r line; echo survived"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let mut output = child.stdout.take().unwrap();
         kill_and_reap(child);
-        assert!(started.elapsed() < Duration::from_secs(1));
-        let gone = (0..200).any(|_| {
-            std::thread::sleep(Duration::from_millis(25));
-            Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| !s.success())
-                .unwrap_or(true)
-        });
-        assert!(gone);
+        drop(input);
+        let mut said = String::new();
+        output.read_to_string(&mut said).unwrap();
+        assert_eq!(said, "");
     }
 }

@@ -50,6 +50,17 @@ A temporary stress test (not committed) ran each case 1000 times while 3 threads
   not cover a limit that runs out during the wait, because that needs a clock.
 - The claim tests unlock a claim before they drop it (`let_go`), as
   `a_held_generation_is_not_swept` does.
+- `child_reap::kill_and_reap_returns_at_once_and_ends_the_child` asserted under 1 s and then started
+  a `kill -0` child every 25 ms. It is now `kill_and_reap_kills_the_child_before_it_returns`: the
+  child is a shell waiting for a line, and after the call the test closes the shell's input and
+  reads its output to the end. The output is empty if the call killed the shell and `survived` if
+  it did not, and the read ends either way. The "returns at once" check is gone because only a
+  clock can show it: a killed child can be reaped within microseconds, so a version that waited
+  for the reap would pass any other check. The reap is not checked either. `kill -0` succeeds on a
+  zombie, and a `waitpid` from the test would compete with the reap thread for the child. Checked
+  by breaking the code: with no kill at all, 60 of 60 runs failed with `survived` and none hung.
+  Without `kill_and_reap`'s own kill, where the reap thread still kills a moment later, 1 of 60
+  failed. On the final code, 0 of 60 runs failed alone and 0 of 60 with the tests above for load.
 - `claim::liveness` unlocks before it answers `Live`. Production behavior is the same, because the
   lock it took used to end when the file closed a line later. This was not a production bug. In
   Quill, the extra holder could only make a helper's `lock_shared` wait until a child's exec, or
