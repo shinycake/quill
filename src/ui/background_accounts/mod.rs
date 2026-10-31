@@ -381,9 +381,12 @@ impl QuillApp {
                     if generation != this.background.generation {
                         return None;
                     }
-                    let backlog = this.poll_background(cx);
+                    let work_left = this.poll_background(cx);
                     if this.background.has_work() {
-                        Some(PassEnd { backlog, due: None })
+                        Some(PassEnd {
+                            work_left,
+                            due: None,
+                        })
                     } else {
                         this.background.polling = false;
                         None
@@ -397,8 +400,6 @@ impl QuillApp {
         .detach();
     }
 
-    /// Apply what every background client received, then show its
-    /// notifications. Returns whether a budget left updates queued.
     /// The app's proxy list and IPv6 choice: the account on screen's, once
     /// it is loaded and no change of it is in flight.
     fn app_proxy_list(&self) -> Option<(Vec<quill::proxy::ProxyEntry>, bool)> {
@@ -409,6 +410,8 @@ impl QuillApp {
         Some((proxy.all_entries()?, proxy.prefer_ipv6))
     }
 
+    /// Apply what every background client received, then show its
+    /// notifications. Returns whether a budget left updates queued.
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {
         let notify_from_all = self.background.notify_from_all;
         let app_active = self.frame.window_active.get();

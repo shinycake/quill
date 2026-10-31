@@ -16,12 +16,12 @@ const PACE: PollPace = PollPace {
 };
 
 const IDLE: PassEnd = PassEnd {
-    backlog: false,
+    work_left: false,
     due: None,
 };
 
 const BACKLOG: PassEnd = PassEnd {
-    backlog: true,
+    work_left: true,
     due: None,
 };
 
@@ -127,7 +127,6 @@ fn one_update_costs_one_pass_with_no_ramp_behind_it(cx: &mut TestAppContext) {
     cx.background_executor.advance_clock(PACE.gap);
     cx.run_until_parked();
     assert_eq!(passes.get(), 2);
-    // Up to the fallback, nothing else: no polls at 20, 40, 80 ms and on.
     cx.background_executor.advance_clock(ms(1900));
     cx.run_until_parked();
     assert_eq!(passes.get(), 2);
@@ -184,7 +183,7 @@ fn at_rest_the_loop_wakes_only_at_its_ceiling(cx: &mut TestAppContext) {
 fn timed_work_ends_a_rest_on_its_due_time(cx: &mut TestAppContext) {
     static SIGNAL: Signal = Signal::new();
     let passes = counted_loop(cx, &SIGNAL, PACE, |pass| PassEnd {
-        backlog: false,
+        work_left: false,
         due: (pass == 2).then_some(ms(400)),
     });
     cx.background_executor.advance_clock(ms(100));
@@ -235,12 +234,11 @@ fn a_pass_with_work_waiting_gives_the_thread_back_for_the_gap() {
 #[test]
 fn a_quiet_pass_rests_until_the_sooner_of_its_due_time_and_the_ceiling() {
     let due = |due| PassEnd {
-        backlog: false,
+        work_left: false,
         due: Some(due),
     };
     assert_eq!(PACE.next(IDLE, false), NextPass::Rest(PACE.ceiling));
     assert_eq!(PACE.next(due(ms(300)), false), NextPass::Rest(ms(300)));
     assert_eq!(PACE.next(due(ms(9000)), false), NextPass::Rest(PACE.ceiling));
-    // Already due: back at the gap, not in a spin.
     assert_eq!(PACE.next(due(ms(0)), false), NextPass::Rest(PACE.gap));
 }

@@ -1,7 +1,5 @@
 //! Sleep until a timeout or a [`quill::wake::Signal`] poke, whichever comes
-//! first, and the pacing of the poll loops that do. Replaces fixed-interval
-//! polling in the UI's background tasks: the task sleeps on a long fallback
-//! and wakes at once when the event it waits for happens.
+//! first, and the pacing of the poll loops that do.
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::{BackgroundExecutor, Task};
@@ -47,7 +45,6 @@ impl RestTimer {
         }
         let mut poked = std::pin::pin!(signal.wait_since(seen));
         std::future::poll_fn(|cx| {
-            // Both are polled until one is ready, so each keeps its waker.
             let timed_out = self
                 .armed
                 .as_mut()
@@ -70,13 +67,12 @@ impl RestTimer {
 /// What a pass of a poll loop left for the next one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct PassEnd {
-    /// More is known to be waiting (the pass stopped at its budget).
-    pub(super) backlog: bool,
+    /// More is waiting, so the loop must not rest.
+    pub(super) work_left: bool,
     /// When timed work next comes due, if any.
     pub(super) due: Option<Duration>,
 }
 
-/// When a poll loop runs its next pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NextPass {
     /// Work is waiting: give the thread back this long, whatever arrives.
@@ -85,7 +81,6 @@ pub(super) enum NextPass {
     Rest(Duration),
 }
 
-/// How a poll loop spaces its passes.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PollPace {
     /// The least the thread gets back between two passes.
@@ -98,14 +93,13 @@ impl PollPace {
     /// The wait after a pass that ended as `end`. `poked`: something
     /// arrived while it ran.
     pub(super) fn next(self, end: PassEnd, poked: bool) -> NextPass {
-        if end.backlog || poked {
+        if end.work_left || poked {
             return NextPass::Yield(self.gap);
         }
         let due = end.due.map_or(self.ceiling, |due| due.max(self.gap));
         NextPass::Rest(due.min(self.ceiling))
     }
 
-    /// What is left of the gap after a rest that lasted `rested`.
     fn gap_left(self, rested: Duration) -> Duration {
         self.gap.saturating_sub(rested)
     }
@@ -124,7 +118,6 @@ pub(super) async fn run_poll_loop(
 ) {
     let mut timer = RestTimer::default();
     loop {
-        // Taken before the pass, so nothing that arrives during it is missed.
         let seen = signal.epoch();
         let Some(end) = pass() else {
             break;

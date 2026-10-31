@@ -97,7 +97,6 @@ pub(super) enum PolledAction {
     Full,
 }
 
-/// The gap of a batched redraw, window active or inactive.
 fn gap_for((active_gap, inactive_gap): (Duration, Duration), active: bool) -> Duration {
     if active { active_gap } else { inactive_gap }
 }
@@ -191,7 +190,7 @@ impl QuillApp {
                     if generation != this.connection.generation {
                         return None;
                     }
-                    let backlog = this.poll_live(cx);
+                    let work_left = this.poll_live(cx);
                     let now = std::time::Instant::now();
                     let active = this.frame.window_active.get();
                     let redraw = this.notify.polled_redraw.next_due(active, now);
@@ -200,7 +199,7 @@ impl QuillApp {
                             .driver
                             .next_deadline(now, quill::state::unix_ms_now());
                         PassEnd {
-                            backlog,
+                            work_left,
                             due: redraw.into_iter().chain(timed).min(),
                         }
                     })
@@ -312,10 +311,6 @@ impl QuillApp {
         // before one poll runs; a `prev_auth`-only check then sees
         // Ready → Closed and misses the restart entirely.
         let mut saw_logging_out = matches!(prev_auth, AuthorizationState::LoggingOut);
-        // Apply updates under a per-tick time budget: a sync burst (thousands
-        // of updates after reconnecting) is spread over several frames
-        // instead of freezing one. Leftovers stay queued and the loop comes
-        // back after its gap.
         let budget_start = std::time::Instant::now();
         let mut budget_hit = false;
         live.driver.begin_batch();
@@ -442,7 +437,7 @@ impl QuillApp {
         // From here on, `progressed` marks results the UI drains (status
         // notes, finished exports, links): those redraw at once.
         let ingested = std::mem::take(&mut progressed);
-        let mut again = budget_hit;
+        let mut work_left = budget_hit;
         // Picture-in-Picture: its account logging out, or its message
         // deleted (tdesktop `sessionChanges`, `itemRemoved`), handled here
         // too because the root render does not run while the main window
@@ -486,7 +481,7 @@ impl QuillApp {
                 .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
             {
                 progressed = true;
-                again = true;
+                work_left = true;
             }
         }
         if self.poll_chat_export_progress() {
@@ -751,7 +746,7 @@ impl QuillApp {
         if logged_out {
             self.restart_live_connection(cx);
         }
-        again
+        work_left
     }
 
     /// Slice auth-logout-warning: drop the logged-out client and start a
@@ -982,7 +977,6 @@ mod tests {
         let start = Instant::now();
         let mut redraw = PolledRedraw::new(start);
         assert_eq!(redraw.next_due(true, start), None);
-        // Presence update: owed, not drawn yet (400 ms batching).
         let _ = redraw.decide(RedrawNeed::ChatList, true, start + ms(1));
         assert_eq!(redraw.next_due(true, start + ms(1)), Some(ms(399)));
         let _ = redraw.decide(RedrawNeed::Nothing, true, start + ms(500));
