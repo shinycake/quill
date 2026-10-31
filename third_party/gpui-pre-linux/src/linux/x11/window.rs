@@ -42,6 +42,7 @@ use std::{
     time::Instant,
 };
 
+use super::present_retry::PresentRetry;
 use super::{
     FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
 };
@@ -296,6 +297,8 @@ pub struct X11WindowState {
     visibility: WindowVisibility,
     hovered: bool,
     force_render_after_recovery: bool,
+    // Quill: forces another frame after the swapchain refused one.
+    present_retry: PresentRetry,
     fullscreen: bool,
     client_side_decorations_supported: bool,
     decorations: WindowDecorations,
@@ -952,6 +955,7 @@ impl X11WindowState {
                 visibility: WindowVisibility::Hidden,
                 hovered: false,
                 force_render_after_recovery: false,
+                present_retry: PresentRetry::default(),
                 fullscreen: false,
                 maximized_vertical: false,
                 maximized_horizontal: false,
@@ -1910,7 +1914,12 @@ impl PlatformWindow for X11Window {
             return;
         }
 
-        renderer.draw(scene);
+        let presented = renderer.draw(scene);
+        if inner.present_retry.after_draw(presented) {
+            inner.force_render_after_recovery = true;
+            // An expose can draw while the refresh timer is parked.
+            self.0.frame.demand();
+        }
 
         if renderer.needs_redraw() {
             inner.force_render_after_recovery = true;

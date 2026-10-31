@@ -91,3 +91,13 @@ allows no longer panic on the main thread (sweep finding linux-windows-5):
   instead of `flush().unwrap()`. Tests in both files ran with
   `cargo test -p gpui-pre-linux -p quill --lib --features quill/demo-capture`
   (the second package turns on `gpui/test-support`) on Linux.
+
+The Quill project also changed it in 2026 so X11 draws a refused frame again
+(sweep finding linux-windows-10):
+
+- `src/linux/x11/present_retry.rs` (new) and `src/linux/x11/window.rs`: when
+  `WgpuRenderer::draw` returns false (suboptimal, lost, outdated, timed-out
+  or occluded surface), the next refresh forces a frame, up to 8 in a row,
+  and a parked refresh timer is woken for it. Upstream ignored the result,
+  so the window kept stale content until the next invalidation. Wayland
+  already retries through `PresentationState`.
