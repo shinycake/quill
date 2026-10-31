@@ -300,7 +300,8 @@ Rejected alternatives for the allocator itself:
 ## Rejected
 
 - `malloc_zone_pressure_relief` (already called at idle): returns 0 bytes
-  on macOS 27 for every size tested.
+  on macOS 27 for every size tested, and the footprint doesn't move either
+  (`idle-heap-return.md`).
 - `MallocLargeCache=0` / `MallocSpaceEfficient=1`: undocumented
   environment switches read at process start; not something an app can
   set for itself.
