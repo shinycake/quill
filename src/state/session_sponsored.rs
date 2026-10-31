@@ -299,6 +299,17 @@ impl Session {
         }
     }
 
+    /// The chat of the ad being reported, from the first request until the
+    /// last answer or the picker's Cancel: the UI holds it from pruning so
+    /// the option picked still finds the ad.
+    pub fn sponsored_report_chat(&self) -> Option<ChatId> {
+        let target = self.messages.sponsored_report_target;
+        let flight = self.messages.sponsored_report.as_ref();
+        target
+            .map(|(chat_id, _)| chat_id)
+            .or(flight.map(|flight| flight.chat_id))
+    }
+
     /// Drop the report picker flight and its target. Called when the user
     /// cancels, when a send fails, or when a result is applied elsewhere —
     /// a dismissed report must not attribute a late response to a stale row.

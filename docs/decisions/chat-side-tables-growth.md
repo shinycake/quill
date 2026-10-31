@@ -39,32 +39,48 @@ repeated `viewMessages`, and TDLib itself reports each ad of its cached
 list as viewed once. A report whose answer arrives after the list went
 still records the hidden id.
 
-`forget_info_panel_data` drops the media counts and member lists, except
-while the info panel shows that chat. Answers still on their way cannot
-bring them back:
+`forget_info_panel_data` drops the media counts and member lists.
+Answers still on their way cannot bring them back:
 
-- a `count` answer only fills the entry `fetch_chat_media_counts` opened
-  (`state/domains/common/apply.rs`), so a dropped entry stays dropped and
-  the next panel asks for every count again, instead of a partial entry
-  from late answers blocking the fetch for good. This also covers a send
-  that failed halfway through the counts;
-- the first-page member requests in flight for the chat
-  (`getSupergroupMembers`, `getBasicGroupFullInfo`) leave the request
-  registry, as translation jobs do, so their answers are ignored and the
-  next fetch is not held back by them;
+- a `count` answer, and the gallery's Stories and Gifts answers and their
+  failures (`set_profile_count`), only fill the entry the counts fetch
+  opened (`fetch_chat_media_counts`, which `fetch_profile_tabs` runs
+  before asking for any tab). A dropped entry stays dropped and the next
+  panel or gallery asks for every count again, instead of a partial entry
+  from late answers stopping that fetch for the rest of the session (no
+  media rows in the panel, no Files, Links or Voice tabs). This also
+  covers a send that failed halfway through the counts;
+- the first-page member requests in flight for the chat (any
+  `getSupergroupMembers` filter, `getBasicGroupFullInfo`) leave the
+  request registry, as translation jobs do, so their answers are ignored
+  and the next fetch is not held back by them;
 - ads answers already land only for a chat a view shows.
 
-The boxes that read a chat's member lists hold that chat from pruning
-(`ui/history_holds.rs`), as a pending forward or a reply bar does: the
-member dialog, the admin and exception pickers, the restrict and
-ownership dialogs, and the Edit box (its Manage rows count the admins).
-A box stays open when the main chat changes under it (a notification
-click), so without the hold 16 more chats would have taken its list and
-it would have shown "Administrators 0" or "Loading". While the box is
-open the chat's history stays whole; once it closes the chat becomes an
-ordinary closed tail. A member list that does go marks the chat in
-`member_list_stale`, as a membership change does, so any other reader
-asks again.
+What is open on screen holds its chat from pruning (`ui/history_holds.rs`),
+as a pending forward or a reply bar does, so nothing it reads goes from
+under it:
+
+- the group or channel the info panel shows (`Session::info_panel_chat`,
+  which looks at the open chat first, so a frame does not search every
+  chat when the panel shows the open chat);
+- the chat of an ad being reported (`Session::sponsored_report_chat`),
+  from the first request until the last answer or Cancel: the option
+  picker stays open across chat switches, and an option picked after the
+  ad went would send nothing yet say "Report sent";
+- the member dialog, the admin and exception pickers, the restrict and
+  ownership dialogs, and the Edit box (its Manage rows count the admins).
+
+These stay open when the main chat changes under them (a notification
+click), so without the hold 16 more chats would have taken the list and
+the box would have shown "Administrators 0" or "Loading". While held, the
+chat's history stays whole; once the surface closes the chat becomes an
+ordinary closed tail and later goes with everything beside it. The info
+panel used to be an exemption inside `forget_info_panel_data`, which
+left the lists of a chat dropped while the panel showed it in memory
+after the panel closed; the hold has no such leftover, and the panel
+reads the same lists and counts as before. A member list that does go
+marks the chat in `member_list_stale`, as a membership change does, so
+any other reader asks again.
 
 The gallery needs no exemption: it always shows the open chat of its own
 view (`ConnectDriver::open_shared_media`) and closes when that view
@@ -86,11 +102,13 @@ State tests in `state/tests/history_prune.rs`:
   every table is empty again. Fails on the old code (the tables held all
   64 chats).
 - `an_open_info_panel_keeps_what_it_shows`,
-  `a_basic_group_panel_keeps_what_it_shows`: the chat the panel shows
-  loses its ads and poll index but keeps its counts and members.
+  `a_basic_group_panel_keeps_what_it_shows`: with the UI's claim, the
+  group the panel shows keeps everything through 17 chat switches, and
+  nothing of it stays once the panel closes and the chat is dropped.
 - `a_reported_ad_stays_hidden_after_its_chat_is_dropped`: report an ad,
   drop the chat, reopen it with the same ad in the answer: it stays
-  hidden.
+  hidden. `a_report_answered_after_the_drop_still_hides_its_ad`: the same
+  when the report's answer lands after the drop.
 - `a_chat_an_open_box_holds_keeps_its_member_lists`: a held chat keeps
   everything through 17 chat switches; once the hold lifts it goes like
   any other chat.
@@ -98,11 +116,17 @@ State tests in `state/tests/history_prune.rs`:
   path.
 - `the_open_chat_keeps_its_gallery_counts_while_its_topics_go`.
 
-Connect test `connect/tests/history_prune_answers.rs`
-(`answers_for_a_dropped_chat_bring_nothing_back`): counts and member
+Connect tests in `connect/tests/history_prune_answers.rs`:
+`answers_for_a_dropped_chat_bring_nothing_back` (counts and member
 answers that arrive after the drop leave no entry, and opening the chats
-again sends every request again. UI test
-`group_edit_box::ui_tests::the_open_box_holds_its_chat_from_pruning`.
+again sends every request again) and
+`late_gallery_answers_leave_no_partial_counts` (the gallery's counts,
+Stories answer and Gifts failure land after the drop: no entry, and the
+reopened gallery asks for every count again).
+
+UI tests in `ui/history_holds_tests.rs`: the Edit box, the member dialog,
+the info panel and an ad's report picker each hold their chat while open
+and let it go when closed.
 
 Not measured on a running app: the bytes above are `size_of` of the
 types on a 64-bit build (`ParsedChatMember` 96, `SponsoredMessage` 888)

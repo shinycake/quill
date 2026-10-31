@@ -11,6 +11,12 @@ fn open_user_gallery(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySi
         r#"{"@type":"updateNewChat","chat":{"id":6,"title":"alice","type":{"@type":"chatTypePrivate","user_id":78},"unread_count":0}}"#,
     );
     session.media.shared_media.open_for(ChatId(6));
+    // The counts entry the answers land in, as `fetch_profile_tabs` opens
+    // it before asking for any tab.
+    session
+        .media
+        .chat_media_counts
+        .insert(6, Default::default());
 }
 
 fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {
@@ -238,11 +244,6 @@ fn gallery_message_counts_include_polls_and_round_videos() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     open_user_gallery(&mut session, &seq, &sink);
-    // The entry the counts land in, as `fetch_chat_media_counts` opens it.
-    session
-        .media
-        .chat_media_counts
-        .insert(6, Default::default());
     for (key, count) in [(0u8, 5), (1, 0), (7, 2), (8, 4)] {
         let extra = session.request(
             RequestPurpose::Users(UsersPurpose::GetChatMessageCount { filter: key }),

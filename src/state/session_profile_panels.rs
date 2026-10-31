@@ -13,6 +13,33 @@ impl Session {
         })
     }
 
+    /// The group or channel the info panel shows, held from pruning by the
+    /// UI (`ui::history_holds`) so what the panel loaded stays. Usually the
+    /// open chat, looked at first so a frame does not search every chat.
+    pub fn info_panel_chat(&self) -> Option<ChatId> {
+        let target = self.users_state.open_info_panel?;
+        let shows = |chat: &&ChatSummary| match (target, &chat.kind) {
+            (InfoPanelTarget::Supergroup(id), ChatKind::Supergroup { supergroup_id, .. }) => {
+                *supergroup_id == id
+            }
+            (InfoPanelTarget::BasicGroup(id), ChatKind::BasicGroup { basic_group_id }) => {
+                *basic_group_id == id
+            }
+            _ => false,
+        };
+        if !matches!(
+            target,
+            InfoPanelTarget::Supergroup(_) | InfoPanelTarget::BasicGroup(_)
+        ) {
+            return None;
+        }
+        self.open_chat
+            .and_then(|id| self.chats.get(&id.0))
+            .filter(shows)
+            .or_else(|| self.chats.values().find(shows))
+            .map(|chat| chat.id)
+    }
+
     /// Whether sharing is disabled in the private chat with another person
     /// (`toggleChatHasProtectedContent`); `None` for other chats, bots
     /// and Saved Messages, where it cannot be toggled.

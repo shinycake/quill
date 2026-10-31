@@ -487,38 +487,24 @@ impl Session {
     }
 
     /// What the info panel of `chat_id` loaded: its media counts and member
-    /// lists, unless the info panel shows the chat right now. The boxes
-    /// that read member lists hold their chat (`ui::history_holds`), and a
-    /// gallery shows its view's open chat, so neither reaches here. A list
-    /// that goes marks the chat in `member_list_stale`, as a membership
-    /// change does, so any reader asks again.
+    /// lists. The info panel and the boxes that read member lists hold
+    /// their chat (`ui::history_holds`), and a gallery shows its view's open
+    /// chat, so none of them reaches here. A list that goes marks the chat
+    /// in `member_list_stale`, as a membership change does, so any reader
+    /// asks again.
     fn forget_info_panel_data(&mut self, chat_id: ChatId) {
-        let panel_shows = match self.users_state.open_info_panel {
-            Some(InfoPanelTarget::Supergroup(id)) => self.chat_supergroup(chat_id) == Some(id),
-            Some(InfoPanelTarget::BasicGroup(id)) => self.chats.get(&chat_id.0).is_some_and(
-                |chat| matches!(chat.kind, ChatKind::BasicGroup { basic_group_id } if basic_group_id == id),
-            ),
-            _ => false,
-        };
-        if panel_shows {
-            return;
-        }
         // A count answer only fills the entry its fetch opened, so one
         // still on its way cannot bring this back.
         self.media.chat_media_counts.remove(&chat_id.0);
         // A first page still on its way would; its answer is dropped.
-        let first_pages: Vec<RequestPurpose> = [
-            MemberListFilter::Recent,
-            MemberListFilter::Search,
-            MemberListFilter::Administrators,
-            MemberListFilter::Restricted,
-            MemberListFilter::Banned,
-        ]
-        .map(|filter| RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter }))
-        .into_iter()
-        .chain([RequestPurpose::GetBasicGroupFullInfo])
-        .collect();
-        for extra in self.requests.ids_for_chat(&first_pages, chat_id) {
+        let first_pages = self.requests.ids_for_chat_where(chat_id, |purpose| {
+            matches!(
+                purpose,
+                RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { .. })
+                    | RequestPurpose::GetBasicGroupFullInfo
+            )
+        });
+        for extra in first_pages {
             self.requests.take(extra);
         }
         let groups = &mut self.groups;

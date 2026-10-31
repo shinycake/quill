@@ -2,12 +2,14 @@
 //! view shows them, so closed-chat pruning (`state::history_prune`) keeps
 //! them whole: the source of a pending forward, the chat a reply bar points
 //! at ("Reply in Another Chat" replies to a message of a chat that is no
-//! longer shown), the chat of the track in the player bar, and the chat
-//! whose member lists an open management box reads (they go with the
-//! chat's history otherwise, and a box stays open when the main chat
-//! changes under it). A chat that closes while the claim is not synced yet
-//! waits in the session's release queue until this runs, so a claim and a
-//! chat switch in one event cannot trim the source.
+//! longer shown), the chat of the track in the player bar, and the chats
+//! whose side tables something open reads: the group the info panel shows,
+//! the chat of an ad being reported, and the chat whose member lists a
+//! management box reads (they go with the chat's history otherwise, and
+//! these stay open when the main chat changes under them). A chat that
+//! closes while the claim is not synced yet waits in the session's release
+//! queue until this runs, so a claim and a chat switch in one event cannot
+//! trim the source.
 use super::*;
 use quill::ids::ChatId;
 
@@ -22,6 +24,11 @@ impl QuillApp {
             .chain(self.playback.player.chat)
             .chain(self.composer_ui.reply().map(|reply| reply.chat_id))
             .chain(self.member_list_readers())
+            .chain(self.session().into_iter().flat_map(|session| {
+                [session.info_panel_chat(), session.sponsored_report_chat()]
+                    .into_iter()
+                    .flatten()
+            }))
             .collect();
         let Some(session) = self
             .live
@@ -51,3 +58,8 @@ impl QuillApp {
         .flatten()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "history_holds_tests.rs"]
+mod tests;

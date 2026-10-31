@@ -14,6 +14,7 @@ use std::sync::atomic::AtomicU64;
 
 const GROUP: i64 = 13;
 const BASIC: i64 = 14;
+const CHANNEL: i64 = 15;
 
 struct Harness {
     driver: ConnectDriver<Arc<RecordingSender>>,
@@ -45,6 +46,9 @@ impl Harness {
         h.ingest(&format!(
             r#"{{"@type":"updateNewChat","chat":{{"id":{BASIC},"title":"Basic","type":{{"@type":"chatTypeBasicGroup","basic_group_id":114}},"unread_count":0}}}}"#
         ));
+        h.ingest(&format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{CHANNEL},"title":"Channel","type":{{"@type":"chatTypeSupergroup","supergroup_id":115,"is_channel":true}},"unread_count":0}}}}"#
+        ));
         h
     }
 
@@ -57,6 +61,14 @@ impl Harness {
     fn open(&mut self, chat: i64) {
         self.driver.session.open_chat(ChatId(chat));
         self.driver.session.set_history_holds([]);
+    }
+
+    /// Enough other chats go by that every chat opened before keeps none
+    /// of its rows.
+    fn churn(&mut self) {
+        for chat in 100..=(100 + CLOSED_CHATS_MAX as i64) {
+            self.open(chat);
+        }
     }
 
     /// The `@extra` of every `method` request sent so far.
@@ -89,10 +101,7 @@ fn answers_for_a_dropped_chat_bring_nothing_back() {
         .expect("member list asked for");
     let counts = h.sent("getChatMessageCount");
     assert!(!counts.is_empty());
-    // Enough other chats go by that neither group keeps its rows.
-    for chat in 100..=(100 + CLOSED_CHATS_MAX as i64) {
-        h.open(chat);
-    }
+    h.churn();
     assert!(!h.driver.session.histories.contains_key(&GROUP));
     assert!(!h.driver.session.histories.contains_key(&BASIC));
     // The answers arrive now.
@@ -142,4 +151,52 @@ fn answers_for_a_dropped_chat_bring_nothing_back() {
             .unwrap()
             .is_some()
     );
+}
+
+/// A slow connection: the channel's gallery asks for its counts, stories
+/// and gifts, and the answers land after the channel was dropped. None of
+/// them may leave a partial counts entry, which would stop the panel's
+/// media rows and the gallery's tabs from being asked for again.
+#[test]
+fn late_gallery_answers_leave_no_partial_counts() {
+    let mut h = Harness::new();
+    h.open(CHANNEL);
+    assert!(h.driver.open_shared_media().unwrap());
+    let counts = h.sent("getChatMessageCount");
+    let stories = h.sent("getChatPostedToChatPageStories");
+    let gifts = h.sent("getReceivedGifts");
+    assert!(!counts.is_empty() && !stories.is_empty() && !gifts.is_empty());
+    h.churn();
+    assert!(!h.driver.session.histories.contains_key(&CHANNEL));
+    for extra in &stories {
+        h.ingest(&format!(
+            r#"{{"@type":"stories","@extra":"{}","total_count":2,"stories":[]}}"#,
+            extra.0
+        ));
+    }
+    for extra in &gifts {
+        h.ingest(&format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"GIFTS_UNAVAILABLE"}}"#,
+            extra.0
+        ));
+    }
+    for extra in &counts {
+        h.ingest(&format!(
+            r#"{{"@type":"count","@extra":"{}","count":3}}"#,
+            extra.0
+        ));
+    }
+    let counts_of = |h: &Harness| {
+        h.driver
+            .session
+            .media
+            .chat_media_counts
+            .get(&CHANNEL)
+            .cloned()
+    };
+    assert_eq!(counts_of(&h), None);
+    // Reopened, the gallery asks for every count again.
+    h.open(CHANNEL);
+    assert!(h.driver.open_shared_media().unwrap());
+    assert_eq!(h.sent("getChatMessageCount").len(), 2 * counts.len());
 }
