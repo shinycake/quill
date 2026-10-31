@@ -77,6 +77,7 @@ mod esc_stack;
 mod folders_state;
 mod force_reply;
 mod frame_clock;
+mod frame_grid;
 mod free_heap;
 pub mod link_inbox;
 mod wake_wait;
