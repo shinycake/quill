@@ -205,8 +205,7 @@ impl QuillApp {
     /// connect and switch.
     pub(super) fn ensure_background_accounts(&mut self, cx: &mut Context<Self>) {
         self.watch_quit_close(cx);
-        // Local data is being wiped: nothing opens until it is gone.
-        if self.background.wiping {
+        if self.background.wiping || self.disk.is_full() {
             return;
         }
         let Some(root) = self.client_accounts_root() else {

@@ -215,7 +215,7 @@ impl super::app::QuillApp {
     }
 
     /// Put the opened client on screen, or say why there is none.
-    fn open_client(
+    pub(super) fn open_client(
         &mut self,
         result: Result<LiveConnect, ConnectBlocker>,
         cx: &mut gpui_kit::Context<Self>,
@@ -225,6 +225,10 @@ impl super::app::QuillApp {
                 quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.playback.volume);
                 self.live = Some(live);
+            }
+            Err(ConnectBlocker::DiskFull) => {
+                self.disk.refused_open();
+                self.connection.set_note(StatusNote::silent(""));
             }
             Err(blocker) => {
                 self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
