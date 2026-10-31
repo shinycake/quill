@@ -309,10 +309,10 @@ impl CeltDecoder {
             false,
             self.mode.window,
             self.mode.overlap,
-            &self.mdct,
-            &self.mdct_480,
-            &self.mdct_240,
-            &self.mdct_short,
+            &mut self.mdct,
+            &mut self.mdct_480,
+            &mut self.mdct_240,
+            &mut self.mdct_short,
             &mut self.decode_mem,
         )
         .is_err()
@@ -350,10 +350,10 @@ impl CeltDecoder {
                 false,
                 self.mode.window,
                 self.mode.overlap,
-                &self.mdct,
-                &self.mdct_480,
-                &self.mdct_240,
-                &self.mdct_short,
+                &mut self.mdct,
+                &mut self.mdct_480,
+                &mut self.mdct_240,
+                &mut self.mdct_short,
                 &mut self.decode_mem_right,
             )
             .is_err()
@@ -668,10 +668,11 @@ impl CeltDecoder {
         is_transient: bool,
         window: &[f32],
         overlap: usize,
-        mdct: &mdct::MdctBackward,
-        mdct_480: &mdct::MdctBackward,
-        mdct_240: &mdct::MdctBackward,
-        mdct_short: &mdct::MdctBackward,
+        // QUILL: `&mut`, as `MdctBackward::backward` reuses its FFT buffers.
+        mdct: &mut mdct::MdctBackward,
+        mdct_480: &mut mdct::MdctBackward,
+        mdct_240: &mut mdct::MdctBackward,
+        mdct_short: &mut mdct::MdctBackward,
         decode_mem: &mut [f32],
     ) -> Result<(), Error> {
         let decode_len = DECODE_BUFFER_SIZE + overlap;
@@ -695,7 +696,7 @@ impl CeltDecoder {
                     .map_err(|_| Error::NotImplemented)?;
             }
         } else {
-            let mdct_impl = match frame_size_48k {
+            let mdct_impl: &mut mdct::MdctBackward = match frame_size_48k {
                 120 => mdct_short,
                 240 => mdct_240,
                 480 => mdct_480,
@@ -926,48 +927,10 @@ impl CeltDecoder {
                 postfilter_tapset
             );
         }
-        // #region agent log
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/Users/tadeusz/Opus/Rasopus/.cursor/debug-bea564.log")
-        {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
-            let line = format!(
-                "{{\"sessionId\":\"4200c5\",\"runId\":\"run-postfilter-overlap-scan\",\"hypothesisId\":\"H10\",\"location\":\"crates/opus-decoder/src/celt/mod.rs:227\",\"message\":\"postfilter_decoded\",\"data\":{{\"packet_idx\":{},\"coded_channels\":{},\"postfilter_active\":{},\"postfilter_pitch\":{},\"postfilter_qg\":{},\"postfilter_tapset\":{}}},\"timestamp\":{}}}\n",
-                packet_idx,
-                coded_channels,
-                postfilter_pitch > 0,
-                postfilter_pitch,
-                postfilter_qg,
-                postfilter_tapset,
-                ts
-            );
-            let _ = std::io::Write::write_all(&mut f, line.as_bytes());
-        }
-        // #endregion
-        if postfilter_pitch > 0 {
-            // #region agent log
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/Users/tadeusz/Opus/Rasopus/.cursor/debug-bea564.log")
-            {
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis())
-                    .unwrap_or(0);
-                let line = format!(
-                    "{{\"sessionId\":\"4200c5\",\"runId\":\"run-postfilter-overlap-scan\",\"hypothesisId\":\"H11\",\"location\":\"crates/opus-decoder/src/celt/mod.rs:249\",\"message\":\"postfilter_active_but_not_applied_in_rust\",\"data\":{{\"packet_idx\":{},\"postfilter_pitch\":{},\"postfilter_qg\":{},\"postfilter_tapset\":{},\"comb_filter_applied\":false}},\"timestamp\":{}}}\n",
-                    packet_idx, postfilter_pitch, postfilter_qg, postfilter_tapset, ts
-                );
-                let _ = std::io::Write::write_all(&mut f, line.as_bytes());
-            }
-            // #endregion
-        }
+        // QUILL: removed two debug-log appends to a fixed path on the
+        // author's machine (upstream master after 0.1.1 removes them too):
+        // an open() on every CELT frame, and another when the postfilter is
+        // on, each failing with ENOENT on any other machine.
         tell = ec.tell();
         if trace_this_packet {
             debug_trace!(
@@ -2436,11 +2399,11 @@ impl CeltDecoder {
             }
         } else {
             // Long block path for all supported frame sizes.
-            let mdct_impl = match frame_size_48k {
-                120 => &self.mdct_short,
-                240 => &self.mdct_240,
-                480 => &self.mdct_480,
-                960 => &self.mdct,
+            let mdct_impl: &mut mdct::MdctBackward = match frame_size_48k {
+                120 => &mut self.mdct_short,
+                240 => &mut self.mdct_240,
+                480 => &mut self.mdct_480,
+                960 => &mut self.mdct,
                 _ => return Err(Error::NotImplemented),
             };
             mdct_impl
@@ -2677,10 +2640,10 @@ impl CeltDecoder {
                     is_transient,
                     window,
                     overlap,
-                    &self.mdct,
-                    &self.mdct_480,
-                    &self.mdct_240,
-                    &self.mdct_short,
+                    &mut self.mdct,
+                    &mut self.mdct_480,
+                    &mut self.mdct_240,
+                    &mut self.mdct_short,
                     &mut self.decode_mem_right,
                 )?;
             } else {
@@ -2691,10 +2654,10 @@ impl CeltDecoder {
                     is_transient,
                     window,
                     overlap,
-                    &self.mdct,
-                    &self.mdct_480,
-                    &self.mdct_240,
-                    &self.mdct_short,
+                    &mut self.mdct,
+                    &mut self.mdct_480,
+                    &mut self.mdct_240,
+                    &mut self.mdct_short,
                     &mut self.decode_mem_right,
                 )?;
             }

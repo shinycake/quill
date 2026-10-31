@@ -264,3 +264,7 @@ impl Source for OpusSource {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "opus_tests.rs"]
+mod tests;

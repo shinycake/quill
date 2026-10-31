@@ -39,6 +39,9 @@ dependency being removed, usually missing on Windows/macOS), and
 vectors, no new system dependency). The last wins. Risk: young crate (0.1.x);
 mitigated by the fixture test and by a bad packet becoming silence rather
 than ending playback. Swapping to libopus later only touches `opus.rs`.
+opus-decoder 0.1.1 is vendored in `third_party/opus-decoder` with upstream's
+unreleased FFT for the CELT inverse MDCT, which made decoding about 55 times
+cheaper (`docs/decisions/opus-decode-cpu.md`).
 
 `OpusSource` reads the compressed packets up front (about 4 KB/s), so the
 duration is exact (final-page granule minus pre-skip) and seeking is a packet
