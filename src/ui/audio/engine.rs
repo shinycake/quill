@@ -618,10 +618,16 @@ impl AudioEngine {
     /// Answer a finished seek: a decoder that refused to seek in place gets
     /// the track rebuilt at the target on a background thread, and the new
     /// sound takes over here when it is ready; the engine's error follows
-    /// the outcome. Called on the UI tick and before every command; never
-    /// waits.
+    /// the outcome. A track whose device failed to open is paused. Called
+    /// on the UI tick and before every command; never waits.
     pub(in crate::ui) fn settle(&mut self) {
         self.land_restart();
+        // Starts and resumes return while the device opens off the UI
+        // thread; this is where one that couldn't open shows.
+        if let Some(track) = self.track.as_ref().filter(|t| t.player.lost()) {
+            track.player.pause();
+            self.error = Some(AudioError::NoOutput);
+        }
         let Some(done) = self.track.as_ref().and_then(|t| t.seeks.take_done()) else {
             return;
         };
@@ -1045,6 +1051,40 @@ mod tests {
         assert_eq!(engine.state(), EngineState::Playing);
         pull(&mut device, 4000);
         assert!(engine.position_secs() > 0.4, "{}", engine.position_secs());
+    }
+
+    /// A start returns while the device opens off the UI thread, showing
+    /// the track as playing; the sound plays once the device is up.
+    #[test]
+    fn a_track_starts_while_the_device_opens_off_the_ui_thread() {
+        let (output, gate) = SharedOutput::gated();
+        let mut engine = AudioEngine::new(output.clone());
+        let path = track("opening.wav", 4);
+        engine.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        engine.settle();
+        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(engine.error(), None, "opening is no error");
+        gate.answer(true);
+        output.settle_device();
+        // One second of the 48 kHz stereo mix.
+        gate.pull(96_000);
+        let secs = engine.position_secs();
+        assert!((0.9..=1.3).contains(&secs), "got {secs}");
+    }
+
+    /// A device that fails to open after the start returned pauses the
+    /// track and says why.
+    #[test]
+    fn a_device_that_fails_to_open_pauses_the_track() {
+        let (output, gate) = SharedOutput::gated();
+        let mut engine = AudioEngine::new(output.clone());
+        let path = track("open-fails.wav", 4);
+        engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
+        gate.answer(false);
+        output.settle_device();
+        engine.settle();
+        assert_eq!(engine.state(), EngineState::Paused);
+        assert_eq!(engine.error(), Some(AudioError::NoOutput));
     }
 
     #[test]

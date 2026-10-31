@@ -91,9 +91,11 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
 
 - `src/ui/audio/output.rs`: every player connects to one app mixer, made
   with the first device's channels and rate and kept for the app's life. A
-  device plays it through a feed that takes 256 frames at a time. The
-  players never see the device come and go, so a paused voice note or video
-  carries on with the next device.
+  device plays it through a feed that takes 256 frames at a time (a later
+  device with another layout converts it). A player made while no device
+  is up waits outside the mixer and connects when one is; its sound is
+  dropped if the player goes first. The players never see the device come
+  and go, so a paused voice note or video carries on with the next device.
 - A sound counts as playing while its player pulls it: `Outlet::append`
   wraps each queued sound in `Heard`, which marks the output on every
   sample. A paused player, or one with nothing queued, plays silence
@@ -102,15 +104,15 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
   instead would close the device during silence inside a track, such as
   the quiet start of many songs, and leave the track stalled.
 - Opening: players are `OutputPlayer`s, and whatever needs the audio
-  thread opens the device first: `play`, `try_seek`, and a sound queued on
-  a playing player (after its file was decoded, however long that took).
-  With the device closed, a play would stall and a seek would wait for an
-  answer for ever (`Player::try_seek` blocks until the audio thread takes
-  it; a paused video's seek runs on the UI thread). The video decoder keeps
-  time from what the output pulls, so a soundtrack resumed without a device
-  would also freeze the picture. With no device, `play` says so (the engine
-  pauses again and shows no output; a video soundtrack waits for the next
-  device) and `try_seek` fails at once.
+  thread has the device opened first: `outlet`, `play`, `try_seek`, and a
+  sound queued on a playing player (after its file was decoded, however
+  long that took). With the device closed, a play would stall and a seek
+  would wait for an answer for ever (`Player::try_seek` blocks until the
+  audio thread takes it). The video decoder keeps time from what the
+  output pulls, so a soundtrack resumed without a device would also freeze
+  the picture. With no device lately, `play` says so (the engine pauses
+  again and shows no output; a video soundtrack waits for the next device)
+  and `try_seek` fails at once.
 - Silence counts only while the device asks for sound. A device that stalls
   (a reroute, a Bluetooth reconnect) stops asking, and closing it then could
   leave a seek parked for an answer that never comes, on the UI thread for a
@@ -118,25 +120,33 @@ detaches its device after 500 ms of silence (`kDetachDeviceTimeout` in
 - A video soundtrack (`StreamSound`) never ends: it plays silence after the
   clip. The ffmpeg backend pauses it whenever the decoder isn't playing, so
   an ended clip left on screen lets the device close.
-- Opening a device takes 10 to 40 ms on macOS, two frames on the UI
-  thread. A notification sound is queued on the app mixer at once and the
-  device opens on a thread of its own (`SharedOutput::outlet_soon`); the
-  sound plays once the device is up, or is dropped if it can't start within
-  2 s (a device that failed to open would otherwise play it whenever one
-  opens next). Call sounds still open the device before returning: a ring
-  that loops has to know it didn't play, to try again after its gap. A
-  play or a seek opens the device before it returns, and waits for one
-  that is opening: it has to know whether there is a device, or a seek
-  would wait for an answer for ever. The first device of the app's life
-  always opens before returning, as its layout makes the app mixer. A
-  closed device is dropped after the output is unlocked, since stopping a
-  stream also takes a while.
+- Opening a device takes 10 to 75 ms on macOS, up to five frames on the
+  UI thread, so it always opens on a thread of its own
+  (`quill-audio-open`) and nothing on the UI thread waits for it
+  (`docs/decisions/audio-open-off-ui-thread.md`). A sound is queued on the
+  app mixer at once and plays once the device is up; a notification is
+  dropped if it can't start within 2 s (a device that failed to open would
+  otherwise play it whenever one opens next). `play` returns while the
+  device opens: the engine shows the track playing, and its next `settle`
+  (the 250 ms tick, or the next command) pauses a track whose device then
+  failed to open (`OutputPlayer::lost`) and shows no output. A call ring
+  that loops counts a lost ring as finished and tries again after its gap;
+  the other call cues are alerts, dropped if they can't start within 2 s.
+  A video soundtrack that is lost is let go (the FFmpeg backend drops it,
+  which frees the decoder's tap at once), so the clip runs on its wall
+  clock as with no device instead of holding its picture. Only `try_seek` waits for a device that is opening, and only the
+  engine's seek worker calls it; a video soundtrack's seek just tells the
+  stretcher to start over at its next pull. A closed device is dropped off
+  the UI thread, since stopping a stream also takes a while.
 - A call sound that loops takes a `Hold` while it loops, so the device stays
   open through the gaps between rings (1 s and 2.5 s) and is not reopened
   for every ring.
 - A stale device (Windows `StreamInvalidated`, a device that went away)
   moves the app mixer to the new default device at the watch's next look,
-  so a track that is playing carries on there. Before, the track stayed on
+  so a track that is playing carries on there. The watch starts the new
+  open under the output's lock and the opener drops the stale stream, so a
+  player never sees a moment with no device up or opening (it would read
+  as lost). Before, the track stayed on
   the dead stream until the next sound.
 
 ## Verified
