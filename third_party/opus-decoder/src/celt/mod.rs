@@ -15,7 +15,6 @@
 
 use crate::Error;
 use crate::entropy::EcDec;
-use core::sync::atomic::{AtomicUsize, Ordering};
 
 mod bands;
 mod cwrs;
@@ -47,7 +46,6 @@ const TF_SELECT_TABLE: [[i8; 8]; 4] = [
     [0, -2, 0, -3, 2, 0, 1, -1],
     [0, -2, 0, -3, 3, 0, 1, -1],
 ];
-static TRACE_PACKET_CALL_IDX: AtomicUsize = AtomicUsize::new(0);
 
 /// Result of decoding one CELT frame.
 #[derive(Debug, Clone, Copy)]
@@ -756,7 +754,8 @@ impl CeltDecoder {
         out: &mut [i16],
         accum: bool,
     ) -> Result<CeltFrameDecode, Error> {
-        let frame_call_idx = TRACE_PACKET_CALL_IDX.fetch_add(1, Ordering::SeqCst);
+        // QUILL: was a process-wide SeqCst counter; it only fed disabled traces.
+        let frame_call_idx = usize::MAX;
         let _ = parent_packet_idx;
         let packet_idx = usize::MAX;
         let output_samples = self.output_frame_size(frame_size_48k)?;
@@ -1188,7 +1187,8 @@ impl CeltDecoder {
                 anti_collapse_rsv
             );
         }
-        if debug_packet || intra_ener {
+        // QUILL: `debug_packet` only; the string went to a no-op logger.
+        if debug_packet {
             let data = format!(
                 "{{\"packet_idx\":{},\"config\":{},\"end\":{},\"lm\":{},\"is_transient\":{},\"intra_ener\":{},\"postfilter_active\":{},\"postfilter_pitch\":{},\"postfilter_qg\":{},\"postfilter_tapset\":{},\"anti_collapse_rsv\":{}}}",
                 packet_idx,
@@ -1452,7 +1452,8 @@ impl CeltDecoder {
             );
             // #endregion
         }
-        if packet_idx <= 10 || coded_channels == 2 {
+        // QUILL: `debug_packet` only; the string went to a no-op logger.
+        if debug_packet {
             let data = format!(
                 "{{\"packet_idx\":{},\"coded_channels\":{},\"output_channels\":{},\"is_transient\":{},\"lm\":{},\"anti_collapse_rsv\":{},\"collapse_nonfull_count\":{}}}",
                 packet_idx,

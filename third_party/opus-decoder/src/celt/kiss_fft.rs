@@ -6,9 +6,8 @@
 
 //! Minimal CELT FFT primitives for decoder path.
 //!
-//! This module intentionally implements only the inverse transform behavior
-//! needed by the decoder. It follows the libopus scaling convention where the
-//! inverse FFT is unscaled and the forward path applies `1/N`.
+//! QUILL: both directions are unscaled (no `1/N`); the inverse MDCT runs the
+//! forward transform with swapped real and imaginary parts, as libopus does.
 
 use core::f32::consts::PI;
 
@@ -31,7 +30,7 @@ impl Complex32 {
     }
 }
 
-/// Inverse-only FFT plan for CELT decoder usage.
+/// FFT plan (both directions) for CELT decoder usage.
 #[derive(Debug, Clone)]
 pub(crate) struct KissFft {
     nfft: usize,

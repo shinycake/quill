@@ -40,6 +40,11 @@ lists the changes):
   Taking upstream's code rather than writing a new FFT means the patch can
   go when a release has it.
 - The two debug-log appends are removed (upstream removed them too).
+- Other leftover debug work no longer runs while decoding: two `format!`
+  strings built for no-op loggers (on intra-energy and stereo frames) and
+  five process-wide `SeqCst` counters. The output is bit-identical, and the
+  instruction count moves by under 0.2%: the release build had already
+  optimized the strings away.
 
 Upstream's other changes since 0.1.1 are not taken: they save little next
 to the FFT, and two of them change output bits.
@@ -86,7 +91,10 @@ all 12 vectors.
 
 The 53.5 dB on the 16 kbit/s SILK stream is an existing difference in
 opus-decoder's SILK path (up to 100 steps from libopus), not part of this
-change.
+change. Neither is a smaller one in some stereo transient frames: a stereo
+96 kbit/s 5 ms stream and a stereo 64 kbit/s 10 ms stream with noise bursts
+come out 7.2 and 8.3 steps from rusty-opus, the same before and after (the
+mono streams and a stereo 128 kbit/s 5 ms one stay under one step).
 
 ## How fast
 
@@ -115,15 +123,18 @@ one decoder per playing voice note.
 
 - `ui::audio::opus::tests::celt_streams_decode_within_one_lsb_of_the_reference_decoder`
   (`src/ui/audio/opus_tests.rs`, runs in CI): voice-like mono and
-  music-like stereo, encoded CELT-only by rusty-opus at 24 to 128 kbit/s in
-  2.5, 5, 10, 20 and 60 ms packets, decoded by opus-decoder and by
-  rusty-opus's decoder (a libopus port that matches the RFC 8251 vectors'
-  reference output to within one step). Every sample must be within one
-  16-bit step: rounding accounts for half a step, and this branch is at most
-  0.73 steps off. opus-decoder 0.1.1 fails it (1.05 steps on the 24 kbit/s
-  voice, 1.07 on the 128 kbit/s music).
+  music-like mono and stereo, encoded CELT-only by rusty-opus at 24 to
+  128 kbit/s in 2.5, 5, 10, 20 and 60 ms packets, decoded by opus-decoder
+  and by rusty-opus's decoder (a libopus port that matches the RFC 8251
+  vectors' reference output to within one step). The music's noise bursts
+  make the encoder code 4 to 8 frames of each 20, 10 and 5 ms music stream
+  as transients (short blocks, so 60-point FFTs). Every sample must be
+  within one 16-bit step: rounding accounts for half a step, and this branch
+  is at most 0.62 steps off. opus-decoder 0.1.1 fails it (1.05 steps on the
+  24 kbit/s voice).
 - `celt::kiss_fft::tests::fft_matches_the_direct_dft_it_replaced_for_every_celt_size`
-  in the vendored crate (run by hand, see its `QUILL-CHANGES.md`): for 60,
+  in the vendored crate, which CI runs with the module's other tests through
+  `scripts/test-opus-fft.sh` (`rustc --test` on the std-only file): for 60,
   120, 240 and 480 points, the FFT is within 1e-6 of an exact `f64` DFT
   (measured 1.7e-7 to 3.6e-7) and within 1e-4 of 0.1.1's DFT, kept verbatim
   in the test. The 0.1.1 DFT fails the first bound (5.2e-6 at 60 points).

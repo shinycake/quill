@@ -33,20 +33,22 @@ fn voice(seconds: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Music-like interleaved stereo: a different chord per side and a decaying
-/// noise burst (a transient, coded with short blocks) twice a second.
+/// Music-like interleaved stereo: a quiet chord, different on each side, and
+/// a sharp noise burst every 111 ms on each side. The encoder codes 4 to 8
+/// frames of each 20, 10 and 5 ms music stream below as transients, with
+/// short blocks (2.5 ms frames have none).
 fn music(seconds: f32) -> Vec<f32> {
     let mut seed = 11;
     let chord = |t: f32, notes: [f32; 3]| -> f32 {
-        notes.iter().map(|f| 0.12 * (2.0 * PI * f * t).sin()).sum()
+        notes.iter().map(|f| 0.05 * (2.0 * PI * f * t).sin()).sum()
     };
     (0..(RATE as f32 * seconds) as usize)
         .flat_map(|i| {
             let t = i as f32 / RATE as f32;
             let left = chord(t, [220.0, 277.18, 329.63])
-                + 0.3 * (-25.0 * (t % 0.5)).exp() * noise(&mut seed);
+                + 0.5 * (-150.0 * (t % 0.111)).exp() * noise(&mut seed);
             let right = chord(t, [196.0, 246.94, 293.66])
-                + 0.3 * (-25.0 * ((t + 0.25) % 0.5)).exp() * noise(&mut seed);
+                + 0.5 * (-150.0 * ((t + 0.05) % 0.111)).exp() * noise(&mut seed);
             [left, right]
         })
         .collect()
@@ -74,12 +76,13 @@ fn celt_streams_decode_within_one_lsb_of_the_reference_decoder() {
     let mono_music: Vec<f32> = music.iter().step_by(2).copied().collect();
     // Every CELT transform size: 20 ms frames run a 480-point FFT, 10 ms
     // 240, 5 ms 120, and 2.5 ms frames and transient short blocks 60.
-    let streams: [(&str, &[f32], usize, i32, usize); 6] = [
+    let streams: [(&str, &[f32], usize, i32, usize); 7] = [
         ("voice 24 kbps 20 ms", &voice, 1, 24_000, 960),
         ("voice 32 kbps 10 ms", &voice, 1, 32_000, 480),
         ("voice 64 kbps 60 ms", &voice, 1, 64_000, 2880),
         ("music stereo 128 kbps 20 ms", &music, 2, 128_000, 960),
-        ("music stereo 96 kbps 5 ms", &music, 2, 96_000, 240),
+        ("music 64 kbps 10 ms", &mono_music, 1, 64_000, 480),
+        ("music stereo 128 kbps 5 ms", &music, 2, 128_000, 240),
         ("music 48 kbps 2.5 ms", &mono_music, 1, 48_000, 120),
     ];
     for (name, pcm, channels, bitrate, frame) in streams {
@@ -104,8 +107,8 @@ fn celt_streams_decode_within_one_lsb_of_the_reference_decoder() {
         );
         // Rounding to 16 bits puts opus-decoder up to half a step from the
         // reference; the same f32 CELT math adds far less than another half
-        // (0.73 steps at most here). opus-decoder 0.1.1's direct DFT, whose
-        // twiddles carried the error of an f32 pi, was up to 1.07 steps off.
+        // (0.62 steps at most here). opus-decoder 0.1.1's direct DFT, whose
+        // twiddles carried the error of an f32 pi, was up to 1.05 steps off.
         assert!(worst < LSB, "{name}: {} LSB apart", worst / LSB);
     }
 }

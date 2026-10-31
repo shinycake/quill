@@ -36,6 +36,18 @@ are removed (upstream master removes them too). One opened that file on
 every CELT frame and one on every frame with the pitch postfilter on; on
 any other machine both failed with ENOENT, so the output is unchanged.
 
+`src/celt/mod.rs`, `src/celt/quant_bands.rs`, `src/lib.rs`: leftover debug
+work on the decode path is gone, with output bit-identical on 24 test
+streams. Two `format!` strings built for no-op loggers, on every
+intra-energy frame and every stereo frame, are gated behind the
+constant-false `debug_packet` like the others. Five process-wide `SeqCst`
+counters bumped per packet or frame are the constant `usize::MAX`
+(upstream master does the same); their values only fed disabled traces,
+some keyed to particular packet numbers, and `usize::MAX` matches none.
+
+`src/celt/kiss_fft.rs`: the module doc said the forward transform applies
+`1/N`; both directions are unscaled.
+
 Master's other changes (fewer allocations, `exp2` for `powf`, a polynomial
 sine in the spreading rotation) are left out: they save little next to the
 FFT, and the last two change output bits. When a release after 0.1.1 has the
@@ -43,7 +55,9 @@ FFT, depend on it and delete this directory.
 
 ## Running the crate's tests
 
-`third_party/opus-decoder` is not a workspace member. To run its tests, add
+`third_party/opus-decoder` is not a workspace member. CI runs the FFT's
+tests (`src/celt/kiss_fft.rs`, std-only) through `scripts/test-opus-fft.sh`,
+which builds that file alone with `rustc --test`. To run the rest, add
 it to `[workspace] members` and delete its `criterion` dev-dependency (used
 only by the benches the crates.io package leaves out), run
 `cargo test --release -p opus-decoder`, then revert both edits. The RFC 8251
