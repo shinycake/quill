@@ -60,7 +60,7 @@ changed file has the "Modified by the Quill project" header, and each crate's
   `unimplemented!()`. Windows has no "hide others"; Quill doesn't call them
   today.
 
-- The vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the
+- The vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 12`) to the
   platform window. That drops the dead devices, so `is_windowed()` reports
   false, keeps a reason that `open_window` returns ("the GPU device was lost
   and could not be recreated"), the same way the launch failure does, and
