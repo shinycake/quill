@@ -308,3 +308,31 @@ fn a_stop_gives_up_on_a_receive_that_does_not_return() {
     assert!(!hub.stop_within(Duration::from_millis(100)));
     assert!(start.elapsed() < Duration::from_millis(500));
 }
+
+#[test]
+fn each_route_wakes_only_its_own_poll_loop_and_a_switch_swaps_them() {
+    static ON_SCREEN: crate::wake::Signal = crate::wake::Signal::new();
+    static BACKGROUND: crate::wake::Signal = crate::wake::Signal::new();
+    let routes = Routes::default();
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let parse = |json: String| copy_and_parse(&json, &seq, &sink).unwrap();
+    let _first = routes.register(1);
+    let _second = routes.register(2);
+    routes.wake_with(1, &ON_SCREEN);
+    routes.wake_with(2, &BACKGROUND);
+    let epochs = || (ON_SCREEN.epoch(), BACKGROUND.epoch());
+    let before = epochs();
+    routes.deliver(parse(option_update(Some(2), 1)));
+    assert_eq!(epochs(), (before.0, before.1 + 1));
+    routes.deliver(parse(option_update(Some(1), 1)));
+    assert_eq!(epochs(), (before.0 + 1, before.1 + 1));
+    // Account switch: client 2 comes on screen, client 1 goes behind.
+    routes.wake_with(2, &ON_SCREEN);
+    routes.wake_with(1, &BACKGROUND);
+    routes.deliver(parse(option_update(Some(2), 2)));
+    routes.deliver(parse(option_update(Some(2), 3)));
+    assert_eq!(epochs(), (before.0 + 3, before.1 + 1));
+    routes.deliver(parse(option_update(Some(1), 2)));
+    assert_eq!(epochs(), (before.0 + 3, before.1 + 2));
+}

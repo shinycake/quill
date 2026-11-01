@@ -3,7 +3,7 @@
 
 use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
-use super::super::frame_clock::follow_app;
+use super::super::frame_clock::follow_app_unless_held;
 use super::super::glyph_sweep;
 use super::super::image_budget::{CacheScope, WindowDraw};
 use super::super::shell::QuillShell;
@@ -45,7 +45,7 @@ impl ChatWindowView {
     ) -> Self {
         let slot = owner.update(cx, |app, cx| WindowSlot::new(app, chat_id, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
-        let observe = follow_app(&owner, cx);
+        let observe = follow_app_unless_held(&owner, window.window_handle().window_id(), cx);
         let placed = [
             cx.observe_window_activation(window, |this, window, cx| {
                 glyph_sweep::window_activation(

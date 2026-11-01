@@ -239,6 +239,7 @@ fn ui_main(args: &[String]) {
             }
         }
     });
+    application.on_reopen(ui::link_inbox::reopen_main_window);
     quill::startup_trace::mark("app_launch");
     application.run(move |cx| {
         quill::startup_trace::mark("app_run");
@@ -373,42 +374,12 @@ fn install_main_window_tray(
     quill::notify_focus::warm();
     // "Show taskbar icon" off: the window starts out of the taskbar.
     view.update(cx, |this, _| this.apply_taskbar_icon(window));
-    // The title-bar close button: "Run in the background" hides the app
-    // (macOS) or the window (Windows, X11; Wayland can only minimize),
-    // otherwise the window closes.
+    // The title-bar close button (`QuillApp::close_main_window`).
     window.on_window_should_close(cx, {
         let view = view.downgrade();
         move |window, cx| {
-            use quill::tray::{CloseOutcome, close_outcome};
-            let background = view
-                .update(cx, |this, _| this.minimize_to_tray())
-                .unwrap_or(false);
-            match close_outcome(
-                background,
-                quill::tray::tray_available(),
-                cfg!(target_os = "macos"),
-                ui::window_control::hide_supported(window),
-            ) {
-                CloseOutcome::Quit => !view
-                    .update(cx, |this, cx| {
-                        this.exit_held_by_export(ui::export_quit::close_main_window, window, cx)
-                    })
-                    .unwrap_or(false),
-                CloseOutcome::HideApp => {
-                    cx.hide();
-                    false
-                }
-                CloseOutcome::Hide => {
-                    if !ui::window_control::set_visible(window, false) {
-                        window.minimize_window();
-                    }
-                    false
-                }
-                CloseOutcome::Minimize => {
-                    window.minimize_window();
-                    false
-                }
-            }
+            view.update(cx, |this, cx| this.close_main_window(window, cx))
+                .unwrap_or(true)
         }
     });
     // parity:platform-tray-icon — system tray icon with

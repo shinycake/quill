@@ -486,7 +486,6 @@ impl AudioEngine {
 
     /// A seek is waiting on the audio thread (or on `settle`); the position
     /// is its target until then.
-    #[cfg(test)]
     pub(in crate::ui) fn seek_pending(&self) -> bool {
         self.building.is_some()
             || self
