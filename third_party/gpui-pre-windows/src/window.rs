@@ -99,9 +99,11 @@ pub struct WindowsWindowState {
     initial_placement: Cell<Option<WindowOpenStatus>>,
     hwnd: HWND,
     pub(crate) a11y: RefCell<Option<A11yState>>,
-    /// Quill: something drew, presented or asked for another frame since the
-    /// last `draw_window` (see `WindowsWindowInner::frames_after_draw`).
-    frame_activity: Cell<bool>,
+    /// Quill: something drew or presented since the last `draw_window` (see
+    /// `WindowsWindowInner::frames_after_draw`).
+    frame_drew: Cell<bool>,
+    /// Quill: GPUI asked for another frame since the last `draw_window`.
+    frame_asked: Cell<bool>,
     /// Quill: whether this window's vsync invalidations are parked.
     frame_idle: Cell<FrameIdle>,
 }
@@ -206,7 +208,8 @@ impl WindowsWindowState {
             draw_coordinator,
             direct_manipulation,
             a11y: RefCell::new(None),
-            frame_activity: Cell::new(false),
+            frame_drew: Cell::new(false),
+            frame_asked: Cell::new(false),
             frame_idle: Cell::new(FrameIdle::new(Instant::now())),
         })
     }
@@ -290,15 +293,40 @@ impl WindowsWindowInner {
 
     /// Quill: `demand_frames` without the visibility check, for a window
     /// that is being shown (`WM_SHOWWINDOW` arrives before it is visible).
+    /// A parked window gets one `WM_PAINT` and stays parked;
+    /// `frames_after_draw` unparks it if that frame asks for more.
     pub(crate) fn resume_frames(&self) {
         let mut idle = self.state.frame_idle.get();
-        let resume = idle.demand(Instant::now());
+        let woken = idle.demand(Instant::now());
         self.state.frame_idle.set(idle);
-        if resume {
-            FRAME_GATE.unpark(self.hwnd);
+        if woken {
             unsafe {
                 let _ = RedrawWindow(Some(self.hwnd), None, None, RDW_INVALIDATE);
             }
+        }
+    }
+
+    /// Quill: a draw was deferred and validated away, so only the vsync
+    /// thread's next invalidation retries it: unpark the window's frames.
+    pub(crate) fn keep_frames_running(&self) {
+        // Hidden, it gets no `WM_PAINT`, as in `demand_frames`.
+        if self.visibility() == WindowVisibility::Hidden {
+            return;
+        }
+        let mut idle = self.state.frame_idle.get();
+        let resume = idle.keep_running(Instant::now());
+        self.state.frame_idle.set(idle);
+        if resume {
+            FRAME_GATE.unpark(self.hwnd);
+        }
+    }
+
+    /// Quill: before GPUI handles a frame request in `draw_window`. A woken
+    /// frame counts only what GPUI asks for during it, not the request that
+    /// woke it.
+    pub(crate) fn frames_before_draw(&self) {
+        if self.state.frame_idle.get().awaits_woken_frame() {
+            self.state.frame_asked.set(false);
         }
     }
 
@@ -315,15 +343,19 @@ impl WindowsWindowInner {
 
     /// Quill: after GPUI handled a frame request in `draw_window`. Frames
     /// that neither drew, presented nor asked for another frame for
-    /// `FRAME_IDLE_AFTER` park the window's vsync invalidations; a frame that
-    /// does (one drawn while parked, e.g. after `WM_PAINT` from the system)
-    /// unparks them. `keep_running`: the platform has its own reason to keep
+    /// `FRAME_IDLE_AFTER` park the window's vsync invalidations; a frame
+    /// drawn while parked (woken by a demand, or `WM_PAINT` from the system)
+    /// unparks them if it asks for another frame or follows the last one
+    /// closely. `keep_running`: the platform has its own reason to keep
     /// frames coming.
     pub(crate) fn frames_after_draw(&self, keep_running: bool) {
-        // The kill switch (`QUILL_IDLE_FRAMES=0`) makes every frame active.
-        let active = self.state.frame_activity.take() || keep_running || !idle_frames_enabled();
+        // The kill switch (`QUILL_IDLE_FRAMES=0`) asks for every frame.
+        let frame = Frame {
+            drew: self.state.frame_drew.take(),
+            asked: self.state.frame_asked.take() || keep_running || !idle_frames_enabled(),
+        };
         let mut idle = self.state.frame_idle.get();
-        match idle.frame(active, Instant::now()) {
+        match idle.frame(frame, Instant::now()) {
             Transition::Park => FRAME_GATE.park(self.hwnd),
             Transition::Resume => FRAME_GATE.unpark(self.hwnd),
             Transition::Keep => {}
@@ -1062,7 +1094,7 @@ impl PlatformWindow for WindowsWindow {
     // Quill: GPUI asks for another frame (the window is still dirty, or
     // next-frame callbacks are queued): keep the vsync frames coming.
     fn schedule_frame(&self) {
-        self.state.frame_activity.set(true);
+        self.state.frame_asked.set(true);
     }
 
     // Quill: see `WindowsWindowInner::demand_frames`. Holds the window
@@ -1139,7 +1171,7 @@ impl PlatformWindow for WindowsWindow {
 
     fn draw(&self, scene: &Scene) {
         // Quill: a drawn (or presented) frame keeps the vsync frames coming.
-        self.state.frame_activity.set(true);
+        self.state.frame_drew.set(true);
         self.state
             .renderer
             .borrow_mut()

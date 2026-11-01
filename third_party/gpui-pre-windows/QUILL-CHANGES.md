@@ -16,7 +16,13 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   `third_party/gpui-pre-linux/src/linux/x11/frame_idle.rs`): the idle
   decision. After 250 ms of frames that neither drew, presented nor asked for
   another frame, with no frame demand from GPUI in between, a window parks
-  and gets no invalidations at all; a demand unparks it. `vsync_has_work`
+  and gets no invalidations at all. A demand on a parked window invalidates
+  it once and leaves it parked; that frame unparks it if GPUI asked for
+  another frame during it or it came within 100 ms of the last woken frame
+  (the macOS `link_pace.rs` rule), so a caret blink costs one `WM_PAINT` and
+  not 250 ms of them. A deferred re-entrant draw unparks it outright
+  (`keep_frames_running`), since only a vsync invalidation retries it.
+  `vsync_has_work`
   decides when the vsync thread may sleep, `contact_frames` what a touchpad
   contact needs. Unit tests run with `scripts/test-frame-idle.sh`.
   `QUILL_IDLE_FRAMES=0` (or `off`), read once, disables parking (upstream
