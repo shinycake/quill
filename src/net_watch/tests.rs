@@ -130,4 +130,3 @@ fn an_online_read_does_not_look_and_an_offline_read_does() {
     let state = tracker.state(|| wifi);
     assert_eq!((state.epoch, state.available), (2, true));
 }
-
