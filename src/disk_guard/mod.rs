@@ -90,6 +90,8 @@ pub const FLOORS: DiskFloors = DiskFloors::for_data(DataUse::ONE);
 
 const FASTEST_WRITER_PER_SEC: u64 = 64 * MIB;
 const SHORTEST_READ: Duration = Duration::from_secs(1);
+/// The read step while the disk falls faster than the floors assume.
+const QUICKEST_READ: Duration = Duration::from_millis(250);
 const LONGEST_READ: Duration = Duration::from_secs(30);
 /// A drop below close is read again this much later before clients close:
 /// one bad reading (a copy that is deleted at once, a volume that answers
@@ -174,12 +176,30 @@ pub fn was_full(free: Option<u64>, floors: &DiskFloors) -> bool {
     free.is_some_and(|free| free < floors.close)
 }
 
-pub fn next_read_in(free: Option<u64>, floors: &DiskFloors) -> Duration {
+/// How long until the next read: the time a writer needs to bring `free`
+/// down to close, at the fastest writer the floors assume or at the fall
+/// the last two readings showed, whichever is faster.
+pub fn next_read_in(free: Option<u64>, floors: &DiskFloors, fall_per_sec: u64) -> Duration {
     let Some(free) = free else {
         return LONGEST_READ;
     };
-    Duration::from_secs(free.saturating_sub(floors.close) / FASTEST_WRITER_PER_SEC)
-        .clamp(SHORTEST_READ, LONGEST_READ)
+    let shortest = if fall_per_sec > FASTEST_WRITER_PER_SEC {
+        QUICKEST_READ
+    } else {
+        SHORTEST_READ
+    };
+    let rate = fall_per_sec.max(FASTEST_WRITER_PER_SEC);
+    let millis = free.saturating_sub(floors.close).saturating_mul(1000) / rate;
+    Duration::from_millis(millis).clamp(shortest, LONGEST_READ)
+}
+
+/// Bytes per second the disk lost between two readings `waited` apart.
+pub fn fall_per_sec(before: Option<u64>, after: Option<u64>, waited: Duration) -> u64 {
+    let (Some(before), Some(after)) = (before, after) else {
+        return 0;
+    };
+    let millis = u64::try_from(waited.as_millis()).unwrap_or(u64::MAX).max(1);
+    before.saturating_sub(after).saturating_mul(1000) / millis
 }
 
 #[cfg(test)]

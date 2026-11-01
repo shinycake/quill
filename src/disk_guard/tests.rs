@@ -148,14 +148,44 @@ fn only_a_read_below_the_close_floor_names_a_full_disk() {
 #[test]
 fn reads_speed_up_as_the_disk_nears_the_close_floor() {
     let floors = super::FLOORS;
-    assert_eq!(next_read_in(Some(u64::MAX), &floors), LONGEST_READ);
-    assert_eq!(next_read_in(None, &floors), LONGEST_READ);
+    assert_eq!(next_read_in(Some(u64::MAX), &floors, 0), LONGEST_READ);
+    assert_eq!(next_read_in(None, &floors, 0), LONGEST_READ);
     assert_eq!(
-        next_read_in(Some(floors.close + 10 * FASTEST_WRITER_PER_SEC), &floors),
+        next_read_in(Some(floors.close + 10 * FASTEST_WRITER_PER_SEC), &floors, 0),
         Duration::from_secs(10)
     );
-    assert_eq!(next_read_in(Some(floors.close), &floors), SHORTEST_READ);
-    assert_eq!(next_read_in(Some(0), &floors), SHORTEST_READ);
+    assert_eq!(next_read_in(Some(floors.close), &floors, 0), SHORTEST_READ);
+    assert_eq!(next_read_in(Some(0), &floors, 0), SHORTEST_READ);
+}
+
+#[test]
+fn a_disk_falling_faster_than_assumed_is_read_sooner() {
+    let floors = super::FLOORS;
+    let free = Some(floors.close + 10 * FASTEST_WRITER_PER_SEC);
+    let fast = 4 * FASTEST_WRITER_PER_SEC;
+    assert_eq!(
+        next_read_in(free, &floors, fast),
+        Duration::from_millis(2500),
+        "a copy four times the assumed writer"
+    );
+    assert_eq!(
+        next_read_in(Some(floors.close), &floors, fast),
+        super::QUICKEST_READ
+    );
+    assert_eq!(
+        next_read_in(free, &floors, FASTEST_WRITER_PER_SEC / 2),
+        Duration::from_secs(10),
+        "a slow fall never slows the reads"
+    );
+}
+
+#[test]
+fn the_fall_is_measured_between_two_readings() {
+    let secs = Duration::from_secs;
+    assert_eq!(fall_per_sec(Some(1000), Some(400), secs(2)), 300);
+    assert_eq!(fall_per_sec(Some(400), Some(1000), secs(2)), 0, "it grew");
+    assert_eq!(fall_per_sec(None, Some(1), secs(2)), 0);
+    assert_eq!(fall_per_sec(Some(5), Some(1), Duration::ZERO), 4000);
 }
 
 #[test]

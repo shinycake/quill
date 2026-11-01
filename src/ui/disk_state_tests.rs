@@ -295,3 +295,21 @@ fn one_low_reading_closes_nothing_until_the_next_agrees(cx: &mut TestAppContext)
     read(&app, &mut vcx, Some(0));
     assert!(shown(&app, &mut vcx).1, "two in a row");
 }
+
+#[gpui_kit::test]
+fn a_disk_falling_fast_is_read_sooner(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let mib = 1u64 << 20;
+    let first = app.update_in(&mut vcx, |app, _, cx| {
+        app.apply_data_reading(Some(FLOORS.close + 20_000 * mib), FLOORS, cx)
+    });
+    assert_eq!(first, std::time::Duration::from_secs(30));
+    let fell = 30 * 512 * mib;
+    let next = app.update_in(&mut vcx, |app, _, cx| {
+        app.apply_data_reading(Some(FLOORS.close + 20_000 * mib - fell), FLOORS, cx)
+    });
+    assert!(
+        next < std::time::Duration::from_secs(10),
+        "a fall of 512 MiB/s reads again in {next:?}"
+    );
+}

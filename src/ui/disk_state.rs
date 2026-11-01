@@ -15,7 +15,7 @@ use gpui_kit::{
 use quill::auth::{AuthAction, AuthView};
 use quill::disk_guard::{
     CONFIRM_READ, DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors,
-    data_free_bytes, next_read_in,
+    data_free_bytes, fall_per_sec, next_read_in,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
@@ -27,6 +27,8 @@ pub(crate) struct DiskUi {
     floors: DiskFloors,
     /// The last reading was below close and the next one decides.
     confirming: bool,
+    /// The wait before the last reading, to measure how fast the disk falls.
+    waited: Duration,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -46,6 +48,7 @@ impl DiskUi {
             free: None,
             floors: FLOORS,
             confirming: false,
+            waited: Duration::ZERO,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -118,12 +121,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Duration {
         self.disk.floors = floors;
+        let fall = fall_per_sec(self.disk.free, free, self.disk.waited);
         self.apply_disk_reading(free, cx);
-        if self.disk.confirming {
+        let wait = if self.disk.confirming {
             CONFIRM_READ
         } else {
-            next_read_in(free, &floors)
-        }
+            next_read_in(free, &floors, fall)
+        };
+        self.disk.waited = wait;
+        wait
     }
 
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
