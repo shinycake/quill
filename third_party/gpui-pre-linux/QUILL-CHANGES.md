@@ -138,3 +138,15 @@ the app (sweep bundle B13, N46):
   refused like a keymap xkb cannot parse. Tests:
   `a_keymap_shorter_than_its_size_is_refused` (SIGBUS with the old mapping),
   `the_compositors_keymap_compiles`.
+
+The Quill project also changed it in 2026 so typing works when the
+compositor's first keymap is unusable (sweep bundle B13, N47):
+
+- `src/linux/wayland/client.rs`: when no keymap was installed yet and the
+  compositor sent `no_keymap`, a non-XkbV1 format or a keymap xkb refuses,
+  `keymap_to_use` installs the default keymap (libxkbcommon's from the
+  system rules, else the built-in one) instead of dropping every key. With
+  a keymap already installed it is kept, as before.
+- `src/linux/wayland/default_keymap.xkb` (new): a US keymap compiled by
+  libxkbcommon from xkeyboard-config 2.41 (MIT licence), for systems without
+  xkeyboard-config. Test: `without_a_usable_first_keymap_keys_type_with_the_default`.

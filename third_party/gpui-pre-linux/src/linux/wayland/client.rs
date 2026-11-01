@@ -2087,10 +2087,6 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                 size,
                 ..
             } => {
-                if format != wl_keyboard::KeymapFormat::XkbV1 {
-                    log::error!("Received keymap format {:?}, expected XkbV1", format);
-                    return;
-                }
                 let xkb_context = match new_xkb_context() {
                     Ok(context) => context,
                     Err(error) => {
@@ -2098,8 +2094,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                         return;
                     }
                 };
-                let Some(keymap) = compile_keymap(&xkb_context, fd, size) else {
-                    log::error!("cannot parse the compositor's keymap, keeping the previous one");
+                let received = if format == wl_keyboard::KeymapFormat::XkbV1 {
+                    compile_keymap(&xkb_context, fd, size)
+                } else {
+                    log::error!("Received keymap format {:?}, expected XkbV1", format);
+                    None
+                };
+                let Some(keymap) =
+                    keymap_to_use(received, state.keymap_state.is_some(), || {
+                        default_keymap(&xkb_context)
+                    })
+                else {
                     return;
                 };
                 state.keymap_state = Some(xkb::State::new(&keymap));
@@ -3253,6 +3258,43 @@ fn compile_keymap(context: &xkb::Context, fd: OwnedFd, size: u32) -> Option<xkb:
     )
 }
 
+/// Quill: the keymap to install after a `wl_keyboard.keymap` event that
+/// brought `received`. Without one the previous keymap stays; with none
+/// yet, the default one, so typing still works.
+fn keymap_to_use(
+    received: Option<xkb::Keymap>,
+    have_one: bool,
+    default: impl FnOnce() -> Option<xkb::Keymap>,
+) -> Option<xkb::Keymap> {
+    if received.is_some() {
+        return received;
+    }
+    if have_one {
+        log::error!("no usable keymap from the compositor, keeping the previous one");
+        return None;
+    }
+    log::error!("no usable keymap from the compositor, using the default one");
+    default()
+}
+
+/// Quill: the keymap libxkbcommon builds from the system's rules (US
+/// unless `XKB_DEFAULT_*` says otherwise), else a US keymap built in, for
+/// a system without xkeyboard-config.
+fn default_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    let system = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    xkb::Keymap::new_from_names(&system, "", "", "", "", None, KEYMAP_COMPILE_NO_FLAGS)
+        .or_else(|| built_in_keymap(context))
+}
+
+fn built_in_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    xkb::Keymap::new_from_string(
+        context,
+        include_str!("default_keymap.xkb").to_owned(),
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
+}
+
 struct ModifierUpdate {
     modifiers: Modifiers,
     capslock: Capslock,
@@ -3281,6 +3323,19 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    /// A compositor whose first keymap xkb refuses (or that sent
+    /// `no_keymap`): keys still type, with the default keymap.
+    #[test]
+    fn without_a_usable_first_keymap_keys_type_with_the_default() {
+        let context = new_xkb_context().unwrap();
+        let keymap = keymap_to_use(None, false, || built_in_keymap(&context))
+            .expect("the default keymap");
+        let state = xkb::State::new(&keymap);
+        // Evdev keycode 30 (+8) is the A key.
+        assert_eq!(state.key_get_utf8(Keycode::new(38)), "a");
+        assert!(keymap_to_use(None, true, || built_in_keymap(&context)).is_none());
+    }
 
     #[test]
     fn keyboard_events_without_a_keymap_are_dropped() {
