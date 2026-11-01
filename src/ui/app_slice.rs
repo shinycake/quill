@@ -33,6 +33,7 @@ use super::conversation::ConversationPart;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 /// Which part of `QuillApp` a slice draws.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -389,6 +390,22 @@ impl QuillApp {
         if inline > 0 {
             self.request_animation_tick_for(Some(slice), inline, cx);
         }
+    }
+
+    /// The rate to keep ticking `target` at when a tick would draw nothing
+    /// new: it is an animation layer whose content shows the same frames
+    /// through the next refresh. `None`: draw it.
+    pub(super) fn idle_layer_tick(&self, target: EntityId) -> Option<u32> {
+        let parts = [
+            self.slices.sidebar.as_ref(),
+            self.slices.conversation.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|parts| parts.painter.entity_id() == target)?;
+        let (layer, _) = parts.layer.demand();
+        let refresh = Duration::from_secs_f64(1.0 / super::sticker_player::display_hz());
+        (layer > 0 && !parts.layer.changes_within(refresh)).then_some(layer)
     }
 
     /// The chat list, as a cached slice filling its laid-out column,

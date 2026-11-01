@@ -224,17 +224,24 @@ impl QuillApp {
                                 Instant::now(),
                                 demand,
                             );
-                            for id in targets.iter().flatten() {
-                                this.frame.layers_drawn.borrow_mut().ticked(*id);
-                            }
                             if targets.contains(&None) {
+                                for id in targets.iter().flatten() {
+                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
+                                }
                                 this.tick_app(cx);
                             } else if !this.frame.main_covered.get() {
                                 // Only the slices with animated content
                                 // redraw; none under a chat window covering
-                                // the main window since they asked.
-                                let app: &mut App = cx;
+                                // the main window since they asked. A layer
+                                // whose frames stay the same keeps ticking
+                                // without a draw.
                                 for id in targets.into_iter().flatten() {
+                                    if let Some(fps) = this.idle_layer_tick(id) {
+                                        this.request_animation_tick_for(Some(id), fps, cx);
+                                        continue;
+                                    }
+                                    this.frame.layers_drawn.borrow_mut().ticked(id);
+                                    let app: &mut App = cx;
                                     app.notify(id);
                                 }
                             }

@@ -211,6 +211,27 @@ the old slack the second phase skips or repeats on about half its paints.
 Feeding heads the target vsync in place of the paint's wall time would
 remove the jitter itself and is left for later.
 
+### Follow-up: ticks that draw nothing new (2026-11-01)
+
+A clip at its file's rate still ticks faster than its frames change (now
+twice its rate, before the display's), so each frame stays up for the same
+number of refreshes. Every tick drew the whole window: 107 window frames a
+second for 30 pictures on a 120 Hz Mac.
+
+The clock now asks an animation layer before it notifies it whether a
+draw before the next refresh would change anything: any clock-driven
+drawing or live tile does, a sticker only when its head would pick another
+frame than the one its view shows (`PlayHead::changes_at`, on a copy of
+the head). A layer that would not change keeps ticking without a draw.
+Frames still land on ticks, so they keep their even holds, and the check
+needs no vsync times, so it works on every system. A view unpainted for
+100 ms paints anyway, so a slow clip never reaches the 200 ms pause gap.
+
+In a model of a 30 fps clip at its file's rate ticked at 120 Hz, with each
+tick up to a refresh before its paint: 120 draws a second → 38, each of
+the 30 frames up for exactly 4 refreshes. The window frame count on a real
+120 Hz display still needs a Mac.
+
 ## Verification
 
 `/verify` captures at 2x, before and after: a sticker message in history,

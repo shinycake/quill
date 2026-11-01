@@ -126,6 +126,8 @@ struct UiClip {
 /// Where a view is in a clip.
 struct Head {
     state: PlayHead,
+    /// The frame its view showed last.
+    shown: Option<u32>,
     /// When a view last drew it.
     seen: Instant,
     /// Where views drew it.
@@ -515,12 +517,17 @@ impl Player {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
                         state: PlayHead::default(),
+                        shown: None,
                         seen: now,
                         places: Places::new(),
                     });
                     entry.seen = now;
                     note_place(&mut entry.places, place);
-                    let head_state = &mut entry.state;
+                    let Head {
+                        state: head_state,
+                        shown: head_shown,
+                        ..
+                    } = entry;
                     let pick = match mode {
                         PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                             Duration::ZERO,
@@ -555,6 +562,7 @@ impl Player {
                         clip.wants.retain(|(h, ..)| *h != head);
                         clip.wants.push((head, pick.index, pick.ahead, now));
                         let (index, image) = found?;
+                        *head_shown = Some(index);
                         if clip
                             .shown
                             .as_ref()

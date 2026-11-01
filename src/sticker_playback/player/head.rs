@@ -18,6 +18,9 @@ pub const AHEAD: usize = 3;
 const GRID_SLACK: f64 = 0.25;
 /// A view not drawn for longer than this paused meanwhile.
 pub const PAUSE_GAP: Duration = Duration::from_millis(200);
+/// A playing view showing one frame this long paints again anyway, well
+/// inside [`PAUSE_GAP`], so a slow clip never reads as paused.
+pub const REPAINT_GAP: Duration = Duration::from_millis(100);
 
 /// What a view does at the end of its clip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -149,6 +152,29 @@ impl PlayHead {
             pick.animating = !matches!(mode, PlayMode::At(_)) || pick.animating;
         }
         Some(pick)
+    }
+
+    /// Whether a paint at `at` would show another frame than `shown`, the
+    /// one its view shows now, or its view went [`REPAINT_GAP`] unpainted.
+    /// Worked out on a copy: the head moves only when its view paints.
+    pub fn changes_at(
+        &self,
+        at: Instant,
+        shown: Option<u32>,
+        mode: PlayMode,
+        timeline: Timeline,
+        high_rate: bool,
+        display_hz: f64,
+    ) -> bool {
+        if self
+            .last
+            .is_some_and(|last| at.saturating_duration_since(last) >= REPAINT_GAP)
+        {
+            return true;
+        }
+        let mut head = *self;
+        let pick = head.advance(at, mode, timeline, high_rate, display_hz);
+        pick.map(|pick| pick.index) != shown
     }
 }
 

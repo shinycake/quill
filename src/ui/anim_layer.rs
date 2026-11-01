@@ -40,6 +40,7 @@ use super::sticker_player::StickerView;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 thread_local! {
     /// The layer of the slice being rendered, laid out or painted.
@@ -105,6 +106,16 @@ impl Content {
             Content::Frames(view) => view.fps(),
             Content::Paint { fps, .. } | Content::Tile { fps, .. } => *fps,
             Content::Mirror { .. } => 0,
+        }
+    }
+
+    /// Whether drawing it within `ahead` shows something new: a sticker
+    /// only on another frame, clock-driven drawing and live tiles always.
+    fn changes_within(&self, ahead: Duration) -> bool {
+        match self {
+            Content::Frames(view) => view.changes_within(ahead),
+            Content::Paint { .. } | Content::Tile { .. } => true,
+            Content::Mirror { .. } => false,
         }
     }
 
@@ -245,6 +256,19 @@ impl Layer {
             }
         }
         (layer, inline)
+    }
+
+    /// Whether drawing the layer within `ahead` would change what it shows.
+    /// A sticker held to its file's rate ticks faster than its frames
+    /// change, so each frame stays up for the same number of refreshes;
+    /// the ticks between need no draw.
+    pub(super) fn changes_within(&self, ahead: Duration) -> bool {
+        self.0.items.borrow().iter().any(|item| {
+            item.seq.get() != 0
+                && !item.inline.get()
+                && item.visible().is_some()
+                && item.content.changes_within(ahead)
+        })
     }
 
     /// Before the slice paints a new frame (the layer's prepaint): decide

@@ -127,6 +127,70 @@ fn heads_painted_with_jitter_show_every_frame_once_at_any_phase() {
     }
 }
 
+/// A view of `tl` ticked on every refresh of a 120 Hz display for a
+/// second, painted only when its frame changes. Each tick comes up to a
+/// refresh before the paint it causes, so it asks about that refresh's end.
+/// The refreshes it painted on, and those it showed a new frame on.
+fn paints_when_changed(tl: Timeline, high_rate: bool) -> (Vec<u32>, Vec<u32>) {
+    let t0 = Instant::now();
+    let refresh = Duration::from_secs_f64(1.0 / 120.0);
+    let mut head = PlayHead::default();
+    head.start(t0);
+    let mut shown = Some(0);
+    let (mut paints, mut changes) = (Vec::new(), Vec::new());
+    for vsync in 1..=120u32 {
+        let paint = t0 + refresh * vsync + Duration::from_micros(u64::from(vsync * 37 % 900));
+        let tick = paint
+            .checked_sub(refresh * (vsync * 53 % 97 + 1) / 98)
+            .unwrap();
+        if !head.changes_at(tick + refresh, shown, PlayMode::Loop, tl, high_rate, 120.0) {
+            continue;
+        }
+        paints.push(vsync);
+        let index = head
+            .advance(paint, PlayMode::Loop, tl, high_rate, 120.0)
+            .map(|p| p.index);
+        if index != shown {
+            changes.push(vsync);
+            shown = index;
+        }
+    }
+    (paints, changes)
+}
+
+fn gaps(at: &[u32]) -> Vec<u32> {
+    at.windows(2)
+        .map(|pair| match pair {
+            [a, b] => b - a,
+            _ => 0,
+        })
+        .collect()
+}
+
+#[test]
+fn a_clip_at_its_files_rate_paints_only_for_its_own_frames() {
+    // 30 fps on a 120 frame grid, shown at the file's rate.
+    let (paints, changes) = paints_when_changed(timeline(480, 30.0, 4), false);
+    assert_eq!(changes.len(), 30, "{changes:?}");
+    assert!(gaps(&changes).iter().all(|gap| *gap == 4), "{changes:?}");
+    assert!(paints.len() <= 60, "{} paints: {paints:?}", paints.len());
+}
+
+#[test]
+fn a_clip_on_the_fine_grid_paints_every_refresh() {
+    let (paints, changes) = paints_when_changed(timeline(240, 60.0, 2), true);
+    assert_eq!(changes.len(), 120);
+    assert_eq!(paints.len(), 120);
+}
+
+#[test]
+fn a_slow_clip_paints_often_enough_to_keep_playing() {
+    // 5 fps: a frame every 200 ms, as long as a pause.
+    let (paints, changes) = paints_when_changed(timeline(20, 5.0, 1), false);
+    assert!(gaps(&paints).iter().all(|gap| *gap <= 12), "{paints:?}");
+    assert!(gaps(&changes).iter().all(|gap| *gap == 24), "{changes:?}");
+}
+
 #[test]
 fn a_clip_too_slow_for_the_fine_grid_drops_to_its_files_rate() {
     use super::engine::too_slow_for_grid;
