@@ -10,13 +10,16 @@ const WIFI: Hop = Hop {
     link: Link {
         interface: 2,
         gateway: Some(ROUTER),
+        gateway_hardware: Some(HOME_ROUTER),
     },
 };
+const HOME_ROUTER: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
 const CAFE: Hop = Hop {
     local: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)),
     link: Link {
         interface: 2,
         gateway: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+        gateway_hardware: None,
     },
 };
 
@@ -129,4 +132,36 @@ fn an_online_read_does_not_look_and_an_offline_read_does() {
 
     let state = tracker.state(|| wifi);
     assert_eq!((state.epoch, state.available), (2, true));
+}
+
+#[test]
+fn a_router_on_the_same_address_with_another_link_address_moves_the_epoch() {
+    let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
+    let with = |gateway_hardware| Hop {
+        link: Link {
+            gateway_hardware,
+            ..WIFI.link
+        },
+        ..WIFI
+    };
+    assert!(
+        !tracker.observe(on(Path::Via(with(None)), Path::NoRoute)),
+        "the new router is not resolved yet"
+    );
+    let next_door = Some([0x02, 0, 0, 0, 0, 0x02]);
+    assert!(tracker.observe(on(Path::Via(with(next_door)), Path::NoRoute)));
+    assert!(!tracker.observe(on(Path::Via(with(next_door)), Path::NoRoute)));
+    assert!(
+        !tracker.observe(on(Path::Via(with(None)), Path::NoRoute)),
+        "the cache dropped the entry"
+    );
+    assert!(tracker.observe(on(Path::Via(WIFI), Path::NoRoute)));
+    assert_eq!(tracker.epoch, 2);
+}
+
+#[test]
+fn an_unresolved_router_on_another_address_is_still_a_new_network() {
+    let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
+    assert!(tracker.observe(on(Path::Via(CAFE), Path::NoRoute)));
+    assert_eq!(tracker.route.v4, Path::Via(CAFE), "nothing carried over");
 }
