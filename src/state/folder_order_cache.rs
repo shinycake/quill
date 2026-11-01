@@ -1,41 +1,42 @@
 //! The order of a folder tab's chats, kept between sidebar renders.
 //!
 //! The order is a function of `Session::chats` (each chat's position in the
-//! folder). It is stored per folder with the revision it was computed at, and
-//! the revision moves whenever a chat's folder position changes (the main and
-//! archive orders do not feed it), so a stored order that does not match the
-//! revision is computed again from the chats, exactly as an uncached read
-//! would.
+//! folder). A folder's stored order is dropped whenever a chat's position in
+//! that folder changes (the main and archive orders do not feed it), so a
+//! missing order is computed again from the chats, exactly as an uncached
+//! read would.
 
 use super::*;
 use std::cell::RefCell;
 
 #[derive(Debug, Default)]
 pub(crate) struct FolderOrderCache {
-    revision: u64,
-    orders: RefCell<HashMap<i32, (u64, Vec<ChatId>)>>,
+    orders: RefCell<HashMap<i32, Vec<ChatId>>>,
 }
 
 impl FolderOrderCache {
-    /// Something that decides the folder orders changed.
-    pub(crate) fn invalidate(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
-        self.orders.get_mut().clear();
+    /// A chat's position in `folder_id` changed.
+    pub(crate) fn invalidate(&mut self, folder_id: i32) {
+        self.orders.get_mut().remove(&folder_id);
     }
 
-    /// The ids of `folder_id`'s chats in order: the stored list for this
-    /// revision, else `compute`'s (which is then stored).
+    #[cfg(test)]
+    pub(crate) fn stores(&self, folder_id: i32) -> bool {
+        self.orders.borrow().contains_key(&folder_id)
+    }
+
+    /// The ids of `folder_id`'s chats in order: the stored list, else
+    /// `compute`'s (which is then stored).
     pub(crate) fn ids(&self, folder_id: i32, compute: impl FnOnce() -> Vec<ChatId>) -> Vec<ChatId> {
         // Never held across `compute`, and a busy cell just skips the cache.
         if let Ok(orders) = self.orders.try_borrow()
-            && let Some((revision, ids)) = orders.get(&folder_id)
-            && *revision == self.revision
+            && let Some(ids) = orders.get(&folder_id)
         {
             return ids.clone();
         }
         let ids = compute();
         if let Ok(mut orders) = self.orders.try_borrow_mut() {
-            orders.insert(folder_id, (self.revision, ids.clone()));
+            orders.insert(folder_id, ids.clone());
         }
         ids
     }

@@ -85,3 +85,20 @@ fn folder_order_survives_main_list_rebuilds_and_batches() {
     assert_matches(&session, &[1]);
     assert_eq!(shown(&session, 1), vec![5, 6]);
 }
+
+#[test]
+fn a_last_message_that_leaves_folder_positions_alone_keeps_the_stored_orders() {
+    let (mut session, _sink) = session();
+    session.apply_position_fields(position(5, ChatList::Folder(1), 50));
+    session.apply_position_fields(position(6, ChatList::Folder(2), 60));
+    assert_matches(&session, &[1, 2]);
+    // An edit or reaction in chat 5 repeats its positions unchanged.
+    session.replace_main_list_from_positions(ChatId(5), &[position(5, ChatList::Folder(1), 50)]);
+    assert!(session.chat_order_sync.folder_orders.stores(1));
+    assert!(session.chat_order_sync.folder_orders.stores(2));
+    // A new message moves chat 5 in folder 1 only.
+    session.replace_main_list_from_positions(ChatId(5), &[position(5, ChatList::Folder(1), 70)]);
+    assert!(!session.chat_order_sync.folder_orders.stores(1));
+    assert!(session.chat_order_sync.folder_orders.stores(2));
+    assert_matches(&session, &[1, 2]);
+}

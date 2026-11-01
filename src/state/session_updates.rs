@@ -110,11 +110,13 @@ impl Session {
             // `getChatListsToAddChat` is *not* folder membership — it lists
             // chat lists a chat can be added to for `addChatToList`.
             ChatList::Folder(folder_id) => {
-                self.chat_order_sync.folder_orders.invalidate();
-                if pos.order == 0 {
-                    chat.folder_positions.remove(&folder_id);
+                let previous = if pos.order == 0 {
+                    chat.folder_positions.remove(&folder_id)
                 } else {
-                    chat.folder_positions.insert(folder_id, pos.order);
+                    chat.folder_positions.insert(folder_id, pos.order)
+                };
+                if previous != Some(pos.order).filter(|order| *order != 0) {
+                    self.chat_order_sync.folder_orders.invalidate(folder_id);
                 }
             }
             ChatList::Unknown => {}
@@ -161,9 +163,14 @@ impl Session {
             })
             .collect();
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-            chat.folder_positions
-                .retain(|id, _| folder_ids.contains(id));
-            self.chat_order_sync.folder_orders.invalidate();
+            let folder_orders = &mut self.chat_order_sync.folder_orders;
+            chat.folder_positions.retain(|id, _| {
+                let kept = folder_ids.contains(id);
+                if !kept {
+                    folder_orders.invalidate(*id);
+                }
+                kept
+            });
         }
         for pos in positions {
             if matches!(pos.list, ChatList::Folder(_)) {
