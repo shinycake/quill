@@ -120,7 +120,6 @@ struct WholeFrames {
     images_below: usize,
 }
 
-/// What a main window frame draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MainDraw {
     /// Everything: `QuillApp` renders.
@@ -195,18 +194,16 @@ pub(super) fn slice_shown(id: EntityId) {
     });
 }
 
-/// Whether an image last used in `scope` at `used` can still be on
-/// screen, as of the start of the current frame.
+/// Whether an image last used at `used` in `scope` (a slice, or `QuillApp`
+/// for `None`) can still be on screen, as of the start of the current frame.
 fn may_be_visible(scope: Option<EntityId>, used: u64) -> bool {
     let on_screen = WHOLE.get().on_screen;
     match scope {
-        // `QuillApp` renders in every whole frame: the last one shows all.
         None => used >= on_screen,
         Some(id) => SLICES.with(|slices| {
             slices
                 .borrow()
                 .get(&id)
-                // A slice not in that frame replays nothing.
                 .is_some_and(|s| s.shown >= on_screen && used >= s.rendered)
         }),
     }

@@ -47,7 +47,6 @@ impl QuillApp {
         if self.frame.frame_started.replace(frame) == frame {
             return;
         }
-        // Before this frame counts: what showed stayed until now.
         self.sticker_frame_starts(None, cx);
         // Bounded image memory: retired images no window can show any
         // more leave the atlas, then this frame counts (`image_budget`).

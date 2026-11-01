@@ -65,7 +65,7 @@ pub(super) struct AppSlice {
 }
 
 /// Draws nothing: a notify of this view re-renders `QuillApp`, its parent,
-/// and no slice, as a `QuillApp` notify would.
+/// and no slice.
 pub(super) struct AppOnly;
 
 impl Render for AppOnly {
@@ -186,7 +186,6 @@ impl Slices {
         self.panel.as_ref().map(|parts| parts.layer.clone())
     }
 
-    /// The view `QuillApp` embeds for [`AppOnly`] redraws.
     pub(super) fn app_only(&self) -> Option<Entity<AppOnly>> {
         self.app_only.clone()
     }

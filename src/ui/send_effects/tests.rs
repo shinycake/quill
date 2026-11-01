@@ -74,6 +74,11 @@ fn arrive(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     frames(vcx);
 }
 
+fn let_the_history_settle(vcx: &mut VisualTestContext) {
+    vcx.update(|window, _| window.activate_window());
+    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
+}
+
 fn unwatched(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: (i64, i64)) -> bool {
     app.update(vcx, |app, _| {
         app.session()
@@ -117,9 +122,7 @@ fn the_ticks_of_an_effect_leave_the_slices_alone(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     let key = (CHAT, ARRIVING);
-    vcx.update(|window, _| window.activate_window());
-    // The chat's entry settles (`arrive` needs a still history).
-    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
+    let_the_history_settle(vcx);
     arrive(&app, vcx);
     let _ = crate::ui::frame_clock::frames_over(vcx, 1);
     let drawn = crate::ui::frame_clock::frames_over(vcx, 2);

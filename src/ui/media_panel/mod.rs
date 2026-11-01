@@ -275,7 +275,6 @@ impl QuillApp {
             && !self.group_title_emoji_active()
     }
 
-    /// Redraw the panel's cells.
     fn notify_panel(&self, cx: &mut Context<Self>) {
         if self.media_panel_over_composer() {
             self.notify_tick(crate::ui::app_slice::SliceKind::Composer, cx);

@@ -285,7 +285,6 @@ impl SelectableRichText {
     }
 }
 
-/// Redraw `view` whenever `handle`'s selection changes.
 fn redraw_on_selection(handle: &TextSelectionHandle, view: EntityId, cx: &mut App) -> Subscription {
     handle.subscribe(
         move |event, cx| {
@@ -406,9 +405,7 @@ impl Element for SelectableRichText {
     ) -> (LayoutId, Self::RequestLayoutState) {
         // The selection handle lives in element state, so a selection
         // survives re-renders of the row. A selection change redraws the
-        // view drawing the text, which may be cached (`app_slice`) and
-        // would otherwise replay its old highlight. A selection that spans
-        // views notifies each through its own text.
+        // view drawing the text.
         // `id()` is always `Some`, so GPUI always passes a global id.
         let handle = match global_id {
             Some(global_id) => window.with_element_state(

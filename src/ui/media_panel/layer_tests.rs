@@ -66,17 +66,20 @@ fn custom_cells(app: &QuillApp) -> usize {
         .count()
 }
 
+fn pump_stickers(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| {
+        app.playback.stickers.settle();
+        cx.notify();
+    });
+}
+
 /// Lets the clips open, then what two seconds of playing draw.
 fn playing(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
 ) -> std::collections::BTreeMap<&'static str, u32> {
     for _ in 0..4 {
-        // What the sticker pump does in the app.
-        app.update(vcx, |app, cx| {
-            app.playback.stickers.settle();
-            cx.notify();
-        });
+        pump_stickers(app, vcx);
         let _ = frames_over(vcx, 1);
     }
     frames_over(vcx, 2)
@@ -92,6 +95,7 @@ fn assert_panel_plays(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 
 /// The chat list, the history and the panel's layers.
 const LAYERS: u32 = 3;
+const SEARCH_CARET_BLINKS: u32 = 5;
 
 /// `app` is what `QuillApp` may render meanwhile.
 fn assert_only_the_layer_draws(
@@ -127,8 +131,7 @@ fn the_selector_plays_on_its_layer(cx: &mut TestAppContext) {
     });
     let drawn = playing(&app, vcx);
     assert!(app.read_with(vcx, |app, _| custom_cells(app)) > 7);
-    // Its search field's caret blinks.
-    assert_only_the_layer_draws(&drawn, 0..=5);
+    assert_only_the_layer_draws(&drawn, 0..=SEARCH_CARET_BLINKS);
     assert_panel_plays(&app, vcx);
 }
 
@@ -144,7 +147,6 @@ fn the_panel_over_the_composer_plays_on_its_layer(cx: &mut TestAppContext) {
     assert_panel_plays(&app, vcx);
 }
 
-/// A closed panel takes its layer with it.
 #[gpui_kit::test]
 fn closing_the_panel_stops_its_layer(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

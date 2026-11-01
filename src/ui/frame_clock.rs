@@ -306,10 +306,6 @@ impl QuillApp {
                             if targets.contains(&None) {
                                 this.tick_app(cx);
                             } else {
-                                // Only the views with animated content
-                                // redraw; none of the main window's under
-                                // a chat window covering it since they
-                                // asked.
                                 let covered = this.frame.main_covered.get();
                                 let views: Vec<_> = targets
                                     .into_iter()

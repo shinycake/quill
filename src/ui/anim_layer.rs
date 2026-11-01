@@ -149,7 +149,6 @@ struct Item {
 }
 
 impl Item {
-    /// The slice paints it now.
     fn painted(&self, window: &Window) {
         self.seq.set(next_seq());
         self.opacity.set(window.element_opacity());

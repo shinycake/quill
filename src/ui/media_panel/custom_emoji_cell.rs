@@ -27,7 +27,6 @@ impl QuillApp {
         };
         // Battery and animations: the emoji panel shows stills.
         let saving = quill::power_saving::on(flag);
-        // On the panel's layer a new frame redraws nothing but the layer.
         let layered = self
             .panel_layer()
             .filter(|_| on_screen && !saving)
