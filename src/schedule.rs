@@ -120,22 +120,34 @@ pub fn validate_send_date(send_date: i64, now: i64) -> Result<i64, ScheduleError
 }
 
 /// Unix time of a local wall-clock moment, given the zone as a function
-/// from a unix instant to its UTC offset. Two fixed-point steps settle
-/// every real zone (offsets differ by at most a couple of hours across a
-/// transition); a moment inside a DST gap lands just after the gap.
-pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32) -> i64 {
+/// from a unix instant to its UTC offset. A moment the clock shows twice,
+/// in the hour repeated when clocks go back, is the first showing after
+/// `now`: a time picked during the second pass of that hour means the one
+/// still ahead. A moment the clock skips lands as far past
+/// the gap as it was into it, as Qt's `QDateTime` moves it.
+pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now: i64) -> i64 {
     let naive =
         civil.day_number() * 86_400 + i64::from(civil.hour) * 3600 + i64::from(civil.minute) * 60;
-    let mut guess = naive - i64::from(offset_at(naive));
-    for _ in 0..2 {
-        guess = naive - i64::from(offset_at(guess));
-    }
-    guess
+    // Offsets span less than a day each way and real zones change at most
+    // once in two days, so these are the offsets before and after the
+    // moment.
+    let early = naive - i64::from(offset_at(naive - 86_400));
+    let late = naive - i64::from(offset_at(naive + 86_400));
+    let shows_civil = |t: &i64| *t + i64::from(offset_at(*t)) == naive;
+    let mut showings: Vec<i64> = [early, late].into_iter().filter(shows_civil).collect();
+    showings.sort_unstable();
+    showings.dedup();
+    showings
+        .iter()
+        .copied()
+        .find(|t| *t > now)
+        .or(showings.last().copied())
+        .unwrap_or(early)
 }
 
 /// [`civil_to_unix_with`] in the OS zone.
-pub fn civil_to_unix(civil: &CivilTime) -> i64 {
-    civil_to_unix_with(civil, utc_offset_at)
+pub fn civil_to_unix(civil: &CivilTime, now: i64) -> i64 {
+    civil_to_unix_with(civil, utc_offset_at, now)
 }
 
 /// Parses the `%Y-%m-%d %H:%M` text the date picker formats.
@@ -293,22 +305,94 @@ mod tests {
     fn civil_round_trips_in_fixed_zones() {
         for offset in [0, 3600 * 5 + 1800, -3600 * 8] {
             let civil = civil_at(NOW, offset);
-            let unix = civil_to_unix_with(&civil, |_| offset);
+            let unix = civil_to_unix_with(&civil, |_| offset, NOW);
             assert_eq!(unix, NOW - NOW % 60);
         }
     }
 
+    /// A zone `before` hours east of UTC until `switch` and `after` from it.
+    fn switching_zone(switch: i64, before: i32, after: i32) -> impl Fn(i64) -> i32 {
+        move |t| {
+            if t < switch {
+                before * 3600
+            } else {
+                after * 3600
+            }
+        }
+    }
+
+    /// Chicago on the night clocks go back: at 02:00 CDT they show 01:00
+    /// CST again, so 01:00 to 02:00 shows twice.
+    fn chicago_fall_back(switch: i64) -> impl Fn(i64) -> i32 {
+        switching_zone(switch, -5, -6)
+    }
+
+    /// Chicago on the night clocks go forward: 02:00 CST becomes 03:00
+    /// CDT and 02:00 to 03:00 never shows.
+    fn chicago_spring_forward(switch: i64) -> impl Fn(i64) -> i32 {
+        switching_zone(switch, -6, -5)
+    }
+
+    /// 2026-11-01 07:00 UTC, when Chicago's clocks go back.
+    const FALL_BACK: i64 = 1_793_516_400;
+    /// 2027-03-14 08:00 UTC, when Chicago's clocks go forward.
+    const SPRING_FORWARD: i64 = 1_805_011_200;
+
+    fn civil(hour: u8, minute: u8, at: i64, offset: i32) -> CivilTime {
+        CivilTime {
+            hour,
+            minute,
+            ..civil_at(at, offset)
+        }
+    }
+
     #[test]
-    fn civil_resolves_across_a_dst_switch() {
-        // UTC+1 before `switch`, UTC+2 from it on.
-        let switch = NOW;
-        let zone = |t: i64| if t < switch { 3600 } else { 7200 };
-        let early = switch - 7200;
-        let before = civil_at(early, 3600);
-        assert_eq!(civil_to_unix_with(&before, zone), early - early % 60);
-        let late = switch + 7200;
-        let after = civil_at(late, 7200);
-        assert_eq!(civil_to_unix_with(&after, zone), late - late % 60);
+    fn a_repeated_hour_picked_before_it_starts_is_its_first_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        let now = FALL_BACK - 2 * 3600;
+        let one_thirty = civil(1, 30, FALL_BACK, -5 * 3600);
+        assert_eq!(
+            civil_to_unix_with(&one_thirty, &zone, now),
+            FALL_BACK - 1800
+        );
+    }
+
+    #[test]
+    fn a_repeated_hour_picked_during_its_second_pass_is_still_ahead() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // 01:05 CST: 01:15 already went by once, as CDT.
+        let now = FALL_BACK + 300;
+        let one_fifteen = civil(1, 15, FALL_BACK, -6 * 3600);
+        let picked = civil_to_unix_with(&one_fifteen, &zone, now);
+        assert_eq!(picked, FALL_BACK + 900);
+        assert_eq!(validate_send_date(picked, now), Ok(picked));
+        // 01:00 CST already passed twice; it stays in the past.
+        let one = civil(1, 0, FALL_BACK, -6 * 3600);
+        assert_eq!(civil_to_unix_with(&one, &zone, now), FALL_BACK);
+    }
+
+    #[test]
+    fn a_skipped_hour_lands_as_far_past_the_gap() {
+        let zone = chicago_spring_forward(SPRING_FORWARD);
+        let two_thirty = civil(2, 30, SPRING_FORWARD, -6 * 3600);
+        // 02:30 CST would be 03:30 CDT.
+        let picked = civil_to_unix_with(&two_thirty, &zone, SPRING_FORWARD - 3600);
+        assert_eq!(picked, SPRING_FORWARD + 1800);
+        assert_eq!(civil_at(picked, -5 * 3600).hour, 3);
+    }
+
+    #[test]
+    fn times_beside_a_switch_resolve_once() {
+        for (switch, before, after) in [(SPRING_FORWARD, -6, -5), (FALL_BACK, -5, -6)] {
+            let zone = switching_zone(switch, before, after);
+            let (early, late) = (switch - 2 * 3600, switch + 2 * 3600);
+            let civil_early = civil_at(early, before * 3600);
+            let civil_late = civil_at(late, after * 3600);
+            for now in [early - 86_400, late + 86_400] {
+                assert_eq!(civil_to_unix_with(&civil_early, &zone, now), early);
+                assert_eq!(civil_to_unix_with(&civil_late, &zone, now), late);
+            }
+        }
     }
 
     #[test]

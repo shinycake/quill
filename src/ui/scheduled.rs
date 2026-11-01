@@ -165,7 +165,7 @@ pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i6
         .date_time()
         .start()
         .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
-        .map(|civil| civil_to_unix(&civil))
+        .map(|civil| civil_to_unix(&civil, now_unix()))
 }
 
 impl QuillApp {
