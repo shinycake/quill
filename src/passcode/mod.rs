@@ -797,8 +797,8 @@ pub fn os_idle_ms() -> Option<u64> {
 mod idle;
 #[cfg(test)]
 use idle::{
-    IDLE_ARMED_GRACE_MS, IdleBackend, IdleCache, SessionEnv, candidate_backends,
-    idle_sampling_wanted, select_backend,
+    IDLE_ARMED_GRACE_MS, IDLE_RETRY_FIRST_MS, IDLE_RETRY_MAX_MS, IdleBackend, IdleCache,
+    SessionEnv, candidate_backends, idle_sampling_wanted, select_backend,
 };
 #[cfg(target_os = "linux")]
 use idle::{linux_idle_known, linux_idle_ms};
