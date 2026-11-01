@@ -1,147 +1,136 @@
 CHANGES
 
-# Review of PR 1307 (claude/sweep-b1, bundle B1, items N82 to N88)
+# Review of PR 1307, second pass (claude/sweep-b1, bundle B1)
 
-Reviewed head b4b5a02 against main 948ad90. I read the whole diff, and read
-`platform.rs`, `events.rs`, `directx_devices.rs` and `vsync.rs` in full
-around the changed paths. I ran `scripts/test-timer-step.sh` (8 passed) and
-`scripts/test-window-list.sh` (5 passed) on Linux. I did not cross-compile
-the fork locally because this container has no Windows target. The PR's own
-`windows-check` job on `windows-latest` (msvc) is the evidence for the
-Windows build.
+Scope: the seven commits after b4b5a026e (c1c1e88 to acb5fa9, head acb5fa9),
+checked against the findings in review.md on claude/review-b1 and the
+"What stays open" list in PR.md on claude/prtext-b1-2. I read the full diff and
+the code around it in `platform.rs`, `events.rs`, `direct_write.rs`, GPUI's
+`app.rs` (window close and `QuitMode`), `main.rs`, `startup_failure/` and
+`background_accounts/closing.rs`. CI on acb5fa9: `windows-check` passed,
+`macos-metal` and `carrier-live-linux` passed, `licenses` **failed**, and
+`linux-fmt-clippy-test` and `carrier-live-windows` were still running. I ran
+nothing on Windows.
 
-The fork changes are mostly sound. Four things block the merge: the new CI
-job is red, the "no adapter" error is never reached, and the two items under
-"What stays open" are open defects.
+All six findings from the first review are fixed at the root. Three things
+block the merge: one new red check, the branch is behind main, and two of the
+three "stays open" items are real defects that need fixes.
+
+## Findings from the first review
+
+1. **windows-check red (N87): fixed at the root.** `probe` and
+   `loader_installed` in `startup_failure/vulkan.rs` are now
+   `#[cfg(target_os = "linux")]`. The pure manifest parsing stays under `test`,
+   and `--all-targets` stays. Job 124918040099 on acb5fa9 passed.
+2. **Unreachable "no adapter" error (N82): fixed at the root.** `get_adapter`
+   now breaks on `DXGI_ERROR_NOT_FOUND`, passes any other `EnumAdapters` error
+   up, skips an adapter whose `cast` or `get_device` fails, and returns the last
+   error with context. That is the fix the first review asked for.
+3. **Caught vsync panic filed as a crash (N84): fixed at the root.** The one
+   counter now lives in the std-only `crates/panic-guard`. `thread_guard`
+   re-exports it, and the vsync thread runs under `panic_guard::guarded`.
+   Cargo.lock shows a single `quill-panic-guard` package used by both the app
+   and `gpui-pre-windows`, so there is still one `thread_local`. The PR gives a
+   sound reason for not putting it in `gpui-pre`: the `--no-default-features`
+   core has no GPUI. The test covers both the hook and the count after.
+4. **Silent exit after a lost device: fixed.** On Windows, `QuitMode::Explicit`
+   plus `on_window_closed` covers this. GPUI removes the window from
+   `cx.windows` before it calls the observers (`app.rs` ~3370 to 3388), so
+   `windows().len() == 0` really means "last window". The steps are: close the
+   rest, recover once through `request_windowing` and `open_main_window`, then
+   give up with the lang-system alert. `report_gpu_gone` is no longer
+   Linux-gated, and it runs after `run` returns (`interface_zoom` `run`). The
+   decision is a tested pure function.
+5. **Stale vsync thread (not blocking before): fixed at the root.** Every
+   attach and detach advances a generation. `WM_GPUI_GPU_DEVICE_GONE` carries it
+   in `lparam`. Recovered devices go to the platform as a `RecoveredDevices`
+   that carries it too. The platform answers `HANDED_OVER` only when it took
+   them, and a refused thread stops before it touches the windows. Every
+   `WM_GPUI_GPU_DEVICE_LOST` sent to the platform window now points at a
+   `RecoveredDevices`. The windows get a separate message with a bare
+   `DirectXDevices`. I checked every send site.
+6. **`open_window` on a removed device: fixed.** `replace_removed_devices`
+   recreates the devices on the UI thread before it builds the window. It
+   cannot wait for the vsync thread, because that thread's handover is a
+   `SendMessageW` to this thread. The vsync thread's later recovery still
+   reaches the new window: the window is in the list before the UI thread pumps
+   the handover, and the N85 check covers the rest.
+   `DirectWriteTextSystem::handle_gpu_lost` takes a write lock, so the two
+   threads cannot race there.
 
 ## Blocking
 
-### 1. The new `windows-check` job fails on this PR (N87)
+### A. `licenses` fails on this head
 
-Job 124899968191 (and the earlier run 124897159739) fail with 4 errors, all
-in the `quill` bin test target:
+Job 124918040063: `error: THIRD_PARTY_LICENSES.md is stale; run
+scripts/third-party-licenses.sh`. The new `quill-panic-guard` crate is now one
+of the users of a license entry. Fix: run `scripts/third-party-licenses.sh`
+and commit the regenerated `THIRD_PARTY_LICENSES.md`. Then confirm that
+`linux-fmt-clippy-test` and `carrier-live-windows` finish green.
 
-```
-error[E0425]: cannot find function `dlopen` in crate `libc`
-   --> src\ui\startup_failure\vulkan.rs:142:28
-error[E0425]: cannot find value `RTLD_LAZY` / `RTLD_LOCAL` in crate `libc`
-error[E0425]: cannot find function `dlclose` in crate `libc`
-error: could not compile `quill` (bin "quill" test) due to 4 previous errors
-```
+### B. Branch is 25 commits behind main
 
-`src/ui/startup_failure.rs:11` declares `#[cfg(any(test, target_os = "linux"))] mod vulkan;`,
-so `--all-targets` compiles the Linux-only `dlopen` probe into the Windows
-test binary. The code is on main and the PR did not touch it, but N87 is
-"PR CI compiles Windows". A job that is red from its first run does not do
-that: it either gets ignored or blocks every PR. The PR text says the job
-"has not run yet". It has now run twice and failed both times.
+origin/main is at 5a173f5 and is not in acb5fa9. rules.md says to merge
+origin/main before the last push. `git merge-tree` reports no conflicts. Fix:
+merge origin/main (no rebase), rerun the checks, and push.
 
-Fix: in `startup_failure/vulkan.rs`, gate `loader_installed` (and its
-`probe` caller) on `target_os = "linux"`, and keep the pure manifest parsing
-under `test`. Another option is `#[cfg(any(all(test, unix), target_os = "linux"))]`
-on the module. Then rerun the job until it is green. Dropping
-`--all-targets` would hide Windows-only test code again, so don't.
-The fork itself (`gpui-pre-windows`) compiled under msvc in that job with no
-errors.
+### C. Open item 1 is a defect: the reopened window can open a TDLib database that is still closing
 
-### 2. "No GPU adapter supports Direct3D 11" can never be returned (N82)
+`open_main_window` builds a new `QuillApp`. The old one is dropped when its
+window is destroyed. `QuillApp::drop` runs `close_all_for_quit`, which waits
+at most `QUIT_CLOSE_DEADLINE` (1.5 s). Clients still closing after that stay in
+the old app's `background.closing` set, and that set is dropped along with the
+app. The new app's `open_wait` / `closed` therefore sees an empty set, returns
+`Go`, and opens the same account database while the old client may still hold
+it. `closing.rs` exists to prevent exactly this ("a new client never opens a
+database that is still closing"). A driver reset is the moment a slow close is
+most likely. The new window also loses the open chat and all UI state, and a
+launch link that was not yet consumed is dropped (`pending_deep_link: None`).
 
-`directx_devices.rs`, `get_adapter`: the loop is
-`for adapter_index in 0.. { let adapter = dxgi_factory.EnumAdapters(adapter_index)?...`.
-When adapters run out, `EnumAdapters` returns `DXGI_ERROR_NOT_FOUND` and
-the `?` returns that error before the loop can end. The new
-`Err(anyhow!("No GPU adapter supports Direct3D 11"))` after the loop is as
-unreachable as the `unreachable!()` it replaced. Users get
-"Creating DirectX devices: ... (0x887A0002)" in the startup alert, and the
-reason each adapter failed only reaches the log. The PR text and
-`gpui-fork-panics.md` both claim the friendly message.
+Fix at the root: keep the `QuillApp` entity across the loss. Hold a strong
+`Entity<QuillApp>` in the recovery state, and have `open_main_window` take an
+optional existing entity. On reopen, wrap that entity in the new window's
+`QuillShell` / `Root`, and redo only the per-window installs: crash notice,
+tray, link inbox, the should-close handler and the `apply_taskbar_icon` /
+`set_native_window` calls. `QuillApp::new` takes `window` only for setup, so
+that setup has to move into a `rebind_window(window, cx)` step. Once the entity
+survives, no client closes or reopens, and the pending deep link is still in
+`app.pending_deep_link`.
 
-Fix: match the `EnumAdapters` error. On `DXGI_ERROR_NOT_FOUND`, `break`.
-Pass any other error up. Keep the last `get_device` error and return it
-with context ("No GPU adapter supports Direct3D 11: <last error>").
-`cast()?` failures should skip the adapter, not abort the search.
+If that is too large for this PR, the minimum fix: move the closing set out of
+`QuillApp` into one main-thread registry per process (a `thread_local` next to
+`early_connect::FIRST`), so a new app's `open_wait` sees the clients the old
+one is still closing. Also carry the old app's still-unconsumed
+`pending_deep_link` into the relaunch instead of `None`. Test: the
+`open_wait` decision returns `Wait` for a key that a dropped app left closing.
 
-### 3. Open item: a caught vsync panic is still filed as a crash (N84)
+### D. Open item 2 is a defect: a failed main-window renderer leaves Quill running with only the PiP
 
-`src/crash_log.rs` asks `thread_guard::panic_will_be_caught()`, which reads
-a thread-local count that only `spawn_guarded` and `ffi_boundary` raise. The
-fork's `catch_unwind` in `begin_vsync_thread` does not raise it. A vsync panic
-is therefore reported as an uncaught crash, and the next launch shows the
-"closed unexpectedly" notice for a panic that was handled.
+When `events.rs` `handle_device_lost` gives up on a window's renderer, it posts
+`WM_GPUI_DESTROY_AFTER_DEVICE_LOST`. If that window is the main window and a
+PiP is open, `after_window_closed(1, false, _)` returns `Nothing`. The device
+still works, so `graphical_environment()` is `Some`. The user is left with a
+video and no way back to their chats. Fix: record the main window's `WindowId`
+in `open_main_window` and pass it to `recover_after_gpu_loss`. When that window
+closes and Quill did not start the close, treat it like a lost GPU: reopen the
+main window once (with the entity kept as in C), and leave the PiP open.
+"Quill started it" is the `close_main_window` path. Set a flag there when it
+returns `true` with `CloseOutcome::Quit`. On Windows, that path should also call
+`cx.quit()` as it already does on macOS, so a user's quit with a PiP open
+really quits, the way Telegram Desktop does. Add a `main_window_closed` input
+to the pure `after_window_closed` and a test row for (PiP left, main closed
+without a quit, GPU works) → `Recover`.
 
-Fix: move the guard count below both crates. Add a small std-only
-`panic_guard` module to the vendored `gpui` core
-(`third_party/gpui-pre`, which `gpui-pre-windows` already depends on), with
-`pub fn guarded<R>(f: impl FnOnce() -> R) -> std::thread::Result<R>` and
-`pub fn panic_will_be_caught() -> bool` over one `thread_local!` counter.
-Make `src/thread_guard.rs`'s `guarded` and `panic_will_be_caught` delegate to
-it, so there is still one counter. Then replace the bare `catch_unwind` in
-`begin_vsync_thread` with `gpui::panic_guard::guarded`. Test it on any host:
-a panic inside `guarded` makes `panic_will_be_caught()` true inside the hook,
-and false after.
+## Open item 3 is a defect, small fix
 
-### 4. Open item: Quill exits after a lost device without saying why (N84, N82 recovery path)
-
-After `WM_GPUI_GPU_DEVICE_GONE` (recovery failed, or now a vsync panic),
-`handle_device_gone` stores `gpu_error`, destroys every window, and GPUI's
-`LastWindowClosed` quit ends the process. The reason goes only to
-`logs/platform.log`. The PR turns one more failure (the vsync panic) into
-this silent exit.
-
-Fix, in the app crate:
-
-1. On Windows, when the main window closes, ask `cx.graphical_environment()`.
-   `None` while Quill never asked to go headless means the device is gone.
-2. Try to recover once: `request_windowing(Windowed(GraphicalEnvironment::detect()))`
-   (the platform supports this, since the dead devices were dropped), then
-   reopen the main window. This needs `QuitMode::Explicit` on Windows, so
-   the last window closing does not end the app first.
-3. If that fails, call `ui::startup_failure::tell` with the error from
-   `request_windowing` or `open_window`, which carries `gpu_error`. Title and
-   body go through the lang system ("Quill closed because the graphics
-   device stopped working"), and then Quill quits.
-
-Step 3 alone is the minimum. Steps 1 to 3 together match the follow-up that
-`gpui-fork-panics.md` already names. Close a PiP window left alone in the same
-path.
-
-## Not blocking, worth fixing in the same PR
-
-- **A stale vsync thread can kill a newer one's devices.** `detach_gpu` only
-  sets `stop` and does not join. If an old thread then panics, or fails
-  recovery, it posts `WM_GPUI_GPU_DEVICE_GONE` without checking `stop`, and
-  `handle_device_gone` drops the devices of the thread `attach_gpu` started
-  since then. The same goes for its `WM_GPUI_GPU_DEVICE_LOST`, which overwrites
-  `directx_devices` with the stale thread's devices. The recovery path had
-  this before. The new panic path adds a second way in. Quill never calls
-  `request_windowing` at runtime today, so it is latent. Fix: give each vsync
-  thread a generation number, send it in `wparam` of both messages, and have
-  the platform ignore a message from an older generation. At the least, skip
-  the post when `stop` is set.
-- **N85 handover reasoning holds.** Recovery sends to the platform window
-  synchronously before it copies the list. The UI thread reads the devices,
-  pushes, then compares. So a window is either in the copy, or sees the
-  new device at its check. The device comparison holds a reference to the
-  old device, so a reused address cannot fool it. One gap stays:
-  `WindowsWindow::new` on a removed device can fail outright, and
-  `open_window` then returns an error instead of waiting for recovery. That
-  matters for windows opened mid-session (PiP, viewer), not at launch.
-- **N83** is correct. `attach_gpu` detaches on spawn failure and keeps
-  `gpu_error` unset only on success. `connect_initially` and
-  `request_windowing` are the only callers, and both surface the error.
-- **N86** is correct. No lock outlives `snapshot`, `find`, `push` or `remove`,
-  no closure that runs under the lock takes another lock, and the gate-then-list
-  order in `wait_for_frames` is unchanged. Every former caller of the old
-  helpers moved over. Only `QUILL-CHANGES.md` history still names them.
-  Small cost: `snapshot` now allocates a `Vec` and bumps two `Arc`s per
-  window on every vsync tick and every gate wake, where the old code
-  iterated an inline `SmallVec`. Not measured here. It is likely noise at
-  1 to 4 windows.
-- **N88** is a faithful move. The `MutexGuard` is a temporary in
-  `let step = shared.lock().next_step(..)`, so due runnables still run
-  unlocked. The `u32::MAX` to `INFINITE` fix is real.
+`WindowList::snapshot` allocates a `Vec` on every vsync tick and every gate
+wake. The old code did not. "Likely noise" was not measured. Fix: return
+`SmallVec<[T; 4]>`. `smallvec` is already a dependency of the fork, and this
+gives back the old no-heap path for up to 4 windows with no other change.
 
 ## What I could not check
 
-Nothing ran on Windows: no forced TDR, no vsync panic, no startup without
-DirectX. The msvc compile of the fork comes from the PR's CI log only.
+Nothing ran on Windows: no forced TDR, no vsync panic, no reopen after a loss,
+no `replace_removed_devices` path. The `msvc` build of the head comes from the
+passing `windows-check` job only. I did not run the test suites. This pass
+read code and CI.
