@@ -337,6 +337,7 @@ void LottieParser::getInterpolatorPoint(Point& pt)
     while (auto key = nextObjectKey()) {
         if (KEY_AS("x")) getValue(pt.x);
         else if (KEY_AS("y")) getValue(pt.y);
+        else skip();  //QUILL
     }
 }
 
