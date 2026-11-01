@@ -1,9 +1,9 @@
 use super::super::app::QuillApp;
 use super::super::scheduled::new_date_time_picker;
 use crate::ui::scheduled::TimePicker;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::local_time::now_unix;
 use quill::moderation::RestrictUntil;
 use quill::telegram::envelope::ChatPermissions;
 
@@ -37,7 +37,7 @@ impl RestrictDialog {
         let until = existing_until.unwrap_or(RestrictUntil::Forever);
         let tomorrow = match until {
             RestrictUntil::Custom(unix) => unix,
-            _ => now_unix() + 86_400,
+            _ => WallClock::of(cx).now() + 86_400,
         };
         Self {
             chat_id,

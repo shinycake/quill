@@ -22,7 +22,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::local_time::now_unix;
 use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
 use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
@@ -243,7 +242,7 @@ impl QuillApp {
             self.restricted_member_entry(chat_id, user_id)
         };
         let current = existing.map_or(defaults, |r| r.permissions);
-        let until = existing.map(|r| initial_until(r.until_date, now_unix()));
+        let until = existing.map(|r| initial_until(r.until_date, WallClock::of(cx).now()));
         self.admin.restrict_dialog = Some(RestrictDialog::new(
             window, cx, chat_id, user_id, ban, current, until,
         ));
