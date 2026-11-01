@@ -4,6 +4,7 @@ use super::*;
 impl Session {
     pub fn apply(&mut self, owned: OwnedEnvelope) {
         self.revision = self.revision.wrapping_add(1);
+        self.note_unread_inputs(&owned.envelope.payload);
         let local = owned.seq == crate::telegram::client::LOCAL_ANSWER_SEQ;
         if !local && owned.seq <= self.last_seq && self.last_seq != 0 {
             self.diagnostics.record(Diagnostic {

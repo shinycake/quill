@@ -678,8 +678,7 @@ impl QuillApp {
                     chat.is_marked_as_unread = false;
                 }
             }
-            // The unread badges recount on a revision change.
-            session.revision = session.revision.wrapping_add(1);
+            session.touch_unread();
         }
         cx.notify();
     }
