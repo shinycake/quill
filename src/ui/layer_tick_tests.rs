@@ -1194,3 +1194,195 @@ fn a_live_view_in_a_cached_view_ticks_alone_after_a_whole_frame(cx: &mut TestApp
     }
     assert_eq!(scene.renders(), renders);
 }
+
+struct CachedShell {
+    host: Entity<CachedHost>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for CachedShell {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div().size(px(50.)).child(
+            self.host
+                .clone()
+                .cached(gpui_kit::StyleRefinement::default().size_full()),
+        )
+    }
+}
+
+struct OuterPage {
+    shell: Entity<CachedShell>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for OuterPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div().size_full().child(self.shell.clone().live())
+    }
+}
+
+/// The inner view's tick shows at once, through the cached view between
+/// them, tick after tick, and nothing around the outer view renders.
+#[gpui_kit::test]
+fn a_live_view_behind_a_cached_view_in_a_live_view_shows_every_tick(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let page_renders = Rc::new(Cell::new(0));
+    let page_in = page_renders.clone();
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Live {
+            hue: FIRST,
+            renders: Rc::default(),
+            kept: Rc::default(),
+        });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        OuterPage {
+            shell: cx.new(|cx| CachedShell {
+                host: cx.new(|_| CachedHost { inner }),
+                renders: Rc::default(),
+            }),
+            renders: page_in,
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let page = page_renders.get();
+    for hue in [SECOND, THIRD, FIRST] {
+        inner.update(&mut vcx, |live, cx| {
+            live.hue = hue;
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        assert_eq!(probe_hues(&mut vcx), vec![hue]);
+    }
+    assert_eq!(page_renders.get(), page, "the ticks stayed patches");
+}
+
+/// Two fills, then one: what a cached view after them finds moves.
+struct Shrinking {
+    fixed: Entity<Fixed>,
+    extra: bool,
+}
+
+impl Render for Shrinking {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size(px(50.))
+            .relative()
+            .child(div().absolute().size(px(10.)).bg(color(UNDER)))
+            .children(
+                self.extra
+                    .then(|| div().absolute().size(px(10.)).bg(color(OVER))),
+            )
+            .child(
+                self.fixed
+                    .clone()
+                    .cached(gpui_kit::StyleRefinement::default().size_full()),
+            )
+    }
+}
+
+struct Fixed;
+
+impl Render for Fixed {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size(px(10.)).bg(color(FIRST))
+    }
+}
+
+struct ShrinkingPage {
+    shell: Entity<Shrinking>,
+    under: f32,
+}
+
+impl Render for ShrinkingPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .relative()
+            .child(div().absolute().size(px(100.)).bg(color(self.under)))
+            .child(self.shell.clone().live())
+    }
+}
+
+/// A patch moves a cached view inside a live one in the scene. The whole
+/// frame after it must not replay ranges that index the patch.
+#[gpui_kit::test]
+fn a_whole_frame_after_a_patch_replays_no_range_of_the_patch(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let shell = cx.new(|cx| Shrinking {
+            fixed: cx.new(|_| Fixed),
+            extra: true,
+        });
+        *slot_in.borrow_mut() = Some(shell.clone());
+        ShrinkingPage {
+            shell,
+            under: THIRD,
+        }
+    });
+    let shell = slot.borrow().clone().expect("the live view");
+    let page: Entity<ShrinkingPage> = handle.root(cx).expect("the page");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    assert_eq!(probe_hues(&mut vcx), vec![THIRD, UNDER, OVER, FIRST]);
+    shell.update(&mut vcx, |shell, cx| {
+        shell.extra = false;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert_eq!(probe_hues(&mut vcx), vec![THIRD, UNDER, FIRST]);
+    page.update(&mut vcx, |page, cx| {
+        page.under = SECOND;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert_eq!(probe_hues(&mut vcx), vec![SECOND, UNDER, FIRST]);
+}
+
+/// Every tick of a nested live view is a patch, not only the first.
+#[gpui_kit::test]
+fn a_live_view_inside_another_ticks_alone_tick_after_tick(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let nest_renders = Rc::new(Cell::new(0));
+    let nest_counter = nest_renders.clone();
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Live {
+            hue: FIRST,
+            renders: Rc::default(),
+            kept: Rc::default(),
+        });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        Nest {
+            shell: cx.new(|_| Shell {
+                inner,
+                renders: Rc::default(),
+            }),
+            renders: nest_counter,
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let nest = nest_renders.get();
+    for hue in [SECOND, THIRD, SECOND] {
+        inner.update(&mut vcx, |live, cx| {
+            live.hue = hue;
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        assert_eq!(probe_hues(&mut vcx), vec![hue]);
+    }
+    assert_eq!(nest_renders.get(), nest, "every tick stayed a patch");
+}

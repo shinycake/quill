@@ -456,7 +456,10 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   and nothing is sent.
 - A live view whose element path runs through another live view's is drawn by
   that one, so a patch skips it as a site of its own. A cached view between the two
-  replays, so the inner one shows its old paint until a whole frame.
+  renders, since a patch refreshes: it has no frame to replay from but the last whole
+  one, and replaying would take the listeners that frame still needs. Its state stays
+  out of `rendered_frame`, as its ranges index the patch, so it renders in the next
+  whole frame too.
 - `Window::transact` drops the entries of a prepaint it rolls back, and a view
   prepainted twice is not nested in itself. A notified view no patch reaches draws a
   whole frame, since a tick that draws nothing would stop asking for the next.

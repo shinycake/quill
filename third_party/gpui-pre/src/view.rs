@@ -269,12 +269,10 @@ impl<T: Render> Entity<T> {
     /// left them, and what it builds in such a frame only paints. A live view
     /// that builds hitboxes (a hover, a click, a tooltip) never redraws alone,
     /// since only a whole frame's hit test answers for them: every notify of
-    /// it draws a whole frame. A cached
-    /// view holding a live view that redrew on its own renders again in the
-    /// next whole frame rather than replay. A live view inside another live
-    /// view redraws with it, unless a cached view sits between them: that
-    /// view replays, so the inner one shows its old paint until a whole
-    /// frame.
+    /// it draws a whole frame. A cached view holding a live view that redrew
+    /// on its own renders again in the next whole frame rather than replay. A
+    /// live view inside another live view redraws with it, a cached view
+    /// between them included.
     #[track_caller]
     pub fn live(self) -> ViewElement<Entity<T>> {
         let live = AnyView::from(self.clone());
@@ -350,7 +348,7 @@ impl<V: View> IntoElement for ViewElement<V> {
     }
 }
 
-struct ViewElementState {
+pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
     cache_key: ViewElementCacheKey,

@@ -21,7 +21,9 @@ use super::{
     AnyImageCache, AnyView, App, Bounds, ContentMask, DrawPhase, ElementId, ElementIdStack,
     EntityId, PaintIndex, Pixels, Range, Scene, SmallVec, TextStyleRefinement, Window,
 };
+use crate::view::ViewElementState;
 use crate::{AnyElement, IntoElement as _};
+use std::any::TypeId;
 
 #[derive(Clone)]
 pub(crate) struct LiveView {
@@ -171,14 +173,14 @@ impl Window {
         })
     }
 
-    /// A whole frame follows patches, which drew every live view of the last
+    /// A whole frame follows patches, which drew the live views of the last
     /// whole frame again. A cached view holding one would replay its older
     /// paint, so each renders again, and its ancestors with it.
     pub(super) fn dirty_patched_live_views(&mut self) {
-        let views: SmallVec<[EntityId; 4]> = self
-            .rendered_frame
-            .live_views
+        let sites = &self.rendered_frame.live_views;
+        let views: SmallVec<[EntityId; 4]> = sites
             .iter()
+            .filter(|site| site.patched(sites))
             .map(|site| site.view.entity_id())
             .collect();
         for view in views {
@@ -198,9 +200,16 @@ impl Window {
         let tree = self.a11y.pause_tree();
         let layouts = self.text_system.layout_index();
 
-        let mut sites = std::mem::take(&mut self.rendered_frame.live_views);
-        sites.retain(LiveView::draws_itself);
+        // The entries stay, nested ones too: the next tick finds its view
+        // in them.
+        let (mut sites, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.rendered_frame.live_views)
+            .into_iter()
+            .partition(LiveView::draws_itself);
         sites.sort_by_key(|site| site.scene.as_ref().map(|scene| scene.start));
+        // A cached view in a live view renders, as it does in one that
+        // renders in a whole frame: the frame it would replay from is older
+        // than this one, and its mouse listeners stay there.
+        self.refreshing = true;
 
         let mut elements: SmallVec<[AnyElement; 4]> = SmallVec::new();
         let mut interactive: SmallVec<[EntityId; 1]> = SmallVec::new();
@@ -242,8 +251,13 @@ impl Window {
         self.text_style_stack.clear();
         self.image_cache_stack.clear();
         self.element_opacity = 1.0;
+        self.refreshing = false;
+        sites.extend(rest);
         self.rendered_frame.live_views = sites;
-        let states = std::mem::take(&mut self.next_frame.element_states);
+        // A cached view's ranges index this frame, which goes: with no state
+        // it renders in the next whole frame.
+        let mut states = std::mem::take(&mut self.next_frame.element_states);
+        states.retain(|(_, state), _| *state != TypeId::of::<ViewElementState>());
         self.rendered_frame.element_states.extend(states);
         self.next_frame.clear_all_but_scene();
         if let Some(layout) = self.layout_engine.as_mut() {
