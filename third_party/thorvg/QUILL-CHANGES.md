@@ -21,8 +21,9 @@ strings whole and counts only a key. Property arrays may hold a null. The search
 for a shared interpolator looks at the newest 1,024 entries. Slots and slot ids are
 not read, since Quill overrides no slot. Text, fonts and glyphs are not read, since
 rlottie draws no text and tdesktop shows none. Metadata Quill never uses is skipped,
-as rlottie does. Percentages that become 8-bit values and 8-bit file values are
-clamped. A dash array keeps its first 64 entries.
+as rlottie does. Easing handles and a layer's color start at zero, so a file that
+leaves one out reads the same on every load. Percentages that become 8-bit values
+and 8-bit file values are clamped. A dash array keeps its first 64 entries.
 
 `src/loaders/lottie/tvgLottieParserHandler.cpp`, `tvgLottieParserHandler.h`: an
 integer written as a float reads as that number, and one past an `int` stops inside

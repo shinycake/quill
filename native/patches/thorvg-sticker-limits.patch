@@ -376,7 +376,7 @@ index 0ab0d875c..a9641ee02 100644
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
 diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..56f8e105d 100644
+index 242d52a98..499ed99e8 100644
 --- a/src/loaders/lottie/tvgLottieParser.cpp
 +++ b/src/loaders/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
@@ -428,6 +428,15 @@ index 242d52a98..56f8e105d 100644
      }
  
      //new interpolator
+@@ -400,7 +408,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+ template<typename T>
+ void LottieParser::parseKeyFrame(T& prop)
+ {
+-    Point inTangent, outTangent;
++    Point inTangent{}, outTangent{};  //QUILL
+     const char* interpolatorKey = nullptr;
+     auto& frame = prop.newFrame();
+     auto interpolator = false;
 @@ -455,6 +463,7 @@ void LottieParser::parsePropertyInternal(T& prop)
          enterArray();
          while (nextArrayValue()) {
@@ -509,6 +518,15 @@ index 242d52a98..56f8e105d 100644
          }
      }
      return nullptr;
+@@ -1557,7 +1574,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+     context.layer = layer;
+ 
+     auto ddd = false;
+-    RGB32 color;
++    RGB32 color{};  //QUILL
+ 
+     enterObject();
+ 
 @@ -1593,10 +1610,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
          else if (KEY_AS("hd")) layer->hidden = getBool();
          else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());

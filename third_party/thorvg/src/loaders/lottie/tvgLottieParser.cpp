@@ -408,7 +408,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
 template<typename T>
 void LottieParser::parseKeyFrame(T& prop)
 {
-    Point inTangent, outTangent;
+    Point inTangent{}, outTangent{};  //QUILL
     const char* interpolatorKey = nullptr;
     auto& frame = prop.newFrame();
     auto interpolator = false;
@@ -1574,7 +1574,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
     context.layer = layer;
 
     auto ddd = false;
-    RGB32 color;
+    RGB32 color{};  //QUILL
 
     enterObject();
 
