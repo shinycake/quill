@@ -49,6 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             muted_hint: Default::default(),
             selected_camera: None,
             call_devices_cache: Vec::new(),
+            call_devices_listing: None,
             selected_devices: (None, None),
             group_playback_muted: Default::default(),
             call_connect_params: None,

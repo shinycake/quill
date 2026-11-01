@@ -58,7 +58,9 @@ struct MockInner {
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
     fail_group_video_sync: bool,
-    device_warms: usize,
+    device_lists: usize,
+    /// Device lists not answered yet, while they are held.
+    held_lists: Option<Vec<std::sync::mpsc::Sender<Vec<MediaDevice>>>>,
     engine_event_hook: Option<EngineEventCallback>,
     live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
@@ -231,8 +233,21 @@ impl MockEngine {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
     }
 
-    pub fn device_warms(&self) -> usize {
-        self.inner.lock_or_recover().device_warms
+    /// Device lists wait for [`Self::release_device_lists`] from now on.
+    pub fn hold_device_lists(&self) {
+        self.inner.lock_or_recover().held_lists = Some(Vec::new());
+    }
+
+    pub fn release_device_lists(&self) {
+        let mut inner = self.inner.lock_or_recover();
+        let held = inner.held_lists.take().unwrap_or_default();
+        for answer in held {
+            let _ = answer.send(inner.devices.clone());
+        }
+    }
+
+    pub fn device_lists(&self) -> usize {
+        self.inner.lock_or_recover().device_lists
     }
 
     pub fn fail_next_group_video_sync(&self) {
@@ -865,8 +880,17 @@ impl CallEngine for MockEngine {
         Ok(inner.devices.clone())
     }
 
-    fn warm_devices(&self) {
-        self.inner.lock_or_recover().device_warms += 1;
+    fn list_media_devices(&self, answer: std::sync::mpsc::Sender<Vec<MediaDevice>>) {
+        let mut inner = self.inner.lock_or_recover();
+        inner.device_lists += 1;
+        if let Some(held) = inner.held_lists.as_mut() {
+            held.push(answer);
+            return;
+        }
+        drop(inner);
+        if let Ok(devices) = self.media_devices() {
+            let _ = answer.send(devices);
+        }
     }
 
     fn protocol(&self) -> EngineProtocol {

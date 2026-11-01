@@ -1,5 +1,6 @@
 //! The `CallEngine` trait: the app-facing call-engine interface.
 use super::*;
+use std::sync::mpsc::Sender;
 
 /// Phase C2b: 1:1 engine lifecycle and bidirectional signaling. The
 /// engine queues inbound signaling until `connect` creates the call.
@@ -330,9 +331,14 @@ pub trait CallEngine {
     /// Phase C2b: engine -> app; enumerate capture and playback devices.
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError>;
 
-    /// A call is coming: do off this thread what makes the first
-    /// [`Self::media_devices`] of a process slow.
-    fn warm_devices(&self) {}
+    /// [`Self::media_devices`] for `answer`, off this thread where listing
+    /// can take long (the first list of a process loads the OS frameworks).
+    /// No answer when the list fails.
+    fn list_media_devices(&self, answer: Sender<Vec<MediaDevice>>) {
+        if let Ok(devices) = self.media_devices() {
+            let _ = answer.send(devices);
+        }
+    }
 
     /// Phase C2b: engine -> app; return the protocol the engine itself reports.
     fn protocol(&self) -> EngineProtocol;

@@ -506,6 +506,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// offer; degrades to the honest no-device params when the offer
     /// fails. The joins that call this refuse first without an engine.
     fn group_join_params(&mut self, group_call_id: i32, is_muted: bool) -> GroupCallJoinParams {
+        self.refresh_call_devices();
         let is_my_video_enabled = self
             .session
             .calls

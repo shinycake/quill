@@ -327,6 +327,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
+    /// The device list on its way (`refresh_call_devices`).
+    pub(crate) call_devices_listing: Option<std::sync::mpsc::Receiver<Vec<MediaDevice>>>,
     pub(crate) selected_devices: (Option<String>, Option<String>),
     /// The group calls whose sound you muted for yourself (the live
     /// stream's settings box, the live story's sound toggle).

@@ -118,7 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The device list as of joining, for the camera and for the
             // screen-share availability gate.
             self.refresh_call_devices();
-            let camera = video_enabled.then(|| self.call_camera_device()).flatten();
+            let camera = video_enabled.then(|| self.camera_to_join_with()).flatten();
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };
