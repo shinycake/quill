@@ -238,6 +238,7 @@ impl QuillApp {
         let to = (!model.translated).then_some(model.to);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.set_chat_translated_to(chat_id, to);
+            quill::wake::UPDATES.poke();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.set_chat_translated_to(chat_id, to);
         }
@@ -357,13 +358,11 @@ impl QuillApp {
             }
             return true;
         };
-        if current != model.to {
-            if let Some(live) = self.live.as_mut() {
-                live.driver
-                    .session
-                    .set_chat_translated_to(chat_id, Some(model.to));
-            }
-            return true;
+        let followed = current != model.to;
+        if followed && let Some(live) = self.live.as_mut() {
+            live.driver
+                .session
+                .set_chat_translated_to(chat_id, Some(model.to));
         }
         let ui = self.translate_ui_language();
         let skip = self.settings.translate.prefs.skip(&ui);
@@ -373,17 +372,17 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.histories.contains_key(&chat_id.0))
         {
-            return false;
+            return followed;
         }
         let mut scan = std::mem::take(&mut self.settings.translate.pump);
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
                 self.settings.translate.pump = scan;
-                return false;
+                return followed;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
                 self.settings.translate.pump = scan;
-                return false;
+                return followed;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
             let key = PumpKey {
@@ -418,13 +417,19 @@ impl QuillApp {
             found.into_iter().take(room).collect()
         };
         self.settings.translate.pump = scan;
+        let Some(live) = self.live.as_mut() else {
+            #[cfg(test)]
+            self.settings
+                .translate
+                .asked
+                .extend(wanted.into_iter().map(|id| (id, model.to)));
+            return followed;
+        };
         let mut sent = false;
-        if let Some(live) = self.live.as_mut() {
-            for id in wanted {
-                sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
-            }
+        for id in wanted {
+            sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
         }
-        sent
+        followed || sent
     }
 
     /// Settings → Translation: Show Translate Button, Translate Entire Chats

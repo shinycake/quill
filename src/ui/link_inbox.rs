@@ -36,8 +36,6 @@ pub fn install_link_inbox(
                             && let Some(link) = quill::deep_link_inbox::pop_link()
                         {
                             this.queue_deep_link(link);
-                            // The poll loop starts the flow.
-                            quill::wake::UPDATES.poke();
                         }
                     })
                     .is_ok();

@@ -1,5 +1,6 @@
 //! Driver tests: automatic photo and chat-photo downloads.
 use super::*;
+use crate::disk_guard::{DiskState, FLOORS};
 
 #[test]
 fn photo_history_auto_downloads_thumb_and_full_photo() {
@@ -424,6 +425,62 @@ fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn file_update(id: i32, size: i64, done: i64) -> String {
+    format!(
+        r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":{size},"expected_size":{size},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":{done},"downloaded_size":{done}}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":{size}}}}}}}"#
+    )
+}
+
+#[test]
+fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
+    const MIB: u64 = 1 << 20;
+    const CLOSE: u64 = FLOORS.close;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    driver
+        .download_user_file(FileId(51), Some((ChatId(7), 99)))
+        .unwrap();
+    driver
+        .download_user_file(FileId(52), Some((ChatId(7), 98)))
+        .unwrap();
+    let big = 900 * MIB as i64;
+    ingest(&mut driver, &file_update(51, big, 100 * MIB as i64));
+    ingest(&mut driver, &file_update(52, 10 * MIB as i64, 0));
+    let base = recorder.snapshot().len();
+
+    driver
+        .note_disk(DiskState::Low, Some(CLOSE + 500 * MIB), &FLOORS)
+        .unwrap();
+    assert!(driver.session.media.disk_holds_auto_downloads);
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 1, "the 10 MiB file fits: {sent:?}");
+    let pause: Value = serde_json::from_str(&sent[base]).unwrap();
+    assert_eq!(pause["@type"], "toggleDownloadIsPaused");
+    assert_eq!(pause["file_id"], 51);
+    assert_eq!(pause["is_paused"], true);
+
+    driver
+        .note_disk(DiskState::Healthy, Some(CLOSE + 900 * MIB), &FLOORS)
+        .unwrap();
+    assert!(!driver.session.media.disk_holds_auto_downloads);
+    assert_eq!(recorder.snapshot().len(), base + 1, "nothing to pause");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // REVIEW-ONLY throwaway tests, never committed.
 fn avatar_driver() -> (
     ConnectDriver<Arc<RecordingSender>>,
@@ -453,6 +510,29 @@ fn avatar_downloads(recorder: &RecordingSender, id: i32) -> Vec<String> {
         .collect()
 }
 
+fn avatar_user(id: i64, file: i32) -> String {
+    format!(
+        r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"U","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","small":{{"@type":"file","id":{file}}},"big":null}}}}}}"#
+    )
+}
+
+fn tick_on_screen(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
+    driver.poll_ticks(
+        crate::connect::TickScope::OnScreen {
+            settings_open: false,
+        },
+        std::time::Instant::now(),
+    );
+}
+
+fn error_answer(request: &str, message: &str) -> String {
+    let extra = serde_json::from_str::<Value>(request).unwrap()["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"{message}"}}"#)
+}
+
 #[test]
 fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
     let (mut driver, recorder, dyn_sink, dir) = avatar_driver();
@@ -462,44 +542,22 @@ fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
             .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
             .unwrap();
     };
-    let tick = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
-        driver.poll_ticks(
-            crate::connect::TickScope::OnScreen {
-                settings_open: false,
-            },
-            std::time::Instant::now(),
-        );
-    };
-    let user = |id: i64, file: i32| {
-        format!(
-            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"U","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","small":{{"@type":"file","id":{file}}},"big":null}}}}}}"#
-        )
-    };
     feed(
         &mut driver,
         r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
     );
     // 1. An error reply: the count drops and a frame's claim sends nothing more.
-    feed(&mut driver, &user(42, 92));
+    feed(&mut driver, &avatar_user(42, 92));
     assert_eq!(driver.session.user_photo_path(42), None);
-    tick(&mut driver);
+    tick_on_screen(&mut driver);
     let sent = avatar_downloads(&recorder, 92);
     assert_eq!(sent.len(), 1);
     assert!(driver.session.requests.has_download(FileId(92)));
-    let extra = serde_json::from_str::<Value>(&sent[0]).unwrap()["@extra"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    feed(
-        &mut driver,
-        &format!(
-            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"FILE_ID_INVALID"}}"#
-        ),
-    );
+    feed(&mut driver, &error_answer(&sent[0], "FILE_ID_INVALID"));
     assert!(!driver.session.requests.has_download(FileId(92)));
     for _ in 0..5 {
         assert_eq!(driver.session.user_photo_path(42), None);
-        tick(&mut driver);
+        tick_on_screen(&mut driver);
     }
     assert_eq!(
         avatar_downloads(&recorder, 92).len(),
@@ -507,9 +565,9 @@ fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
         "failed file re-sent"
     );
     // 2. A cancel with the answer still out, then the answer.
-    feed(&mut driver, &user(43, 93));
+    feed(&mut driver, &avatar_user(43, 93));
     assert_eq!(driver.session.user_photo_path(43), None);
-    tick(&mut driver);
+    tick_on_screen(&mut driver);
     let sent = avatar_downloads(&recorder, 93);
     assert_eq!(sent.len(), 1);
     assert!(driver.cancel_download(FileId(93)).unwrap());
@@ -517,37 +575,75 @@ fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
         driver.session.requests.has_download(FileId(93)),
         "answer still out"
     );
-    let extra = serde_json::from_str::<Value>(&sent[0]).unwrap()["@extra"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    feed(
-        &mut driver,
-        &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"cancelled"}}"#),
-    );
+    feed(&mut driver, &error_answer(&sent[0], "cancelled"));
     assert!(!driver.session.requests.has_download(FileId(93)));
     // 3. Data saver: nothing goes out; the claim is dropped, not kept.
-    feed(&mut driver, &user(44, 94));
+    feed(&mut driver, &avatar_user(44, 94));
     driver.session.settings.media_prefs.data_saver = true;
     assert_eq!(driver.session.user_photo_path(44), None);
-    tick(&mut driver);
+    tick_on_screen(&mut driver);
     assert!(avatar_downloads(&recorder, 94).is_empty());
     driver.session.settings.media_prefs.data_saver = false;
-    tick(&mut driver);
+    tick_on_screen(&mut driver);
     assert!(
         avatar_downloads(&recorder, 94).is_empty(),
         "the claim taken under data saver is gone until a frame asks again"
     );
     assert_eq!(driver.session.user_photo_path(44), None);
-    tick(&mut driver);
+    tick_on_screen(&mut driver);
     assert_eq!(avatar_downloads(&recorder, 94).len(), 1);
     // 4. Background scope never drains.
-    feed(&mut driver, &user(45, 95));
+    feed(&mut driver, &avatar_user(45, 95));
     assert_eq!(driver.session.user_photo_path(45), None);
     driver.poll_ticks(
         crate::connect::TickScope::Background,
         std::time::Instant::now(),
     );
     assert!(avatar_downloads(&recorder, 95).is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn only_a_claim_the_next_pass_sends_wakes_it() {
+    let (mut driver, recorder, dyn_sink, dir) = avatar_driver();
+    let seq = AtomicU64::new(0);
+    let feed = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let wake = crate::wake::Signal::new();
+    feed(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    feed(&mut driver, &avatar_user(46, 96));
+    assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+    assert_eq!(wake.epoch(), 1, "the claim wakes the pass that sends it");
+    assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+    assert_eq!(wake.epoch(), 1, "a repeat before that pass costs nothing");
+    tick_on_screen(&mut driver);
+    assert_eq!(avatar_downloads(&recorder, 96).len(), 1);
+    for _ in 0..3 {
+        assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+        tick_on_screen(&mut driver);
+    }
+    assert_eq!(wake.epoch(), 1, "a file in flight never wakes the loop");
+    let sent = avatar_downloads(&recorder, 96);
+    feed(&mut driver, &error_answer(&sent[0], "FILE_ID_INVALID"));
+    for _ in 0..3 {
+        assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+        tick_on_screen(&mut driver);
+    }
+    assert_eq!(avatar_downloads(&recorder, 96).len(), 1);
+    assert_eq!(
+        wake.epoch(),
+        1,
+        "a failed file is not sent, so it never wakes"
+    );
+    feed(&mut driver, &avatar_user(47, 97));
+    driver.session.settings.media_prefs.data_saver = true;
+    assert_eq!(driver.session.user_photo_path_waking(47, &wake), None);
+    assert_eq!(wake.epoch(), 1, "data saver sends nothing");
     let _ = std::fs::remove_dir_all(&dir);
 }

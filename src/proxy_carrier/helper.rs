@@ -365,6 +365,9 @@ impl CarrierHost for HelperCarrierHost {
         // Not starting is this process's trouble (no handles, no memory),
         // not proof the system has no web view: TDLib may try again.
         let mut child = spawn(program).map_err(|_| CarrierError::Terminated)?;
+        if let Some(generation) = &self.generation {
+            generation.hold(&child);
+        }
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             crate::child_reap::kill_and_reap(child);
             return Err(CarrierError::Terminated);
@@ -516,9 +519,9 @@ impl HelperCarrierHost {
         }
         if let Some(generation) = self.generation.take() {
             if wait {
-                generation.remove(data_folder::RETRY_FOR);
+                generation.tear_down(data_folder::RETRY_FOR);
             } else {
-                generation.remove_in_background(data_folder::RETRY_FOR);
+                generation.tear_down_in_background(data_folder::RETRY_FOR);
             }
         }
         waited
