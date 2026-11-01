@@ -693,7 +693,7 @@ fn frame_steps_move_one_picture_while_paused() {
     assert!(player.step_forward().is_none());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn ffmpeg_opens_a_path_that_is_not_utf8() {
     use std::os::unix::ffi::OsStrExt;

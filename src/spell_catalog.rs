@@ -473,7 +473,7 @@ pub fn install(dir: &Path, code: &str, aff: &[u8], dic: &[u8]) -> Result<(), Ins
         let tmp = dir.join(format!(".{code}.{ext}.part"));
         let target = dir.join(format!("{code}.{ext}"));
         std::fs::write(&tmp, bytes).map_err(InstallError::Io)?;
-        if let Err(err) = crate::fs_retry::rename_retrying(&tmp, &target, crate::fs_retry::SHORT) {
+        if let Err(err) = crate::fs_retry::rename_retrying(&tmp, &target, crate::fs_retry::LONG) {
             let _ = std::fs::remove_file(&tmp);
             return Err(InstallError::Io(err));
         }

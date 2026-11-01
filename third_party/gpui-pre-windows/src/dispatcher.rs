@@ -150,14 +150,10 @@ impl PlatformDispatcher for WindowsDispatcher {
     }
 
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant) {
-        let runnable = match &self.timers {
-            Some(timers) => match timers.schedule(duration, runnable) {
-                Ok(()) => return,
-                Err(runnable) => runnable,
-            },
-            None => runnable,
-        };
-        self.dispatch_on_threadpool_after(runnable, duration);
+        match &self.timers {
+            Some(timers) => timers.schedule(duration, runnable),
+            None => self.dispatch_on_threadpool_after(runnable, duration),
+        }
     }
 
     fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {

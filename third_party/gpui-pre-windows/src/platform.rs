@@ -1641,17 +1641,21 @@ fn file_open_dialog(
     }
 
     let mut paths = Vec::with_capacity(file_count as usize);
+    let mut skipped = None;
     for i in 0..file_count {
         let item = unsafe { results.GetItemAt(i)? };
         // An item with no file system path (a phone, a library) is skipped,
         // not the whole selection.
         match file_system_path(&item) {
             Ok(path) => paths.push(path),
-            Err(error) => log::warn!("skipping a picked item without a file path: {error}"),
+            Err(error) => skipped = Some(error),
         }
     }
 
-    Ok((!paths.is_empty()).then_some(paths))
+    match skipped {
+        Some(error) if paths.is_empty() => Err(error),
+        _ => Ok(Some(paths)),
+    }
 }
 
 fn file_system_path(item: &IShellItem) -> Result<PathBuf> {

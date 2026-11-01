@@ -126,7 +126,7 @@ pub fn save_current(app_root: &Path, id: EmojiSetId) -> std::io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     let tmp = dir.join(".current.part");
     std::fs::write(&tmp, id.key())?;
-    crate::fs_retry::rename_retrying(&tmp, &dir.join(CURRENT_FILE), crate::fs_retry::SHORT)
+    crate::fs_retry::rename_retrying(&tmp, &dir.join(CURRENT_FILE), crate::fs_retry::LONG)
         .inspect_err(|_| {
             let _ = std::fs::remove_file(&tmp);
         })

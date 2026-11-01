@@ -91,11 +91,6 @@ impl<T> TimerQueue<T> {
             Some(first) => Wait::For(first.deadline.saturating_duration_since(now)),
         }
     }
-
-    /// Empties the queue, for a thread that is stopping.
-    pub(crate) fn drain(&mut self) -> Vec<T> {
-        self.heap.drain().map(|entry| entry.item).collect()
-    }
 }
 
 #[cfg(test)]
@@ -146,17 +141,5 @@ mod tests {
             queue.push(at, n);
         }
         assert_eq!(queue.pop_due(at), vec![0, 1, 2, 3, 4]);
-    }
-
-    #[test]
-    fn drain_hands_back_everything_pending() {
-        let start = Instant::now();
-        let mut queue = TimerQueue::new();
-        queue.push(start + ms(10), 1);
-        queue.push(start + ms(20), 2);
-        let mut drained = queue.drain();
-        drained.sort();
-        assert_eq!(drained, vec![1, 2]);
-        assert_eq!(queue.wait(start), Wait::Forever);
     }
 }

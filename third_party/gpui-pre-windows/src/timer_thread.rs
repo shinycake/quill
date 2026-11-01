@@ -87,28 +87,17 @@ impl TimerThread {
         Some(Self { shared })
     }
 
-    /// Gives the runnable back when the thread has stopped.
-    pub(crate) fn schedule(
-        &self,
-        duration: Duration,
-        runnable: RunnableVariant,
-    ) -> Result<(), RunnableVariant> {
+    pub(crate) fn schedule(&self, duration: Duration, runnable: RunnableVariant) {
         let Some(deadline) = Instant::now().checked_add(duration) else {
             // Never due. Dropping it would cancel the task and make the next
             // poll of its awaiter panic.
             std::mem::forget(runnable);
-            return Ok(());
+            return;
         };
-        let mut state = self.shared.lock();
-        if state.stopped {
-            return Err(runnable);
-        }
-        let earliest = state.timers.push(deadline, runnable);
-        drop(state);
+        let earliest = self.shared.lock().timers.push(deadline, runnable);
         if earliest {
             self.shared.wake();
         }
-        Ok(())
     }
 }
 
@@ -137,9 +126,9 @@ fn run(shared: &Shared, timer: &Handle, high_resolution: bool) {
     loop {
         let (due, wait) = {
             let mut state = shared.lock();
+            // A pending runnable holds the dispatcher that owns `TimerThread`,
+            // so nothing is queued by the time it drops.
             if state.stopped {
-                // Same as a failed dispatch: leak rather than cancel.
-                state.timers.drain().into_iter().for_each(std::mem::forget);
                 return;
             }
             let now = Instant::now();

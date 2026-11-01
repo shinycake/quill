@@ -358,8 +358,7 @@ played at about 32 Hz. Telegram Desktop runs its animations on a
   rejected it uses a plain waitable timer and holds `timeBeginPeriod(1)` only
   across waits shorter than 100 ms (animation frames), not idle ones.
 - `src/dispatcher.rs`: `dispatch_after` schedules on that thread; the
-  thread-pool timer remains only for when the thread could not start or has
-  stopped.
+  thread-pool timer remains only for when the thread could not start.
 - `src/gpui_windows.rs`: declares the new modules.
 
 Type-checked with `cargo check -p gpui-pre-windows --target
@@ -373,9 +372,9 @@ Added in 2026:
   into a `PathBuf` (as UTF-16, so a name that is not valid Unicode survives)
   and frees the string with `CoTaskMemFree`. Upstream's open dialog never
   freed it, and one item without a file system path (a phone, a library)
-  failed the whole selection; such items are now logged and skipped, and a
-  selection with none left reads as cancelled. The save dialog uses the same
-  helper.
+  failed the whole selection. Such items are now skipped, and a selection
+  with none left returns the error as upstream did. The save dialog uses the
+  same helper.
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
