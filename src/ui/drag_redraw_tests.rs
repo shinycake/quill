@@ -13,6 +13,7 @@ struct Counts {
     shell: Cell<usize>,
     slice: Cell<usize>,
     drag_over: Cell<usize>,
+    covered: Cell<bool>,
     ghost_at: RefCell<Vec<Point<Pixels>>>,
 }
 
@@ -76,11 +77,20 @@ struct Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.counts.shell.set(self.counts.shell.get() + 1);
-        div().size_full().child(
-            self.slice
-                .clone()
-                .cached(StyleRefinement::default().size_full()),
-        )
+        let cover = self
+            .counts
+            .covered
+            .get()
+            .then(|| div().id("cover").absolute().size_full().occlude());
+        div()
+            .size_full()
+            .relative()
+            .child(
+                self.slice
+                    .clone()
+                    .cached(StyleRefinement::default().size_full()),
+            )
+            .children(cover)
     }
 }
 
@@ -188,4 +198,27 @@ fn a_file_entering_over_a_drop_target_renders_its_style(cx: &mut TestAppContext)
 
     assert_eq!(counts.slice.get(), slice + 1);
     assert!(counts.drag_over.get() > 0);
+}
+
+fn set_covered(window: AnyWindowHandle, counts: &Counts, cx: &mut TestAppContext) {
+    counts.covered.set(!counts.covered.get());
+    cx.update_window(window, |root, _, cx| cx.notify(root.entity_id()))
+        .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn a_drop_target_covered_under_a_still_pointer_renders_again_once(cx: &mut TestAppContext) {
+    let (window, counts) = open(cx);
+    start_drag(window, cx);
+    mouse_move(window, 150., cx);
+    let slice = counts.slice.get();
+
+    set_covered(window, &counts, cx);
+
+    assert_eq!(counts.slice.get(), slice + 1);
+    cx.update_window(window, |root, _, cx| cx.notify(root.entity_id()))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(counts.slice.get(), slice + 1, "the next frame replays");
 }
