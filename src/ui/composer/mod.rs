@@ -7,7 +7,6 @@ use super::actions::{
 };
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
-use super::message_text::rich_block_element;
 use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;

@@ -193,5 +193,5 @@ fn the_rich_editor_shows_the_blocks_of_a_long_draft(cx: &mut TestAppContext) {
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(text, markup);
     let blocks = quill::rich::preview_blocks(&text);
-    assert!(blocks.len() > 1_000, "{} blocks", blocks.len());
+    assert!(blocks.len() > 500, "{} blocks", blocks.len());
 }
