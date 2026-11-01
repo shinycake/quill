@@ -169,6 +169,36 @@ impl ThreadView {
         }
         doomed.len()
     }
+
+    pub(crate) fn trim_after_page(&mut self, far_end: WindowEnd) -> usize {
+        match self.history.messages.len().checked_sub(HISTORY_WINDOW_CAP) {
+            Some(1..) => {
+                let excess = self.history.messages.len() - HISTORY_WINDOW_TRIM_TO;
+                self.trim_replies(far_end, excess)
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn trim_live(&mut self) -> Vec<WindowEnd> {
+        let messages = &self.history.messages;
+        let len = messages.len();
+        let above = self
+            .history
+            .reader_top
+            .map(|top| messages.range(..top).count());
+        let span = live_trim_span(len, above);
+        let mut moved = Vec::new();
+        for (end, count) in [
+            (WindowEnd::Oldest, span.oldest),
+            (WindowEnd::Newest, span.newest),
+        ] {
+            if self.trim_replies(end, count) > 0 {
+                moved.push(end);
+            }
+        }
+        moved
+    }
 }
 
 impl Session {

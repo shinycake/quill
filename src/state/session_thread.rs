@@ -181,6 +181,12 @@ impl Session {
             // newest reply; older pages leave the newest row as it is.
             thread.refresh_has_newer();
         }
+        let far_end = if newer {
+            WindowEnd::Oldest
+        } else {
+            WindowEnd::Newest
+        };
+        let trimmed = thread.trim_after_page(far_end) > 0;
         thread.history.total_count = thread.history.messages.len() as i32;
         // The page around the saved position landed without its reply
         // (deleted): load the default first page instead.
@@ -193,6 +199,9 @@ impl Session {
         }
         if thread.status == ThreadStatus::LoadingHistory {
             thread.status = ThreadStatus::Ready;
+        }
+        if trimmed {
+            self.drop_thread_pages_past(&[far_end]);
         }
     }
 
