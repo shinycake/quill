@@ -70,7 +70,7 @@ impl QuillApp {
         if let Some(page) = page {
             self.switch_settings_page(page);
         }
-        // The poll loop's ticks follow Settings being open (the grams probe).
+        // The next pass sends the grams balance probe, which waits for Settings.
         quill::wake::UPDATES.poke();
     }
 

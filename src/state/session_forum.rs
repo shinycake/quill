@@ -188,9 +188,8 @@ impl Session {
         path
     }
 
-    /// Whether a pass sends this claim. A download that failed stays
-    /// failed, as for every automatic download, though the file still
-    /// counts as missing.
+    /// `should_download` alone still accepts a failed file, which no
+    /// automatic download sends again.
     fn avatar_claim_sends(&self, file_id: FileId) -> bool {
         !self.settings.media_prefs.data_saver
             && self.should_download(file_id)
