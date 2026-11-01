@@ -12,15 +12,15 @@
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod vulkan;
 
-use gpui_kit::Platform;
 #[cfg(target_os = "linux")]
 use gpui_kit::ForegroundExecutor;
+use gpui_kit::Platform;
 use quill::lang::{keys, tr};
 #[cfg(target_os = "linux")]
 use std::cell::RefCell;
+use std::rc::Rc;
 #[cfg(target_os = "linux")]
 use std::rc::Weak;
-use std::rc::Rc;
 
 /// Report `error` from opening the main window and end the process.
 #[expect(
@@ -89,7 +89,10 @@ pub(crate) fn report_gpu_gone() {
         eprintln!("quill: the GPU stopped working: {detail}");
         show_alert(
             tr(keys::Q_MISC_GPU_STOPPED_WORKING),
-            &quill::lang::tr_with(keys::Q_MISC_GPU_STOPPED_WORKING_DETAIL, &[("detail", &detail)]),
+            &quill::lang::tr_with(
+                keys::Q_MISC_GPU_STOPPED_WORKING_DETAIL,
+                &[("detail", &detail)],
+            ),
             tr(keys::Q_MISC_GPU_STOPPED_WORKING_SUMMARY),
         );
     }
