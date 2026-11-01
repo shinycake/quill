@@ -158,12 +158,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return false;
         }
-        let ids = self.session.take_avatar_claims();
-        if self.session.settings.media_prefs.data_saver {
-            return false;
-        }
         let mut sent = false;
-        for file_id in ids {
+        for file_id in self.session.take_avatar_claims() {
             sent |= matches!(
                 self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY),
                 Ok(Some(_))

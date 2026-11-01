@@ -5,6 +5,7 @@ use super::app::QuillApp;
 use super::audio::{NotificationSound, notification_sound};
 use super::connect_ui::live_status_for;
 use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
+use super::wake_wait::{PassEnd, PollPace, run_poll_loop};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -57,37 +58,13 @@ const CHAT_LIST_REDRAW: (Duration, Duration) =
 const LATER_REDRAW: (Duration, Duration) =
     (Duration::from_millis(1000), Duration::from_millis(4000));
 
-/// First sleep of the poll loop, and the shortest (updates still flowing).
-const POLL_START: Duration = Duration::from_millis(40);
-const POLL_BUSY: Duration = Duration::from_millis(10);
-/// Longest sleep while redraws are held back: they land on the batching
-/// intervals above, so the loop must come back at least this often.
-const POLL_HELD_BACK_MAX: Duration = Duration::from_millis(120);
-/// Longest sleep when nothing is pending. TDLib updates do not wait for
-/// it (the receive thread pokes [`quill::wake::UPDATES`]); it only bounds
-/// the time-driven checks in `poll_live` (request sweeps, presence, proxy).
-pub(super) const POLL_IDLE_MAX: Duration = Duration::from_secs(2);
-
-/// The next poll sleep: fast while updates flow, doubling up to
-/// [`POLL_IDLE_MAX`] when idle, and capped at [`POLL_HELD_BACK_MAX`] while
-/// a batched redraw is owed.
-pub(super) fn next_poll_delay(prev: Duration, busy: bool, redraw_held_back: bool) -> Duration {
-    if busy {
-        return POLL_BUSY;
-    }
-    let doubled = prev.saturating_mul(2).clamp(POLL_BUSY, POLL_IDLE_MAX);
-    if redraw_held_back {
-        doubled.min(POLL_HELD_BACK_MAX)
-    } else {
-        doubled
-    }
-}
-
-/// Caps a poll sleep at the earliest known deadline (a due flood retry, a
-/// pending bot message expiring), never below [`POLL_BUSY`].
-pub(super) fn cap_at_deadline(delay: Duration, deadline: Option<Duration>) -> Duration {
-    deadline.map_or(delay, |d| delay.min(d.max(POLL_BUSY)))
-}
+/// The poll loop's pace. TDLib updates do not wait for the ceiling (the
+/// receive thread pokes [`quill::wake::UPDATES`]); it only bounds the
+/// time-driven checks in `poll_live` (request sweeps, presence, proxy).
+const POLL_PACE: PollPace = PollPace {
+    gap: Duration::from_millis(10),
+    ceiling: Duration::from_secs(2),
+};
 
 /// What the TDLib poll has asked to redraw and not drawn yet.
 ///
@@ -98,8 +75,8 @@ pub(super) fn cap_at_deadline(delay: Duration, deadline: Option<Duration>) -> Du
 /// redraw at most once per `LATER_REDRAW`. The two batches are tracked
 /// apart, so a pending full redraw never holds a chat-list change back
 /// past its own interval. A held-back redraw is never dropped: the poll
-/// loop calls back at least every 120 ms while one is owed, with [`RedrawNeed::Nothing`]
-/// when nothing arrived.
+/// loop calls back when [`Self::next_due`] says, with
+/// [`RedrawNeed::Nothing`] when nothing arrived.
 #[derive(Debug)]
 pub(super) struct PolledRedraw {
     /// The last full redraw the poll asked for.
@@ -120,6 +97,10 @@ pub(super) enum PolledAction {
     Full,
 }
 
+fn gap_for((active_gap, inactive_gap): (Duration, Duration), active: bool) -> Duration {
+    if active { active_gap } else { inactive_gap }
+}
+
 impl PolledRedraw {
     pub(super) fn new(now: std::time::Instant) -> Self {
         Self {
@@ -130,9 +111,28 @@ impl PolledRedraw {
         }
     }
 
-    /// A batched redraw is owed and has not been drawn yet.
-    pub(super) fn pending(&self) -> bool {
-        self.list || matches!(self.full, RedrawNeed::Later | RedrawNeed::Now)
+    /// How long the owed full redraw may wait after the last one.
+    fn full_gap(&self, active: bool) -> Option<Duration> {
+        match self.full {
+            RedrawNeed::Now if active => Some(Duration::ZERO),
+            RedrawNeed::Now => Some(INACTIVE_REDRAW),
+            RedrawNeed::Later => Some(gap_for(LATER_REDRAW, active)),
+            RedrawNeed::Nothing | RedrawNeed::ChatList => None,
+        }
+    }
+
+    /// How long the owed chat-list redraw may wait after the last one.
+    fn list_gap(&self, active: bool) -> Option<Duration> {
+        self.list.then(|| gap_for(CHAT_LIST_REDRAW, active))
+    }
+
+    /// When the soonest owed redraw comes due, from `now`.
+    pub(super) fn next_due(&self, active: bool, now: std::time::Instant) -> Option<Duration> {
+        let left =
+            |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
+        let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
+        let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
+        full.into_iter().chain(list).min()
     }
 
     /// Record `need` and say what to redraw now.
@@ -147,18 +147,17 @@ impl PolledRedraw {
             RedrawNeed::ChatList => self.list = true,
             RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
         }
-        let pick = |(active_gap, inactive_gap): (Duration, Duration)| {
-            if active { active_gap } else { inactive_gap }
-        };
-        let full_due = match self.full {
-            RedrawNeed::Now => active || now.duration_since(self.last_full) >= INACTIVE_REDRAW,
-            RedrawNeed::Later => now.duration_since(self.last_full) >= pick(LATER_REDRAW),
-            RedrawNeed::Nothing | RedrawNeed::ChatList => false,
-        };
-        if full_due {
+        let since = |last: std::time::Instant| now.duration_since(last);
+        if self
+            .full_gap(active)
+            .is_some_and(|gap| since(self.last_full) >= gap)
+        {
             return self.drawn(now);
         }
-        if self.list && now.duration_since(self.last_list) >= pick(CHAT_LIST_REDRAW) {
+        if self
+            .list_gap(active)
+            .is_some_and(|gap| since(self.last_list) >= gap)
+        {
             self.list = false;
             self.last_list = now;
             return PolledAction::ChatList;
@@ -184,43 +183,28 @@ impl QuillApp {
         let generation = self.connection.generation;
         // window-scope: `poll_live` puts the main window's state in place itself.
         cx.spawn(async move |this, cx| {
-            let mut delay = POLL_START;
-            loop {
-                // Taken before the poll, so an update that arrives while
-                // it runs ends the sleep below at once.
-                let seen = quill::wake::UPDATES.epoch();
-                let step = this
-                    .update(cx, |this, cx| {
-                        if generation != this.connection.generation {
-                            return None;
+            let executor = cx.background_executor().clone();
+            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, || {
+                this.update(cx, |this, cx| {
+                    if generation != this.connection.generation {
+                        return None;
+                    }
+                    let work_left = this.poll_live(cx);
+                    let now = std::time::Instant::now();
+                    let active = this.frame.window_active.get();
+                    let redraw = this.notify.polled_redraw.next_due(active, now);
+                    this.live.as_ref().map(|live| {
+                        let timed = live.driver.next_deadline(now, quill::state::unix_ms_now());
+                        PassEnd {
+                            work_left,
+                            due: redraw.into_iter().chain(timed).min(),
                         }
-                        let busy = this.poll_live(cx);
-                        let held_back = this.notify.polled_redraw.pending();
-                        let next = next_poll_delay(delay, busy, held_back);
-                        this.live.as_ref().map(|live| {
-                            cap_at_deadline(
-                                next,
-                                live.driver.next_deadline(
-                                    std::time::Instant::now(),
-                                    quill::state::unix_ms_now(),
-                                ),
-                            )
-                        })
                     })
-                    .ok()
-                    .flatten();
-                let Some(next) = step else {
-                    break;
-                };
-                delay = next;
-                super::wake_wait::sleep_or_wake(
-                    cx.background_executor(),
-                    &quill::wake::UPDATES,
-                    seen,
-                    delay,
-                )
-                .await;
-            }
+                })
+                .ok()
+                .flatten()
+            })
+            .await;
         })
         .detach();
     }
@@ -285,9 +269,9 @@ impl QuillApp {
         )
     }
 
-    /// Drain and apply everything TDLib has queued. Returns whether
-    /// anything arrived, so the poll loop can stay fast during bursts and
-    /// back off while idle.
+    /// Drain and apply what TDLib has queued, within the budget. Returns
+    /// whether work is known to be left, so the poll loop comes back after
+    /// its gap instead of resting.
     pub(super) fn poll_live(&mut self, cx: &mut Context<Self>) -> bool {
         // Updates apply to the main window's view; a chat window's input
         // may have left its own state in place.
@@ -295,9 +279,7 @@ impl QuillApp {
         // What this poll may change outside the session (the status line,
         // the login-review box, the folder tab): any change redraws at once.
         let shown_before = self.polled_chrome();
-        self.poll_device_qr(cx);
         self.sync_presence();
-        self.drain_account_notices();
         self.apply_pending_keybindings(cx);
         // Notification clicks from the Linux listener thread: replies and
         // read receipts run here, chat opens wake the window.
@@ -305,6 +287,7 @@ impl QuillApp {
         self.drain_account_clicks(cx);
         let settings_open = self.settings.open;
         let Some(live) = self.live.as_mut() else {
+            self.clear_device_qr();
             return false;
         };
         let prev_auth = live.driver.session.auth.clone();
@@ -325,10 +308,6 @@ impl QuillApp {
         // before one poll runs; a `prev_auth`-only check then sees
         // Ready → Closed and misses the restart entirely.
         let mut saw_logging_out = matches!(prev_auth, AuthorizationState::LoggingOut);
-        // Apply updates under a per-tick time budget: a sync burst (thousands
-        // of updates after reconnecting) is spread over several frames
-        // instead of freezing one. Leftovers stay queued and the loop comes
-        // back at its busy cadence.
         let budget_start = std::time::Instant::now();
         let mut budget_hit = false;
         live.driver.begin_batch();
@@ -456,6 +435,7 @@ impl QuillApp {
         // From here on, `progressed` marks results the UI drains (status
         // notes, finished exports, links): those redraw at once.
         let ingested = std::mem::take(&mut progressed);
+        let mut work_left = budget_hit;
         // Picture-in-Picture: its account logging out, or its message
         // deleted (tdesktop `sessionChanges`, `itemRemoved`), handled here
         // too because the root render does not run while the main window
@@ -469,6 +449,8 @@ impl QuillApp {
             self.video_pip_account_ended(&account, cx);
         }
         self.forget_sends_after_auth(&prev_auth, saw_logging_out);
+        self.poll_device_qr(cx);
+        self.drain_account_notices();
         if ingested {
             self.check_video_pip(cx);
             // The tray, the badge and the OS menus follow what was applied.
@@ -497,6 +479,7 @@ impl QuillApp {
                 .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
             {
                 progressed = true;
+                work_left = true;
             }
         }
         if self.poll_chat_export_progress() {
@@ -761,7 +744,7 @@ impl QuillApp {
         if logged_out {
             self.restart_live_connection(cx);
         }
-        progressed || send_failed
+        work_left
     }
 
     /// Slice auth-logout-warning: drop the logged-out client and start a
@@ -978,86 +961,67 @@ mod spawn_call_notification;
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        POLL_BUSY, POLL_HELD_BACK_MAX, POLL_IDLE_MAX, POLL_START, PolledAction, PolledRedraw,
-        cap_at_deadline, logout_restart_trigger, next_poll_delay,
-    };
+    use super::{POLL_PACE, PolledAction, PolledRedraw, logout_restart_trigger};
     use quill::state::RedrawNeed;
     use quill::telegram::envelope::AuthorizationState;
     use std::time::{Duration, Instant};
 
-    #[test]
-    fn a_due_deadline_caps_the_idle_poll_sleep() {
-        assert_eq!(cap_at_deadline(POLL_IDLE_MAX, None), POLL_IDLE_MAX);
-        assert_eq!(cap_at_deadline(POLL_IDLE_MAX, Some(ms(300))), ms(300));
-        assert_eq!(cap_at_deadline(ms(40), Some(ms(300))), ms(40));
-        // Already due: run again at the busy cadence, not in a spin.
-        assert_eq!(
-            cap_at_deadline(POLL_IDLE_MAX, Some(Duration::ZERO)),
-            POLL_BUSY
-        );
-    }
-
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
-    }
-
-    /// Timer fires of the poll loop over `secs` of silence, starting from
-    /// a busy burst.
-    fn idle_poll_fires(secs: u64, held_back: bool) -> u64 {
-        let mut delay = next_poll_delay(POLL_START, true, held_back);
-        let (mut elapsed, mut fires) = (Duration::ZERO, 0);
-        while elapsed < Duration::from_secs(secs) {
-            delay = next_poll_delay(delay, false, held_back);
-            elapsed += delay;
-            fires += 1;
-        }
-        fires
-    }
-
-    #[test]
-    fn an_idle_signed_in_poll_loop_wakes_under_one_a_second() {
-        // The brief: the main thread wakes at most about once a second
-        // when nothing arrives. Thirty seconds of silence: the schedule
-        // ramps 20 ms to 2 s and then holds.
-        let fires = idle_poll_fires(30, false);
-        assert!(fires <= 30, "{fires} poll fires in 30 s idle");
-        // The old fixed 120 ms tick fired 250 times.
-        assert!(fires < 250 / 8);
-    }
-
-    #[test]
-    fn the_poll_loop_goes_fast_the_moment_updates_flow() {
-        assert_eq!(next_poll_delay(POLL_IDLE_MAX, true, false), POLL_BUSY);
-        assert_eq!(next_poll_delay(POLL_IDLE_MAX, true, true), POLL_BUSY);
-    }
-
-    #[test]
-    fn a_held_back_redraw_keeps_the_loop_at_most_120_ms_apart() {
-        let mut delay = POLL_BUSY;
-        for _ in 0..20 {
-            delay = next_poll_delay(delay, false, true);
-            assert!(delay <= POLL_HELD_BACK_MAX);
-        }
-        assert_eq!(delay, POLL_HELD_BACK_MAX);
-        // Once nothing is owed any more it backs off further.
-        let mut delay = POLL_HELD_BACK_MAX;
-        for _ in 0..20 {
-            delay = next_poll_delay(delay, false, false);
-        }
-        assert_eq!(delay, POLL_IDLE_MAX);
     }
 
     #[test]
     fn a_pending_redraw_is_reported_until_it_is_drawn() {
         let start = Instant::now();
         let mut redraw = PolledRedraw::new(start);
-        assert!(!redraw.pending());
-        // Presence update: owed, not drawn yet (400 ms batching).
+        assert_eq!(redraw.next_due(true, start), None);
         let _ = redraw.decide(RedrawNeed::ChatList, true, start + ms(1));
-        assert!(redraw.pending());
+        assert_eq!(redraw.next_due(true, start + ms(1)), Some(ms(399)));
         let _ = redraw.decide(RedrawNeed::Nothing, true, start + ms(500));
-        assert!(!redraw.pending());
+        assert_eq!(redraw.next_due(true, start + ms(500)), None);
+    }
+
+    #[test]
+    fn the_soonest_owed_redraw_sets_the_due_time() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        let _ = redraw.decide(RedrawNeed::Later, true, start + ms(100));
+        assert_eq!(redraw.next_due(true, start + ms(100)), Some(ms(900)));
+        let _ = redraw.decide(RedrawNeed::ChatList, true, start + ms(200));
+        assert_eq!(redraw.next_due(true, start + ms(200)), Some(ms(200)));
+        assert_eq!(redraw.next_due(false, start + ms(200)), Some(ms(1800)));
+    }
+
+    #[test]
+    fn a_poll_on_the_due_time_draws_what_was_owed() {
+        let cases = [
+            (RedrawNeed::ChatList, true, PolledAction::ChatList),
+            (RedrawNeed::ChatList, false, PolledAction::ChatList),
+            (RedrawNeed::Later, true, PolledAction::Full),
+            (RedrawNeed::Later, false, PolledAction::Full),
+            (RedrawNeed::Now, false, PolledAction::Full),
+        ];
+        for (need, active, drawn) in cases {
+            let start = Instant::now();
+            let arrived = start + ms(100);
+            let mut redraw = PolledRedraw::new(start);
+            assert_eq!(redraw.decide(need, active, arrived), PolledAction::Wait);
+            let wait = redraw.next_due(active, arrived);
+            let wait = wait.expect("a redraw is owed");
+            let early = arrived + wait.saturating_sub(ms(1));
+            assert_eq!(
+                redraw.decide(RedrawNeed::Nothing, active, early),
+                PolledAction::Wait,
+                "{need:?} early"
+            );
+            let due = arrived + wait;
+            assert_eq!(
+                redraw.decide(RedrawNeed::Nothing, active, due),
+                drawn,
+                "{need:?} on time"
+            );
+            assert_eq!(redraw.next_due(active, due), None);
+        }
     }
 
     #[test]
@@ -1240,10 +1204,10 @@ mod tests {
     }
 
     /// Feeds `PolledRedraw` a pseudo-random stream of needs, polled the
-    /// way the poll loop does (10–120 ms apart, with the window going to
-    /// the background and back), and checks that every need is covered
-    /// by a redraw no later than its interval allows: held back, never
-    /// dropped.
+    /// way the poll loop does (when an update arrives or a redraw comes
+    /// due, with the window going to the background and back), and checks
+    /// that every need is covered by a redraw no later than its interval
+    /// allows: held back, never dropped.
     #[test]
     fn every_need_is_drawn_within_its_interval() {
         let start = Instant::now();
@@ -1261,11 +1225,17 @@ mod tests {
         let mut owed_full: Option<(Instant, RedrawNeed)> = None;
         let mut active = true;
         for _ in 0..20_000 {
-            at += ms(10 + next(111));
+            let arrival = ms(10 + next(111));
+            let due = redraw
+                .next_due(active, at)
+                .map(|due| due.max(POLL_PACE.gap))
+                .filter(|due| *due < arrival);
+            at += due.unwrap_or(arrival);
             if next(200) == 0 {
                 active = !active;
             }
             let need = match next(10) {
+                _ if due.is_some() => RedrawNeed::Nothing,
                 0..=4 => RedrawNeed::Nothing,
                 5..=7 => RedrawNeed::ChatList,
                 8 => RedrawNeed::Later,
@@ -1290,7 +1260,7 @@ mod tests {
                 PolledAction::Wait => {}
             }
             // The longest an owed redraw may wait, plus one poll gap.
-            let slack = ms(121);
+            let slack = POLL_PACE.gap;
             if let Some(since) = owed_list {
                 let (on, off) = super::CHAT_LIST_REDRAW;
                 let limit = if active { on } else { off };

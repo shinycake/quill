@@ -117,8 +117,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// How long until the earliest time-driven work here and in the session
-    /// is due (a flood retry, a pending bot message expiring), so the poll
-    /// loop can cap its idle sleep. `None` when nothing is scheduled.
+    /// is due (a flood retry, a pending bot message expiring, a Star reaction
+    /// toast), so the poll loop can cap its idle sleep. `None` when nothing
+    /// is scheduled.
     pub fn next_deadline(&self, now: Instant, now_ms: u64) -> Option<Duration> {
         let retry = self
             .flood_retries
@@ -133,7 +134,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let levels = self.group_levels_deadline(now);
         // The muted-speech hint's next check while it listens.
         let hint = self.muted_hint_deadline(now);
-        [retry, bot, levels, hint].into_iter().flatten().min()
+        let paid = self
+            .session
+            .payments
+            .paid
+            .next_change_ms(now_ms)
+            .map(Duration::from_millis);
+        [retry, bot, levels, hint, paid].into_iter().flatten().min()
     }
 
     /// The "Couldn't load messages · Retry" action: clear the failure and

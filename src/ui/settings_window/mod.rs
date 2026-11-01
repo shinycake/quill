@@ -70,6 +70,8 @@ impl QuillApp {
         if let Some(page) = page {
             self.switch_settings_page(page);
         }
+        // The next pass sends the grams balance probe, which waits for Settings.
+        quill::wake::UPDATES.poke();
     }
 
     pub(super) fn close_settings(&mut self) {
