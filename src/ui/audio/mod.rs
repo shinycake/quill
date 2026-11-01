@@ -14,7 +14,6 @@ mod cpal_stream_tests;
 pub(super) mod engine;
 mod opus;
 mod output;
-mod seek_board;
 mod tempo;
 
 use std::cell::RefCell;
