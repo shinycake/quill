@@ -23,6 +23,8 @@ struct State {
     /// Kept until the bytes are on disk, so a read during the write sees them.
     pending: HashMap<PathBuf, Queued>,
     writer_running: bool,
+    /// The path the writer is writing now, so a discard can wait for it.
+    in_flight: Option<PathBuf>,
     failure: Option<std::io::Error>,
 }
 
@@ -139,8 +141,22 @@ impl DeferredWriter {
                     .collect::<Vec<_>>()
             };
             for (path, bytes) in batch {
+                {
+                    let mut state = self.shared.lock();
+                    let current = state
+                        .pending
+                        .get(&path)
+                        .is_some_and(|queued| Arc::ptr_eq(&queued.bytes, &bytes));
+                    if !current {
+                        // Replaced or discarded since the batch was taken.
+                        continue;
+                    }
+                    state.in_flight = Some(path.clone());
+                }
                 let written = (self.shared.sink)(&path, &bytes);
                 let mut state = self.shared.lock();
+                state.in_flight = None;
+                self.shared.idle.notify_all();
                 let current = state
                     .pending
                     .get_mut(&path)
@@ -178,6 +194,24 @@ impl DeferredWriter {
                 state = self.shared.lock();
                 continue;
             }
+            state = self
+                .shared
+                .idle
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    /// Drop every write queued under `folder` and wait for one already on
+    /// its way there, so nothing recreates the folder once it is removed.
+    pub(crate) fn discard_under(&self, folder: &Path) {
+        let mut state = self.shared.lock();
+        state.pending.retain(|path, _| !path.starts_with(folder));
+        while state
+            .in_flight
+            .as_deref()
+            .is_some_and(|path| path.starts_with(folder))
+        {
             state = self
                 .shared
                 .idle
@@ -266,6 +300,11 @@ pub(crate) fn read_with_pending(path: &Path) -> std::io::Result<Vec<u8>> {
         Some(bytes) => Ok(bytes),
         None => std::fs::read(path),
     }
+}
+
+/// Drop the writes queued under `folder`, which is about to be deleted.
+pub(crate) fn discard_deferred_writes_under(folder: &Path) {
+    global().discard_under(folder);
 }
 
 /// Wait for every deferred write; call when the app quits.
@@ -427,5 +466,28 @@ mod tests {
         let _ = open.send(());
         writer.flush();
         assert_eq!(writer.pending(&path), None);
+    }
+
+    #[test]
+    fn a_discard_drops_the_writes_under_a_folder_only() {
+        let (writer, log) = recording(None);
+        let (gone, kept) = (PathBuf::from("/x/acct/a.json"), PathBuf::from("/x/b.json"));
+        for path in [&gone, &kept] {
+            writer.shared.lock().pending.insert(
+                path.clone(),
+                super::Queued {
+                    bytes: Arc::new(b"q".to_vec()),
+                    failed: true,
+                },
+            );
+        }
+        writer.discard_under(Path::new("/x/acct"));
+        assert_eq!(writer.pending(&gone), None);
+        writer.flush();
+        let written: Vec<PathBuf> = log
+            .lock()
+            .map(|l| l.iter().map(|(path, _)| path.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(written, vec![kept]);
     }
 }
