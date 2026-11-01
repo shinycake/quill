@@ -466,7 +466,10 @@ fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut Te
 fn adapt_pick(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
-) -> (Vec<StickerItem>, crate::ui::sticker_set_box::state::PickExisting) {
+) -> (
+    Vec<StickerItem>,
+    crate::ui::sticker_set_box::state::PickExisting,
+) {
     use crate::ui::sticker_set_box::state::PickExisting;
     use quill::sticker_set_box::SetKind;
     use quill::telegram::envelope::StickerFormat;
