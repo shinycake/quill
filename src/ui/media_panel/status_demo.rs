@@ -39,6 +39,9 @@ const FACES: [&str; 12] = [
     "😀", "😎", "🥳", "🤩", "😴", "🤔", "😇", "🥰", "😜", "🤖", "👻", "🔥",
 ];
 
+/// The demo sticker every status resolves to.
+pub(super) const STATUS_FILE: i32 = 61;
+
 pub(super) fn status_sticker(id: i64, emoji: &str) -> StickerItem {
     StickerItem {
         custom_emoji_id: Some(id),
@@ -48,7 +51,7 @@ pub(super) fn status_sticker(id: i64, emoji: &str) -> StickerItem {
         width: 512,
         height: 512,
         format: StickerFormat::Webp,
-        file_id: FileId(61),
+        file_id: FileId(STATUS_FILE),
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,

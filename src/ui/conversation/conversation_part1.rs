@@ -159,26 +159,19 @@ impl QuillApp {
                         .relative()
                         // The emoji / sticker / GIF popover floats above the
                         // composer, anchored to its left edge.
-                        .when(
-                            self.media_panel_open()
-                                && self.pickers.media_panel.reaction.is_none()
-                                && self.pickers.media_panel.status.is_none()
-                                && !self.story_reply_panel_active()
-                                && !self.group_title_emoji_active(),
-                            |this| {
-                                let panel = self.media_panel(cx);
-                                // Over the history: animations under it are
-                                // drawn by the conversation (`anim_layer`).
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .left(px(8.))
-                                        .bottom(relative(1.))
-                                        .pb_1()
-                                        .child(super::anim_layer::occluder(panel)),
-                                )
-                            },
-                        )
+                        .when(self.media_panel_over_composer(), |this| {
+                            let panel = self.media_panel(cx);
+                            // Over the history: animations under it are
+                            // drawn by the conversation (`anim_layer`).
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .left(px(8.))
+                                    .bottom(relative(1.))
+                                    .pb_1()
+                                    .child(super::anim_layer::occluder(panel)),
+                            )
+                        })
                         // tdesktop shows the recording video message as a
                         // camera circle over the chat.
                         .when_some(self.round_record_overlay(cx), |this, circle| {
