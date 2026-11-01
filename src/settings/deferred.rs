@@ -15,12 +15,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-type Sink = dyn Fn(&Path, &[u8]) + Send + Sync;
+type Sink = dyn Fn(&Path, &[u8]) -> std::io::Result<()> + Send + Sync;
 
 #[derive(Default)]
 struct State {
-    pending: HashMap<PathBuf, Vec<u8>>,
+    /// Kept until the bytes are on disk, so a read during the write sees them.
+    pending: HashMap<PathBuf, Arc<Vec<u8>>>,
     writer_running: bool,
+    failure: Option<std::io::Error>,
 }
 
 struct Shared {
@@ -56,7 +58,7 @@ impl DeferredWriter {
     pub(crate) fn submit(&self, path: PathBuf, bytes: Vec<u8>) {
         let start = {
             let mut state = self.shared.lock();
-            state.pending.insert(path, bytes);
+            state.pending.insert(path, Arc::new(bytes));
             !std::mem::replace(&mut state.writer_running, true)
         };
         if start && !self.spawn_writer() {
@@ -70,7 +72,16 @@ impl DeferredWriter {
     /// The bytes still queued for `path`, so a read sees a write that has
     /// not reached the disk yet.
     pub(crate) fn pending(&self, path: &Path) -> Option<Vec<u8>> {
-        self.shared.lock().pending.get(path).cloned()
+        self.shared
+            .lock()
+            .pending
+            .get(path)
+            .map(|bytes| bytes.as_ref().clone())
+    }
+
+    /// The latest write that failed since the last call, for the status note.
+    pub(crate) fn take_failure(&self) -> Option<std::io::Error> {
+        self.shared.lock().failure.take()
     }
 
     fn spawn_writer(&self) -> bool {
@@ -93,10 +104,21 @@ impl DeferredWriter {
                     self.shared.idle.notify_all();
                     return;
                 }
-                std::mem::take(&mut state.pending)
+                state.pending.clone()
             };
-            for (path, bytes) in &batch {
-                (self.shared.sink)(path, bytes);
+            for (path, bytes) in batch {
+                let written = (self.shared.sink)(&path, &bytes);
+                let mut state = self.shared.lock();
+                if state
+                    .pending
+                    .get(&path)
+                    .is_some_and(|queued| Arc::ptr_eq(queued, &bytes))
+                {
+                    state.pending.remove(&path);
+                }
+                if let Err(err) = written {
+                    state.failure = Some(err);
+                }
             }
         }
     }
@@ -131,9 +153,49 @@ fn global() -> &'static DeferredWriter {
     static WRITER: OnceLock<DeferredWriter> = OnceLock::new();
     WRITER.get_or_init(|| {
         DeferredWriter::new(Box::new(|path, bytes| {
-            let _ = write_bytes_atomic(path, bytes);
+            #[cfg(test)]
+            test_gate::wait(path);
+            write_bytes_atomic(path, bytes)
         }))
     })
+}
+
+/// A settings write that failed on the writer thread since the last call.
+pub fn take_deferred_write_failure() -> Option<std::io::Error> {
+    global().take_failure()
+}
+
+/// Holds the shared writer before it writes one path, so a test can look
+/// at the state while that write is still waiting.
+#[cfg(test)]
+pub(crate) mod test_gate {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+
+    static GATES: Mutex<Option<HashMap<PathBuf, Receiver<()>>>> = Mutex::new(None);
+
+    /// Block writes of `path` until the returned sender sends or drops.
+    pub(crate) fn hold(path: &Path) -> Sender<()> {
+        let (open, gate) = channel();
+        if let Ok(mut gates) = GATES.lock() {
+            gates
+                .get_or_insert_default()
+                .insert(path.to_path_buf(), gate);
+        }
+        open
+    }
+
+    pub(super) fn wait(path: &Path) {
+        let gate = GATES
+            .lock()
+            .ok()
+            .and_then(|mut gates| gates.as_mut()?.remove(path));
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
+    }
 }
 
 /// Save `value` as JSON at `path` without waiting for the disk. A newer
@@ -181,6 +243,7 @@ mod tests {
             if let Ok(mut log) = seen.lock() {
                 log.push((path.to_path_buf(), bytes.to_vec()));
             }
+            Ok(())
         }));
         (writer, log)
     }
@@ -226,7 +289,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("prefs.json");
         let writer = DeferredWriter::new(Box::new(|path, bytes| {
-            let _ = super::write_bytes_atomic(path, bytes);
+            super::write_bytes_atomic(path, bytes)
         }));
         writer.submit(path.clone(), b"{\"a\":1}".to_vec());
         writer.submit(path.clone(), b"{\"a\":2}".to_vec());
@@ -244,11 +307,36 @@ mod tests {
             .shared
             .lock()
             .pending
-            .insert(path.clone(), b"q".to_vec());
+            .insert(path.clone(), Arc::new(b"q".to_vec()));
         assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
         writer.flush(Duration::from_secs(5));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
+        assert_eq!(writer.pending(&path), None);
+    }
+
+    #[test]
+    fn a_failed_write_is_reported_once() {
+        let writer = DeferredWriter::new(Box::new(|_, _| Err(std::io::Error::other("disk full"))));
+        assert!(writer.take_failure().is_none());
+        writer.submit(PathBuf::from("/x/a.json"), b"a".to_vec());
+        writer.flush(Duration::from_secs(5));
+        let failure = writer.take_failure().map(|err| err.to_string());
+        assert_eq!(failure.as_deref(), Some("disk full"));
+        assert!(writer.take_failure().is_none());
+    }
+
+    #[test]
+    fn a_write_on_its_way_to_disk_stays_readable() {
+        let (open, gate) = mpsc::channel();
+        let (entered_tx, entered) = mpsc::channel();
+        let (writer, _log) = recording(Some((gate, entered_tx)));
+        let path = PathBuf::from("/x/prefs.json");
+        writer.submit(path.clone(), b"a".to_vec());
+        assert!(entered.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert_eq!(writer.pending(&path), Some(b"a".to_vec()));
+        let _ = open.send(());
+        writer.flush(Duration::from_secs(5));
         assert_eq!(writer.pending(&path), None);
     }
 }

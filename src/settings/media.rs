@@ -220,8 +220,40 @@ mod tests {
             ..Default::default()
         };
         assert!(prefs.default_grouping());
-        std::fs::write(dir.join("accounts/primary/media_prefs.json"), b"not json").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let corrupt =
+            std::env::temp_dir().join(format!("quill-media-prefs-corrupt-{}", std::process::id()));
+        let paths = AccountPaths::for_root(&corrupt, &AccountKey::primary());
+        std::fs::create_dir_all(corrupt.join("accounts/primary")).unwrap();
+        std::fs::write(
+            corrupt.join("accounts/primary/media_prefs.json"),
+            b"not json",
+        )
+        .unwrap();
         assert_eq!(load_media_prefs(&paths), MediaPrefs::default());
+        let _ = std::fs::remove_dir_all(&corrupt);
+    }
+
+    #[test]
+    fn saving_does_not_wait_for_the_disk() {
+        let dir =
+            std::env::temp_dir().join(format!("quill-media-prefs-held-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = AccountPaths::for_root(&dir, &AccountKey::primary());
+        let file = dir.join("accounts/primary/media_prefs.json");
+        let open = crate::settings::deferred::test_gate::hold(&file);
+        let prefs = MediaPrefs {
+            autoplay_gifs: false,
+            ..Default::default()
+        };
+        save_media_prefs(&paths, &prefs).expect("save queues");
+        // The writer is held before this file: the save already returned.
+        assert!(!file.exists());
+        assert_eq!(load_media_prefs(&paths), prefs);
+        drop(open);
+        crate::settings::flush_deferred_writes();
+        let on_disk: MediaPrefs = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(on_disk, prefs);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

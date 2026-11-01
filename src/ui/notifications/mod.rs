@@ -298,6 +298,13 @@ impl QuillApp {
         self.poll_device_qr(cx);
         self.sync_presence();
         self.drain_account_notices();
+        if let Some(err) = quill::settings::take_deferred_write_failure() {
+            self.connection
+                .set_note(StatusNote::error(quill::lang::tr_with(
+                    keys::Q_PREFS_COULDNT_SAVE_SETTINGS,
+                    &[("err", &err.to_string())],
+                )));
+        }
         self.apply_pending_keybindings(cx);
         // Notification clicks from the Linux listener thread: replies and
         // read receipts run here, chat opens wake the window.

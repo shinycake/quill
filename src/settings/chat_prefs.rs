@@ -367,6 +367,7 @@ mod tests {
         };
         save_language_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_language_prefs(&paths), prefs);
+        crate::settings::flush_deferred_writes();
         // Unsupported tag → default, never an error.
         fs::write(
             paths.root.join("language_prefs.json"),
@@ -391,6 +392,7 @@ mod tests {
         };
         save_device_prefs(&paths, &prefs).unwrap();
         assert_eq!(load_device_prefs(&paths), prefs);
+        crate::settings::flush_deferred_writes();
         fs::write(paths.root.join("device_prefs.json"), b"not json").unwrap();
         assert_eq!(load_device_prefs(&paths), DevicePrefs::default());
         let _ = fs::remove_dir_all(&dir);
