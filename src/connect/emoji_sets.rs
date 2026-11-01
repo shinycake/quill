@@ -258,10 +258,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        let resolved = self.session.resolved_custom_emoji_ids();
         let mut ids = self
             .session
-            .unresolved_custom_emoji_ids_in(open_chat_ids.to_vec(), &resolved);
+            .unresolved_custom_emoji_ids(open_chat_ids.to_vec());
         ids.extend(
             self.session
                 .settings
@@ -269,15 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .recent_custom_emoji_ids
                 .iter()
                 .copied()
-                .filter(|id| {
-                    !self
-                        .session
-                        .stickers
-                        .emoji
-                        .status_resolution_attempted
-                        .contains(id)
-                        && !resolved.contains(id)
-                }),
+                .filter(|id| self.session.custom_emoji_needs_resolving(*id)),
         );
         ids.sort_unstable();
         ids.dedup();

@@ -214,11 +214,9 @@ impl Session {
         }
     }
 
-    /// The strip of a reply to a story (tdesktop draws the poster's name
-    /// over "Story" and the story's picture).
-    fn story_reply_header(&self, reply: &MessageReplyTo) -> ReplyHeader {
-        let poster = reply.chat_id;
-        // A user's stories come from their private chat.
+    /// Who posted the stories of `poster`: a user's come from their
+    /// private chat.
+    fn story_poster(&self, poster: ChatId) -> (Option<UserId>, MessageSender) {
         let user = self.chats.get(&poster.0).and_then(|chat| match chat.kind {
             ChatKind::Private { user_id } => Some(user_id),
             _ => None,
@@ -227,6 +225,57 @@ impl Session {
             Some(user_id) => MessageSender::User { user_id: user_id.0 },
             None => MessageSender::Chat { chat_id: poster.0 },
         };
+        (user, sender)
+    }
+
+    /// The message `message` replies to, if it is in a history or was
+    /// fetched, with the chat it is in.
+    fn reply_original<'a>(
+        &'a self,
+        message: &HistoryMessage,
+        reply: &MessageReplyTo,
+    ) -> (ChatId, Option<&'a HistoryMessage>) {
+        let target_chat = if reply.chat_id.0 == 0 {
+            message.chat_id
+        } else {
+            reply.chat_id
+        };
+        let original = self
+            .histories
+            .get(&target_chat.0)
+            .and_then(|history| history.messages.get(&reply.message_id.0))
+            .or(
+                match self
+                    .messages
+                    .reply_targets
+                    .get(&(message.chat_id.0, message.id.0))
+                {
+                    Some(ReplyTarget::Loaded(found)) => Some(found.as_ref()),
+                    _ => None,
+                },
+            );
+        (target_chat, original)
+    }
+
+    /// The custom emoji repeated behind `message`'s reply strip:
+    /// [`Self::reply_header`]'s `background_emoji` without building the rest.
+    fn reply_background_emoji(&self, message: &HistoryMessage) -> Option<i64> {
+        let reply = message.reply_to.as_ref()?;
+        if reply.story_id != 0 {
+            return self.sender_background_emoji(Some(self.story_poster(reply.chat_id).1));
+        }
+        match (self.reply_original(message, reply).1, &reply.origin) {
+            (Some(found), _) => self.sender_background_emoji(found.sender),
+            (None, Some(origin)) => self.origin_background_emoji(origin),
+            (None, None) => None,
+        }
+    }
+
+    /// The strip of a reply to a story (tdesktop draws the poster's name
+    /// over "Story" and the story's picture).
+    fn story_reply_header(&self, reply: &MessageReplyTo) -> ReplyHeader {
+        let poster = reply.chat_id;
+        let (user, sender) = self.story_poster(poster);
         let (name, accent) = match user {
             Some(_) => self.sender_name_and_accent(Some(sender)),
             None => (
@@ -278,24 +327,12 @@ impl Session {
         if reply.story_id != 0 {
             return Some(self.story_reply_header(reply));
         }
-        let target_chat = if reply.chat_id.0 == 0 {
-            message.chat_id
-        } else {
-            reply.chat_id
-        };
+        let (target_chat, original) = self.reply_original(message, reply);
         let external = target_chat != message.chat_id;
         let fetched = self
             .messages
             .reply_targets
             .get(&(message.chat_id.0, message.id.0));
-        let original: Option<&HistoryMessage> = self
-            .histories
-            .get(&target_chat.0)
-            .and_then(|history| history.messages.get(&reply.message_id.0))
-            .or(match fetched {
-                Some(ReplyTarget::Loaded(found)) => Some(found.as_ref()),
-                _ => None,
-            });
         let tombstoned = self
             .histories
             .get(&target_chat.0)
@@ -320,11 +357,6 @@ impl Session {
             (Some(found), _) => self.sender_name_and_accent(found.sender),
             (None, Some(origin)) => self.origin_name_and_accent(origin),
             (None, None) => (None, None),
-        };
-        let background_emoji = match (original, &reply.origin) {
-            (Some(found), _) => self.sender_background_emoji(found.sender),
-            (None, Some(origin)) => self.origin_background_emoji(origin),
-            (None, None) => None,
         };
         let name = name.or_else(|| {
             original
@@ -376,7 +408,7 @@ impl Session {
             external_chat,
             thumb,
             clickable,
-            background_emoji,
+            background_emoji: self.reply_background_emoji(message),
             story: None,
         })
     }
@@ -625,8 +657,7 @@ impl Session {
         history
             .messages
             .values()
-            .filter(|message| message.reply_to.is_some())
-            .filter_map(|message| self.reply_header(message)?.background_emoji)
+            .filter_map(|message| self.reply_background_emoji(message))
             .collect()
     }
 }
