@@ -404,15 +404,17 @@ impl QuillApp {
         (shift, indicator, listener)
     }
 
-    /// The capture-phase wheel listener over the history's bounds.
+    /// The capture-phase wheel listener over the history. It runs before
+    /// the views over the history (the media panel), so it asks the hit test
+    /// whether the wheel is the history's, as the list under it does.
     fn pull_listener(&self, cx: &mut Context<Self>) -> AnyElement {
         let app = cx.weak_entity();
         canvas(
-            |_, _, _| {},
-            move |bounds, _, window, _| {
+            |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            move |_, hitbox, window, _| {
                 let app = app.clone();
                 window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Capture || !bounds.contains(&event.position) {
+                    if phase != DispatchPhase::Capture || !hitbox.should_handle_scroll(window) {
                         return;
                     }
                     let consumed = app
