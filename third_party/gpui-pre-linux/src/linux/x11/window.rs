@@ -1165,6 +1165,36 @@ impl X11Window {
 }
 
 impl X11WindowStatePtr {
+    fn raw_window(&self, state: &X11WindowState) -> RawWindow {
+        RawWindow {
+            connection: as_raw_xcb_connection::AsRawXcbConnection::as_raw_xcb_connection(
+                &*self.xcb,
+            ) as *mut _,
+            screen_id: state.x_screen_index,
+            window_id: self.x_window,
+            visual_id: state.visual_id,
+        }
+    }
+
+    /// Quill: look for the GPU while on the software renderer recovery fell
+    /// back to (`WgpuRenderer::probe_hardware`), and look again later.
+    pub(crate) fn probe_hardware(&self) {
+        let mut state = self.state.borrow_mut();
+        let state = &mut *state;
+        let raw_window = self.raw_window(state);
+        let Some(renderer) = state.renderer.as_mut() else {
+            return;
+        };
+        let next = renderer.probe_hardware(&raw_window);
+        if renderer.needs_redraw() {
+            state.force_render_after_recovery = true;
+            self.frame.demand();
+        }
+        if let Some(at) = next {
+            schedule_hardware_probe(&state.client, self.x_window, at);
+        }
+    }
+
     pub fn should_close(&self) -> bool {
         let mut cb = self.callbacks.borrow_mut();
         if let Some(mut should_close) = cb.should_close.take() {
@@ -1517,6 +1547,10 @@ impl X11WindowStatePtr {
             self.callbacks.borrow_mut().button_layout_changed = Some(fun);
         }
     }
+}
+
+fn schedule_hardware_probe(client: &X11ClientStatePtr, x_window: xproto::Window, at: Instant) {
+    client.run_for_window_at(x_window, at, |window| window.probe_hardware());
 }
 
 impl PlatformWindow for X11Window {
@@ -1919,7 +1953,12 @@ impl PlatformWindow for X11Window {
             };
             inner.recovery_retry_at = None;
             match renderer.recover(&raw_window) {
-                Recovery::Recovered => inner.force_render_after_recovery = true,
+                Recovery::Recovered => {
+                    inner.force_render_after_recovery = true;
+                    if let Some(at) = renderer.hardware_probe_at() {
+                        schedule_hardware_probe(&inner.client, self.0.x_window, at);
+                    }
+                }
                 Recovery::RetryAt(at) => {
                     inner.recovery_retry_at = Some(at);
                     self.0.frame.demand();

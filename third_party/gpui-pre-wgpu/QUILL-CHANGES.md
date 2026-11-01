@@ -67,9 +67,18 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
 - `src/device_recovery.rs` (new, std-only; tests run with
   `scripts/test-device-recovery.sh`): when to try again after a device loss.
   The first attempt waits 350 ms (upstream's sleep), later ones back off to
-  8 s, a software adapter is accepted after 3 hardware-only failures (at
-  once when the lost device was already a CPU one), and after 8 failures
-  (about 35 s) the renderer gives up.
+  8 s, a software adapter is accepted after 7 hardware-only failures (the
+  last at about 27 s; at once when the lost device was already a CPU one),
+  and after 9 failures (about 43 s) the renderer gives up.
+- A window that recreated the context from a lost GPU and landed on a CPU
+  adapter looks for the GPU again (`HardwareProbe`: after 10 s, then less
+  often, up to every 2 minutes). `WgpuRenderer::probe_hardware` first asks
+  whether a non-CPU adapter supports the window's surface; only then does
+  it let go of the window's software swapchain and make a hardware-only
+  context, retiring the software one (`DeviceErrorState::retire`) so the
+  other windows adopt the new one on their next draw. If that fails, the
+  window goes back onto the software context. The caller arms the timer
+  from `hardware_probe_at`.
 - `src/wgpu_renderer.rs`: `recover` no longer sleeps on the UI thread and
   returns a `Recovery` (`Recovered`, `RetryAt(instant)` or `GaveUp`) instead
   of a `Result`; upstream retried on every frame forever, rejecting software

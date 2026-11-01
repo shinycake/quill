@@ -1,7 +1,7 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
-use crate::device_recovery::{Attempt, Next, Recovering, Shared, Target};
+use crate::device_recovery::{Attempt, HardwareProbe, Next, Recovering, Shared, Target};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -269,6 +269,8 @@ pub struct WgpuRenderer {
     needs_redraw: bool,
     // Quill: from the first `recover` after a device loss until it succeeds.
     recovering: Recovering,
+    // Quill: set while on a CPU adapter that recovery fell back to.
+    hardware_probe: Option<HardwareProbe>,
 }
 
 impl WgpuRenderer {
@@ -493,6 +495,7 @@ impl WgpuRenderer {
             last_surface_error: None,
             needs_redraw: false,
             recovering: Recovering::default(),
+            hardware_probe: None,
         })
     }
 }
@@ -2360,7 +2363,7 @@ impl WgpuRenderer {
         let shared = match gpu_context.borrow().as_ref() {
             Some(ctx) if !ctx.device_lost() => Shared::Healthy,
             Some(ctx) => Shared::Lost {
-                was_software: ctx.adapter.get_info().device_type == wgpu::DeviceType::Cpu,
+                was_software: is_software(ctx),
             },
             None => Shared::Lost {
                 was_software: false,
@@ -2377,9 +2380,12 @@ impl WgpuRenderer {
             Next::GiveUp(target) => return gave_up(target),
             Next::Attempt(attempt) => attempt,
         };
+        let target = self.recovering.target();
         match self.try_recover(window, &gpu_context, attempt) {
             Ok(()) => {
                 self.recovering.succeeded();
+                let on_software = gpu_context.borrow().as_ref().is_some_and(is_software);
+                self.hardware_probe = HardwareProbe::after_recovery(now, target, on_software);
                 log::info!("GPU recovery complete");
                 Recovery::Recovered
             }
@@ -2399,6 +2405,76 @@ impl WgpuRenderer {
                 }
                 Next::Attempt(_) => Recovery::RetryAt(now),
             },
+        }
+    }
+
+    /// Quill: when to call [`Self::probe_hardware`], while on a CPU adapter
+    /// that recovery fell back to from a lost GPU.
+    pub fn hardware_probe_at(&self) -> Option<Instant> {
+        self.hardware_probe.map(|probe| probe.due())
+    }
+
+    /// Quill: on a CPU adapter that recovery fell back to, look for the GPU
+    /// and move this window onto it when it is back. The other windows
+    /// follow on their next draw: the CPU context is retired, so they
+    /// recover and adopt the new one. Returns when to look again, or `None`
+    /// when there is no more looking to do. A frame is due afterwards when
+    /// [`Self::needs_redraw`] says so.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn probe_hardware<W>(&mut self, window: &W) -> Option<Instant>
+    where
+        W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+    {
+        let mut probe = self.hardware_probe?;
+        let now = Instant::now();
+        if now < probe.due() {
+            return Some(probe.due());
+        }
+        let gpu_context = self.context.clone()?;
+        let on_software = gpu_context
+            .borrow()
+            .as_ref()
+            .is_some_and(|ctx| is_software(ctx) && !ctx.device_lost());
+        if !on_software || self.device_lost() {
+            self.hardware_probe = None;
+            return None;
+        }
+        if !gpu_can_present(window) {
+            probe.missed(now);
+            self.hardware_probe = Some(probe);
+            return Some(probe.due());
+        }
+        // A window holds one swapchain at a time: let go of the CPU one
+        // before the GPU's is configured.
+        let software = gpu_context.borrow_mut().take();
+        self.state = RendererState::Released;
+        let hardware = Attempt::Recreate {
+            allow_software: false,
+        };
+        match self.try_recover(window, &gpu_context, hardware) {
+            Ok(()) => {
+                if let Some(software) = software {
+                    software.errors().retire();
+                }
+                log::info!("GPU is back, leaving the software renderer");
+                self.needs_redraw = true;
+                None
+            }
+            Err(err) => {
+                log::warn!("GPU seen but not usable yet, staying on software: {err:#}");
+                *gpu_context.borrow_mut() = software;
+                self.state = RendererState::Released;
+                if let Err(err) = self.try_recover(window, &gpu_context, Attempt::Adopt) {
+                    log::error!("cannot return to the software renderer: {err:#}");
+                    // Recovery adopts it again, with its backoff.
+                    self.device_errors = Arc::new(DeviceErrorState::default());
+                    self.device_errors.retire();
+                }
+                probe.missed(now);
+                self.hardware_probe = Some(probe);
+                self.needs_redraw = true;
+                Some(probe.due())
+            }
         }
     }
 
@@ -2495,6 +2571,33 @@ pub enum Recovery {
     /// Other windows draw with the recovered context but this one cannot:
     /// close it, outside the draw.
     CloseWindow,
+}
+
+fn is_software(context: &WgpuContext) -> bool {
+    context.adapter.get_info().device_type == wgpu::DeviceType::Cpu
+}
+
+/// Quill: whether a GPU, not a CPU adapter, says it can present to
+/// `window`. Cheap next to making a context, so a probe that finds nothing
+/// leaves the window's renderer alone.
+#[cfg(not(target_family = "wasm"))]
+fn gpu_can_present<W>(window: &W) -> bool
+where
+    W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    let Ok(handle) = window.window_handle() else {
+        return false;
+    };
+    let instance = WgpuContext::instance(Some(Box::new(window.clone())));
+    let Ok(surface) = create_surface(&instance, handle.as_raw()) else {
+        return false;
+    };
+    gpui::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+        .iter()
+        .any(|adapter| {
+            adapter.get_info().device_type != wgpu::DeviceType::Cpu
+                && adapter.is_surface_supported(&surface)
+        })
 }
 
 fn gave_up(target: Target) -> Recovery {

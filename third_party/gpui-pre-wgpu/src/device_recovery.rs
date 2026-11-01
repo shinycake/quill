@@ -13,6 +13,11 @@
 //! once when the lost device was already one, since no real GPU is coming),
 //! and after [`GIVE_UP_AFTER`] failures the renderer gives up.
 //!
+//! A real GPU can take a while to return after a resume or driver reset,
+//! so attempts stay hardware-only for about 27 s. A window that still had
+//! to fall back to a CPU adapter keeps looking for the GPU on a slow timer
+//! ([`HardwareProbe`]) and moves back onto it when it returns.
+//!
 //! A window whose context another window already recreated only adopts it
 //! ([`Target::Adopt`]): its first attempt is immediate, and failures back
 //! off and give up the same way.
@@ -24,10 +29,15 @@ use std::time::{Duration, Instant};
 /// Before the first attempt: lets the driver settle (upstream's sleep).
 const FIRST_DELAY: Duration = Duration::from_millis(350);
 const MAX_DELAY: Duration = Duration::from_secs(8);
-/// Failed attempts on hardware only before software adapters are accepted.
-const SOFTWARE_AFTER: u32 = 3;
-/// Failed attempts in all before giving up (about 35 s).
-const GIVE_UP_AFTER: u32 = 8;
+/// Failed attempts on hardware only before software adapters are accepted
+/// (the last at about 27 s).
+const SOFTWARE_AFTER: u32 = 7;
+/// Failed attempts in all before giving up (the last at about 43 s).
+const GIVE_UP_AFTER: u32 = 9;
+/// On a CPU adapter recovery fell back to: the first look for the GPU, and
+/// the longest gap between looks.
+const PROBE_FIRST: Duration = Duration::from_secs(10);
+const PROBE_MAX: Duration = Duration::from_secs(120);
 
 /// What a recovery is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -165,6 +175,10 @@ impl Recovering {
         }
     }
 
+    pub(crate) fn target(&self) -> Option<Target> {
+        self.0.map(|policy| policy.target())
+    }
+
     pub(crate) fn succeeded(&mut self) {
         self.0 = None;
     }
@@ -177,11 +191,53 @@ impl Recovering {
     }
 }
 
+/// When a window on a CPU adapter that recovery fell back to looks for the
+/// GPU again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HardwareProbe {
+    looks: u32,
+    due: Instant,
+}
+
+impl HardwareProbe {
+    /// After a recovery that reached `target` and landed on a CPU adapter
+    /// or not. Only a recreation from a lost GPU probes: a lost CPU device
+    /// has no GPU to return to, and adopting leaves it to the window that
+    /// recreated the context.
+    pub(crate) fn after_recovery(
+        now: Instant,
+        target: Option<Target>,
+        landed_on_software: bool,
+    ) -> Option<Self> {
+        let from_gpu = target
+            == Some(Target::Recreate {
+                lost_was_software: false,
+            });
+        (from_gpu && landed_on_software).then_some(Self {
+            looks: 0,
+            due: now + PROBE_FIRST,
+        })
+    }
+
+    pub(crate) fn due(&self) -> Instant {
+        self.due
+    }
+
+    /// The GPU was not back: look again later, less often each time.
+    pub(crate) fn missed(&mut self, now: Instant) {
+        self.looks = self.looks.saturating_add(1);
+        self.due = now
+            + PROBE_FIRST
+                .saturating_mul(1 << self.looks.min(8))
+                .min(PROBE_MAX);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Attempt, FIRST_DELAY, GIVE_UP_AFTER, MAX_DELAY, Next, Recovering, RecoveryPolicy,
-        RecoveryStep, SOFTWARE_AFTER, Shared, Target,
+        Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, MAX_DELAY, Next, PROBE_FIRST,
+        PROBE_MAX, Recovering, RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, Shared, Target,
     };
     use std::time::{Duration, Instant};
 
@@ -348,5 +404,57 @@ mod tests {
         let later = start + Duration::from_secs(60);
         assert!(recovering.begin(later, HARDWARE_LOST));
         assert_eq!(recovering.next(later), Next::Wait(later + FIRST_DELAY));
+    }
+
+    #[test]
+    fn attempts_follow_the_backoff_curve() {
+        let start = Instant::now();
+        let attempts = attempt_times(&mut RecoveryPolicy::new(start, hardware()), start);
+        let millis: Vec<(u128, bool)> = attempts
+            .iter()
+            .map(|(at, software)| (at.as_millis(), *software))
+            .collect();
+        assert_eq!(
+            millis,
+            [
+                (350, false),
+                (1_050, false),
+                (2_450, false),
+                (5_250, false),
+                (10_850, false),
+                (18_850, false),
+                (26_850, false),
+                (34_850, true),
+                (42_850, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_software_fallback_from_a_lost_gpu_looks_for_it_less_and_less_often() {
+        let start = Instant::now();
+        let mut probe = HardwareProbe::after_recovery(start, Some(hardware()), true)
+            .expect("falling back to a CPU adapter looks for the GPU");
+        assert_eq!(probe.due(), start + PROBE_FIRST);
+        let mut gaps = Vec::new();
+        let mut now = probe.due();
+        for _ in 0..6 {
+            probe.missed(now);
+            gaps.push((probe.due() - now).as_secs());
+            now = probe.due();
+        }
+        assert_eq!(gaps, [20, 40, 80, 120, 120, 120]);
+        assert!(probe.due() - now <= PROBE_MAX);
+    }
+
+    #[test]
+    fn only_a_fallback_from_a_lost_gpu_looks_for_it() {
+        let now = Instant::now();
+        assert_eq!(HardwareProbe::after_recovery(now, Some(hardware()), false), None);
+        let lost_software = Target::Recreate {
+            lost_was_software: true,
+        };
+        assert_eq!(HardwareProbe::after_recovery(now, Some(lost_software), true), None);
+        assert_eq!(HardwareProbe::after_recovery(now, Some(Target::Adopt), true), None);
     }
 }

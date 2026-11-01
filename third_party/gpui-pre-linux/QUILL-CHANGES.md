@@ -114,6 +114,10 @@ QUILL-CHANGES.md):
   timer (`run_for_window_at`) redraws the window when the attempt is
   due, instead of redrawing every refresh interval. The device-lost path no
   longer unwraps the surface's backend.
+- After a recovery that landed on a software adapter, both backends call
+  `WgpuRenderer::probe_hardware` from a calloop timer at
+  `hardware_probe_at`, re-arm it at the instant it returns, and redraw
+  when the renderer was rebuilt.
 - Both backends close a window on `Recovery::CloseWindow` from a calloop
   timer (`run_for_window_at`, also in `src/linux/x11/client.rs`), outside
   the draw, without asking `should_close`, as Windows destroys the window.

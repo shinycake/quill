@@ -1059,6 +1059,34 @@ impl WaylandWindowStatePtr {
         }
     }
 
+    /// Quill: look for the GPU while on the software renderer recovery fell
+    /// back to (`WgpuRenderer::probe_hardware`), and look again later.
+    pub fn probe_hardware(&self) {
+        let mut guard = self.state.borrow_mut();
+        let state = &mut *guard;
+        let Some(backend) = state.surface.backend().upgrade() else {
+            return;
+        };
+        let raw_window = RawWindow {
+            window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
+            display: backend.display_ptr().cast::<std::ffi::c_void>(),
+        };
+        let Some(renderer) = state.renderer.as_mut() else {
+            return;
+        };
+        let next = renderer.probe_hardware(&raw_window);
+        let redraw = renderer.needs_redraw();
+        let surface_id = state.surface.id();
+        let client = state.client.clone();
+        drop(guard);
+        if let Some(at) = next {
+            client.run_for_window_at(&surface_id, at, |window| window.probe_hardware());
+        }
+        if redraw {
+            self.request_redraw();
+        }
+    }
+
     /// Quill: a GPU recovery attempt is due (`run_for_window_at`).
     pub fn recovery_retry_due(&self) {
         self.state.borrow_mut().recovery_retry_at = None;
@@ -2035,7 +2063,15 @@ impl PlatformWindow for WaylandWindow {
                 display: backend.display_ptr().cast::<std::ffi::c_void>(),
             };
             match renderer.recover(&raw_window) {
-                Recovery::Recovered => state.redraw_requested = true,
+                Recovery::Recovered => {
+                    state.redraw_requested = true;
+                    if let Some(at) = renderer.hardware_probe_at() {
+                        let surface_id = state.surface.id();
+                        state.client.run_for_window_at(&surface_id, at, |window| {
+                            window.probe_hardware()
+                        });
+                    }
+                }
                 Recovery::RetryAt(at) if state.recovery_retry_at != Some(at) => {
                     state.recovery_retry_at = Some(at);
                     let surface_id = state.surface.id();
