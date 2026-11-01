@@ -119,6 +119,13 @@ platform. Each is fixed in its own commit:
   that is `connect_initially`'s DirectX error, which the first
   `open_window` returns and `main.rs` shows in the startup alert; from
   `request_windowing(Windowed)` it is that call's error.
+- `platform.rs`, the vsync thread: its body runs under `catch_unwind`. A
+  panic there used to end the thread silently, so no window got another
+  frame and Quill looked hung. Now the thread logs it and posts
+  `WM_GPUI_GPU_DEVICE_GONE`, the same message as a device that can't be
+  recreated, so the platform drops its devices and closes the windows. The
+  app crate's `spawn_guarded` can't be used here (the fork doesn't depend
+  on Quill), so Quill's panic hook still files the report as a crash.
 
 ### macOS (`gpui-pre-macos`)
 

@@ -438,3 +438,7 @@ Added in 2026, after an audit of the earlier panic pass
   instead of unwrapping it. `attach_gpu` then detaches the GPU again and
   returns the error, so launch fails with the startup alert and
   `request_windowing(Windowed)` fails, instead of the app panicking.
+- `src/platform.rs`: the vsync thread's body runs under `catch_unwind`. On a
+  panic it logs and posts `WM_GPUI_GPU_DEVICE_GONE` to the platform window,
+  which drops the devices and destroys every window, instead of leaving them
+  without frames.

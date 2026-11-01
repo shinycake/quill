@@ -483,75 +483,90 @@ impl WindowsPlatform {
         std::thread::Builder::new()
             .name("VSyncProvider".to_owned())
             .spawn(move || {
-                let vsync_provider = VSyncProvider::new();
-                loop {
-                    // Quill: sleep while every window's frames are parked
-                    // (see `FrameGate`), with no timeout, until one unparks
-                    // or this thread must stop or check its device.
-                    if !FRAME_GATE.wait_for_frames(&all_windows, TrackedWindow::as_raw, || {
-                        stop.load(Ordering::Acquire) || invalidate_devices.load(Ordering::Acquire)
-                    }) {
-                        break;
-                    }
-                    let signal_source = vsync_provider.wait_for_vsync();
-                    let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
-                    if stop.load(Ordering::Acquire) {
-                        break;
-                    }
-                    if check_device_lost(&directx_device.device)
-                        || invalidate_devices.fetch_and(false, Ordering::Acquire)
-                    {
-                        // Quill: retry with backoff, then close the windows and stop
-                        // vsync instead of panicking (upstream panics here).
-                        if let Err(err) = recover_from_gpu_device_lost(
-                            &mut directx_device,
-                            platform_window.as_raw(),
-                            validation_number,
-                            &all_windows,
-                            &text_system,
-                        ) {
-                            log::error!(
-                                "DirectX device lost and could not be recreated, closing all \
-                                 windows: {err:#}"
-                            );
-                            // Quill: the platform drops the dead devices, so it reports
-                            // itself headless until it is windowed again, then closes
-                            // the windows.
-                            // SAFETY: PostMessageW only queues the message.
-                            unsafe {
-                                validation_number
-                                    .message(WM_GPUI_GPU_DEVICE_GONE, 0)
-                                    .post(platform_window.as_raw())
-                                    .log_err();
-                            }
+                // Quill: a panic would end vsync and leave every window frozen. Handle it like
+                // a device that can't be recreated: the platform closes the windows.
+                let vsync = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let vsync_provider = VSyncProvider::new();
+                    loop {
+                        // Quill: sleep while every window's frames are parked
+                        // (see `FrameGate`), with no timeout, until one unparks
+                        // or this thread must stop or check its device.
+                        if !FRAME_GATE.wait_for_frames(&all_windows, TrackedWindow::as_raw, || {
+                            stop.load(Ordering::Acquire)
+                                || invalidate_devices.load(Ordering::Acquire)
+                        }) {
                             break;
                         }
-                    }
-                    let Some(all_windows) = all_windows.upgrade() else {
-                        break;
-                    };
-                    // Quill: skip parked windows. The parked set is read
-                    // before the window list (lock order).
-                    let parked = FRAME_GATE.parked_windows();
-                    for hwnd in all_windows.read().iter() {
-                        if parked.contains(hwnd.as_raw()) {
-                            continue;
+                        let signal_source = vsync_provider.wait_for_vsync();
+                        let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
+                        if stop.load(Ordering::Acquire) {
+                            break;
                         }
-                        unsafe {
-                            if let Some(signal_at) = signal_at {
-                                if IsWindowVisible(hwnd.as_raw()).as_bool()
-                                    && !IsIconic(hwnd.as_raw()).as_bool()
-                                {
-                                    hwnd.frame_signal.record(signal_at, signal_source);
-                                } else {
-                                    // Hidden windows may not consume WM_PAINT until shown again.
-                                    hwnd.frame_signal.take();
+                        if check_device_lost(&directx_device.device)
+                            || invalidate_devices.fetch_and(false, Ordering::Acquire)
+                        {
+                            // Quill: retry with backoff, then close the windows and stop
+                            // vsync instead of panicking (upstream panics here).
+                            if let Err(err) = recover_from_gpu_device_lost(
+                                &mut directx_device,
+                                platform_window.as_raw(),
+                                validation_number,
+                                &all_windows,
+                                &text_system,
+                            ) {
+                                log::error!(
+                                    "DirectX device lost and could not be recreated, closing all \
+                                 windows: {err:#}"
+                                );
+                                // Quill: the platform drops the dead devices, so it reports
+                                // itself headless until it is windowed again, then closes
+                                // the windows.
+                                // SAFETY: PostMessageW only queues the message.
+                                unsafe {
+                                    validation_number
+                                        .message(WM_GPUI_GPU_DEVICE_GONE, 0)
+                                        .post(platform_window.as_raw())
+                                        .log_err();
                                 }
+                                break;
                             }
-                            RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
-                                .ok()
-                                .log_err();
                         }
+                        let Some(all_windows) = all_windows.upgrade() else {
+                            break;
+                        };
+                        // Quill: skip parked windows. The parked set is read
+                        // before the window list (lock order).
+                        let parked = FRAME_GATE.parked_windows();
+                        for hwnd in all_windows.read().iter() {
+                            if parked.contains(hwnd.as_raw()) {
+                                continue;
+                            }
+                            unsafe {
+                                if let Some(signal_at) = signal_at {
+                                    if IsWindowVisible(hwnd.as_raw()).as_bool()
+                                        && !IsIconic(hwnd.as_raw()).as_bool()
+                                    {
+                                        hwnd.frame_signal.record(signal_at, signal_source);
+                                    } else {
+                                        // Hidden windows may not consume WM_PAINT until shown again.
+                                        hwnd.frame_signal.take();
+                                    }
+                                }
+                                RedrawWindow(Some(hwnd.as_raw()), None, None, RDW_INVALIDATE)
+                                    .ok()
+                                    .log_err();
+                            }
+                        }
+                    }
+                }));
+                if vsync.is_err() {
+                    log::error!("the vsync thread panicked, closing all windows");
+                    // SAFETY: PostMessageW only queues the message.
+                    unsafe {
+                        validation_number
+                            .message(WM_GPUI_GPU_DEVICE_GONE, 0)
+                            .post(platform_window.as_raw())
+                            .log_err();
                     }
                 }
             })
