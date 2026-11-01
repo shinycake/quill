@@ -22,8 +22,8 @@ pub const DEBUG_TDLIB_VERBOSITY: i32 = 4;
 const TDLIB_LOG_MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// Quill's log is moved to `.old` past this size.
 const QUILL_LOG_MAX_BYTES: u64 = 16 * 1024 * 1024;
-/// The call log is small and always on, so it is moved to `.old` sooner.
-const CALL_LOG_MAX_BYTES: u64 = 1024 * 1024;
+/// The always-on logs are small, so they are moved to `.old` sooner.
+const ALWAYS_ON_LOG_MAX_BYTES: u64 = 1024 * 1024;
 
 static ENABLED: OnceLock<AtomicBool> = OnceLock::new();
 
@@ -67,6 +67,12 @@ pub fn quill_log_path(root: &Path) -> PathBuf {
 /// sound arrived, and the call engine's warnings. No message content.
 pub fn call_log_path(root: &Path) -> PathBuf {
     log_dir(root).join("calls.log")
+}
+
+/// The always-on log of GPUI and the other libraries that report through the
+/// `log` crate (`advanced::platform_log`).
+pub fn platform_log_path(root: &Path) -> PathBuf {
+    log_dir(root).join("platform.log")
 }
 
 pub fn tdlib_log_path(root: &Path) -> PathBuf {
@@ -151,7 +157,17 @@ pub fn call_log(message: &str) {
     let Some(root) = crate::settings::safe_app_root() else {
         return;
     };
-    append_line(&call_log_path(&root), message, CALL_LOG_MAX_BYTES);
+    append_line(&call_log_path(&root), message, ALWAYS_ON_LOG_MAX_BYTES);
+}
+
+/// One line in the platform log, whether or not the debug mode is on, and in
+/// the debug log while it is.
+pub fn platform_log(message: &str) {
+    debug_log(message);
+    let Some(root) = crate::settings::safe_app_root() else {
+        return;
+    };
+    append_line(&platform_log_path(&root), message, ALWAYS_ON_LOG_MAX_BYTES);
 }
 
 fn append_line(path: &Path, message: &str, max_bytes: u64) {

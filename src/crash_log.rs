@@ -400,6 +400,7 @@ pub(crate) fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
 /// touches the running Quill's files. It also files the previous run's crash
 /// report before the "closed unexpectedly" notice looks for it.
 pub fn begin_app_run() {
+    crate::advanced::platform_log::install();
     if let Some(root) = crate::settings::safe_app_root() {
         begin_run_with_native_handlers(&root);
     }
