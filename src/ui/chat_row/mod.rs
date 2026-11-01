@@ -60,7 +60,11 @@ pub(super) fn chat_preview_line(
         author_signature.unwrap_or(peer_title).to_string()
     };
     let body = effective_content(content, ephemeral).preview();
-    (name, body, id)
+    let shown = |text: String| match quill::display_text::filtered(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(shown) => shown,
+    };
+    (shown(name), shown(body), id)
 }
 
 /// kit Phase 3: one flat item for the virtualized chat list — a chat row
@@ -993,3 +997,7 @@ pub(crate) use selected_fg::selected_secondary_fg;
 mod with_call_badge;
 #[allow(unused_imports)]
 pub use with_call_badge::*;
+
+#[cfg(test)]
+#[path = "preview_line_tests.rs"]
+mod preview_line_tests;
