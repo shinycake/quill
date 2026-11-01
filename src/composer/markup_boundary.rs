@@ -100,10 +100,12 @@ pub(crate) fn closer_ok(text: &str, at: usize, marker: &str) -> bool {
 /// leaves something between it and the opener.
 pub(crate) fn find_closer(text: &str, from: usize, to: usize, marker: &str) -> Option<usize> {
     let window = text.get(from..to)?;
-    window
+    let closer = window
         .match_indices(marker)
         .map(|(rel, _)| from + rel)
-        .find(|&at| at > from && closer_ok(text, at, marker))
+        .find(|&at| at > from && closer_ok(text, at, marker));
+    super::scan_work::add(closer.unwrap_or(to).saturating_sub(from));
+    closer
 }
 
 /// Whether a writer must put a [`BARRIER`] between a marker and `neighbour`.

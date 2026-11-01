@@ -16,8 +16,8 @@ use std::ops::Range;
 use crate::composer::markup_boundary::{
     BARRIER, closer_ok, is_marker_char, needs_barrier, opener_ok,
 };
-use crate::composer::{FormatKind, parse_format_markup};
-use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
+use crate::composer::{FormatKind, parse_format_markup, scan_work};
+use crate::text::{TextEntity, TextEntityKind};
 
 /// One kind of formatting in the field. The tag string
 /// ([`ComposerTag::to_tag`]) is what the input engine stores.
@@ -145,13 +145,8 @@ impl ComposerDoc {
         let (text, entities) = parse_format_markup(markup);
         let mut doc = Self::plain(text);
         for entity in entities {
-            let (Ok(start), Ok(end)) = (
-                utf16_to_utf8_offset(&doc.text, entity.offset),
-                utf16_to_utf8_offset(&doc.text, entity.offset + entity.length),
-            ) else {
-                continue;
-            };
-            if start >= end {
+            let range = entity.bytes;
+            if range.is_empty() {
                 continue;
             }
             let tag = match entity.kind {
@@ -176,14 +171,14 @@ impl ComposerDoc {
                         .and_then(|id| id.parse().ok())
                     {
                         doc.emoji.push(DocEmoji {
-                            range: start..end,
+                            range,
                             custom_emoji_id: id,
                         });
                     }
                     continue;
                 }
             };
-            doc.spans.push(DocSpan::new(start..end, tag));
+            doc.spans.push(DocSpan::new(range, tag));
         }
         doc.normalize();
         doc
@@ -322,12 +317,30 @@ pub fn normalize_spans(mut spans: Vec<DocSpan>) -> Vec<DocSpan> {
     merged
 }
 
+struct DisjointRanges(Vec<Range<usize>>);
+
+impl DisjointRanges {
+    fn of(spans: impl IntoIterator<Item = DocSpan>) -> Self {
+        let spans = normalize_spans(spans.into_iter().collect());
+        Self(spans.into_iter().map(|span| span.range).collect())
+    }
+
+    fn overlapping(&self, range: &Range<usize>) -> &[Range<usize>] {
+        let first = self.0.partition_point(|other| other.end <= range.start);
+        let rest = self.0.get(first..).unwrap_or_default();
+        let count = rest.partition_point(|other| other.start < range.end);
+        scan_work::add(count + 1);
+        rest.get(..count).unwrap_or_default()
+    }
+}
+
 /// `spans` with `range` cut out of every span whose tag `cut` selects.
 fn carve(
     spans: Vec<DocSpan>,
     range: &Range<usize>,
     cut: impl Fn(&ComposerTag) -> bool,
 ) -> Vec<DocSpan> {
+    scan_work::add(spans.len());
     let mut out = Vec::with_capacity(spans.len() + 1);
     for span in spans {
         if !cut(&span.tag) || span.range.end <= range.start || span.range.start >= range.end {
@@ -585,8 +598,9 @@ struct Markup<'a> {
     doc: &'a ComposerDoc,
     /// Inline spans after reshaping (see [`ComposerDoc::to_markup`]).
     inline: Vec<DocSpan>,
+    bold: DisjointRanges,
     pre: Vec<DocSpan>,
-    quote: Vec<Range<usize>>,
+    quote: DisjointRanges,
 }
 
 impl<'a> Markup<'a> {
@@ -625,18 +639,15 @@ impl<'a> Markup<'a> {
         });
         spans.retain(|span| !matches!(span.tag, ComposerTag::Pre(_)));
         // Nothing else inside a code block.
-        for block in &pre {
-            spans = carve(spans, &block.range, |_| true);
-        }
-        let mut quote: Vec<Range<usize>> = Vec::new();
-        let mut inline: Vec<DocSpan> = Vec::new();
-        for span in spans {
-            if span.tag == ComposerTag::Quote {
-                quote.push(span.range);
-            } else {
-                inline.push(span);
-            }
-        }
+        let blocks = DisjointRanges::of(pre.iter().cloned());
+        let spans = spans.into_iter().flat_map(|span| {
+            blocks
+                .overlapping(&span.range)
+                .iter()
+                .fold(vec![span], |pieces, block| carve(pieces, block, |_| true))
+        });
+        let (quote, inline): (Vec<DocSpan>, Vec<DocSpan>) =
+            spans.partition(|span| span.tag == ComposerTag::Quote);
         // Inline formatting stays on one line.
         let mut lines: Vec<DocSpan> = Vec::new();
         for span in inline {
@@ -654,30 +665,46 @@ impl<'a> Markup<'a> {
             }
         }
         // Nothing inside code, unless it holds the whole code span.
-        let code: Vec<Range<usize>> = lines
-            .iter()
-            .filter(|span| span.tag == ComposerTag::Code)
-            .map(|span| span.range.clone())
-            .collect();
-        for code_range in &code {
-            lines = lines
-                .into_iter()
-                .flat_map(|span| {
-                    let holds =
-                        span.range.start <= code_range.start && code_range.end <= span.range.end;
-                    if span.tag == ComposerTag::Code || holds {
-                        vec![span]
-                    } else {
-                        carve(vec![span], code_range, |_| true)
-                    }
+        let code = DisjointRanges::of(
+            lines
+                .iter()
+                .filter(|span| span.tag == ComposerTag::Code)
+                .cloned(),
+        );
+        let lines = lines.into_iter().flat_map(|span| {
+            if span.tag == ComposerTag::Code {
+                return vec![span];
+            }
+            code.overlapping(&span.range)
+                .iter()
+                .fold(vec![span], |pieces, code_range| {
+                    pieces
+                        .into_iter()
+                        .flat_map(|piece| {
+                            let holds = piece.range.start <= code_range.start
+                                && code_range.end <= piece.range.end;
+                            if holds {
+                                vec![piece]
+                            } else {
+                                carve(vec![piece], code_range, |_| true)
+                            }
+                        })
+                        .collect()
                 })
-                .collect();
-        }
+        });
+        let inline = normalize_spans(lines.collect());
+        let bold = DisjointRanges::of(
+            inline
+                .iter()
+                .filter(|span| span.tag == ComposerTag::Bold)
+                .cloned(),
+        );
         Self {
             doc,
-            inline: normalize_spans(lines),
+            inline,
+            bold,
             pre,
-            quote,
+            quote: DisjointRanges::of(quote),
         }
     }
 
@@ -706,10 +733,18 @@ impl<'a> Markup<'a> {
         let mut out = String::with_capacity(text.len() + 16);
         // Indices into `self.inline` of the open spans, outermost first.
         let mut stack: Vec<usize> = Vec::new();
+        let mut spans_over_cut: Vec<usize> = Vec::new();
+        let mut first_unreached = 0;
         let mut i = 0;
         while let (Some(&a), Some(&b)) = (cuts.get(i), cuts.get(i + 1)) {
             i += 1;
-            if let Some(block) = self.pre.iter().find(|p| p.range.start == a) {
+            scan_work::add(spans_over_cut.len() + 1);
+            let block = self
+                .pre
+                .binary_search_by_key(&a, |block| block.range.start)
+                .ok()
+                .and_then(|ix| self.pre.get(ix));
+            if let Some(block) = block {
                 self.close_all(&mut stack, &mut out);
                 self.quote_prefix(a, &mut out);
                 let language = match &block.tag {
@@ -727,24 +762,27 @@ impl<'a> Markup<'a> {
                 }
                 continue;
             }
-            let active: Vec<usize> = self
+            while self
                 .inline
-                .iter()
-                .enumerate()
-                .filter(|(_, span)| span.range.start <= a && a < span.range.end)
-                .map(|(ix, _)| ix)
-                .collect();
+                .get(first_unreached)
+                .is_some_and(|span| span.range.start <= a)
+            {
+                spans_over_cut.push(first_unreached);
+                first_unreached += 1;
+            }
+            spans_over_cut.retain(|&ix| self.inline.get(ix).is_some_and(|span| a < span.range.end));
             // Close from the first open span that is no longer active.
             let mut closed_marker = false;
-            if let Some(k) = stack.iter().position(|ix| !active.contains(ix)) {
+            if let Some(k) = stack.iter().position(|ix| !spans_over_cut.contains(ix)) {
                 for ix in stack.drain(k..).rev() {
                     out.push_str(&self.closer(ix));
                 }
                 closed_marker = out.chars().next_back().is_some_and(is_marker_char);
             }
             self.quote_prefix(a, &mut out);
-            let mut opening: Vec<usize> = active
-                .into_iter()
+            let mut opening: Vec<usize> = spans_over_cut
+                .iter()
+                .copied()
                 .filter(|ix| !stack.contains(ix))
                 .collect();
             opening.sort_by_key(|&ix| {
@@ -790,7 +828,7 @@ impl<'a> Markup<'a> {
     fn quote_prefix(&self, at: usize, out: &mut String) {
         let text = &self.doc.text;
         let line_start = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
-        if line_start && self.quote.iter().any(|q| q.start <= at && at < q.end) {
+        if line_start && !self.quote.overlapping(&(at..at + 1)).is_empty() {
             out.push_str("> ");
         }
     }
@@ -844,11 +882,7 @@ impl<'a> Markup<'a> {
         let touches_star = text.get(range.clone()).is_some_and(|t| t.contains('*'))
             || text.get(..range.start).is_some_and(|t| t.ends_with('*'))
             || text.get(range.end..).is_some_and(|t| t.starts_with('*'));
-        let with_bold = self.inline.iter().any(|span| {
-            span.tag == ComposerTag::Bold
-                && span.range.start < range.end
-                && range.start < span.range.end
-        });
+        let with_bold = !self.bold.overlapping(range).is_empty();
         if touches_star || with_bold { "_" } else { "*" }
     }
 }
