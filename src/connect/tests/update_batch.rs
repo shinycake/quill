@@ -105,35 +105,49 @@ fn a_batch_of_file_and_presence_updates_leaves_custom_emoji_alone() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// An account not on screen leaves its custom emoji for later; the first
-/// batch once it is shown resolves them, even with nothing new in it.
+/// An account not on screen leaves its open chat's custom emoji, views and
+/// media for later; the first batch once it is shown sends them all, even
+/// with nothing new in it.
 #[test]
-fn an_offscreen_batch_resolves_custom_emoji_once_shown() {
+fn an_offscreen_batch_runs_the_shown_chat_passes_once_shown() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    let resolve_requests = || {
-        recorder
-            .snapshot()
-            .iter()
-            .filter(|request| request.contains("getCustomEmojiStickers"))
-            .count()
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
     };
-    driver.session.open_chat = Some(ChatId(4));
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":4,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":4},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(4)).unwrap();
     driver.begin_batch();
-    driver
-        .ingest(copy_and_parse(&text_with_emoji(9, 12345).to_string(), &seq, &sink).unwrap())
-        .unwrap();
+    ingest(&mut driver, &text_with_emoji(9, 12345).to_string());
+    ingest(&mut driver, &photo_message(10, 4, 1, 2));
     driver.end_offscreen_batch();
-    assert_eq!(resolve_requests(), 0);
+    assert!(sent_of_type(&recorder, "getCustomEmojiStickers").is_empty());
+    assert!(sent_of_type(&recorder, "downloadFile").is_empty());
+    assert!(sent_of_type(&recorder, "viewMessages").is_empty());
     driver.begin_batch();
     driver.end_batch().unwrap();
+    assert_eq!(
+        sent_request(&recorder, "viewMessages")["message_ids"],
+        json!([10])
+    );
     assert_eq!(
         sent_request(&recorder, "getCustomEmojiStickers")["custom_emoji_ids"],
         json!(["12345"])
     );
+    let mut downloads: Vec<i64> = sent_of_type(&recorder, "downloadFile")
+        .iter()
+        .filter_map(|request| request["file_id"].as_i64())
+        .collect();
+    downloads.sort_unstable();
+    assert_eq!(downloads, vec![1, 2]);
     let _ = std::fs::remove_dir_all(dir);
 }
 
