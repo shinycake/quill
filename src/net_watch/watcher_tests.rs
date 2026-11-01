@@ -3,7 +3,7 @@
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::super::backend::{listen, subscribe};
+    use super::super::backend::{heard, listen, subscribe};
     use crate::net_watch::link::Link;
     use crate::net_watch::netlink::{self, Request};
     use crate::net_watch::{Hop, Path};
@@ -112,9 +112,14 @@ mod linux {
 
         let families = address_families(&reader);
         assert!(families.contains(&libc::AF_INET), "{families:?}");
-        // A kernel built without IPv6 has no `::1` to add.
+        // A kernel built without IPv6 has no `::1` to add. CI's has.
         if std::path::Path::new("/proc/sys/net/ipv6").exists() {
             assert!(families.contains(&libc::AF_INET6), "{families:?}");
+        } else {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "this runner has no IPv6, so the IPv6 events went untested"
+            );
         }
     }
 
@@ -124,6 +129,9 @@ mod linux {
         if std::env::var_os(CHILD).is_none() {
             return;
         }
+        let epoch = || crate::locks::lock_or_recover(super::super::super::tracker()).epoch;
+        let before = epoch();
+        let watcher = subscribe().unwrap();
         let socket = netlink::open(0).unwrap();
         // A bridge with no ports: a link with a neighbour table, which
         // loopback has not, and no way out of the namespace.
@@ -147,6 +155,19 @@ mod linux {
             })
         };
         assert_eq!(super::super::super::route_now().v4, hop(None));
+        // The watcher hears the new route and moves the epoch TDLib reads.
+        // Every change above is queued on `watcher` already.
+        listen(&watcher, |batch| {
+            heard(batch);
+            ControlFlow::Break(())
+        });
+        assert!(epoch() > before);
+        assert_eq!(
+            crate::locks::lock_or_recover(super::super::super::tracker())
+                .route
+                .v4,
+            hop(None)
+        );
         // The gateway's link-layer address, once the kernel knows it.
         let router = [0x02, 0, 0, 0, 0, 0x09];
         add_neighbour(&socket, link, ip(9), router);
@@ -313,26 +334,69 @@ mod linux {
 
 #[cfg(windows)]
 mod windows {
-    use super::super::backend::{Listener, subscribe};
+    use super::super::backend::{Change, Kind, Listener, subscribe};
+    use std::net::Ipv6Addr;
     use std::sync::{Condvar, Mutex};
+    use windows_sys::Win32::Foundation::NO_ERROR;
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        CreateUnicastIpAddressEntry, DeleteUnicastIpAddressEntry, InitializeUnicastIpAddressEntry,
+        MIB_UNICASTIPADDRESS_ROW, MibAddInstance,
+    };
+    use windows_sys::Win32::Networking::WinSock::AF_INET6;
 
-    static HEARD: Mutex<u32> = Mutex::new(0);
+    static HEARD: Mutex<Vec<Change>> = Mutex::new(Vec::new());
     static WAKE: Condvar = Condvar::new();
-    static COUNTER: Listener = Listener(heard);
+    static RECORDER: Listener = Listener(heard);
 
-    fn heard() {
-        *HEARD.lock().unwrap() += 1;
+    fn heard(change: Change) {
+        HEARD.lock().unwrap().push(change);
         WAKE.notify_all();
     }
 
+    /// An address on the loopback interface (index 1 on Windows), removed
+    /// on drop. Adding one takes an administrator, which the runner is.
+    struct LoopbackAddress(MIB_UNICASTIPADDRESS_ROW);
+
+    impl LoopbackAddress {
+        fn add(ip: Ipv6Addr) -> Self {
+            let mut row = MIB_UNICASTIPADDRESS_ROW::default();
+            // SAFETY: `row` is live and writable.
+            unsafe { InitializeUnicastIpAddressEntry(&raw mut row) };
+            row.Address.Ipv6.sin6_family = AF_INET6;
+            row.Address.Ipv6.sin6_addr.u.Byte = ip.octets();
+            row.InterfaceIndex = 1;
+            row.OnLinkPrefixLength = 128;
+            // SAFETY: `row` is a live, filled-in row.
+            let status = unsafe { CreateUnicastIpAddressEntry(&raw const row) };
+            assert_eq!(status, NO_ERROR, "adding {ip} to loopback");
+            Self(row)
+        }
+    }
+
+    impl Drop for LoopbackAddress {
+        fn drop(&mut self) {
+            // SAFETY: the row this address was added with.
+            unsafe { DeleteUnicastIpAddressEntry(&raw const self.0) };
+        }
+    }
+
+    /// N21: `NotifyAddrChange` never heard this. The CI step's own time
+    /// limit ends the wait if no notification comes.
     #[test]
-    fn interface_address_and_route_notifications_register_for_both_ip_versions() {
-        let subscription = subscribe(&COUNTER, true).unwrap();
+    fn an_ipv6_address_added_on_loopback_wakes_the_watcher() {
+        let subscription = subscribe(&RECORDER).unwrap();
+        let added = Change {
+            kind: Kind::Address,
+            family: AF_INET6,
+            what: MibAddInstance,
+        };
+        let address = LoopbackAddress::add(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0x5175, 0x1));
         let mut heard = HEARD.lock().unwrap();
-        while *heard < 3 {
+        while !heard.contains(&added) {
             heard = WAKE.wait(heard).unwrap();
         }
         drop(heard);
+        drop(address);
         drop(subscription);
     }
 }

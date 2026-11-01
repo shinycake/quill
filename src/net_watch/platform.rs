@@ -117,12 +117,17 @@ mod backend {
     pub(in crate::net_watch) fn watch() {
         if let Ok(socket) = subscribe() {
             listen(&socket, |batch| {
-                // A gateway's entry tells two routers on one address apart.
-                if !super::super::netlink::only_other_neighbours(batch, super::super::is_gateway) {
-                    super::super::network_changed();
-                }
+                heard(batch);
                 ControlFlow::Continue(())
             });
+        }
+    }
+
+    /// What the watcher does with one read.
+    pub(in crate::net_watch) fn heard(batch: &[u8]) {
+        // A gateway's entry tells two routers on one address apart.
+        if !super::super::netlink::only_other_neighbours(batch, super::super::is_gateway) {
+            super::super::network_changed();
         }
     }
 
@@ -176,42 +181,81 @@ mod backend {
 
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
+    /// One notification: what kind of row changed, on which IP version
+    /// (0 when the OS passes no row), and how.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(in crate::net_watch) struct Change {
+        pub(in crate::net_watch) kind: Kind,
+        pub(in crate::net_watch) family: u16,
+        pub(in crate::net_watch) what: MIB_NOTIFICATION_TYPE,
+    }
+
     /// Who hears the notifications; the OS gets a pointer to it.
-    pub(in crate::net_watch) struct Listener(pub(in crate::net_watch) fn());
+    pub(in crate::net_watch) struct Listener(pub(in crate::net_watch) fn(Change));
 
-    static NETWORK: Listener = Listener(super::super::network_changed);
+    static NETWORK: Listener = Listener(|_| super::super::network_changed());
 
-    fn notify(context: *const c_void) {
+    fn notify(context: *const c_void, change: Change) {
         // SAFETY: every registration below passes a `&'static Listener`.
         let listener = unsafe { &*context.cast::<Listener>() };
-        crate::thread_guard::ffi_boundary((), listener.0);
+        crate::thread_guard::ffi_boundary((), || (listener.0)(change));
     }
 
     unsafe extern "system" fn interface(
         context: *const c_void,
-        _row: *const MIB_IPINTERFACE_ROW,
-        _kind: MIB_NOTIFICATION_TYPE,
+        row: *const MIB_IPINTERFACE_ROW,
+        what: MIB_NOTIFICATION_TYPE,
     ) {
-        notify(context);
+        // SAFETY: null or a row the OS keeps live for the call.
+        let family = unsafe { row.as_ref() }.map_or(0, |row| row.Family);
+        notify(
+            context,
+            Change {
+                kind: Kind::Interface,
+                family,
+                what,
+            },
+        );
     }
 
     unsafe extern "system" fn address(
         context: *const c_void,
-        _row: *const MIB_UNICASTIPADDRESS_ROW,
-        _kind: MIB_NOTIFICATION_TYPE,
+        row: *const MIB_UNICASTIPADDRESS_ROW,
+        what: MIB_NOTIFICATION_TYPE,
     ) {
-        notify(context);
+        // SAFETY: null or a row the OS keeps live for the call; every member
+        // of the address union starts with the family.
+        let family = unsafe { row.as_ref() }.map_or(0, |row| unsafe { row.Address.si_family });
+        notify(
+            context,
+            Change {
+                kind: Kind::Address,
+                family,
+                what,
+            },
+        );
     }
 
     unsafe extern "system" fn route(
         context: *const c_void,
-        _row: *const MIB_IPFORWARD_ROW2,
-        _kind: MIB_NOTIFICATION_TYPE,
+        row: *const MIB_IPFORWARD_ROW2,
+        what: MIB_NOTIFICATION_TYPE,
     ) {
-        notify(context);
+        // SAFETY: as in `address`.
+        let family = unsafe { row.as_ref() }
+            .map_or(0, |row| unsafe { row.DestinationPrefix.Prefix.si_family });
+        notify(
+            context,
+            Change {
+                kind: Kind::Route,
+                family,
+                what,
+            },
+        );
     }
 
-    enum Kind {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(in crate::net_watch) enum Kind {
         Interface,
         Address,
         Route,
@@ -230,12 +274,9 @@ mod backend {
     }
 
     /// Interface, address and route changes on IPv4 and IPv6 alike.
-    /// `NotifyAddrChange` heard only IPv4 addresses. `initial` asks for one
-    /// call of each kind at once.
-    pub(in crate::net_watch) fn subscribe(
-        listener: &'static Listener,
-        initial: bool,
-    ) -> io::Result<Subscription> {
+    /// `NotifyAddrChange` heard only IPv4 addresses.
+    pub(in crate::net_watch) fn subscribe(listener: &'static Listener) -> io::Result<Subscription> {
+        let initial = false;
         let context: *const c_void = std::ptr::from_ref(listener).cast();
         let mut subscription = Subscription(Vec::with_capacity(3));
         for kind in [Kind::Interface, Kind::Address, Kind::Route] {
@@ -270,7 +311,7 @@ mod backend {
 
     /// The callbacks run on system threads for as long as Quill does.
     pub(in crate::net_watch) fn watch() {
-        match subscribe(&NETWORK, false) {
+        match subscribe(&NETWORK) {
             Ok(subscription) => std::mem::forget(subscription),
             Err(error) => eprintln!("quill: no network notifications: {error}"),
         }
