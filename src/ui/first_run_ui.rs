@@ -160,43 +160,6 @@ fn write_clip(
     }
 }
 
-#[cfg(test)]
-mod intro_file_tests {
-    use super::write_clip;
-    use std::sync::Mutex;
-
-    /// Replay pressed while the first write of the clip runs: the second
-    /// write cannot start until the first is done, and then finds the clip
-    /// there and leaves the file the player holds alone.
-    #[test]
-    fn a_replay_during_the_first_write_waits_and_reuses_the_written_clip() {
-        static WRITING: Mutex<()> = Mutex::new(());
-        let dir = quill::scratch::process_dir("quill-intro-race");
-        let _ = std::fs::remove_dir_all(&dir);
-        let clip = b"not really an mp4";
-        let first = write_clip(&dir, clip, &WRITING, |file, bytes| {
-            assert!(
-                WRITING.try_lock().is_err(),
-                "a second write could start while this one runs"
-            );
-            std::io::Write::write_all(file, bytes)
-        })
-        .expect("the clip is written");
-        let second = write_clip(&dir, clip, &WRITING, |_, _| panic!("written twice"));
-        assert_eq!(second.as_ref(), Some(&first));
-        assert_eq!(std::fs::read(&first).unwrap(), clip);
-        let leftovers = std::fs::read_dir(&dir)
-            .unwrap()
-            .filter(|entry| {
-                entry
-                    .as_ref()
-                    .is_ok_and(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
-            })
-            .count();
-        assert_eq!(leftovers, 0);
-    }
-}
-
 fn logo() -> Arc<Image> {
     static LOGO: OnceLock<Arc<Image>> = OnceLock::new();
     LOGO.get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())))
@@ -489,4 +452,41 @@ fn highlight_row(icon: IconName, title: &'static str, body: &'static str, cx: &A
                 )
                 .child(paragraph(body, cx.theme().muted_foreground)),
         )
+}
+
+#[cfg(test)]
+mod intro_file_tests {
+    use super::write_clip;
+    use std::sync::Mutex;
+
+    /// Replay pressed while the first write of the clip runs: the second
+    /// write cannot start until the first is done, and then finds the clip
+    /// there and leaves the file the player holds alone.
+    #[test]
+    fn a_replay_during_the_first_write_waits_and_reuses_the_written_clip() {
+        static WRITING: Mutex<()> = Mutex::new(());
+        let dir = quill::scratch::process_dir("quill-intro-race");
+        let _ = std::fs::remove_dir_all(&dir);
+        let clip = b"not really an mp4";
+        let first = write_clip(&dir, clip, &WRITING, |file, bytes| {
+            assert!(
+                WRITING.try_lock().is_err(),
+                "a second write could start while this one runs"
+            );
+            std::io::Write::write_all(file, bytes)
+        })
+        .expect("the clip is written");
+        let second = write_clip(&dir, clip, &WRITING, |_, _| panic!("written twice"));
+        assert_eq!(second.as_ref(), Some(&first));
+        assert_eq!(std::fs::read(&first).unwrap(), clip);
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+    }
 }
