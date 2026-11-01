@@ -39,6 +39,12 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let demo = ScreenshotDemo::named("ready-sticker-playback");
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        // Stickers play on the clock the test moves, as the frame clock
+        // ticks: a tick draws them only when their frame changed.
+        view.read(cx)
+            .playback
+            .stickers
+            .follow(cx.background_executor().clone());
         for file in STICKER_FILES {
             view.read(cx).playback.stickers.set_fixture(
                 file,

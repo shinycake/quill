@@ -254,6 +254,9 @@ pub(crate) struct Player {
     /// Where a test stopped the clock (`freeze`).
     #[cfg(test)]
     frozen: Cell<Option<Instant>>,
+    /// The test executor whose clock [`Self::now`] follows (`follow`).
+    #[cfg(test)]
+    executor: RefCell<Option<BackgroundExecutor>>,
     /// How many times `close_stale` looked (a test).
     #[cfg(test)]
     looks: Cell<usize>,
@@ -274,6 +277,8 @@ impl Player {
             #[cfg(test)]
             frozen: Cell::new(None),
             #[cfg(test)]
+            executor: RefCell::new(None),
+            #[cfg(test)]
             looks: Cell::new(0),
         }
     }
@@ -281,7 +286,12 @@ impl Player {
     /// The time views draw at and the closer judges by.
     pub(super) fn now(&self) -> Instant {
         #[cfg(test)]
-        return self.frozen.get().unwrap_or_else(Instant::now) + self.skew.get();
+        return self
+            .frozen
+            .get()
+            .or_else(|| self.executor.borrow().as_ref().map(BackgroundExecutor::now))
+            .unwrap_or_else(Instant::now)
+            + self.skew.get();
         #[cfg(not(test))]
         Instant::now()
     }
@@ -290,6 +300,13 @@ impl Player {
     #[cfg(test)]
     pub(super) fn skip(&self, by: Duration) {
         self.skew.set(self.skew.get() + by);
+    }
+
+    /// Run [`Self::now`] on `executor`'s clock, which a test moves on:
+    /// heads then play as far as the frame clock's ticks came.
+    #[cfg(test)]
+    pub(in crate::ui) fn follow(&self, executor: BackgroundExecutor) {
+        *self.executor.borrow_mut() = Some(executor);
     }
 
     /// Stop [`Self::now`] where it is: from then on only [`Self::skip`]
