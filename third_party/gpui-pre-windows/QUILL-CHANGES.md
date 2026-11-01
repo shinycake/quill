@@ -340,10 +340,12 @@ x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
 ## Async timers fire on time, not on the 15.6 ms system tick
 
 Added in 2026. Upstream's `dispatch_after` armed a thread-pool timer per
-call, and those expire only on the system timer tick (15.6 ms by default), so
-a 15.3 ms frame-clock wait for a 60 fps sticker landed on 15.6 or 31.25 ms and
-played at about 32 Hz. Telegram Desktop runs its animations on a
-`Qt::PreciseTimer` for the same reason.
+call, and those land on the system timer tick (15.6 ms by default). Measured
+on `windows-latest` VMs with no window: a 30 fps wait of 33.3 ms took about
+47 ms (23 Hz), a 50 fps wait of 18.4 ms about 32 ms (34 Hz), and a 60 fps wait
+of 15.3 ms fits one tick but slipped a whole tick on 1-17% of waits, or 18-32%
+with 2 to 6 ms of main-thread work at 60 Hz (48-54 Hz). Through this timer
+thread those loops ran at 29.6, 53.3 and 60.1 Hz.
 
 - `src/timer_queue.rs` (new, std-only; unit tests run with
   `scripts/test-timer-queue.sh`, which CI's `linux-fmt-clippy-test` job runs):
