@@ -656,3 +656,41 @@ fn a_refused_paint_stays_out_of_a_replay() {
     filtered.replay(0..1, &first);
     assert_eq!(filtered.len(), 0);
 }
+
+#[test]
+fn finish_sorts_by_order_and_keeps_paint_order_among_equals() {
+    for case in 0..500 {
+        let mut painter = Painter::new(case);
+        let mut scene = Scene::default();
+        for _ in 0..1 + painter.dice.below(6) {
+            paint(&mut scene, &painter.view().steps);
+        }
+        let mut quads: Vec<_> = scene
+            .quads
+            .iter()
+            .map(|quad| (quad.order, quad_tag(quad)))
+            .collect();
+        let mut sprites: Vec<_> = scene
+            .monochrome_sprites
+            .iter()
+            .map(|sprite| (sprite.order, sprite.tile.texture_id.index, sprite.pad))
+            .collect();
+        quads.sort_by_key(|&(order, _)| order);
+        sprites.sort_by_key(|&(order, texture, _)| (order, texture));
+
+        scene.finish();
+
+        let sorted_quads: Vec<_> = scene
+            .quads
+            .iter()
+            .map(|quad| (quad.order, quad_tag(quad)))
+            .collect();
+        let sorted_sprites: Vec<_> = scene
+            .monochrome_sprites
+            .iter()
+            .map(|sprite| (sprite.order, sprite.tile.texture_id.index, sprite.pad))
+            .collect();
+        assert_eq!(sorted_quads, quads, "case {case}");
+        assert_eq!(sorted_sprites, sprites, "case {case}");
+    }
+}

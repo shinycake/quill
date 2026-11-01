@@ -16,6 +16,7 @@ use crate::{
 use std::{
     fmt::Debug,
     iter::Peekable,
+    mem,
     ops::{Add, Range, Sub},
     slice,
 };
@@ -55,6 +56,9 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// Quill: the sort keys of `finish`, kept so it allocates nothing once
+    /// the scene has grown.
+    sort_keys: Vec<(u64, u32)>,
     /// Quill: the window's paint filter refuses the tags being painted
     /// now, so primitives inserted meanwhile are dropped
     /// (`Window::set_paint_filter`).
@@ -78,6 +82,7 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.sort_keys.clear();
         self.suppressed = false;
         self.filtered = false;
     }
@@ -217,17 +222,25 @@ impl Scene {
     }
 
     pub fn finish(&mut self) {
-        self.shadows.sort_by_key(|shadow| shadow.order);
-        self.quads.sort_by_key(|quad| quad.order);
-        self.paths.sort_by_key(|path| path.order);
-        self.underlines.sort_by_key(|underline| underline.order);
-        self.monochrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.subpixel_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.polychrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
-        self.surfaces.sort_by_key(|surface| surface.order);
+        let keys = &mut self.sort_keys;
+        sort_primitives(&mut self.shadows, keys, |shadow| u64::from(shadow.order));
+        sort_primitives(&mut self.quads, keys, |quad| u64::from(quad.order));
+        sort_primitives(&mut self.paths, keys, |path| u64::from(path.order));
+        sort_primitives(&mut self.underlines, keys, |underline| {
+            u64::from(underline.order)
+        });
+        sort_primitives(&mut self.monochrome_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.subpixel_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.polychrome_sprites, keys, |sprite| {
+            sprite_sort_key(sprite.order, &sprite.tile)
+        });
+        sort_primitives(&mut self.surfaces, keys, |surface| {
+            u64::from(surface.order)
+        });
     }
 
     #[cfg_attr(
@@ -255,6 +268,38 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+        }
+    }
+}
+
+fn sprite_sort_key(order: DrawOrder, tile: &AtlasTile) -> u64 {
+    u64::from(order) << 32 | u64::from(tile.texture_id.index)
+}
+
+/// QUILL: a stable sort by `key` that moves the primitives only once their
+/// places are known. `sort_by_key` needed a scratch buffer of whole structs on
+/// each frame, for a list that often comes in order already.
+fn sort_primitives<T>(primitives: &mut [T], keys: &mut Vec<(u64, u32)>, key: impl Fn(&T) -> u64) {
+    if primitives.is_sorted_by_key(&key) {
+        return;
+    }
+    keys.clear();
+    keys.extend(
+        primitives
+            .iter()
+            .zip(0u32..)
+            .map(|(primitive, at)| (key(primitive), at)),
+    );
+    keys.sort_unstable();
+    for start in 0..primitives.len() {
+        let mut slot = start;
+        while let Some(entry) = keys.get_mut(slot) {
+            let source = mem::replace(&mut entry.1, slot as u32) as usize;
+            if source == start {
+                break;
+            }
+            primitives.swap(slot, source);
+            slot = source;
         }
     }
 }
