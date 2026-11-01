@@ -5,6 +5,7 @@
 use super::join::ProgramRow;
 use super::setup::STARREF_TOS_URL;
 use super::*;
+use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -557,7 +558,10 @@ impl QuillApp {
                     tr(keys::Q_MONEY_BY_JOINING_THIS_PROGRAM_YOU),
                     tr(keys::Q_MONEY_TERMS_AND_CONDITIONS),
                     tr(keys::Q_MONEY_OF_AFFILIATE_PROGRAMS),
-                    |_, cx| cx.open_url(STARREF_TOS_URL),
+                    {
+                        let app = app.downgrade();
+                        move |_, cx| open_link_in(&app, STARREF_TOS_URL, cx)
+                    },
                     cx,
                 ));
             dialog

@@ -523,9 +523,22 @@ pub fn mailto_url(address: &str) -> Option<String> {
 /// Open the mail client on a new message to `address`.
 pub fn open_mailto(address: &str) -> OsOpen {
     match mailto_url(address) {
-        Some(url) => os_open(std::ffi::OsStr::new(&url), "open the mail client"),
+        Some(url) => open_mailto_url(&url),
         None => OsOpen::Answered(false),
     }
+}
+
+/// Open the mail client on a `mailto:` URL Quill built (address, subject
+/// and body already percent-encoded). Anything else is refused, like
+/// [`open_external_url`] refuses what is not a web link.
+pub fn open_mailto_url(url: &str) -> OsOpen {
+    let plain = url
+        .chars()
+        .all(|ch| !ch.is_whitespace() && !ch.is_control());
+    if !url.starts_with("mailto:") || !plain {
+        return OsOpen::Answered(false);
+    }
+    os_open(std::ffi::OsStr::new(url), "open the mail client")
 }
 
 /// Hand a URL or path to the OS default handler: the one door every helper
@@ -534,14 +547,20 @@ pub fn open_mailto(address: &str) -> OsOpen {
 /// for the OS stays with the user, whichever link, button or file the
 /// agent reached. `what` is the verb phrase the refusal names.
 fn os_open(target: &std::ffi::OsStr, what: &str) -> OsOpen {
+    os_gate(what).unwrap_or_else(|| os_open_now(target))
+}
+
+/// The answer for a hand-off to the OS that must not go ahead: refused
+/// while the agent injects input, or scripted by a test.
+fn os_gate(what: &str) -> Option<OsOpen> {
     if crate::agent::ui_driver::guard::refuse_outside_if_injecting(what) {
-        return OsOpen::Answered(false);
+        return Some(OsOpen::Answered(false));
     }
     #[cfg(any(test, feature = "test-support"))]
     if let Some(answer) = test_launches::scripted_answer() {
-        return answer;
+        return Some(answer);
     }
-    os_open_now(target)
+    None
 }
 
 /// macOS `open`, Linux `xdg-open` (argv, no shell).
@@ -802,6 +821,27 @@ mod tests {
         ] {
             assert_eq!(mailto_url(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_mail_link_reaches_the_os_only_when_it_is_one() {
+        for bad in [
+            "https://example.com",
+            "mailto:ann@example.com\nbcc:x@y.z",
+            "mailto:ann@example.com?subject=two words",
+            "file:///etc/passwd",
+        ] {
+            let before = os_launch_attempts();
+            assert!(
+                matches!(open_mailto_url(bad), OsOpen::Answered(false)),
+                "{bad}"
+            );
+            assert_eq!(os_launch_attempts(), before, "{bad}");
+        }
+        let before = os_launch_attempts();
+        let url = crate::signin::banned_help_mailto("+1 555", "1.0", "linux");
+        assert!(matches!(open_mailto_url(&url), OsOpen::Answered(true)));
+        assert_eq!(os_launch_attempts(), before + 1);
     }
 
     #[test]

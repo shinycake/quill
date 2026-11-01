@@ -22,24 +22,24 @@ impl QuillApp {
                 Button::new("settings-faq")
                     .label(tr(keys::SETTINGS_FAQ))
                     .ghost()
-                    .on_click(
-                        cx.listener(|_, _, _, cx| cx.open_url(quill::settings_account::FAQ_URL)),
-                    ),
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_link(quill::settings_account::FAQ_URL, cx)
+                    })),
             )
             .child(
                 Button::new("settings-features")
                     .label(tr(keys::SETTINGS_FEATURES))
                     .ghost()
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        cx.open_url(quill::settings_account::FEATURES_URL)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_link(quill::settings_account::FEATURES_URL, cx)
                     })),
             )
             .child(
                 Button::new("settings-privacy-policy")
                     .label(tr(keys::Q_PREFS_PRIVACY_POLICY))
                     .ghost()
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        cx.open_url(quill::settings_account::PRIVACY_POLICY_URL)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_link(quill::settings_account::PRIVACY_POLICY_URL, cx)
                     })),
             )
             .child(
@@ -96,8 +96,8 @@ impl QuillApp {
                         Button::new("ask-question-faq")
                             .label(tr(keys::SETTINGS_FAQ_BUTTON))
                             .outline()
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.open_url(quill::settings_account::FAQ_URL)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_link(quill::settings_account::FAQ_URL, cx)
                             })),
                     )
                     .child(

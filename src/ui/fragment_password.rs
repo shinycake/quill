@@ -270,7 +270,7 @@ impl QuillApp {
             label: None,
         };
         match open_decision(&link) {
-            OpenDecision::Open => cx.open_url(url),
+            OpenDecision::Open => self.open_link(url, cx),
             OpenDecision::Confirm {
                 url,
                 shown,

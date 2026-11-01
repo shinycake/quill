@@ -334,7 +334,7 @@ impl QuillApp {
             self.connection.set_note(StatusNote::info(note));
         }
         if let Some(url) = url {
-            cx.open_url(&url);
+            self.open_link(&url, cx);
         }
         if closed
             && matches!(

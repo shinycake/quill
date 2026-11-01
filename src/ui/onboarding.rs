@@ -199,7 +199,7 @@ impl QuillApp {
                     .label(tr(keys::Q_MISC_EMAIL_TELEGRAM_SUPPORT))
                     .ghost()
                     .w_full()
-                    .on_click(move |_, _, cx| cx.open_url(&mailto)),
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_link(&mailto, cx))),
             );
         }
         if show_retry {

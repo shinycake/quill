@@ -5,6 +5,7 @@
 
 use super::revenue::{learn_more_band, star_amount};
 use super::*;
+use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -178,7 +179,7 @@ impl QuillApp {
                         .label(tr(keys::BOT_EARN_BALANCE_BUTTON_BUY_ADS))
                         .primary()
                         .flex_1()
-                        .on_click(move |_, _, cx| cx.open_url(&url)),
+                        .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx))),
                 );
             }
             block = block
@@ -207,7 +208,10 @@ impl QuillApp {
             } else {
                 tr(keys::Q_MONEY_YOU_CAN_WITHDRAW_STARS_USING)
             },
-            |_, cx| cx.open_url(STARS_TOS_URL),
+            {
+                let app = cx.weak_entity();
+                move |_, cx| open_link_in(&app, STARS_TOS_URL, cx)
+            },
             cx,
         ))
     }

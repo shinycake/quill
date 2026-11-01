@@ -692,8 +692,8 @@ fn subscription_row(
                 Button::new(format!("subs-renew-{id}"))
                     .label(tr(keys::Q_MONEY_RENEW))
                     .disabled(mutating)
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.open_url(&link);
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_link(&link, cx);
                     })),
             );
         }

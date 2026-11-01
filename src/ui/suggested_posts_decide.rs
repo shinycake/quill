@@ -553,7 +553,7 @@ impl QuillApp {
                         .primary()
                         .w_full()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            cx.open_url(LOW_TON_URL);
+                            this.open_link(LOW_TON_URL, cx);
                             this.close_grams_needed(cx);
                             this.close_kit_dialog_if_done(
                                 DialogKind::SuggestGramsNeeded,

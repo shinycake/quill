@@ -101,7 +101,7 @@ impl QuillApp {
                     self.restart_to_update(cx);
                 }
             }
-            UpdateControl::OpenRelease(url) => cx.open_url(&url),
+            UpdateControl::OpenRelease(url) => self.open_link(&url, cx),
             UpdateControl::Check { busy: true }
             | UpdateControl::Downloading { .. }
             | UpdateControl::Restarting => {}
@@ -338,7 +338,7 @@ impl QuillApp {
             Button::new("open-quill-release")
                 .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
                 .ghost()
-                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
+                .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx)))
                 .into_any_element(),
         )
     }
@@ -440,9 +440,9 @@ impl QuillApp {
     }
 
     pub(super) fn published_notices_unless_opened(&mut self, open: OsOpen, cx: &mut Context<Self>) {
-        self.when_os_answers(open, cx, |_, opened, cx| {
+        self.when_os_answers(open, cx, |this, opened, cx| {
             if !opened {
-                cx.open_url(quill::about::NOTICES_URL);
+                this.open_link(quill::about::NOTICES_URL, cx);
             }
         });
     }

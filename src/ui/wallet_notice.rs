@@ -115,7 +115,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_MONEY_GET_TELEGRAM_APPS))
                                 .primary()
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    cx.open_url(OFFICIAL_APPS_URL);
+                                    this.open_link(OFFICIAL_APPS_URL, cx);
                                     this.dismiss_wallet_notice(cx);
                                     this.close_kit_dialog_if_done(
                                         DialogKind::WalletNotice,

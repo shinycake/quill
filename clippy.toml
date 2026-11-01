@@ -3,3 +3,9 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
+
+# Every open goes through `QuillApp::open_link` / `report_failed_open`
+# (src/ui/os_open.rs), which tells the user when the OS could not open it.
+disallowed-methods = [
+    { path = "gpui_kit::App::open_url", reason = "GPUI reports no failure: use QuillApp::open_link or os_open::open_link_in" },
+]

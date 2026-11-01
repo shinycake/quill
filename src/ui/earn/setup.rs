@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::ui::chat_theme::danger;
+use crate::ui::os_open::open_link_in;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -466,7 +467,10 @@ impl QuillApp {
                 },
                 tr(keys::Q_MONEY_TERMS_AND_CONDITIONS),
                 tr(keys::Q_MONEY_OF_AFFILIATE_PROGRAMS),
-                |_, cx| cx.open_url(STARREF_TOS_URL),
+                {
+                    let app = cx.weak_entity();
+                    move |_, cx| open_link_in(&app, STARREF_TOS_URL, cx)
+                },
                 cx,
             ))
     }
