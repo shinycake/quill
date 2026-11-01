@@ -29,16 +29,21 @@ fn an_incoming_call_rings_before_any_window_draws(cx: &mut TestAppContext) {
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
     });
-    let app: Entity<QuillApp> = slot.borrow().clone().expect("the app");
+    let app = slot.borrow().clone();
+    let Some(app): Option<Entity<QuillApp>> = app else {
+        panic!("the window builder did not run");
+    };
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     vcx.update(|window, cx| window.render_frame(cx));
     vcx.run_until_parked();
     app.update(&mut vcx, |app, cx| {
-        let call = app
+        let Some(call) = app
             .demo_session
             .as_mut()
             .and_then(|session| session.calls.active_call.as_mut())
-            .expect("the demo's call");
+        else {
+            panic!("the demo has a call");
+        };
         call.is_outgoing = false;
         call.state = CallState::Pending {
             is_created: true,
