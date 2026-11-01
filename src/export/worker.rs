@@ -348,7 +348,7 @@ fn save_once<T: Tdlib>(
     name: impl FnOnce(&Fetched) -> String,
 ) -> Result<Result<String, Skip>, ExportError> {
     if let Some(saved) = job.loaded.find(file_id) {
-        return Ok(Ok(out.from_folder(&saved)));
+        return Ok(Ok(out.folder_path(&saved)));
     }
     let source = match fetch_file(tdlib, job.files_root, file_id, limit)? {
         Ok(source) => source,
@@ -357,7 +357,7 @@ fn save_once<T: Tdlib>(
     let path = name(&source);
     place_into(out.folder, &path, &source)?;
     source.release(tdlib)?;
-    job.loaded.save(file_id, out.from_root(&path));
+    job.loaded.save(file_id, out.root_path(&path));
     Ok(Ok(path))
 }
 
@@ -384,7 +384,7 @@ pub struct ChatOut<'a> {
 impl ChatOut<'_> {
     /// `root_relative`, a path from the export root, as a path from this
     /// chat's folder.
-    fn from_folder(&self, root_relative: &str) -> String {
+    fn folder_path(&self, root_relative: &str) -> String {
         match root_relative.strip_prefix(self.json_prefix) {
             Some(inside) => inside.to_string(),
             None => format!("{}{root_relative}", self.base),
@@ -392,7 +392,7 @@ impl ChatOut<'_> {
     }
 
     /// A path from this chat's folder as a path from the export root.
-    fn from_root(&self, folder_relative: &str) -> String {
+    fn root_path(&self, folder_relative: &str) -> String {
         match folder_relative.strip_prefix(self.base) {
             Some(outside) if !self.base.is_empty() => outside.to_string(),
             _ => format!("{}{folder_relative}", self.json_prefix),
@@ -450,8 +450,8 @@ fn flush_page(
 fn rooted_outcome(outcome: Option<&Outcome>, out: &ChatOut<'_>) -> Option<Outcome> {
     match outcome {
         Some(Outcome::Saved { path, thumb }) => Some(Outcome::Saved {
-            path: out.from_root(path),
-            thumb: thumb.as_deref().map(|t| out.from_root(t)),
+            path: out.root_path(path),
+            thumb: thumb.as_deref().map(|t| out.root_path(t)),
         }),
         other => other.cloned(),
     }
