@@ -1,11 +1,6 @@
 //! The poll loops' pacing, on the test scheduler's clock.
-<<<<<<< HEAD
-use super::{NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
-use gpui_kit::{ActivityGuard, TestAppContext};
-=======
 use super::{CHROME_PACE, NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
-use gpui_kit::TestAppContext;
->>>>>>> origin/claude/sweep-b9
+use gpui_kit::{ActivityGuard, TestAppContext};
 use quill::wake::Signal;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

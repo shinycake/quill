@@ -421,20 +421,11 @@ fn install_main_window_tray(
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
-<<<<<<< HEAD
             // Fallback for what no event announces (a tray host that
             // appears late, the menu bar theme); everything else pokes
             // `wake::CHROME` (applied updates, tray menu clicks, settings).
-            let wait = std::time::Duration::from_secs(10);
-            let mut seen = quill::wake::CHROME.epoch();
-            loop {
-                ui::sleep_or_wake(cx.background_executor(), &quill::wake::CHROME, seen, wait).await;
-                // Taken before the work: a poke during it runs the loop again.
-                seen = quill::wake::CHROME.epoch();
-=======
             let executor = cx.background_executor().clone();
             ui::run_chrome_loop(executor, || {
->>>>>>> origin/claude/sweep-b9
                 let alive = tray_view
                     .update(cx, |this, _| {
                         quill::tray::sync_tray(this.session());
@@ -448,37 +439,6 @@ fn install_main_window_tray(
                 if !alive {
                     return None;
                 }
-<<<<<<< HEAD
-=======
-                #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-                let mut due = None;
-                #[cfg(target_os = "macos")]
-                let _ = tray_window.update(cx, |_, window, cx| {
-                    let enabled = tray_view
-                        .update(cx, |this, _| this.minimize_to_tray())
-                        .unwrap_or(false);
-                    if enabled && quill::tray::tray_available() {
-                        use objc2_app_kit::NSView;
-                        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-                        if let Ok(handle) = HasWindowHandle::window_handle(window)
-                            && let RawWindowHandle::AppKit(handle) = handle.as_raw()
-                        {
-                            // SAFETY: GPUI owns this live NSView for the lifetime of the window.
-                            let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
-                            if let Some(native) = view.window()
-                                && native.isMiniaturized()
-                            {
-                                // Check again soon; a minimized window
-                                // has no event to announce its state.
-                                due = Some(std::time::Duration::from_secs(1));
-                                // Keep it minimized while hidden. Deminiaturizing
-                                // here would finish its animation by unhiding the app.
-                                cx.hide();
-                            }
-                        }
-                    }
-                });
->>>>>>> origin/claude/sweep-b9
                 for action in quill::tray::take_tray_actions() {
                     let _ = tray_window.update(cx, |_, window, cx| match action {
                         quill::tray::TrayAction::Open => raise_main_window(window, cx),
@@ -507,7 +467,7 @@ fn install_main_window_tray(
                 }
                 Some(ui::PassEnd {
                     work_left: false,
-                    due,
+                    due: None,
                 })
             })
             .await;

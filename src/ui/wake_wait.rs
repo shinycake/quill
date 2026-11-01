@@ -160,7 +160,8 @@ pub(super) const CHROME_PACE: PollPace = PollPace {
 /// Run the tray and badge `pass` on [`quill::wake::CHROME`] at
 /// [`CHROME_PACE`], with one fallback timer kept across rests.
 pub async fn run_chrome_loop(executor: BackgroundExecutor, pass: impl FnMut() -> Option<PassEnd>) {
-    run_poll_loop(executor, &quill::wake::CHROME, CHROME_PACE, pass).await;
+    let hold = backlog_hold(&executor);
+    run_poll_loop(executor, &quill::wake::CHROME, CHROME_PACE, hold, pass).await;
 }
 
 #[cfg(test)]
