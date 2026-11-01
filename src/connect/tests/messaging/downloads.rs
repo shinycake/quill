@@ -82,8 +82,8 @@ fn photo_history_auto_downloads_thumb_and_full_photo() {
 #[test]
 fn chat_list_photo_downloads_on_ingest_and_dedupes() {
     // Parity slice: `updateNewChat` with `chat.photo.small` triggers a
-    // `downloadFile` (thumb priority) from the ingest hook; a second
-    // ingest does not re-request while the download is in flight.
+    // `downloadFile` (below the open chat's thumbs) from the ingest hook; a
+    // second ingest does not re-request while the download is in flight.
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink = Arc::new(MemorySink::new());
@@ -121,7 +121,8 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
         .find(|j| j.contains("downloadFile") && j.contains("\"file_id\":91"))
         .expect("chat photo downloadFile");
     let avatar_json: Value = serde_json::from_str(avatar_req).unwrap();
-    assert_eq!(avatar_json["priority"], THUMB_DOWNLOAD_PRIORITY);
+    assert_eq!(avatar_json["priority"], CHAT_LIST_PHOTO_PRIORITY);
+    assert!(CHAT_LIST_PHOTO_PRIORITY < THUMB_DOWNLOAD_PRIORITY);
     assert_eq!(avatar_json["synchronous"], false);
     // A second ingest (any envelope) must not duplicate the in-flight
     // download.
@@ -144,12 +145,39 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
     driver.ingest(copy_and_parse(
         r#"{"@type":"updateUser","user":{"id":42,"first_name":"Contact","type":{"@type":"userTypeRegular"},"profile_photo":{"@type":"profilePhoto","small":{"@type":"file","id":92},"big":null}}}"#,
         &seq, &dyn_sink).unwrap()).unwrap();
-    assert!(
+    let user_downloads = |recorder: &RecordingSender| {
         recorder
             .snapshot()
             .iter()
-            .any(|j| j.contains("downloadFile") && j.contains("\"file_id\":92")),
-        "contact avatars are downloaded too"
+            .filter(|j| j.contains("downloadFile") && j.contains("\"file_id\":92"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let tick = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+        driver.poll_ticks(
+            crate::connect::TickScope::OnScreen {
+                settings_open: false,
+            },
+            std::time::Instant::now(),
+        );
+    };
+    tick(&mut driver);
+    assert!(
+        user_downloads(&recorder).is_empty(),
+        "a user no view shows is not downloaded"
+    );
+    assert_eq!(driver.session.user_photo_path(42), None);
+    tick(&mut driver);
+    let sent = user_downloads(&recorder);
+    assert_eq!(sent.len(), 1, "the avatar a view asked for is downloaded");
+    let user_json: Value = serde_json::from_str(&sent[0]).unwrap();
+    assert_eq!(user_json["priority"], THUMB_DOWNLOAD_PRIORITY);
+    assert_eq!(driver.session.user_photo_path(42), None);
+    tick(&mut driver);
+    assert_eq!(
+        user_downloads(&recorder).len(),
+        1,
+        "claimed again while in flight"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
