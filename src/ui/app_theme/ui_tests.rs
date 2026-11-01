@@ -234,3 +234,44 @@ fn a_custom_theme_is_read_off_the_ui_thread(cx: &mut TestAppContext) {
         assert_eq!(applied_id(app), Some(&ThemeId::default_day()));
     });
 }
+
+/// Edit on a custom theme reads it off the UI thread. Opening the current
+/// theme's editor meanwhile wins: the late read neither replaces that
+/// editor nor reports its own failure.
+#[gpui_kit::test]
+fn a_late_custom_read_leaves_a_newer_editor_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let missing = "quill-test-no-such-theme-b9-editor".to_string();
+    let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
+    app.update_in(vcx, |app, window, cx| {
+        app.open_theme_editor(EditorSource::Custom(missing), window, cx);
+        assert!(app.settings.app_theme.editor.is_none(), "still reading");
+        app.open_theme_editor(EditorSource::Current, window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        let editor = app.settings.app_theme.editor.as_ref();
+        assert!(editor.is_some_and(|editor| editor.editing.is_none()));
+        assert_eq!(app.connection.status_note(), note);
+    });
+}
+
+/// Closing Settings while a custom theme is read for the editor: the
+/// editor does not pop up on its own afterwards.
+#[gpui_kit::test]
+fn closing_settings_drops_the_editor_read(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let missing = "quill-test-no-such-theme-b9-closed".to_string();
+    let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
+    app.update_in(vcx, |app, window, cx| {
+        app.open_theme_editor(EditorSource::Custom(missing), window, cx);
+        app.close_settings();
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(app.settings.app_theme.editor.is_none());
+        assert_eq!(app.connection.status_note(), note, "no load error either");
+    });
+}

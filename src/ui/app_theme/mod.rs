@@ -171,6 +171,8 @@ pub(crate) struct AppThemeUi {
     pub(super) chat_defaults: Option<ChatDefaults>,
     /// The palette editor, while it is open.
     pub(super) editor: Option<editor::ThemeEditor>,
+    /// The custom theme being read for the editor, by name.
+    pub(crate) editor_read: Option<(String, Task<()>)>,
     /// Omarchy's current theme, once looked for (`omarchy.rs`).
     pub(super) omarchy: Option<omarchy::OmarchyState>,
     omarchy_probed: bool,
@@ -330,6 +332,7 @@ impl QuillApp {
         themes.custom_read = None;
         themes.custom_cache = None;
         themes.palette_read = None;
+        themes.editor_read = None;
     }
 
     /// Show `id` (tdesktop `SetupDefaultThemes` `apply`): it becomes the
