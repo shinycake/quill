@@ -511,6 +511,7 @@ impl QuillApp {
         // Logged out in the background: its next sends go with it.
         for key in signed_out {
             self.forget_account_sends(&key);
+            super::notifications::forget_cached_icons();
         }
         if changed {
             self.publish_background_unread();

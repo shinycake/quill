@@ -203,6 +203,7 @@ fn ui_main(args: &[String]) {
 
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
+    quill::notify::avatar::sweep_old_icons();
     // Old editor working files go once per run, here and nowhere else.
     quill::scratch::sweep_work_dirs_once();
 

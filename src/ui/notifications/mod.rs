@@ -763,6 +763,7 @@ impl QuillApp {
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup.
         quill::local_path::sweep_media_caches();
+        avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }
 
@@ -949,6 +950,7 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
 
 mod account_notifications;
 mod avatar_icon;
+pub(in crate::ui) use avatar_icon::forget_cached_icons;
 mod debug_notification;
 mod inline_reply;
 #[cfg(target_os = "linux")]

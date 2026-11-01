@@ -9,15 +9,17 @@ use super::QuillApp;
 use gpui_kit::{AppContext, Context};
 use image::{ImageFormat, RgbaImage, imageops};
 use quill::ids::AccountKey;
-use quill::notify::avatar::{ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_path};
+use quill::notify::avatar::{
+    ICON_SIZE, apply_circle_mask, existing_icon, icon_cache_dir, icon_cache_path,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-fn cache_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("org", "shinycake", quill::settings::APP_DIR_NAME)
-        .map(|dirs| dirs.cache_dir().join("notify-avatars"))
+pub(in crate::ui) fn forget_cached_icons() {
+    #[cfg(not(test))]
+    quill::notify::avatar::clear_icons();
 }
 
 /// Decode `source`, crop to a centered square, scale and mask to a circle.
@@ -48,7 +50,7 @@ fn cache_target(source: &Path) -> Option<(PathBuf, PathBuf)> {
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_secs());
-    let dir = cache_dir()?;
+    let dir = icon_cache_dir()?;
     let target = icon_cache_path(&dir, source, meta.len(), mtime);
     Some((dir, target))
 }
