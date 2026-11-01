@@ -401,7 +401,7 @@ fn mic_mix(controls: &Mutex<Option<Arc<MicControls>>>) -> Option<Arc<SystemAudio
 #[test]
 fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
     driver.pump_call_screen();
     assert!(driver.call_screen().with_audio() && driver.call_screen().sharing_audio());
@@ -446,7 +446,7 @@ fn a_microphone_opened_later_still_gets_the_system_audio() {
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
     driver.pump_call_screen();
     assert!(mic_mix(&controls).is_none(), "no microphone yet");
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     let started = loopbacks.started.lock().unwrap().clone();
     let mixed = mic_mix(&controls).expect("handed over on open");
     assert!(Arc::ptr_eq(&mixed, &started[0]));
@@ -457,7 +457,7 @@ fn a_microphone_opened_later_still_gets_the_system_audio() {
 fn failed_system_audio_keeps_the_screen_and_says_why() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
     loopbacks.fail.store(true, Ordering::SeqCst);
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
     driver.pump_call_screen();
     assert!(driver.call_screen().target().is_some());

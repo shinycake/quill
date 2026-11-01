@@ -77,6 +77,9 @@ pub struct GroupVideoSource {
     /// The participant's audio ssrc (`audio_source_id`), which tgcalls
     /// syncs the video's playback to (lip sync).
     pub audio_ssrc: u32,
+    /// Shown large where someone can see it. Only this video is worth
+    /// more than Thumbnail.
+    pub large: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

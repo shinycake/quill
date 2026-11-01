@@ -196,8 +196,11 @@ becomes `audio_source_id`. A join answer with `"stream": true` sets
 broadcast mode (unified for `"rtmp": true`); any other answer sets RTC
 mode and then the answer, in tdesktop's order. Incoming video is routed by
 endpoint, so each `GroupVideoSource` says whether it is a screen. Requested
-qualities follow tdesktop's grid defaults and budget, since Quill does not
-report tile sizes. Speaker levels reach the engine event hook and drive every
+qualities follow tdesktop's tiles: Full for the one shown large in a window
+someone can see, Thumbnail for the rest, as Quill's other tiles are under
+tdesktop's 240 px line. A minimized, covered or closed window drops the
+large tile too, which tdesktop does not do; the channels themselves stay
+subscribed. Speaker levels reach the engine event hook and drive every
 member row (see "Parity items on tgcalls"). Media channel requests
 stay unwired: tgcalls then accepts every ssrc as it comes, which a stream
 never needs (its parts carry no ssrcs) and an RTC call plays the same.

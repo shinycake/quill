@@ -437,7 +437,10 @@ impl TgcallsEngine {
                 .find(|source| source.screen)
                 .or_else(|| sources.first())
                 .into_iter()
-                .cloned()
+                .map(|source| GroupVideoSource {
+                    large: true,
+                    ..source.clone()
+                })
                 .collect(),
         };
         let sources = chosen.as_slice();

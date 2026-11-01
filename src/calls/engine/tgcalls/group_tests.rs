@@ -19,6 +19,7 @@ fn source(user_id: i64, endpoint: &str, screen: bool) -> GroupVideoSource {
         }],
         screen,
         audio_ssrc: 0,
+        large: false,
     }
 }
 

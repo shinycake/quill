@@ -32,6 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             group_camera_state: HashMap::new(),
             group_mute_state: HashMap::new(),
             group_seen: HashMap::new(),
+            group_large_tile: None,
             conference_crypto: None,
             group_call_streams: Default::default(),
             group_levels: Default::default(),

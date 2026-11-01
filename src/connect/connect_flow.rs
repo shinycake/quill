@@ -1,6 +1,7 @@
 //! Connect gate: credential/TDJSON gating and TDLib parameters.
 use super::*;
 use crate::calls::engine::{GroupVideoSource, GroupVideoSourceGroup};
+use crate::calls::tile_pin::TileKey;
 use crate::credentials::TelegramCredentials;
 use crate::disk_guard::{FLOORS, available_bytes, refuses_open};
 use crate::ids::AccountKey;
@@ -96,12 +97,14 @@ pub fn build_set_tdlib_parameters(
 /// diffs this set against its subscriptions on every pump.
 pub(crate) fn group_video_sources(
     participants: &[ParsedGroupCallParticipant],
+    large_tile: Option<TileKey>,
 ) -> Vec<GroupVideoSource> {
     fn one(
         user_id: i64,
         audio_ssrc: u32,
         info: &Option<GroupCallVideoInfo>,
         screen: bool,
+        large_tile: Option<TileKey>,
         out: &mut Vec<GroupVideoSource>,
     ) {
         let Some(info) = info else { return };
@@ -126,6 +129,11 @@ pub(crate) fn group_video_sources(
             ssrc_groups,
             screen,
             audio_ssrc,
+            large: large_tile
+                == Some(TileKey {
+                    participant: MessageSender::User { user_id },
+                    screen,
+                }),
         });
     }
 
@@ -143,6 +151,7 @@ pub(crate) fn group_video_sources(
             audio_ssrc,
             &participant.video_info,
             false,
+            large_tile,
             &mut sources,
         );
         one(
@@ -150,6 +159,7 @@ pub(crate) fn group_video_sources(
             audio_ssrc,
             &participant.screen_sharing_video_info,
             true,
+            large_tile,
             &mut sources,
         );
     }
