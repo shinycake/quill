@@ -3,7 +3,8 @@
 //! disk, and the tightest volume is the one that fills first.
 #![deny(clippy::indexing_slicing)]
 
-use super::DataUse;
+use super::probe::Volume;
+use super::{DataReading, DataUse};
 use std::path::{Path, PathBuf};
 
 /// The data root, `accounts`, and each account folder with its `tdlib` and
@@ -31,9 +32,38 @@ pub(super) fn data_folders(root: &Path) -> Vec<PathBuf> {
     real
 }
 
-/// The least free space over `folders`, read by `read`.
-pub(super) fn tightest(folders: &[PathBuf], read: impl Fn(&Path) -> Option<u64>) -> Option<u64> {
-    folders.iter().filter_map(|folder| read(folder)).min()
+/// `folders` read by `read`: the least free space over them, and whether
+/// any one cannot be written.
+pub(super) fn tightest(folders: &[PathBuf], read: impl Fn(&Path) -> Volume) -> DataReading {
+    let volumes: Vec<Volume> = folders.iter().map(|folder| read(folder)).collect();
+    DataReading {
+        free: volumes.iter().filter_map(|volume| volume.free()).min(),
+        unwritable: volumes.contains(&Volume::Unwritable),
+    }
+}
+
+/// The device the data root lives on, while it exists.
+#[cfg(unix)]
+pub(super) fn root_device(root: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt as _;
+    std::fs::metadata(root).ok().map(|root| root.dev())
+}
+
+/// Windows needs no device: a pulled drive takes every parent with it, so
+/// its read fails.
+#[cfg(not(unix))]
+pub(super) fn root_device(_root: &Path) -> Option<u64> {
+    None
+}
+
+/// The data root is gone and its nearest parent is on another device than
+/// the root was: the volume it lived on went away (a pulled drive), not the
+/// folder (deleted to free space).
+pub(super) fn volume_gone(root: &Path, device: Option<u64>) -> bool {
+    let Some(device) = device else {
+        return false;
+    };
+    !root.exists() && root_device(super::probe::nearest_existing(root)) != Some(device)
 }
 
 /// The accounts under `root` that have a database, and the largest one.

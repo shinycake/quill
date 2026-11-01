@@ -11,12 +11,39 @@ mod folders;
 mod linux;
 mod probe;
 
-pub use probe::available_bytes;
+pub use probe::{Volume, available_bytes, read_volume};
 
-/// Free bytes for TDLib under the data root `root`: the least over the
-/// volumes its data folders live on (`folders::data_folders`).
+/// One read of the data folders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataReading {
+    /// The least free space over the volumes the data folders live on.
+    pub free: Option<u64>,
+    /// A data folder cannot be written: its read failed, its volume is
+    /// read-only, or the volume the data root lived on is gone.
+    pub unwritable: bool,
+}
+
+/// Reads the data folders under `root` (`folders::data_folders`).
+/// `device` is where the root was last seen ([`data_root_device`]).
+pub fn read_data(root: &Path, device: Option<u64>) -> DataReading {
+    let mut reading = folders::tightest(&folders::data_folders(root), read_volume);
+    reading.unwritable |= folders::volume_gone(root, device);
+    reading
+}
+
+pub fn data_root_device(root: &Path) -> Option<u64> {
+    folders::root_device(root)
+}
+
+/// Free bytes for TDLib under the data root `root`, with a folder that
+/// cannot be written read as no room at all.
 pub fn data_free_bytes(root: &Path) -> Option<u64> {
-    folders::tightest(&folders::data_folders(root), available_bytes)
+    let reading = read_data(root, None);
+    if reading.unwritable {
+        Some(0)
+    } else {
+        reading.free
+    }
 }
 
 /// The floors for what is under the data root `root` now.

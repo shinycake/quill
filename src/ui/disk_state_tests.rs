@@ -38,6 +38,13 @@ fn read(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, free: Option<u64>) 
     app.update_in(vcx, |app, _, cx| app.apply_disk_reading(free, cx));
 }
 
+fn at(free: Option<u64>) -> quill::disk_guard::DataReading {
+    quill::disk_guard::DataReading {
+        free,
+        unwritable: false,
+    }
+}
+
 /// Two readings below close, as the watcher takes them `CONFIRM_READ` apart.
 fn fill(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, free: Option<u64>) {
     read(app, vcx, free);
@@ -264,7 +271,7 @@ fn more_accounts_need_more_room_on_the_full_screen(cx: &mut TestAppContext) {
     });
     for _ in 0..2 {
         app.update_in(&mut vcx, |app, _, cx| {
-            app.apply_data_reading(Some(FLOORS.close), six, cx)
+            app.apply_data_reading(at(Some(FLOORS.close)), six, cx)
         });
     }
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
@@ -281,7 +288,7 @@ fn one_low_reading_closes_nothing_until_the_next_agrees(cx: &mut TestAppContext)
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;
     let wait = app.update_in(&mut vcx, |app, _, cx| {
-        app.apply_data_reading(Some(0), FLOORS, cx)
+        app.apply_data_reading(at(Some(0)), FLOORS, cx)
     });
     assert_eq!(wait, quill::disk_guard::CONFIRM_READ);
     assert_eq!(shown(&app, &mut vcx), (false, false, start), "not full yet");
@@ -301,15 +308,38 @@ fn a_disk_falling_fast_is_read_sooner(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let mib = 1u64 << 20;
     let first = app.update_in(&mut vcx, |app, _, cx| {
-        app.apply_data_reading(Some(FLOORS.close + 20_000 * mib), FLOORS, cx)
+        app.apply_data_reading(at(Some(FLOORS.close + 20_000 * mib)), FLOORS, cx)
     });
     assert_eq!(first, std::time::Duration::from_secs(30));
     let fell = 30 * 512 * mib;
     let next = app.update_in(&mut vcx, |app, _, cx| {
-        app.apply_data_reading(Some(FLOORS.close + 20_000 * mib - fell), FLOORS, cx)
+        app.apply_data_reading(at(Some(FLOORS.close + 20_000 * mib - fell)), FLOORS, cx)
     });
     assert!(
         next < std::time::Duration::from_secs(10),
         "a fall of 512 MiB/s reads again in {next:?}"
     );
+}
+
+#[gpui_kit::test]
+fn a_data_folder_that_cannot_be_written_closes_with_its_own_screen(cx: &mut TestAppContext) {
+    use quill::disk_guard::DataReading;
+    let (app, mut vcx) = new_app(cx);
+    let start = shown(&app, &mut vcx).2;
+    let gone = DataReading {
+        free: Some(FLOORS.warn_clear),
+        unwritable: true,
+    };
+    for _ in 0..2 {
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.apply_data_reading(gone, FLOORS, cx)
+        });
+    }
+    let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
+    assert_eq!(view.title, tr(keys::Q_DISK_UNWRITABLE_TITLE));
+    assert!(!view.body.contains("Needed"), "{}", view.body);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.apply_data_reading(at(Some(FLOORS.warn_clear)), FLOORS, cx)
+    });
+    assert_eq!(shown(&app, &mut vcx), (false, false, start + 1), "back");
 }

@@ -6,6 +6,7 @@
 //! decides.
 #![deny(clippy::indexing_slicing)]
 
+use super::probe::Volume;
 use std::io::Write as _;
 use std::path::Path;
 
@@ -20,16 +21,20 @@ pub(super) struct Statvfs {
     pub(super) btrfs: bool,
 }
 
-pub(super) fn read_available(path: &Path) -> Option<u64> {
-    let stat = statvfs(path)?;
+pub(super) fn read_available(path: &Path) -> Volume {
+    let stat = match statvfs(path) {
+        Ok(Some(stat)) => stat,
+        Ok(None) => return Volume::NoSizes,
+        Err(()) => return Volume::Unwritable,
+    };
     let free = match quota_room(path) {
         Some(room) => stat.available.min(room),
         None => stat.available,
     };
-    if free == 0 && zero_needs_a_write(&stat, is_root()) {
-        return small_write_fails(path).then_some(0);
+    if free == 0 && zero_needs_a_write(&stat, is_root()) && !small_write_fails(path) {
+        return Volume::NoSizes;
     }
-    Some(free)
+    Volume::Free(free)
 }
 
 /// A 0 that a write may still prove wrong.
@@ -61,16 +66,26 @@ fn c_path(path: &Path) -> Option<std::ffi::CString> {
     std::ffi::CString::new(path.as_os_str().as_bytes()).ok()
 }
 
-fn statvfs(path: &Path) -> Option<Statvfs> {
-    let c = c_path(path)?;
+/// `Err` when the read fails or the mount is read-only, `Ok(None)` when the
+/// volume reports no sizes.
+fn statvfs(path: &Path) -> Result<Option<Statvfs>, ()> {
+    let Some(c) = c_path(path) else {
+        return Ok(None);
+    };
     let mut vfs = std::mem::MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: `c` is a valid C string and `vfs` has room for a `statvfs`.
     if unsafe { libc::statvfs(c.as_ptr(), vfs.as_mut_ptr()) } != 0 {
-        return None;
+        return Err(());
     }
     // SAFETY: statvfs returned 0, so the buffer is initialised.
     let vfs = unsafe { vfs.assume_init() };
-    let available = super::probe::usable(vfs.f_blocks, vfs.f_bavail, vfs.f_frsize)?;
+    if vfs.f_flag & libc::ST_RDONLY != 0 {
+        return Err(());
+    }
+    let Volume::Free(available) = super::probe::usable(vfs.f_blocks, vfs.f_bavail, vfs.f_frsize)
+    else {
+        return Ok(None);
+    };
     let mut fs = std::mem::MaybeUninit::<libc::statfs>::uninit();
     // SAFETY: as above, for a `statfs`.
     let btrfs = unsafe { libc::statfs(c.as_ptr(), fs.as_mut_ptr()) } == 0 && {
@@ -81,11 +96,11 @@ fn statvfs(path: &Path) -> Option<Statvfs> {
         let btrfs = fs.f_type as i64 == libc::BTRFS_SUPER_MAGIC as i64;
         btrfs
     };
-    Some(Statvfs {
+    Ok(Some(Statvfs {
         available,
         free_to_root: vfs.f_bfree.saturating_mul(vfs.f_frsize),
         btrfs,
-    })
+    }))
 }
 
 /// The bytes this user may still write under its block quota on the volume

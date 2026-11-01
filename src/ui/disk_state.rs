@@ -14,8 +14,8 @@ use gpui_kit::{
 };
 use quill::auth::{AuthAction, AuthView};
 use quill::disk_guard::{
-    CONFIRM_READ, DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors,
-    data_free_bytes, fall_per_sec, next_read_in,
+    CONFIRM_READ, DataReading, DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors,
+    data_root_device, fall_per_sec, next_read_in, read_data,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
@@ -29,6 +29,8 @@ pub(crate) struct DiskUi {
     confirming: bool,
     /// The wait before the last reading, to measure how fast the disk falls.
     waited: Duration,
+    /// The last reading found a data folder TDLib cannot write.
+    unwritable: bool,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -49,6 +51,7 @@ impl DiskUi {
             floors: FLOORS,
             confirming: false,
             waited: Duration::ZERO,
+            unwritable: false,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -78,16 +81,24 @@ impl DiskUi {
 
 fn watch(root: PathBuf, cx: &Context<QuillApp>) {
     QuillApp::spawn_main(cx, async move |this, cx| {
+        let mut device = None;
         loop {
             let folder = root.clone();
-            let (free, floors) = cx
+            let (reading, floors, seen_on) = cx
                 .background_executor()
                 .spawn(async move {
-                    let free = demo_reading().or_else(|| data_free_bytes(&folder));
-                    (free, data_floors(&folder))
+                    let reading = match demo_reading() {
+                        Some(free) => DataReading {
+                            free: Some(free),
+                            unwritable: false,
+                        },
+                        None => read_data(&folder, device),
+                    };
+                    (reading, data_floors(&folder), data_root_device(&folder))
                 })
                 .await;
-            let Ok(wait) = this.update(cx, |this, cx| this.apply_data_reading(free, floors, cx))
+            device = seen_on.or(device);
+            let Ok(wait) = this.update(cx, |this, cx| this.apply_data_reading(reading, floors, cx))
             else {
                 break;
             };
@@ -116,11 +127,21 @@ impl QuillApp {
     /// Returns how long to wait for the next one.
     pub(super) fn apply_data_reading(
         &mut self,
-        free: Option<u64>,
+        reading: DataReading,
         floors: DiskFloors,
         cx: &mut Context<Self>,
     ) -> Duration {
         self.disk.floors = floors;
+        if reading.unwritable != self.disk.unwritable {
+            self.disk.unwritable = reading.unwritable;
+            cx.notify();
+        }
+        // TDLib can write nothing there: the same as no room at all.
+        let free = if reading.unwritable {
+            Some(0)
+        } else {
+            reading.free
+        };
         let fall = fall_per_sec(self.disk.free, free, self.disk.waited);
         self.apply_disk_reading(free, cx);
         let wait = if self.disk.confirming {
@@ -204,21 +225,30 @@ impl QuillApp {
     }
 
     pub(super) fn disk_full_view(&self) -> Option<AuthView> {
-        self.disk.is_full().then(|| {
-            let needed = disk_size(self.disk.floors.open);
-            let sizes = match self.disk.free {
-                Some(free) => tr_with(
-                    keys::Q_DISK_FULL_SIZES,
-                    &[("free", &disk_size(free)), ("needed", &needed)],
-                ),
-                None => tr_with(keys::Q_DISK_FULL_NEEDED, &[("needed", &needed)]),
-            };
-            AuthView {
-                title: tr(keys::Q_DISK_FULL_TITLE),
-                body: format!("{}\n\n{sizes}", tr(keys::Q_DISK_FULL_BODY)),
+        if !self.disk.is_full() {
+            return None;
+        }
+        if self.disk.unwritable {
+            return Some(AuthView {
+                title: tr(keys::Q_DISK_UNWRITABLE_TITLE),
+                body: tr(keys::Q_DISK_UNWRITABLE_BODY).to_string(),
                 action: AuthAction::ProvideParameters,
                 blocking: true,
-            }
+            });
+        }
+        let needed = disk_size(self.disk.floors.open);
+        let sizes = match self.disk.free {
+            Some(free) => tr_with(
+                keys::Q_DISK_FULL_SIZES,
+                &[("free", &disk_size(free)), ("needed", &needed)],
+            ),
+            None => tr_with(keys::Q_DISK_FULL_NEEDED, &[("needed", &needed)]),
+        };
+        Some(AuthView {
+            title: tr(keys::Q_DISK_FULL_TITLE),
+            body: format!("{}\n\n{sizes}", tr(keys::Q_DISK_FULL_BODY)),
+            action: AuthAction::ProvideParameters,
+            blocking: true,
         })
     }
 

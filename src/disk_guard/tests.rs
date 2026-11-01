@@ -211,10 +211,10 @@ fn a_symlinked_files_folder_is_read_where_it_really_lives() {
         !folders.iter().any(|folder| folder.ends_with("files")),
         "the link itself is not read: {folders:?}"
     );
-    let read = |folder: &Path| Some(if folder == elsewhere { 10 } else { 5000 });
-    assert_eq!(super::folders::tightest(&folders, read), Some(10));
+    let read = |folder: &Path| Volume::Free(if folder == elsewhere { 10 } else { 5000 });
+    assert_eq!(super::folders::tightest(&folders, read).free, Some(10));
     let none: &[PathBuf] = &[];
-    assert_eq!(super::folders::tightest(none, read), None);
+    assert_eq!(super::folders::tightest(none, read).free, None);
     let _ = std::fs::remove_dir_all(&root);
     let _ = std::fs::remove_dir_all(&elsewhere);
 }
@@ -289,7 +289,11 @@ mod linux {
 
     #[test]
     fn a_real_folder_reads_on_linux() {
-        assert!(super::super::linux::read_available(&std::env::temp_dir()).is_some());
+        assert!(
+            super::super::linux::read_available(&std::env::temp_dir())
+                .free()
+                .is_some()
+        );
     }
 
     #[test]
@@ -382,4 +386,45 @@ fn the_close_floor_covers_the_wait_for_the_second_reading() {
     let room =
         super::FASTEST_WRITER_PER_SEC * (SHORTEST_READ.as_secs() + super::CONFIRM_READ.as_secs());
     assert!(floors.close >= room + super::APFS_RESERVE + super::CLOSE_WRITES_PER_ACCOUNT);
+}
+
+#[test]
+fn one_unwritable_folder_makes_the_reading_unwritable() {
+    use std::path::{Path, PathBuf};
+    let folders = [
+        PathBuf::from("/a"),
+        PathBuf::from("/b"),
+        PathBuf::from("/c"),
+    ];
+    let read = |folder: &Path| match folder.to_str() {
+        Some("/a") => Volume::Free(500),
+        Some("/b") => Volume::NoSizes,
+        _ => Volume::Unwritable,
+    };
+    assert_eq!(
+        super::folders::tightest(&folders, read),
+        DataReading {
+            free: Some(500),
+            unwritable: true
+        }
+    );
+    let fine = |_: &Path| Volume::NoSizes;
+    assert!(!super::folders::tightest(&folders, fine).unwritable);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_whose_volume_went_away_is_unwritable_and_a_deleted_one_is_not() {
+    let root = crate::scratch::unique_dir("quill-disk-gone");
+    let device = data_root_device(&root);
+    assert!(device.is_some());
+    assert!(!read_data(&root, device).unwritable, "still there");
+    std::fs::remove_dir_all(&root).unwrap();
+    assert!(
+        !read_data(&root, device).unwritable,
+        "deleted on the same volume: the parent's reading stands"
+    );
+    let elsewhere = device.map(|device| device.wrapping_add(1));
+    assert!(read_data(&root, elsewhere).unwritable, "the volume left");
+    assert!(!read_data(&root, None).unwritable, "never seen");
 }
