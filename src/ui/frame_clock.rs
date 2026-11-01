@@ -9,9 +9,9 @@
 //! rest of the window replays its last frame. Requests made outside any
 //! slice redraw the whole app, as before.
 //!
-//! On a display faster than 60 Hz, while a clip also plays there, the
-//! clock ticks on the main window's content grid (`frame_grid`), the
-//! vsyncs the clip draws on too, so they share window frames. An animation
+//! While a clip also plays on its display, the clock ticks on the main
+//! window's content grid (`frame_grid`), the vsyncs the clip draws on too,
+//! so they share window frames. An animation
 //! layer whose inline clip redraws it more often than its content needs
 //! asks for no tick at all ([`layer_redrawn_by_clip`]). Elsewhere it ticks
 //! on the display's own vsyncs where it knows them, and runs free on a
@@ -411,7 +411,8 @@ impl QuillApp {
 
     /// The tick planned for the grid vsync `planned`, put off (see
     /// [`later_tick`]) when every view that asked is an animation layer a
-    /// clip's picture redrew since the last tick. `None` when it is due.
+    /// clip's picture redrew since the last tick, or while a clip's pictures
+    /// fall between its ticks. `None` when it is due.
     fn tick_after_draws(
         &self,
         fps: u32,
@@ -579,7 +580,9 @@ pub(super) enum Woke {
 /// the tick then comes one content frame after that draw, sharing the
 /// clip's next window frame. A tick is never put off for being late: the
 /// frame after `redrawn` is counted from that draw, not from `now`, and a
-/// tick's own draw is no redraw (`LayerDraws`). `None` when it is due.
+/// tick's own draw is no redraw (`LayerDraws`). Likewise while a clip's
+/// pictures come between the clock's ticks in a view of its own
+/// ([`clip_beat`]): the clock moves onto them. `None` when it is due.
 pub(super) fn later_tick(
     display: Option<(ClockTiming, Vsync)>,
     now: Instant,
@@ -587,12 +590,13 @@ pub(super) fn later_tick(
     planned: Option<Instant>,
     redrawn: Option<Instant>,
 ) -> Option<(Duration, Option<Instant>)> {
-    let (planned, redrawn) = (planned?, redrawn?);
+    let planned = planned?;
     let (timing, vsync) = display?;
     let grid = frame_grid::display_grid(timing.display, vsync, now)?;
     if !frame_grid::shared(timing.display, Source::Clock, now) {
         return None;
     }
+    let redrawn = redrawn.or_else(|| clip_beat(timing.display, &grid, fps, planned, now))?;
     let due = frame_grid::content_due(&grid, redrawn, fps)?;
     if due <= planned + Duration::from_millis(1) {
         return None;
@@ -850,6 +854,7 @@ mod tests {
         }
 
         let ask = |requested: &FrameRequested| VideoFrameAsk {
+            display: None,
             next_due: None,
             interval: Duration::from_millis(8),
             lead: Duration::from_millis(8),

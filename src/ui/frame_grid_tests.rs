@@ -38,8 +38,8 @@ fn only_displays_at_whole_multiples_of_60_hz_have_a_grid() {
         })
         .map(|grid| grid.step)
     };
-    assert_eq!(step(60.0), None);
-    assert_eq!(step(59.94), None);
+    assert_eq!(step(60.0), Some(1));
+    assert_eq!(step(59.94), Some(1));
     assert_eq!(step(119.88), Some(2));
     assert_eq!(step(120.0), Some(2));
     assert_eq!(step(240.0), Some(4));
@@ -95,11 +95,10 @@ fn the_grid_keeps_its_phase_as_vsyncs_come_in() {
         grid.follow(Vsync { at: off, period }).unwrap().anchor,
         off
     ));
-    // Down to 60 Hz: no grid.
     assert_eq!(
         grid.follow(Vsync {
             at: t0,
-            period: hz(60.0)
+            period: hz(90.0)
         }),
         None
     );
@@ -944,6 +943,7 @@ impl Sim {
             &self.requested,
             target,
             now,
+            Some(self.display),
             Some(due),
             interval,
             lead,
@@ -1166,11 +1166,14 @@ fn a_lone_clip_keeps_its_own_cadence() {
         "{holds:?}"
     );
     // Any rate, alone: exactly as before.
-    for fps in [24.0, 25.0, 30.0, 50.0] {
-        for late in [Late::Little, Late::Realistic] {
-            let before = Sim::new(8, 120.0, false).clip(fps).late(late).run(1.6);
-            let after = Sim::new(9, 120.0, true).clip(fps).late(late).run(1.6);
-            assert_eq!(after.timeline(), before.timeline(), "{fps} fps, {late:?}");
+    for rate in [60.0, 120.0] {
+        for fps in [24.0, 25.0, 30.0, 50.0] {
+            for late in [Late::Little, Late::Realistic] {
+                let before = Sim::new(8, rate, false).clip(fps).late(late).run(1.6);
+                let after = Sim::new(9, rate, true).clip(fps).late(late).run(1.6);
+                let case = format!("{rate} Hz, {fps} fps, {late:?}");
+                assert_eq!(after.timeline(), before.timeline(), "{case}");
+            }
         }
     }
 }
@@ -1309,8 +1312,14 @@ fn a_tick_faster_than_its_frames_draws_on_the_refresh_they_change() {
 }
 
 #[test]
-fn a_60_hz_display_shares_nothing_and_loses_no_refresh_beside_a_clip() {
-    for (display, emoji, hold, clip) in [(14, 30, 2, 30.0), (15, 60, 1, 25.0)] {
+fn a_60_hz_display_loses_no_refresh_beside_a_clip() {
+    let cases = [
+        (14, 30, 2, 30.0),
+        (15, 60, 1, 25.0),
+        (17, 30, 2, 24.0),
+        (18, 30, 2, 25.0),
+    ];
+    for (display, emoji, hold, clip) in cases {
         let sim = Sim::new(display, 60.0, true)
             .emoji(emoji)
             .clip(clip)
@@ -1324,36 +1333,75 @@ fn a_60_hz_display_shares_nothing_and_loses_no_refresh_beside_a_clip() {
 }
 
 #[test]
-fn a_30_fps_clip_and_30_fps_emoji_share_vsyncs_at_60_hz() {
+fn a_30_fps_clip_and_30_fps_emoji_share_vsyncs_at_any_phase() {
     let mut display = 300;
-    for late in [Late::Little, Late::Realistic] {
-        for on_layer in [false, true] {
-            for head in 0..2 {
-                // The clip's pictures on either refresh of the emoji's two.
-                for offset in [0, 5, 17, 20, 30] {
-                    display += 1;
-                    let offset = Duration::from_millis(offset);
-                    let sim = Sim::new(display, 60.0, true)
-                        .emoji(30)
-                        .emoji_phase(head)
-                        .clip(30.0)
-                        .clip_offset(offset);
-                    let sim = if on_layer { sim.on_layer(offset) } else { sim };
-                    let sim = sim.late(late).run(3.0);
-                    let case = format!("{late:?}, on layer: {on_layer}, head {head}, {offset:?}");
-                    let draws = sim.draws_in_a_second();
-                    assert!(draws <= 31, "{case}: {draws} window frames in a second");
-                    let holds = sim.emoji_holds();
-                    assert!(
-                        holds.len() > 60 && holds.iter().all(|hold| *hold == 2),
-                        "{case}: {holds:?}"
-                    );
-                    assert!(sim.holds().iter().all(|hold| *hold == 2), "{case}");
-                    assert!(sim.clip_shows_every_picture_within(on_time(&sim)), "{case}");
+    for (rate, hold) in [(60.0, 2), (120.0, 4)] {
+        for late in [Late::Little, Late::Realistic] {
+            for on_layer in [false, true] {
+                for head in 0..hold {
+                    for offset in [0, 5, 9, 17, 20, 26, 30] {
+                        display += 1;
+                        let offset = Duration::from_millis(offset);
+                        let sim = Sim::new(display, rate, true)
+                            .emoji(30)
+                            .emoji_phase(head)
+                            .clip(30.0)
+                            .clip_offset(offset);
+                        let sim = if on_layer { sim.on_layer(offset) } else { sim };
+                        let sim = sim.late(late).run(3.0);
+                        let case =
+                            format!("{rate} Hz, {late:?}, layer: {on_layer}, {head}, {offset:?}");
+                        let draws = sim.draws_in_a_second();
+                        assert!(draws <= 31, "{case}: {draws} window frames in a second");
+                        let holds = sim.emoji_holds();
+                        assert!(
+                            holds.len() > 60 && holds.iter().all(|at| *at == hold),
+                            "{case}: {holds:?}"
+                        );
+                        assert!(sim.holds().iter().all(|at| *at == hold), "{case}");
+                        assert!(sim.clip_shows_every_picture_within(on_time(&sim)), "{case}");
+                    }
                 }
             }
         }
     }
+}
+
+#[test]
+fn a_clip_on_another_display_moves_no_tick() {
+    forget_video_requests();
+    let t0 = Instant::now();
+    let period = hz(60.0);
+    let timing = ClockTiming {
+        display: 950,
+        period,
+        lead: period * 3 / 2,
+    };
+    let vsync = Vsync { at: t0, period };
+    note_playing(950, Source::Clip(1), t0, t0 + Duration::from_secs(1));
+    note_playing(950, Source::Clock, t0, t0 + Duration::from_secs(1));
+    let requested = FrameRequested::default();
+    let tick = t0 + period * 4;
+    let clip_ask = |display: u64| {
+        requested.set(None);
+        let spacing = Some(period * 2);
+        let due = Some(t0 + period * 5);
+        let view = EntityId::from(1u64);
+        video_request(
+            &requested,
+            view,
+            t0,
+            Some(display),
+            due,
+            period,
+            period,
+            spacing,
+        );
+        later_tick(Some((timing, vsync)), t0, 30, Some(tick), None)
+    };
+    assert_eq!(clip_ask(951), None);
+    let (_, moved) = clip_ask(950).unwrap();
+    assert!(close(moved.unwrap(), t0 + period * 5));
 }
 
 #[test]

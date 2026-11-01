@@ -41,8 +41,7 @@ pub(crate) struct PresentEstimator {
     present: Option<Instant>,
     /// The platform's refresh period, if it reports one.
     period: Option<Duration>,
-    /// The vsyncs content draws on, on a display faster than 60 Hz
-    /// (`frame_grid`).
+    /// The vsyncs content draws on (`frame_grid`).
     grid: Option<ContentGrid>,
     /// Something else animates on that display: the clip may share its
     /// grid vsyncs.
@@ -108,8 +107,8 @@ impl PresentEstimator {
         self.hint = hint;
     }
 
-    /// The content grid of the window's display, or `None` (60 Hz, or no
-    /// vsync times), and whether something else animates there.
+    /// The content grid of the window's display, or `None` (no grid at
+    /// its rate, or no vsync times), and whether something else animates there.
     pub(crate) fn set_grid(&mut self, grid: Option<ContentGrid>, shared: bool) {
         self.grid = grid;
         self.shared = shared;

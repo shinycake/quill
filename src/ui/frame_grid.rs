@@ -4,15 +4,16 @@
 //! (`frame_clock`) ticks custom emoji, stickers, GIFs, spoiler specks,
 //! typing dots and clock-driven motion at the highest rate asked, and each
 //! playing video asks for the vsync its next picture is due on
-//! (`request_video_frame`). On a display faster than 60 Hz those land on
-//! different vsyncs, so the window draws their union: a 30 fps clip and
-//! 30 fps emoji cost up to 60 full window frames a second.
+//! (`request_video_frame`). Those can land on different vsyncs, so the
+//! window draws their union: a 30 fps clip and 30 fps emoji cost up to 60
+//! full window frames a second.
 //!
 //! Telegram Desktop drives every animation from one shared tick
 //! (`Ui::Animations::Manager`). Here, on a display refreshing a whole
-//! number of times 60 a second (every other vsync at 120 Hz, every fourth
-//! at 240 Hz), content shares the display's grid vsyncs while more than
-//! one source animates on it (the clock and a clip, or two clips):
+//! number of times 60 a second (every vsync at 60 Hz, every other at
+//! 120 Hz, every fourth at 240 Hz), content shares the display's grid
+//! vsyncs while more than one source animates on it (the clock and a clip,
+//! or two clips):
 //!
 //! - The clock ticks on grid vsyncs when its rate divides the grid's (60,
 //!   30, 20, 15 fps...), so each tick still comes one content frame after
@@ -21,11 +22,14 @@
 //!   apart (30 or 60 fps, not 24, 25 or 50) draws each on the next grid
 //!   vsync, at most one display frame later. Each picture is then still
 //!   held as long as the one before.
+//! - Where such a clip's pictures come slower than the grid, the clock
+//!   moves its ticks onto their vsyncs (`frame_clock::later_tick`): a clip
+//!   keeps its pacing, and content takes one longer hold, once.
 //!
 //! Everything else keeps its own vsyncs: a source animating alone, content
 //! the grid would hold unevenly, content faster than the grid, and anything
-//! drawn for input (scrolling, typing, hover). At 60 Hz every vsync is on
-//! the grid, and other rates (90, 144 Hz) have none.
+//! drawn for input (scrolling, typing, hover). Other rates (90, 144 Hz)
+//! have no grid.
 //!
 //! Off the grid the clock still ticks on the display's vsyncs when a whole
 //! number of them make one frame of its content ([`vsync_tick`]): a tick
@@ -107,14 +111,13 @@ const PHASE_SLACK_DIV: u32 = 4;
 const SNAP_SLACK: Duration = Duration::from_micros(250);
 
 impl ContentGrid {
-    /// The grid of the display `vsync` belongs to; `None` at 60 Hz or
-    /// below, where every vsync is on it.
+    /// The grid of the display `vsync` belongs to, if it has one
+    /// ([`grid_step`]).
     pub(crate) fn new(vsync: Vsync) -> Option<Self> {
-        let step = grid_step(vsync.period);
-        (step >= 2).then_some(Self {
+        Some(Self {
             anchor: vsync.at,
             period: vsync.period,
-            step,
+            step: grid_step(vsync.period)?,
         })
     }
 
@@ -199,20 +202,16 @@ impl ContentGrid {
     }
 }
 
-/// Vsyncs per grid tick on a display refreshing every `period`: 2 at
-/// 120 Hz, 4 at 240 Hz. 1 (no grid) at 60 Hz, where every vsync is on it,
-/// and at rates no whole number of vsyncs makes 60 a second of (90, 144,
-/// 165 Hz), where a grid of its vsyncs would draw 30 and 60 fps content
-/// more often than before.
-fn grid_step(period: Duration) -> u32 {
+/// Vsyncs per grid tick on a display refreshing every `period`: 1 at
+/// 60 Hz, 2 at 120 Hz, 4 at 240 Hz. `None` at rates no whole number of
+/// vsyncs makes 60 a second of (90, 144, 165 Hz), where a grid of its
+/// vsyncs would draw 30 and 60 fps content more often than before.
+fn grid_step(period: Duration) -> Option<u32> {
     let hz = 1.0 / period.as_secs_f64();
     let step = (hz / GRID_HZ).round();
     // A couple of hertz of headroom: 119.88 Hz is a 120 Hz display.
-    if hz.is_finite() && (2.0..=16.0).contains(&step) && (hz - step * GRID_HZ).abs() <= 2.0 {
-        step as u32
-    } else {
-        1
-    }
+    (hz.is_finite() && (1.0..=16.0).contains(&step) && (hz - step * GRID_HZ).abs() <= 2.0)
+        .then_some(step as u32)
 }
 
 /// The grid vsync one frame of content at `fps` after `last`, a vsync it
@@ -223,6 +222,24 @@ pub(crate) fn content_due(grid: &ContentGrid, last: Instant, fps: u32) -> Option
         grid.at_or_before(last.checked_add(grid.tick() * every)?)
             .max(grid.first_after(last.checked_add(grid.period() / 2)?)),
     )
+}
+
+/// The last vsync before `tick` on the beat through `at` that comes `every`
+/// apart. `None` when `tick` is on that beat, give or take a quarter of a
+/// frame of the grid.
+pub(crate) fn beat_before(
+    grid: &ContentGrid,
+    at: Instant,
+    every: Duration,
+    tick: Instant,
+) -> Option<Instant> {
+    let every = nanos(every);
+    if every == 0 {
+        return None;
+    }
+    let slack = nanos(grid.period()) / i128::from(PHASE_SLACK_DIV);
+    let past = nanos_between(at, tick).rem_euclid(every);
+    (past > slack && every - past > slack).then(|| shifted(tick, -past))
 }
 
 /// The frame clock's next tick of content at `fps`, as `(wake, vsync)`:
@@ -422,7 +439,7 @@ pub(crate) fn shared(display: u64, source: Source, now: Instant) -> bool {
 }
 
 /// The content grid of `display`, kept in phase with `vsync`, its latest
-/// one; `None` at 60 Hz or below, or with no recent vsync (`now`).
+/// one; `None` where it has none, or with no recent vsync (`now`).
 pub(crate) fn display_grid(display: u64, vsync: Vsync, now: Instant) -> Option<ContentGrid> {
     if !vsync.fresh(now) {
         return None;
