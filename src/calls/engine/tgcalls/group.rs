@@ -55,8 +55,8 @@ struct Presentation {
     connected: bool,
 }
 
-/// A new instance and its join payload; `None` (logged) when tgcalls
-/// refuses it.
+/// A new instance and its join payload; `None` when tgcalls refuses it.
+/// Waits on tgcalls up to the library's limit, so never on the UI thread.
 fn create_instance(
     api: &'static Loader,
     reaper: &Reaper,
@@ -221,16 +221,18 @@ impl TgcallsEngine {
             .ok_or(EngineError::NoSuchCall(group_call_id))
     }
 
-    /// A fresh instance for `group_call_id` (a rejoin replaces the old
-    /// one) and its join payload, tdesktop's `GroupJoinPayload` JSON,
-    /// which `joinVideoChat` carries as is.
+    /// Starts a fresh instance for `group_call_id` off this thread; a
+    /// rejoin replaces the old one. [`Self::land_group_offers`] picks it up
+    /// with its join payload, tdesktop's `GroupJoinPayload` JSON, which
+    /// `joinVideoChat` carries as is.
     pub(super) fn create_group(
         &mut self,
         group_call_id: i32,
         chat_id: i64,
         role: GroupCallRole,
         crypto: Option<Arc<dyn FrameCrypto>>,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
+        self.offers.forget(group_call_id);
         if let Some(old) = self.groups.remove(&group_call_id) {
             retire_group(self.api, &self.reaper, old);
         }
@@ -238,23 +240,39 @@ impl TgcallsEngine {
         if let Some(crypto) = crypto.as_ref() {
             context = context.conference(Arc::clone(crypto));
         }
-        let context = Arc::new(context);
-        let (handle, payload) =
-            create_instance(self.api, &self.reaper, &context, std::ptr::null_mut()).ok_or(
-                EngineError::Engine {
-                    op: "qc_group_create",
-                    code: -1,
+        let run = offer::make_call(self.api, &self.reaper, Arc::new(context))?;
+        self.offers.calls.insert(
+            group_call_id,
+            offer::CallOffer {
+                run,
+                landing: offer::CallLanding {
+                    chat_id,
+                    role,
+                    crypto,
                 },
-            )?;
+            },
+        );
+        Ok(())
+    }
+
+    /// An instance that was made joins the calls here.
+    fn land_group_call(
+        &mut self,
+        group_call_id: i32,
+        landing: offer::CallLanding,
+        context: Arc<GroupContext>,
+        handle: Native<qc_group>,
+    ) {
         crate::advanced::debug_mode::call_log(&format!(
-            "[call] group {group_call_id} tgcalls create ({role:?})"
+            "[call] group {group_call_id} tgcalls create ({:?})",
+            landing.role
         ));
-        self.groups.insert(
+        let replaced = self.groups.insert(
             group_call_id,
             GroupCall {
-                chat_id,
-                role,
-                crypto,
+                chat_id: landing.chat_id,
+                role: landing.role,
+                crypto: landing.crypto,
                 context,
                 handle,
                 gate: Arc::new(sender::Gate::default()),
@@ -273,7 +291,9 @@ impl TgcallsEngine {
                 stream_quality: None,
             },
         );
-        Ok(payload)
+        if let Some(old) = replaced {
+            retire_group(self.api, &self.reaper, old);
+        }
     }
 
     /// Applies the `joinVideoChat` answer once, then the call's sound,
@@ -543,38 +563,23 @@ impl TgcallsEngine {
         Ok(())
     }
 
-    /// The presentation's instance and its payload for
-    /// `startGroupCallScreenSharing`; a running one is replaced.
-    pub(super) fn start_presentation(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+    /// Starts the screen-sharing instance beside the call off this thread;
+    /// its join payload, which `startGroupCallScreenSharing` carries, comes
+    /// through [`Self::land_group_offers`].
+    pub(super) fn start_presentation(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let api = self.api;
         let shared = Arc::clone(&self.callback);
         let reaper = Arc::clone(&self.reaper);
+        self.offers.screens.remove(&group_call_id);
         let call = self.group_mut(group_call_id)?;
         stop_presentation(api, &reaper, call);
-        // SAFETY: returns a new external screencast source owned here.
-        let screen = unsafe { (api.qc_video_capture_external)(1) };
-        let screen = Native::new(screen).ok_or(EngineError::NoScreenSource)?;
         let mut context = GroupContext::new(group_call_id, call.chat_id, true, &shared);
         if let Some(crypto) = call.crypto.as_ref() {
             context = context.conference(Arc::clone(crypto));
         }
-        let context = Arc::new(context);
-        let Some((handle, payload)) = create_instance(api, &reaper, &context, screen.as_ptr())
-        else {
-            // SAFETY: Quill's only reference to the source made above.
-            unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
-            return Err(EngineError::Engine {
-                op: "qc_group_create",
-                code: -1,
-            });
-        };
-        call.presentation = Some(Presentation {
-            context,
-            handle,
-            screen,
-            connected: false,
-        });
-        Ok(payload)
+        let run = offer::make_presentation(api, &reaper, Arc::new(context))?;
+        self.offers.screens.insert(group_call_id, run);
+        Ok(())
     }
 
     /// Applies the `startGroupCallScreenSharing` answer once; screen
@@ -607,6 +612,7 @@ impl TgcallsEngine {
     ) -> Result<(), EngineError> {
         let api = self.api;
         let reaper = Arc::clone(&self.reaper);
+        self.offers.screens.remove(&group_call_id);
         stop_presentation(api, &reaper, self.group_mut(group_call_id)?);
         Ok(())
     }
@@ -658,6 +664,7 @@ impl TgcallsEngine {
     }
 
     pub(super) fn leave_group(&mut self, group_call_id: i32) {
+        self.offers.forget(group_call_id);
         if let Some(call) = self.groups.remove(&group_call_id) {
             crate::advanced::debug_mode::call_log(&format!(
                 "[call] group {group_call_id} tgcalls leave"
@@ -736,6 +743,10 @@ impl TgcallsEngine {
         self.open_group_sound(group_call_id)
     }
 }
+
+#[path = "group_offer.rs"]
+mod offer;
+pub(super) use offer::GroupOffers;
 
 #[path = "group_stream.rs"]
 mod stream;

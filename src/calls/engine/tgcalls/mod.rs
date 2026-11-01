@@ -102,6 +102,8 @@ pub struct TgcallsEngine {
     calls: HashMap<i32, P2pCall>,
     /// Group calls, by TDLib group call id.
     groups: HashMap<i32, group::GroupCall>,
+    /// Instances still being made, off this thread.
+    offers: group::GroupOffers,
     /// The media viewer's volume, for the streams Quill plays.
     stream_volume: f32,
     callback: Arc<CallbackShared>,
@@ -137,6 +139,7 @@ impl TgcallsEngine {
             },
             calls: HashMap::new(),
             groups: HashMap::new(),
+            offers: group::GroupOffers::default(),
             stream_volume: 1.0,
             callback: Arc::new(CallbackShared::new()),
             reaper,

@@ -52,6 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
+        self.forget_all_group_offers();
         let outbox = self.signaling_outbox.clone();
         // Each hook wakes the poll loop, which applies the report at once
         // (`pump_call_engine_reports`) instead of after its idle sleep.

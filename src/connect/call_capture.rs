@@ -316,9 +316,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let before = shown(self);
         self.warm_call_devices();
         let listed = self.take_listed_call_devices();
+        let landed = self.land_group_offers();
         self.pump_call_capture(now);
         self.pump_call_screen();
-        listed || before != shown(self)
+        listed || landed || before != shown(self)
     }
 
     fn warm_call_devices(&mut self) {

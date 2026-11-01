@@ -704,3 +704,43 @@ fn ending_the_search_works_offline_and_ends_with_the_call() {
     assert!(harness.1.session.calls.add_people_search.query.is_empty());
     let _ = std::fs::remove_dir_all(&harness.0);
 }
+
+#[test]
+fn an_invitation_stays_until_its_join_goes_out_and_a_failed_payload_clears_the_join() {
+    let mut harness = conference_driver();
+    harness.3.hold_group_offers();
+    harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("the press is taken");
+    assert!(harness.1.session.calls.pending_conference.is_some());
+    assert_eq!(sent_count(&harness.2, "joinGroupCall"), 0);
+    assert!(
+        harness.1.accept_group_call_invitation(3, 42).is_err(),
+        "one conference join at a time"
+    );
+    harness.3.release_group_offers();
+    harness.1.pump_call_media(std::time::Instant::now());
+    assert_eq!(sent_count(&harness.2, "joinGroupCall"), 1);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+#[test]
+fn a_conference_whose_payload_failed_sends_nothing_and_can_be_tried_again() {
+    let mut harness = conference_driver();
+    harness.3.fail_group_offer();
+    harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("the press is taken");
+    assert_eq!(sent_count(&harness.2, "joinGroupCall"), 0);
+    assert!(harness.1.session.calls.pending_conference.is_none());
+    assert!(harness.1.session.calls.group_call_error.is_some());
+    assert_eq!(bound_call(&harness.1), None);
+    harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("try again");
+    assert_eq!(sent_count(&harness.2, "joinGroupCall"), 1);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}

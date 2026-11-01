@@ -225,15 +225,19 @@ impl CallEngine for TgcallsEngine {
         group_call_id: i32,
         chat_id: i64,
         role: GroupCallRole,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
         self.create_group(group_call_id, chat_id, role, None)
+    }
+
+    fn take_group_offers(&mut self) -> Vec<GroupOffer> {
+        self.land_group_offers()
     }
 
     fn create_conference_call(
         &mut self,
         key: i32,
         crypto: Arc<dyn FrameCrypto>,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
         // A conference call is in no chat: no stream is ever keyed by it.
         self.create_group(key, 0, GroupCallRole::Member, Some(crypto))
     }
@@ -271,7 +275,7 @@ impl CallEngine for TgcallsEngine {
         self.set_group_camera_device(group_call_id, camera)
     }
 
-    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         self.start_presentation(group_call_id)
     }
 

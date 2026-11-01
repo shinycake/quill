@@ -92,6 +92,18 @@ impl Reaper {
         self.backlog.wait_drained();
     }
 
+    /// Quit waits for the work this covers as for a teardown: an exit while
+    /// an instance is being made crashes the same way.
+    pub(super) fn hold(&self) -> ReaperHold {
+        self.backlog.add();
+        ReaperHold(Arc::clone(&self.backlog))
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_drained(&self) -> bool {
+        self.backlog.is_empty()
+    }
+
     pub(super) fn hand_off(&self, job: impl FnOnce() + Send + 'static) {
         self.backlog.add();
         let job: Job = Box::new(job);
@@ -99,6 +111,14 @@ impl Reaper {
             ffi_boundary((), no_thread_took_it);
             self.backlog.finish();
         }
+    }
+}
+
+pub(super) struct ReaperHold(Arc<Backlog>);
+
+impl Drop for ReaperHold {
+    fn drop(&mut self) {
+        self.0.finish();
     }
 }
 

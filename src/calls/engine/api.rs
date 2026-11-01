@@ -61,30 +61,37 @@ pub trait CallEngine {
     /// restores the retained config.
     fn set_screen_share_enabled(&mut self, call_id: i32, enabled: bool) -> Result<(), EngineError>;
 
-    /// Phase C2g: app -> engine; create the group call instance for the
-    /// TDLib chat id and return the join payload that `joinVideoChat`
-    /// carries as its `payload` (`schema/td_api.tl:14292`). The answer
-    /// (`Text` response) goes back through `connect_group_call`. A
-    /// `Viewer` context opens no capture source.
+    /// Phase C2g: app -> engine; start making the group call instance for
+    /// the TDLib chat id, in place of any before it. Its join payload,
+    /// which `joinVideoChat` carries as its `payload`
+    /// (`schema/td_api.tl:14292`), comes back through
+    /// [`CallEngine::take_group_offers`]. The answer (`Text` response) goes
+    /// back through `connect_group_call`. A `Viewer` context opens no
+    /// capture source.
     fn create_group_call(
         &mut self,
         group_call_id: i32,
         chat_id: i64,
         role: GroupCallRole,
-    ) -> Result<String, EngineError>;
+    ) -> Result<(), EngineError>;
 
-    /// app -> engine; create a conference call's instance (an end-to-end
-    /// encrypted group call not bound to a chat, tdesktop
+    /// app -> engine; the join payloads that are ready. An instance is
+    /// usable from here on. Leaving, stopping or replacing what is still
+    /// being made means its payload never comes.
+    fn take_group_offers(&mut self) -> Vec<GroupOffer>;
+
+    /// app -> engine; start making a conference call's instance (an
+    /// end-to-end encrypted group call not bound to a chat, tdesktop
     /// `GroupCall::conference()`) under `key`, every frame going through
-    /// `crypto`, and return the join payload `createGroupCall` or
-    /// `joinGroupCall` carries. A join learns the call's TDLib id only
+    /// `crypto`. Its join payload, which `createGroupCall` or
+    /// `joinGroupCall` carries, comes as `create_group_call`'s does. A join learns the call's TDLib id only
     /// from its answer, so `key` may be provisional
     /// ([`CallEngine::rekey_group_call`]). A rejoin replaces the instance.
     fn create_conference_call(
         &mut self,
         key: i32,
         crypto: std::sync::Arc<dyn FrameCrypto>,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
         let _ = (key, crypto);
         Err(EngineError::Unavailable)
     }
@@ -136,7 +143,7 @@ pub trait CallEngine {
     /// Phase C2g: app -> engine; begin screen sharing: the presentation
     /// instance returns the payload that `startGroupCallScreenSharing`
     /// (`schema/td_api.tl:14303`) carries as its `payload`.
-    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError>;
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError>;
 
     /// Phase C2g: app -> engine; finish the presentation handshake with
     /// the `startGroupCallScreenSharing` answer and attach the desktop

@@ -284,6 +284,28 @@ pub enum GroupCallRole {
     Viewer,
 }
 
+/// Which join payload the engine is making: a call's, or its presentation's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GroupOfferKey {
+    Call(i32),
+    Screen(i32),
+}
+
+impl GroupOfferKey {
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Call(id) | Self::Screen(id) => id,
+        }
+    }
+}
+
+/// A join payload that came back, or why none did.
+#[derive(Debug)]
+pub struct GroupOffer {
+    pub key: GroupOfferKey,
+    pub payload: Result<String, EngineError>,
+}
+
 /// Stores `hook` in a callback slot of the state shared with the
 /// engine's native callbacks.
 pub(crate) fn set_hook<T>(slot: &std::sync::Mutex<Option<T>>, hook: T) {
