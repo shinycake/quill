@@ -363,3 +363,21 @@ fn a_call_held_open_at_full_keeps_the_app_with_the_bar(cx: &mut TestAppContext) 
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     app.read_with(&vcx, |app, _| assert!(!app.disk.held_for_call));
 }
+
+#[gpui_kit::test]
+fn each_time_the_disk_fills_sends_one_notice(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let notices = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.disk.full_notices)
+    };
+    fill(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
+    assert_eq!(notices(&app, &mut vcx), 1, "one per edge");
+    read(&app, &mut vcx, Some(FLOORS.warn_clear));
+    fill(&app, &mut vcx, Some(0));
+    assert_eq!(notices(&app, &mut vcx), 2);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_client(Err(ConnectBlocker::DiskFull), cx);
+    });
+    assert_eq!(notices(&app, &mut vcx), 2, "the screen was up already");
+}

@@ -38,6 +38,9 @@ pub(crate) struct DiskUi {
     /// At Full, the on-screen client stays open for its call, and closes
     /// at the first reading after the call ends.
     held_for_call: bool,
+    /// How many times this run the full-disk screen went up, each with one
+    /// system notification.
+    full_notices: u32,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -61,6 +64,7 @@ impl DiskUi {
             unwritable: false,
             screen_refused: false,
             held_for_call: false,
+            full_notices: 0,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -225,7 +229,7 @@ impl QuillApp {
     /// running clients close only when a reading falls below close.
     pub(super) fn refuse_screen_open(&mut self, cx: &mut Context<Self>) {
         if !self.disk.shows_screen() {
-            self.bring_main_window_forward(cx);
+            self.announce_full_disk(cx);
         }
         self.disk.screen_refused = true;
         cx.notify();
@@ -236,13 +240,37 @@ impl QuillApp {
         if after != DiskState::Full {
             self.disk.held_for_call = false;
         }
-        if after == DiskState::Full && before != DiskState::Full {
-            self.bring_main_window_forward(cx);
+        if after == DiskState::Full && before != DiskState::Full && !self.disk.screen_refused {
+            self.announce_full_disk(cx);
         }
         if after == DiskState::Healthy && before != DiskState::Healthy {
             self.auto_download_update(cx);
         }
         before
+    }
+
+    /// The screen goes up: Quill hidden in the tray would otherwise show
+    /// nothing, so the main window comes forward and the system shows one
+    /// notification.
+    fn announce_full_disk(&mut self, cx: &mut Context<Self>) {
+        self.bring_main_window_forward(cx);
+        self.disk.full_notices += 1;
+        let (title, body) = if self.disk.unwritable {
+            (
+                keys::Q_DISK_UNWRITABLE_TITLE,
+                keys::Q_DISK_UNWRITABLE_NOTICE,
+            )
+        } else {
+            (keys::Q_DISK_FULL_TITLE, keys::Q_DISK_FULL_NOTICE)
+        };
+        let notice = quill::notify::OsNotification {
+            chat_id: quill::ids::ChatId(0),
+            message_id: None,
+            title: tr(title).to_string(),
+            body: tr(body).to_string(),
+        };
+        let locked = self.account.passcode.locked;
+        self.show_os_notification(notice, None, None, locked, cx);
     }
 
     fn bring_main_window_forward(&self, cx: &mut Context<Self>) {
