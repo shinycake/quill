@@ -12,6 +12,14 @@ ran about once per envelope.
   typing, read receipts, list unread counters and the online member count.
   They no longer mark the pass dirty. Anything not named still does, so a
   kind missing from the list costs time, not a missing emoji.
+- The one exception is a file the open chat's emoji wait on. The pass keeps
+  the display files it left undownloaded (`emoji_waiting_files`), and a
+  file update that reports one of them stopped without completing marks
+  the pass dirty again. That idle update is what lifts a refusal in
+  `should_download` (a resume this session never asked for, a cancel that
+  is settling, a failed request of ours). Without it, emoji only the pass
+  asks for (reactions, reply strips, statuses, topic icons) stayed missing
+  until an unrelated update.
 - A background account ends its batches with `end_offscreen_batch`, which
   keeps the pass pending. The first batch after the account comes on screen
   runs it once.
