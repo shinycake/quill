@@ -264,6 +264,9 @@ impl QuillApp {
         match action {
             PolledAction::Wait => {}
             PolledAction::ChatList => self.notify_chat_list(cx),
+            // The media viewer draws in the root render and shows the
+            // progress of the download it waits for.
+            PolledAction::Conversation if self.viewer.state.is_open() => cx.notify(),
             PolledAction::Conversation => self.notify_conversations(cx),
             PolledAction::Full => cx.notify(),
         }
@@ -842,6 +845,8 @@ pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod photo_preview;
 mod spawn_call_notification;
+#[cfg(all(test, feature = "demo-capture"))]
+mod viewer_progress_tests;
 
 #[cfg(test)]
 mod tests {
