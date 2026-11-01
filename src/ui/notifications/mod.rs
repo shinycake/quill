@@ -88,9 +88,9 @@ pub(super) struct PolledRedraw {
     full: RedrawNeed,
     /// A chat-list redraw is owed.
     list: bool,
-    /// A conversation redraw is owed, and the last one.
+    /// A conversation redraw is owed (only in front: behind another app
+    /// it waits as an urgent full redraw does, folded into `full`).
     conversation: bool,
-    last_conversation: std::time::Instant,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,7 +113,6 @@ impl PolledRedraw {
             full: RedrawNeed::Nothing,
             list: false,
             conversation: false,
-            last_conversation: now,
         }
     }
 
@@ -127,16 +126,6 @@ impl PolledRedraw {
         }
     }
 
-    /// How long the owed conversation redraw may wait after the last one:
-    /// none in front, as for [`RedrawNeed::Now`].
-    fn conversation_gap(&self, active: bool) -> Option<Duration> {
-        self.conversation.then_some(if active {
-            Duration::ZERO
-        } else {
-            INACTIVE_REDRAW
-        })
-    }
-
     /// How long the owed chat-list redraw may wait after the last one.
     fn list_gap(&self, active: bool) -> Option<Duration> {
         self.list.then(|| gap_for(CHAT_LIST_REDRAW, active))
@@ -148,9 +137,7 @@ impl PolledRedraw {
             |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
         let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
         let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
-        let conversation = self
-            .conversation_gap(active)
-            .map(|gap| left(gap, self.last_conversation));
+        let conversation = self.conversation.then_some(Duration::ZERO);
         full.into_iter().chain(list).chain(conversation).min()
     }
 
@@ -164,7 +151,8 @@ impl PolledRedraw {
         match need {
             RedrawNeed::Nothing => {}
             RedrawNeed::ChatList => self.list = true,
-            RedrawNeed::Conversation => self.conversation = true,
+            RedrawNeed::Conversation if active => self.conversation = true,
+            RedrawNeed::Conversation => self.full = self.full.max(RedrawNeed::Now),
             RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
         }
         let since = |last: std::time::Instant| now.duration_since(last);
@@ -182,12 +170,7 @@ impl PolledRedraw {
             self.last_list = now;
             return PolledAction::ChatList;
         }
-        if self
-            .conversation_gap(active)
-            .is_some_and(|gap| since(self.last_conversation) >= gap)
-        {
-            self.conversation = false;
-            self.last_conversation = now;
+        if std::mem::take(&mut self.conversation) {
             return PolledAction::Conversation;
         }
         PolledAction::Wait
@@ -202,7 +185,6 @@ impl PolledRedraw {
         self.conversation = false;
         self.last_full = now;
         self.last_list = now;
-        self.last_conversation = now;
         PolledAction::Full
     }
 }
