@@ -442,13 +442,11 @@ fn a_forum_field_names_the_topic_it_sends_to(cx: &mut TestAppContext) {
     // A topic that was renamed is read again.
     reply_to(&app, vcx, FORUM, 20);
     app.update(vcx, |app, cx| {
-        if let Some(topics) = app
-            .demo_session
-            .as_mut()
-            .and_then(|session| session.threads.forum_topics.get_mut(&FORUM.0))
-            && let Some(topic) = topics.iter_mut().find(|topic| topic.forum_topic_id == 5)
-        {
-            topic.name = "Changelog".into();
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .threads
+                .forum_topics
+                .update_topic(FORUM.0, 5, |topic| topic.name = "Changelog".into());
         }
         cx.notify();
     });

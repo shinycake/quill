@@ -191,25 +191,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.chat_has_topics(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(topic) = self
-            .session
-            .threads
-            .forum_topics
-            .get_mut(&chat_id.0)
-            .and_then(|topics| {
-                topics
-                    .iter_mut()
-                    .find(|t| t.forum_topic_id == forum_topic_id)
-            })
+        let Some((settings, previous)) =
+            self.session
+                .threads
+                .forum_topics
+                .update_topic(chat_id.0, forum_topic_id, |topic| {
+                    let settings = topic.notification_settings.clone().with_mute_for(if muted {
+                        MUTE_FOREVER
+                    } else {
+                        0
+                    });
+                    let previous =
+                        std::mem::replace(&mut topic.notification_settings, settings.clone());
+                    (settings, previous)
+                })
         else {
             return Ok(None);
         };
-        let settings =
-            topic
-                .notification_settings
-                .clone()
-                .with_mute_for(if muted { MUTE_FOREVER } else { 0 });
-        let previous = std::mem::replace(&mut topic.notification_settings, settings.clone());
         let purpose = RequestPurpose::Threads(ThreadsPurpose::SetForumTopicNotificationSettings {
             forum_topic_id,
         });
@@ -224,15 +222,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            if let Some(topic) = self
-                .session
+            self.session
                 .threads
                 .forum_topics
-                .get_mut(&chat_id.0)
-                .and_then(|t| t.iter_mut().find(|t| t.forum_topic_id == forum_topic_id))
-            {
-                topic.notification_settings = previous;
-            }
+                .update_topic(chat_id.0, forum_topic_id, |topic| {
+                    topic.notification_settings = previous;
+                });
             return Err(err);
         }
         Ok(Some(extra))

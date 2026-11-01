@@ -398,15 +398,15 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
         &topics_answer(extra.0, 43, &[2, 3]),
     );
     let set = |session: &mut Session, id: i32, muted: bool, icon: i64| {
-        let topic = session
+        session
             .threads
             .forum_topics
-            .get_mut(&43)
-            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
+            .update_topic(43, id, |topic| {
+                topic.notification_settings.use_default_mute_for = false;
+                topic.notification_settings.mute_for = if muted { 2147483647 } else { 0 };
+                topic.icon_custom_emoji_id = icon;
+            })
             .expect("topic");
-        topic.notification_settings.use_default_mute_for = false;
-        topic.notification_settings.mute_for = if muted { 2147483647 } else { 0 };
-        topic.icon_custom_emoji_id = icon;
     };
     let row = |session: &Session| session.chat_row_forum(ChatId(43)).expect("row");
     // One muted and one unmuted unread topic: the badge counts the unmuted.
@@ -423,18 +423,59 @@ fn forum_badge_counts_unmuted_topics_and_icons_are_resolved() {
     // Nothing unread but the chat marked as unread: no badge and no dot
     // (tdesktop ignores the mark on a forum).
     for id in [2, 3] {
-        if let Some(topic) = session
-            .threads
-            .forum_topics
-            .get_mut(&43)
-            .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == id))
-        {
+        session.threads.forum_topics.update_topic(43, id, |topic| {
             topic.unread_count = 0;
             topic.last_read_inbox_message_id = 900;
-        }
+        });
     }
     if let Some(chat) = session.chats.get_mut(&43) {
         chat.is_marked_as_unread = true;
     }
     assert_eq!(row(&session).unread_topics, 0);
+}
+
+/// The forum's unread sum kept as topics change equals the topics' badges.
+#[test]
+fn forum_unread_follows_topic_updates() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &bot_user(41, true, true));
+    apply_json(&mut session, &seq, &sink, &private_chat(41));
+    let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(41)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &topics_answer(extra.0, 41, &[2, 3, 4]),
+    );
+    let badges = |session: &Session| -> i32 {
+        session
+            .ordered_forum_topics(ChatId(41))
+            .iter()
+            .map(|topic| match session.topic_badge(ChatId(41), topic) {
+                TopicBadge::Count(n) => n.max(0),
+                _ => 0,
+            })
+            .sum()
+    };
+    // Never read: no count is trusted.
+    assert_eq!(session.forum_topics_unread(ChatId(41)), 0);
+    let extra = session.request(
+        RequestPurpose::Threads(ThreadsPurpose::GetForumTopic { forum_topic_id: 3 }),
+        Some(ChatId(41)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"forumTopic","@extra":"{}","info":{{"@type":"forumTopicInfo","chat_id":41,"forum_topic_id":3,"name":"T3","icon":{{"@type":"forumTopicIcon","color":0,"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false}},"last_message":null,"order":"3","is_pinned":false,"unread_count":5,"last_read_inbox_message_id":90}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.forum_topics_unread(ChatId(41)), 5);
+    assert_eq!(session.forum_topics_unread(ChatId(41)), badges(&session));
+    session.mark_forum_topic_read_locally(ChatId(41), 3);
+    assert_eq!(session.forum_topics_unread(ChatId(41)), 0);
+    assert_eq!(session.forum_topics_unread(ChatId(41)), badges(&session));
 }
