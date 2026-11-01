@@ -4,6 +4,7 @@ use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice};
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{AccountKey, ChatId, RequestId};
+use crate::lang::{keys, tr};
 use crate::lifecycle::RestoreBlocker;
 use crate::platform::DatabaseKey;
 use crate::settings::AccountPaths;
@@ -35,8 +36,12 @@ pub const OUTGOING_TYPING_INTERVAL_MS: u64 = 4_000;
 pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
 /// Page size for `getChatHistory`.
 pub const HISTORY_PAGE_SIZE: i32 = 50;
-/// `downloadFile.priority` for automatic photo thumbs (schema: 1–32).
-pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
+/// `downloadFile.priority` for chat-list avatars, fetched for every chat
+/// whether or not the list shows it (schema: 1–32).
+pub const CHAT_LIST_PHOTO_PRIORITY: i32 = 1;
+/// `downloadFile.priority` for automatic photo thumbs and the avatars a
+/// view is showing: above the chat-list avatars.
+pub const THUMB_DOWNLOAD_PRIORITY: i32 = 2;
 /// `downloadFile.priority` for automatic full-media downloads (MED3: above
 /// thumbs so enabled media actually arrives, far below explicit user
 /// downloads).
@@ -132,6 +137,7 @@ pub enum ConnectBlocker {
     TdjsonVersion,
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
+    DiskFull,
 }
 
 impl ConnectBlocker {
@@ -157,6 +163,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonVersion => {
                 "tdjson is a different TDLib version than this build of Quill needs — rebuild it with scripts/build-tdlib.sh"
             }
+            ConnectBlocker::DiskFull => tr(keys::Q_DISK_FULL_TITLE),
         }
     }
 
@@ -171,6 +178,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => "tdjson-load",
             ConnectBlocker::TdjsonVersion => "tdjson-version",
             ConnectBlocker::ReceiveThread => "receive-thread",
+            ConnectBlocker::DiskFull => "disk-full",
         }
     }
 }

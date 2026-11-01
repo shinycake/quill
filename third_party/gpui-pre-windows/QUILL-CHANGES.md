@@ -336,3 +336,75 @@ Added in 2026:
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
+
+## Async timers fire on time, not on the 15.6 ms system tick
+
+Added in 2026. Upstream's `dispatch_after` armed a thread-pool timer per
+call, and those land on the system timer tick (15.6 ms by default). Measured
+on `windows-latest` VMs with no window: a 30 fps wait of 33.3 ms took about
+47 ms (23 Hz), a 50 fps wait of 18.4 ms about 32 ms (34 Hz), and a 60 fps wait
+of 15.3 ms fits one tick but slipped a whole tick on 1-17% of waits, or 18-32%
+with 2 to 6 ms of main-thread work at 60 Hz (48-54 Hz). Through this timer
+thread those loops ran at 29.6, 53.3 and 60.1 Hz.
+
+- `src/timer_queue.rs` (new, std-only; unit tests run with
+  `scripts/test-timer-queue.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the deadline heap, earliest first, ties in the order added, and the wait
+  until the next deadline (none when empty).
+- `src/timer_thread.rs` (new): one "Timer" thread fires every
+  `dispatch_after` runnable from that heap. It sleeps on a waitable timer made
+  with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (Windows 10 1803 and later),
+  which needs no process-wide `timeBeginPeriod`, plus an event that a new
+  earliest deadline sets. With nothing pending it waits on the event alone,
+  with no timeout, so an idle app gains no wakeups. Where the flag is
+  rejected it uses a plain waitable timer and holds `timeBeginPeriod(1)` only
+  across waits shorter than 100 ms (animation frames), not idle ones.
+- `src/dispatcher.rs`: `dispatch_after` schedules on that thread; the
+  thread-pool timer remains only for when the thread could not start.
+- `src/gpui_windows.rs`: declares the new modules.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
+
+## The file pickers free each path and skip items without one
+
+Added in 2026:
+
+- `src/platform.rs`: `file_system_path` copies `GetDisplayName(SIGDN_FILESYSPATH)`
+  into a `PathBuf` (as UTF-16, so a name that is not valid Unicode survives)
+  and frees the string with `CoTaskMemFree`. Upstream's open dialog never
+  freed it, and one item without a file system path (a phone, a library)
+  failed the whole selection. Such items are now skipped, and a selection
+  with none left returns the error as upstream did. The save dialog uses the
+  same helper.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
+
+## Giving up on a lost device closes the windows
+
+Added in 2026:
+
+- `src/gpui_message.rs` (new, std-only; unit tests run with
+  `scripts/test-gpui-message.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the `WM_GPUI_*` ids move here from `src/events.rs` as `GpuiMessageId`, whose
+  value can't be read outside the module. `ValidationNumber::message` is the
+  only way to build a `GpuiMessage`, so an id can't reach `PostMessageW` or
+  `SendMessageW` without the number. Upstream's ids are plain `u32`s and every
+  sender passes the number by hand.
+- `src/wrapper.rs`: `GpuiMessage::post` and `send`, the only places that hand
+  one to Win32.
+- `src/platform.rs`: `destroy_all_windows_after_device_lost` posted
+  `WPARAM::default()`, so the windows' `handle_gpui_events` dropped the message
+  and every window stayed open and blank. It now gets the number.
+- `src/events.rs`, `src/platform.rs`: `handle_msg` passes whatever it does not
+  handle itself to `handle_gpui_events`, which parses the id with
+  `GpuiMessageId::from_raw` and then checks the number. The window's check now
+  calls `log::error!` on a wrong number, as the platform's always did. Quill
+  installs no `log` backend, so a shipped build still writes that nowhere.
+- `src/dispatcher.rs`, `src/window.rs`: `validation_number` is a
+  `ValidationNumber`.
+- `src/gpui_windows.rs`: declares the new module.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.

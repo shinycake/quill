@@ -14,7 +14,7 @@
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_DEPTH: usize = 16;
 
@@ -29,9 +29,6 @@ pub const TEMP_PREFIX: &str = ".quill-update-";
 /// left behind. Only files named here are ever deleted at startup.
 pub const LEFTOVERS_FILE: &str = ".quill-leftovers";
 const MAX_LEFTOVERS_BYTES: u64 = 1024 * 1024;
-
-/// Attempts for a Windows rename or delete that hits a transient lock.
-const RETRIES: u32 = 10;
 
 fn combine(primary: io::Error, rollback: io::Error) -> io::Error {
     io::Error::new(
@@ -306,28 +303,9 @@ pub(super) fn list_files(root: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
-/// ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION: an
-/// antivirus scanner, the search indexer or a backup tool holding the file
-/// for a moment.
-fn transient(error: &io::Error) -> bool {
-    cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
-}
-
-/// Runs `op` again on a transient Windows lock, up to [`RETRIES`] times with
-/// 100–500 ms pauses (about 4 s in all).
-pub(super) fn retry<T>(mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
-    let mut delay = Duration::from_millis(100);
-    let mut attempt = 0;
-    loop {
-        match op() {
-            Err(error) if attempt < RETRIES && transient(&error) => {
-                std::thread::sleep(delay);
-                delay = delay.saturating_mul(2).min(Duration::from_millis(500));
-                attempt += 1;
-            }
-            other => return other,
-        }
-    }
+/// Runs `op` again on a transient Windows lock for about 4 s.
+pub(super) fn retry<T>(op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    crate::fs_retry::retry(crate::fs_retry::LONG, op)
 }
 
 fn file_name_of(path: &Path) -> io::Result<String> {

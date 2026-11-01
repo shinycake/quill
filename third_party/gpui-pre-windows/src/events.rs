@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // windows stop receiving vsync frames while idle, and a renderer that can't
-// recover from a lost device closes its window instead of panicking.
+// recover from a lost device closes its window instead of panicking, and
+// message ids and sends go through `gpui_message`.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
 
@@ -30,20 +31,6 @@ const RENDERER_RECOVERY_BACKOFF: [std::time::Duration; 2] = [
     std::time::Duration::from_millis(200),
     std::time::Duration::from_millis(500),
 ];
-
-pub(crate) const WM_GPUI_CURSOR_STYLE_CHANGED: u32 = WM_USER + 1;
-pub(crate) const WM_GPUI_CLOSE_ONE_WINDOW: u32 = WM_USER + 2;
-pub(crate) const WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD: u32 = WM_USER + 3;
-pub(crate) const WM_GPUI_DOCK_MENU_ACTION: u32 = WM_USER + 4;
-pub(crate) const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
-pub(crate) const WM_GPUI_KEYBOARD_LAYOUT_CHANGED: u32 = WM_USER + 6;
-pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
-pub(crate) const WM_GPUI_DISPLAYS_CHANGED: u32 = WM_USER + 10;
-/// Quill: destroy this window because its GPU device is gone and could not be recreated.
-pub(crate) const WM_GPUI_DESTROY_AFTER_DEVICE_LOST: u32 = WM_USER + 11;
-/// Quill: tells the platform window that the GPU device is gone for good (see
-/// `WindowsPlatformInner::handle_device_gone`).
-pub(crate) const WM_GPUI_GPU_DEVICE_GONE: u32 = WM_USER + 12;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 /// Quill: polls a resting touchpad contact (`poll_touchpad_contact`).
@@ -175,13 +162,7 @@ impl WindowsWindowInner {
             WM_SHOWWINDOW => self.handle_window_visibility_changed(handle, wparam),
             DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(handle, wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
-            WM_GPUI_CURSOR_STYLE_CHANGED
-            | WM_GPUI_FORCE_UPDATE_WINDOW
-            | WM_GPUI_GPU_DEVICE_LOST
-            | WM_GPUI_DESTROY_AFTER_DEVICE_LOST => {
-                self.handle_gpui_events(handle, msg, wparam, lparam)
-            }
-            _ => None,
+            _ => self.handle_gpui_events(handle, msg, wparam, lparam),
         };
         if let Some(n) = handled {
             LRESULT(n)
@@ -368,13 +349,10 @@ impl WindowsWindowInner {
             callback();
         }
         unsafe {
-            PostMessageW(
-                Some(self.platform_window_handle),
-                WM_GPUI_CLOSE_ONE_WINDOW,
-                WPARAM(self.validation_number),
-                LPARAM(handle.0 as isize),
-            )
-            .log_err();
+            self.validation_number
+                .message(WM_GPUI_CLOSE_ONE_WINDOW, handle.0 as isize)
+                .post(self.platform_window_handle)
+                .log_err();
         }
         Some(0)
     }
@@ -1278,13 +1256,10 @@ impl WindowsWindowInner {
 
     fn handle_input_language_changed(&self) -> Option<isize> {
         unsafe {
-            PostMessageW(
-                Some(self.platform_window_handle),
-                WM_GPUI_KEYBOARD_LAYOUT_CHANGED,
-                WPARAM(self.validation_number),
-                LPARAM(0),
-            )
-            .log_err();
+            self.validation_number
+                .message(WM_GPUI_KEYBOARD_LAYOUT_CHANGED, 0)
+                .post(self.platform_window_handle)
+                .log_err();
         }
         Some(0)
     }
@@ -1339,7 +1314,9 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<isize> {
-        if wparam.0 != self.validation_number {
+        let message = GpuiMessageId::from_raw(message)?;
+        if !self.validation_number.accepts(wparam.0) {
+            log::error!("Wrong validation number while processing message: {message:?}");
             return None;
         }
         match message {
@@ -1377,13 +1354,10 @@ impl WindowsWindowInner {
             );
             // SAFETY: PostMessageW only queues the message for this window's own thread.
             unsafe {
-                PostMessageW(
-                    Some(handle),
-                    WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
-                    WPARAM(self.validation_number),
-                    LPARAM::default(),
-                )
-                .log_err();
+                self.validation_number
+                    .message(WM_GPUI_DESTROY_AFTER_DEVICE_LOST, 0)
+                    .post(handle)
+                    .log_err();
             }
             return Some(0);
         }

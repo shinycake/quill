@@ -7037,6 +7037,7 @@ dependencies = [
  "gpui-kit",
  "gpui-pre-macos",
  "gpui-pre-shared-string",
+ "gpui-pre-wgpu",
  "gpui-pre-windows",
  "hkdf 0.13.0",
  "hmac 0.13.0",

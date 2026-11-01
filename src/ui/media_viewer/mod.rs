@@ -89,9 +89,20 @@ pub(super) struct ViewerExtra {
     pub rotations: HashMap<(i64, i64), u8>,
     /// The width the last frame laid the thumbnail strip out in, which
     /// says which profile photo thumbs to fetch.
-    pub strip_lane: Option<f32>,
+    strip_lane: Option<f32>,
+    #[cfg(test)]
+    strip_asked: Vec<quill::ids::FileId>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
+}
+
+impl ViewerExtra {
+    fn set_strip_lane_waking(&mut self, lane: f32, wake: &quill::wake::Signal) {
+        if self.strip_lane != Some(lane) {
+            self.strip_lane = Some(lane);
+            wake.poke();
+        }
+    }
 }
 
 /// Which part of the viewer a render draws.

@@ -262,6 +262,12 @@ impl ClosingSet {
         }
     }
 
+    pub fn restart_all(&mut self) {
+        for entry in &mut self.entries {
+            entry.restart = true;
+        }
+    }
+
     /// `key` does not restart (it is being removed).
     pub fn cancel_restart(&mut self, key: &AccountKey) {
         for entry in &mut self.entries {

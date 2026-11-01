@@ -126,10 +126,16 @@ impl FileMap {
         self.quiet_updates = self.quiet_updates.wrapping_add(1);
     }
 
+    /// Whether [`Self::evict`] would scan: past [`FILES_MAX`] and not
+    /// waiting out a pass that fell short.
+    pub(crate) fn evict_due(&self) -> bool {
+        self.entries.len() > FILES_MAX && self.clock >= self.retry_at
+    }
+
     /// Past [`FILES_MAX`], drop the least recently used files `held`
     /// does not keep until [`FILES_KEEP`] are left. Returns how many went.
     pub(crate) fn evict(&mut self, held: impl Fn(&ParsedFile) -> bool) -> usize {
-        if self.entries.len() <= FILES_MAX || self.clock < self.retry_at {
+        if !self.evict_due() {
             return 0;
         }
         let excess = self.entries.len().saturating_sub(FILES_KEEP);
