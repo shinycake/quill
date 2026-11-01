@@ -124,20 +124,32 @@ fn quota_room(path: &Path) -> Option<u64> {
             return None;
         }
     }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
     // SAFETY: zeroed is a valid dqblk, and a call that returned 0 filled it.
-    room_under(&unsafe { quota.assume_init() })
+    room_under(&unsafe { quota.assume_init() }, now)
 }
 
 const USRQUOTA: libc::c_int = 0;
 
-pub(super) fn room_under(quota: &libc::dqblk) -> Option<u64> {
+/// The kernel (`check_bdq` in fs/quota/dquot.c) refuses a write only past
+/// the hard limit, or past the soft limit once its grace time is over: in
+/// the grace time, writes still reach the hard limit. `now` is in seconds
+/// since the epoch, as `dqb_btime` is.
+pub(super) fn room_under(quota: &libc::dqblk, now: u64) -> Option<u64> {
     if quota.dqb_valid & libc::QIF_BLIMITS == 0 || quota.dqb_valid & libc::QIF_SPACE == 0 {
         return None;
     }
-    let limit = [quota.dqb_bsoftlimit, quota.dqb_bhardlimit]
-        .into_iter()
-        .filter(|limit| *limit != 0)
-        .min()?;
+    let grace_over =
+        quota.dqb_valid & libc::QIF_BTIME != 0 && quota.dqb_btime != 0 && now >= quota.dqb_btime;
+    let limit = if quota.dqb_bsoftlimit != 0 && grace_over {
+        quota.dqb_bsoftlimit
+    } else if quota.dqb_bhardlimit != 0 {
+        quota.dqb_bhardlimit
+    } else {
+        return None;
+    };
     Some(limit.saturating_mul(KIB).saturating_sub(quota.dqb_curspace))
 }
 

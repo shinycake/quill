@@ -273,19 +273,38 @@ mod linux {
         quota
     }
 
+    const NOW: u64 = 1_800_000_000;
+
     #[test]
     fn a_user_quota_counts_as_the_free_space() {
-        assert_eq!(room_under(&quota(0, 1024, 1024 * 1000)), Some(24 * 1024));
         assert_eq!(
-            room_under(&quota(512, 1024, 0)),
-            Some(512 * 1024),
-            "soft first"
+            room_under(&quota(0, 1024, 1024 * 1000), NOW),
+            Some(24 * 1024)
         );
-        assert_eq!(room_under(&quota(10, 0, 1 << 30)), Some(0), "over it");
-        assert_eq!(room_under(&quota(0, 0, 5)), None, "no limit");
+        assert_eq!(room_under(&quota(0, 0, 5), NOW), None, "no limit");
         let mut unset = quota(0, 1024, 0);
         unset.dqb_valid = 0;
-        assert_eq!(room_under(&unset), None);
+        assert_eq!(room_under(&unset, NOW), None);
+    }
+
+    #[test]
+    fn writes_reach_the_hard_limit_until_the_soft_limits_grace_ends() {
+        let mut over_soft = quota(512, 1024, 600 * 1024);
+        assert_eq!(
+            room_under(&over_soft, NOW),
+            Some(424 * 1024),
+            "over soft with no grace time recorded"
+        );
+        over_soft.dqb_valid |= libc::QIF_BTIME;
+        over_soft.dqb_btime = NOW + 3600;
+        assert_eq!(room_under(&over_soft, NOW), Some(424 * 1024), "in grace");
+        over_soft.dqb_btime = NOW;
+        assert_eq!(room_under(&over_soft, NOW), Some(0), "grace over");
+        let mut soft_only = quota(10, 0, 1 << 30);
+        assert_eq!(room_under(&soft_only, NOW), None, "in grace, no hard limit");
+        soft_only.dqb_valid |= libc::QIF_BTIME;
+        soft_only.dqb_btime = NOW - 1;
+        assert_eq!(room_under(&soft_only, NOW), Some(0));
     }
 
     #[test]
