@@ -49,6 +49,13 @@ fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, u6
 }
 
 #[gpui_kit::test]
+fn a_ui_test_never_reads_the_real_disk(cx: &mut TestAppContext) {
+    let (app, vcx) = new_app(cx);
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| assert_eq!(app.disk.free, None));
+}
+
+#[gpui_kit::test]
 fn the_bar_shows_only_while_the_disk_is_low(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;

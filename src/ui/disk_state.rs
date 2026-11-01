@@ -26,7 +26,12 @@ pub(crate) struct DiskUi {
 
 impl DiskUi {
     pub(crate) fn start(window: &Window, cx: &mut Context<QuillApp>) -> Self {
-        if let Some(root) = quill::settings::safe_app_root() {
+        // A UI test feeds its readings through `apply_disk_reading`: a read
+        // of the machine's own disk would make it pass or fail by how full
+        // that disk is.
+        if !cfg!(test)
+            && let Some(root) = quill::settings::safe_app_root()
+        {
             watch(root, cx);
         }
         Self {
