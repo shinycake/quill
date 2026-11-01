@@ -113,6 +113,8 @@ jobs:
         run: bash scripts/test-gpui-message.sh
       - name: tests (vendored GPUI device recovery)
         run: bash scripts/test-device-recovery.sh
+      - name: tests (vendored GPUI input rate)
+        run: bash scripts/test-input-rate.sh
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh

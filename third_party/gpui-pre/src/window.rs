@@ -8,6 +8,7 @@ use crate::DebugFrameOverlayMode;
 use crate::Inspector;
 #[cfg(feature = "profiler")]
 use crate::profiler;
+use crate::input_rate::InputRateTracker;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
@@ -1369,51 +1370,6 @@ struct ModifierState {
     saw_other_input: bool,
 }
 
-/// Tracks input event timestamps to determine if input is arriving at a high rate.
-/// Used for selective VRR (Variable Refresh Rate) optimization.
-#[derive(Clone, Debug)]
-pub(crate) struct InputRateTracker {
-    timestamps: Vec<Instant>,
-    window: Duration,
-    inputs_per_second: u32,
-    sustain_until: Instant,
-    sustain_duration: Duration,
-}
-
-impl Default for InputRateTracker {
-    fn default() -> Self {
-        Self {
-            timestamps: Vec::new(),
-            window: Duration::from_millis(100),
-            inputs_per_second: 60,
-            sustain_until: Instant::now(),
-            sustain_duration: Duration::from_secs(1),
-        }
-    }
-}
-
-impl InputRateTracker {
-    pub fn record_input(&mut self) {
-        let now = Instant::now();
-        self.timestamps.push(now);
-        self.prune_old_timestamps(now);
-
-        let min_events = self.inputs_per_second as u128 * self.window.as_millis() / 1000;
-        if self.timestamps.len() as u128 >= min_events {
-            self.sustain_until = now + self.sustain_duration;
-        }
-    }
-
-    pub fn is_high_rate(&self) -> bool {
-        Instant::now() < self.sustain_until
-    }
-
-    fn prune_old_timestamps(&mut self, now: Instant) {
-        self.timestamps
-            .retain(|&t| now.duration_since(t) <= self.window);
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DrawPhase {
     None,
@@ -1875,12 +1831,13 @@ impl Window {
                 // Throttle frame rate based on conditions:
                 // - Thermal pressure (Serious/Critical): cap to ~60fps
                 // - Inactive window (not focused): cap to ~30fps to save energy
+                let now = Instant::now();
                 let min_frame_interval = if request_frame_options.require_presentation
                     || (!request_frame_options.force_render
                         && next_frame_callbacks.borrow().is_empty())
                 {
                     None
-                } else if !active.get() && !input_rate_tracker.borrow_mut().is_high_rate() {
+                } else if !active.get() && !input_rate_tracker.borrow().is_high_rate(now) {
                     inactive_frame_interval.map(|interval| (interval, FrameRateLimit::Inactive))
                 } else if let Some(ThermalState::Critical | ThermalState::Serious) = thermal_state {
                     Some((Duration::from_micros(16667), FrameRateLimit::Thermal))
@@ -1888,7 +1845,6 @@ impl Window {
                     None
                 };
 
-                let now = Instant::now();
                 #[cfg_attr(not(feature = "profiler"), expect(unused_variables))]
                 if let Some((min_interval, limit)) = min_frame_interval {
                     if let Some(last_frame) = last_frame_time.get()
@@ -1937,11 +1893,11 @@ impl Window {
                 }
 
                 // Keep presenting if input was recently arriving at a high rate (>= 60fps).
-                // Once high-rate input is detected, we sustain presentation for 1 second
+                // Once high-rate input is detected, we sustain presentation briefly
                 // to prevent display underclocking during active input.
                 let needs_present = request_frame_options.require_presentation
                     || needs_present.get()
-                    || input_rate_tracker.borrow_mut().is_high_rate();
+                    || input_rate_tracker.borrow().is_high_rate(now);
 
                 let should_draw = invalidator.is_dirty() || force_render;
                 if should_draw {
@@ -6169,7 +6125,9 @@ impl Window {
 
         let caused_invalidation = self.invalidator.update_count() > update_count_before;
         if caused_invalidation {
-            self.input_rate_tracker.borrow_mut().record_input();
+            self.input_rate_tracker
+                .borrow_mut()
+                .record_input(Instant::now());
         }
         #[cfg(feature = "profiler")]
         self.window_profiler.end_input(caused_invalidation);

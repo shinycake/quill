@@ -418,3 +418,12 @@ cache off:
   (`drag_painted_at`) does nothing. `FileDropEvent::Entered` refreshes by itself
   now, since it can arrive with the hit test unchanged. Tests:
   `src/ui/drag_redraw_tests.rs`.
+
+The Quill project also changed it in 2026 so the end of a scroll doesn't keep
+presenting:
+
+- `src/input_rate.rs`: `InputRateTracker`, moved out of `src/window.rs` with
+  injected instants so `scripts/test-input-rate.sh` can test it alone.
+  `sustain_duration` goes from 1 s to 150 ms: a gesture that stopped
+  re-presented the unchanged frame at display rate for a second, and held off
+  the macOS frame idle by as long. Gaps inside a gesture are far shorter.
