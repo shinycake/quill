@@ -104,15 +104,10 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Forward the exports' TDLib requests and toast the ones that ended.
-    /// Returns whether one ended, so the app redraws for its toast. A
-    /// running export needs no busy polling: its worker wakes the loop
-    /// whenever it has a request or is done.
     pub(super) fn poll_rich_html_exports(&mut self) -> bool {
         let Some(live) = self.live.as_mut() else {
             return false;
         };
-        live.driver.pump_rich_html_exports();
         let finished = live.driver.take_finished_rich_html_exports();
         for outcome in &finished {
             self.toast_rich_html(outcome);
@@ -123,16 +118,19 @@ impl QuillApp {
     /// The toast for how an export ended (tdesktop `showSavedToast` /
     /// `showFailToast`); logout and quit end one silently.
     pub(super) fn toast_rich_html(&mut self, outcome: &RichHtmlOutcome) {
-        match outcome {
-            RichHtmlOutcome::Saved(html) => {
-                let note = StatusNote::info(saved_text(html));
-                self.connection.set_note(note.with_reveal(html.clone()));
-            }
-            RichHtmlOutcome::Failed => self
-                .connection
-                .set_note(StatusNote::error(tr(keys::EXPORT_HTML_FAILED))),
-            RichHtmlOutcome::Cancelled => {}
+        if let Some(note) = rich_html_note(outcome) {
+            self.connection.set_note(note);
         }
+    }
+}
+
+pub(super) fn rich_html_note(outcome: &RichHtmlOutcome) -> Option<StatusNote> {
+    match outcome {
+        RichHtmlOutcome::Saved(html) => {
+            Some(StatusNote::info(saved_text(html)).with_reveal(html.clone()))
+        }
+        RichHtmlOutcome::Failed => Some(StatusNote::error(tr(keys::EXPORT_HTML_FAILED))),
+        RichHtmlOutcome::Cancelled => None,
     }
 }
 

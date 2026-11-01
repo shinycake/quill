@@ -14,6 +14,8 @@ pub mod thermal;
 #[cfg(feature = "font-kit")]
 mod open_type;
 #[cfg(feature = "font-kit")]
+mod sized_fonts;
+#[cfg(feature = "font-kit")]
 mod text_system;
 
 use objc2::MainThreadMarker;

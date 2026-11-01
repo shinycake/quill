@@ -55,10 +55,9 @@ fn accepting_custom_emoji_stickers_replaces_by_id() {
         held,
         vec![(Some(2), 11), (None, 12), (None, 13), (Some(1), 21)]
     );
-    assert_eq!(
-        session.resolved_custom_emoji_ids(),
-        [1, 2].into_iter().collect()
-    );
+    for id in [1, 2] {
+        assert!(held_emoji(&session, id));
+    }
 }
 
 /// The cache keeps the newest entries and forgets the attempt mark of what
@@ -110,10 +109,9 @@ fn visible_custom_emoji_survives_overflow() {
     );
     let held = &session.stickers.emoji.custom_emoji_stickers;
     assert_eq!(held.len(), CUSTOM_EMOJI_CACHE_CAP);
-    let ids = session.resolved_custom_emoji_ids();
-    assert!(ids.contains(&1));
-    assert!(!ids.contains(&2));
-    assert!(ids.contains(&total));
+    assert!(held_emoji(&session, 1));
+    assert!(!held_emoji(&session, 2));
+    assert!(held_emoji(&session, total));
 }
 
 /// The ids still to resolve skip resolved and already attempted ones.
@@ -194,4 +192,13 @@ fn custom_emoji_lookup_matches_a_scan_after_the_cache_is_trimmed() {
     session.accept_custom_emoji_stickers(vec![resolved_emoji(Some(total + 1), 7)]);
     assert_eq!(looked_up(&session, total + 1), Some(7));
     assert_lookup_matches_scan(&session, 0..=total + 2);
+}
+
+fn held_emoji(session: &Session, id: i64) -> bool {
+    session
+        .stickers
+        .emoji
+        .custom_emoji_stickers
+        .lookup(id)
+        .is_some()
 }

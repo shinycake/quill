@@ -137,6 +137,76 @@ fn display_p3_png_is_converted_to_srgb() {
     assert_eq!(pixel[3], 255);
 }
 
+fn assert_triangle_filtered<P>(
+    shrunk: &image::RgbaImage,
+    source: &image::ImageBuffer<P, Vec<u8>>,
+    tolerance: u8,
+) where
+    P: image::Pixel<Subpixel = u8> + 'static,
+{
+    let (width, height) = shrunk.dimensions();
+    let filter = image::imageops::FilterType::Triangle;
+    let expected = image::imageops::resize(source, width, height, filter);
+    for (x, y, pixel) in shrunk.enumerate_pixels() {
+        let expected = expected.get_pixel(x, y).to_rgba();
+        for (got, want) in pixel.0.iter().zip(expected.0) {
+            assert!(
+                got.abs_diff(want) <= tolerance,
+                "({x}, {y}): {pixel:?}, the filter gives {expected:?}"
+            );
+        }
+    }
+}
+
+fn png(picture: &image::DynamicImage) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    picture
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+fn busy_pixel(x: u32, y: u32) -> [u8; 3] {
+    [
+        (x / 4) as u8,
+        (y / 4) as u8,
+        ((x ^ y) % 3 * 100 + (x + y) % 7) as u8,
+    ]
+}
+
+#[test]
+fn a_shrunk_opaque_picture_matches_the_triangle_filter() {
+    let picture = image::RgbImage::from_fn(900, 600, |x, y| image::Rgb(busy_pixel(x, y)));
+    let bytes = png(&image::DynamicImage::ImageRgb8(picture.clone()));
+    for short_edge in [400, 150, 37] {
+        let shrunk = decode_image(&bytes, None, DecodeSize { short_edge }).unwrap();
+        assert_eq!(shrunk.height(), short_edge);
+        assert_triangle_filtered(&shrunk, &picture, 2);
+    }
+}
+
+#[test]
+fn a_shrunk_transparent_picture_matches_the_triangle_filter() {
+    let picture = image::RgbaImage::from_fn(900, 600, |x, y| {
+        let [r, g, b] = busy_pixel(x, y);
+        image::Rgba([r, g, b, (x / 4 + y / 4) as u8])
+    });
+    let bytes = png(&image::DynamicImage::ImageRgba8(picture.clone()));
+    let shrunk = decode_image(&bytes, None, DecodeSize { short_edge: 150 }).unwrap();
+    assert_triangle_filtered(&shrunk, &picture, 2);
+}
+
+#[test]
+fn a_shrunk_checkerboard_stays_flat() {
+    let board =
+        image::GrayImage::from_fn(1280, 960, |x, y| image::Luma([((x + y) % 2 * 255) as u8]));
+    let bytes = png(&image::DynamicImage::ImageLuma8(board));
+    let shrunk = decode_image(&bytes, None, DecodeSize { short_edge: 320 }).unwrap();
+    for pixel in shrunk.pixels() {
+        assert!((124..=131).contains(&pixel.0[0]), "{pixel:?}");
+    }
+}
+
 #[test]
 fn garbage_and_oversized_images_fail_cleanly() {
     assert!(decode_image(b"not an image at all", None, DecodeSize::FULL).is_err());

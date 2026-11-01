@@ -7,6 +7,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::picker_value;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
@@ -54,6 +55,7 @@ fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, part: &str) {
 fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_global(WallClock::chicago_repeated_hour()));
     // Nothing selected and no date under the caret: Date is off.
     app.update(vcx, |app, cx| assert!(!app.composer_date_enabled(cx)));
 
@@ -68,9 +70,10 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
 
     app.update_in(vcx, |app, window, cx| {
         let dialog = app.composer_ui.date_dialog.as_ref().expect("box");
-        let value = picker_value(TIME).expect("value");
+        let value = picker_value(TIME, cx).expect("value");
         dialog
             .picker
+            .state
             .update(cx, |state, cx| state.set_date_time(value, window, cx));
     });
     vcx.update(|window, cx| window.click("composer-date-save", cx));

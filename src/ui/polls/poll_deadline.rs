@@ -6,8 +6,8 @@
 use super::*;
 use crate::ui::dialogs::poll::DeadlineBox;
 use crate::ui::scheduled::{new_date_time_picker, picked_unix};
+use crate::ui::wall_clock::WallClock;
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 use quill::poll::{POLL_DEADLINE_MIN_SECS, POLL_DEFAULT_PERIOD_SECS, PollClose};
 
 /// Where the picker starts: the chosen deadline while it is still ahead,
@@ -36,7 +36,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let max = self.poll_close_max_secs();
         let Some(close) = self.composer_ui.poll_dialog.as_ref().map(|d| d.close) else {
             return;
@@ -75,7 +75,7 @@ impl QuillApp {
         let Some(picked) = picked else {
             return;
         };
-        match deadline_choice(picked, now_unix(), max) {
+        match deadline_choice(picked, WallClock::of(cx).now(), max) {
             Some(date) => {
                 if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
                     dialog.close = PollClose::Date(date);
@@ -115,7 +115,7 @@ impl QuillApp {
                         .font_semibold()
                         .child(tr(keys::POLLS_CREATE_DEADLINE_TITLE)),
                 )
-                .child(DatePicker::new(&deadline.picker))
+                .child(DatePicker::new(&deadline.picker.state))
                 .child(
                     div()
                         .flex()

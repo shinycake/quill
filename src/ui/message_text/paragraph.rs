@@ -14,6 +14,8 @@ pub(super) struct ParagraphText {
     pub(super) link_flags: Vec<bool>,
     pub(super) spoilers: Vec<(std::ops::Range<usize>, f32)>,
     pub(super) inline_emoji: Vec<super::super::selectable_text::InlineEmoji>,
+    /// What `text` dropped from the message, for copy and quote.
+    pub(super) source: quill::display_text::SourceMap,
 }
 
 pub(super) fn paragraph_text(
@@ -34,6 +36,8 @@ pub(super) fn paragraph_text(
     let mut link_flags: Vec<bool> = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     let mut inline_emoji: Vec<super::super::selectable_text::InlineEmoji> = Vec::new();
+    let mut filter = quill::display_text::FilterState::default();
+    let mut source = quill::display_text::SourceMap::default();
     for (offset, run) in runs.iter().enumerate() {
         if run.text.is_empty() {
             continue;
@@ -114,7 +118,9 @@ pub(super) fn paragraph_text(
                 }
                 continue;
             }
-            text.push_str(piece);
+            // Ranges are taken from what was pushed, so dropped characters
+            // never shift a style or a click target.
+            quill::display_text::push_filtered(&mut text, piece, &mut filter, &mut source);
             let range = at..text.len();
             let mut highlight = HighlightStyle::default();
             if style.bold {
@@ -181,5 +187,11 @@ pub(super) fn paragraph_text(
         link_flags,
         spoilers,
         inline_emoji,
+        source,
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "paragraph_tests.rs"]
+mod tests;

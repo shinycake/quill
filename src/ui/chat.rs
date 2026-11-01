@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr_with};
+use quill::lang::{keys, tr, tr_with};
 use quill::state::unix_ms_now;
 use quill::telegram::envelope::ChatKind;
 use std::time::Duration;
@@ -53,6 +53,24 @@ impl QuillApp {
                 let _ = live.driver.refresh_supergroup_full_info(supergroup_id);
             }
         }
+        cx.notify();
+        true
+    }
+
+    /// Slow mode lets one Send make one message (tdesktop
+    /// `lng_slowmode_no_many`): a Send of `messages` more is refused before
+    /// anything goes, so the tray and the text stay.
+    pub(super) fn slow_mode_refuses(
+        &mut self,
+        chat_id: ChatId,
+        messages: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if messages <= 1 || !self.session().is_some_and(|s| s.slow_mode_applies(chat_id)) {
+            return false;
+        }
+        self.connection
+            .set_note(StatusNote::info(tr(keys::SLOWMODE_NO_MANY)));
         cx.notify();
         true
     }

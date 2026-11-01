@@ -208,6 +208,7 @@ fn ui_main(args: &[String]) {
 
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
+    quill::notify::avatar::sweep_old_icons();
     // Old editor working files go once per run, here and nowhere else.
     quill::scratch::sweep_work_dirs_once();
 
@@ -259,6 +260,7 @@ fn ui_main(args: &[String]) {
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
         ui::setup_app_menus(cx);
+        ui::flush_settings_on_quit(cx);
         let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
         cx.spawn(async move |cx| {
             cx.open_window(
@@ -385,7 +387,11 @@ fn install_main_window_tray(
                 cfg!(target_os = "macos"),
                 ui::window_control::hide_supported(window),
             ) {
-                CloseOutcome::Quit => true,
+                CloseOutcome::Quit => !view
+                    .update(cx, |this, cx| {
+                        this.exit_held_by_export(ui::export_quit::close_main_window, window, cx)
+                    })
+                    .unwrap_or(false),
                 CloseOutcome::HideApp => {
                     cx.hide();
                     false
@@ -479,7 +485,11 @@ fn install_main_window_tray(
                                 this.set_inapp_sounds_enabled(!on, cx);
                             });
                         }
-                        quill::tray::TrayAction::Quit => cx.quit(),
+                        quill::tray::TrayAction::Quit => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                this.exit_after_exports(|_, cx| cx.quit(), window, cx);
+                            });
+                        }
                     });
                 }
             }

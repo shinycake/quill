@@ -128,6 +128,7 @@ pub(super) fn inline_paragraph(
         link_flags,
         spoilers,
         inline_emoji,
+        source,
     } = paragraph_text(
         runs,
         first_index,
@@ -171,6 +172,7 @@ pub(super) fn inline_paragraph(
         styled,
     )
     .bidi(bidi_source.0, bidi_source.1)
+    .source_map(source)
     .selection_color(accent().opacity(0.35).into())
     .message(msg_key)
     // Messages read top to bottom by id; paragraphs within one in order.

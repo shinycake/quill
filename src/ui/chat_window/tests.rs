@@ -1007,3 +1007,96 @@ fn a_chat_windows_pictures_go_through_a_cache_of_its_own(cx: &mut TestAppContext
     assert!(left.is_empty(), "no longer shown: gone");
     assert!(!in_atlas(cx), "and out of the atlas");
 }
+
+#[gpui_kit::test]
+fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    use quill::composer::{AttachmentExtras, AttachmentKind, ComposerAttachment};
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let dir = quill::scratch::process_dir("quill-chat-window-edit");
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("closing.png");
+    image::RgbaImage::from_pixel(53, 13, image::Rgba([1, 2, 3, 255]))
+        .save(&original)
+        .unwrap();
+    let app = h.app.clone();
+    let path = original.clone();
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.update_pending_attachments(|tray| {
+                    tray.push(ComposerAttachment {
+                        file_name: "closing.png".into(),
+                        path: path.clone(),
+                        kind: AttachmentKind::Photo,
+                        spoiler: false,
+                        extras: AttachmentExtras::default(),
+                    })
+                })
+                .unwrap();
+                let item = app.tray_item(0).unwrap();
+                let pixels = image::open(&path).unwrap().to_rgba8();
+                app.viewer.photo_editor =
+                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.photo_editor_mut(PhotoEditor::rotate, cx);
+                app.save_photo_editor(window, cx);
+            });
+        });
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    let edits = quill::scratch::temp_work_dir("quill-edits");
+    let rendered: Vec<_> = std::fs::read_dir(edits)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| image::image_dimensions(path).ok() == Some((13, 53)))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(rendered.len(), 1, "one PNG, not leaked twice");
+    h.app.read_with(cx, |app, _| {
+        assert!(
+            app.composer_sends.holds(&rendered[0]),
+            "the PNG is the tray's photo, not a leftover"
+        );
+        assert!(!app.composer_sends.holds(&original));
+    });
+    let _ = std::fs::remove_file(&rendered[0]);
+}
+
+#[gpui_kit::test]
+fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let app = h.app.clone();
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
+                app.viewer.photo_editor =
+                    Some(PhotoEditor::new(EditorPurpose::MessageEdit, pixels));
+                app.save_photo_editor(window, cx);
+            });
+        });
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    let edits = quill::scratch::temp_work_dir("quill-edits");
+    let left = std::fs::read_dir(edits)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| image::image_dimensions(entry.path()).ok() == Some((59, 11)))
+                .count()
+        })
+        .unwrap_or_default();
+    assert_eq!(left, 0, "the dropped edit's PNG was deleted");
+}

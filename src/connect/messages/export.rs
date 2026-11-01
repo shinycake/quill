@@ -80,21 +80,38 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
     }
 
-    /// Send a worker's waiting request tagged for `purpose`; the answer
-    /// comes back through `apply_common_payload`. One request at a time.
-    /// `link` finds the worker's link in the session (each "Save as HTML"
-    /// export passes its own index).
+    /// The view asked for `file_id`: a running export must not delete it
+    /// from TDLib's cache after copying it.
+    pub(crate) fn note_view_file(&mut self, file_id: crate::ids::FileId) {
+        let settings = &mut self.session.settings;
+        if let Some(export) = settings.chat_export.as_mut() {
+            export.link.note_view_file(file_id.0);
+        }
+        if let Some(export) = settings.account_export.as_mut() {
+            export.link.note_view_file(file_id.0);
+        }
+    }
+
+    pub(crate) fn pump_exports(&mut self) {
+        self.pump_chat_export();
+        self.pump_account_export();
+        self.pump_rich_html_exports();
+    }
+
     pub(super) fn pump_export(
         &mut self,
         purpose: RequestPurpose,
         link: impl Fn(&mut Session) -> Option<&mut WorkerLink>,
     ) {
         let Some(mut request) = link(&mut self.session)
-            .filter(|link| link.pending.is_none())
+            .filter(|link| link.idle_or_cancelled())
             .and_then(|link| link.next_request())
         else {
             return;
         };
+        if link(&mut self.session).is_some_and(|link| link.keep_view_file(&request)) {
+            return;
+        }
         let extra = self.session.request(purpose, None);
         crate::json_access::set(
             &mut request,

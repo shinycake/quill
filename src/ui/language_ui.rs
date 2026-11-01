@@ -296,7 +296,7 @@ impl QuillApp {
                 .language_prefs
                 .system_language_code = code.to_string();
             // Best effort: the tag only matters from the next start.
-            let _ = live.driver.save_language_prefs();
+            live.driver.save_language_prefs();
         }
     }
 

@@ -36,6 +36,22 @@ impl QuillApp {
         })
         .detach();
     }
+
+    /// [`Self::run_off_ui_then`] for work whose result lands in the window
+    /// it started in, and is dropped once that window has closed.
+    pub(super) fn run_off_ui_scoped_then<T: Send + 'static>(
+        &mut self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Self, T, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let task = cx.background_spawn(async move { work() });
+        self.spawn_scoped(cx, async move |app, cx| {
+            let result = task.await;
+            let _ = app.update(cx, |this, cx| done(this, result, cx));
+        })
+        .detach();
+    }
 }
 
 #[cfg(test)]
