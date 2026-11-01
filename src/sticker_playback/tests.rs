@@ -192,6 +192,21 @@ fn fixture_text(json: &str) -> PathBuf {
 }
 
 #[test]
+fn tgs_validation_rejects_a_document_nested_too_deep() {
+    let nested = |depth: usize| {
+        let list = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        fixture_text(&format!(
+            r#"{{"w":512,"h":512,"fr":60,"ip":0,"op":120,"assets":[],"layers":[],"extra":{list}}}"#
+        ))
+    };
+    let (shallow, deep) = (nested(100), nested(200));
+    assert!(tgs_json(&shallow, FitzType::None).is_ok());
+    assert!(tgs_json(&deep, FitzType::None).is_err());
+    let _ = std::fs::remove_file(shallow);
+    let _ = std::fs::remove_file(deep);
+}
+
+#[test]
 fn tgs_validation_rejects_external_resources_and_bad_bounds() {
     let base = serde_json::json!({"w":512,"h":512,"fr":60,"ip":0,"op":120,"assets":[],"layers":[]});
     let path = fixture(&base);

@@ -48,6 +48,9 @@ use std::time::{Duration, Instant};
 
 mod cache_scope;
 pub(in crate::ui) use cache_scope::CacheScope;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod gif_still_tests;
 mod retired;
 #[cfg(test)]
 pub(in crate::ui) use retired::take_unshowable;
@@ -360,20 +363,13 @@ pub(super) enum Fit {
 /// drawn in a `frame` of logical size, decoded no larger than that needs
 /// (device pixels), through the bounded cache. `dims` is the picture's
 /// own size when known, which keeps the decode tight for frames whose
-/// aspect differs from the picture's. GIF files stay on GPUI's loader
-/// (it plays their frames); the media viewer never comes here.
+/// aspect differs from the picture's.
 pub(super) fn sized_media(
     path: &Path,
     frame: (Pixels, Pixels),
     dims: Option<(i32, i32)>,
     fit: Fit,
 ) -> ImageSource {
-    if path
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"))
-    {
-        return ImageSource::Resource(Resource::Path(Arc::from(path)));
-    }
     let logical = shorter_side_in_frame((frame.0 / px(1.), frame.1 / px(1.)), dims, fit);
     sized_image_with(SizedSource::Path(Arc::from(path)), move |scale_factor| {
         bucket_edge(display_edge(px(logical), scale_factor))
