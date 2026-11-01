@@ -1,5 +1,6 @@
 //! Connect gate types: blockers, parameters, driver state.
 use super::*;
+use crate::auth::StartupFailure;
 use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice};
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
@@ -137,10 +138,28 @@ pub enum ConnectBlocker {
     TdjsonVersion,
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
+    DataFolder,
     DiskFull,
 }
 
 impl ConnectBlocker {
+    /// What the failure card says. `None` for a build with no API
+    /// credentials, where trying again cannot help, and for a full disk,
+    /// which has its own screen.
+    pub fn startup_failure(&self) -> Option<StartupFailure> {
+        match self {
+            ConnectBlocker::MissingCredentials | ConnectBlocker::DiskFull => None,
+            ConnectBlocker::MissingTdjson
+            | ConnectBlocker::TdjsonLoad
+            | ConnectBlocker::TdjsonVersion => Some(StartupFailure::Library),
+            ConnectBlocker::MissingKeyAgainstExistingDb => Some(StartupFailure::KeyMissing),
+            ConnectBlocker::LockedStore => Some(StartupFailure::KeyLocked),
+            ConnectBlocker::StoreError => Some(StartupFailure::KeyUnreadable),
+            ConnectBlocker::ReceiveThread => Some(StartupFailure::NoThread),
+            ConnectBlocker::DataFolder => Some(StartupFailure::DataFolder),
+        }
+    }
+
     pub fn user_message(&self) -> &'static str {
         match self {
             ConnectBlocker::MissingCredentials => {
@@ -163,6 +182,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonVersion => {
                 "tdjson is a different TDLib version than this build of Quill needs — rebuild it with scripts/build-tdlib.sh"
             }
+            ConnectBlocker::DataFolder => "the account's data folder could not be used",
             ConnectBlocker::DiskFull => tr(keys::Q_DISK_FULL_TITLE),
         }
     }
@@ -178,6 +198,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => "tdjson-load",
             ConnectBlocker::TdjsonVersion => "tdjson-version",
             ConnectBlocker::ReceiveThread => "receive-thread",
+            ConnectBlocker::DataFolder => "data-folder",
             ConnectBlocker::DiskFull => "disk-full",
         }
     }
@@ -337,6 +358,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// TDLib refused is not sent again until the OS setting changes or
     /// `system_proxy::RETRY` passes.
     pub(crate) system_proxy_sent: Option<crate::system_proxy::SentStep>,
+    pub(crate) system_proxy_asked: Option<std::time::Instant>,
+    pub(crate) network_seen: Option<super::ticks::Reach>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
     /// `None` refuses them.
     pub(crate) carrier_host: Option<Box<dyn crate::proxy_carrier::CarrierHost>>,

@@ -113,14 +113,35 @@ pub fn set_prefer_ipv6(extra: RequestId, on: bool) -> String {
     .to_string()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkType {
+    /// Nothing to connect through: TDLib stops trying.
+    None,
+    /// A network, which may be a new one: TDLib drops its connections.
+    Other,
+}
+
+pub fn set_network_type(extra: RequestId, network: NetworkType) -> String {
+    let kind = match network {
+        NetworkType::None => "networkTypeNone",
+        NetworkType::Other => "networkTypeOther",
+    };
+    json!({
+        "@type": "setNetworkType",
+        "@extra": extra.as_extra(),
+        "type": {"@type": kind},
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::calls::proxy::ProxyKind;
     use crate::ids::RequestId;
     use crate::proxy::ProxyDraft;
     use crate::telegram::requests::{
-        add_proxy, disable_proxy, edit_proxy, enable_proxy, get_proxies, ping_proxy, remove_proxy,
-        set_prefer_ipv6,
+        NetworkType, add_proxy, disable_proxy, edit_proxy, enable_proxy, get_proxies, ping_proxy,
+        remove_proxy, set_network_type, set_prefer_ipv6,
     };
     use serde_json::Value;
 
@@ -173,5 +194,17 @@ mod tests {
         assert_eq!(json["name"], "prefer_ipv6");
         assert_eq!(json["value"]["@type"], "optionValueBoolean");
         assert_eq!(json["value"]["value"], true);
+    }
+
+    #[test]
+    fn network_type_names_tdlib_s_constructor() {
+        let value: Value =
+            serde_json::from_str(&set_network_type(RequestId(7), NetworkType::None)).unwrap();
+        assert_eq!(value["@type"], "setNetworkType");
+        assert_eq!(value["@extra"], "7");
+        assert_eq!(value["type"]["@type"], "networkTypeNone");
+        let value: Value =
+            serde_json::from_str(&set_network_type(RequestId(8), NetworkType::Other)).unwrap();
+        assert_eq!(value["type"]["@type"], "networkTypeOther");
     }
 }

@@ -137,7 +137,7 @@ impl RequestPurpose {
 /// The code of the error a lost request settles with: HTTP's "Request
 /// Timeout". It never came from TDLib; the domain handlers only read the
 /// class (`Other`), so every purpose settles as an ordinary failed lookup.
-const LOST_REQUEST_ERROR_CODE: i32 = 408;
+pub(crate) const LOST_REQUEST_ERROR_CODE: i32 = 408;
 
 impl Session {
     /// Settle a request that will never be answered (swept after its TTL,

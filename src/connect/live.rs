@@ -115,7 +115,7 @@ pub fn start_live_connect(
     store: &(impl SecretStore + ?Sized),
     diagnostics: Arc<dyn DiagnosticSink>,
 ) -> Result<LiveConnect, ConnectBlocker> {
-    let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
+    let app_root = safe_app_root().ok_or(ConnectBlocker::DataFolder)?;
     start_live_connect_for_account(
         credentials,
         store,
@@ -138,7 +138,7 @@ pub fn start_live_connect_for_account(
         ConnectGate::Blocked(b) => return Err(b),
         ConnectGate::Ready { .. } => {}
     }
-    let app_root = safe_app_root().ok_or(ConnectBlocker::LockedStore)?;
+    let app_root = safe_app_root().ok_or(ConnectBlocker::DataFolder)?;
     let prepared = prepare_connect(&app_root, account, store, &credentials)?;
     start_prepared_live_connect(credentials, prepared, diagnostics)
 }
