@@ -2,8 +2,9 @@
 
 use super::{
     AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Demuxer, Item, PixelOutput,
-    Shared, State, idle_wait, lock,
+    SYNC_TOLERANCE, Shared, State, VideoFrame, idle_wait, lock,
 };
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -28,6 +29,14 @@ pub(super) fn next_step(
         Some(_) if audio_low => Step::ReachForSound,
         None if audio_low => Step::Decode,
         _ => Step::Wait,
+    }
+}
+
+/// Nothing else moves the queue while nothing paints, and the sound filed
+/// behind these pictures has to keep coming.
+fn drop_passed_pictures(queue: &mut VecDeque<VideoFrame>, floor: f64) {
+    while queue.get(1).is_some_and(|next| next.pts <= floor) {
+        queue.pop_front();
     }
 }
 
@@ -120,6 +129,9 @@ impl Decoder {
             .audio
             .clone()
             .filter(|audio| !audio.detached.load(Ordering::Relaxed));
+        if let Some(heard) = audio.as_ref().and_then(|audio| audio.heard()) {
+            drop_passed_pictures(&mut state.video, heard - SYNC_TOLERANCE);
+        }
         let video_queued = self
             .has_video
             .then_some((state.video.len(), state.video_cap));

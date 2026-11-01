@@ -472,6 +472,12 @@ impl AudioShared {
         let after = self.played_generation.load(Ordering::Acquire);
         (before == generation && after == generation).then_some(value)
     }
+
+    /// What is heard, if the output has played anything since the last seek.
+    fn heard(&self) -> Option<f64> {
+        self.played()
+            .map(|played| (played - AUDIO_OUTPUT_LATENCY).max(0.0))
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -799,16 +805,17 @@ impl Player {
             Some(total) => secs.clamp(0.0, total),
             None => secs.max(0.0),
         };
-        let audio = {
+        {
             let mut state = lock(&self.shared.state);
             state.seek = Some(secs);
             state.epoch += 1;
             state.video.clear();
             state.eof = false;
-            state.audio.clone()
-        };
-        if let Some(audio) = audio {
-            audio.reset(secs);
+            // Under the lock: the decode thread must not judge pictures of
+            // the new position against where the sound was before the seek.
+            if let Some(audio) = &state.audio {
+                audio.reset(secs);
+            }
         }
         self.shared.wake.notify_all();
         self.clock.seek(secs, Instant::now());
@@ -822,9 +829,7 @@ impl Player {
         if audio.starved.load(Ordering::Acquire) {
             return None;
         }
-        audio
-            .played()
-            .map(|played| (played - AUDIO_OUTPUT_LATENCY).max(0.0))
+        audio.heard()
     }
 
     fn position_at(&self, now: Instant) -> f64 {

@@ -359,7 +359,12 @@ fn a_normal_clip_keeps_its_picture_queue_while_the_sound_buffers() {
 fn sound_that_stops_early_does_not_decode_the_rest_of_the_file() {
     let mut rig = Rig::open(Shape::clip(60.0, 1.0));
     assert!((rig.play_out_sound() - 1.0).abs() < 1e-6);
-    assert_eq!(rig.decoded_pictures(), QUEUE, "of 1500 in the file");
+    let through_the_sound = FPS as usize + QUEUE;
+    assert!(
+        rig.decoded_pictures() <= through_the_sound,
+        "{} of 1500 in the file",
+        rig.decoded_pictures()
+    );
     assert_eq!(rig.pictures_queued(), QUEUE);
 }
 
