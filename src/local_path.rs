@@ -740,4 +740,25 @@ mod tests {
         }
         let _ = fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn a_verdict_never_crosses_root_sets() {
+        let _guard = lock_shared_media_cache();
+        let inside = scratch("roots-in");
+        let other = scratch("roots-other");
+        let file = inside.join("a.jpg");
+        fs::write(&file, b"x").unwrap();
+        let path = file.to_str().unwrap().to_owned();
+        let allowed = vec![inside.clone()];
+        let blocked = vec![other.clone()];
+        assert!(sandboxed_display_path(&path, &allowed).is_some());
+        assert!(sandboxed_display_path(&path, &blocked).is_none());
+        assert!(sandboxed_display_path(&path, &allowed).is_some());
+        invalidate_display_path(&path);
+        assert!(sandboxed_display_path(&path, &blocked).is_none());
+        assert!(sandboxed_display_path(&path, &allowed).is_some());
+        assert!(sandboxed_display_path(&path, &blocked).is_none());
+        let _ = fs::remove_dir_all(&inside);
+        let _ = fs::remove_dir_all(&other);
+    }
 }
