@@ -9,6 +9,10 @@ pub struct MediaState {
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: FileMap,
     pub disk_holds_auto_downloads: bool,
+    /// Room above the close floor while the disk is low; `None` otherwise.
+    pub disk_room: Option<u64>,
+    /// Listed downloads the low disk paused, resumed when it is healthy.
+    pub disk_paused: HashSet<i32>,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
@@ -57,6 +61,8 @@ impl MediaState {
             media_library: MediaLibrary::default(),
             files: FileMap::default(),
             disk_holds_auto_downloads: false,
+            disk_room: None,
+            disk_paused: HashSet::new(),
             downloads: DownloadIntents::default(),
             open_chat_media_downloads: HashSet::new(),
             avatar_file_refs: HashMap::new(),

@@ -3736,6 +3736,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
 
             // Check if mouse is in this line's bounds
+            let pos = line_layout.nearest_laid_out(pos, line_height);
             if let Some((local_index, line_end_affinity)) =
                 line_layout.closest_index_for_position(pos, last_layout)
             {

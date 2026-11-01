@@ -5,7 +5,7 @@ use crate::state::*;
 
 pub struct ThreadsState {
     /// Phase 5.1: cached `forumTopics` per forum chat id (first page only).
-    pub forum_topics: HashMap<i64, Vec<ForumTopic>>,
+    pub forum_topics: ForumTopicsMap,
     /// Phase 5.1: per-topic histories keyed by `(chat_id, forum_topic_id)`.
     pub topic_histories: HashMap<(i64, i32), TopicHistory>,
     /// Topics whose first history page failed or timed out (error answer
@@ -39,7 +39,7 @@ pub struct ThreadsState {
 impl ThreadsState {
     pub(crate) fn new() -> Self {
         Self {
-            forum_topics: HashMap::new(),
+            forum_topics: ForumTopicsMap::default(),
             topic_histories: HashMap::new(),
             topic_load_failed: HashSet::new(),
             chat_view_as_topics: HashMap::new(),

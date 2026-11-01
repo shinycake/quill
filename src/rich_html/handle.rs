@@ -44,8 +44,12 @@ pub struct RichHtmlExport {
 impl RichHtmlExport {
     /// Start the worker thread. `files_root` is TDLib's files directory;
     /// only files under it are copied.
-    pub fn start(request: RichHtmlRequest, files_root: PathBuf) -> io::Result<Self> {
-        let (link, mut tdlib) = WorkerLink::pair();
+    pub fn start(
+        request: RichHtmlRequest,
+        files_root: PathBuf,
+        leftovers: Option<crate::export::leftovers::Leftovers>,
+    ) -> io::Result<Self> {
+        let (link, mut tdlib) = WorkerLink::pair(leftovers);
         let outcome = Arc::new(Mutex::new(None));
         let worker_outcome = outcome.clone();
         let worker_request = request.clone();

@@ -343,3 +343,57 @@ fn cover_facts_parsed_from_user_status_and_full_info() {
         other => panic!("{other:?}"),
     }
 }
+
+// robustness-8: names are filtered once, where they are parsed, so the
+// chat list, call tiles, member lists, forward headers and window titles
+// all get the same text.
+#[test]
+fn names_drop_stacked_marks_and_tag_characters_when_parsed() {
+    let zalgo = "Ada\u{301}\u{302}\u{303}\u{304}\u{305}";
+    let tagged = "Love\u{E0041}\u{E0042}lace";
+    let user =
+        serde_json::json!({"@type": "user", "id": 31, "first_name": zalgo, "last_name": tagged});
+    let user = parse_user(&user).unwrap();
+    assert_eq!(user.display_name(), "Ada\u{301}\u{302} Lovelace");
+    let origin = serde_json::json!({"@type": "messageOriginHiddenUser", "sender_name": zalgo});
+    match parse_message_origin(Some(&origin)) {
+        Some(MessageOrigin::HiddenUser { sender_name }) => {
+            assert_eq!(sender_name, "Ada\u{301}\u{302}");
+        }
+        other => panic!("not a hidden origin: {other:?}"),
+    }
+    let title = serde_json::json!({"@type": "updateChatTitle", "chat_id": 5, "title": tagged});
+    match parse_envelope(&title.to_string()).unwrap().payload {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatTitle { title, .. }) => {
+            assert_eq!(title, "Lovelace");
+        }
+        _ => panic!("not a title update"),
+    }
+}
+
+#[test]
+fn contact_call_and_invite_titles_drop_marks_and_tags_when_parsed() {
+    let zalgo = "Ada\u{301}\u{302}\u{303}\u{304}\u{305}";
+    let tagged = "Love\u{E0041}\u{E0042}lace";
+    let contact = serde_json::json!({"@type": "messageContact", "contact":
+        {"phone_number": "1", "first_name": zalgo, "last_name": tagged, "vcard": "", "user_id": 0}});
+    match parse_message_contact(&contact).0 {
+        MessageContent::Contact(card) => {
+            assert_eq!(card.first_name, "Ada\u{301}\u{302}");
+            assert_eq!(card.last_name, "Lovelace");
+        }
+        other => panic!("not a contact: {other:?}"),
+    }
+    let call = serde_json::json!({"@type": "groupCall", "id": 4, "title": tagged});
+    assert_eq!(
+        parse_group_call(Some(&call)).map(|call| call.title),
+        Some("Lovelace".to_string())
+    );
+    let invite = serde_json::json!({"@type": "chatInviteLinkInfo", "title": zalgo});
+    match parse_envelope(&invite.to_string()).unwrap().payload {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLinkInfo { title, .. }) => {
+            assert_eq!(title, "Ada\u{301}\u{302}");
+        }
+        _ => panic!("not an invite preview"),
+    }
+}

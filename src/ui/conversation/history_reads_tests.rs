@@ -121,3 +121,23 @@ fn overdraw_rows_below_the_view_are_not_read(cx: &mut TestAppContext) {
     });
     assert_eq!(reported, Some(seen));
 }
+
+#[gpui_kit::test]
+fn a_row_counts_as_on_screen_as_soon_as_any_of_it_shows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.history
+            .scroller
+            .update(cx, |state, cx| state.scroll_to_item(40, cx));
+    });
+    frames(vcx);
+    let (seen, _, cut_off) = snapshot(&app, vcx);
+    assert!(
+        !cut_off.is_empty(),
+        "a row is cut off by the viewport's edge"
+    );
+    let on_screen = app.update(vcx, |app, _| app.history.on_screen.borrow().clone());
+    assert!(seen.iter().all(|id| on_screen.contains(id)));
+    assert!(cut_off.iter().any(|id| on_screen.contains(id)));
+}

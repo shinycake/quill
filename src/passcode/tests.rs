@@ -4,7 +4,8 @@ use crate::platform::MemorySecretStore;
 #[test]
 fn idle_cache_extrapolates_and_fails_closed() {
     assert_eq!(IdleCache::Unknown.read(10), None);
-    assert_eq!(IdleCache::Failed.read(10), None);
+    let failed = IdleCache::Unknown.after_sample(0, None);
+    assert_eq!(failed.read(10), None);
     let sample = IdleCache::Sample {
         ms: 500,
         taken_ms: 1000,
@@ -24,11 +25,43 @@ fn failed_cache_means_no_backend_answered() {
     let candidates = candidate_backends(SessionEnv { x11: true });
     let answer = select_backend(candidates, |_| None);
     assert_eq!(answer, None);
-    let cache = match answer {
-        Some((_, ms)) => IdleCache::Sample { ms, taken_ms: 0 },
-        None => IdleCache::Failed,
-    };
-    assert_eq!(cache, IdleCache::Failed);
+    let cache = IdleCache::Unknown.after_sample(0, answer.map(|(_, ms)| ms));
+    assert!(matches!(cache, IdleCache::Failed { failures: 1, .. }));
+}
+
+/// The shell restarted: one sample got no answer. Auto-lock reads "away"
+/// time again once the shell is back, instead of input to Quill's window
+/// for the rest of the session.
+#[test]
+fn one_failed_idle_sample_is_retried() {
+    let failed = IdleCache::Sample { ms: 0, taken_ms: 0 }.after_sample(2_000, None);
+    assert_eq!(failed.read(2_000), None);
+    assert!(!failed.sample_due(2_001));
+    assert!(failed.sample_due(2_000 + IDLE_RETRY_FIRST_MS));
+    let back = failed.after_sample(4_000, Some(3_500));
+    assert_eq!(back.read(5_000), Some(4_500));
+}
+
+#[test]
+fn idle_retries_back_off_while_no_backend_answers() {
+    let mut cache = IdleCache::Unknown;
+    let mut now = 0;
+    let mut waits = Vec::new();
+    for _ in 0..10 {
+        cache = cache.after_sample(now, None);
+        let IdleCache::Failed { retry_ms, .. } = cache else {
+            panic!("no answer is a failure");
+        };
+        waits.push(retry_ms - now);
+        now = retry_ms;
+    }
+    assert_eq!(
+        waits,
+        [
+            2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 120_000, 120_000, 120_000, 120_000
+        ]
+    );
+    assert!(waits.iter().all(|wait| *wait <= IDLE_RETRY_MAX_MS));
 }
 
 #[test]

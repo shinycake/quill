@@ -87,7 +87,8 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(auth.body.clone()),
                         )
-                    }),
+                    })
+                    .children(self.disk_full_reveal()),
             );
         let mut form = div().w_full().flex().flex_col().gap_3();
         if matches!(auth.action, AuthAction::Register) && self.live.is_some() {
@@ -199,7 +200,7 @@ impl QuillApp {
                     .label(tr(keys::Q_MISC_EMAIL_TELEGRAM_SUPPORT))
                     .ghost()
                     .w_full()
-                    .on_click(move |_, _, cx| cx.open_url(&mailto)),
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_link(&mailto, cx))),
             );
         }
         if show_retry {

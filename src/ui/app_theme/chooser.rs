@@ -278,7 +278,7 @@ impl QuillApp {
     /// export / delete. tdesktop's "Choose from file" and "Create new
     /// theme"; its cloud themes need an API TDLib does not have.
     fn custom_themes_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let themes: Vec<CustomTheme> = self.custom_themes().to_vec();
+        let themes: Vec<CustomTheme> = self.custom_themes(cx).to_vec();
         let applied = self.applied_theme_id().cloned();
         let mut tiles = div().flex().flex_wrap().gap_3();
         let mut selected_name = None;
@@ -387,18 +387,28 @@ impl QuillApp {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let _ = this.update(cx, |this, cx| {
-                let taken = this.custom_theme_names();
-                match store::import(&Self::themes_dir(), &path, &taken) {
-                    Ok((name, file)) => {
-                        this.refresh_custom_themes();
-                        let night = super::file_palette(&file).is_dark();
-                        this.choose_app_theme(ThemeId::Custom(name), night, cx);
-                    }
-                    Err(err) => {
-                        this.connection.set_note(StatusNote::error(err.note()));
-                        cx.notify();
-                    }
+            // The copy and the decode of the theme's picture run off the
+            // UI thread.
+            let imported = cx
+                .background_spawn(async move {
+                    let dir = Self::themes_dir();
+                    let taken = store::list(&dir);
+                    store::import(&dir, &path, &taken)
+                        .map(|(name, file)| (name, super::file_palette(&file)))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| match imported {
+                Ok((name, palette)) => {
+                    this.refresh_custom_themes();
+                    let night = palette.is_dark();
+                    this.settings
+                        .app_theme
+                        .cache_palette(name.clone(), Some(palette));
+                    this.choose_app_theme(ThemeId::Custom(name), night, cx);
+                }
+                Err(err) => {
+                    this.connection.set_note(StatusNote::error(err.note()));
+                    cx.notify();
                 }
             });
         })

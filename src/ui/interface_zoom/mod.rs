@@ -243,6 +243,28 @@ impl HasDisplayHandle for ZoomWindow {
     }
 }
 
+/// The platform quits on its own too (Windows ending the session, a macOS
+/// terminate), and closes the windows as part of it.
+fn noting_quit(mut quit: Box<dyn FnMut() -> bool>) -> Box<dyn FnMut() -> bool> {
+    Box::new(move || {
+        super::startup_failure::note_quit_asked();
+        quit()
+    })
+}
+
+/// A quit the system asked about and the app allowed ends the session.
+fn noting_allowed_quit(
+    mut ask: Box<dyn FnMut() -> gpui_kit::QuitAnswer>,
+) -> Box<dyn FnMut() -> gpui_kit::QuitAnswer> {
+    Box::new(move || {
+        let answer = ask();
+        if answer == gpui_kit::QuitAnswer::Allow {
+            super::startup_failure::note_quit_asked();
+        }
+        answer
+    })
+}
+
 impl Platform for ZoomPlatform {
     fn platform_info(&self) -> PlatformInfo {
         self.inner.platform_info()
@@ -261,6 +283,7 @@ impl Platform for ZoomPlatform {
         super::startup_failure::report_gpu_gone();
     }
     fn quit(&self) {
+        super::startup_failure::note_quit_asked();
         self.inner.quit()
     }
     fn set_initial_windowing(&self, request: WindowingRequest) {
@@ -270,6 +293,7 @@ impl Platform for ZoomPlatform {
         self.inner.request_windowing(request)
     }
     fn restart(&self, binary_path: Option<PathBuf>, arguments: Vec<OsString>) {
+        super::startup_failure::note_quit_asked();
         self.inner.restart(binary_path, arguments)
     }
     fn set_activation_policy(&self, policy: ActivationPolicy) {
@@ -392,7 +416,10 @@ impl Platform for ZoomPlatform {
         self.inner.open_with_system(path)
     }
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
-        self.inner.on_quit(callback)
+        self.inner.on_quit(noting_quit(callback))
+    }
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> gpui_kit::QuitAnswer>) {
+        self.inner.on_quit_request(noting_allowed_quit(callback))
     }
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.inner.on_reopen(callback)
@@ -733,6 +760,9 @@ impl PlatformWindow for ZoomWindow {
     fn set_edited(&mut self, edited: bool) {
         self.inner.set_edited(edited)
     }
+    fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        self.inner.set_shutdown_block_reason(reason)
+    }
     fn set_document_path(&self, path: Option<&Path>) {
         self.inner.set_document_path(path)
     }
@@ -909,6 +939,23 @@ mod tests {
     use gpui_kit::{
         FileDropEvent, MouseButton, MouseDownEvent, ScrollDelta, ScrollEvent, point, px,
     };
+
+    #[test]
+    fn a_quit_the_system_starts_is_not_a_lost_window() {
+        let mut refused = noting_allowed_quit(Box::new(|| gpui_kit::QuitAnswer::Later));
+        assert_eq!(refused(), gpui_kit::QuitAnswer::Later);
+        assert!(!crate::ui::startup_failure::quit_asked());
+        let mut allowed = noting_allowed_quit(Box::new(|| gpui_kit::QuitAnswer::Allow));
+        assert_eq!(allowed(), gpui_kit::QuitAnswer::Allow);
+        assert!(crate::ui::startup_failure::quit_asked());
+    }
+
+    #[test]
+    fn the_session_ending_is_a_quit() {
+        let mut quit = noting_quit(Box::new(|| true));
+        assert!(quit());
+        assert!(crate::ui::startup_failure::quit_asked());
+    }
 
     #[test]
     fn zoom_for_percent_clamps_like_the_setting() {

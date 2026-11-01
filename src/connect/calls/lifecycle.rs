@@ -132,25 +132,40 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// one answered here is hung up even before TDLib moves it on, as
     /// tdesktop's `Call::answer` leaves the waiting state at once.
     pub(crate) fn hang_up_for_close(&mut self) {
-        let calls = &self.session.calls;
-        let call_running = calls.active_call.as_ref().is_some_and(|call| {
-            !matches!(
-                call.state,
-                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
-            )
-        });
-        let joined = calls
-            .active_group_call
-            .as_ref()
-            .is_some_and(|call| call.is_joined);
-        let ringing = ringing_incoming_call(&self.session)
-            .is_some_and(|(id, _, _)| calls.answered_call != Some(id));
-        if call_running && !ringing {
+        let (call_running, joined) = (self.call_running(), self.group_call_joined());
+        if call_running {
             let _ = self.discard_call();
         }
         if joined {
             let _ = self.leave_group_call();
         }
+    }
+
+    /// A call or a joined voice chat that closing this client would end.
+    /// A call still ringing in is not one: it can be answered elsewhere.
+    pub fn call_in_progress(&self) -> bool {
+        self.call_running() || self.group_call_joined()
+    }
+
+    fn call_running(&self) -> bool {
+        let calls = &self.session.calls;
+        let running = calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        let ringing = ringing_incoming_call(&self.session)
+            .is_some_and(|(id, _, _)| calls.answered_call != Some(id));
+        running && !ringing
+    }
+
+    fn group_call_joined(&self) -> bool {
+        self.session
+            .calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined)
     }
 
     pub(crate) fn hang_up_pending(&self) -> bool {

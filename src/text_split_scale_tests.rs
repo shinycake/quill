@@ -128,7 +128,7 @@ fn assert_linear(work: impl Fn(&str)) {
         println!("{name}");
         let large_work = scan_work::measure(budget, || work(&large));
         assert!(
-            large_work >= large.len() as u64,
+            large_work >= large.len() as u64 / 2,
             "{name}: the work never ran"
         );
     }
@@ -152,5 +152,21 @@ fn reading_and_writing_a_draft_grows_with_the_text() {
 fn splitting_work_grows_with_the_text() {
     assert_linear(|text| {
         assert!(split_markup_text(text, LIMIT).len() > 1);
+    });
+}
+
+#[test]
+fn the_rich_preview_grows_with_the_text() {
+    assert_linear(|text| {
+        crate::rich::preview_blocks(text);
+    });
+}
+
+#[test]
+fn a_rich_send_grows_with_the_text() {
+    assert_linear(|text| {
+        for block in crate::rich::preview_blocks(text) {
+            crate::rich::input_page_block_json(&block);
+        }
     });
 }

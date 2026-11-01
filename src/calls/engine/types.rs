@@ -77,6 +77,9 @@ pub struct GroupVideoSource {
     /// The participant's audio ssrc (`audio_source_id`), which tgcalls
     /// syncs the video's playback to (lip sync).
     pub audio_ssrc: u32,
+    /// Shown large where someone can see it. Only this video is worth
+    /// more than Thumbnail.
+    pub large: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,6 +282,28 @@ pub enum GroupCallRole {
     #[default]
     Member,
     Viewer,
+}
+
+/// Which join payload the engine is making: a call's, or its presentation's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GroupOfferKey {
+    Call(i32),
+    Screen(i32),
+}
+
+impl GroupOfferKey {
+    pub fn id(self) -> i32 {
+        match self {
+            Self::Call(id) | Self::Screen(id) => id,
+        }
+    }
+}
+
+/// A join payload that came back, or why none did.
+#[derive(Debug)]
+pub struct GroupOffer {
+    pub key: GroupOfferKey,
+    pub payload: Result<String, EngineError>,
 }
 
 /// Stores `hook` in a callback slot of the state shared with the

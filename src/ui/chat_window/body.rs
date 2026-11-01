@@ -8,7 +8,6 @@
 //! chat list was).
 
 use super::super::app::QuillApp;
-use super::super::conversation::ConversationPart;
 use gpui_kit::TestSupportExt;
 
 use gpui_kit::prelude::FluentBuilder;
@@ -65,46 +64,46 @@ impl QuillApp {
             });
         let drop_state = self.visible_drop_state(cx);
         let drop_overlay = drop_state.map(|state| self.drop_zone_overlay(state, cx));
-        let top = self
-            .conversation(ConversationPart::Top, cx)
-            .into_any_element();
-        let bottom = self
-            .conversation(ConversationPart::Bottom, cx)
-            .into_any_element();
-        let conversation = div()
-            .id("chat-window-history")
-            .test_support()
-            .relative()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            // Files dragged over the chat: the zones say what each one does
-            // (`drop_zones`); a drop outside any zone attaches them.
-            .on_drag_move(
-                cx.listener(|this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
-                    let paths = event.drag(cx).paths().to_vec();
-                    this.note_file_drag(&paths, cx);
-                }),
-            )
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
-                this.drop_files_plain(paths.paths(), cx);
-            }))
-            .child(top)
-            .child(
-                // The pull to the next channel's note covers the composer.
-                div()
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .flex_none()
-                    .child(bottom)
-                    .children(self.pull_hint_overlay(cx)),
-            )
-            .children(drop_overlay)
-            .children(effects);
         let viewer_open = self.viewer.state.is_open();
+        let toast = self
+            .status_toast_in(Some(chat_id), cx)
+            .map(|note| self.chat_window_toast(&note, window, cx));
+        let (composer_toast, viewer_toast) = if viewer_open {
+            (None, toast)
+        } else {
+            (toast, None)
+        };
+        let conversation = (!topics_only).then(|| {
+            let history = div()
+                .id("chat-window-history")
+                .relative()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .on_drag_move(
+                    cx.listener(|this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                        let paths = event.drag(cx).paths().to_vec();
+                        this.note_file_drag(&paths, cx);
+                    }),
+                )
+                .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                    this.drop_files_plain(paths.paths(), cx);
+                }));
+            self.conversation_column(history, cx)
+                .children(composer_toast.map(|toast| {
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(self.slices.composer_height())
+                        .child(toast)
+                }))
+                .children(drop_overlay)
+                .children(effects)
+                .test_support()
+        });
         div()
             .id("chat-window-body")
             .relative()
@@ -113,7 +112,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(column)
-            .when(!topics_only, |this| this.child(conversation))
+            .children(conversation)
             // MED1: fullscreen media viewer over the window's content.
             .when(viewer_open, |this| {
                 this.child(self.media_viewer_panel(
@@ -122,6 +121,8 @@ impl QuillApp {
                     cx,
                 ))
             })
+            // Above the viewer, like the main window's toast.
+            .children(viewer_toast)
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
             .when_some(self.message_ui.menu, |this, menu| {
@@ -130,6 +131,7 @@ impl QuillApp {
             // The expanded reaction selector, where the menu was.
             .when_some(self.pickers.media_panel.reaction, |this, target| {
                 let panel = self.media_panel(cx);
+                let panel = self.selector_panel(panel);
                 this.child(
                     div()
                         .id("reaction-selector-layer")
@@ -150,7 +152,8 @@ impl QuillApp {
                                 .position(target.position)
                                 .snap_to_window_with_margin(px(8.))
                                 .child(panel),
-                        ),
+                        )
+                        .children(self.panel_painter()),
                 )
             })
             // MED4: Instant View reader overlay (above the menu).

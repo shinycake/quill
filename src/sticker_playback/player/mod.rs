@@ -13,7 +13,8 @@
 //! - Each worker keeps the clips it opened: ThorVG's software renderer uses
 //!   the memory pool of the thread that created a canvas
 //!   (`tvgSwMemPool.cpp`, a `thread_local`), so a canvas is drawn only on
-//!   the thread that made it.
+//!   the thread that made it. Clips decoded up front (WebM) are decoded on
+//!   opener threads of their own ([`opener`]), off the workers.
 //! - Stored frames are evicted least recently used first under one byte
 //!   budget for every clip ([`Engine::new`]); a clip shown in the last half
 //!   second keeps its frames.
@@ -24,6 +25,7 @@
 
 mod engine;
 pub mod head;
+mod opener;
 mod source;
 mod store;
 mod worker;
@@ -70,10 +72,29 @@ pub struct ClipKey {
     pub hz: u32,
 }
 
-/// Straight-alpha BGRA frames, `edge` × `edge` each, at `fps`.
+/// Takes a clip's frames as they are decoded: straight-alpha BGRA, `edge` ×
+/// `edge`, tinted and packed for its store one by one, so its raw frames
+/// are never in memory together.
+pub trait FrameSink {
+    fn frame(&mut self, pixels: &mut [u8]) -> Result<(), String>;
+    /// The last frame, this many times more.
+    fn repeat(&mut self, times: usize) -> Result<(), String>;
+}
+
+/// A whole clip's frames at `fps` (a test clip).
 pub struct DecodedFrames {
     pub frames: Vec<Vec<u8>>,
     pub fps: f64,
+}
+
+impl DecodedFrames {
+    /// Hands them to `sink`, as [`DecodeAll`] does; the frames a second.
+    pub fn feed(self, sink: &mut dyn FrameSink) -> Result<f64, String> {
+        for mut frame in self.frames {
+            sink.frame(&mut frame)?;
+        }
+        Ok(self.fps)
+    }
 }
 
 /// Lets the engine stop a decode when its clip closes: the flag, and the
@@ -84,9 +105,10 @@ pub struct Cancel {
     pub child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
-/// A decode that produces every frame at once (WebM video stickers, test
-/// clips): its frames all go to the store.
-pub type DecodeAll = Box<dyn FnOnce(&Cancel) -> Result<DecodedFrames, String> + Send>;
+/// A decode that runs through every frame in one go (WebM video stickers,
+/// test clips), feeding them to the clip's store. It returns the frames a
+/// second.
+pub type DecodeAll = Box<dyn FnOnce(&Cancel, &mut dyn FrameSink) -> Result<f64, String> + Send>;
 
 /// Where a clip's frames come from.
 pub enum Origin {

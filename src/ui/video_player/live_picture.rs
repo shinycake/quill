@@ -5,12 +5,13 @@
 //!   copying the Y plane and interleaving U and V (`i420_to_nv12`), and
 //!   painted through `surface()` like AVPlayer's pictures. The pool is
 //!   made again when the frame size changes.
-//! - Windows: an NV12 `SurfaceFrame` packed from the planes (the same
-//!   `i420_to_nv12` interleave) into a pooled buffer (`live_surface.rs`),
-//!   uploaded and converted to RGB by the vendored DirectX renderer. A
-//!   frame the renderer refuses is shown as a BGRA image instead.
-//! - Linux (and macOS or Windows with `QUILL_LIVE_BGRA=1`): one
-//!   `i420_to_bgra` into a `RenderImage`.
+//! - Windows and Linux: an NV12 `SurfaceFrame` packed from the planes (the
+//!   same `i420_to_nv12` interleave) into a pooled buffer
+//!   (`live_surface.rs`), uploaded and converted to RGB by the vendored
+//!   DirectX or wgpu renderer. A frame the renderer refuses is shown as a
+//!   BGRA image instead.
+//! - With `QUILL_LIVE_BGRA=1` (demo-capture builds): one `i420_to_bgra`
+//!   into a `RenderImage`.
 //!
 //! Frames the sender turned (a phone camera) are turned in the plane copy
 //! first (`rotate_planes`), and a mirrored feed (your camera preview) is
@@ -26,7 +27,6 @@ use gpui_kit::RenderImage;
 use quill::calls::live_video::LiveFrame;
 use quill::calls::live_video::convert::{I420, i420_to_bgra, mirror_planes, rotate_planes};
 use smallvec::SmallVec;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Where a frame is converted into.
@@ -34,9 +34,9 @@ pub(super) enum Target {
     /// A pixel buffer fresh from the pool.
     #[cfg(target_os = "macos")]
     Surface(SendBuffer),
-    /// A buffer for a packed NV12 frame (Windows), from the backend's
+    /// A buffer for a packed NV12 frame (Windows, Linux), from the backend's
     /// pool; no frame holds it.
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(not(target_os = "macos"), test))]
     Nv12(Arc<[u8]>),
     /// A new BGRA buffer.
     Bgra,
@@ -46,7 +46,7 @@ pub(super) enum Target {
 pub(super) enum Prepared {
     #[cfg(target_os = "macos")]
     Surface(SendBuffer),
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(not(target_os = "macos"), test))]
     Nv12(super::live_surface::Nv12Picture),
     Bgra {
         bgra: Vec<u8>,
@@ -70,29 +70,41 @@ pub(super) struct SendBuffer(
 unsafe impl Send for SendBuffer {}
 
 /// The frame's planes as shown: turned when the sender turned them, then
-/// mirrored when the feed is (one copy at most for each).
-fn upright(frame: &LiveFrame, mirrored: bool) -> Option<(Cow<'_, [u8]>, u16, u16)> {
+/// mirrored when the feed is.
+fn upright<'a>(
+    frame: &'a LiveFrame,
+    mirrored: bool,
+    scratch: &'a mut Vec<u8>,
+) -> Option<(&'a [u8], u16, u16)> {
     let src = frame.i420()?;
-    let (mut planes, width, height) = match rotate_planes(&src, frame.rotation) {
-        Some((planes, width, height)) => (Cow::Owned(planes), width, height),
-        None => (
-            Cow::Borrowed(frame.planes.as_slice()),
-            frame.width,
-            frame.height,
-        ),
-    };
+    let turned = rotate_planes(&src, frame.rotation, scratch);
+    let (width, height) = turned.unwrap_or((frame.width, frame.height));
     if mirrored {
-        mirror_planes(planes.to_mut(), width, height);
+        if turned.is_none() {
+            scratch.clear();
+            scratch.extend_from_slice(&frame.planes);
+        }
+        mirror_planes(scratch, width, height);
     }
+    let planes = if turned.is_some() || mirrored {
+        scratch.as_slice()
+    } else {
+        frame.planes.as_slice()
+    };
     Some((planes, width, height))
 }
 
 /// Convert `frame` into `target`, mirrored when `mirrored`; a pixel
 /// buffer or NV12 buffer that can't be filled falls back to BGRA. `None`
 /// for a malformed frame.
-pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Option<Prepared> {
-    let (planes, width, height) = upright(frame, mirrored)?;
-    let src = I420::new(&planes, width, height)?;
+pub(super) fn convert(
+    frame: &LiveFrame,
+    target: Target,
+    mirrored: bool,
+    scratch: &mut Vec<u8>,
+) -> Option<Prepared> {
+    let (planes, width, height) = upright(frame, mirrored, scratch)?;
+    let src = I420::new(planes, width, height)?;
     match target {
         #[cfg(target_os = "macos")]
         Target::Surface(buffer) => {
@@ -100,7 +112,7 @@ pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Opti
                 return Some(Prepared::Surface(buffer));
             }
         }
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         Target::Nv12(bytes) => {
             if let Some(picture) = super::live_surface::fill(&src, bytes) {
                 return Some(Prepared::Nv12(picture));
@@ -120,8 +132,8 @@ pub(super) struct Shown {
     pub(super) picture: Picture,
     /// The image it made, for the backend to retire.
     pub(super) image: Option<Arc<RenderImage>>,
-    /// The NV12 frame and its buffer (Windows), for the backend to keep.
-    #[cfg(any(target_os = "windows", test))]
+    /// The NV12 frame and its buffer (Windows, Linux), for the backend to keep.
+    #[cfg(any(not(target_os = "macos"), test))]
     pub(super) nv12: Option<super::live_surface::Nv12Shown>,
 }
 
@@ -130,7 +142,7 @@ impl Shown {
         Self {
             picture,
             image,
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(not(target_os = "macos"), test))]
             nv12: None,
         }
     }
@@ -142,7 +154,7 @@ impl Prepared {
         match self {
             #[cfg(target_os = "macos")]
             Prepared::Surface(buffer) => Some(Shown::new(Picture::Surface(buffer.0), None)),
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(not(target_os = "macos"), test))]
             Prepared::Nv12(picture) => {
                 let (picture, image, nv12) = picture.into_shown()?;
                 Some(Shown {
@@ -172,7 +184,7 @@ impl Prepared {
                 let luma = (width as usize).saturating_mul(height as usize);
                 ("nv12", width, height, luma.saturating_add(luma / 2))
             }
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(not(target_os = "macos"), test))]
             Prepared::Nv12(picture) => {
                 let (width, height) = picture.size();
                 ("nv12", width, height, picture.byte_len())
@@ -215,13 +227,9 @@ pub(crate) fn take_made_images() -> Vec<std::sync::Weak<RenderImage>> {
     MADE.with(|made| std::mem::take(&mut *made.borrow_mut()))
 }
 
-/// Whether every picture is BGRA: on Linux, and on macOS and Windows
-/// with `QUILL_LIVE_BGRA=1` in a demo-capture build, to run the image
-/// path (its memory, its atlas) there.
+/// Whether every picture is BGRA: with `QUILL_LIVE_BGRA=1` in a
+/// demo-capture build, to run the image path (its memory, its atlas).
 pub(crate) fn bgra_only() -> bool {
-    if !cfg!(any(target_os = "macos", target_os = "windows")) {
-        return true;
-    }
     #[cfg(feature = "demo-capture")]
     {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -429,7 +437,12 @@ mod tests {
             width,
             height,
             bgra,
-        }) = convert(&frame(64, 36, LiveRotation::R90), Target::Bgra, false)
+        }) = convert(
+            &frame(64, 36, LiveRotation::R90),
+            Target::Bgra,
+            false,
+            &mut Vec::new(),
+        )
         else {
             panic!("bgra");
         };
@@ -456,6 +469,7 @@ mod tests {
             &frame(64, 36, LiveRotation::None),
             Target::Surface(buffer),
             false,
+            &mut Vec::new(),
         ) else {
             panic!("filled");
         };
@@ -475,7 +489,8 @@ mod tests {
             convert(
                 &frame(64, 36, LiveRotation::None),
                 Target::Surface(bigger),
-                false
+                false,
+                &mut Vec::new()
             ),
             Some(Prepared::Bgra { .. })
         ));

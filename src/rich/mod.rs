@@ -8,7 +8,7 @@
 
 use crate::composer::ComposerEntity;
 use crate::telegram::envelope::{InlineKeyboardButton, parse_inline_keyboard_button};
-use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
+use crate::text::{TextEntity, TextEntityKind};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -16,11 +16,13 @@ mod draft;
 mod input;
 mod markup;
 mod parse;
+mod preview;
 mod quote;
 pub use draft::{RichDraft, text_has_markdown_structure};
 pub use input::*;
 pub use markup::*;
 pub use parse::*;
+pub use preview::PreviewBlocks;
 pub use quote::{
     QuoteRichText, QuoteStyle, join_quote_texts, quote_rich_texts_display, rich_message_quote_texts,
 };
@@ -130,7 +132,13 @@ impl RichBlock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RichListItem {
+    /// TDLib's marker for a received item, such as `•` or `3.`. Empty in an
+    /// editor item, whose marker comes from its place in the list.
+    pub label: String,
     pub text: String,
+    /// Inline styling of `text`. Empty in an editor item, whose `text` is
+    /// composer markup, as in [`RichBlock::Paragraph`].
+    pub entities: Vec<TextEntity>,
     /// `Some` when the item is a checkbox (`has_checkbox`).
     pub checked: Option<bool>,
 }

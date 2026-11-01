@@ -32,28 +32,36 @@ use crate::calls::capture::screen::{
 use crate::calls::capture::system_audio::{
     SystemAudioCapture, SystemAudioMix, system_audio_supported,
 };
-use crate::calls::capture::{CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame};
-use crate::calls::engine::{CaptureTarget, TransportState, external_screen_capture_enabled};
+use crate::calls::capture::{
+    CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame,
+    device_thread::{DeviceRun, DeviceThread},
+};
+use crate::calls::engine::{
+    CaptureTarget, ExternalFrameSender, TransportState, external_screen_capture_enabled,
+};
 use crate::state::{CallsPurpose, RequestPurpose};
 use crate::telegram::envelope::MessageSender;
 use crate::telegram::requests::toggle_group_call_screen_sharing_is_paused;
 use std::sync::Arc;
 
-/// Starts a screen capture: `(source, options, sink, preview)`. The
-/// driver uses the OS backend; tests inject a fake.
-pub type ScreenOpener = Box<
-    dyn FnMut(
-        &SourceId,
-        ScreenOptions,
-        FrameSink<VideoFrame>,
-        Arc<PreviewSlot>,
-    ) -> Result<Box<dyn ScreenCapture>, CaptureError>,
+/// Starts a screen capture on its own thread: `(source, options, sink,
+/// preview)`. The driver uses the OS backend; tests inject a fake.
+pub type ScreenOpener = Arc<
+    dyn Fn(
+            &SourceId,
+            ScreenOptions,
+            FrameSink<VideoFrame>,
+            Arc<PreviewSlot>,
+        ) -> Result<Box<dyn ScreenCapture>, CaptureError>
+        + Send
+        + Sync,
 >;
 
-/// Starts recording system audio into the mix. The driver uses WASAPI
-/// loopback; tests inject a fake.
-pub type SystemAudioOpener =
-    Box<dyn FnMut(Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError>>;
+/// Starts recording system audio into the mix on its own thread. The
+/// driver uses WASAPI loopback; tests inject a fake.
+pub type SystemAudioOpener = Arc<
+    dyn Fn(Arc<SystemAudioMix>) -> Result<Box<dyn SystemAudioCapture>, CaptureError> + Send + Sync,
+>;
 
 /// Driver-side state of the shared screen.
 #[derive(Default)]
@@ -76,30 +84,42 @@ struct ActiveScreen {
     target: CaptureTarget,
     source: SourceId,
     sink: FrameSink<VideoFrame>,
-    feeder: CaptureFeeder,
-    capture: Box<dyn ScreenCapture>,
+    sender: Arc<dyn ExternalFrameSender>,
     preview: Arc<PreviewSlot>,
     last_preview: u64,
     paused: bool,
     /// The system audio shared with it, while running.
     audio: Option<SharedAudio>,
+    capture: DeviceThread,
+    run: DeviceRun<CaptureFeeder>,
 }
 
 struct SharedAudio {
     mix: Arc<SystemAudioMix>,
-    capture: Box<dyn SystemAudioCapture>,
+    capture: DeviceThread,
+    run: DeviceRun<()>,
 }
 
-impl Drop for SharedAudio {
-    fn drop(&mut self) {
-        self.capture.stop();
-    }
-}
-
-impl Drop for ActiveScreen {
-    fn drop(&mut self) {
-        self.audio = None;
-        self.capture.stop();
+impl SharedAudio {
+    fn open(opener: Option<SystemAudioOpener>) -> Self {
+        let mix = Arc::new(SystemAudioMix::default());
+        let capture = DeviceThread::open(
+            "quill-system-audio",
+            &crate::wake::UPDATES,
+            {
+                let mix = mix.clone();
+                move || match opener {
+                    Some(opener) => opener(mix),
+                    None => open_loopback(mix),
+                }
+            },
+            |mut capture| capture.stop(),
+        );
+        Self {
+            mix,
+            capture,
+            run: DeviceRun::Opening,
+        }
     }
 }
 
@@ -139,7 +159,8 @@ impl CallScreen {
     pub fn sharing_audio(&self) -> bool {
         self.active
             .as_ref()
-            .is_some_and(|active| active.audio.is_some())
+            .and_then(|active| active.audio.as_ref())
+            .is_some_and(|audio| !audio.run.is_opening())
     }
 
     /// The source being shared right now.
@@ -154,7 +175,20 @@ impl CallScreen {
 
     /// The call the screen feeds right now.
     pub fn target(&self) -> Option<CaptureTarget> {
-        self.active.as_ref().map(|active| active.target)
+        self.active
+            .as_ref()
+            .filter(|active| !active.run.is_opening())
+            .map(|active| active.target)
+    }
+
+    pub fn opening(&self) -> bool {
+        self.active.as_ref().is_some_and(|active| {
+            active.run.is_opening()
+                || active
+                    .audio
+                    .as_ref()
+                    .is_some_and(|audio| audio.run.is_opening())
+        })
     }
 
     /// Whether the shared window is hidden.
@@ -166,49 +200,78 @@ impl CallScreen {
     pub fn frames_sent(&self) -> u64 {
         self.active
             .as_ref()
-            .map_or(0, |active| active.feeder.stats().sent())
+            .and_then(|active| active.run.running())
+            .map_or(0, |feeder| feeder.stats().sent())
     }
 
     fn open(
         &mut self,
         target: CaptureTarget,
         source: SourceId,
-        sender: Arc<dyn crate::calls::engine::ExternalFrameSender>,
-    ) -> Result<(), String> {
+        sender: Arc<dyn ExternalFrameSender>,
+    ) {
         let sink = FrameSink::new(VIDEO_SINK_FRAMES);
         let preview = Arc::new(PreviewSlot::default());
         let options = ScreenOptions::default();
-        let started = match self.opener.as_mut() {
-            Some(opener) => opener(&source, options, sink.clone(), preview.clone()),
-            None => match native_backend() {
-                Some(backend) => backend.start(&source, options, sink.clone(), preview.clone()),
-                None => Err(CaptureError::Unsupported(
-                    "Screen capture isn't available in this build.".into(),
-                )),
+        let opener = self.opener.clone();
+        let capture = DeviceThread::open(
+            "quill-screen-open",
+            &crate::wake::UPDATES,
+            {
+                let source = source.clone();
+                let sink = sink.clone();
+                let preview = preview.clone();
+                move || match (opener, native_backend()) {
+                    (Some(opener), _) => opener(&source, options, sink, preview),
+                    (None, Some(backend)) => backend.start(&source, options, sink, preview),
+                    (None, None) => Err(CaptureError::Unsupported(
+                        "Screen capture isn't available in this build.".into(),
+                    )),
+                }
             },
-        };
-        let mut capture = started.map_err(|err| err.to_string())?;
-        match CaptureFeeder::start(sink.clone(), sender) {
+            |mut capture| capture.stop(),
+        );
+        self.active = Some(ActiveScreen {
+            target,
+            source,
+            sink,
+            sender,
+            preview,
+            last_preview: 0,
+            paused: false,
+            audio: None,
+            capture,
+            run: DeviceRun::Opening,
+        });
+    }
+
+    /// How the open went; `Ok` says whether events read while it ran
+    /// paused the share.
+    fn finish_open(&mut self) -> Option<Result<bool, String>> {
+        let active = self
+            .active
+            .as_mut()
+            .filter(|active| active.run.is_opening())?;
+        let started = active
+            .capture
+            .opened()?
+            .map_err(|err| err.to_string())
+            .and_then(|()| {
+                CaptureFeeder::start(active.sink.clone(), active.sender.clone())
+                    .map_err(|err| format!("Couldn't start screen sharing: {err}"))
+            });
+        Some(match started {
             Ok(feeder) => {
-                self.active = Some(ActiveScreen {
-                    target,
-                    source,
-                    sink,
-                    feeder,
-                    capture,
-                    preview,
-                    last_preview: 0,
-                    paused: false,
-                    audio: None,
-                });
+                active.run = DeviceRun::Running(feeder);
+                let paused = active.paused;
                 self.error = None;
-                Ok(())
+                Ok(paused)
             }
             Err(err) => {
-                capture.stop();
-                Err(format!("Couldn't start screen sharing: {err}"))
+                self.active = None;
+                Err(err)
             }
-        }
+        })
     }
 }
 
@@ -289,21 +352,29 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn pump_system_audio(&mut self) {
         let screen = &mut self.call_screen;
         let wanted = screen.with_audio && screen.system_audio_enabled();
+        let opener = screen.audio_opener.clone();
         let mut failed = None;
-        let mix = match screen.active.as_mut() {
+        let running = screen
+            .active
+            .as_mut()
+            .filter(|active| !active.run.is_opening());
+        let mix = match running {
             Some(active) if wanted => {
-                if active.audio.is_none() {
-                    let mix = Arc::new(SystemAudioMix::default());
-                    let started = match screen.audio_opener.as_mut() {
-                        Some(opener) => opener(mix.clone()),
-                        None => open_loopback(mix.clone()),
-                    };
-                    match started {
-                        Ok(capture) => active.audio = Some(SharedAudio { mix, capture }),
-                        Err(err) => failed = Some(err.to_string()),
+                let audio = active
+                    .audio
+                    .get_or_insert_with(|| SharedAudio::open(opener));
+                if audio.run.is_opening() {
+                    match audio.capture.opened() {
+                        Some(Ok(())) => audio.run = DeviceRun::Running(()),
+                        Some(Err(err)) => failed = Some(err.to_string()),
+                        None => {}
                     }
                 }
-                active.audio.as_ref().map(|audio| audio.mix.clone())
+                let mix = audio.mix.clone();
+                if failed.is_some() {
+                    active.audio = None;
+                }
+                failed.is_none().then_some(mix)
             }
             Some(active) => {
                 active.audio = None;
@@ -371,13 +442,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             else {
                 return;
             };
-            if let Err(err) = self.call_screen.open(target, source, sender) {
+            self.call_screen.open(target, source, sender);
+        }
+        match self.call_screen.finish_open() {
+            Some(Ok(paused)) => self.set_screen_paused(paused),
+            Some(Err(err)) => {
                 self.call_screen.chosen = None;
                 self.call_screen.error = Some(err);
                 self.stop_sharing_screen();
                 return;
             }
-            self.set_screen_paused(false);
+            None => {}
         }
         self.publish_screen_preview();
     }
@@ -411,7 +486,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let changed = active.paused != paused;
         active.paused = paused;
-        active.feeder.set_forwarding(!paused);
+        if let Some(feeder) = active.run.running() {
+            feeder.set_forwarding(!paused);
+        }
         let CaptureTarget::Group(group_call_id) = active.target else {
             return;
         };
@@ -478,12 +555,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let CaptureTarget::Group(group_call_id) = active.target else {
             return;
         };
-        let Some((seq, picture)) = active.preview.latest() else {
+        let Some((seq, picture)) = active.preview.latest_after(active.last_preview) else {
             return;
         };
-        if seq == active.last_preview {
-            return;
-        }
         active.last_preview = seq;
         let me = self
             .session

@@ -118,30 +118,22 @@ impl Session {
         if status == ChannelMemberStatus::Unknown {
             return;
         }
-        for chat in self.chats.values_mut() {
-            let ChatKind::Supergroup {
-                supergroup_id: id, ..
-            } = chat.kind
-            else {
-                continue;
-            };
-            if id != supergroup_id {
-                continue;
+        let Some(chat) = self.supergroup_chat_mut(supergroup_id) else {
+            return;
+        };
+        match chat.my_member_status {
+            None => {
+                chat.set_member_status(status, None);
             }
-            match chat.my_member_status {
-                None => {
-                    chat.set_member_status(status, None);
-                }
-                Some(
-                    ChannelMemberStatus::Left
-                    | ChannelMemberStatus::Member
-                    | ChannelMemberStatus::Banned
-                    | ChannelMemberStatus::Restricted,
-                ) if !status.is_admin() => {
-                    chat.set_member_status(status, None);
-                }
-                _ => {}
+            Some(
+                ChannelMemberStatus::Left
+                | ChannelMemberStatus::Member
+                | ChannelMemberStatus::Banned
+                | ChannelMemberStatus::Restricted,
+            ) if !status.is_admin() => {
+                chat.set_member_status(status, None);
             }
+            _ => {}
         }
     }
 

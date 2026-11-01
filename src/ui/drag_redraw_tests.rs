@@ -13,6 +13,7 @@ struct Counts {
     shell: Cell<usize>,
     slice: Cell<usize>,
     drag_over: Cell<usize>,
+    covered: Cell<bool>,
     ghost_at: RefCell<Vec<Point<Pixels>>>,
 }
 
@@ -76,11 +77,24 @@ struct Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.counts.shell.set(self.counts.shell.get() + 1);
-        div().size_full().child(
-            self.slice
-                .clone()
-                .cached(StyleRefinement::default().size_full()),
-        )
+        let cover = self.counts.covered.get().then(|| {
+            div()
+                .id("cover")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+        });
+        div()
+            .size_full()
+            .relative()
+            .child(
+                self.slice
+                    .clone()
+                    .cached(StyleRefinement::default().size_full()),
+            )
+            .children(cover)
     }
 }
 
@@ -188,4 +202,34 @@ fn a_file_entering_over_a_drop_target_renders_its_style(cx: &mut TestAppContext)
 
     assert_eq!(counts.slice.get(), slice + 1);
     assert!(counts.drag_over.get() > 0);
+}
+
+fn set_covered(window: AnyWindowHandle, counts: &Counts, cx: &mut TestAppContext) {
+    counts.covered.set(!counts.covered.get());
+    notify_root(window, cx);
+    draw_what_is_dirty(window, cx);
+}
+
+fn notify_root(window: AnyWindowHandle, cx: &mut TestAppContext) {
+    cx.update_window(window, |root, _, cx| cx.notify(root.entity_id()))
+        .unwrap();
+}
+
+fn draw_what_is_dirty(window: AnyWindowHandle, cx: &mut TestAppContext) {
+    cx.update_window(window, |_, _, _| ()).unwrap();
+}
+
+#[gpui_kit::test]
+fn a_drop_target_covered_under_a_still_pointer_renders_again_once(cx: &mut TestAppContext) {
+    let (window, counts) = open(cx);
+    start_drag(window, cx);
+    mouse_move(window, 150., cx);
+    let slice = counts.slice.get();
+
+    set_covered(window, &counts, cx);
+
+    assert_eq!(counts.slice.get(), slice + 1);
+    notify_root(window, cx);
+    draw_what_is_dirty(window, cx);
+    assert_eq!(counts.slice.get(), slice + 1, "the next frame replays");
 }

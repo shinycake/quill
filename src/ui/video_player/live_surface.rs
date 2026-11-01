@@ -1,9 +1,9 @@
-//! Windows: a live frame as an NV12 surface frame, the way file video is
-//! since #859 (`docs/decisions/video-player-live-nv12.md`). The upright
+//! Windows and Linux: a live frame as an NV12 surface frame, the way file
+//! video is since #859 (`docs/decisions/video-player-live-nv12.md`). The upright
 //! I420 planes (turned and mirrored in the plane copy, as on every
 //! platform) are packed into NV12 (`i420_to_nv12_packed`: the Y plane
-//! copied, U and V interleaved), and the vendored DirectX renderer uploads
-//! the two planes as textures and converts to RGB on the GPU.
+//! copied, U and V interleaved), and the vendored DirectX or wgpu renderer
+//! uploads the two planes as textures and converts to RGB on the GPU.
 //!
 //! - Colour: BT.601, full range, for every size ([`LIVE_COLOR`]): what the
 //!   BGRA fallback (`i420_to_bgra`) and the macOS pixel buffers show, so a
@@ -20,11 +20,11 @@
 //!   is converted on the CPU, and the feed converts to BGRA for
 //!   [`NV12_RETRY`] (the file player's pause) before it tries NV12 again.
 //!
-//! The module builds on Windows and in tests (a `SurfaceFrame` is plain
-//! data), so its logic is tested on every machine; only Windows draws
-//! these frames.
+//! The module builds off macOS and in tests (a `SurfaceFrame` is plain
+//! data), so its logic is tested on every machine; macOS draws pixel
+//! buffers instead.
 #![deny(clippy::indexing_slicing)]
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#![cfg_attr(target_os = "macos", allow(dead_code))]
 
 use super::Picture;
 use super::backend_ffmpeg::{NV12_RETRY, nv12_allowed};
@@ -52,10 +52,10 @@ pub(super) const LIVE_COLOR: YuvColor = YuvColor {
 /// scene may still hold, one landed but not drawn yet, and one converting.
 const POOL: usize = 4;
 
-/// Whether live frames become NV12 surface frames here: on Windows,
+/// Whether live frames become NV12 surface frames here: off macOS,
 /// unless `QUILL_LIVE_BGRA=1` (demo-capture builds) asks for images.
 pub(super) fn nv12_live() -> bool {
-    cfg!(target_os = "windows") && !super::live_picture::bgra_only()
+    cfg!(not(target_os = "macos")) && !super::live_picture::bgra_only()
 }
 
 /// A frame packed into a pool buffer, on its way to the UI thread.
@@ -114,15 +114,15 @@ pub(super) fn fill(src: &I420, mut bytes: Arc<[u8]>) -> Option<Nv12Picture> {
     Some(Nv12Picture { frame, bytes })
 }
 
-/// The frame as the renderer draws it: a surface on Windows.
-#[cfg(target_os = "windows")]
+/// The frame as the renderer draws it: a surface.
+#[cfg(not(target_os = "macos"))]
 fn picture_of(frame: &Arc<SurfaceFrame>) -> Option<(Picture, Option<Arc<RenderImage>>)> {
     Some((Picture::Surface(frame.clone()), None))
 }
 
-/// Tests elsewhere: no renderer here draws NV12, so the frame is shown
-/// as its CPU image (what a refused frame becomes on Windows).
-#[cfg(not(target_os = "windows"))]
+/// Tests on macOS: no renderer there draws NV12 frames, so the frame is
+/// shown as its CPU image (what a refused frame becomes elsewhere).
+#[cfg(target_os = "macos")]
 fn picture_of(frame: &Arc<SurfaceFrame>) -> Option<(Picture, Option<Arc<RenderImage>>)> {
     let image = fallback_image(frame)?;
     Some((Picture::Image(image.clone()), Some(image)))

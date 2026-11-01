@@ -364,6 +364,47 @@ bitflags::bitflags! {
 
 pub use platform_info::{OperatingSystem, PlatformInfo, PlatformTarget};
 
+/// Quill: the app's answer to a quit the OS started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitAnswer {
+    /// The quit goes ahead.
+    Allow,
+    /// The quit is cancelled.
+    Refuse,
+    /// The app is busy further up the stack and cannot be asked now.
+    Later,
+}
+
+/// Quill: how many times a platform asks again, from its event loop, an app
+/// that keeps answering [`QuitAnswer::Later`]. A nested run loop (a modal
+/// panel) can hold the app for as long as it is up, and each ask comes
+/// straight back.
+pub const QUIT_ASKS_AGAIN: u32 = 100;
+
+/// Quill: what a platform does with an answer to a quit it asked about
+/// `asked` times before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitStep {
+    /// The quit goes ahead (`true`) or is cancelled.
+    Settled(bool),
+    /// Ask again from the event loop; carry this count to that ask.
+    AskAgain(u32),
+}
+
+impl QuitAnswer {
+    /// The step after this answer. An app still busy after
+    /// [`QUIT_ASKS_AGAIN`] asks refuses the quit, as it would while busy,
+    /// rather than keep the event loop spinning; the user can quit again.
+    pub fn step(self, asked: u32) -> QuitStep {
+        match self {
+            Self::Allow => QuitStep::Settled(true),
+            Self::Refuse => QuitStep::Settled(false),
+            Self::Later if asked < QUIT_ASKS_AGAIN => QuitStep::AskAgain(asked.saturating_add(1)),
+            Self::Later => QuitStep::Settled(false),
+        }
+    }
+}
+
 #[expect(missing_docs)]
 pub trait Platform: 'static {
     /// Returns the host OS and application target reported by this backend.
@@ -463,6 +504,11 @@ pub trait Platform: 'static {
     fn open_with_system(&self, path: &Path);
 
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>);
+    /// Quill: registers the callback asked before a quit the OS started goes
+    /// ahead: a Dock Quit or log out on macOS, the end of the session on
+    /// Windows. `App::quit` never asks. [`QuitAnswer::Later`] makes the
+    /// platform hold the quit and ask again from its event loop.
+    fn on_quit_request(&self, _callback: Box<dyn FnMut() -> QuitAnswer>) {}
     fn on_reopen(&self, callback: Box<dyn FnMut()>);
     /// Registers the callback invoked when the system is about to sleep.
     fn on_system_sleep(&self, callback: Box<dyn FnMut()>);
@@ -1322,6 +1368,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         false
     }
     fn set_edited(&mut self, _edited: bool) {}
+    /// Quill: the reason Windows shows while this window holds back the end
+    /// of the session, or `None` to stop showing it. Other platforms have no
+    /// such text.
+    fn set_shutdown_block_reason(&self, _reason: Option<&str>) {}
     fn set_document_path(&self, _path: Option<&std::path::Path>) {}
     fn toggle_simple_fullscreen(&self) {}
     fn is_simple_fullscreen(&self) -> bool {
@@ -1808,6 +1858,17 @@ pub trait PlatformAtlas {
         0
     }
 
+    /// QUILL: how many text (non-emoji) glyphs the atlas holds.
+    fn text_glyph_count(&self) -> usize {
+        0
+    }
+
+    /// QUILL: remove the text glyphs nothing asked for since `mark` started;
+    /// how many went. Their tiles go back to the texture's allocator.
+    fn remove_text_glyphs_unused_since(&self, _mark: u64) -> usize {
+        0
+    }
+
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, _key: &AtlasKey) -> bool {
         false
@@ -1847,6 +1908,8 @@ pub struct AtlasState<Backend> {
     use_mark: u64,
     /// QUILL: how many keys are color emoji glyphs.
     emoji_glyphs: usize,
+    /// QUILL: how many keys are text glyphs.
+    text_glyphs: usize,
     pub backend: Backend,
 }
 
@@ -1856,6 +1919,7 @@ impl<Backend> AtlasState<Backend> {
             tiles_by_key: FxHashMap::default(),
             use_mark: 0,
             emoji_glyphs: 0,
+            text_glyphs: 0,
             backend,
         }
     }
@@ -1869,6 +1933,10 @@ impl<Backend> AtlasState<Backend> {
         self.emoji_glyphs
     }
 
+    pub fn text_glyph_count(&self) -> usize {
+        self.text_glyphs
+    }
+
     pub fn contains(&self, key: &AtlasKey) -> bool {
         self.tiles_by_key.contains_key(key)
     }
@@ -1876,6 +1944,7 @@ impl<Backend> AtlasState<Backend> {
     pub fn clear(&mut self, reset_backend: impl FnOnce(&mut Backend)) {
         self.tiles_by_key.clear();
         self.emoji_glyphs = 0;
+        self.text_glyphs = 0;
         reset_backend(&mut self.backend);
     }
 }
@@ -1911,8 +1980,10 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
                 } else {
                     self.backend.insert(kind, size, &bytes)?
                 };
-                if is_emoji_glyph(entry.key()) {
-                    self.emoji_glyphs += 1;
+                match glyph_class(entry.key()) {
+                    Some(GlyphClass::Emoji) => self.emoji_glyphs += 1,
+                    Some(GlyphClass::Text) => self.text_glyphs += 1,
+                    None => {}
                 }
                 entry.insert((tile, use_mark));
                 Ok(Some(tile))
@@ -1922,24 +1993,37 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
 
     pub fn remove(&mut self, key: &AtlasKey) {
         if let Some((tile, _)) = self.tiles_by_key.remove(key) {
-            if is_emoji_glyph(key) {
-                self.emoji_glyphs -= 1;
+            match glyph_class(key) {
+                Some(GlyphClass::Emoji) => self.emoji_glyphs -= 1,
+                Some(GlyphClass::Text) => self.text_glyphs -= 1,
+                None => {}
             }
             self.backend.remove(tile);
         }
     }
 
     pub fn remove_emoji_glyphs_unused_since(&mut self, mark: u64) -> usize {
+        let count = self.remove_glyphs_unused_since(GlyphClass::Emoji, mark);
+        self.emoji_glyphs -= count;
+        count
+    }
+
+    pub fn remove_text_glyphs_unused_since(&mut self, mark: u64) -> usize {
+        let count = self.remove_glyphs_unused_since(GlyphClass::Text, mark);
+        self.text_glyphs -= count;
+        count
+    }
+
+    fn remove_glyphs_unused_since(&mut self, class: GlyphClass, mark: u64) -> usize {
         let mut gone = Vec::new();
         self.tiles_by_key.retain(|key, (tile, used)| {
-            let keep = *used >= mark || !is_emoji_glyph(key);
+            let keep = *used >= mark || glyph_class(key) != Some(class);
             if !keep {
                 gone.push(*tile);
             }
             keep
         });
         let count = gone.len();
-        self.emoji_glyphs -= count;
         for tile in gone {
             self.backend.remove(tile);
         }
@@ -1947,8 +2031,18 @@ impl<Backend: AtlasBackend> AtlasState<Backend> {
     }
 }
 
-fn is_emoji_glyph(key: &AtlasKey) -> bool {
-    matches!(key, AtlasKey::Glyph(params) if params.is_emoji)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GlyphClass {
+    Emoji,
+    Text,
+}
+
+fn glyph_class(key: &AtlasKey) -> Option<GlyphClass> {
+    match key {
+        AtlasKey::Glyph(params) if params.is_emoji => Some(GlyphClass::Emoji),
+        AtlasKey::Glyph(_) => Some(GlyphClass::Text),
+        _ => None,
+    }
 }
 
 /// A sprite atlas for windows without a GPU. It hands out uniquely identified
@@ -2014,6 +2108,14 @@ impl PlatformAtlas for HeadlessAtlas {
 
     fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
         self.0.lock().remove_emoji_glyphs_unused_since(mark)
+    }
+
+    fn text_glyph_count(&self) -> usize {
+        self.0.lock().text_glyph_count()
+    }
+
+    fn remove_text_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_text_glyphs_unused_since(mark)
     }
 
     #[cfg(any(test, feature = "test-support", feature = "bench-support"))]

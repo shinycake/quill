@@ -50,11 +50,20 @@ pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
 }
 
 /// Delete `key`'s folder (`accounts/<key>`); a missing folder is fine.
-/// Never call it while a TDLib client of `key` may still be open.
+/// Never call it while a TDLib client of `key` may still be open. Fails
+/// without deleting while a settings write into the folder is stuck.
 pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
-    // A queued settings write would recreate the folder after it is gone.
+    // A queued settings write would recreate the folder after it is gone,
+    // and one that failed stays queued, so drop what is left for it.
     crate::settings::flush_deferred_writes();
-    let removed = std::fs::remove_dir_all(AccountPaths::for_root(app_root, key).root);
+    let folder = AccountPaths::for_root(app_root, key).root;
+    let Some(closed) = crate::settings::close_deferred_writes_under(&folder) else {
+        // It would land after the removal; the record keeps the folder for
+        // the next try.
+        return Err(std::io::Error::other("a settings write is stuck"));
+    };
+    let removed = std::fs::remove_dir_all(folder);
+    drop(closed);
     // The folder held the test-environment marker.
     crate::advanced::test_environment::invalidate_active_test(app_root);
     match removed {
@@ -165,13 +174,37 @@ mod tests {
         let work = add_account(&root, "Work").unwrap();
         let paths = AccountPaths::for_root(&root, &work);
         let prefs = paths.root.join("hashtags.json");
-        crate::settings::write_json_deferred(&prefs, &["#queued"]).unwrap();
+        crate::settings::write_json_deferred(&prefs, &["#queued"]);
         delete_account_folder(&root, &work).unwrap();
         assert!(!paths.root.exists());
         assert!(
             crate::settings::read_with_pending(&prefs).is_err(),
             "nothing is left to write into the deleted folder"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_queued_write_does_not_bring_the_deleted_folder_back() {
+        let root = tmp_root("failed");
+        let work = add_account(&root, "Work").unwrap();
+        let paths = AccountPaths::for_root(&root, &work);
+        std::fs::create_dir_all(&paths.root).unwrap();
+        // A file where the write needs a folder, so the write fails.
+        std::fs::write(paths.root.join("sub"), b"x").unwrap();
+        let prefs = paths.root.join("sub").join("prefs.json");
+        crate::settings::write_json_deferred(&prefs, &["#queued"]);
+        delete_account_folder(&root, &work).unwrap();
+        assert!(!paths.root.exists());
+        assert!(
+            crate::settings::read_with_pending(&prefs).is_err(),
+            "the deleted account's setting is gone"
+        );
+        // Any later save retries failed writes.
+        crate::settings::write_json_deferred(&root.join("other.json"), &1);
+        crate::settings::flush_deferred_writes();
+        assert!(!paths.root.exists(), "the deleted folder stays deleted");
+        let _ = crate::settings::take_deferred_write_failure();
         let _ = std::fs::remove_dir_all(&root);
     }
 }

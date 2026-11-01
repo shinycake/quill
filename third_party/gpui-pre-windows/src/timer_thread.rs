@@ -13,11 +13,7 @@ use windows::Win32::System::Threading::{
 use windows::core::PCWSTR;
 
 use crate::dispatcher::WindowsDispatcher;
-use crate::timer_queue::{TimerQueue, Wait};
-
-/// Without a high-resolution timer, waits shorter than this hold the system
-/// timer at 1 ms; longer (idle) waits leave it alone.
-const SHORT_WAIT: Duration = Duration::from_millis(100);
+use crate::timer_step::{Step, TimerState, fallback_wait_millis, relative_due_time};
 
 struct Handle(HANDLE);
 
@@ -37,18 +33,13 @@ impl Drop for Handle {
     }
 }
 
-struct State {
-    timers: TimerQueue<RunnableVariant>,
-    stopped: bool,
-}
-
 struct Shared {
-    state: Mutex<State>,
+    state: Mutex<TimerState<RunnableVariant>>,
     wake: Handle,
 }
 
 impl Shared {
-    fn lock(&self) -> MutexGuard<'_, State> {
+    fn lock(&self) -> MutexGuard<'_, TimerState<RunnableVariant>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -73,10 +64,7 @@ impl TimerThread {
         let wake = Handle(unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.ok()?);
         let (timer, high_resolution) = waitable_timer()?;
         let shared = Arc::new(Shared {
-            state: Mutex::new(State {
-                timers: TimerQueue::new(),
-                stopped: false,
-            }),
+            state: Mutex::new(TimerState::new()),
             wake,
         });
         let thread_shared = shared.clone();
@@ -124,31 +112,26 @@ fn waitable_timer() -> Option<(Handle, bool)> {
 
 fn run(shared: &Shared, timer: &Handle, high_resolution: bool) {
     loop {
-        let (due, wait) = {
-            let mut state = shared.lock();
-            // A pending runnable holds the dispatcher that owns `TimerThread`,
-            // so nothing is queued by the time it drops.
-            if state.stopped {
-                return;
-            }
-            let now = Instant::now();
-            (state.timers.pop_due(now), state.timers.wait(now))
-        };
-        if !due.is_empty() {
-            due.into_iter().for_each(WindowsDispatcher::execute_runnable);
-            continue;
-        }
-        match wait {
-            Wait::Forever => {
+        // A pending runnable holds the dispatcher that owns `TimerThread`, so
+        // nothing is queued by the time it stops.
+        let step = shared.lock().next_step(Instant::now(), high_resolution);
+        match step {
+            Step::Stop => return,
+            Step::Fire(due) => due
+                .into_iter()
+                .for_each(WindowsDispatcher::execute_runnable),
+            Step::WaitForWake => {
                 // SAFETY: `wake` is a live event owned by `shared`.
                 let result = unsafe { WaitForSingleObject(shared.wake.0, INFINITE) };
                 if result == WAIT_FAILED {
                     std::thread::sleep(Duration::from_millis(1));
                 }
             }
-            Wait::For(duration) => {
-                let _resolution =
-                    (!high_resolution && duration < SHORT_WAIT).then(SystemResolution::hold);
+            Step::WaitFor {
+                duration,
+                hold_system_resolution,
+            } => {
+                let _resolution = hold_system_resolution.then(SystemResolution::hold);
                 wait_for(shared, timer, duration);
             }
         }
@@ -156,9 +139,7 @@ fn run(shared: &Shared, timer: &Handle, high_resolution: bool) {
 }
 
 fn wait_for(shared: &Shared, timer: &Handle, duration: Duration) {
-    // A negative due time is relative, in 100 ns units.
-    let ticks = i64::try_from(duration.as_nanos() / 100).unwrap_or(i64::MAX);
-    let due = -ticks.max(1);
+    let due = relative_due_time(duration);
     // SAFETY: `timer` is a live waitable timer and `due` outlives the call;
     // no completion routine is passed.
     let armed = unsafe { SetWaitableTimer(timer.0, &due, 0, None, None, false) }.is_ok();
@@ -166,9 +147,8 @@ fn wait_for(shared: &Shared, timer: &Handle, duration: Duration) {
         // SAFETY: both handles are live for the whole wait.
         unsafe { WaitForMultipleObjects(&[shared.wake.0, timer.0], false, INFINITE) }
     } else {
-        let millis = u32::try_from(duration.as_millis()).unwrap_or(INFINITE - 1);
         // SAFETY: `wake` is a live event owned by `shared`.
-        unsafe { WaitForSingleObject(shared.wake.0, millis.max(1)) }
+        unsafe { WaitForSingleObject(shared.wake.0, fallback_wait_millis(duration)) }
     };
     if result == WAIT_FAILED {
         std::thread::sleep(duration.min(Duration::from_millis(1)));

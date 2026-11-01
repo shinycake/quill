@@ -1,8 +1,8 @@
 use super::super::decode_loop::{Decoder, Turn};
 use super::super::ffi::FfiDemuxer;
 use super::super::{
-    AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Clock, Demuxer, Item, MediaInfo,
-    OpenOptions, Pixels, Player, Shared, State, VideoFrame, lock,
+    AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Demuxer, Item, MediaInfo,
+    OpenOptions, Pixels, Player, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
 };
 use super::{decode_all, decoder, fixture, frame};
 use std::collections::VecDeque;
@@ -47,6 +47,8 @@ struct Shape {
     declares_pictures: bool,
     duration: f64,
     held_packet_limit: usize,
+    /// No sound from the first time up to the second.
+    sound_gap: (f64, f64),
 }
 
 impl Shape {
@@ -58,6 +60,7 @@ impl Shape {
             declares_pictures: true,
             duration: picture_secs.max(sound_secs),
             held_packet_limit: 1024,
+            sound_gap: (0.0, 0.0),
         }
     }
 
@@ -70,6 +73,10 @@ impl Shape {
             .chain(
                 (0..sounds)
                     .map(|n| n as f64 * CHUNK_SECS)
+                    .filter(|pts| {
+                        let (from, to) = self.sound_gap;
+                        !(from - 1e-9..to - 1e-9).contains(pts)
+                    })
                     .map(|pts| (pts + self.sound_behind_secs, Packet::Sound(pts))),
             )
             .collect();
@@ -210,10 +217,10 @@ impl Rig {
         let decoder = Decoder::start(demuxer, &shared, want_audio);
         let mut player = Player {
             shared: shared.clone(),
-            clock: Clock::new(),
             first: true,
             last_pts: None,
             ended: false,
+            bgra: Default::default(),
             thread: None,
         };
         let tap = player.take_audio_tap();
@@ -229,10 +236,20 @@ impl Rig {
     }
 
     fn settle(&mut self) {
+        self.settle_until_idle();
+    }
+
+    /// Run turns until the thread would sleep; how long it would.
+    fn settle_until_idle(&mut self) -> Duration {
+        self.settle_at(Instant::now())
+    }
+
+    /// Run turns at `now` until the thread would sleep; how long it would.
+    fn settle_at(&mut self, now: Instant) -> Duration {
         loop {
-            match self.decoder.turn(&self.shared) {
+            match self.decoder.turn(&self.shared, now) {
                 Turn::Worked => {}
-                Turn::Idle(..) => return,
+                Turn::Idle(_, wait) => return wait,
                 Turn::Stop => panic!("the player is alive"),
             }
         }
@@ -346,6 +363,15 @@ impl Run {
             .windows(2)
             .any(|pair| pair[1] - pair[0] > 1.5 * FRAME_SECS)
     }
+}
+
+#[test]
+fn a_paused_clip_with_sound_wakes_its_decoder_at_most_once_a_second() {
+    let mut rig = Rig::open(Shape::clip(60.0, 60.0));
+    rig.start();
+    rig.player.pause();
+    let wait = rig.settle_until_idle();
+    assert!(wait >= Duration::from_secs(1), "wakes every {wait:?}");
 }
 
 #[test]
@@ -474,6 +500,68 @@ fn sound_keeps_playing_while_nothing_paints() {
     rig.player.play();
     let sound = rig.play_with_nothing_painting(60.0);
     assert!((sound - 60.0).abs() < 1e-6, "{sound} s of sound");
+}
+
+#[test]
+fn a_clip_nobody_paints_ends_when_its_time_runs_out() {
+    let mut rig = Rig::open(Shape::clip(2.0, 2.0));
+    let t0 = rig.start();
+    rig.play_with_nothing_painting(1.0);
+    rig.player.update_ended(t0 + Duration::from_secs(1));
+    assert!(!rig.player.ended, "still playing at 1 s");
+    rig.play_with_nothing_painting(1.5);
+    rig.player.update_ended(t0 + Duration::from_secs_f64(2.5));
+    assert!(
+        rig.player.ended,
+        "{} pictures queued",
+        rig.pictures_queued()
+    );
+    assert!(rig.player.error().is_none());
+}
+
+#[test]
+fn a_silent_clip_nobody_paints_keeps_its_picture_current() {
+    let mut rig = Rig::open(Shape::clip(10.0, 0.0));
+    let t0 = rig.start();
+    let mut now = t0;
+    let mut wakes = 0;
+    while now < t0 + Duration::from_secs(5) {
+        now += rig.settle_at(now);
+        wakes += 1;
+        assert!(rig.pictures_queued() <= QUEUE);
+    }
+    assert!(wakes <= 5 * FPS as usize + 2, "{wakes} wakes in 5 s");
+    let shown = rig
+        .player
+        .take_frame_for(now, now)
+        .expect("a picture is due");
+    let position = rig.player.position_at(now);
+    assert!(
+        (position - shown.pts).abs() <= FRAME_SECS + SYNC_TOLERANCE,
+        "{} at {position}",
+        shown.pts
+    );
+}
+
+#[test]
+fn sound_after_a_gap_plays_at_its_time() {
+    let mut rig = Rig::open(Shape {
+        sound_gap: (1.0, 2.0),
+        ..Shape::clip(4.0, 4.0)
+    });
+    rig.player.play();
+    let mut play = |secs: f64| {
+        for _ in 0..(secs / 0.1).round() as usize {
+            rig.pull_sound(0.1);
+            rig.settle();
+        }
+        rig.player.heard().expect("sound plays")
+    };
+    let heard = play(1.5);
+    let expected = 1.5 - AUDIO_OUTPUT_LATENCY;
+    assert!((heard - expected).abs() < 0.01, "{heard}");
+    let heard = play(1.0);
+    assert!((heard - (expected + 1.0)).abs() < 0.01, "{heard}");
 }
 
 #[test]

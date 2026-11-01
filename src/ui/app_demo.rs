@@ -24,7 +24,10 @@ impl QuillApp {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         #[cfg(test)]
-        quill::wake::isolate_current_thread();
+        {
+            quill::wake::isolate_current_thread();
+            quill::power_saving::isolate_for_tests();
+        }
         super::tooltip_timing::install(cx);
         super::image_budget::start_sweeper(cx);
         quill::media_tools::warm_up();

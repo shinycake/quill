@@ -245,6 +245,21 @@ impl TestAppContext {
         self.app.borrow_mut().shutdown();
     }
 
+    /// Quill: the OS asks to quit. Returns the app's answer, as the platform
+    /// would hear it from [`App::on_quit_request`].
+    pub fn simulate_quit_request(&self) -> crate::QuitAnswer {
+        let callback = self.test_platform.quit_request_callback.borrow_mut().take();
+        let Some(mut callback) = callback else {
+            return crate::QuitAnswer::Allow;
+        };
+        let allowed = callback();
+        self.test_platform
+            .quit_request_callback
+            .borrow_mut()
+            .get_or_insert(callback);
+        allowed
+    }
+
     /// Register cleanup to run when the test ends.
     pub fn on_quit(&mut self, f: impl FnOnce() + 'static) {
         self.on_quit.borrow_mut().push(Box::new(f));

@@ -1,4 +1,4 @@
-use super::{TextLimitKey, TextLimitMemo, TextLimitNote};
+use super::TextLimitNote;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -6,7 +6,6 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use std::cell::Cell;
 
 const LIMIT: i32 = 4096;
 
@@ -47,6 +46,8 @@ fn fill(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str) {
 }
 
 fn note(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, editing: bool) -> TextLimitNote {
+    app.update(vcx, |app, cx| app.text_limit_note(editing, cx));
+    vcx.run_until_parked();
     app.update(vcx, |app, cx| app.text_limit_note(editing, cx))
 }
 
@@ -66,7 +67,6 @@ fn the_line_follows_the_text(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(shown(&app, vcx));
     assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(2));
-    assert_eq!(note(&app, vcx, true), TextLimitNote::UnitsOver(1));
     vcx.update(|window, cx| window.press("secondary-z", cx));
     frames(vcx);
     assert!(!shown(&app, vcx));
@@ -74,6 +74,51 @@ fn the_line_follows_the_text(cx: &mut TestAppContext) {
     let text = format!("**{}**", "x".repeat(LIMIT as usize));
     fill(&app, vcx, &text);
     assert_eq!(note(&app, vcx, false), TextLimitNote::Fits);
+}
+
+#[gpui_kit::test]
+fn a_long_text_shows_no_count_until_its_own_count_returns(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let text = "12:00:01 [INFO] [worker-3] a request came in\n".repeat(1_000);
+    fill(&app, vcx, &text);
+    assert!(matches!(note(&app, vcx, false), TextLimitNote::Parts(_)));
+    let count = quill::text_split::split_markup_text(&format!("{text}y"), LIMIT).len();
+    app.update_in(vcx, |app, window, cx| {
+        let end = app.composer.read(cx).text().len();
+        app.replace_composer_text(end..end, "y", window, cx);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Counting);
+    });
+    assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(count));
+}
+
+#[gpui_kit::test]
+fn another_text_in_the_field_never_shows_the_last_count(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let first = "12:00:01 [INFO] [worker-3] a request came in\n".repeat(1_000);
+    fill(&app, vcx, &first);
+    let first_count = note(&app, vcx, false);
+    let second = "another chat holds another draft\n".repeat(3_000);
+    let second_count = quill::text_split::split_markup_text(&second, LIMIT).len();
+    app.update_in(vcx, |app, window, cx| {
+        app.set_composer_markup(&second, window, cx);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Counting);
+    });
+    assert_ne!(first_count, TextLimitNote::Parts(second_count));
+    assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(second_count));
+}
+
+#[gpui_kit::test]
+fn a_text_near_the_limit_is_counted_in_the_frame(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let text = "x".repeat(LIMIT as usize + 1);
+    fill(&app, vcx, &text);
+    app.update_in(vcx, |app, window, cx| {
+        app.set_composer_markup(&format!("{text}y"), window, cx);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Parts(2));
+    });
 }
 
 #[gpui_kit::test]
@@ -87,43 +132,12 @@ fn a_big_paste_counts_as_it_will_be_sent(cx: &mut TestAppContext) {
     assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(parts));
 }
 
-#[gpui_kit::test]
-fn a_note_is_counted_once_per_revision(cx: &mut TestAppContext) {
-    let key = TextLimitKey {
-        field: cx.new(|_| ()).entity_id(),
-        revision: 1,
-        rich_editor: false,
-        limit: LIMIT,
-        editing: false,
-    };
-    let memo = TextLimitMemo::default();
-    let runs = Cell::new(0);
-    let count = || {
-        runs.set(runs.get() + 1);
-        TextLimitNote::Parts(runs.get())
-    };
-    assert_eq!(memo.get(key, count), TextLimitNote::Parts(1));
-    assert_eq!(memo.get(key, count), TextLimitNote::Parts(1));
-    let moved = [
-        TextLimitKey { revision: 2, ..key },
-        TextLimitKey {
-            rich_editor: true,
-            ..key
-        },
-        TextLimitKey { limit: 1024, ..key },
-        TextLimitKey {
-            editing: true,
-            ..key
-        },
-    ];
-    for (ix, key) in moved.into_iter().enumerate() {
-        assert_eq!(memo.get(key, count), TextLimitNote::Parts(ix + 2));
-    }
-    assert_eq!(runs.get(), 5);
-}
-
 #[test]
 fn a_note_reads_the_text_as_a_send_does() {
+    assert_eq!(
+        TextLimitNote::of("hello!", 5, true),
+        TextLimitNote::UnitsOver(1)
+    );
     assert_eq!(
         TextLimitNote::of("  hello  ", 5, false),
         TextLimitNote::Fits

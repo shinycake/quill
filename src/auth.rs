@@ -30,6 +30,36 @@ pub fn is_device_login_qr(link: &str) -> bool {
 use crate::lang::{keys, tr};
 use crate::telegram::envelope::{AuthorizationState, ErrorClass};
 
+/// TDLib's message about a database or file it could not open
+/// (`TdDb.cpp`, `Binlog.cpp`), with the quoted part removed: that is a
+/// path, which names the user. Any other message gives `None`, since free
+/// text can carry secrets.
+pub fn database_error_detail(message: &str) -> Option<String> {
+    let about_storage = message.starts_with("File \"")
+        || ["database", "binlog", "PosixError"]
+            .iter()
+            .any(|word| message.contains(word));
+    // An unpaired quote leaves no telling which parts are the paths.
+    if !about_storage || message.matches('"').count() % 2 == 1 {
+        return None;
+    }
+    // Everything from the first quote to the last goes, so a quote inside
+    // a path cannot let part of the path through.
+    let unquoted = match (message.find('"'), message.rfind('"')) {
+        (Some(first), Some(last)) => {
+            let after = last.saturating_add(1);
+            format!("{}{}", message.get(..first)?, message.get(after..)?)
+        }
+        _ => message.to_string(),
+    };
+    let detail = unquoted
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" :", ":");
+    (!detail.is_empty()).then_some(detail)
+}
+
 /// Sign-in errors whose raw message is dropped later but which the UI
 /// needs to tell apart (tdesktop `PhoneWidget::phoneSubmitFail`).
 pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
@@ -44,7 +74,7 @@ pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
 
 /// Why an account's client could not start. TDLib has no state for this: it
 /// answers an error and stays in `WaitTdlibParameters`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupFailure {
     /// The system did not hand over the database key: its prompt was
     /// cancelled, or the store is locked.
@@ -54,9 +84,12 @@ pub enum StartupFailure {
     KeyMissing,
     /// TDLib refused the database key.
     WrongKey,
-    /// The data folder could not be opened or created. TDLib's messages do
-    /// not tell a read-only folder from a full disk or a missing volume.
-    DataFolder,
+    /// The data folder could not be opened or created. `detail` is TDLib's
+    /// own message ([`database_error_detail`]), which tells a read-only
+    /// folder from a file in the way or a full disk.
+    DataFolder {
+        detail: Option<String>,
+    },
     /// libtdjson is missing, damaged or the wrong version.
     Library,
     /// The system refused the receive thread.
@@ -64,15 +97,25 @@ pub enum StartupFailure {
 }
 
 impl StartupFailure {
-    pub fn reason(self) -> &'static str {
+    pub fn reason(&self) -> &'static str {
         match self {
             Self::KeyLocked => tr(keys::Q_STARTUP_KEY_LOCKED),
             Self::KeyUnreadable => tr(keys::Q_STARTUP_KEY_UNREADABLE),
             Self::KeyMissing => tr(keys::Q_STARTUP_KEY_MISSING),
             Self::WrongKey => tr(keys::Q_STARTUP_WRONG_KEY),
-            Self::DataFolder => tr(keys::Q_STARTUP_DATA_FOLDER),
+            Self::DataFolder { .. } => tr(keys::Q_STARTUP_DATA_FOLDER),
             Self::Library => tr(keys::Q_STARTUP_LIBRARY),
             Self::NoThread => tr(keys::Q_STARTUP_NO_THREAD),
+        }
+    }
+
+    /// The card's text: the reason, and TDLib's words on a line under it.
+    pub fn body(&self) -> String {
+        match self {
+            Self::DataFolder {
+                detail: Some(detail),
+            } => format!("{}\n{detail}", self.reason()),
+            _ => self.reason().into(),
         }
     }
 }
@@ -223,7 +266,7 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
         },
         AuthorizationState::StartupFailed(failure) => AuthView {
             title: tr(keys::Q_STARTUP_FAILED_TITLE),
-            body: failure.reason().into(),
+            body: failure.body(),
             action: AuthAction::StartupFailed,
             blocking: true,
         },
@@ -407,5 +450,43 @@ mod device_login_qr_tests {
             "tg://login?token={}",
             "A".repeat(1404)
         )));
+    }
+
+    #[test]
+    fn only_storage_messages_reach_the_card_and_without_their_paths() {
+        assert_eq!(
+            super::database_error_detail(
+                "Can't open database \"/home/ana/.local/share/quill/db.sqlite\": disk I/O error"
+            )
+            .as_deref(),
+            Some("Can't open database: disk I/O error")
+        );
+        assert_eq!(super::database_error_detail("PHONE_CODE_INVALID"), None);
+        assert_eq!(
+            super::database_error_detail(
+                "Can't open database \"/home/ana/My \"Quill\" data/db.sqlite\": disk I/O error"
+            )
+            .as_deref(),
+            Some("Can't open database: disk I/O error"),
+            "quotes inside the path"
+        );
+        assert_eq!(
+            super::database_error_detail(
+                "Can't open database \"/home/ana/it\"s/db.sqlite\": disk I/O error"
+            ),
+            None,
+            "an odd quote count"
+        );
+        assert_eq!(
+            super::database_error_detail(
+                "Can't open database \"/home/ana/db.sqlite: disk I/O error"
+            ),
+            None,
+            "an unclosed quote"
+        );
+        assert_eq!(
+            super::database_error_detail("Invalid phone number +44 7700 900123"),
+            None
+        );
     }
 }

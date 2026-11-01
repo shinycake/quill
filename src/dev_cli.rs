@@ -8,6 +8,13 @@
 /// they ask for none.
 #[must_use]
 pub fn exit_code(args: &[String]) -> Option<i32> {
+    let code = command_exit_code(args)?;
+    // `--connect-smoke` may exit with a client open, past TDLib's teardown.
+    crate::telegram::hub::set_exit_status(code);
+    Some(code)
+}
+
+fn command_exit_code(args: &[String]) -> Option<i32> {
     if args.get(1).is_some_and(|a| a == "--passkey-probe") {
         return Some(crate::passkey_probe::cli_exit_code(
             args.get(2).is_some_and(|a| a == "login"),

@@ -16,7 +16,13 @@ The Quill project changed it in 2026 so an idle window stops receiving a
   `third_party/gpui-pre-linux/src/linux/x11/frame_idle.rs`): the idle
   decision. After 250 ms of frames that neither drew, presented nor asked for
   another frame, with no frame demand from GPUI in between, a window parks
-  and gets no invalidations at all; a demand unparks it. `vsync_has_work`
+  and gets no invalidations at all. A demand on a parked window invalidates
+  it once and leaves it parked; that frame unparks it if GPUI asked for
+  another frame during it or it came within 100 ms of the last woken frame
+  (the macOS `link_pace.rs` rule), so a caret blink costs one `WM_PAINT` and
+  not 250 ms of them. A deferred re-entrant draw unparks it outright
+  (`keep_frames_running`), since only a vsync invalidation retries it.
+  `vsync_has_work`
   decides when the vsync thread may sleep, `contact_frames` what a touchpad
   contact needs. Unit tests run with `scripts/test-frame-idle.sh`.
   `QUILL_IDLE_FRAMES=0` (or `off`), read once, disables parking (upstream
@@ -423,3 +429,94 @@ give-up:
   listed until its `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a post to it fails.
 - `src/window_list.rs`: `for_each_open_after_unlock` skips destroyed windows.
   It is std-only, tested by `scripts/test-window-list.sh`.
+
+The Quill project also changed it in 2026 so the end of a session can be
+refused like a Dock Quit on macOS:
+
+- `src/platform.rs`: `WM_QUERYENDSESSION` asks `Platform::on_quit_request`
+  and answers 0 when it says no. A request with `ENDSESSION_CRITICAL` set
+  asks nothing, because that session ends whatever the answer.
+
+## The Windows platform never panics on its own threads
+
+Added in 2026, after an audit of the earlier panic pass
+(`docs/decisions/gpui-fork-panics.md`, "Windows, second pass"):
+
+- `src/directx_devices.rs`: `get_device` returns an error for a device
+  `D3D11CreateDevice` did not hand back, `get_adapter` skips an adapter
+  that fails to cast or has no device or context, stops at
+  `DXGI_ERROR_NOT_FOUND`, and returns an error naming the last adapter's
+  failure, and
+  `DirectXDevices::new` logs an unexpected feature level. No `unwrap` or
+  `unreachable!` is left in the file.
+- `src/platform.rs`: `begin_vsync_thread` returns the thread's spawn error
+  instead of unwrapping it. `attach_gpu` then detaches the GPU again and
+  returns the error, so launch fails with the startup alert and
+  `request_windowing(Windowed)` fails, instead of the app panicking.
+- `src/platform.rs`: the vsync thread's body runs under
+  `panic_guard::guarded` (`quill-panic-guard`, a new dependency, so Quill's
+  panic hook knows the panic is caught). On a panic it logs and posts
+  `WM_GPUI_GPU_DEVICE_GONE` to the platform window, which drops the devices
+  and destroys every window, instead of leaving them without frames.
+- `src/platform.rs`: each vsync thread has a `VsyncGeneration`, moved on by
+  every start (`begin_vsync_thread`) and stop (`detach_gpu`).
+  `WM_GPUI_GPU_DEVICE_GONE` carries it in `lparam`, and the platform's
+  `WM_GPUI_GPU_DEVICE_LOST` now points at a `RecoveredDevices` that carries
+  it. The platform ignores both from an older generation, and answers
+  `HANDED_OVER` only when it took the devices; otherwise the thread stops
+  without sending them to the windows.
+- `src/platform.rs`: `open_window` replaces devices the GPU removed before
+  it builds the window (`replace_removed_devices`), instead of failing.
+- `src/window_list.rs`: `WindowList` replaces the bare `RwLock` and the
+  `for_each_after_unlock` / `for_each_open_after_unlock` helpers. Callers get
+  copies only (`snapshot`, `find`) or change it under its own lock (`push`,
+  `remove`), so none can hold the lock across `SendMessageW`. `src/platform.rs`
+  and `src/vsync.rs` use it; `TrackedWindow` is `Clone`. `WindowList::collect`
+  copies into the caller's collection so the module stays std-only, and
+  `WindowList::snapshot` in `src/platform.rs` copies into a `SmallVec<[W; 4]>`,
+  so the vsync thread's copy on each tick takes no heap for up to 4 windows.
+- `src/platform.rs`: after `open_window` lists a new window, it checks the
+  window's device against the platform's current one and, when recovery
+  replaced the devices meanwhile, sends the window `WM_GPUI_GPU_DEVICE_LOST`
+  with the new ones (`hand_over_recovered_devices`).
+- `src/timer_step.rs` (new, std-only; unit tests run with
+  `scripts/test-timer-step.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the timer thread's next step from its state and the clock, the relative
+  `SetWaitableTimer` due time and the fallback wait's timeout.
+  `src/timer_thread.rs` uses it and keeps only the Win32 calls.
+  `src/gpui_windows.rs` declares the module.
+
+The Quill project changed it in 2026 so opening a window does not build every
+shader again:
+
+- `src/directx_renderer.rs`: `PipelineState::new` takes its vertex and pixel
+  shader from `shared_shaders`, a per-thread cache keyed by the D3D device.
+  Upstream made all ten shader pairs for each window, so every Quill
+  notification toast (a pop-up window of its own) had the driver build them on
+  the UI thread, and debug builds compiled the HLSL with `D3DCompileFromFile`
+  each time. Instance buffers, the swap chain and DirectComposition stay per
+  window. Blend and sampler states are left as they were: D3D11 returns the
+  existing object for an identical description. A new device after a device
+  loss replaces the cache.
+
+`shared_shader_tests` checks the device-loss reset on two WARP devices: a new
+device gets shaders made on it and the old device's are dropped. Run it on
+Windows with `cargo test -p gpui-pre-windows -p quill --lib --features
+quill/demo-capture shared_shader_tests` (the crate is not a workspace member,
+so its `test-support` feature comes through Quill's `demo-capture`).
+
+  and answers 0 when it refuses. A request with `ENDSESSION_CRITICAL` set
+  asks nothing, because that session ends whatever the answer. When the app
+  cannot be asked (broadcasts arrive mid-update, for example inside a COM
+  call), it answers 0 and posts `WM_GPUI_QUIT_REQUEST_LATER`
+  (`src/gpui_message.rs`), which asks from the message loop and quits if the
+  app then allows it. The message's `lparam` counts the asks; after
+  `QUIT_ASKS_AGAIN` (`QuitAnswer::step`) the quit counts as refused.
+- `src/window.rs`: `set_shutdown_block_reason` calls
+  `ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy` (the
+  `Win32_System_Shutdown` feature in `Cargo.toml`).
+
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

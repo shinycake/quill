@@ -181,9 +181,9 @@ thread_local! {
 }
 
 /// Memo for [`AccountUnread::of`]: the count walks every chat and forum
-/// topic, and only changes when the session applies an update
-/// (`Session::revision`), the badge preferences change, or another account
-/// is asked about.
+/// topic, and only changes when the session applies an update that feeds
+/// it (`ChatListState::unread_revision`), the badge preferences change, or
+/// another account is asked about.
 #[derive(Debug, Default)]
 pub struct UnreadMemo {
     key: Option<SessionCountKey>,

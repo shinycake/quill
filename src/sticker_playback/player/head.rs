@@ -14,10 +14,13 @@ use std::time::{Duration, Instant};
 /// Frames asked for ahead of the one shown (the ready queue).
 pub const AHEAD: usize = 3;
 /// How early, in grid frames, a paint may land and still show the frame
-/// due on the next grid line.
+/// due on the next grid line, at most.
 const GRID_SLACK: f64 = 0.25;
 /// A view not drawn for longer than this paused meanwhile.
 pub const PAUSE_GAP: Duration = Duration::from_millis(200);
+/// A playing view showing one frame this long paints again anyway, well
+/// inside [`PAUSE_GAP`], so a slow clip never reads as paused.
+pub const REPAINT_GAP: Duration = Duration::from_millis(100);
 
 /// What a view does at the end of its clip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -130,6 +133,7 @@ impl PlayHead {
         mode: PlayMode,
         timeline: Timeline,
         high_rate: bool,
+        display_hz: f64,
     ) -> Option<Pick> {
         if self.started {
             if let Some(last) = self.last {
@@ -140,17 +144,60 @@ impl PlayHead {
             }
             self.last = Some(now);
         }
-        let mut pick = pick(self.pos, mode, timeline, high_rate)?;
+        let mut pick = pick(self.pos, mode, timeline, high_rate, display_hz)?;
         if !self.started {
             // Waiting for the first frame keeps the view ticking.
             pick.animating = !matches!(mode, PlayMode::At(_)) || pick.animating;
         }
         Some(pick)
     }
+
+    /// Whether a paint at `at` would show another frame than `shown`, the
+    /// one its view shows now, or its view went [`REPAINT_GAP`] unpainted.
+    pub fn changes_at(
+        &self,
+        at: Instant,
+        shown: Option<u32>,
+        mode: PlayMode,
+        timeline: Timeline,
+        high_rate: bool,
+        display_hz: f64,
+    ) -> bool {
+        if self
+            .last
+            .is_some_and(|last| at.saturating_duration_since(last) >= REPAINT_GAP)
+        {
+            return true;
+        }
+        let mut head = *self;
+        let pick = head.advance(at, mode, timeline, high_rate, display_hz);
+        pick.map(|pick| pick.index) != shown
+    }
 }
 
-/// The frame `pos` into a view playing `mode`.
-pub fn pick(pos: Duration, mode: PlayMode, timeline: Timeline, high_rate: bool) -> Option<Pick> {
+/// How early, in grid frames, a paint may land and still count as on the
+/// next grid line: a quarter frame, but never half a refresh or more. Paints
+/// land on refreshes, so a slack of a whole refresh would put a head that
+/// started one refresh after its paints' beat exactly on a frame boundary,
+/// and paint jitter would skip a frame and hold the next.
+fn grid_slack(timeline: Timeline, display_hz: f64) -> f64 {
+    let half_refresh = 0.5 * timeline.grid_fps() / display_hz;
+    if half_refresh.is_finite() && half_refresh > 0.0 {
+        GRID_SLACK.min(half_refresh)
+    } else {
+        GRID_SLACK
+    }
+}
+
+/// The frame `pos` into a view playing `mode`, painted on a display
+/// refreshing at `display_hz`.
+pub fn pick(
+    pos: Duration,
+    mode: PlayMode,
+    timeline: Timeline,
+    high_rate: bool,
+    display_hz: f64,
+) -> Option<Pick> {
     let frames = timeline.frames;
     if frames == 0 {
         return None;
@@ -163,10 +210,11 @@ pub fn pick(pos: Duration, mode: PlayMode, timeline: Timeline, high_rate: bool) 
         _ => pos,
     };
     // A head starts on a paint, so later paints land near whole grid
-    // frames, a little early or late. Counting a paint up to a quarter
-    // frame early as on time keeps every frame up for the same number of
+    // frames, a little early or late. Counting a paint up to the grid slack
+    // early as on time keeps every frame up for the same number of
     // refreshes, instead of one, then three.
-    let on_grid = (pos.as_secs_f64() * timeline.grid_fps() + GRID_SLACK).floor();
+    let on_grid =
+        (pos.as_secs_f64() * timeline.grid_fps() + grid_slack(timeline, display_hz)).floor();
     let shown = (on_grid / f64::from(stride) + 1e-9).floor();
     let along = if shown.is_finite() && shown >= 0.0 {
         (shown as u64).saturating_mul(u64::from(stride))

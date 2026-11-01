@@ -523,9 +523,22 @@ pub fn mailto_url(address: &str) -> Option<String> {
 /// Open the mail client on a new message to `address`.
 pub fn open_mailto(address: &str) -> OsOpen {
     match mailto_url(address) {
-        Some(url) => os_open(std::ffi::OsStr::new(&url), "open the mail client"),
+        Some(url) => open_mailto_url(&url),
         None => OsOpen::Answered(false),
     }
+}
+
+/// Open the mail client on a `mailto:` URL Quill built (address, subject
+/// and body already percent-encoded). Anything else is refused, like
+/// [`open_external_url`] refuses what is not a web link.
+pub fn open_mailto_url(url: &str) -> OsOpen {
+    let plain = url
+        .chars()
+        .all(|ch| !ch.is_whitespace() && !ch.is_control());
+    if !url.starts_with("mailto:") || !plain {
+        return OsOpen::Answered(false);
+    }
+    os_open(std::ffi::OsStr::new(url), "open the mail client")
 }
 
 /// Hand a URL or path to the OS default handler: the one door every helper
@@ -534,14 +547,25 @@ pub fn open_mailto(address: &str) -> OsOpen {
 /// for the OS stays with the user, whichever link, button or file the
 /// agent reached. `what` is the verb phrase the refusal names.
 fn os_open(target: &std::ffi::OsStr, what: &str) -> OsOpen {
+    if let Some(answer) = os_gate(what) {
+        return answer;
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    test_launches::note_target(target);
+    os_open_now(target)
+}
+
+/// The answer for a hand-off to the OS that must not go ahead: refused
+/// while the agent injects input, or scripted by a test.
+fn os_gate(what: &str) -> Option<OsOpen> {
     if crate::agent::ui_driver::guard::refuse_outside_if_injecting(what) {
-        return OsOpen::Answered(false);
+        return Some(OsOpen::Answered(false));
     }
     #[cfg(any(test, feature = "test-support"))]
     if let Some(answer) = test_launches::scripted_answer() {
-        return answer;
+        return Some(answer);
     }
-    os_open_now(target)
+    None
 }
 
 /// macOS `open`, Linux `xdg-open` (argv, no shell).
@@ -651,6 +675,16 @@ mod test_launches {
     thread_local! {
         static LAUNCHES: Cell<usize> = const { Cell::new(0) };
         static NEXT_ANSWER: Cell<Option<OsOpen>> = const { Cell::new(None) };
+        static LAST_TARGET: std::cell::RefCell<Option<String>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn note_target(target: &std::ffi::OsStr) {
+        LAST_TARGET.with(|last| *last.borrow_mut() = Some(target.to_string_lossy().into_owned()));
+    }
+
+    pub(super) fn last_target() -> Option<String> {
+        LAST_TARGET.with(|last| last.borrow().clone())
     }
 
     pub(super) fn script_answer(answer: OsOpen) {
@@ -678,6 +712,12 @@ pub fn os_launch_attempts() -> usize {
     test_launches::count()
 }
 
+/// Test builds only: the last link or file this thread handed to the OS.
+#[cfg(any(test, feature = "test-support"))]
+pub fn os_opened_last() -> Option<String> {
+    test_launches::last_target()
+}
+
 /// The next open on this thread gets `answer`.
 #[cfg(any(test, feature = "test-support"))]
 pub fn script_next_os_open(answer: OsOpen) {
@@ -694,11 +734,13 @@ pub fn open_local_file(path: &std::path::Path) -> OsOpen {
 /// MED3: reveal a file in the file manager — macOS `open -R` (selects the
 /// file in Finder), Windows `explorer /select,`, Linux opens the parent
 /// directory with `xdg-open` (no portable select-file equivalent). Never
-/// while the agent UI driver injects input, like [`os_open`].
-pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
-    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("reveal a file in its folder") {
-        return false;
-    }
+/// while the agent UI driver injects input, like [`os_open`]. The helper
+/// starts on the calling thread on every OS, so the answer comes at once.
+pub fn reveal_in_file_manager(path: &std::path::Path) -> OsOpen {
+    os_gate("reveal a file in its folder").unwrap_or_else(|| OsOpen::Answered(reveal_now(path)))
+}
+
+fn reveal_now(path: &std::path::Path) -> bool {
     if cfg!(target_os = "macos") {
         let mut command = std::process::Command::new("open");
         command.args(["-R"]).arg(path);
@@ -802,6 +844,27 @@ mod tests {
         ] {
             assert_eq!(mailto_url(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn a_mail_link_reaches_the_os_only_when_it_is_one() {
+        for bad in [
+            "https://example.com",
+            "mailto:ann@example.com\nbcc:x@y.z",
+            "mailto:ann@example.com?subject=two words",
+            "file:///etc/passwd",
+        ] {
+            let before = os_launch_attempts();
+            assert!(
+                matches!(open_mailto_url(bad), OsOpen::Answered(false)),
+                "{bad}"
+            );
+            assert_eq!(os_launch_attempts(), before, "{bad}");
+        }
+        let before = os_launch_attempts();
+        let url = crate::signin::banned_help_mailto("+1 555", "1.0", "linux");
+        assert!(matches!(open_mailto_url(&url), OsOpen::Answered(true)));
+        assert_eq!(os_launch_attempts(), before + 1);
     }
 
     #[test]

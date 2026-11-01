@@ -4,15 +4,16 @@
 //! (`frame_clock`) ticks custom emoji, stickers, GIFs, spoiler specks,
 //! typing dots and clock-driven motion at the highest rate asked, and each
 //! playing video asks for the vsync its next picture is due on
-//! (`request_video_frame`). On a display faster than 60 Hz those land on
-//! different vsyncs, so the window draws their union: a 30 fps clip and
-//! 30 fps emoji cost up to 60 full window frames a second.
+//! (`request_video_frame`). Those can land on different vsyncs, so the
+//! window draws their union: a 30 fps clip and 30 fps emoji cost up to 60
+//! full window frames a second.
 //!
 //! Telegram Desktop drives every animation from one shared tick
 //! (`Ui::Animations::Manager`). Here, on a display refreshing a whole
-//! number of times 60 a second (every other vsync at 120 Hz, every fourth
-//! at 240 Hz), content shares the display's grid vsyncs while more than
-//! one source animates on it (the clock and a clip, or two clips):
+//! number of times 60 a second (every vsync at 60 Hz, every other at
+//! 120 Hz, every fourth at 240 Hz), content shares the display's grid
+//! vsyncs while more than one source animates on it (the clock and a clip,
+//! or two clips):
 //!
 //! - The clock ticks on grid vsyncs when its rate divides the grid's (60,
 //!   30, 20, 15 fps...), so each tick still comes one content frame after
@@ -21,15 +22,21 @@
 //!   apart (30 or 60 fps, not 24, 25 or 50) draws each on the next grid
 //!   vsync, at most one display frame later. Each picture is then still
 //!   held as long as the one before.
+//! - Where such a clip's pictures come slower than the grid, the clock
+//!   moves its ticks onto their vsyncs (`frame_clock::later_tick`): a clip
+//!   keeps its pacing, and content takes one longer hold, once.
 //!
 //! Everything else keeps its own vsyncs: a source animating alone, content
 //! the grid would hold unevenly, content faster than the grid, and anything
-//! drawn for input (scrolling, typing, hover). At 60 Hz every vsync is on
-//! the grid, and other rates (90, 144 Hz) have none, so nothing changes
-//! there.
+//! drawn for input (scrolling, typing, hover). Other rates (90, 144 Hz)
+//! have no grid.
 //!
-//! The grid needs the display's vsync times: the display link's present
-//! time on macOS. Without them (Linux, Windows) nothing changes.
+//! Off the grid the clock still ticks on the display's vsyncs when a whole
+//! number of them make one frame of its content ([`vsync_tick`]): a tick
+//! then comes once per frame, at the same point of each.
+//!
+//! All of this needs the display's vsync times: the display link's present
+//! time on macOS. Without them (Linux, Windows) the clock runs free.
 //! docs/decisions/anim-frame-coalesce.md.
 #![deny(clippy::indexing_slicing)]
 
@@ -50,6 +57,37 @@ impl Vsync {
     pub(crate) fn fresh(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.at) <= self.period * 2
     }
+
+    /// The vsync a frame starting at `now` shows on: this one while it
+    /// lies ahead (the display link reported it for the frame now
+    /// drawing), else the display's next one after `now`.
+    pub(crate) fn target(self, now: Instant) -> Self {
+        let period = nanos(self.period);
+        if now < self.at || period == 0 {
+            return self;
+        }
+        let index = nanos_between(self.at, now).div_euclid(period) + 1;
+        Self {
+            at: shifted(self.at, index * period),
+            period: self.period,
+        }
+    }
+
+    /// The display's first vsync at or after `at`, give or take a quarter
+    /// refresh (the display link's times carry some noise).
+    fn first_from(self, at: Instant) -> Instant {
+        let period = nanos(self.period);
+        if period == 0 {
+            return at;
+        }
+        let offset = nanos_between(self.at, at) - period / i128::from(PHASE_SLACK_DIV);
+        shifted(self.at, rounded_up(offset, period) * period)
+    }
+}
+
+/// `value / by` rounded up.
+fn rounded_up(value: i128, by: i128) -> i128 {
+    -(-value).div_euclid(by)
 }
 
 /// Every `step`-th vsync of a display, counted from `anchor` (one of
@@ -73,14 +111,13 @@ const PHASE_SLACK_DIV: u32 = 4;
 const SNAP_SLACK: Duration = Duration::from_micros(250);
 
 impl ContentGrid {
-    /// The grid of the display `vsync` belongs to; `None` at 60 Hz or
-    /// below, where every vsync is on it.
+    /// The grid of the display `vsync` belongs to, if it has one
+    /// ([`grid_step`]).
     pub(crate) fn new(vsync: Vsync) -> Option<Self> {
-        let step = grid_step(vsync.period);
-        (step >= 2).then_some(Self {
+        Some(Self {
             anchor: vsync.at,
             period: vsync.period,
-            step,
+            step: grid_step(vsync.period)?,
         })
     }
 
@@ -165,20 +202,16 @@ impl ContentGrid {
     }
 }
 
-/// Vsyncs per grid tick on a display refreshing every `period`: 2 at
-/// 120 Hz, 4 at 240 Hz. 1 (no grid) at 60 Hz, where every vsync is on it,
-/// and at rates no whole number of vsyncs makes 60 a second of (90, 144,
-/// 165 Hz), where a grid of its vsyncs would draw 30 and 60 fps content
-/// more often than before.
-fn grid_step(period: Duration) -> u32 {
+/// Vsyncs per grid tick on a display refreshing every `period`: 1 at
+/// 60 Hz, 2 at 120 Hz, 4 at 240 Hz. `None` at rates no whole number of
+/// vsyncs makes 60 a second of (90, 144, 165 Hz), where a grid of its
+/// vsyncs would draw 30 and 60 fps content more often than before.
+fn grid_step(period: Duration) -> Option<u32> {
     let hz = 1.0 / period.as_secs_f64();
     let step = (hz / GRID_HZ).round();
     // A couple of hertz of headroom: 119.88 Hz is a 120 Hz display.
-    if hz.is_finite() && (2.0..=16.0).contains(&step) && (hz - step * GRID_HZ).abs() <= 2.0 {
-        step as u32
-    } else {
-        1
-    }
+    (hz.is_finite() && (1.0..=16.0).contains(&step) && (hz - step * GRID_HZ).abs() <= 2.0)
+        .then_some(step as u32)
 }
 
 /// The grid vsync one frame of content at `fps` after `last`, a vsync it
@@ -189,6 +222,24 @@ pub(crate) fn content_due(grid: &ContentGrid, last: Instant, fps: u32) -> Option
         grid.at_or_before(last.checked_add(grid.tick() * every)?)
             .max(grid.first_after(last.checked_add(grid.period() / 2)?)),
     )
+}
+
+/// The last vsync before `tick` on the beat through `at` that comes `every`
+/// apart. `None` when `tick` is on that beat, give or take a quarter of a
+/// frame of the grid.
+pub(crate) fn beat_before(
+    grid: &ContentGrid,
+    at: Instant,
+    every: Duration,
+    tick: Instant,
+) -> Option<Instant> {
+    let every = nanos(every);
+    if every == 0 {
+        return None;
+    }
+    let slack = nanos(grid.period()) / i128::from(PHASE_SLACK_DIV);
+    let past = nanos_between(at, tick).rem_euclid(every);
+    (past > slack && every - past > slack).then(|| shifted(tick, -past))
 }
 
 /// The frame clock's next tick of content at `fps`, as `(wake, vsync)`:
@@ -219,12 +270,49 @@ pub(crate) fn clock_tick(
     Some((wake, at))
 }
 
+/// The frame clock's next tick of content at `fps` on the display of
+/// `vsync`, its latest vsync, as `(wake, vsync)`: the vsync one content
+/// frame after `last` (the vsync the last tick drew on), never one whose
+/// frame has started by `now`, and the time to wake for it, as in
+/// [`clock_tick`]. A timer alone drifts against the display: a tick then
+/// lands on either side of a frame's start, and one frame draws nothing.
+/// `None` when no whole number of refreshes makes one frame at `fps`.
+pub(crate) fn vsync_tick(
+    vsync: Vsync,
+    lead: Duration,
+    last: Instant,
+    now: Instant,
+    fps: u32,
+) -> Option<(Instant, Instant)> {
+    let every = refreshes_per_frame(vsync.period, fps)?;
+    let due = vsync.first_from(last.checked_add(vsync.period * every)?);
+    let starting = now.checked_add(lead + Duration::from_millis(1))?;
+    let at = due.max(vsync.target(starting).at);
+    let wake = at
+        .checked_sub(lead + vsync.period * 3 / 4)
+        .unwrap_or(now)
+        .max(now);
+    Some((wake, at))
+}
+
+/// Refreshes every `period` between two frames of content at `fps`: one
+/// for content as fast as the display or faster. `None` when no whole
+/// number of them makes one frame (60 fps on a 144 Hz display).
+fn refreshes_per_frame(period: Duration, fps: u32) -> Option<u32> {
+    let ratio = 1.0 / f64::from(fps.max(1)) / period.as_secs_f64();
+    let every = ratio.round().max(1.0);
+    (ratio.is_finite() && (ratio <= 1.0 || (ratio - every).abs() <= 0.05)).then_some(every as u32)
+}
+
 /// How a clip's pictures are spaced, learned from their due times.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Cadence {
     last: Option<Instant>,
     /// The latest gaps in a row that were a whole number of grid ticks.
     even: u8,
+    /// The latest gap, and how many gaps in a row came that far apart.
+    spacing: Option<Duration>,
+    steady: u8,
 }
 
 /// Two due times this close are the same picture's.
@@ -242,6 +330,16 @@ impl Cadence {
             Some(last) if due > last + SAME_PICTURE => {
                 let even = grid.is_some_and(|grid| grid.whole_ticks(due - last));
                 self.even = if even { self.even.saturating_add(1) } else { 0 };
+                let gap = due - last;
+                let same = self
+                    .spacing
+                    .is_some_and(|spacing| spacing.abs_diff(gap) <= SAME_PICTURE);
+                self.steady = if same {
+                    self.steady.saturating_add(1)
+                } else {
+                    1
+                };
+                self.spacing = Some(gap);
                 self.last = Some(due);
             }
             // Back to the start (a loop, a seek): the spacing stays.
@@ -258,6 +356,13 @@ impl Cadence {
         self.even >= EVEN_GAPS
     }
 
+    /// How far apart its pictures come, once the last [`EVEN_GAPS`] came
+    /// [`Self::even`]ly and alike.
+    pub(crate) fn even_spacing(&self) -> Option<Duration> {
+        self.spacing
+            .filter(|_| self.even() && self.steady >= EVEN_GAPS)
+    }
+
     /// The vsync to draw the picture due at `due` on: the next vsync of
     /// `grid` (the display's, while other content animates on it) when the
     /// clip's pictures come [`Self::even`]ly; else its own.
@@ -267,6 +372,29 @@ impl Cadence {
             _ => due,
         }
     }
+}
+
+/// The vsyncs the frame clock ticks content on: `at`, and every `every`
+/// before and after it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Lattice {
+    pub(crate) at: Instant,
+    pub(crate) every: Duration,
+}
+
+/// The time content in a frame shown on `vsync` plays at: the clock's last
+/// tick vsync at or before `vsync`. A play head started on any draw then
+/// moves to a new frame only on a tick's vsync, so a draw between ticks (a
+/// clip's, a scroll's) never shows one a refresh or two early, which the
+/// next tick would then hold that much longer.
+pub(crate) fn content_time(vsync: Vsync, lattice: Lattice) -> Instant {
+    let every = nanos(lattice.every);
+    if every == 0 {
+        return vsync.at;
+    }
+    let slack = nanos(vsync.period) / i128::from(PHASE_SLACK_DIV);
+    let index = (nanos_between(lattice.at, vsync.at) + slack).div_euclid(every);
+    shifted(lattice.at, index * every)
 }
 
 /// Something that animates on a display: the frame clock, or a clip (by
@@ -311,7 +439,7 @@ pub(crate) fn shared(display: u64, source: Source, now: Instant) -> bool {
 }
 
 /// The content grid of `display`, kept in phase with `vsync`, its latest
-/// one; `None` at 60 Hz or below, or with no recent vsync (`now`).
+/// one; `None` where it has none, or with no recent vsync (`now`).
 pub(crate) fn display_grid(display: u64, vsync: Vsync, now: Instant) -> Option<ContentGrid> {
     if !vsync.fresh(now) {
         return None;

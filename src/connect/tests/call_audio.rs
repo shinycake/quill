@@ -29,7 +29,7 @@ fn joined_unmuted_call(audio_source_id: i32) -> ActiveGroupCall {
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
     me.audio_source_id = audio_source_id;
     me.can_unmute_self = true;
-    call.participants = Arc::new(vec![me]);
+    call.participants = vec![me].into();
     call
 }
 
@@ -98,11 +98,11 @@ fn tap_runs_only_while_joined_and_allowed_to_speak() {
     call.is_joined = false;
     assert_eq!(tap_wanted(&call), None, "not joined: no tap");
     call.is_joined = true;
-    let participants = Arc::make_mut(&mut call.participants);
+    let participants = call.participants.edit();
     participants[0].is_muted_for_all_users = true;
     participants[0].can_unmute_self = false;
     assert_eq!(tap_wanted(&call), None, "muted by an admin: no tap");
-    Arc::make_mut(&mut call.participants).clear();
+    call.participants.edit().clear();
     assert_eq!(tap_wanted(&call), None, "no self participant yet: no tap");
 }
 

@@ -97,7 +97,7 @@ impl FormatAction {
 /// Telegram. Kinds the markup can't express (URLs, mentions, …) stay plain
 /// text; TDLib detects those again on send.
 pub fn entities_to_markup(text: &str, entities: &[crate::text::TextEntity]) -> String {
-    crate::composer_doc::ComposerDoc::from_entities(text, entities).to_markup()
+    crate::composer_doc::ComposerDoc::from_entities(text, entities).to_final_markup()
 }
 
 /// M1: apply a formatting action to `range` (UTF-8 byte range; snapped to
@@ -313,14 +313,15 @@ fn strip_range(text: &str, from: usize, to: usize, out: &mut String) {
 pub fn find_urls(text: &str) -> Vec<String> {
     text.split_whitespace()
         .filter_map(|token| {
-            let lower = token.to_lowercase();
-            let url = if lower.starts_with("http://") || lower.starts_with("https://") {
-                token
-            } else {
-                return None;
+            let starts = |scheme: &str| {
+                let head = token.as_bytes().get(..scheme.len());
+                head.is_some_and(|head| head.eq_ignore_ascii_case(scheme.as_bytes()))
             };
+            if !starts("http://") && !starts("https://") {
+                return None;
+            }
             let trimmed =
-                url.trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '\'', '"', '…']);
+                token.trim_end_matches([',', '.', ';', ':', '!', '?', ')', ']', '\'', '"', '…']);
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect()

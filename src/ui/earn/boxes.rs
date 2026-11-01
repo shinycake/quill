@@ -6,6 +6,7 @@ use super::revenue::ton_amount;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
 use crate::ui::earn_state::AskBoostReason;
+use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -148,7 +149,10 @@ impl QuillApp {
                 .child(super::revenue::about_with_link(
                     "earn-learn-coin",
                     tr(keys::Q_MONEY_TON_IS_A_BLOCKCHAIN_PLATFORM),
-                    |_, cx| cx.open_url(TON_BLOG_URL),
+                    {
+                        let app = app.downgrade();
+                        move |_, cx| open_link_in(&app, TON_BLOG_URL, cx)
+                    },
                     cx,
                 ))
                 .into_any_element();
@@ -226,7 +230,10 @@ impl QuillApp {
                     .label(tr(keys::CHANNEL_EARN_HISTORY_OUT_BUTTON))
                     .primary()
                     .w_full()
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                    .on_click({
+                        let app = app.downgrade();
+                        move |_, _, cx| open_link_in(&app, &url, cx)
+                    }),
                 None => Button::new("earn-tx-ok")
                     .label(tr(keys::BOX_OK))
                     .primary()

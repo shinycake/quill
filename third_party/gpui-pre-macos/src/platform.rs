@@ -14,9 +14,8 @@ use gpui::{
     BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, GraphicalEnvironment,
     KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
     PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
-    PlatformWindow, Result, SystemMenuType, Task, ThermalState, WindowAppearance, WindowKind,
-    WindowParams, WindowingRequest,
-    popup::PopupNotSupportedError,
+    PlatformWindow, QuitAnswer, QuitStep, Result, SystemMenuType, Task, ThermalState, WindowAppearance,
+    WindowKind, WindowParams, WindowingRequest, popup::PopupNotSupportedError,
 };
 use gpui_apple::{
     keychain,
@@ -33,9 +32,10 @@ use objc2::{
 use objc2_app_kit::{
     NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSAppearanceNameVibrantDark,
     NSAppearanceNameVibrantLight, NSApplication, NSApplicationActivationPolicy,
-    NSControlStateValueOn, NSCursor, NSDocumentController, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel, NSSavePanel, NSScroller,
-    NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    NSApplicationTerminateReply, NSControlStateValueOn, NSCursor, NSDocumentController,
+    NSEventModifierFlags, NSMenu, NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel,
+    NSSavePanel, NSScroller, NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_foundation::{
     NSActivityOptions, NSArray, NSBundle, NSError, NSInteger, NSProcessInfo, NSString, NSURL,
@@ -91,6 +91,11 @@ unsafe fn build_classes() {
             decl.add_method(
                 sel!(applicationDidBecomeActive:),
                 did_become_active as extern "C-unwind" fn(_, Sel, *mut AnyObject),
+            );
+            decl.add_method(
+                sel!(applicationShouldTerminate:),
+                should_terminate
+                    as extern "C-unwind" fn(_, Sel, *mut AnyObject) -> NSApplicationTerminateReply,
             );
             decl.add_method(
                 sel!(applicationWillTerminate:),
@@ -188,6 +193,11 @@ pub(crate) struct MacPlatformState {
     on_system_wake: Option<Box<dyn FnMut()>>,
     system_power_observers_registered: bool,
     quit: Option<Box<dyn FnMut() -> bool>>,
+    quit_request: Option<Box<dyn FnMut() -> QuitAnswer>>,
+    /// `quit_request` was registered; an empty slot then means it runs.
+    quit_request_set: bool,
+    /// `Platform::quit` ran: the app decided, so `terminate:` asks nothing.
+    quit_decided: bool,
     menu_command: Option<Box<dyn FnMut(&dyn Action)>>,
     validate_menu_command: Option<Box<dyn FnMut(&dyn Action) -> bool>>,
     will_open_menu: Option<Box<dyn FnMut()>>,
@@ -252,6 +262,9 @@ impl MacPlatform {
             reopen: None,
             app_lifecycle: None,
             quit: None,
+            quit_request: None,
+            quit_request_set: false,
+            quit_decided: false,
             menu_command: None,
             validate_menu_command: None,
             will_open_menu: None,
@@ -587,6 +600,7 @@ impl Platform for MacPlatform {
         // this, we make quitting the application asynchronous so that we aren't holding borrows to
         // the app state on the stack when we actually terminate the app.
 
+        self.0.lock().quit_decided = true;
         unsafe {
             DispatchQueue::main().exec_async_f(ptr::null_mut(), quit);
         }
@@ -1045,6 +1059,12 @@ impl Platform for MacPlatform {
         self.0.lock().quit = Some(callback);
     }
 
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> QuitAnswer>) {
+        let mut lock = self.0.lock();
+        lock.quit_request = Some(callback);
+        lock.quit_request_set = true;
+    }
+
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.0.lock().reopen = Some(callback);
     }
@@ -1401,6 +1421,66 @@ extern "C-unwind" fn did_become_active(this: &AnyObject, _: Sel, _: *mut AnyObje
         if let Some(mut callback) = callback {
             callback(AppLifecyclePhase::Active);
             platform.0.lock().app_lifecycle.get_or_insert(callback);
+        }
+    }
+}
+
+extern "C-unwind" fn should_terminate(
+    this: &AnyObject,
+    _: Sel,
+    _: *mut AnyObject,
+) -> NSApplicationTerminateReply {
+    let platform = unsafe { get_mac_platform(this) };
+    if platform.0.lock().quit_decided {
+        return NSApplicationTerminateReply::TerminateNow;
+    }
+    match ask_quit_request(platform) {
+        QuitAnswer::Allow => NSApplicationTerminateReply::TerminateNow,
+        QuitAnswer::Refuse => NSApplicationTerminateReply::TerminateCancel,
+        QuitAnswer::Later => {
+            ask_quit_request_later(platform, 1);
+            NSApplicationTerminateReply::TerminateLater
+        }
+    }
+}
+
+fn ask_quit_request(platform: &MacPlatform) -> QuitAnswer {
+    let mut lock = platform.0.lock();
+    if !lock.quit_request_set {
+        return QuitAnswer::Allow;
+    }
+    let Some(mut callback) = lock.quit_request.take() else {
+        return QuitAnswer::Later;
+    };
+    drop(lock);
+    let answer = callback();
+    platform.0.lock().quit_request.get_or_insert(callback);
+    answer
+}
+
+/// How many asks the quit AppKit waits on has had; one quit waits at a time.
+static QUIT_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+// The app was busy when AppKit asked: it waits for
+// `replyToApplicationShouldTerminate:`, and the app is asked again from the
+// main queue, at most `QUIT_ASKS_AGAIN` times (`QuitAnswer::step`).
+fn ask_quit_request_later(platform: &MacPlatform, asked: u32) {
+    QUIT_ASKED.store(asked, std::sync::atomic::Ordering::Relaxed);
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    // SAFETY: platform lives for the process lifetime while callbacks are registered.
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, answer_later);
+    }
+
+    extern "C" fn answer_later(context: *mut c_void) {
+        // SAFETY: context is the MacPlatform pointer queued above.
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        let asked = QUIT_ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        match ask_quit_request(platform).step(asked) {
+            QuitStep::AskAgain(asked) => ask_quit_request_later(platform, asked),
+            QuitStep::Settled(allow) => {
+                NSApplication::sharedApplication(platform.1).replyToApplicationShouldTerminate(allow)
+            }
         }
     }
 }

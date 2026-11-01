@@ -1,9 +1,13 @@
-//! The main window brought back on a Mac, and Quit with no key window
-//! (needs the `demo-capture` feature for gpui-kit's test support). Which
+//! The main window brought back on a Mac, Quit with no key window, and a
+//! link a closed main window had not opened yet (needs the `demo-capture`
+//! feature for gpui-kit's test support). Which
 //! close hides on which platform: `quill::tray`'s tests. The test platform
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
-use super::{MainWindow, main_window_on_activation, note_main_window, raise_main_window_if};
+use super::{
+    MainWindow, answer_wakes, main_window_on_activation, note_main_window, raise_main_window_if,
+    take_hide_after_full_screen,
+};
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -73,6 +77,63 @@ fn quill_coming_forward_raises_the_closed_main_window(cx: &mut TestAppContext) {
     assert!(vcx.update(|window, _| window.is_window_active()));
 }
 
+fn close_in_full_screen(vcx: &mut VisualTestContext) {
+    close_main_window(vcx);
+    vcx.cx
+        .update(|cx| cx.global_mut::<MainWindow>().hide_after_full_screen = true);
+}
+
+#[gpui_kit::test]
+fn a_dock_click_during_the_full_screen_wait_undoes_the_close(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_in_full_screen(vcx);
+    vcx.cx.update(|cx| raise_main_window_if(|_| false, cx));
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        !vcx.cx.update(take_hide_after_full_screen),
+        "the wait hides nothing"
+    );
+}
+
+#[gpui_kit::test]
+fn quill_coming_forward_during_the_full_screen_wait_undoes_the_close(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_in_full_screen(vcx);
+    let view = app.downgrade();
+    vcx.cx
+        .update(|cx| main_window_on_activation(&view, |_| false, cx));
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        !vcx.cx.update(take_hide_after_full_screen),
+        "the wait hides nothing"
+    );
+}
+
+#[gpui_kit::test]
+fn a_chat_window_coming_forward_leaves_the_full_screen_wait_running(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_window_at(ChatId(11), None, window, cx);
+    });
+    vcx.run_until_parked();
+    close_in_full_screen(vcx);
+    let view = app.downgrade();
+    vcx.cx
+        .update(|cx| main_window_on_activation(&view, |_| false, cx));
+    vcx.run_until_parked();
+    assert!(!vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        vcx.cx.update(take_hide_after_full_screen),
+        "the close stands"
+    );
+}
+
 #[gpui_kit::test]
 fn a_main_window_the_user_did_not_close_stays_hidden_when_quill_comes_forward(
     cx: &mut TestAppContext,
@@ -137,7 +198,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     let dir = quill::scratch::process_dir("quill-link-inbox-export");
     let _ = std::fs::create_dir_all(&dir);
     let settings = quill::export::ExportSettings::new(16, "Export Chat".into(), dir.clone());
-    let Ok(export) = quill::export::ChatExport::start(settings, dir.clone()) else {
+    let Ok(export) = quill::export::ChatExport::start(settings, dir.clone(), None) else {
         panic!("the export did not start");
     };
     app.update(vcx, |app, _| {
@@ -150,7 +211,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     vcx.cx.update(|cx| cx.dispatch_action(&QuitApp));
     vcx.run_until_parked();
     assert!(!vcx.cx.windows().is_empty(), "still running");
-    assert!(app.read_with(vcx, |app, _| app.dialogs.export_stop_open));
+    assert!(app.read_with(vcx, |app, _| app.dialogs.export_stop.is_some()));
     assert!(
         vcx.update(|window, _| window.is_window_active()),
         "back with the prompt"
@@ -161,4 +222,82 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
         }
     });
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn drop_with_link(cx: &mut TestAppContext, link: &str, from_agent: bool) -> Option<String> {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    app.update(&mut vcx, |app, _| {
+        app.pending_deep_link = Some(link.to_owned());
+        app.links.agent_pending_link = from_agent.then(|| link.to_owned());
+    });
+    vcx.update(|window, _| window.remove_window());
+    drop(app);
+    // GPUI drops released entities when it next flushes its effects.
+    vcx.cx.update(|_| {});
+    crate::ui::deep_links::take_left_by_dropped_app()
+}
+
+#[gpui_kit::test]
+fn a_link_the_closed_main_window_had_not_opened_goes_to_the_next(cx: &mut TestAppContext) {
+    let link = "tg://resolve?domain=quill";
+    assert_eq!(drop_with_link(cx, link, false).as_deref(), Some(link));
+    assert_eq!(
+        drop_with_link(cx, link, true),
+        None,
+        "an agent's link is not the user's"
+    );
+}
+
+#[gpui_kit::test]
+fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAppContext) {
+    static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
+    static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
+    let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = turns.clone();
+    cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            answer_wakes(cx, &SIGNAL, &UI, |_| {
+                counted.set(counted.get() + 1);
+                // A second launch marks the beat and pokes mid-turn.
+                if counted.get() == 2 {
+                    SIGNAL.poke();
+                }
+                true
+            })
+            .await;
+        })
+        .detach();
+    });
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 1, "the first turn, then asleep until a poke");
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 3, "the mid-turn poke woke the loop again");
+}
+
+#[gpui_kit::test]
+fn a_launch_that_pokes_before_the_inbox_first_runs_is_answered_at_once(cx: &mut TestAppContext) {
+    static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
+    static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
+    let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = turns.clone();
+    cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            answer_wakes(cx, &SIGNAL, &UI, |_| {
+                counted.set(counted.get() + 1);
+                true
+            })
+            .await;
+        })
+        .detach();
+    });
+    // A double-click on the app icon while Quill starts: the second launch
+    // queues its activation and pokes before the inbox task has run.
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(
+        turns.get(),
+        1,
+        "the launch's activation is handled, not left for 60 s"
+    );
 }

@@ -6,8 +6,10 @@
 //! and the chat open finds nothing. Set it to an image path and that image
 //! is the sender picture; `QUILL_DEBUG_NOTIFICATION_PHOTO` names an image
 //! shown as the message's photo, and `QUILL_DEBUG_NOTIFICATION_CUSTOM`
-//! shows it in Quill's own notification window instead. Never set in
-//! normal use.
+//! shows it in Quill's own notification window instead. Set that to a
+//! number and the check is posted that many times, each replacing the
+//! last, so each opens a new window (with `QUILL_TRACE_TOASTS=1`, the toast
+//! timing run in `docs/build.md`). Never set in normal use.
 
 use super::*;
 use quill::lang::{keys, tr};
@@ -42,8 +44,22 @@ impl QuillApp {
             icon.is_some(),
             preview.is_some()
         );
-        if std::env::var_os("QUILL_DEBUG_NOTIFICATION_CUSTOM").is_some() {
-            self.show_custom_notification(None, notification, icon, preview, locked, true, cx);
+        if let Some(custom) = std::env::var_os("QUILL_DEBUG_NOTIFICATION_CUSTOM") {
+            let times = custom
+                .to_str()
+                .and_then(|times| times.parse::<usize>().ok())
+                .unwrap_or(1);
+            for _ in 0..times {
+                self.show_custom_notification(
+                    None,
+                    notification.clone(),
+                    icon.clone(),
+                    preview.clone(),
+                    locked,
+                    true,
+                    cx,
+                );
+            }
             return;
         }
         self.show_os_notification(notification, icon, preview, locked, cx);

@@ -20,24 +20,7 @@ pub fn install_link_inbox(
         let view = view.downgrade();
         let window_handle = window.window_handle();
         async move |cx| {
-            loop {
-                // Asleep until a link, activation or quit request arrives
-                // (the OS callback and the single-instance listener poke
-                // `wake::LINKS`); links waiting behind another flow are
-                // retried at the old cadence.
-                let seen = quill::wake::LINKS.epoch();
-                let wait = if quill::deep_link_inbox::has_pending_links() {
-                    std::time::Duration::from_millis(250)
-                } else {
-                    std::time::Duration::from_secs(60)
-                };
-                super::wake_wait::sleep_or_wake(
-                    cx.background_executor(),
-                    &quill::wake::LINKS,
-                    seen,
-                    wait,
-                )
-                .await;
+            answer_wakes(cx, &quill::wake::LINKS, &quill::single_instance::UI, |cx| {
                 let alive = view
                     .update(cx, |this, _| {
                         if this.pending_deep_link.is_none()
@@ -47,21 +30,55 @@ pub fn install_link_inbox(
                         }
                     })
                     .is_ok();
-                if !alive {
-                    break;
-                }
-                if quill::deep_link_inbox::take_activation() {
+                if alive && quill::deep_link_inbox::take_activation() {
                     let _ = window_handle.update(cx, |_, window, cx| raise_main_window(window, cx));
                 }
-            }
+                alive
+            })
+            .await;
         }
     })
     .detach();
 }
 
+/// Runs `turn` once, then each time `signal` wakes the loop, until it
+/// returns false. A second launch waits for `ui` to beat before it is
+/// acknowledged. The epoch the next sleep waits past is read before the
+/// beat, and before `ui` starts: a launch marks after some beat (or before
+/// the start, and is answered at once) and pokes after its mark, so its
+/// poke ends the next sleep even when it lands while `turn` runs, and the
+/// first turn takes whatever came before.
+async fn answer_wakes(
+    cx: &mut gpui_kit::AsyncApp,
+    signal: &'static quill::wake::Signal,
+    ui: &quill::single_instance::Heartbeat,
+    mut turn: impl FnMut(&mut gpui_kit::AsyncApp) -> bool,
+) {
+    let mut seen = signal.epoch();
+    ui.start();
+    loop {
+        ui.beat();
+        if !turn(cx) {
+            ui.stop();
+            return;
+        }
+        // Asleep until a link, activation or quit request arrives (the OS
+        // callback and the single-instance listener poke `signal`); links
+        // waiting behind another flow are retried at the old cadence.
+        let wait = if quill::deep_link_inbox::has_pending_links() {
+            std::time::Duration::from_millis(250)
+        } else {
+            std::time::Duration::from_secs(60)
+        };
+        super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
+        seen = signal.epoch();
+    }
+}
+
 /// Brings the main window to the front, restoring it from the tray, the
 /// Dock (minimized) or a hidden app.
 pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    take_hide_after_full_screen(cx);
     // Hidden to the tray (Windows, X11) or minimized (everywhere): show it
     // again, then bring it to the front.
     super::window_control::set_visible(window, true);
@@ -75,6 +92,7 @@ pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) 
 struct MainWindow {
     handle: gpui_kit::AnyWindowHandle,
     closed_by_user: bool,
+    hide_after_full_screen: bool,
 }
 
 impl gpui_kit::Global for MainWindow {}
@@ -84,7 +102,20 @@ pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
     cx.set_global(MainWindow {
         handle: window.window_handle(),
         closed_by_user: false,
+        hide_after_full_screen: false,
     });
+}
+
+/// The main window's id, once it opened.
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+pub(crate) fn main_window_id(cx: &gpui_kit::App) -> Option<gpui_kit::WindowId> {
+    cx.try_global::<MainWindow>()
+        .map(|main| main.handle.window_id())
+}
+
+fn take_hide_after_full_screen(cx: &mut gpui_kit::App) -> bool {
+    cx.has_global::<MainWindow>()
+        && std::mem::take(&mut cx.global_mut::<MainWindow>().hide_after_full_screen)
 }
 
 /// macOS calls this for a Dock click, with windows showing or not: a main
@@ -97,7 +128,7 @@ pub fn reopen_main_window(cx: &mut gpui_kit::App) {
 fn raise_main_window_if(hidden: impl FnOnce(&gpui_kit::Window) -> bool, cx: &mut gpui_kit::App) {
     if let Some(main) = cx.try_global::<MainWindow>().copied() {
         let _ = main.handle.update(cx, |_, window, cx| {
-            if hidden(window) {
+            if main.hide_after_full_screen || hidden(window) {
                 raise_main_window(window, cx);
             }
         });
@@ -117,10 +148,11 @@ fn main_window_on_activation(
         return;
     };
     let closed = main.closed_by_user
-        && main
-            .handle
-            .update(cx, |_, window, _| hidden(window))
-            .unwrap_or(false);
+        && (main.hide_after_full_screen
+            || main
+                .handle
+                .update(cx, |_, window, _| hidden(window))
+                .unwrap_or(false));
     if !closed {
         return;
     }
@@ -148,11 +180,22 @@ const LEFT_FULLSCREEN_POLLS: u32 = 30;
 
 /// Hide the main window, tdesktop's `closeWithoutDestroy`: on a Mac it
 /// leaves full screen first, because hiding it there leaves a black Space.
-fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
-    if cx.has_global::<MainWindow>() {
-        cx.global_mut::<MainWindow>().closed_by_user = true;
+/// Raising the window during that wait undoes the close, unlike tdesktop,
+/// where the wait then hides the window the user just asked for.
+pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    let waiting = cx
+        .try_global::<MainWindow>()
+        .is_some_and(|main| main.hide_after_full_screen);
+    if waiting {
+        return;
     }
-    if !(cfg!(target_os = "macos") && window.is_fullscreen()) {
+    let leave_full_screen = cfg!(target_os = "macos") && window.is_fullscreen();
+    if cx.has_global::<MainWindow>() {
+        let main = cx.global_mut::<MainWindow>();
+        main.closed_by_user = true;
+        main.hide_after_full_screen = leave_full_screen;
+    }
+    if !leave_full_screen {
         hide_or_minimize(window);
         return;
     }
@@ -168,7 +211,11 @@ fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
                 break;
             }
         }
-        let _ = main.update(cx, |_, window, _| hide_or_minimize(window));
+        let _ = main.update(cx, |_, window, cx| {
+            if take_hide_after_full_screen(cx) {
+                hide_or_minimize(window);
+            }
+        });
     })
     .detach();
 }
@@ -199,9 +246,8 @@ impl super::QuillApp {
                 if self.exit_held_by_export(super::export_quit::quit_app, window, cx) {
                     return false;
                 }
-                // No account to keep running for; a Mac app would stay
-                // alive with no window otherwise.
-                #[cfg(target_os = "macos")]
+                // No account to keep running for: quit, as tdesktop does,
+                // even with a PiP or a chat window still open.
                 cx.quit();
                 true
             }

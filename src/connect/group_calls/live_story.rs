@@ -138,6 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 ssrc_groups,
                 screen,
                 audio_ssrc: streamer.audio_source_id.cast_unsigned(),
+                large: false,
             })
         })
         .collect()

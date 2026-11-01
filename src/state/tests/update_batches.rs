@@ -108,3 +108,62 @@ fn cheap_list_checks_agree_with_the_lists() {
     assert!(session.has_archived_chats());
     assert_eq!(session.ordered_archived_chats().len(), 1);
 }
+
+/// The chat lists kept up to date by placing moved chats equal a full
+/// sort, across moves, ties, leaving and rejoining both lists.
+#[test]
+fn placing_moved_chats_matches_a_full_sort() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for chat in 1..=200 {
+        session
+            .chats
+            .entry(chat)
+            .or_insert_with(|| placeholder_chat(ChatId(chat)));
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &position_json(chat, chat * 10, false),
+        );
+    }
+    let mut state: u64 = 7;
+    let mut next = |below: u64| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) % below
+    };
+    for round in 0..300 {
+        session.begin_update_batch();
+        for _ in 0..1 + next(4) {
+            let chat = 1 + next(200) as i64;
+            let order = match next(5) {
+                0 => 0,
+                1 => 1_000,
+                _ => next(3_000) as i64,
+            };
+            let list = if next(3) == 0 {
+                "chatListArchive"
+            } else {
+                "chatListMain"
+            };
+            apply_json(
+                &mut session,
+                &seq,
+                &sink,
+                &format!(
+                    r#"{{"@type":"updateChatPosition","chat_id":{chat},"position":{{"@type":"chatPosition","list":{{"@type":"{list}"}},"order":"{order}","is_pinned":false}}}}"#
+                ),
+            );
+        }
+        session.end_update_batch();
+        let placed = (session.main_order.clone(), session.archive_order.clone());
+        session.rebuild_main_order();
+        assert_eq!(
+            placed,
+            (session.main_order.clone(), session.archive_order.clone()),
+            "round {round}"
+        );
+    }
+}

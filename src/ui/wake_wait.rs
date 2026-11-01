@@ -2,7 +2,7 @@
 //! first, and the pacing of the poll loops that do.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::{BackgroundExecutor, Task};
+use gpui_kit::{ActivityGuard, BackgroundExecutor, Task};
 use quill::wake::Signal;
 use std::future::Future;
 use std::pin::Pin;
@@ -66,11 +66,11 @@ impl RestTimer {
 
 /// What a pass of a poll loop left for the next one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct PassEnd {
+pub struct PassEnd {
     /// More is waiting, so the loop must not rest.
-    pub(super) work_left: bool,
+    pub work_left: bool,
     /// When timed work next comes due, if any.
-    pub(super) due: Option<Duration>,
+    pub due: Option<Duration>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +105,13 @@ impl PollPace {
     }
 }
 
+/// About a minute after Quill is hidden, App Nap runs its timers up to
+/// 200 ms late, so a backlog that takes a second took about 19.
+pub(super) fn backlog_hold(executor: &BackgroundExecutor) -> impl Fn() -> ActivityGuard + use<> {
+    let executor = executor.clone();
+    move || executor.prevent_app_nap("applying Telegram updates")
+}
+
 /// Run `pass` until it returns `None`, paced by `pace`. Every envelope
 /// pokes `signal`, and a future holds the main thread until it returns
 /// `Pending`, so a wait that a poke has already ended would run pass after
@@ -114,24 +121,52 @@ pub(super) async fn run_poll_loop(
     executor: BackgroundExecutor,
     signal: &'static Signal,
     pace: PollPace,
+    hold: impl Fn() -> ActivityGuard,
     mut pass: impl FnMut() -> Option<PassEnd>,
 ) {
     let mut timer = RestTimer::default();
+    let mut held = None;
     loop {
         let seen = signal.epoch();
         let Some(end) = pass() else {
             break;
         };
         match pace.next(end, signal.epoch() != seen) {
-            NextPass::Yield(gap) => executor.timer(gap).await,
+            NextPass::Yield(gap) => {
+                held.get_or_insert_with(&hold);
+                executor.timer(gap).await;
+            }
             NextPass::Rest(longest) => {
+                held = None;
                 let began = executor.now();
                 timer.rest(&executor, signal, seen, longest).await;
                 let rested = executor.now().saturating_duration_since(began);
-                executor.timer(pace.gap_left(rested)).await;
+                let gap = pace.gap_left(rested);
+                if !gap.is_zero() {
+                    // A poke cut the rest short, so its update waits out the gap.
+                    held.get_or_insert_with(&hold);
+                    executor.timer(gap).await;
+                }
             }
         }
     }
+}
+
+/// The pace of the tray and app icon badge loop: an update after a quiet
+/// spell lands at once, a burst of `wake::CHROME` pokes (one per applied
+/// update batch) syncs at most four times a second, like the menu loop's
+/// one-second guard, and a tray host that appears late is noticed within
+/// ten seconds.
+pub(super) const CHROME_PACE: PollPace = PollPace {
+    gap: Duration::from_millis(250),
+    ceiling: Duration::from_secs(10),
+};
+
+/// Run the tray and badge `pass` on [`quill::wake::CHROME`] at
+/// [`CHROME_PACE`], with one fallback timer kept across rests.
+pub async fn run_chrome_loop(executor: BackgroundExecutor, pass: impl FnMut() -> Option<PassEnd>) {
+    let hold = backlog_hold(&executor);
+    run_poll_loop(executor, &quill::wake::CHROME, CHROME_PACE, hold, pass).await;
 }
 
 #[cfg(test)]

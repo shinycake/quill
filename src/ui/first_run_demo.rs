@@ -18,7 +18,7 @@ fn signed_out() -> (ConnectUiStatus, String, AuthorizationState) {
 
 register_demos![
     DemoSpec::signed_out("first-run-intro", signed_out).setup(|app, _, cx| {
-        app.first_run = FirstRun::welcome(super::first_run_ui::open_intro(cx), Instant::now());
+        app.first_run = super::first_run_ui::start_intro(cx);
     }),
     DemoSpec::signed_out("first-run-notice", signed_out).setup(|app, _, _| {
         app.first_run = FirstRun::welcome(None, Instant::now());

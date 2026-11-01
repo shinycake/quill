@@ -3,7 +3,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
-use super::{CLOSE_SLACK, ClipSpec, DISPLAY, HeadId, Leaving, Part, Place, StickerView, edge_for};
+use super::{
+    CLOSE_SLACK, ClipSpec, HeadId, Leaving, Part, Place, StickerView, display_of, edge_for,
+};
 use futures_channel::oneshot;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
@@ -13,7 +15,6 @@ use quill::power_saving;
 use quill::sticker_playback::player::{ClipKey, PlayMode, Rest, grid_hz};
 use quill::sticker_playback::{FitzType, Tint};
 use quill::telegram::envelope::{DicePhase, StickerFormat};
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::rc::Rc;
@@ -105,19 +106,20 @@ impl ViewAsk {
         Self { tint, ..self }
     }
 
-    /// Its clip at the size its box has on the last painted window, on
-    /// the frame grid for that window's display. A WebM clip keeps its own
-    /// frames, and a view capped at 60 frames a second never steps finer.
-    pub(super) fn key(&self) -> ClipKey {
-        let (scale, display_hz) = DISPLAY.with(Cell::get);
+    /// Its clip at the size its box has in `window` (`None`: the main
+    /// window), on the frame grid for that window's display. A WebM clip
+    /// keeps its own frames, and a view capped at 60 frames a second never
+    /// steps finer.
+    pub(super) fn key(&self, window: Option<ChatId>) -> ClipKey {
+        let display = display_of(window);
         let hz = if self.format == StickerFormat::Webm || self.max_fps <= 60 {
             grid_hz(0.0)
         } else {
-            grid_hz(display_hz).min(self.max_fps)
+            grid_hz(display.hz).min(self.max_fps)
         };
         ClipKey {
             file: self.file.0,
-            edge: edge_for(self.side * scale),
+            edge: edge_for(self.side * display.scale),
             fitz: self.fitz,
             tint: self.tint,
             mirror: self.mirror,
@@ -239,7 +241,7 @@ impl QuillApp {
         let path = self.sticker_path(ask.file, cx);
         let path = path?;
         self.ensure_sticker_pump(cx);
-        let key = ask.key();
+        let key = ask.key(self.windows.scope);
         let spec = ClipSpec {
             file: ask.file,
             format: ask.format,
@@ -282,7 +284,11 @@ impl QuillApp {
         ask: ViewAsk,
         cx: &mut Context<QuillApp>,
     ) -> Option<StickerView> {
-        if !self.playback.stickers.has_clip_like(&ask.key()) {
+        if !self
+            .playback
+            .stickers
+            .has_clip_like(&ask.key(self.windows.scope))
+        {
             return None;
         }
         self.sticker_view(ask, cx)
@@ -291,17 +297,15 @@ impl QuillApp {
     /// Whether the clip `ask` names failed to open.
     #[cfg(feature = "demo-capture")]
     pub(in crate::ui) fn sticker_failed(&self, ask: ViewAsk) -> bool {
-        self.playback.stickers.failed_key(&ask.key())
+        self.playback
+            .stickers
+            .failed_key(&ask.key(self.windows.scope))
     }
 
     /// A window starts a frame, before anything in it renders (`None`: the
     /// main window).
-    pub(in crate::ui) fn sticker_frame_starts(
-        &self,
-        window: Option<ChatId>,
-        cx: &mut Context<QuillApp>,
-    ) {
-        self.playback.stickers.frame_starts(window);
+    pub(in crate::ui) fn sticker_frame_starts(&self, cx: &mut Context<QuillApp>) {
+        self.playback.stickers.frame_starts();
         self.ensure_sticker_closer(cx);
     }
 

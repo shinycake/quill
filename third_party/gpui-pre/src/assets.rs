@@ -1,3 +1,5 @@
+// Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
+// `RenderImage::with_recycler` hands the frames back on drop. See third_party/gpui-pre/QUILL-CHANGES.md.
 use crate::{DevicePixels, Pixels, Result, SharedString, Size, size};
 use smallvec::SmallVec;
 
@@ -46,7 +48,11 @@ pub struct RenderImage {
     /// The scale factor of this image on render.
     pub(crate) scale_factor: f32,
     data: SmallVec<[Frame; 1]>,
+    recycle: Option<Recycle>,
 }
+
+/// Takes an image's frames back when the image is dropped.
+type Recycle = Box<dyn FnOnce(SmallVec<[Frame; 1]>) + Send + Sync>;
 
 impl PartialEq for RenderImage {
     fn eq(&self, other: &Self) -> bool {
@@ -65,7 +71,18 @@ impl RenderImage {
             id: ImageId(NEXT_ID.fetch_add(1, SeqCst)),
             scale_factor: 1.0,
             data: data.into(),
+            recycle: None,
         }
+    }
+
+    /// Hand the frames to `recycle` when the image is dropped, so their
+    /// buffers can be filled again instead of freed.
+    pub fn with_recycler(
+        mut self,
+        recycle: impl FnOnce(SmallVec<[Frame; 1]>) + Send + Sync + 'static,
+    ) -> Self {
+        self.recycle = Some(Box::new(recycle));
+        self
     }
 
     /// Convert this image into a byte slice.
@@ -103,6 +120,14 @@ impl RenderImage {
     /// Get the number of frames for this image.
     pub fn frame_count(&self) -> usize {
         self.data.len()
+    }
+}
+
+impl Drop for RenderImage {
+    fn drop(&mut self) {
+        if let Some(recycle) = self.recycle.take() {
+            recycle(std::mem::take(&mut self.data));
+        }
     }
 }
 

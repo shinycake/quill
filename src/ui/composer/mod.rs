@@ -7,7 +7,6 @@ use super::actions::{
 };
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
-use super::message_text::rich_block_element;
 use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;
@@ -206,10 +205,6 @@ impl QuillApp {
                         .flatten();
                     // MED1: the grouping toggle decides album vs separate
                     // sends (TGX `RememberAlbumSetting`).
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
                     let grouped = self.composer_group_media_effective();
                     let reply = self.reply_for_send(cx);
                     let mut snaps = Vec::new();
@@ -219,10 +214,10 @@ impl QuillApp {
                         self.pending_send().scheduling,
                         ComposerScheduling::SendAtDate(_)
                     ) && self.pending_send().schedule_repeat != 0;
-                    if albumable && grouped && !repeating {
-                        // A video turned into a GIF leaves the album and
-                        // goes alone (tdesktop `GroupRanges`); paid media
-                        // is one message.
+                    if attachments.len() >= 2 && grouped && !repeating {
+                        // One message per run of one album type, in tray
+                        // order (tdesktop `GroupRanges`); paid media is one
+                        // message.
                         let groups = if self.paid_stars_in_effect() > 0 {
                             vec![attachments]
                         } else {
@@ -315,13 +310,15 @@ impl QuillApp {
                     // R8: tdesktop cuts a text over the length limit into
                     // several messages (`ApiWrap::sendMessage` + `CutPart`);
                     // the reply rides the first part only.
+                    let mut split = None;
                     if let [only] = snaps.as_slice()
                         && only.attachment.is_none()
                         && only.album.is_empty()
                     {
                         let limit = self.text_length_limit();
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {
-                            let parts = quill::text_split::split_markup_text(&only.text, limit);
+                            let mut cut = quill::text_split::SplitText::of(&only.text, limit);
+                            let parts = std::mem::take(&mut cut.parts);
                             if parts.is_empty() {
                                 self.connection.set_note(StatusNote::silent(tr(
                                     keys::Q_CHAT_MESSAGE_TOO_LONG_TO_SEND,
@@ -342,6 +339,7 @@ impl QuillApp {
                                     snap
                                 })
                                 .collect();
+                            split = Some(std::sync::Arc::new(cut));
                         }
                     }
                     // Phase A1: slow-mode gate (centralized in
@@ -359,12 +357,13 @@ impl QuillApp {
                     let Some(slot) = self.send_slot() else {
                         return;
                     };
-                    let origin = super::send_prep::SendOrigin::new(
+                    let mut origin = super::send_prep::SendOrigin::new(
                         slot,
                         chat_id,
                         self.composer_markup(cx),
                         &snaps,
                     );
+                    origin.split = split;
                     if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
                         self.begin_media_prep(origin, snaps, window, cx);
                     } else {
@@ -392,12 +391,11 @@ impl QuillApp {
                     }
                     let reply = self.reply_for_send(cx);
                     // MED1: the grouping toggle applies to the demo too.
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
-                    let messages = if albumable && self.composer_group_media_effective() {
-                        ComposerAttachment::split_for_send(&attachments, true).len()
+                    let grouped = self.composer_group_media_effective();
+                    let messages = if grouped {
+                        ComposerAttachment::split_for_send(&attachments, true)
+                            .len()
+                            .max(1)
                     } else {
                         attachments.len().max(1)
                     };
@@ -406,8 +404,16 @@ impl QuillApp {
                     {
                         return;
                     }
-                    if albumable && self.composer_group_media_effective() {
-                        self.apply_demo_album(&text, &attachments, reply.as_ref());
+                    if grouped && attachments.len() >= 2 {
+                        let groups = ComposerAttachment::split_for_send(&attachments, true);
+                        for (i, group) in groups.iter().enumerate() {
+                            let text = if i == 0 { text.as_str() } else { "" };
+                            let reply = reply.as_ref().filter(|_| i == 0);
+                            match group.as_slice() {
+                                [one] => self.apply_demo_outgoing(text, Some(one), reply),
+                                _ => self.apply_demo_album(text, group, reply),
+                            }
+                        }
                     } else if attachments.len() >= 2 {
                         for (i, att) in attachments.iter().enumerate() {
                             self.apply_demo_outgoing(
@@ -694,21 +700,21 @@ impl QuillApp {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }
+            // Joins the tray as a dropped file does: a photo next to media,
+            // a file next to files.
             Some(att) => {
-                let name = att.file_name.clone();
-                let before = self.pending_attachments().len();
-                self.update_pending_attachments(|tray| {
-                    ComposerAttachment::push_attachment(tray, att)
+                let added = self.update_pending_attachments(|tray| {
+                    ComposerAttachment::append_dropped_files(tray, std::slice::from_ref(&att.path))
                 });
-                self.connection
-                    .set_note(if self.pending_attachments().len() == before {
-                        StatusNote::silent(tr_with(
-                            keys::Q_CHAT_ALBUM_IS_FULL,
-                            &[("before", &before.to_string())],
-                        ))
-                    } else {
-                        StatusNote::silent(tr_with(keys::Q_CHAT_ATTACHED_NAME, &[("name", &name)]))
+                if let Some(added) = added {
+                    self.connection.set_note(match added {
+                        Ok(_) => StatusNote::silent(tr_with(
+                            keys::Q_CHAT_ATTACHED_NAME,
+                            &[("name", &att.file_name)],
+                        )),
+                        Err(note) => StatusNote::error(note),
                     });
+                }
             }
             None => {
                 self.connection

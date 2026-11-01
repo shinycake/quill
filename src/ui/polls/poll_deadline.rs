@@ -70,7 +70,7 @@ impl QuillApp {
             .poll_dialog
             .as_ref()
             .and_then(|dialog| dialog.deadline_box.as_ref())
-            .and_then(|deadline| picked_unix(&deadline.picker, cx));
+            .and_then(|deadline| picked_unix(&deadline.picker, POLL_DEADLINE_MIN_SECS, cx));
         let max = self.poll_close_max_secs();
         let Some(picked) = picked else {
             return;

@@ -8,7 +8,13 @@ enum TextLimitNote {
     Fits,
     UnitsOver(usize),
     Parts(usize),
+    /// Over the limit by bytes, and the count of this text is not back yet.
+    Counting,
 }
+
+/// Bytes of text counted in the frame, a few milliseconds of work. Longer text
+/// is counted off the UI thread.
+const COUNTED_IN_THE_FRAME: usize = 16 * 1024;
 
 impl TextLimitNote {
     fn of(markup: &str, limit: i32, editing: bool) -> Self {
@@ -28,39 +34,80 @@ impl TextLimitNote {
 struct TextLimitKey {
     field: EntityId,
     revision: u64,
-    rich_editor: bool,
     limit: i32,
     editing: bool,
 }
 
+/// The note of the text at the last counted revision, which only ever answers
+/// for that revision of that field.
 #[derive(Default)]
-pub(in crate::ui) struct TextLimitMemo(Cell<Option<(TextLimitKey, TextLimitNote)>>);
+struct TextLimitCount {
+    known: Cell<Option<(TextLimitKey, TextLimitNote)>>,
+    running: Cell<Option<(TextLimitKey, Task<()>)>>,
+}
+
+#[derive(Default)]
+pub(in crate::ui) struct TextLimitMemo(Box<TextLimitCount>);
 
 impl TextLimitMemo {
-    fn get(&self, key: TextLimitKey, count: impl FnOnce() -> TextLimitNote) -> TextLimitNote {
-        match self.0.get() {
-            Some((known, note)) if known == key => note,
-            _ => {
-                let note = count();
-                self.0.set(Some((key, note)));
-                note
-            }
-        }
+    fn known(&self) -> Option<(TextLimitKey, TextLimitNote)> {
+        self.0.known.get()
+    }
+
+    fn set(&self, key: TextLimitKey, note: TextLimitNote) {
+        self.0.known.set(Some((key, note)));
+        self.0.running.take();
+    }
+
+    fn is_counting(&self, key: TextLimitKey) -> bool {
+        let running = self.0.running.take();
+        let same = running.as_ref().is_some_and(|(known, _)| *known == key);
+        self.0.running.set(running);
+        same
     }
 }
 
 impl QuillApp {
-    fn text_limit_note(&self, editing: bool, cx: &App) -> TextLimitNote {
+    fn text_limit_note(&self, editing: bool, cx: &mut Context<Self>) -> TextLimitNote {
+        let composer = self.composer.read(cx);
         let key = TextLimitKey {
             field: self.composer.entity_id(),
-            revision: self.composer.read(cx).document_revision(),
-            rich_editor: self.composer_ui.rich_editor_open,
+            revision: composer.document_revision(),
             limit: self.text_length_limit(),
             editing,
         };
-        self.composer_ui.text_limit.get(key, || {
-            TextLimitNote::of(&self.composer_markup(cx), key.limit, editing)
-        })
+        let memo = &self.composer_ui.text_limit;
+        if let Some((known, note)) = memo.known()
+            && known == key
+        {
+            return note;
+        }
+        // A UTF-8 byte is at least a UTF-16 unit, and parsing only removes.
+        let fits = usize::try_from(key.limit).is_ok_and(|limit| composer.text().len() <= limit);
+        if fits {
+            memo.set(key, TextLimitNote::Fits);
+            return TextLimitNote::Fits;
+        }
+        if composer.text().len() <= COUNTED_IN_THE_FRAME {
+            let note = TextLimitNote::of(&self.composer_markup(cx), key.limit, editing);
+            memo.set(key, note);
+            return note;
+        }
+        if !memo.is_counting(key) {
+            let markup = self.composer_markup(cx);
+            let count =
+                cx.background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
+            let task = Self::spawn_main(cx, async move |this, cx| {
+                let note = count.await;
+                this.update(cx, |this, cx| {
+                    this.composer_ui.text_limit.set(key, note);
+                    cx.notify();
+                })
+                .ok();
+            });
+            memo.0.running.set(Some((key, task)));
+        }
+        TextLimitNote::Counting
     }
 
     /// R8: tdesktop `CharactersLimitLabel` — only shown once the text is
@@ -68,7 +115,8 @@ impl QuillApp {
     /// editing. A new message over the limit is not an error (it is sent as
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.pending_attachments().is_empty() {
+        // The rich editor sends one message, and refuses text over its own limit.
+        if self.composer_ui.rich_editor_open || !self.pending_attachments().is_empty() {
             return None;
         }
         let editing = self.composer_ui.pending_edit.as_ref();
@@ -76,18 +124,18 @@ impl QuillApp {
         {
             return None;
         }
+        let parts_label =
+            |parts: &str| tr_with(keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES, &[("parts", parts)]);
         let (label, color) = match self.text_limit_note(editing.is_some(), cx) {
             TextLimitNote::Fits => return None,
+            TextLimitNote::Counting if editing.is_some() => {
+                ("\u{2212}\u{2026}".to_string(), danger_bright())
+            }
+            TextLimitNote::Counting => (parts_label("\u{2026}"), text_muted()),
             TextLimitNote::UnitsOver(over) => {
                 (format!("\u{2212}{}", over.min(999)), danger_bright())
             }
-            TextLimitNote::Parts(parts) => (
-                tr_with(
-                    keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES,
-                    &[("parts", &parts.to_string())],
-                ),
-                text_muted(),
-            ),
+            TextLimitNote::Parts(parts) => (parts_label(&parts.to_string()), text_muted()),
         };
         Some(
             div()

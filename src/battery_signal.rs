@@ -16,40 +16,61 @@
 use crate::locks::LockExt as _;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
-use zbus::blocking::{Connection, MessageIterator, fdo::PropertiesProxy};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use zbus::blocking::{Connection, MessageIterator, connection, fdo::PropertiesProxy};
 use zbus::zvariant::OwnedValue;
 
-const NOT_LISTENING: u32 = 0;
-const UNKNOWN: u32 = 1;
-const OFF: u32 = 2;
-const ON: u32 = 3;
+const NOT_LISTENING: u64 = 0;
+const UNKNOWN: u64 = 1;
+const OFF: u64 = 2;
+const ON: u64 = 3;
+const VALUE: u64 = 0b11;
+/// The listener stored an answer the watcher has not taken yet: the wake it
+/// poked needs no read of its own.
+const FRESH: u64 = 0b100;
+/// One more answer from the listener.
+const ANSWER: u64 = 0b1000;
 
-static LATEST: AtomicU32 = AtomicU32::new(NOT_LISTENING);
+/// The switch, the [`FRESH`] flag, and a count of the listener's answers
+/// above them. One word, so a [`refresh`] read that went out before a
+/// signal cannot overwrite the signal's newer value.
+static STATE: AtomicU64 = AtomicU64::new(NOT_LISTENING);
 
 /// The switch as last announced: `None` while nothing is subscribed, else
 /// the answer (`Some(None)` when the service gave a value we cannot read).
 pub fn latest() -> Option<Option<bool>> {
-    match LATEST.load(Ordering::Acquire) {
+    decode(STATE.load(Ordering::Acquire))
+}
+
+fn decode(state: u64) -> Option<Option<bool>> {
+    match state & VALUE {
         NOT_LISTENING => None,
         UNKNOWN => Some(None),
         value => Some(Some(value == ON)),
     }
 }
 
-fn record(answer: Option<Option<bool>>) {
-    store(answer);
-    crate::wake::BATTERY.poke();
-}
-
-fn store(answer: Option<Option<bool>>) {
-    let value = match answer {
+fn encode(answer: Option<Option<bool>>) -> u64 {
+    match answer {
         None => NOT_LISTENING,
         Some(None) => UNKNOWN,
         Some(Some(false)) => OFF,
         Some(Some(true)) => ON,
-    };
-    LATEST.store(value, Ordering::Release);
+    }
+}
+
+fn record(answer: Option<Option<bool>>) {
+    let fresh = if answer.is_some() { FRESH } else { 0 };
+    let next =
+        |state: u64| (state & !(VALUE | FRESH)).wrapping_add(ANSWER) | fresh | encode(answer);
+    let mut state = STATE.load(Ordering::Acquire);
+    while let Err(now) =
+        STATE.compare_exchange_weak(state, next(state), Ordering::AcqRel, Ordering::Acquire)
+    {
+        state = now;
+    }
+    crate::wake::BATTERY.poke();
 }
 
 /// The listener's connection to the property, while it is subscribed.
@@ -57,12 +78,25 @@ static OPEN: Mutex<Option<(PropertiesProxy<'static>, &'static Source)>> = Mutex:
 
 /// Read the switch again over the listener's open connection, without a
 /// process; `None` while nothing listens. Keeps the answer for [`latest`]
-/// without waking the watcher, which is the one asking.
+/// without waking the watcher, which is the one asking. Right after the
+/// listener recorded an answer it is that answer, with no D-Bus call.
 pub fn refresh() -> Option<Option<bool>> {
     let (properties, source) = OPEN.lock_or_recover().clone()?;
+    let taken = STATE.fetch_and(!FRESH, Ordering::AcqRel);
+    if taken & FRESH != 0
+        && let Some(answer) = decode(taken)
+    {
+        return Some(answer);
+    }
+    let seen = taken & !FRESH;
     let answer = read(&properties, source).ok().flatten();
-    store(Some(answer));
-    Some(answer)
+    let ours = (seen & !VALUE) | encode(Some(answer));
+    match STATE.compare_exchange(seen, ours, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(_) => Some(answer),
+        // The listener recorded an answer while this read was out: it is
+        // newer, so it stays, and the wake it poked takes it.
+        Err(_) => latest().or(Some(answer)),
+    }
 }
 
 fn read(properties: &PropertiesProxy<'_>, source: &Source) -> zbus::Result<Option<bool>> {
@@ -148,14 +182,22 @@ pub fn start() {
     });
 }
 
+/// A connection whose calls give up after `limit`: [`refresh`] runs on the
+/// background executor, and a service that never answers would hold that
+/// thread for good.
+fn connect(bus: connection::Builder<'_>, limit: Duration) -> zbus::Result<Connection> {
+    bus.method_timeout(limit).build()
+}
+
 /// Subscribe, read the current value, then follow every change until the
 /// bus closes. Errors when the service does not answer.
 fn listen(source: &'static Source) -> zbus::Result<()> {
-    let connection = if source.session {
-        Connection::session()?
+    let bus = if source.session {
+        connection::Builder::session()?
     } else {
-        Connection::system()?
+        connection::Builder::system()?
     };
+    let connection = connect(bus, crate::child_timeout::DESKTOP_QUERY_LIMIT)?;
 
     // Subscribe before the first read so no change is missed.
     let rule = zbus::MatchRule::builder()
@@ -191,11 +233,11 @@ fn listen(source: &'static Source) -> zbus::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OPEN, SOURCES, latest, record, refresh, signal_answer, store};
+    use super::{OPEN, SOURCES, connect, latest, record, refresh, signal_answer};
     use crate::locks::LockExt as _;
     use std::collections::HashMap;
     use std::io::{BufRead as _, BufReader};
-    use std::process::{Command, Stdio};
+    use std::process::{Child, Command, Stdio};
     use std::sync::Mutex;
     use zbus::blocking::fdo::PropertiesProxy;
     use zbus::zvariant::{OwnedValue, Value};
@@ -216,9 +258,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_parked_probe_reads_a_change_that_sent_no_signal() {
-        let _serial = SERIAL.lock_or_recover();
+    /// A private session bus and its address.
+    fn private_bus() -> (Child, String) {
         let mut daemon = Command::new("dbus-daemon")
             .args(["--session", "--nofork", "--print-address=1"])
             .stdout(Stdio::piped())
@@ -228,8 +269,15 @@ mod tests {
         BufReader::new(daemon.stdout.take().unwrap())
             .read_line(&mut address)
             .unwrap();
+        (daemon, address.trim().to_owned())
+    }
+
+    #[test]
+    fn a_parked_probe_reads_a_change_that_sent_no_signal() {
+        let _serial = SERIAL.lock_or_recover();
+        let (mut daemon, address) = private_bus();
         let [portal, _] = &SOURCES;
-        let service = zbus::blocking::connection::Builder::address(address.trim())
+        let service = zbus::blocking::connection::Builder::address(&*address)
             .unwrap()
             .name(portal.destination)
             .unwrap()
@@ -237,7 +285,7 @@ mod tests {
             .unwrap()
             .build()
             .unwrap();
-        let watcher = zbus::blocking::connection::Builder::address(address.trim())
+        let watcher = zbus::blocking::connection::Builder::address(&*address)
             .unwrap()
             .build()
             .unwrap();
@@ -263,14 +311,168 @@ mod tests {
         assert_eq!(latest(), Some(Some(true)));
 
         *OPEN.lock_or_recover() = None;
-        store(None);
+        record(None);
         assert_eq!(refresh(), None);
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+    }
+
+    /// A portal that takes the call and never answers it.
+    struct HungMonitor;
+
+    #[zbus::interface(name = "org.freedesktop.portal.PowerProfileMonitor")]
+    impl HungMonitor {
+        #[zbus(property, name = "power-saver-enabled")]
+        async fn power_saver_enabled(&self) -> bool {
+            std::future::pending().await
+        }
+    }
+
+    #[test]
+    fn a_service_that_never_answers_does_not_hold_the_probe() {
+        let _serial = SERIAL.lock_or_recover();
+        let (mut daemon, address) = private_bus();
+        let [portal, _] = &SOURCES;
+        let _service = zbus::blocking::connection::Builder::address(&*address)
+            .unwrap()
+            .name(portal.destination)
+            .unwrap()
+            .serve_at(portal.path, HungMonitor)
+            .unwrap()
+            .build()
+            .unwrap();
+        let watcher = connect(
+            zbus::blocking::connection::Builder::address(&*address).unwrap(),
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap();
+        let properties = PropertiesProxy::builder(&watcher)
+            .destination(portal.destination)
+            .unwrap()
+            .path(portal.path)
+            .unwrap()
+            .build()
+            .unwrap();
+        *OPEN.lock_or_recover() = Some((properties, portal));
+
+        // Returns, with no answer, instead of waiting for the portal forever.
+        assert_eq!(refresh(), Some(None));
+
+        *OPEN.lock_or_recover() = None;
+        record(None);
         let _ = daemon.kill();
         let _ = daemon.wait();
     }
 
     fn owned(value: Value<'_>) -> OwnedValue {
         value.try_to_owned().unwrap()
+    }
+
+    #[test]
+    fn the_wake_a_signal_pokes_takes_its_value_without_a_call() {
+        let _serial = SERIAL.lock_or_recover();
+        let (mut daemon, address) = private_bus();
+        let [portal, _] = &SOURCES;
+        let _service = zbus::blocking::connection::Builder::address(&*address)
+            .unwrap()
+            .name(portal.destination)
+            .unwrap()
+            .serve_at(portal.path, Monitor { saving: false })
+            .unwrap()
+            .build()
+            .unwrap();
+        let watcher = zbus::blocking::connection::Builder::address(&*address)
+            .unwrap()
+            .build()
+            .unwrap();
+        let properties = PropertiesProxy::builder(&watcher)
+            .destination(portal.destination)
+            .unwrap()
+            .path(portal.path)
+            .unwrap()
+            .build()
+            .unwrap();
+        *OPEN.lock_or_recover() = Some((properties, portal));
+
+        // The signal said "on"; a call would have answered "off".
+        record(Some(Some(true)));
+        assert_eq!(crate::battery_saving::probe(), Some(true));
+        // A later wake with no signal reads the service.
+        assert_eq!(crate::battery_saving::probe(), Some(false));
+
+        *OPEN.lock_or_recover() = None;
+        record(None);
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+    }
+
+    /// A portal whose getter reports that it was asked, then answers with
+    /// whatever the test sends it.
+    struct GatedMonitor {
+        asked: Mutex<std::sync::mpsc::Sender<()>>,
+        answer: Mutex<std::sync::mpsc::Receiver<bool>>,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.portal.PowerProfileMonitor")]
+    impl GatedMonitor {
+        #[zbus(property, name = "power-saver-enabled")]
+        fn power_saver_enabled(&self) -> bool {
+            let _ = self.asked.lock_or_recover().send(());
+            self.answer.lock_or_recover().recv().unwrap_or(false)
+        }
+    }
+
+    #[test]
+    fn a_read_that_went_out_before_a_signal_keeps_the_signals_value() {
+        let _serial = SERIAL.lock_or_recover();
+        let (mut daemon, address) = private_bus();
+        let [portal, _] = &SOURCES;
+        let (asked, was_asked) = std::sync::mpsc::channel();
+        let (answer, answers) = std::sync::mpsc::channel();
+        let _service = zbus::blocking::connection::Builder::address(&*address)
+            .unwrap()
+            .name(portal.destination)
+            .unwrap()
+            .serve_at(
+                portal.path,
+                GatedMonitor {
+                    asked: Mutex::new(asked),
+                    answer: Mutex::new(answers),
+                },
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        let watcher = zbus::blocking::connection::Builder::address(&*address)
+            .unwrap()
+            .build()
+            .unwrap();
+        let properties = PropertiesProxy::builder(&watcher)
+            .destination(portal.destination)
+            .unwrap()
+            .path(portal.path)
+            .unwrap()
+            .build()
+            .unwrap();
+        *OPEN.lock_or_recover() = Some((properties, portal));
+
+        // The parked probe asks; the service has the old value "off".
+        let probe = std::thread::spawn(refresh);
+        was_asked.recv().unwrap();
+        // The saver goes on and the signal arrives before the answer does.
+        record(Some(Some(true)));
+        answer.send(false).unwrap();
+        let _ = probe.join().unwrap();
+
+        assert_eq!(latest(), Some(Some(true)));
+        // The wake the signal poked takes "on" without asking again.
+        assert_eq!(crate::battery_saving::probe(), Some(true));
+
+        *OPEN.lock_or_recover() = None;
+        record(None);
+        drop(answer);
+        let _ = daemon.kill();
+        let _ = daemon.wait();
     }
 
     #[test]

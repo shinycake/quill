@@ -8,6 +8,13 @@
 //! MTProto on `availableChanges` (`mtp_instance.cpp`).
 #![deny(clippy::indexing_slicing)]
 
+#[cfg(any(windows, test))]
+mod coalesce;
+mod link;
+#[cfg(any(target_os = "macos", test))]
+mod llinfo;
+#[cfg(target_os = "linux")]
+mod netlink;
 mod platform;
 #[cfg(test)]
 mod tests;
@@ -34,16 +41,62 @@ const NO_SUCH_IP_VERSION: i32 = 10047; // WSAEAFNOSUPPORT
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Path {
-    Via(IpAddr),
+    Via(Hop),
     NoRoute,
     Unknown,
 }
 
+/// Where traffic to Telegram leaves this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Hop {
+    local: IpAddr,
+    link: link::Link,
+}
+
 impl Path {
-    fn of(lookup: io::Result<SocketAddr>) -> Self {
+    /// `self`, keeping the gateway's link-layer address from `before` when
+    /// the system has not resolved it yet: an entry the cache dropped, or
+    /// one not learned yet, is no new network. A different address is.
+    fn settled(self, before: Self) -> Self {
+        match (self, before) {
+            (Self::Via(mut now), Self::Via(then))
+                if now.link.gateway_hardware.is_none()
+                    && Hop {
+                        link: link::Link {
+                            gateway_hardware: None,
+                            ..then.link
+                        },
+                        ..then
+                    } == now =>
+            {
+                now.link.gateway_hardware = then.link.gateway_hardware;
+                Self::Via(now)
+            }
+            _ => self,
+        }
+    }
+
+    /// The gateway whose link-layer address [`Self::settled`] carries over
+    /// from `before`: until the system resolves it, a new router on the
+    /// same address is not seen.
+    fn carried(self, before: Self) -> Option<IpAddr> {
+        match (self, before) {
+            (Self::Via(now), Self::Via(then))
+                if now.link.gateway_hardware.is_none() && then.link.gateway_hardware.is_some() =>
+            {
+                now.link.gateway.filter(|_| self.settled(before) != self)
+            }
+            _ => None,
+        }
+    }
+
+    fn of(lookup: io::Result<SocketAddr>, link: impl FnOnce(IpAddr) -> link::Link) -> Self {
         match lookup {
             Ok(local) if local.ip().is_unspecified() => Self::NoRoute,
-            Ok(local) => Self::Via(local.ip()),
+            Ok(local) => Self::Via(Hop {
+                local: local.ip(),
+                link: link(local.ip()),
+            }),
             Err(error)
                 if error.raw_os_error() == Some(NO_SUCH_IP_VERSION)
                     || matches!(
@@ -67,6 +120,23 @@ struct Route {
 }
 
 impl Route {
+    fn settled(self, before: Self) -> Self {
+        Self {
+            v4: self.v4.settled(before.v4),
+            v6: self.v6.settled(before.v6),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn gateways(self) -> impl Iterator<Item = IpAddr> {
+        [self.v4, self.v6]
+            .into_iter()
+            .filter_map(|path| match path {
+                Path::Via(hop) => hop.link.gateway,
+                _ => None,
+            })
+    }
+
     /// Offline takes proof on both IP versions: TDLib stops trying on
     /// `networkTypeNone`, so an odd failure must not read as "no network".
     fn available(self) -> bool {
@@ -82,9 +152,12 @@ fn local_address(bind: IpAddr, to: SocketAddr) -> io::Result<SocketAddr> {
 }
 
 fn route_now() -> Route {
+    let path = |bind: IpAddr, to: SocketAddr| {
+        Path::of(local_address(bind, to), |local| link::of(local, to.ip()))
+    };
     Route {
-        v4: Path::of(local_address(Ipv4Addr::UNSPECIFIED.into(), TELEGRAM_V4)),
-        v6: Path::of(local_address(Ipv6Addr::UNSPECIFIED.into(), TELEGRAM_V6)),
+        v4: path(Ipv4Addr::UNSPECIFIED.into(), TELEGRAM_V4),
+        v6: path(Ipv6Addr::UNSPECIFIED.into(), TELEGRAM_V6),
     }
 }
 
@@ -99,14 +172,39 @@ pub struct NetworkState {
 struct Tracker {
     route: Route,
     epoch: u64,
+    /// The gateways [`Self::gateways_to_resolve`] last named, so each is asked once
+    /// until it resolves: a router that never answers would otherwise turn
+    /// every failed lookup's event into another lookup.
+    resolving: [Option<IpAddr>; 2],
 }
 
 impl Tracker {
     fn new(route: Route) -> Self {
-        Self { route, epoch: 0 }
+        Self {
+            route,
+            epoch: 0,
+            resolving: [None; 2],
+        }
+    }
+
+    /// The gateways to resolve now, before `route` is observed: those whose
+    /// link-layer address would be carried over, each named once.
+    fn gateways_to_resolve(&mut self, route: Route) -> Vec<IpAddr> {
+        let carried = [
+            route.v4.carried(self.route.v4),
+            route.v6.carried(self.route.v6),
+        ];
+        let fresh = carried
+            .iter()
+            .zip(self.resolving)
+            .filter_map(|(now, asked)| now.filter(|gateway| asked != Some(*gateway)))
+            .collect();
+        self.resolving = carried;
+        fresh
     }
 
     fn observe(&mut self, route: Route) -> bool {
+        let route = route.settled(self.route);
         let moved = route != self.route;
         self.route = route;
         self.epoch += u64::from(moved);
@@ -115,7 +213,7 @@ impl Tracker {
 
     /// Connections do not survive a sleep, even when the route is the same.
     fn woke(&mut self, route: Route) {
-        self.route = route;
+        self.route = route.settled(self.route);
         self.epoch += 1;
     }
 
@@ -154,9 +252,24 @@ pub fn system_woke() {
     crate::system_proxy::refresh();
 }
 
+/// Whether `ip` is a gateway Telegram traffic leaves through.
+#[cfg(target_os = "linux")]
+fn is_gateway(ip: IpAddr) -> bool {
+    lock_or_recover(tracker())
+        .route
+        .gateways()
+        .any(|gateway| gateway == ip)
+}
+
 fn network_changed() {
     let route = route_now();
-    let moved = lock_or_recover(tracker()).observe(route);
+    let mut tracker = lock_or_recover(tracker());
+    let resolve = tracker.gateways_to_resolve(route);
+    let moved = tracker.observe(route);
+    drop(tracker);
+    // The answer comes back as a neighbour change (Linux), or from the
+    // background resolve `link::of` starts (Windows).
+    resolve.into_iter().for_each(link::resolve);
     if moved {
         crate::wake::UPDATES.poke();
     }

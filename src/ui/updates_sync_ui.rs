@@ -267,7 +267,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_SUBMIT_AN_APPEAL))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.open_message_url(&url, cx);
+                            this.open_link(&url, cx);
                         })),
                 )
             });
@@ -325,7 +325,7 @@ impl QuillApp {
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.account.age_verify_started = true;
-                            this.open_message_url(&url, cx);
+                            this.open_link(&url, cx);
                         })),
                 )
             });

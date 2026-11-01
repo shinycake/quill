@@ -13,7 +13,7 @@
 //! `connect::suggested_posts`, the screens in `ui::suggested_posts_ui`.
 
 use crate::ids::{ChatId, MessageId};
-use crate::local_time::{CivilTime, civil_local, hhmm, month_name};
+use crate::local_time::{CivilTime, hhmm, month_name};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -258,12 +258,13 @@ pub fn block_time_label(date: &CivilTime, now: &CivilTime) -> String {
     }
 }
 
-/// The time row's value: "Anytime" for 0, else the local date and time.
-pub fn time_value(send_date: i32, now_unix: i64) -> String {
+/// The time row's value: "Anytime" for 0, else the local date and time,
+/// with `civil_at` giving the local time of an instant.
+pub fn time_value(send_date: i32, now_unix: i64, civil_at: impl Fn(i64) -> CivilTime) -> String {
     if send_date <= 0 {
         return "Anytime".into();
     }
-    date_time_label(&civil_local(i64::from(send_date)), &civil_local(now_unix))
+    date_time_label(&civil_at(i64::from(send_date)), &civil_at(now_unix))
 }
 
 /// Which box a price or time choice belongs to (tdesktop `SuggestMode`).
@@ -469,10 +470,15 @@ impl SuggestedPostLimits {
         *slot = value.max(0);
     }
 
-    /// The earliest and latest time a post may be set for
+    /// How far ahead of now the earliest time a post may be set for lies
     /// (`ChooseSuggestTimeBox`: the minimum delay plus a minute).
+    pub fn min_lead(&self) -> i64 {
+        self.send_delay_min.saturating_add(60)
+    }
+
+    /// The earliest and latest time a post may be set for.
     pub fn time_range(&self, now: i64) -> (i64, i64) {
-        let min = now.saturating_add(self.send_delay_min).saturating_add(60);
+        let min = now.saturating_add(self.min_lead());
         let max = now.saturating_add(self.send_delay_max).max(min);
         (min, max)
     }

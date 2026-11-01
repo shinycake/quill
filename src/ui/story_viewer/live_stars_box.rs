@@ -14,6 +14,7 @@
 use super::live_state::{StarsBoxMode, level_color, pin_label};
 use super::live_view::sender_avatar;
 use super::*;
+use crate::ui::os_open::open_link_in;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -210,7 +211,10 @@ impl QuillApp {
                         },
                     )]),
                 )
-                .on_click(vec![range], |_, _, cx| cx.open_url(STARS_TERMS_URL))
+                .on_click(vec![range], {
+                    let app = app.downgrade();
+                    move |_, _, cx| open_link_in(&app, STARS_TERMS_URL, cx)
+                })
                 .into_any_element()
             };
             body = body.child(div().text_xs().text_color(text_muted()).child(divider));

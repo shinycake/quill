@@ -42,13 +42,18 @@ invite preview waits instead of being dropped.
   in the temp dir when `sun_path` would overflow), mode `0600`. Windows: named
   pipe `quill-<hash of data dir>.ipc`. Isolated roots (demos, tests) get their
   own endpoint.
-- Protocol: `quill-ipc 1` header, one argument per line, empty line, owner
-  replies `ok`. Messages are capped (64 KiB, 32 args).
+- Protocol: `quill-ipc 2` header, one argument per line, empty line. The
+  owner replies `queued` once it holds the arguments, then `ok` when its UI
+  thread beats, or `stuck` after 30 s (tdesktop's main-thread check). A
+  `quill-ipc 1` launch gets `ok` alone, and a launch whose `quill-ipc 2`
+  header is dropped tries `quill-ipc 1`. Messages are capped (64 KiB, 32 args).
 - Election: an `flock` on `quill.sock.lock` serializes connect / unlink-stale /
   bind (Windows relies on the exclusive first pipe instance). A connect
   failure means a crashed owner, so the stale file is unlinked and rebound.
-- A connection that opens but never acknowledges within 3 s is a hung owner:
-  the new launch refuses to start (protecting the database) and exits 1.
+- A connection that does not say `queued` within 3 s, or says `stuck`, is a
+  hung owner: the new launch refuses to start (protecting the database) and
+  says the running copy is not responding. A launch drops the election lock
+  once it hears `queued`, so later launches do not wait behind its 30 s.
   If the socket cannot be created at all, Quill continues without the guard.
 - Only validated links are forwarded. A bare relaunch raises the window; a
   `--start-minimized` relaunch (autostart) stays silent.

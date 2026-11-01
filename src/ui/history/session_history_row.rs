@@ -42,6 +42,7 @@ pub(in crate::ui) fn session_history_row(
     session: Option<&Session>,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
+    corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Stickers, dice, round video messages and emoji-only messages (the ones
@@ -151,8 +152,12 @@ pub(in crate::ui) fn session_history_row(
     let media_max = room.media(header.is_none());
     let chat_id = message.chat_id;
     let message_id = message.id;
-    let (more_btn, actions_span) =
-        message_corner_actions(chat_id, message_id, message, session, cx);
+    let mut actions_span = Pixels::default();
+    let mut more_btn = corner.mount(|| {
+        let (buttons, span) = message_corner_actions(chat_id, message_id, message, session, cx);
+        actions_span = span;
+        buttons
+    });
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
@@ -374,7 +379,8 @@ pub(in crate::ui) fn session_history_row(
             ))
         }
         MessageContent::Document(doc) if quill::media_viewer::shows_as_photo(doc) => {
-            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, cx))
+            let gif = gif_play.filter(|_| animation_playing);
+            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, gif, cx))
         }
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
@@ -558,7 +564,7 @@ pub(in crate::ui) fn session_history_row(
                     .child(tr(keys::Q_CHAT_QUILL_CANNOT_DISPLAY_THIS_MESSAGE)))
                 .child(Button::new(("unsupported-update", message.id.0 as u64))
                     .label(tr(keys::Q_CHAT_GET_LATEST_QUILL))
-                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(quill::updater::RELEASES_URL))))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_link(quill::updater::RELEASES_URL, cx))))
                 .into_any_element(),
         ),
     };
@@ -797,7 +803,7 @@ pub(in crate::ui) fn session_history_row(
             .then(|| message_footer_meta(&footer_meta))
             .flatten()
             .map(|footer| {
-                let meta = footer_meta.clone();
+                let meta = footer_meta.mirrored();
                 crate::ui::synthetic::media_footer_pill(
                     footer,
                     Some(std::rc::Rc::new(move || message_footer_meta(&meta))),
@@ -858,7 +864,6 @@ pub(in crate::ui) fn session_history_row(
         .flatten()
         .map(|width| media_content_width(width, info_width, media_max));
     let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
-    let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut sender_status = sender_status;
     let mut chrome = |footer_inline: bool| {
@@ -884,7 +889,7 @@ pub(in crate::ui) fn session_history_row(
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
         if footer_overlay && chrome.footer.is_some() {
-            let meta = footer_meta.clone();
+            let meta = footer_meta.mirrored();
             chrome.footer_rebuild = Some(std::rc::Rc::new(move || message_footer_meta(&meta)));
         }
         chrome.media_led = media_led;

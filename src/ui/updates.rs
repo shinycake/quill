@@ -70,13 +70,22 @@ impl QuillApp {
     /// can install starts downloading at once.
     pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
         self.settings.update_state = state;
+        self.auto_download_update(cx);
+        cx.notify();
+    }
+
+    /// Starts the found release's download, unless the disk bar says
+    /// automatic downloads wait: then the disk's return to healthy starts it.
+    pub(super) fn auto_download_update(&mut self, cx: &mut Context<Self>) {
+        if self.disk.holds_auto_downloads() {
+            return;
+        }
         if let Some(release) = UpdateControl::auto_download(
             &self.settings.update_state,
             quill::update_install::self_update_availability(),
         ) {
             self.download_update(release, cx);
         }
-        cx.notify();
     }
 
     /// The update button for the current state (`UpdateControl::of`).
@@ -101,7 +110,7 @@ impl QuillApp {
                     self.restart_to_update(cx);
                 }
             }
-            UpdateControl::OpenRelease(url) => cx.open_url(&url),
+            UpdateControl::OpenRelease(url) => self.open_link(&url, cx),
             UpdateControl::Check { busy: true }
             | UpdateControl::Downloading { .. }
             | UpdateControl::Restarting => {}
@@ -338,7 +347,7 @@ impl QuillApp {
             Button::new("open-quill-release")
                 .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
                 .ghost()
-                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
+                .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx)))
                 .into_any_element(),
         )
     }
@@ -440,9 +449,9 @@ impl QuillApp {
     }
 
     pub(super) fn published_notices_unless_opened(&mut self, open: OsOpen, cx: &mut Context<Self>) {
-        self.when_os_answers(open, cx, |_, opened, cx| {
+        self.when_os_answers(open, cx, |this, opened, cx| {
             if !opened {
-                cx.open_url(quill::about::NOTICES_URL);
+                this.open_link(quill::about::NOTICES_URL, cx);
             }
         });
     }

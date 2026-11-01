@@ -6,15 +6,15 @@ use super::*;
 // ---------------------------------------------------------------------------
 
 /// Build one `RichText` node from clean text + M1 markup entities.
-/// UTF-16 offsets that don't convert are dropped; overlapping entities keep
-/// the longest span (the markup parser doesn't nest).
+/// Entities whose bytes are not a range of `text` are dropped; overlapping
+/// entities keep the longest span (the markup parser doesn't nest).
 pub fn formatted_to_rich_text(text: &str, entities: &[ComposerEntity]) -> Value {
     let mut spans: Vec<(usize, usize, &ComposerEntity)> = entities
         .iter()
         .filter_map(|entity| {
-            let start = utf16_to_utf8_offset(text, entity.offset).ok()?;
-            let end = utf16_to_utf8_offset(text, entity.offset + entity.length).ok()?;
-            (end > start).then_some((start, end, entity))
+            let bytes = entity.bytes.clone();
+            text.get(bytes.clone())?;
+            (bytes.end > bytes.start).then_some((bytes.start, bytes.end, entity))
         })
         .collect();
     spans.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
@@ -120,17 +120,18 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
                 "size": size,
             }))
         }
-        RichBlock::List { ordered: _, items } => {
+        RichBlock::List { ordered, items } => {
             let inputs: Vec<Value> = items
                 .iter()
-                .map(|item| {
+                .enumerate()
+                .map(|(index, item)| {
                     json!({
                         "@type": "inputPageBlockListItem",
                         "blocks": [{ "@type": "inputPageBlockParagraph", "text": block_rich_text(&item.text) }],
                         "has_checkbox": item.checked.is_some(),
                         "is_checked": item.checked.unwrap_or(false),
-                        "value": 0,
-                        "type": "",
+                        "value": if *ordered { index + 1 } else { 0 },
+                        "type": if *ordered { "1" } else { "" },
                     })
                 })
                 .collect();
@@ -412,7 +413,9 @@ mod tests {
             RichBlock::List {
                 ordered: false,
                 items: vec![RichListItem {
+                    label: String::new(),
                     text: "cd".into(),
+                    entities: Vec::new(),
                     checked: None,
                 }],
             },

@@ -122,7 +122,7 @@ impl QuillApp {
             .collect();
         let mut state = load_chat_windows();
         state.set_windows_of(&account, windows);
-        let _ = save_chat_windows(&state);
+        save_chat_windows(&state);
     }
 
     /// Once per session, when the account is ready: offer the windows from
@@ -205,7 +205,7 @@ impl QuillApp {
     pub(super) fn answer_restore(&mut self, restore: bool, cx: &mut Context<Self>) {
         let mut state = load_chat_windows();
         state.answer(restore);
-        let _ = save_chat_windows(&state);
+        save_chat_windows(&state);
         self.windows.restore = match std::mem::take(&mut self.windows.restore) {
             Restore::Offered(saved) if restore => Restore::Opening(saved),
             _ => Restore::Done,

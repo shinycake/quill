@@ -116,7 +116,8 @@ impl QuillApp {
         let hc = self.appearance.theme == ThemeChoice::HighContrast;
         // The day or night theme (tdesktop keeps one of each and switches
         // with night mode); high contrast keeps its own palette.
-        let (theme_id, palette) = self.resolve_app_theme(hc || self.night_mode_now(cx));
+        let night = hc || self.night_mode_now(cx);
+        let (theme_id, palette) = self.resolve_app_theme(night, cx);
         // Quill Light and Quill Dark (and high contrast) are drawn by the
         // token pairs and the kit's own colours, exactly as before themes:
         // no palette is installed for them.

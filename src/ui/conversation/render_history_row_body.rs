@@ -20,6 +20,7 @@ impl QuillApp {
     pub(super) fn render_history_row_body(
         &self,
         row: &HistoryRow,
+        corner: crate::ui::history::CornerActions,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let shared = &self.history.shared;
@@ -51,6 +52,34 @@ impl QuillApp {
                     refs.first().and_then(|first| first.sender),
                     cx,
                 );
+                let kind = refs
+                    .first()
+                    .and_then(|first| quill::album::album_kind(&first.content));
+                if kind != Some(quill::album::AlbumKind::Media) {
+                    let seek_bars = refs
+                        .iter()
+                        .map(|message| self.history_row_seek_bar(message))
+                        .collect();
+                    return crate::ui::history::file_album_history_row(
+                        crate::ui::history::FileAlbum {
+                            album_id: *album_id,
+                            messages: &refs,
+                            seek_bars,
+                            sender: chrome.sender.clone(),
+                            sender_status,
+                            receipt: chrome.receipt,
+                            sender_avatar: avatar,
+                            look,
+                        },
+                        files,
+                        downloading,
+                        &shared.media_roots,
+                        session,
+                        &self.message_ui.spoiler_revealed,
+                        corner,
+                        cx,
+                    );
+                }
                 album_history_row(
                     *album_id,
                     &refs,
@@ -65,6 +94,7 @@ impl QuillApp {
                     look,
                     session,
                     &self.message_ui.spoiler_revealed,
+                    corner,
                     cx,
                 )
             }
@@ -148,6 +178,7 @@ impl QuillApp {
                         joined_above: inputs.joined_above,
                         ..look
                     },
+                    corner,
                     cx,
                 );
                 let row = self.with_suggested_post_block(message, row, cx);
@@ -320,14 +351,15 @@ impl QuillApp {
     pub(in crate::ui) fn maybe_auto_load_newer(&mut self, cx: &mut Context<Self>) {
         let in_thread = self.thread_active();
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.open_topic.is_none()
             && (in_thread || live.driver.session.threads.thread.is_none())
             && live.driver.session.threads.saved.sublist.is_none()
             && live.driver.session.threads.saved.tag_search.is_none()
         {
-            // A thread window pages forward on its own.
+            // Thread and topic windows page forward on their own.
             let sent = if in_thread {
                 live.driver.fetch_thread_history_newer()
+            } else if live.driver.session.open_topic.is_some() {
+                live.driver.fetch_topic_history_newer()
             } else {
                 live.driver.fetch_history_newer()
             };
@@ -346,10 +378,18 @@ impl QuillApp {
         // Inside a thread the button addresses the thread's window: its
         // divider goes, and a window short of the newest replies is
         // replaced (the scroller lands at the end when the page arrives).
+        let in_topic = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.open_topic.is_some());
         let replaced = if in_thread {
             self.live
                 .as_mut()
                 .is_some_and(|live| matches!(live.driver.thread_jump_to_latest(), Ok(Some(_))))
+        } else if in_topic {
+            self.live
+                .as_mut()
+                .is_some_and(|live| matches!(live.driver.topic_jump_to_latest(), Ok(Some(_))))
         } else {
             self.live.as_mut().is_some_and(|live| {
                 live.driver

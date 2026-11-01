@@ -58,7 +58,7 @@ pub fn store(prefs: AiComposePrefs) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = prefs_path()
     {
-        let _ = crate::settings::write_json_deferred(&path, &prefs);
+        crate::settings::write_json_deferred(&path, &prefs);
     }
     *PREFS.write_or_recover() = Some(prefs);
 }

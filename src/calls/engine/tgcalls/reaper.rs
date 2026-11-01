@@ -67,13 +67,13 @@ impl Backlog {
     }
 }
 
-struct Reaper {
+pub(super) struct Reaper {
     jobs: Sender<Job>,
     backlog: Arc<Backlog>,
 }
 
 impl Reaper {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let (jobs, queue) = channel::<Job>();
         let backlog = Arc::new(Backlog::default());
         let finished = Arc::clone(&backlog);
@@ -86,8 +86,27 @@ impl Reaper {
         Self { jobs, backlog }
     }
 
-    fn hand_off(&self, job: Job) {
+    /// Blocks until every teardown handed off has run.
+    #[cfg(test)]
+    pub(super) fn wait_drained(&self) {
+        self.backlog.wait_drained();
+    }
+
+    /// Quit waits for the work this covers as for a teardown: an exit while
+    /// an instance is being made crashes the same way.
+    pub(super) fn hold(&self) -> ReaperHold {
         self.backlog.add();
+        ReaperHold(Arc::clone(&self.backlog))
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_drained(&self) -> bool {
+        self.backlog.is_empty()
+    }
+
+    pub(super) fn hand_off(&self, job: impl FnOnce() + Send + 'static) {
+        self.backlog.add();
+        let job: Job = Box::new(job);
         if let Err(SendError(no_thread_took_it)) = self.jobs.send(job) {
             ffi_boundary((), no_thread_took_it);
             self.backlog.finish();
@@ -95,19 +114,29 @@ impl Reaper {
     }
 }
 
-static REAPER: OnceLock<Reaper> = OnceLock::new();
+pub(super) struct ReaperHold(Arc<Backlog>);
+
+impl Drop for ReaperHold {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
+static REAPER: OnceLock<Arc<Reaper>> = OnceLock::new();
 static EXIT_HOOK: Once = Once::new();
 
-pub(super) fn hand_off(job: impl FnOnce() + Send + 'static) {
-    REAPER.get_or_init(Reaper::start).hand_off(Box::new(job));
+/// The process's reaper, the one quit waits for.
+pub(super) fn shared() -> Arc<Reaper> {
+    Arc::clone(REAPER.get_or_init(|| Arc::new(Reaper::start())))
 }
 
 /// Quit: waits for teardowns in progress until `deadline`. One still running
 /// at exit makes the process leave through `_exit`. Blocks at most until
-/// `deadline`, and not at all if no call ever ended.
-pub fn await_call_teardown(deadline: Instant) {
+/// `deadline`, and not at all if no call ever ended. Says whether they
+/// all finished.
+pub fn await_call_teardown(deadline: Instant) -> bool {
     let Some(reaper) = REAPER.get() else {
-        return;
+        return true;
     };
     // Registered here, the last moment before exit: `atexit` hooks and
     // static destructors run in reverse order, so this one runs first.
@@ -116,7 +145,7 @@ pub fn await_call_teardown(deadline: Instant) {
         // every panic. A failed registration leaves exit as before.
         let _ = unsafe { libc::atexit(leave_if_stuck) };
     });
-    reaper.backlog.wait_empty(deadline);
+    reaper.backlog.wait_empty(deadline)
 }
 
 /// The exit status of a process that left with a teardown still running.
@@ -143,17 +172,6 @@ extern "C" fn leave_if_stuck() {
     });
 }
 
-/// Blocks until every teardown handed off before this call has run: the
-/// reaper runs them in order, so a marker queued now runs after them.
-#[cfg(test)]
-pub(super) fn wait_for_teardowns_so_far() {
-    let (ran, marker) = std::sync::mpsc::channel::<()>();
-    hand_off(move || {
-        let _ = ran.send(());
-    });
-    let _ = marker.recv();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,13 +182,13 @@ mod tests {
     fn a_stuck_teardown_never_holds_up_the_caller() {
         let reaper = Reaper::start();
         let (release, stuck) = channel::<()>();
-        reaper.hand_off(Box::new(move || {
+        reaper.hand_off(move || {
             let _ = stuck.recv();
-        }));
+        });
         assert!(!reaper.backlog.wait_empty(Instant::now()));
         assert!(!reaper.backlog.is_empty(), "exit would use _exit");
         drop(release);
-        reaper.backlog.wait_drained();
+        reaper.wait_drained();
         assert!(reaper.backlog.is_empty());
     }
 
@@ -180,9 +198,9 @@ mod tests {
         let (done, finished) = channel::<(usize, ThreadId)>();
         for order in 0..3 {
             let done = done.clone();
-            reaper.hand_off(Box::new(move || {
+            reaper.hand_off(move || {
                 let _ = done.send((order, thread::current().id()));
-            }));
+            });
         }
         drop(done);
         let ran: Vec<(usize, ThreadId)> = finished.iter().collect();
@@ -222,7 +240,7 @@ mod tests {
     )]
     fn exit_with_a_stuck_teardown() -> ! {
         let (_held, stuck) = channel::<()>();
-        hand_off(move || {
+        shared().hand_off(move || {
             let _ = stuck.recv();
         });
         await_call_teardown(Instant::now());
@@ -233,11 +251,11 @@ mod tests {
     fn a_panicking_teardown_leaves_the_rest_running() {
         let reaper = Reaper::start();
         let (done, finished) = channel::<()>();
-        reaper.hand_off(Box::new(|| panic!("teardown failed")));
-        reaper.hand_off(Box::new(move || {
+        reaper.hand_off(|| panic!("teardown failed"));
+        reaper.hand_off(move || {
             let _ = done.send(());
-        }));
+        });
         assert_eq!(finished.recv(), Ok(()));
-        reaper.backlog.wait_drained();
+        reaper.wait_drained();
     }
 }

@@ -72,23 +72,102 @@ fn turned(x: usize, y: usize, w: usize, h: usize, rotation: LiveRotation) -> (us
     }
 }
 
+const TURN_BLOCK: usize = 8;
+
+fn transpose_8x8_bytes([a, b, c, d, e, f, g, h]: &mut [u64; TURN_BLOCK]) {
+    fn swap(low: &mut u64, high: &mut u64, shift: u32, mask: u64) {
+        let moved = ((*low >> shift) ^ *high) & mask;
+        *high ^= moved;
+        *low ^= moved << shift;
+    }
+    const BYTES: u64 = 0x00ff_00ff_00ff_00ff;
+    const PAIRS: u64 = 0x0000_ffff_0000_ffff;
+    const QUADS: u64 = 0x0000_0000_ffff_ffff;
+    swap(a, b, 8, BYTES);
+    swap(c, d, 8, BYTES);
+    swap(e, f, 8, BYTES);
+    swap(g, h, 8, BYTES);
+    swap(a, c, 16, PAIRS);
+    swap(b, d, 16, PAIRS);
+    swap(e, g, 16, PAIRS);
+    swap(f, h, 16, PAIRS);
+    swap(a, e, 32, QUADS);
+    swap(b, f, 32, QUADS);
+    swap(c, g, 32, QUADS);
+    swap(d, h, 32, QUADS);
+}
+
+fn rotate_quarter(src: &[u8], w: usize, h: usize, rotation: LiveRotation, dst: &mut [u8]) {
+    let clockwise = rotation == LiveRotation::R90;
+    let (across, down) = (w - w % TURN_BLOCK, h - h % TURN_BLOCK);
+    for top in (0..down).step_by(TURN_BLOCK) {
+        for left in (0..across).step_by(TURN_BLOCK) {
+            let mut block = [0u64; TURN_BLOCK];
+            for (at, word) in block.iter_mut().enumerate() {
+                let row = top + if clockwise { TURN_BLOCK - 1 - at } else { at };
+                let start = row * w + left;
+                if let Some((bytes, _)) = src
+                    .get(start..)
+                    .and_then(|rest| rest.split_first_chunk::<TURN_BLOCK>())
+                {
+                    *word = u64::from_le_bytes(*bytes);
+                }
+            }
+            transpose_8x8_bytes(&mut block);
+            for (at, word) in block.iter().enumerate() {
+                let (row, column) = if clockwise {
+                    (left + at, h - TURN_BLOCK - top)
+                } else {
+                    (w - 1 - left - at, top)
+                };
+                let start = row * h + column;
+                if let Some((out, _)) = dst
+                    .get_mut(start..)
+                    .and_then(|rest| rest.split_first_chunk_mut::<TURN_BLOCK>())
+                {
+                    *out = word.to_le_bytes();
+                }
+            }
+        }
+    }
+    let mut turn_pixel = |x: usize, y: usize| {
+        let (dx, dy) = turned(x, y, w, h, rotation);
+        if let (Some(value), Some(out)) = (src.get(y * w + x), dst.get_mut(dy * h + dx)) {
+            *out = *value;
+        }
+    };
+    for y in 0..down {
+        for x in across..w {
+            turn_pixel(x, y);
+        }
+    }
+    for y in down..h {
+        for x in 0..w {
+            turn_pixel(x, y);
+        }
+    }
+}
+
 fn rotate_plane(src: &[u8], w: usize, h: usize, rotation: LiveRotation, dst: &mut [u8]) {
-    let dw = if rotation.swaps_sides() { h } else { w };
-    for (y, row) in src.chunks_exact(w.max(1)).take(h).enumerate() {
-        for (x, value) in row.iter().enumerate() {
-            let (dx, dy) = turned(x, y, w, h, rotation);
-            if let Some(out) = dst.get_mut(dy * dw + dx) {
-                *out = *value;
+    match rotation {
+        LiveRotation::None => {}
+        LiveRotation::R90 | LiveRotation::R270 => rotate_quarter(src, w, h, rotation, dst),
+        LiveRotation::R180 => {
+            let rows = src.chunks_exact(w.max(1)).take(h).rev();
+            for (out, row) in dst.chunks_exact_mut(w.max(1)).zip(rows) {
+                out.copy_from_slice(row);
+                out.reverse();
             }
         }
     }
 }
 
-/// The frame turned by `rotation`, as new I420 planes with the turned
-/// width and height. `None` when there is nothing to turn (or the size
-/// does not fit a frame). Odd sides keep their chroma grid, so they are
-/// exact only for even sizes (which is what WebRTC sends).
-pub fn rotate_planes(src: &I420, rotation: LiveRotation) -> Option<(Vec<u8>, u16, u16)> {
+/// The frame turned by `rotation` into `out` (whatever it held goes), as
+/// I420 planes, and the turned width and height. `None` when there is
+/// nothing to turn (or the size does not fit a frame). Odd sides keep their
+/// chroma grid, so they are exact only for even sizes (which is what WebRTC
+/// sends).
+pub fn rotate_planes(src: &I420, rotation: LiveRotation, out: &mut Vec<u8>) -> Option<(u16, u16)> {
     if rotation == LiveRotation::None {
         return None;
     }
@@ -103,14 +182,14 @@ pub fn rotate_planes(src: &I420, rotation: LiveRotation) -> Option<(Vec<u8>, u16
         (w, h)
     };
     let (out_w, out_h) = (u16::try_from(dw).ok()?, u16::try_from(dh).ok()?);
-    let mut out = vec![0u8; i420_size(out_w, out_h)];
+    out.resize(i420_size(out_w, out_h), 0);
     let (dcw, dch) = (dw.div_ceil(2), dh.div_ceil(2));
     let (y_out, rest) = out.split_at_mut_checked(dw * dh)?;
     let (u_out, v_out) = rest.split_at_mut_checked(dcw * dch)?;
     rotate_plane(src.y, w, h, rotation, y_out);
     rotate_plane(src.u, cw, ch, rotation, u_out);
     rotate_plane(src.v, cw, ch, rotation, v_out);
-    Some((out, out_w, out_h))
+    Some((out_w, out_h))
 }
 
 /// Mirror an I420 frame left to right in place (your camera preview, as

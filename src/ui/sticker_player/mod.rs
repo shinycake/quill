@@ -18,12 +18,15 @@
 #![deny(clippy::indexing_slicing)]
 
 mod app;
+mod display;
 mod spec;
 mod view;
 
 #[cfg(test)]
 pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
+pub(super) use display::note_display;
+use display::{display_of, forget_display};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
@@ -50,7 +53,7 @@ const CLOSE_AFTER: Duration = Duration::from_secs(5);
 /// past a clip's due time: a burst of frames, or clips due close
 /// together, cost one look.
 const CLOSE_SLACK: Duration = Duration::from_secs(1);
-/// Heads not drawn for this long are forgotten (a sticker seen again
+/// Heads off screen for this long are forgotten (a sticker seen again
 /// after that plays as if new).
 const HEAD_TTL: Duration = Duration::from_secs(600);
 const MAX_HEADS: usize = 4096;
@@ -59,37 +62,16 @@ const WANT_TTL: Duration = Duration::from_millis(120);
 /// Tick rate while a clip opens.
 const OPENING_FPS: u32 = 30;
 
-thread_local! {
-    /// The scale factor and refresh rate of the window that last painted a
-    /// sticker, for views resolved while rendering (before paint).
-    static DISPLAY: Cell<(f32, f64)> = const { Cell::new((2.0, 60.0)) };
-}
-
-/// The refresh rate of the window that last painted a sticker.
-pub(super) fn display_hz() -> f64 {
-    DISPLAY.with(Cell::get).1
-}
-
-/// Note the scale factor and refresh rate of the window painting now;
-/// called by what paints views (the animation layer, effect overlays).
-pub(super) fn note_display(window: &Window, cx: &App) {
-    let hz = window
-        .refresh_interval(cx)
-        .map(|interval| 1.0 / interval.as_secs_f64())
-        .filter(|hz| hz.is_finite() && *hz > 0.0)
-        .unwrap_or(60.0);
-    DISPLAY.with(|display| display.set((window.scale_factor(), hz)));
-}
-
 fn trace_stickers() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_STICKERS").is_some_and(|v| v == "1"))
 }
 
-/// Whether views may play on the fine grid now.
-fn high_rate(window_active: bool) -> bool {
+/// Whether views in `window` (`None`: the main window) may play on the
+/// fine grid now.
+fn high_rate(window: Option<ChatId>, window_active: bool) -> bool {
     window_active
-        && display_hz() > 61.0
+        && display_of(window).hz > 61.0
         && !quill::power_saving::on(quill::power_saving::Flag::Animations)
 }
 
@@ -112,20 +94,33 @@ struct UiClip {
     shown: Option<(u32, Arc<RenderImage>)>,
     used: Option<Instant>,
     /// Where views last drew it: one stamp per window and slice.
-    drawn: SmallVec<[Drawn; 2]>,
+    drawn: SmallVec<[PaintStamp; 2]>,
     /// When the closer last found it on screen.
     seen: Option<Instant>,
-    /// What each head drawing it wants: its frame and the next ones.
-    wants: Vec<(HeadId, u32, [Option<u32>; AHEAD], Instant)>,
+    /// What each head drawing it wants.
+    wants: Vec<Want>,
     /// When its first frame arrived.
     ready_at: Option<Instant>,
     /// Where views asked for it since it opened.
     places: Places,
 }
 
+/// What a head drawing a clip wants.
+struct Want {
+    head: HeadId,
+    index: u32,
+    ahead: [Option<u32>; AHEAD],
+    at: Instant,
+    /// It rests on `index`, and its window draws it only when something else
+    /// changes: the frame stays for as long as the head does.
+    rests: bool,
+}
+
 /// Where a view is in a clip.
 struct Head {
     state: PlayHead,
+    /// The frame its view showed last.
+    shown: Option<u32>,
     /// When a view last drew it.
     seen: Instant,
     /// Where views drew it.
@@ -176,45 +171,12 @@ impl Leaving {
     }
 }
 
-/// Where a view drew a clip, and in which frame: the main window (its
-/// frames, and the slice that may replay the draw), or a chat window,
-/// which the main window's frames say nothing about.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Drawn {
-    Main(PaintStamp),
-    Chat(ChatId, u64),
-}
-
-impl Drawn {
-    fn same_place(self, other: Drawn) -> bool {
-        match (self, other) {
-            (Drawn::Main(a), Drawn::Main(b)) => a.same_place(b),
-            (Drawn::Chat(a, _), Drawn::Chat(b, _)) => a == b,
-            _ => false,
-        }
-    }
-
-    /// Whether the window's latest frame shows it (between frames). A
-    /// stamp that does not show never will again: the window drew since,
-    /// or closed.
-    fn shows(self, chat_frames: &HashMap<ChatId, u64>) -> bool {
-        match self {
-            Drawn::Main(stamp) => super::image_budget::shows_now(stamp),
-            Drawn::Chat(chat, frame) => chat_frames.get(&chat) == Some(&frame),
-        }
-    }
-}
-
 #[derive(Default)]
 struct Inner {
     clips: HashMap<ClipKey, UiClip>,
     heads: HashMap<(HeadId, i32), Head>,
     stats: ScreenStats,
     trimmed: Option<Instant>,
-    /// Each open chat window's latest frame, numbered across all chat
-    /// windows (a window opened again starts past its old stamps).
-    chat_frames: HashMap<ChatId, u64>,
-    chat_frame_count: u64,
 }
 
 /// What [`Player::close_stale`] did.
@@ -252,6 +214,9 @@ pub(crate) struct Player {
     /// Where a test stopped the clock (`freeze`).
     #[cfg(test)]
     frozen: Cell<Option<Instant>>,
+    /// The test executor whose clock [`Self::now`] follows (`follow`).
+    #[cfg(test)]
+    executor: RefCell<Option<BackgroundExecutor>>,
     /// How many times `close_stale` looked (a test).
     #[cfg(test)]
     looks: Cell<usize>,
@@ -272,6 +237,8 @@ impl Player {
             #[cfg(test)]
             frozen: Cell::new(None),
             #[cfg(test)]
+            executor: RefCell::new(None),
+            #[cfg(test)]
             looks: Cell::new(0),
         }
     }
@@ -279,7 +246,12 @@ impl Player {
     /// The time views draw at and the closer judges by.
     pub(super) fn now(&self) -> Instant {
         #[cfg(test)]
-        return self.frozen.get().unwrap_or_else(Instant::now) + self.skew.get();
+        return self
+            .frozen
+            .get()
+            .or_else(|| self.executor.borrow().as_ref().map(BackgroundExecutor::now))
+            .unwrap_or_else(Instant::now)
+            + self.skew.get();
         #[cfg(not(test))]
         Instant::now()
     }
@@ -288,6 +260,13 @@ impl Player {
     #[cfg(test)]
     pub(super) fn skip(&self, by: Duration) {
         self.skew.set(self.skew.get() + by);
+    }
+
+    /// Run [`Self::now`] on `executor`'s clock, which a test moves on:
+    /// heads then play as far as the frame clock's ticks came.
+    #[cfg(test)]
+    pub(in crate::ui) fn follow(&self, executor: BackgroundExecutor) {
+        *self.executor.borrow_mut() = Some(executor);
     }
 
     /// Stop [`Self::now`] where it is: from then on only [`Self::skip`]
@@ -338,8 +317,8 @@ impl Player {
             .ok()
             .and_then(|fixtures| fixtures.get(&spec.file.0).cloned())
         {
-            return quill::sticker_playback::player::Origin::Decoded(Box::new(move |_| {
-                Ok(fixture(edge))
+            return quill::sticker_playback::player::Origin::Decoded(Box::new(move |_, frames| {
+                fixture(edge).feed(frames)
             }));
         }
         spec.origin(edge)
@@ -364,10 +343,7 @@ impl Player {
     /// what they drew.
     #[cfg(test)]
     pub(super) fn settle(&self) {
-        let until = Instant::now() + Duration::from_secs(10);
-        while !self.engine.idle() && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        self.engine.wait_idle();
         self.drain();
     }
 
@@ -483,6 +459,8 @@ impl Player {
         now: Instant,
     ) -> Option<Arc<RenderImage>> {
         self.drain();
+        let display = display_of(window);
+        let played = super::frame_clock::content_now(display.id, now);
         let key = spec.key(edge);
         let high_rate = high_rate && !self.engine.coarse(&key);
         let place = Place::of(head, window);
@@ -490,13 +468,7 @@ impl Player {
         let shown = {
             let mut guard = self.inner.try_borrow_mut().ok()?;
             let inner = &mut *guard;
-            let drawn = match window {
-                None => Drawn::Main(super::image_budget::paint_stamp()),
-                Some(chat) => {
-                    let frame = inner.chat_frames.get(&chat).copied().unwrap_or(0);
-                    Drawn::Chat(chat, frame)
-                }
-            };
+            let drawn = super::image_budget::paint_stamp_in(window);
             let clip = inner.clips.entry(key).or_insert_with(|| {
                 self.engine.open(key, self.origin(spec, edge));
                 UiClip::default()
@@ -515,20 +487,26 @@ impl Player {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
                         state: PlayHead::default(),
+                        shown: None,
                         seen: now,
                         places: Places::new(),
                     });
                     entry.seen = now;
                     note_place(&mut entry.places, place);
-                    let head_state = &mut entry.state;
+                    let Head {
+                        state: head_state,
+                        shown: head_shown,
+                        ..
+                    } = entry;
                     let pick = match mode {
                         PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                             Duration::ZERO,
                             mode,
                             timeline,
                             high_rate,
+                            display.hz,
                         ),
-                        _ => head_state.advance(now, mode, timeline, high_rate),
+                        _ => head_state.advance(played, mode, timeline, high_rate, display.hz),
                     };
                     pick.and_then(|pick| {
                         let exact = clip
@@ -536,7 +514,7 @@ impl Player {
                             .get(&pick.index)
                             .map(|image| (pick.index, image.clone()));
                         if exact.is_some() {
-                            head_state.start(now);
+                            head_state.start(played);
                         } else if head_state.started() {
                             inner.stats.late += 1;
                         }
@@ -551,9 +529,16 @@ impl Player {
                                     .map(|(index, image)| (*index, image.clone()))
                             })
                             .or_else(|| clip.shown.clone());
-                        clip.wants.retain(|(h, ..)| *h != head);
-                        clip.wants.push((head, pick.index, pick.ahead, now));
+                        clip.wants.retain(|want| want.head != head);
+                        clip.wants.push(Want {
+                            head,
+                            index: pick.index,
+                            ahead: pick.ahead,
+                            at: now,
+                            rests: !pick.animating,
+                        });
                         let (index, image) = found?;
+                        *head_shown = Some(index);
                         if clip
                             .shown
                             .as_ref()
@@ -593,22 +578,26 @@ impl Player {
     /// Ask the engine for what the heads drawing `key` want next, and let
     /// go of drawn frames none of them needs any more.
     fn ask(&self, key: &ClipKey, now: Instant, retired: &mut Vec<Arc<RenderImage>>) {
-        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+        let Ok(mut guard) = self.inner.try_borrow_mut() else {
             return;
         };
+        let inner = &mut *guard;
         let Some(clip) = inner.clips.get_mut(key) else {
             return;
         };
-        clip.wants
-            .retain(|(.., at)| now.saturating_duration_since(*at) <= WANT_TTL);
+        let heads = &inner.heads;
+        clip.wants.retain(|want| {
+            now.saturating_duration_since(want.at) <= WANT_TTL
+                || want.rests && heads.contains_key(&(want.head, key.file))
+        });
         let mut wanted: SmallVec<[u32; 16]> = SmallVec::new();
         // Each head's own frame first, then the frames ahead in order.
-        for (_, index, ..) in &clip.wants {
-            wanted.push(*index);
+        for want in &clip.wants {
+            wanted.push(want.index);
         }
         for slot in 0..AHEAD {
-            for (_, _, ahead, _) in &clip.wants {
-                if let Some(index) = ahead.get(slot).copied().flatten() {
+            for want in &clip.wants {
+                if let Some(index) = want.ahead.get(slot).copied().flatten() {
                     wanted.push(index);
                 }
             }
@@ -635,15 +624,15 @@ impl Player {
             seen.push(*index);
             fresh
         });
-        drop(inner);
+        drop(guard);
         if !wanted.is_empty() {
             self.engine.want(key, &wanted);
         }
     }
 
-    /// Forget heads not drawn lately, once a second. Clips close between
-    /// frames (`close_stale`): in the middle of one, a view at rest that
-    /// the frame has not painted yet would look gone.
+    /// Keep the heads in check, once a second. What is off screen goes
+    /// between frames (`close_stale`): in the middle of one, a view at rest
+    /// that the frame has not painted yet would look gone.
     fn trim(&self, now: Instant) {
         let Ok(mut inner) = self.inner.try_borrow_mut() else {
             return;
@@ -655,9 +644,6 @@ impl Player {
             return;
         }
         inner.trimmed = Some(now);
-        inner
-            .heads
-            .retain(|_, head| now.saturating_duration_since(head.seen) < HEAD_TTL);
         if inner.heads.len() > MAX_HEADS {
             let mut seen: Vec<Instant> = inner.heads.values().map(|head| head.seen).collect();
             seen.sort_unstable();
@@ -677,7 +663,9 @@ impl Player {
     /// window drew it, or replays a slice render that did (a view at rest
     /// is not drawn again while nothing changes, and closing its clip
     /// would show the still at the next draw). No window shows what the
-    /// closed clips held, so their frames can leave the atlas now.
+    /// closed clips held, so their frames can leave the atlas now. Heads go
+    /// the same way: a window with nothing to draw for ten minutes still
+    /// shows its stickers, played and at rest.
     pub(super) fn close_stale(&self, now: Instant) -> Closed {
         #[cfg(test)]
         self.looks.set(self.looks.get() + 1);
@@ -692,10 +680,13 @@ impl Player {
         let inner = &mut *guard;
         let mut next: Option<Duration> = None;
         let mut stale = Vec::new();
+        let mut on_screen: SmallVec<[i32; 16]> = SmallVec::new();
         for (key, clip) in &mut inner.clips {
-            clip.drawn.retain(|drawn| drawn.shows(&inner.chat_frames));
+            clip.drawn
+                .retain(|drawn| super::image_budget::shows_now(*drawn));
             if !clip.drawn.is_empty() {
                 clip.seen = Some(now);
+                on_screen.push(key.file);
                 continue;
             }
             let idle = clip
@@ -707,6 +698,12 @@ impl Player {
                 None => stale.push(*key),
             }
         }
+        inner.heads.retain(|(_, file), head| {
+            if on_screen.contains(file) {
+                head.seen = now;
+            }
+            now.saturating_duration_since(head.seen) < HEAD_TTL
+        });
         let mut frames: Vec<Arc<RenderImage>> = Vec::new();
         for key in &stale {
             if let Some(clip) = inner.clips.remove(key) {
@@ -726,25 +723,15 @@ impl Player {
         }
     }
 
-    /// A window starts a frame, before anything in it renders (`None`: the
-    /// main window, whose frames `image_budget` counts).
-    pub(super) fn frame_starts(&self, window: Option<ChatId>) {
+    /// A window starts a frame, before anything in it renders.
+    pub(super) fn frame_starts(&self) {
         self.screen_changes();
-        if let Some(chat) = window
-            && let Ok(mut inner) = self.inner.try_borrow_mut()
-        {
-            inner.chat_frame_count += 1;
-            let frame = inner.chat_frame_count;
-            inner.chat_frames.insert(chat, frame);
-        }
     }
 
-    /// `chat`'s window closed: what it showed is gone.
+    /// A chat window closed: what it showed is gone.
     pub(super) fn window_closed(&self, chat: ChatId) {
+        super::image_budget::forget_window(chat);
         self.screen_changes();
-        if let Ok(mut inner) = self.inner.try_borrow_mut() {
-            inner.chat_frames.remove(&chat);
-        }
     }
 
     /// What is on screen may change now. If the closer waits for that,
@@ -761,13 +748,12 @@ impl Player {
             return;
         };
         let now = self.now();
-        if let Ok(mut guard) = self.inner.try_borrow_mut() {
-            let inner = &mut *guard;
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
             for clip in inner.clips.values_mut() {
                 if clip
                     .drawn
                     .iter()
-                    .any(|drawn| drawn.shows(&inner.chat_frames))
+                    .any(|drawn| super::image_budget::shows_now(*drawn))
                 {
                     clip.seen = Some(now);
                 }
@@ -816,7 +802,7 @@ impl Player {
             }
         };
         eprintln!(
-            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
+            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} coarse {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
             screen.shown,
             screen.late,
             stats.drawn,
@@ -825,10 +811,11 @@ impl Player {
             stats.unpacked,
             avg(stats.unpack_time, stats.unpacked),
             stats.clips,
+            stats.coarse,
             stats.store_bytes as f64 / 1_048_576.0,
             stats.source_bytes as f64 / 1_048_576.0,
             stats.evicted,
-            display_hz().round(),
+            display_of(None).hz.round(),
         );
     }
 
@@ -842,6 +829,9 @@ impl Player {
     /// chat list keeps its emoji where they are, on their frames).
     /// Returns the frames of the clips it closed, each once.
     pub(super) fn leave(&self, window: Option<ChatId>, what: Leaving) -> Vec<Arc<RenderImage>> {
+        if what == Leaving::Window {
+            forget_display(window);
+        }
         let Ok(mut guard) = self.inner.try_borrow_mut() else {
             return Vec::new();
         };
@@ -941,7 +931,7 @@ impl Player {
 }
 
 /// Note that a view drew a clip at `drawn`, over its last stamp there.
-fn note_drawn(stamps: &mut SmallVec<[Drawn; 2]>, drawn: Drawn) {
+fn note_drawn(stamps: &mut SmallVec<[PaintStamp; 2]>, drawn: PaintStamp) {
     match stamps.iter_mut().find(|stamp| stamp.same_place(drawn)) {
         Some(stamp) => *stamp = drawn,
         None => stamps.push(drawn),

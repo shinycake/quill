@@ -6,7 +6,7 @@
 //! theme" uploads a cloud theme, which TDLib cannot do.
 
 use super::super::{DialogKind, QuillShell};
-use super::{QuillApp, file_palette};
+use super::{QuillApp, image_color};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::StyledExt;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -16,7 +16,9 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::theme::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::app_theme::{KeyGroup, Palette, PaletteKey, ThemeFile, ThemeId, hex_string, store};
+use quill::app_theme::{
+    KeyGroup, Palette, PaletteKey, ThemeFile, ThemeId, custom_palette, hex_string, store,
+};
 use quill::lang::{keys, tr, tr_with};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,11 +38,14 @@ pub(crate) struct ThemeEditor {
     picker: Entity<ColorPickerState>,
     /// The theme as it will be saved, with keys Quill does not use kept.
     file: ThemeFile,
+    /// The colour standing for the theme's background, worked out once
+    /// (decoding its picture) so a colour change does not decode it again.
+    image: Option<u32>,
     pub(super) palette: Palette,
     selected: EditorRow,
     /// The custom theme being edited; saving under the same name replaces
     /// it.
-    editing: Option<String>,
+    pub(super) editing: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -112,8 +117,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (file, editing) = match source {
+        match source {
             EditorSource::Current => {
+                self.settings.app_theme.editor_read = None;
                 let palette = self
                     .settings
                     .app_theme
@@ -121,18 +127,63 @@ impl QuillApp {
                     .as_ref()
                     .map(|(_, p)| p.clone())
                     .unwrap_or_else(|| quill::app_theme::BuiltinTheme::Classic.palette());
-                (ThemeFile::from_palette(&palette), None)
+                let file = ThemeFile::from_palette(&palette);
+                // A solid background: no picture to decode.
+                let image = image_color(&file);
+                self.show_theme_editor(file, None, image, window, cx);
             }
-            EditorSource::Custom(name) => match store::load(&Self::themes_dir(), &name) {
-                Ok(file) => (file, Some(name)),
-                Err(err) => {
-                    self.connection.set_note(StatusNote::error(err.note()));
-                    cx.notify();
+            // The theme's picture is decoded off the UI thread. The read is
+            // dropped when the editor, Settings or the theme goes away first.
+            EditorSource::Custom(name) => {
+                let themes = &mut self.settings.app_theme;
+                if themes
+                    .editor_read
+                    .as_ref()
+                    .is_some_and(|(reading, _)| *reading == name)
+                {
                     return;
                 }
-            },
-        };
-        let palette = file_palette(&file);
+                let dir = Self::themes_dir();
+                let wanted = name.clone();
+                let read = cx.background_spawn(async move {
+                    store::load(&dir, &wanted).map(|file| {
+                        let image = image_color(&file);
+                        (file, image)
+                    })
+                });
+                let editing = name.clone();
+                let task = cx.spawn_in(window, async move |this, cx| {
+                    let read = read.await;
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.settings.app_theme.editor_read = None;
+                        if this.settings.app_theme.editor.is_some() {
+                            return;
+                        }
+                        match read {
+                            Ok((file, image)) => {
+                                this.show_theme_editor(file, Some(editing), image, window, cx);
+                            }
+                            Err(err) => {
+                                this.connection.set_note(StatusNote::error(err.note()));
+                                cx.notify();
+                            }
+                        }
+                    });
+                });
+                themes.editor_read = Some((name, task));
+            }
+        }
+    }
+
+    fn show_theme_editor(
+        &mut self,
+        file: ThemeFile,
+        editing: Option<String>,
+        image: Option<u32>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let palette = custom_palette(&file, image);
         let taken = self.custom_theme_names();
         let initial_name = editing
             .clone()
@@ -169,6 +220,7 @@ impl QuillApp {
             search,
             picker,
             file,
+            image,
             palette,
             selected,
             editing,
@@ -181,6 +233,7 @@ impl QuillApp {
     /// Close the editor; what it changed goes away unless it was saved.
     pub(crate) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
         self.settings.app_theme.editor = None;
+        self.settings.app_theme.editor_read = None;
         self.apply_appearance(cx);
         cx.notify();
     }
@@ -210,9 +263,12 @@ impl QuillApp {
         let rgba = rgba_of(color);
         match editor.selected {
             EditorRow::Key(key) => editor.file.set_color(key, rgba),
-            EditorRow::Background => editor.file.set_background(rgba >> 8),
+            EditorRow::Background => {
+                editor.file.set_background(rgba >> 8);
+                editor.image = image_color(&editor.file);
+            }
         }
-        editor.palette = file_palette(&editor.file);
+        editor.palette = custom_palette(&editor.file, editor.image);
         self.apply_appearance(cx);
         cx.notify();
     }

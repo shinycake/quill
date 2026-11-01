@@ -91,11 +91,11 @@ impl Session {
                 self.set_chat_last_message(chat_id, last_message.as_ref());
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
-                self.rebuild_main_order();
+                self.sync_chat_order();
             }
             ChatListPayload::UpdateChatPosition(pos) => {
                 self.apply_position_fields(pos);
-                self.rebuild_main_order();
+                self.sync_chat_order();
             }
             ChatListPayload::UpdateChatFolders {
                 folders,

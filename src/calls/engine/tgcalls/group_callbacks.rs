@@ -7,11 +7,10 @@ use super::super::{
     BroadcastChannel, BroadcastPartRequest, BroadcastRequestId, CallbackShared, EngineEvent,
     GroupAudioLevel, StreamQuality,
 };
+use super::SoundSlot;
 use super::callbacks::send_picture;
 use crate::calls::live_video::LiveKey;
-use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
-use arc_swap::ArcSwapOption;
 use quill_calls_sys::{
     QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_MEDIUM, qc_group_broadcast_part, qc_group_callbacks,
     qc_group_level, qc_video_frame,
@@ -38,8 +37,7 @@ pub(super) struct GroupContext {
     pub(super) instance: u64,
     pub(super) presentation: bool,
     pub(super) shared: Arc<CallbackShared>,
-    /// Where the call's sound goes; `None` drops it (no output open).
-    pub(super) sound: ArcSwapOption<StreamAudio>,
+    pub(super) sound: Arc<SoundSlot>,
     /// The endpoints whose pictures Quill takes and the feed each one
     /// goes to, by endpoint id.
     pub(super) endpoints: Mutex<HashMap<String, LiveKey>>,
@@ -62,7 +60,7 @@ impl GroupContext {
             instance: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
             presentation,
             shared: Arc::clone(shared),
-            sound: ArcSwapOption::empty(),
+            sound: Arc::default(),
             endpoints: Mutex::new(HashMap::new()),
             conference: None,
             retired: AtomicBool::new(false),
@@ -280,7 +278,8 @@ unsafe extern "C" fn on_audio(user: *mut c_void, samples: *const i16, count: usi
         if samples.is_null() || count == 0 {
             return;
         }
-        let Some(sound) = call.sound.load_full() else {
+        let sound = call.sound.audio();
+        let Some(sound) = sound.as_ref() else {
             return;
         };
         // SAFETY: the library hands `count` samples at `samples` for this

@@ -285,7 +285,9 @@ impl QuillApp {
                         .label(tr(keys::Q_WHATS_NEW_ALL_RELEASES))
                         .link()
                         .small()
-                        .on_click(|_, _, cx| cx.open_url(quill::updater::RELEASES_URL)),
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_link(quill::updater::RELEASES_URL, cx)
+                        })),
                 ),
             )
             .into_any_element()
@@ -382,7 +384,7 @@ fn release_section(note: &ReleaseNote, cx: &mut Context<QuillApp>) -> AnyElement
                     .label(tr(keys::Q_OPS_VIEW_RELEASE_ON_GITHUB))
                     .link()
                     .small()
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx))),
             ),
         )
         .into_any_element()

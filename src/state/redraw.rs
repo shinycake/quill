@@ -9,18 +9,18 @@
 //! kept an idle window at 6–8% CPU.
 //!
 //! [`redraw_need`] grades an envelope before it is applied; the poll loop
-//! joins the grades of a batch ([`RedrawNeed::join`]) and redraws accordingly (see
-//! `ui::notifications`). Anything not graded here is [`RedrawNeed::Now`],
-//! so an update type added later redraws at once until someone decides
-//! otherwise.
+//! redraws accordingly (see `ui::notifications`). Anything not graded here
+//! is [`RedrawNeed::Now`], so an update type added later redraws at once
+//! until someone decides otherwise.
 
 use super::Session;
-use crate::ids::{ChatId, UserId};
+use crate::ids::{ChatId, MessageId, UserId};
 use crate::telegram::envelope::{ChatKind, Envelope, EnvelopePayload, ParsedFile};
 use crate::telegram::envelope::{
     ChatListPayload, ChatsPayload, CommonPayload, GroupsPayload, MediaPayload, MessagesPayload,
     SettingsPayload, UsersPayload,
 };
+use std::collections::HashSet;
 
 /// What an envelope's effect on screen asks for, least urgent first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -33,9 +33,9 @@ pub enum RedrawNeed {
     /// that are not open. Redrawn together, a few times a second, without
     /// the conversation.
     ChatList,
-    /// Only the open chat can change (progress of its media downloads):
-    /// redrawn now in the conversation and composer slices and the chat
-    /// windows, without the chat list.
+    /// Only a row on screen can change (progress of a media download, the
+    /// views and reactions of a message): redrawn now in the conversation
+    /// and composer slices and the chat windows, without the chat list.
     Conversation,
     /// Anything may change but nothing is urgent (automatic downloads,
     /// user and group records): a coalesced full redraw.
@@ -44,18 +44,32 @@ pub enum RedrawNeed {
     Now,
 }
 
-impl RedrawNeed {
-    /// The grade of a batch holding `self` and `other`. A conversation-only
-    /// change together with any other change asks for a full redraw now,
-    /// as it did before it had a grade of its own, so neither is lost.
-    pub fn join(self, other: Self) -> Self {
-        use RedrawNeed::*;
-        match (self, other) {
-            (Nothing, need) | (need, Nothing) => need,
-            (Conversation, Conversation) => Conversation,
-            (Conversation, _) | (_, Conversation) => Now,
-            (a, b) => a.max(b),
-        }
+/// The rows the main window's conversation showed at its last paint.
+#[derive(Debug, Default)]
+pub struct RowsOnScreen {
+    messages: HashSet<MessageId>,
+    auto_download_files: HashSet<i32>,
+}
+
+impl Session {
+    /// `None` when something over the conversation shows a row's progress
+    /// wherever the row is (the media viewer): every row then counts as on
+    /// screen.
+    pub fn note_rows_on_screen(&mut self, messages: Option<&[MessageId]>) {
+        let history = self.open_chat.and_then(|chat| self.histories.get(&chat.0));
+        self.messages.rows_on_screen = messages.map(|messages| RowsOnScreen {
+            messages: messages.iter().copied().collect(),
+            auto_download_files: messages
+                .iter()
+                .filter_map(|id| history?.messages.get(&id.0))
+                .filter_map(|message| super::session_files::auto_download_target(&message.content))
+                .map(|(_, file)| file.0)
+                .collect(),
+        });
+    }
+
+    fn row_on_screen(&self, is_shown: impl Fn(&RowsOnScreen) -> bool) -> bool {
+        self.messages.rows_on_screen.as_ref().is_none_or(is_shown)
     }
 }
 
@@ -153,6 +167,11 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
                 RedrawNeed::Later
             }
         }
+        P::Messages(MessagesPayload::UpdateMessageInteractionInfo {
+            chat_id,
+            message_id,
+            ..
+        }) => interaction_need(session, *chat_id, *message_id),
         P::Media(MediaPayload::UpdateFile(file)) => file_need(session, file),
         P::Media(MediaPayload::UpdateFileDownload { file_id, .. }) => {
             if session.media.downloads.is_user(*file_id) {
@@ -230,12 +249,26 @@ fn list_unless_shown(session: &Session, chat_id: ChatId) -> RedrawNeed {
     }
 }
 
+/// Only the main window knows which rows are on screen, so a chat window
+/// always redraws.
+fn interaction_need(session: &Session, chat_id: ChatId, message_id: MessageId) -> RedrawNeed {
+    let in_window =
+        session.window_chats.contains(&chat_id) || session.window_chats.shows_chat(chat_id);
+    let on_screen = shows_chat(session, chat_id)
+        && session.row_on_screen(|rows| rows.messages.contains(&message_id));
+    if in_window || on_screen {
+        RedrawNeed::Conversation
+    } else {
+        RedrawNeed::Later
+    }
+}
+
 /// Downloads the user started show live progress everywhere (the Downloads
-/// panel too); the open chat's automatic media downloads show it only in
-/// the conversation. Other automatic downloads (avatars,
-/// thumbnails, stickers) draw nothing while in flight, so their progress
-/// redraws in batches; the update that completes one redraws at once, as
-/// the picture appears wherever it is shown. A file Quill is not
+/// panel too); the open chat's automatic media downloads show it in their
+/// row, so only one on screen redraws at once. Other automatic downloads
+/// (avatars, thumbnails, stickers) draw nothing while in flight, so their
+/// progress redraws in batches; the update that completes one redraws at
+/// once, as the picture appears wherever it is shown. A file Quill is not
 /// downloading at all (an upload, a generated file) redraws at once.
 fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
     let id = file.id.0;
@@ -245,11 +278,15 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
             .files
             .get(&id)
             .is_some_and(|known| known.local.is_downloading_completed);
+    let open_chat = session.media.open_chat_media_downloads.contains(&id);
     if completes || session.media.downloads.is_user(id) {
         RedrawNeed::Now
-    } else if session.media.open_chat_media_downloads.contains(&id) {
+    } else if open_chat && session.row_on_screen(|rows| rows.auto_download_files.contains(&id)) {
         RedrawNeed::Conversation
-    } else if session.media.downloads.is_requested(id) || file.local.is_downloading_completed {
+    } else if open_chat
+        || session.media.downloads.is_requested(id)
+        || file.local.is_downloading_completed
+    {
         RedrawNeed::Later
     } else {
         RedrawNeed::Now

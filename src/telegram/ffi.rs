@@ -194,6 +194,13 @@ impl TdJson {
         Ok(())
     }
 
+    /// End a `td_receive` in progress, or the next one: TDLib answers a
+    /// request to a client id it never made at once, with an error.
+    pub fn wake_receive(&self) {
+        const NEVER_MADE: i32 = 0;
+        let _ = self.send(NEVER_MADE, r#"{"@type":"getOption","name":"version"}"#);
+    }
+
     /// Copy the received C string before the next `td_receive`/`td_execute` call.
     pub fn receive(&self, timeout: f64) -> Option<String> {
         // SAFETY: `td_receive` takes a plain timeout; Quill calls it from one

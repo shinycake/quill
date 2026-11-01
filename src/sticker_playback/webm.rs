@@ -12,30 +12,57 @@ use super::webm_ffi::{OpenError, StickerDecoder};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Decoded sticker frames, all `width` × `height`.
+pub struct WebmFrame {
+    pub width: u32,
+    pub height: u32,
+    /// Straight-alpha BGRA, `width * height * 4` bytes (GPUI's
+    /// `RenderImage` byte order).
+    pub bgra: Vec<u8>,
+}
+
+impl WebmFrame {
+    /// Centered on a transparent `edge` × `edge` square.
+    pub fn into_square(self, edge: u32) -> Vec<u8> {
+        if self.width == edge && self.height == edge {
+            self.bgra
+        } else {
+            center_into(&self.bgra, self.width, self.height, edge, edge)
+        }
+    }
+}
+
+/// What a decode gives next. Every frame of a sticker has one size.
+pub enum WebmStep {
+    Frame(WebmFrame),
+    /// The last frame, this many times more.
+    Repeat(usize),
+}
+
+pub type WebmSteps<'a> = dyn FnMut(WebmStep) -> Result<(), String> + 'a;
+
+/// A sticker's frames gathered in memory, all `width` × `height`.
+#[derive(Default)]
 pub struct WebmFrames {
     pub width: u32,
     pub height: u32,
-    /// Straight-alpha BGRA, `width * height * 4` bytes each (GPUI's
-    /// `RenderImage` byte order).
+    /// Each as [`WebmFrame::bgra`].
     pub frames: Vec<Vec<u8>>,
     pub fps: f64,
 }
 
 impl WebmFrames {
-    /// Each frame centered on a transparent `edge` × `edge` square.
-    pub fn into_squares(self, edge: u32) -> Vec<Vec<u8>> {
-        let (width, height) = (self.width, self.height);
-        self.frames
-            .into_iter()
-            .map(|frame| {
-                if width == edge && height == edge {
-                    frame
-                } else {
-                    center_into(&frame, width, height, edge, edge)
+    pub(super) fn keep(&mut self, step: WebmStep) {
+        match step {
+            WebmStep::Frame(frame) => {
+                (self.width, self.height) = (frame.width, frame.height);
+                self.frames.push(frame.bgra);
+            }
+            WebmStep::Repeat(times) => {
+                if let Some(last) = self.frames.last().cloned() {
+                    self.frames.extend(std::iter::repeat_n(last, times));
                 }
-            })
-            .collect()
+            }
+        }
     }
 
     /// The first frame as RGBA (the photo editor's sticker item).
@@ -189,13 +216,15 @@ pub(super) fn center_into(
     out
 }
 
-/// Decode in process. `Ok(None)` when the decoder is not installed here.
+/// Decode in process, one frame at a time into `each`; the frames a second.
+/// `Ok(None)` when the decoder is not installed here.
 pub(super) fn decode_in_process(
     path: &Path,
     edge: usize,
     max_frames: usize,
     cancelled: &AtomicBool,
-) -> Result<Option<WebmFrames>, String> {
+    each: &mut WebmSteps<'_>,
+) -> Result<Option<f64>, String> {
     let edge = u32::try_from(edge).unwrap_or(u32::MAX);
     let mut decoder = match StickerDecoder::open(path, edge) {
         Ok(decoder) => decoder,
@@ -208,7 +237,7 @@ pub(super) fn decode_in_process(
     let max_frames = max_frames.max(1);
     let fps = sample_fps(info.duration, max_frames)?;
     let mut plan = FramePlan::new(fps, max_frames, info.duration);
-    let mut frames: Vec<Vec<u8>> = Vec::new();
+    let mut any = false;
     while !plan.full() {
         if cancelled.load(Ordering::SeqCst) {
             return Err("Sticker playback cancelled".into());
@@ -217,41 +246,39 @@ pub(super) fn decode_in_process(
             break;
         };
         let placement = plan.place(pts);
-        if placement.repeat_previous > 0
-            && let Some(previous) = frames.last().cloned()
-        {
-            frames.extend(std::iter::repeat_n(previous, placement.repeat_previous));
+        if placement.repeat_previous > 0 {
+            each(WebmStep::Repeat(placement.repeat_previous))?;
         }
         if !placement.take {
             continue;
         }
         let (width, height, bgra) = decoder.pixels()?;
-        frames.push(if (width, height) == (info.width, info.height) {
+        let bgra = if (width, height) == (info.width, info.height) {
             bgra
         } else {
             // The stream changed size: keep every frame one size.
             center_into(&bgra, width, height, info.width, info.height)
-        });
+        };
+        each(WebmStep::Frame(WebmFrame {
+            width: info.width,
+            height: info.height,
+            bgra,
+        }))?;
+        any = true;
     }
     let tail = plan.tail();
-    if tail > 0
-        && let Some(last) = frames.last().cloned()
-    {
-        frames.extend(std::iter::repeat_n(last, tail));
+    if tail > 0 {
+        each(WebmStep::Repeat(tail))?;
     }
-    if frames.is_empty() {
+    if !any {
         return Err("Video sticker has no frames".into());
     }
-    Ok(Some(WebmFrames {
-        width: info.width,
-        height: info.height,
-        frames,
-        fps,
-    }))
+    Ok(Some(fps))
 }
 
-/// Decode with the `ffmpeg` binary: PNG frames under `cache`, read back
-/// and removed. The fallback when the bundled decoder is not installed.
+/// Decode with the `ffmpeg` binary: PNG frames under `cache`, read back one
+/// at a time into `each` and removed; the frames a second. The fallback
+/// when the bundled decoder is not installed.
 pub(super) fn decode_with_ffmpeg(
     path: &Path,
     cache: &Path,
@@ -259,13 +286,14 @@ pub(super) fn decode_with_ffmpeg(
     max_frames: usize,
     child: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
-) -> Result<WebmFrames, String> {
+    each: &mut WebmSteps<'_>,
+) -> Result<f64, String> {
     let probe =
         crate::video::probe_with_ffprobe(path, false).ok_or("Could not read video sticker")?;
     let max_frames = max_frames.max(1);
     let fps = sample_fps(Some(f64::from(probe.duration)), max_frames)?;
     // VP9's native ffmpeg decoder drops alpha; libvpx preserves the sticker surface.
-    let frames = crate::video::extract_frames(
+    let read = crate::video::extract_frames(
         path,
         cache,
         fps,
@@ -274,28 +302,20 @@ pub(super) fn decode_with_ffmpeg(
         Some((child, cancelled)),
         Some("libvpx-vp9"),
     )
-    .and_then(|paths| read_png_frames(&paths, cancelled));
+    .and_then(|paths| read_png_frames(&paths, cancelled, each));
     let _ = std::fs::remove_dir_all(cache);
-    let (width, height, frames) = frames?;
-    if frames.is_empty() {
-        return Err("Video sticker has no frames".into());
-    }
-    Ok(WebmFrames {
-        width,
-        height,
-        frames,
-        fps,
-    })
+    read?;
+    Ok(fps)
 }
 
-/// The PNG frames as BGRA, all the size of the first.
+/// The PNG frames as BGRA into `each`, all the size of the first.
 #[cfg(feature = "ui")]
 fn read_png_frames(
     paths: &[std::path::PathBuf],
     cancelled: &AtomicBool,
-) -> Result<(u32, u32, Vec<Vec<u8>>), String> {
+    each: &mut WebmSteps<'_>,
+) -> Result<(), String> {
     let mut size = None;
-    let mut frames = Vec::with_capacity(paths.len());
     for path in paths {
         if cancelled.load(Ordering::SeqCst) {
             return Err("Sticker playback cancelled".into());
@@ -307,14 +327,20 @@ fn read_png_frames(
             pixel.swap(0, 2);
         }
         let (out_w, out_h) = *size.get_or_insert((width, height));
-        frames.push(if (width, height) == (out_w, out_h) {
-            bgra
-        } else {
-            center_into(&bgra, width, height, out_w, out_h)
-        });
+        each(WebmStep::Frame(WebmFrame {
+            width: out_w,
+            height: out_h,
+            bgra: if (width, height) == (out_w, out_h) {
+                bgra
+            } else {
+                center_into(&bgra, width, height, out_w, out_h)
+            },
+        }))?;
     }
-    let (width, height) = size.unwrap_or((0, 0));
-    Ok((width, height, frames))
+    if size.is_none() {
+        return Err("Video sticker has no frames".into());
+    }
+    Ok(())
 }
 
 /// Without the UI build there is no PNG reader.
@@ -322,7 +348,8 @@ fn read_png_frames(
 fn read_png_frames(
     _paths: &[std::path::PathBuf],
     _cancelled: &AtomicBool,
-) -> Result<(u32, u32, Vec<Vec<u8>>), String> {
+    _each: &mut WebmSteps<'_>,
+) -> Result<(), String> {
     Err("Video stickers need the bundled decoder".into())
 }
 

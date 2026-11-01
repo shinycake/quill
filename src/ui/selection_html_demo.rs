@@ -47,7 +47,10 @@ pub(super) fn rich_blocks() -> Value {
                 "blocks": [{"@type": "pageBlockParagraph", "text": plain("Book the cabin")}]},
             {"@type": "pageBlockListItem", "label": "•", "has_checkbox": true, "is_checked": false,
                 "value": 0, "type": "",
-                "blocks": [{"@type": "pageBlockParagraph", "text": plain("Pack the tent")}]},
+                "blocks": [{"@type": "pageBlockParagraph", "text": {"@type": "richTexts", "texts": [
+                    plain("Pack the "),
+                    {"@type": "richTextBold", "text": plain("tent")},
+                ]}}]},
         ]},
         {"@type": "pageBlockTable", "caption": plain(""), "is_bordered": true,
             "is_striped": false, "is_compact": false, "cells": [

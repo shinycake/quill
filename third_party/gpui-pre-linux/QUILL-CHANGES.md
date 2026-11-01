@@ -17,8 +17,12 @@ draws on demand).
   `third_party/gpui-pre-windows/src/frame_idle.rs`): the idle decision. After
   250 ms of frames that neither drew, presented nor asked for another frame,
   with no frame demand from GPUI in between, a window's frame source parks
-  and gets no frames at all, like the macOS display link; a demand unparks
-  it. `next_frame_at` computes the timer's next deadline (the refresh grid,
+  and gets no frames at all, like the macOS display link. A demand on a
+  parked source gets one frame, which parks it again unless GPUI asked for
+  another frame during it or it came within 100 ms of the last woken frame
+  (the macOS `link_pace.rs` rule), so a caret blink costs one frame and not
+  250 ms of them. The refresh timer clears what GPUI asked for before a
+  woken frame (`X11FrameIdle::before_frame`). `next_frame_at` computes the timer's next deadline (the refresh grid,
   skipping missed frames, or none while parked). Unit tests run with
   `scripts/test-frame-idle.sh`. `QUILL_IDLE_FRAMES=0` (or `off`), read
   once, disables parking (upstream behavior).
@@ -126,3 +130,47 @@ QUILL-CHANGES.md):
 - Both backends close a window on `Recovery::CloseWindow` from a calloop
   timer (`run_for_window_at`, also in `src/linux/x11/client.rs`), outside
   the draw, without asking `should_close`, as Windows destroys the window.
+
+The Quill project also changed it in 2026 so the Wayland keymap cannot crash
+the app (sweep bundle B13, N46):
+
+- `src/linux/wayland/client.rs`: `compile_keymap` reads the keymap file with
+  `read_exact_at` after checking its length, instead of
+  `xkb::Keymap::new_from_fd`, which maps the `size` the compositor sent: a
+  file shorter than that raised SIGBUS once xkb read past its end, and a
+  size of 0 underflowed. A size the file does not hold (or above 16 MiB) is
+  refused like a keymap xkb cannot parse. Tests:
+  `a_keymap_shorter_than_its_size_is_refused` (SIGBUS with the old mapping),
+  `the_compositors_keymap_compiles`.
+
+The Quill project also changed it in 2026 so typing works when the
+compositor's first keymap is unusable (sweep bundle B13, N47):
+
+- `src/linux/wayland/client.rs`: when no keymap was installed yet and the
+  compositor sent `no_keymap`, a non-XkbV1 format or a keymap xkb refuses,
+  `keymap_to_use` installs the default keymap (libxkbcommon's from the
+  system rules, else the built-in one) instead of dropping every key. With
+  a keymap already installed it is kept, as before.
+- `src/linux/wayland/default_keymap.xkb` (new): a US keymap compiled by
+  libxkbcommon from xkeyboard-config 2.41 (MIT/X11-style notices, shipped as
+  `licenses/xkeyboard-config-COPYING.txt` and listed in `THIRD_PARTY.md`),
+  for systems without xkeyboard-config. Test: `without_a_usable_first_keymap_keys_type_with_the_default`.
+
+The Quill project also changed it in 2026 so GPU recovery arms each timer
+once (sweep bundle B13, N42):
+
+- `src/linux/recovery_timers.rs` (new): the retry, hardware-probe and close
+  timers a window has armed, at most one of each. A timer carries the
+  instant it was armed for and does nothing once that is not the window's.
+- `src/linux/x11/window.rs`: a recovery attempt that is not due yet arms one
+  `run_for_window_at` timer for its instant (`recovery_retry_due`), as on
+  Wayland, instead of keeping the refresh timer running at the refresh rate
+  until then; the refresh timer parks while it waits.
+- Both backends: a second recovery no longer starts a second hardware-probe
+  chain, and every draw before a `CloseWindow` runs no longer arms another
+  close. Tests: `recovery_timers::tests`.
+- Both backends arm the hardware-probe timer from every draw while the
+  shared context is a software fallback (`hardware_probe_at`, deduplicated
+  by `RecoveryTimers`), so a window that adopted the fallback or opened on
+  it looks for the GPU as well (sweep bundle B13, N45). The clients make the
+  shared context with `GpuContext::default()`.

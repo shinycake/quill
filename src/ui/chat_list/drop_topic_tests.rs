@@ -431,10 +431,11 @@ fn a_topic_that_vanished_keeps_the_chooser_open_and_the_chat_closed(cx: &mut Tes
     let chat = open_chat(&app, vcx);
     drop_file_on(vcx, 71);
     app.update(vcx, |app, _| {
-        if let Some(session) = app.demo_session.as_mut()
-            && let Some(topics) = session.threads.forum_topics.get_mut(&71)
-        {
-            topics.retain(|t| t.forum_topic_id != 4);
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .threads
+                .forum_topics
+                .update(71, |topics| topics.retain(|t| t.forum_topic_id != 4));
         }
     });
     choose(&app, vcx, Some(4));

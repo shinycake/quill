@@ -62,7 +62,7 @@ pub(crate) fn parse_saved_messages_topic(value: &Value) -> Option<SavedMessagesT
         .and_then(|m| m.get("forward_info"))
         .and_then(|f| f.get("origin"))
         .filter(|o| o.get("@type").and_then(Value::as_str) == Some("messageOriginHiddenUser"))
-        .map(|o| json_field_str(o, "sender_name"))
+        .map(|o| json_name_str(o, "sender_name"))
         .unwrap_or_default();
     Some(SavedMessagesTopic {
         id,

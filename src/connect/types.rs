@@ -156,7 +156,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => Some(StartupFailure::KeyLocked),
             ConnectBlocker::StoreError => Some(StartupFailure::KeyUnreadable),
             ConnectBlocker::ReceiveThread => Some(StartupFailure::NoThread),
-            ConnectBlocker::DataFolder => Some(StartupFailure::DataFolder),
+            ConnectBlocker::DataFolder => Some(StartupFailure::DataFolder { detail: None }),
         }
     }
 
@@ -298,6 +298,7 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
+    pub(crate) call_devices_warmed: bool,
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
@@ -306,6 +307,11 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_camera_state: HashMap<i32, Option<String>>,
     /// Microphone mute state the group-call engine last applied, per call.
     pub(crate) group_mute_state: HashMap<i32, bool>,
+    pub(crate) group_seen: HashMap<i32, super::group_calls::GroupCallSeen>,
+    /// Requests waiting for the join payload the engine is making.
+    pub(crate) group_offers:
+        HashMap<crate::calls::engine::GroupOfferKey, super::group_calls::WaitingOffer>,
+    pub(crate) group_large_tile: Option<crate::calls::tile_pin::TileKey>,
     /// The conference call's frame encryption and the engine key it is
     /// under (`group_calls::conference`).
     pub(crate) conference_crypto: Option<super::group_calls::ConferenceCrypto>,
@@ -324,6 +330,8 @@ pub struct ConnectDriver<S: JsonSender> {
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
+    /// The device list on its way (`refresh_call_devices`).
+    pub(crate) call_devices_listing: Option<std::sync::mpsc::Receiver<Vec<MediaDevice>>>,
     pub(crate) selected_devices: (Option<String>, Option<String>),
     /// The group calls whose sound you muted for yourself (the live
     /// stream's settings box, the live story's sound toggle).

@@ -451,3 +451,105 @@ fn a_tap_mid_render_then_a_chat_change_opens_nothing(cx: &mut TestAppContext) {
 fn a_tap_mid_render_then_an_editor_closing_opens_nothing(cx: &mut TestAppContext) {
     tap_mid_render_then(cx, "closed.png", 9, |app, cx| app.close_photo_editor(cx));
 }
+
+/// An editor opened on the second photo while the first one's Done
+/// renders and a Send waits: when the Send goes out, the editor closes
+/// instead of staying open on a photo that is no longer in any tray.
+#[gpui_kit::test]
+fn the_held_send_going_out_closes_an_editor_open_on_its_tray(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let first = picture("held-a.png", 89, 11);
+    let second = picture("held-b.png", 97, 13);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let tray = vec![attachment(&first), attachment(&second)];
+        app.update_pending_attachments(|items| *items = tray)
+            .expect("an open chat");
+        let item = app.tray_item(0).expect("the first card");
+        let pixels = image::open(&first).expect("decodes").to_rgba8();
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.submit_composer(String::new(), window, cx);
+        let item = app.tray_item(1).expect("the second card");
+        let pixels = image::open(&second).expect("decodes").to_rgba8();
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert!(app.pending_attachments().is_empty(), "the held Send went");
+        assert!(
+            app.viewer.photo_editor.is_none(),
+            "no editor left on a sent photo"
+        );
+    });
+    if let Some(sent) = newest_sent_photo(&app, &mut vcx) {
+        let _ = std::fs::remove_file(sent);
+    }
+}
+
+/// While a Send waits for a render, a tap on another card opens no
+/// editor, so no edit made there is dropped when the Send goes out.
+#[gpui_kit::test]
+fn a_tap_while_a_send_waits_opens_no_editor(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let first = picture("wait-a.png", 107, 11);
+    let second = picture("wait-b.png", 109, 13);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let tray = vec![attachment(&first), attachment(&second)];
+        app.update_pending_attachments(|items| *items = tray)
+            .expect("an open chat");
+        let item = app.tray_item(0).expect("the first card");
+        let pixels = image::open(&first).expect("decodes").to_rgba8();
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.submit_composer(String::new(), window, cx);
+        app.open_photo_editor(1, cx);
+        assert!(app.viewer.photo_editor_after.is_none());
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_OPS_PHOTOS_ARE_SENDING)
+        );
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert!(app.pending_attachments().is_empty(), "the held Send went");
+        assert!(app.viewer.photo_editor.is_none(), "no editor was opened");
+    });
+    if let Some(sent) = newest_sent_photo(&app, &mut vcx) {
+        let _ = std::fs::remove_file(sent);
+    }
+}
+
+/// Tap the first card while its Done renders, press Send, and let that
+/// render land while the second card still renders: the Send cancelled
+/// the tap, so no editor opens on a tray that is about to go.
+#[gpui_kit::test]
+fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let first = picture("cancel-a.png", 101, 11);
+    let second = picture("cancel-b.png", 103, 13);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let tray = vec![attachment(&first), attachment(&second)];
+        app.update_pending_attachments(|items| *items = tray)
+            .expect("an open chat");
+        let item = app.tray_item(0).expect("the first card");
+        let pixels = image::open(&first).expect("decodes").to_rgba8();
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        // The second card's Done is still rendering when the first lands.
+        app.update_pending_attachments(|tray| tray[1].extras.photo_render = Some(u64::MAX))
+            .expect("an open chat");
+        app.open_photo_editor(0, cx);
+        app.submit_composer(String::new(), window, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert_eq!(app.pending_attachments().len(), 2, "the Send still waits");
+        assert!(app.viewer.photo_editor.is_none(), "the tap was cancelled");
+    });
+    if let Some(edited) = tray_path(&app, &mut vcx) {
+        let _ = std::fs::remove_file(edited);
+    }
+}

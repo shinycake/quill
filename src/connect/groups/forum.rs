@@ -175,8 +175,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetTopicHistory, chat_id)
+            .topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
         {
             return Ok(None);
         }

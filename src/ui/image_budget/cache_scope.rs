@@ -19,9 +19,16 @@ impl CacheScope {
         }
     }
 
-    fn enter<R>(&self, window: &mut Window, f: impl FnOnce(&mut Window) -> R) -> R {
-        SCOPED.with(|scoped| scoped.borrow_mut().push(self.cache.clone()));
-        let result = window.with_image_cache(Some(self.cache.clone().into()), f);
+    fn enter<R>(
+        &self,
+        window: &mut Window,
+        cx: &mut App,
+        f: impl FnOnce(&mut Window, &mut App) -> R,
+    ) -> R {
+        let owner = self.cache.read(cx).window;
+        SCOPED.with(|scoped| scoped.borrow_mut().push((self.cache.clone(), owner)));
+        let result =
+            window.with_image_cache(Some(self.cache.clone().into()), |window| f(window, cx));
         SCOPED.with(|scoped| scoped.borrow_mut().pop());
         result
     }
@@ -55,7 +62,7 @@ impl Element for CacheScope {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        let layout_id = self.enter(window, |window| child.request_layout(window, cx));
+        let layout_id = self.enter(window, cx, |window, cx| child.request_layout(window, cx));
         self.child = child;
         (layout_id, ())
     }
@@ -70,7 +77,7 @@ impl Element for CacheScope {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        self.enter(window, |window| child.prepaint(window, cx));
+        self.enter(window, cx, |window, cx| child.prepaint(window, cx));
         self.child = child;
     }
 
@@ -85,7 +92,7 @@ impl Element for CacheScope {
         cx: &mut App,
     ) {
         let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
-        self.enter(window, |window| child.paint(window, cx));
+        self.enter(window, cx, |window, cx| child.paint(window, cx));
         self.child = child;
     }
 }

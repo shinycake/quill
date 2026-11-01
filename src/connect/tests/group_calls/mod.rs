@@ -17,6 +17,8 @@ mod conference;
 mod levels;
 mod link;
 mod no_engine;
+mod offers;
+mod pump_gates;
 mod rtmp_start;
 mod share_links;
 mod stream;
@@ -433,7 +435,7 @@ fn driver_auto_rejoin_group_call_discipline() {
         let sent: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
         assert_eq!(sent["@type"], "joinVideoChat");
         assert_eq!(sent["group_call_id"], 77);
-        // Honest no-device params, retaining the self-mute.
+        // The mock payload carries no `a=ssrc:` lines; the self-mute stays.
         assert_eq!(sent["join_parameters"]["audio_source_id"], 0);
         assert_eq!(sent["join_parameters"]["is_muted"], true);
         assert_eq!(

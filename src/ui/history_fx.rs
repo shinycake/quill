@@ -159,12 +159,22 @@ pub(crate) fn reveal_viewport(
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum DateMotion {
+    Hidden,
+    Fading,
+    Still { until_fade: Duration },
+}
+
 /// What the floating date pill shows, and until when.
 #[derive(Default)]
 pub(crate) struct ScrollDate {
     shown_at: Option<Instant>,
     last_scroll: Option<Instant>,
     hide_after: Duration,
+    /// Redraws the pill when its fade-out is due (tdesktop's
+    /// `_scrollDateHideTimer`).
+    wake: Option<Task<()>>,
     /// Day of the row at the top of the viewport (None: unknown).
     pub(crate) top_label: Option<String>,
     /// The top row starts its day, so an inline separator is on screen.
@@ -201,6 +211,21 @@ impl ScrollDate {
             (now.saturating_duration_since(shown).as_secs_f32() / DATE_FADE.as_secs_f32()).min(1.);
         let fade_out = (remaining.as_secs_f32() / DATE_FADE.as_secs_f32()).min(1.);
         fade_in.min(fade_out)
+    }
+
+    pub(crate) fn motion(&self, now: Instant) -> DateMotion {
+        let (Some(shown), Some(last)) = (self.shown_at, self.last_scroll) else {
+            return DateMotion::Hidden;
+        };
+        let remaining = (last + self.hide_after).saturating_duration_since(now);
+        if remaining.is_zero() {
+            return DateMotion::Hidden;
+        }
+        let until_fade = remaining.saturating_sub(DATE_FADE);
+        if now.saturating_duration_since(shown) < DATE_FADE || until_fade.is_zero() {
+            return DateMotion::Fading;
+        }
+        DateMotion::Still { until_fade }
     }
 }
 
@@ -267,7 +292,8 @@ impl QuillApp {
             if this.history.scroller.read(cx).is_following_tail() {
                 return;
             }
-            this.history.scroll_date.scrolled(Instant::now(), false);
+            let now = cx.background_executor().now();
+            this.history.scroll_date.scrolled(now, false);
             // The pill lives in the conversation: the chat list can replay.
             this.notify_conversation(cx);
         });
@@ -318,15 +344,20 @@ impl QuillApp {
     /// The floating pill, absolutely positioned at the top center.
     pub(super) fn scroll_date_pill(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.refresh_scroll_date_top();
-        let alpha = self.history.scroll_date.opacity(Instant::now());
-        if alpha <= 0. {
+        let now = cx.background_executor().now();
+        let motion = self.history.scroll_date.motion(now);
+        if motion == DateMotion::Hidden {
             return None;
         }
-        self.request_animation_tick(30, cx);
         let label = self.history.scroll_date.top_label.clone()?;
         if self.history.scroll_date.separator_at_top {
             return None;
         }
+        match motion {
+            DateMotion::Still { until_fade } => self.wake_date_pill(until_fade, cx),
+            _ => self.request_animation_tick(30, cx),
+        }
+        let alpha = self.history.scroll_date.opacity(now);
         // The wide layout centres it in its column (`PaintDate` with
         // `chatWide`).
         let column = div().absolute().top_2().left_0();
@@ -340,6 +371,7 @@ impl QuillApp {
                 .flex()
                 .justify_center()
                 .opacity(alpha)
+                .debug_selector(|| "floating-date".to_string())
                 .child(super::anim_layer::occluder(
                     // Floats over the history: its click opens the
                     // calendar only, never the media under it.
@@ -348,11 +380,24 @@ impl QuillApp {
                 .into_any_element(),
         )
     }
+
+    fn wake_date_pill(&mut self, wait: Duration, cx: &mut Context<Self>) {
+        if self.history.scroll_date.wake.is_some() {
+            return;
+        }
+        self.history.scroll_date.wake = Some(self.spawn_scoped(cx, async move |app, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = app.update(cx, |this, cx| {
+                this.history.scroll_date.wake = None;
+                this.notify_conversation(cx);
+            });
+        }));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::history_fx::{ScrollDate, jump_fade, jump_fade_active};
+    use crate::ui::history_fx::{DateMotion, ScrollDate, jump_fade, jump_fade_active};
     use std::time::{Duration, Instant};
 
     fn ms(n: u64) -> Duration {
@@ -388,6 +433,23 @@ mod tests {
     }
 
     #[test]
+    fn date_pill_needs_the_clock_only_while_it_fades() {
+        let still = |n| DateMotion::Still { until_fade: ms(n) };
+        let t0 = Instant::now();
+        let mut date = ScrollDate::default();
+        assert_eq!(date.motion(t0), DateMotion::Hidden);
+        date.scrolled(t0, false);
+        assert_eq!(date.motion(t0), DateMotion::Fading);
+        assert_eq!(date.motion(t0 + ms(199)), DateMotion::Fading);
+        assert_eq!(date.motion(t0 + ms(200)), still(600));
+        assert_eq!(date.motion(t0 + ms(799)), still(1));
+        assert_eq!(date.motion(t0 + ms(800)), DateMotion::Fading);
+        assert_eq!(date.motion(t0 + ms(1000)), DateMotion::Hidden);
+        date.scrolled(t0 + ms(900), false);
+        assert_eq!(date.motion(t0 + ms(900)), still(800));
+    }
+
+    #[test]
     fn day_change_extends_the_timeout() {
         let t0 = Instant::now();
         let mut date = ScrollDate::default();
@@ -418,3 +480,8 @@ mod fly_tests {
         assert_eq!(reaction_fly_frame(Duration::ZERO, true), None);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "history_fx_tests.rs"]
+mod ui_tests;

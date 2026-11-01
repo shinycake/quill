@@ -5,6 +5,7 @@
 use super::state::{CreateSticker, PickExisting};
 use super::*;
 use crate::ui::status_note::StatusNote;
+use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::sticker_image::{Corners, prepared_sticker_image};
 use quill::sticker_set_box::{
@@ -385,6 +386,9 @@ impl QuillApp {
         let Some(pick) = self.sticker_box.pick else {
             return;
         };
+        // This pick replaces any earlier one still decoding or downloading.
+        self.sticker_box.pending_still = None;
+        self.sticker_box.pending_video = None;
         if !pick.adapt {
             self.sticker_box.pick = None;
             self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
@@ -404,15 +408,40 @@ impl QuillApp {
             }
             StickerFormat::Webp | StickerFormat::Unknown => {
                 self.sticker_box.pick = None;
-                let pixels = self.local_media_path(item.file_id).and_then(|path| {
-                    super::super::editor_art::sticker_pixels(
-                        std::path::Path::new(&path),
-                        item.format,
-                    )
-                });
-                self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
+                let file_id = item.file_id;
+                self.sticker_box.pending_still = Some((pick, file_id));
+                let path = self.local_media_path(file_id);
+                let format = item.format;
+                self.run_off_ui_scoped_then(
+                    move || {
+                        path.and_then(|path| {
+                            super::super::editor_art::sticker_pixels(
+                                std::path::Path::new(&path),
+                                format,
+                            )
+                        })
+                    },
+                    move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
+                    cx,
+                );
             }
         }
+    }
+
+    /// A picked still sticker is decoded: open the editor on it, unless the
+    /// set box closed or another sticker was picked meanwhile.
+    pub(super) fn land_still_pick(
+        &mut self,
+        pick: PickExisting,
+        file_id: FileId,
+        pixels: Option<image::RgbaImage>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sticker_box.pending_still != Some((pick, file_id)) {
+            return;
+        }
+        self.sticker_box.pending_still = None;
+        self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
     }
 
     /// Add a sticker that already exists to an owned set, refusing a full

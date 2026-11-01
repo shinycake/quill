@@ -9,6 +9,7 @@
 //! finished source.
 
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use opus_decoder::OpusDecoder;
@@ -82,7 +83,12 @@ pub(super) struct OpusSource {
 }
 
 impl OpusSource {
-    pub(super) fn new<R: Read + Seek>(mut reader: R) -> Result<Self, String> {
+    /// Reads every packet; stops with an error once `cancelled` is set, so a
+    /// long file nobody waits for is not read to its end.
+    pub(super) fn new<R: Read + Seek>(
+        mut reader: R,
+        cancelled: &AtomicBool,
+    ) -> Result<Self, String> {
         let file_len = reader.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
         reader.rewind().map_err(|e| e.to_string())?;
         let mut reader = ogg::PacketReader::new(reader);
@@ -132,6 +138,9 @@ impl OpusSource {
         let mut last_granule = None;
         let mut first = true;
         while let Some(packet) = reader.read_packet().map_err(|e| format!("ogg: {e}"))? {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err("cancelled".into());
+            }
             if packet.stream_serial() != serial {
                 continue;
             }

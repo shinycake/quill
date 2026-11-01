@@ -199,8 +199,15 @@ impl HistoryState {
 
 impl TopicHistory {
     /// [`HistoryState::trim_to_tail`] for a topic: the paging cursor moves
-    /// to the oldest kept message so older pages continue from there.
+    /// to the oldest kept message so older pages continue from there. A
+    /// window short of the latest has no tail worth keeping: it goes, and
+    /// the topic opens at its latest page again.
     pub(crate) fn trim_to_tail(&mut self, keep: usize) -> usize {
+        if self.has_newer {
+            let before = self.messages.len();
+            self.reset_window();
+            return before - self.messages.len();
+        }
         let doomed = tail_excess(&self.messages, keep);
         for id in &doomed {
             self.messages.remove(id);

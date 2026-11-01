@@ -295,8 +295,8 @@ pub(crate) struct MessageChrome {
     /// border or gradient, and the media carries its own time pill
     /// (`media_footer_pill`).
     pub bubbleless: bool,
-    /// Hover-revealed control in the bubble's top-right corner (message
-    /// actions). Right-click opens the same menu.
+    /// Control in the bubble's top-right corner, under the pointer (message
+    /// actions, `history::row_hover`). Right-click opens the same menu.
     pub actions: Option<AnyElement>,
     /// Room the actions take beside the bubble.
     pub actions_span: Pixels,
@@ -439,7 +439,6 @@ fn message_bubble_with_quote(
     let has_sender_status = sender_status.is_some();
     let room =
         super::history::bubble_width::BubbleRoom::new(look.history, avatar.is_some(), look.plain);
-    let group: SharedString = format!("message-row-{}", row.id).into();
     // tdesktop `Element::hasRightLayout`: the wide layout keeps outgoing
     // messages on the left, tail and all; only their colors differ.
     let right = quill::chat_wide::has_right_layout(row.outgoing, look.wide);
@@ -597,12 +596,7 @@ fn message_bubble_with_quote(
                     this.right(-actions_span)
                 }
             })
-            .child(
-                div()
-                    .invisible()
-                    .group_hover(group.clone(), |style| style.visible())
-                    .child(actions),
-            );
+            .child(actions);
         bubble = bubble.reactions(region);
     }
     if look.plain {
@@ -636,7 +630,6 @@ fn message_bubble_with_quote(
     }
     div()
         .id(("row", row.id))
-        .group(group)
         .w_full()
         .py_0p5()
         .child(message)

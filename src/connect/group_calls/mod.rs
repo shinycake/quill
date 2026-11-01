@@ -1,6 +1,9 @@
 //! Connect driver: group calls and video chats.
 use super::*;
-use crate::calls::engine::{GroupCallRole, GroupVideoSource, group_offer_audio_source_id};
+use crate::calls::engine::{
+    GroupCallRole, GroupOfferKey, GroupVideoSource, group_offer_audio_source_id,
+};
+use crate::calls::tile_pin::TileKey;
 use crate::ids::RequestId;
 use crate::locks::LockExt;
 use crate::state::CallsPurpose;
@@ -27,6 +30,9 @@ mod conference;
 pub(crate) use conference::ConferenceCrypto;
 mod controls;
 pub use controls::SelfMuteError;
+mod offers;
+use offers::OfferSend;
+pub(crate) use offers::WaitingOffer;
 mod join;
 pub(crate) mod levels;
 mod link;
@@ -36,6 +42,20 @@ mod live_story_extras;
 pub(crate) mod muted_hint;
 mod rtmp_start;
 pub(crate) mod stream;
+
+#[derive(Default)]
+pub(crate) struct GroupCallSeen {
+    feeds: Option<live_feeds::FeedInputs>,
+    ssrc_owners: Option<(u64, bool)>,
+    videos: Option<VideoInputs>,
+}
+
+#[derive(PartialEq)]
+struct VideoInputs {
+    participants: Option<u64>,
+    story: Vec<GroupVideoSource>,
+    large_tile: Option<TileKey>,
+}
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every
@@ -73,6 +93,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !engine_available {
             return Ok(());
         }
+        // The instance isn't there yet: nothing to drive until it lands.
+        if self
+            .offer_waiting(GroupOfferKey::Call(group_call_id))
+            .is_some()
+        {
+            return Ok(());
+        }
+        let connected = self
+            .session
+            .calls
+            .group_call(group_call_id)
+            .is_some_and(|call| call.transport_ready);
+        if !connected {
+            let seen = self.group_seen.entry(group_call_id).or_default();
+            seen.ssrc_owners = None;
+            seen.videos = None;
+        }
         self.sync_conference_ssrc_owners(group_call_id);
         // Finish the join handshake once the `joinVideoChat` answer is
         // stored on the tracked call.
@@ -93,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The device list as of joining, for the camera and for the
             // screen-share availability gate.
             self.refresh_call_devices();
-            let camera = video_enabled.then(|| self.call_camera_device()).flatten();
+            let camera = video_enabled.then(|| self.camera_to_join_with()).flatten();
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };
@@ -199,30 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         }
-        // Incoming video follows the participants' `video_info` /
-        // `screen_sharing_video_info`; the engine diffs add/remove.
-        let sources: Vec<GroupVideoSource> = self
-            .session
-            .calls
-            .group_call(group_call_id)
-            .map(|call| group_video_sources(&call.participants))
-            .unwrap_or_default();
-        // A live story's streamer may not be in the participant list (and
-        // may be a channel): subscribe to its video as well.
-        let mut sources = sources;
-        for source in self.live_story_video_sources(group_call_id) {
-            if !sources.iter().any(|s| s.endpoint == source.endpoint) {
-                sources.push(source);
-            }
-        }
-        let Some(engine) = self.call_engine.as_deref_mut() else {
-            return Ok(());
-        };
-        if let Err(err) = engine.sync_group_video(group_call_id, &sources)
-            && let Some(call) = self.session.calls.group_call_mut(group_call_id)
-        {
-            call.transport_error = Some(err.to_string());
-        }
+        self.sync_incoming_video(group_call_id);
         // Finish the presentation handshake once the
         // `startGroupCallScreenSharing` answer is stored.
         let share_answer = self
@@ -271,5 +285,64 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.stop_screen_share(group_call_id);
         }
         Ok(())
+    }
+
+    /// The tile the UI shows large in a window someone can see, or `None`.
+    pub fn set_group_call_large_tile(&mut self, tile: Option<TileKey>) {
+        if self.group_large_tile == tile {
+            return;
+        }
+        self.group_large_tile = tile;
+        let connected = self
+            .session
+            .calls
+            .active_group_call
+            .as_ref()
+            .filter(|call| call.transport_ready)
+            .map(|call| call.id);
+        if let Some(group_call_id) = connected {
+            self.sync_incoming_video(group_call_id);
+        }
+    }
+
+    /// Incoming video follows the participants' `video_info` /
+    /// `screen_sharing_video_info`; the engine diffs add/remove.
+    fn sync_incoming_video(&mut self, group_call_id: i32) {
+        let call = self.session.calls.group_call(group_call_id);
+        let inputs = VideoInputs {
+            participants: call.map(|call| call.participants.revision()),
+            story: self.live_story_video_sources(group_call_id),
+            large_tile: self.group_large_tile,
+        };
+        let seen = self
+            .group_seen
+            .get(&group_call_id)
+            .and_then(|seen| seen.videos.as_ref());
+        if seen == Some(&inputs) {
+            return;
+        }
+        let mut sources = call
+            .map(|call| group_video_sources(&call.participants, inputs.large_tile))
+            .unwrap_or_default();
+        // A live story's streamer may not be in the participant list (and
+        // may be a channel): subscribe to its video as well.
+        for source in &inputs.story {
+            if !sources.iter().any(|s| s.endpoint == source.endpoint) {
+                sources.push(source.clone());
+            }
+        }
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return;
+        };
+        match engine.sync_group_video(group_call_id, &sources) {
+            Ok(()) => {
+                self.group_seen.entry(group_call_id).or_default().videos = Some(inputs);
+            }
+            Err(err) => {
+                if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+                    call.transport_error = Some(err.to_string());
+                }
+            }
+        }
     }
 }

@@ -40,18 +40,20 @@ impl QuillApp {
     pub(super) fn main_frame_starts(
         &mut self,
         window: &mut Window,
-        draw: super::image_budget::MainDraw,
+        draw: super::image_budget::WindowDraw,
         cx: &mut Context<Self>,
     ) {
         let frame = window.frame_number();
         if self.frame.frame_started.replace(frame) == frame {
             return;
         }
-        self.sticker_frame_starts(None, cx);
+        self.sticker_frame_starts(cx);
         // Bounded image memory: retired images no window can show any
         // more leave the atlas, then this frame counts (`image_budget`).
         super::image_budget::begin_main_frame(window, draw, cx);
         self.note_frame_timing(window, cx);
+        let display = self.frame.clock_timing.get().map(|timing| timing.display);
+        super::sticker_player::note_display(None, display, window, cx);
         super::glyph_sweep::start_frame(window, cx);
         super::spoiler_fx::release_media_tile(Some(window), cx);
         if let Some(cache) = self.slices.image_cache() {
@@ -75,7 +77,7 @@ impl Render for QuillApp {
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
-        self.main_frame_starts(window, super::image_budget::MainDraw::Whole, cx);
+        self.main_frame_starts(window, super::image_budget::WindowDraw::Whole, cx);
         self.sync_emoji_style(cx);
         let image_cache = self.slices.image_cache();
         self.sync_capture_block(window);
@@ -91,11 +93,7 @@ impl Render for QuillApp {
             cx,
         );
         self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
-        // A conversation replayed from its cache (`app_slice`) still shows
-        // its clips: only a conversation that rendered (or a frame without
-        // one) and swept no player orphans them.
-        let history_drawn = self.slices.conversation_rendered.replace(false)
-            || !self.slices.conversation_shown.replace(false);
+        let history_drawn = self.slices.window.history_drawn();
         self.playback.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
@@ -112,11 +110,16 @@ impl Render for QuillApp {
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
         self.frame.media_roots_frame.borrow_mut().take();
+        let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
+        let cover = self.frame.viewer_cover.get();
+        self.frame
+            .viewer_cover
+            .set(cover.follow(opening, cx.background_executor().now()));
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
-        let status_toast = self.status_toast_visible(cx);
+        let status_toast = self.status_toast_in(None, cx);
         self.frame.context_menu_items.begin();
         let menu_open = self.context_menu_open();
         if menu_open && !self.frame.context_menu_was_open {
@@ -136,7 +139,8 @@ impl Render for QuillApp {
         self.frame_upkeep(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
-        let inputs_live = (self.live.is_some() || self.auth_ui.demo_inputs) && !self.disk.is_full();
+        let inputs_live =
+            (self.live.is_some() || self.auth_ui.demo_inputs) && !self.disk.shows_screen();
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
@@ -204,22 +208,21 @@ impl Render for QuillApp {
                 }
                 if this.close_main_window(window, cx) {
                     window.remove_window();
-                    // Elsewhere closing the only window quits.
-                    #[cfg(not(target_os = "macos"))]
-                    cx.quit();
                 }
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
                 if guard::refuse_hard_if_injecting(HardSurface::Window) {
                     return;
                 }
-                #[cfg(target_os = "macos")]
-                if this.appearance.minimize_to_tray && quill::tray::tray_available() {
-                    cx.hide();
-                    return;
+                if quill::tray::minimize_hides_main_window(
+                    this.minimize_to_tray(),
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                ) {
+                    crate::ui::link_inbox::hide_main_window(window, cx);
+                } else {
+                    window.minimize_window();
                 }
-                let _ = (this, cx);
-                window.minimize_window();
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
                 let _ = this;
@@ -257,8 +260,7 @@ impl Render for QuillApp {
                 this.set_appearance(cx, |a| a.theme = next);
             }))
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
-                let _ = this;
-                cx.open_url("https://github.com/shinycake/quill");
+                this.open_link("https://github.com/shinycake/quill", cx);
             }))
             .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
                 this.open_settings(Some(quill::settings_catalog::Page::Shortcuts));
@@ -905,5 +907,7 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
+#[cfg(test)]
+pub(in crate::ui) use status_toast::pin_toasts_for_tests;
 #[allow(unused_imports)]
 use status_toast::*;

@@ -150,3 +150,22 @@ caches for every line:
 - `src/sized_fonts.rs`: the map, std-only and bounded, tested by
   `scripts/test-sized-fonts.sh`. `test_kept_fonts_shape_like_new_ones` in
   `text_system.rs` compares a kept font's shaping with a new font's.
+
+The Quill project also changed it in 2026 so `prevent_app_nap` keeps timers on
+time:
+
+- `src/dispatcher.rs`: `prevent_app_nap` adds `NSActivityLatencyCritical`. In a
+  hidden app `NSActivityUserInitiatedAllowingIdleSystemSleep` alone leaves
+  timers 60 ms late (100 passes with a 10 ms gap: 6.2 s, against 19 s with no
+  activity). With the flag they take 1.1 s, as in a visible app. Quill holds
+  the activity only while a poll loop has work waiting.
+
+
+  `scripts/test-sized-fonts.sh`. At the limit it drops the font unused longest,
+  so the fonts every line needs survive. `test_kept_fonts_shape_like_new_ones`
+  and `test_adjacent_runs_shape_alike_past_the_font_limit` in `text_system.rs`
+  compare a kept font's shaping with a new font's, and CI runs them on macOS.
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

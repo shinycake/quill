@@ -14,6 +14,10 @@ pub(crate) struct FrameUi {
     /// What asked for the next tick: cached slices by entity id, `None`
     /// for `QuillApp` itself (see `frame_clock`).
     pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
+    /// The next tick's targets that need no draw while nothing they show
+    /// changes (`request_app_tick_unless`).
+    pub(super) still_ticks:
+        std::cell::RefCell<std::collections::HashMap<EntityId, super::frame_clock::StillTick>>,
     pub(super) window_views: std::cell::RefCell<std::collections::HashSet<EntityId>>,
     /// The next tick serves media playing with sound (allowed while the
     /// window is inactive).
@@ -34,6 +38,8 @@ pub(crate) struct FrameUi {
     /// render: the main window's own content asks for no ticks, as behind
     /// another app (`chat_window::cover`).
     pub(super) main_covered: std::cell::Cell<bool>,
+    /// The open viewer's fade: what it hides gets no ticks once it has ended.
+    pub(super) viewer_cover: std::cell::Cell<super::media_viewer::ViewerCover>,
     /// The title last handed to the platform window (`window_chrome`).
     pub(super) window_title_shown: std::cell::RefCell<String>,
     /// Unread badge memo for the title (`tray::badge_cache`).
@@ -51,9 +57,12 @@ pub(crate) struct FrameUi {
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
     pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
+    /// The main window's refresh period as its display reports it, as of
+    /// its last frame (`QuillApp::note_frame_timing`).
+    pub(super) main_refresh: std::cell::Cell<Option<std::time::Duration>>,
     /// What the main window's animation layers drew since their ticks
     /// (`QuillApp::note_layer_drawn`).
-    pub(super) layers_drawn: std::cell::RefCell<super::frame_clock::LayerDraws>,
+    pub(super) layers_drawn: std::cell::RefCell<super::layer_draws::LayerDraws>,
     /// History motion: new-message reveal and selection-mode fades.
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
@@ -88,12 +97,14 @@ impl FrameUi {
             animation_demand: Default::default(),
             row_fx: Default::default(),
             animation_targets: Default::default(),
+            still_ticks: Default::default(),
             window_views: Default::default(),
             animation_sound: Default::default(),
             own_window_tick: Default::default(),
             window_active: std::cell::Cell::new(true),
             main_active: std::cell::Cell::new(true),
             main_covered: Default::default(),
+            viewer_cover: Default::default(),
             window_title_shown: Default::default(),
             title_badge: Default::default(),
             media_roots_frame: Default::default(),
@@ -101,6 +112,7 @@ impl FrameUi {
             tick_view: Default::default(),
             frame_clock_running: Default::default(),
             clock_timing: Default::default(),
+            main_refresh: Default::default(),
             layers_drawn: Default::default(),
             motion: Default::default(),
             sidebar_width: px(

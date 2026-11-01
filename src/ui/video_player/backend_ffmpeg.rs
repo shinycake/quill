@@ -9,11 +9,11 @@
 //! becomes a new `RenderImage`; the one it replaces is retired to
 //! `image_budget`, which drops it from the GPU atlas once no frame shows it.
 //!
-//! On Windows the decoder is asked for NV12 instead
+//! On Windows and Linux the decoder is asked for NV12 instead
 //! ([`surface::NV12_SURFACES`]): pictures the stream allows (8-bit 4:2:0,
 //! BT.601/709, even sides) skip the decoder's BGRA conversion and become
-//! surface frames the DirectX renderer converts on the GPU; the rest stay
-//! images. When the window's renderer refuses a surface (its NV12
+//! surface frames the DirectX or wgpu renderer converts on the GPU; the
+//! rest stay images. When the window's renderer refuses a surface (its NV12
 //! textures or pipeline failed), the player asks [`Backend::replace_refused`]
 //! for the same picture as an image, and this backend shows images for
 //! [`NV12_RETRY`]: the decoder goes back to BGRA, NV12 pictures still
@@ -23,7 +23,7 @@
 use super::surface;
 use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
-use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
+use quill::video_decode::{BgraPool, OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -98,7 +98,7 @@ pub(super) struct FfmpegBackend {
     /// The transport's intent as last synced (its rate is the decoder's).
     want: Want,
     image: Option<Arc<RenderImage>>,
-    /// The surface picture on screen (Windows NV12), to show as an image
+    /// The surface picture on screen (NV12), to show as an image
     /// instead if the renderer refuses it.
     surface: Option<Picture>,
     /// The layout last asked of the decoder.
@@ -134,7 +134,7 @@ impl FfmpegBackend {
         }
     }
 
-    /// Whether to hand over NV12 surfaces now: on Windows, unless the
+    /// Whether to hand over NV12 surfaces now: off macOS, unless the
     /// window refused one less than [`NV12_RETRY`] ago.
     fn nv12_now(&self, now: Instant) -> bool {
         surface::NV12_SURFACES && nv12_allowed(self.nv12_paused_until, now)
@@ -174,7 +174,7 @@ impl FfmpegBackend {
             Ok(shown) => return Some(shown),
             Err(frame) => frame,
         };
-        let image = render_image(frame)?;
+        let image = render_image(frame, self.player.bgra_pool())?;
         self.show_image(image.clone());
         let stats = PictureStats {
             format: "bgra",
@@ -198,7 +198,7 @@ impl FfmpegBackend {
 
     /// An NV12 picture as a surface when `nv12` ([`Self::nv12_now`]); the
     /// picture back otherwise (it becomes an image).
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "macos"))]
     fn surface_picture(
         &mut self,
         frame: VideoFrame,
@@ -224,8 +224,8 @@ impl FfmpegBackend {
         Ok((picture, stats))
     }
 
-    /// Off Windows every picture is an image.
-    #[cfg(not(target_os = "windows"))]
+    /// On macOS every FFmpeg picture is an image.
+    #[cfg(target_os = "macos")]
     fn surface_picture(
         &mut self,
         frame: VideoFrame,
@@ -390,16 +390,22 @@ impl Drop for FfmpegBackend {
 }
 
 /// A decoded picture as a GPUI image (no copy for BGRA: the buffer moves
-/// in; NV12 is converted on the CPU first).
-pub(super) fn render_image(frame: VideoFrame) -> Option<Arc<RenderImage>> {
-    let frame = frame.into_bgra()?;
+/// in; NV12 is converted on the CPU first). The buffer goes back to `pool`
+/// when the image is dropped.
+pub(super) fn render_image(frame: VideoFrame, pool: &BgraPool) -> Option<Arc<RenderImage>> {
+    let frame = frame.into_bgra(pool)?;
     let Pixels::Bgra(bgra) = frame.pixels else {
         return None;
     };
     let buffer = image::RgbaImage::from_raw(frame.width, frame.height, bgra)?;
-    Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-        image::Frame::new(buffer),
-    ]))))
+    let pool = pool.clone();
+    let image = RenderImage::new(smallvec::SmallVec::from_buf([image::Frame::new(buffer)]))
+        .with_recycler(move |frames| {
+            for frame in frames {
+                pool.give(frame.into_buffer().into_raw());
+            }
+        });
+    Some(Arc::new(image))
 }
 
 /// Open `path`, seek to `at`, and wait (at most two seconds) for the first
@@ -429,10 +435,11 @@ pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<
 #[cfg(test)]
 mod tests {
     use super::super::Backend;
-    use super::{FfmpegBackend, NV12_RETRY, nv12_allowed, output_for};
+    use super::{FfmpegBackend, NV12_RETRY, nv12_allowed, output_for, render_image};
     use crate::ui::audio::{SharedOutput, share_output_with_video};
     use quill::video_decode::{
-        AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Player,
+        AudioChunk, BgraPool, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Player,
+        VideoFrame,
     };
     use std::path::Path;
     use std::sync::mpsc;
@@ -500,6 +507,20 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    /// A BGRA picture's buffer goes back to its player once the image
+    /// showing it is gone, for the next picture to be turned into.
+    #[test]
+    fn a_picture_hands_its_buffer_back_once_its_image_goes() {
+        let pool = BgraPool::default();
+        // The spare byte tells this buffer from a new one.
+        let mut bgra = Vec::with_capacity(17);
+        bgra.resize(16, 0);
+        let image = render_image(VideoFrame::bgra(0.0, 2, 2, bgra), &pool).expect("image");
+        assert_eq!(pool.take(16).capacity(), 16, "the image still shows it");
+        drop(image);
+        assert_eq!(pool.take(16).capacity(), 17);
     }
 
     #[test]

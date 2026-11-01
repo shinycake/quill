@@ -460,3 +460,17 @@ fn only_the_saved_messages_chat_opens_the_saved_messages_info() {
         Some(InfoPanelTarget::User(30))
     );
 }
+
+#[test]
+fn avatar_already_on_disk_shows_without_a_download() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","type":{"@type":"userTypeRegular"},"profile_photo":{"@type":"profilePhoto","id":"7","small":{"@type":"file","id":41,"size":24,"expected_size":24,"local":{"@type":"localFile","path":"/cache/41.jpg","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":true,"downloaded_size":24},"remote":{"@type":"remoteFile","id":"r","is_uploading_active":false}},"has_animation":false}}}"#,
+    );
+    assert_eq!(session.user_photo_path(31), Some("/cache/41.jpg"));
+    assert!(session.take_avatar_claims().is_empty());
+}

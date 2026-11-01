@@ -146,9 +146,9 @@ fn rich_message_copy_text_joins_text_blocks() {
     let json = r#"{"id":603,"chat_id":14,"is_outgoing":false,"content":{"@type":"messageRichMessage","message":{"@type":"richMessage","is_full":true,"is_rtl":false,"blocks":[
             {"@type":"pageBlockTitle","title":{"@type":"richTextPlain","text":"Welcome"}},
             {"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"pick one"}},
-            {"@type":"pageBlockList","is_ordered":false,"items":[
-                {"@type":"pageBlockListItem","label":"a","blocks":[]},
-                {"@type":"pageBlockListItem","label":"b","blocks":[]}]},
+            {"@type":"pageBlockList","items":[
+                {"@type":"pageBlockListItem","label":"•","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"a"}}]},
+                {"@type":"pageBlockListItem","label":"•","blocks":[{"@type":"pageBlockParagraph","text":{"@type":"richTextPlain","text":"b"}}]}]},
             {"@type":"pageBlockDivider"},
             {"@type":"pageBlockButtonRow","buttons":[]}
         ]}}}"#;

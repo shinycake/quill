@@ -43,9 +43,12 @@ pub fn window_title(
     format!("{primary}{middle}{added}")
 }
 
-/// Title bars are one line: control characters become spaces.
+/// Title bars are one line: control characters become spaces. What
+/// message text drops goes too: tag characters and stacked marks crash
+/// some Linux text stacks, the window manager's among them.
 fn single_line(text: &str) -> String {
-    text.split(|c: char| c.is_control())
+    crate::display_text::filtered(text)
+        .split(|c: char| c.is_control())
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
@@ -99,5 +102,11 @@ mod tests {
             "Ada Lovelace"
         );
         assert_eq!(window_title(None, 0, Some("\n")), "Quill");
+    }
+
+    #[test]
+    fn names_lose_tag_characters_and_stacked_marks() {
+        let name = "A\u{E0041}\u{E0042}da\u{301}\u{301}\u{301}\u{301}";
+        assert_eq!(window_title(chat(name, 0), 0, None), "Ada\u{301}\u{301}");
     }
 }

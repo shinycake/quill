@@ -58,9 +58,8 @@ impl QuillApp {
         // composer replaces the draft (this needs `&mut Window` for the
         // input, so it can't live in `poll_live`). A late answer for a
         // chat the user has since left is dropped, never applied blindly.
-        // Rich answers are written back as editor markup
-        // (`blocks_to_markup`, the inverse of `markup_to_blocks`) so the
-        // rich send path rebuilds headings, lists, details, and dividers.
+        // Rich answers are written back as editor markup, inline formatting
+        // included, so the rich send path rebuilds the whole message.
         let ai_text = self
             .live
             .as_mut()
@@ -83,10 +82,10 @@ impl QuillApp {
         if let Some((chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
         {
-            let text = quill::rich::blocks_to_markup(&rich.blocks);
-            self.composer.update(cx, |input, cx| {
-                input.set_value(&text, window, cx);
-            });
+            let text = quill::rich::RichDraft::from_message(&rich.blocks)
+                .map(|draft| draft.markup())
+                .unwrap_or_default();
+            self.set_composer_markup(&text, window, cx);
             self.connection.set_note(StatusNote::info(note));
         }
         self.ai_compose_frame_upkeep(window, cx);

@@ -1,5 +1,6 @@
-//! Photo/video album geometry from tdesktop `Ui::LayoutMediaGroup`
-//! (`ui/grouped_layout.cpp`). Documents and audio stay out of this slice.
+//! Album grouping, and photo/video album geometry from tdesktop
+//! `Ui::LayoutMediaGroup` (`ui/grouped_layout.cpp`). File and audio
+//! albums stack their rows in one bubble and need no geometry.
 //!
 //! Schema (TDLib 1.8.67): `message.media_album_id` is int64, `0` if none.
 //! `sendMessageAlbum` takes 2–10 `InputMessageContent` values.
@@ -25,16 +26,32 @@ pub struct AlbumRect {
     pub height: i32,
 }
 
-/// One history row: a lone message, or 2+ consecutive photo/video messages
-/// that share a non-zero `media_album_id` and the same outgoing flag.
+/// One history row: a lone message, or 2+ consecutive messages of one
+/// [`AlbumKind`] that share a non-zero `media_album_id` and the same
+/// outgoing flag.
 #[derive(Debug)]
 pub enum HistoryGroup<'a, T> {
     Single(&'a T),
     Album { album_id: i64, messages: Vec<&'a T> },
 }
 
-pub fn is_album_media(content: &MessageContent) -> bool {
-    matches!(content, MessageContent::Photo(_) | MessageContent::Video(_))
+/// What one album holds (tdesktop `GroupedMedia`): a photo/video mosaic,
+/// or files or audio files stacked one under another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumKind {
+    Media,
+    Files,
+    Music,
+}
+
+/// The album `content` can be part of; `None` is always its own row.
+pub fn album_kind(content: &MessageContent) -> Option<AlbumKind> {
+    match content {
+        MessageContent::Photo(_) | MessageContent::Video(_) => Some(AlbumKind::Media),
+        MessageContent::Document(_) => Some(AlbumKind::Files),
+        MessageContent::Audio(_) => Some(AlbumKind::Music),
+        _ => None,
+    }
 }
 
 /// Pixel size used by the mosaic. Missing dimensions become 1×1 so a ratio
@@ -52,25 +69,27 @@ pub fn album_pixel_size(content: &MessageContent) -> (i32, i32) {
     (w.max(1), h.max(1))
 }
 
-/// Group consecutive album media. A lone id, a non-photo/video, or a sender
-/// change stays on the single-message path.
-pub fn group_media_albums<'a, T>(
+/// Group consecutive album items of one kind. A lone id, content of no
+/// [`AlbumKind`], a kind change or a sender change stays on the
+/// single-message path.
+pub fn group_media_albums<'a, T, K: PartialEq>(
     messages: &'a [T],
     album_id: impl Fn(&T) -> i64,
     is_outgoing: impl Fn(&T) -> bool,
-    is_media: impl Fn(&T) -> bool,
+    kind: impl Fn(&T) -> Option<K>,
 ) -> Vec<HistoryGroup<'a, T>> {
     let mut groups = Vec::new();
     let mut index = 0;
     while let Some(first) = messages.get(index) {
         let id = album_id(first);
         let outgoing = is_outgoing(first);
-        if id != 0 && is_media(first) {
+        let first_kind = kind(first);
+        if id != 0 && first_kind.is_some() {
             let mut end = index + 1;
             while let Some(next) = messages.get(end)
                 && album_id(next) == id
                 && is_outgoing(next) == outgoing
-                && is_media(next)
+                && kind(next) == first_kind
             {
                 end += 1;
             }
@@ -556,7 +575,7 @@ mod tests {
     #[test]
     fn lone_album_id_stays_single() {
         let rows = [(0_i64, true), (7, true), (7, true)];
-        let groups = group_media_albums(&rows, |row| row.0, |row| row.1, |_| true);
+        let groups = group_media_albums(&rows, |row| row.0, |row| row.1, |_| Some(()));
         assert!(matches!(groups[0], HistoryGroup::Single(_)));
         assert!(matches!(groups[1], HistoryGroup::Album { album_id: 7, .. }));
     }
@@ -564,8 +583,30 @@ mod tests {
     #[test]
     fn outgoing_change_splits_the_album() {
         let rows = [(9_i64, false), (9, true)];
-        let groups = group_media_albums(&rows, |row| row.0, |row| row.1, |_| true);
+        let groups = group_media_albums(&rows, |row| row.0, |row| row.1, |_| Some(()));
         assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn files_group_apart_from_photos_and_audio() {
+        use AlbumKind::{Files, Media, Music};
+        let rows = [
+            Some(Files),
+            Some(Files),
+            Some(Media),
+            Some(Music),
+            Some(Music),
+            None,
+        ];
+        let groups = group_media_albums(&rows, |_| 7, |_| false, |row| *row);
+        let sizes: Vec<usize> = groups
+            .iter()
+            .map(|group| match group {
+                HistoryGroup::Album { messages, .. } => messages.len(),
+                HistoryGroup::Single(_) => 1,
+            })
+            .collect();
+        assert_eq!(sizes, [2, 1, 2, 1]);
     }
 
     #[test]

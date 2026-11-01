@@ -137,6 +137,10 @@ pub struct ParsedUser {
     /// `profile_photo.small.id` (`profilePhoto`, schema 1.8.67 line 754);
     /// 0 = no photo.
     pub photo_small_file_id: i32,
+    /// That file with its `local` block, so an avatar already on disk
+    /// shows without a `downloadFile` round trip. The reducer moves it
+    /// into the file store; the stored user keeps `None`.
+    pub photo_small: Option<ParsedFile>,
     /// `profile_photo.id`: the photo whose full `chatPhoto` (from
     /// `userFullInfo`) holds its clips; 0 = no photo.
     pub photo_id: i64,
@@ -297,16 +301,8 @@ pub(crate) fn parse_first_active_username(value: Option<&Value>) -> String {
 /// object carries no id.
 pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let id = int53(value.get("id")).ok()?;
-    let first_name = value
-        .get("first_name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let last_name = value
-        .get("last_name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let first_name = json_name_str(value, "first_name");
+    let last_name = json_name_str(value, "last_name");
     let (active_usernames, disabled_usernames, editable_username) =
         parse_username_lists(value.get("usernames"));
     let username = active_usernames.first().cloned().unwrap_or_default();
@@ -383,14 +379,9 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         .and_then(|t| t.get("active_user_count"))
         .and_then(Value::as_i64)
         .map_or(0, |count| count.max(0).sat_i32());
-    let photo_small_file_id = i32::try_from(int53_or_zero(
-        value
-            .get("profile_photo")
-            .and_then(|p| p.get("small"))
-            .and_then(|f| f.get("id")),
-    ))
-    .unwrap_or(0);
     let profile_photo = value.get("profile_photo").filter(|p| !p.is_null());
+    let photo_small = parse_chat_photo_small(profile_photo);
+    let photo_small_file_id = photo_small.as_ref().map_or(0, |file| file.id.0);
     let photo_id = int64(profile_photo.and_then(|p| p.get("id"))).unwrap_or(0);
     let photo_has_animation = profile_photo
         .and_then(|p| p.get("has_animation"))
@@ -472,6 +463,7 @@ pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
         is_support,
         bot_active_users,
         photo_small_file_id,
+        photo_small,
         photo_id,
         photo_has_animation,
         accent_color_id,

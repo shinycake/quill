@@ -59,7 +59,7 @@ impl QuillApp {
             || explorer_url(None, address),
             |session| session.ton_wallet.explorer_url_for(address),
         );
-        self.open_message_url(&url, cx);
+        self.open_link(&url, cx);
     }
 
     /// "Copy Address" (iOS toast: "Address copied").

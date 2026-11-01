@@ -226,7 +226,7 @@ impl QuillApp {
             is_joined: true,
             screen_sharing: true,
             screen_share_paused: true,
-            participants: std::sync::Arc::new(participants),
+            participants: participants.into(),
             ..ActiveGroupCall::fresh(7)
         });
         if crowd > 0 {

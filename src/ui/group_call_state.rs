@@ -46,6 +46,7 @@ pub(crate) struct GroupCallUi {
     /// Ends the task listening to the hook's key edges (set when the hook
     /// is torn down or replaced, so no thread waits on a dead channel).
     pub(super) global_ptt_listener_stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub(super) window_visible: bool,
     /// Locally pinned video tile of the group call (tdesktop viewport pin).
     pub(super) pin: quill::calls::tile_pin::TilePin,
     /// Your own microphone level on the mute button: the halo follows
@@ -100,6 +101,7 @@ impl GroupCallUi {
             global_ptt: Default::default(),
             global_ptt_polling: false,
             global_ptt_listener_stop: None,
+            window_visible: true,
             pin: quill::calls::tile_pin::TilePin::default(),
             tile_overlays: HashMap::new(),
             stage_volume: None,

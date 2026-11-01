@@ -527,11 +527,7 @@ pub(crate) fn parse_message(value: &Value) -> Result<ParsedMessage, ParseError> 
         media_album_id: int64(value.get("media_album_id")).unwrap_or(0),
         // Phase D2: `message.author_signature` (TDLib 1.8.67, lines
         // 3155/3165). Empty or absent → `None`.
-        author_signature: value
-            .get("author_signature")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string),
+        author_signature: Some(json_name_str(value, "author_signature")).filter(|s| !s.is_empty()),
         topic_id: parse_message_topic(value.get("topic_id")),
         thread_id: parse_message_thread_topic(value.get("topic_id")),
         content,
@@ -637,11 +633,7 @@ pub(crate) fn parse_message_extras(value: &Value) -> MessageExtras {
             .get("import_info")
             .filter(|info| info.get("@type").and_then(Value::as_str) == Some("messageImportInfo"))
             .map(|info| MessageImportInfo {
-                sender_name: info
-                    .get("sender_name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string(),
+                sender_name: json_name_str(info, "sender_name"),
                 date: info
                     .get("date")
                     .and_then(Value::as_i64)
@@ -696,28 +688,16 @@ pub(crate) fn parse_message_origin(value: Option<&Value>) -> Option<MessageOrigi
             user_id: UserId(int53_or_zero(value.get("sender_user_id"))),
         }),
         Some("messageOriginHiddenUser") => Some(MessageOrigin::HiddenUser {
-            sender_name: value
-                .get("sender_name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            sender_name: json_name_str(value, "sender_name"),
         }),
         Some("messageOriginChat") => Some(MessageOrigin::Chat {
             chat_id: ChatId(int53_or_zero(value.get("sender_chat_id"))),
-            author_signature: value
-                .get("author_signature")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            author_signature: json_name_str(value, "author_signature"),
         }),
         Some("messageOriginChannel") => Some(MessageOrigin::Channel {
             chat_id: ChatId(int53_or_zero(value.get("chat_id"))),
             message_id: MessageId(int53_or_zero(value.get("message_id"))),
-            author_signature: value
-                .get("author_signature")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            author_signature: json_name_str(value, "author_signature"),
         }),
         _ => None,
     }

@@ -197,3 +197,25 @@ fn a_prepared_album_goes_out_in_order_to_its_chat() {
     assert_eq!(durations, [Value::from(1), Value::from(2)]);
     let _ = std::fs::remove_dir_all(&rig.dir);
 }
+
+#[test]
+fn two_files_go_out_as_one_album_of_documents_with_the_caption_last() {
+    let mut rig = Rig::new();
+    let first = rig.junk("a.txt", AttachmentKind::Document);
+    let second = rig.junk("b.txt", AttachmentKind::Document);
+    let snap = ComposerSnapshot::capture_album(
+        ChatId(7),
+        rig.driver.session.view_generation,
+        "notes",
+        vec![first, second],
+    );
+    rig.driver.send_snapshot(&snap).unwrap();
+    let request = rig.last();
+    assert_eq!(request["@type"], "sendMessageAlbum");
+    let contents = request["input_message_contents"].as_array().unwrap();
+    let kinds: Vec<_> = contents.iter().map(|c| c["@type"].clone()).collect();
+    assert_eq!(kinds, ["inputMessageDocument", "inputMessageDocument"]);
+    assert_eq!(contents[0]["caption"]["text"], "");
+    assert_eq!(contents[1]["caption"]["text"], "notes");
+    let _ = std::fs::remove_dir_all(&rig.dir);
+}

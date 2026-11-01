@@ -10,60 +10,6 @@ pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
     (parser.out, parser.entities)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Seam {
-    pub byte: usize,
-    pub utf16_units: i32,
-    pub outside_spans: bool,
-}
-
-pub(crate) struct MarkupScanner<'t> {
-    ahead: Lookahead<'t>,
-    seams: Vec<Seam>,
-}
-
-impl<'t> MarkupScanner<'t> {
-    pub(crate) fn new(markup: &'t str) -> Self {
-        Self {
-            ahead: Lookahead::new(markup),
-            seams: Vec::new(),
-        }
-    }
-
-    pub(crate) fn rest(&self) -> &'t str {
-        let ahead = &self.ahead;
-        ahead.text.get(ahead.parse_start..).unwrap_or_default()
-    }
-
-    pub(crate) fn advance(&mut self, bytes: usize) {
-        self.ahead.parse_start += bytes;
-    }
-
-    pub(crate) fn scan(&mut self, budget: i32) -> Option<&[Seam]> {
-        let rest = self.rest();
-        let capacity = usize::try_from(budget).unwrap_or(0).min(rest.len());
-        self.seams.clear();
-        let mut parser = MarkupParser::new(rest, &mut self.ahead, capacity);
-        parser.scan = Some(SeamScan {
-            budget,
-            stopped: false,
-            seams: std::mem::take(&mut self.seams),
-        });
-        parser.parse_top();
-        let scan = parser.scan.take()?;
-        self.seams = scan.seams;
-        scan.stopped.then_some(self.seams.as_slice())
-    }
-}
-
-const SEAMS_BETWEEN_LINES: usize = 2;
-
-struct SeamScan {
-    budget: i32,
-    stopped: bool,
-    seams: Vec<Seam>,
-}
-
 #[derive(Clone, Copy)]
 struct OutPosition {
     utf16: i32,
@@ -156,7 +102,6 @@ impl NextMatch {
 
 struct Lookahead<'t> {
     text: &'t str,
-    parse_start: usize,
     matches: [NextMatch; PLAIN_TARGETS + INLINE_MARKERS.len()],
 }
 
@@ -164,14 +109,13 @@ impl<'t> Lookahead<'t> {
     fn new(text: &'t str) -> Self {
         Self {
             text,
-            parse_start: 0,
             matches: Default::default(),
         }
     }
 
     fn find(&mut self, target: Target, from: usize, to: usize) -> Option<usize> {
         let text = self.text;
-        let start = self.parse_start + from;
+        let start = from;
         let needle = target.needle();
         let at = self
             .matches
@@ -186,7 +130,6 @@ impl<'t> Lookahead<'t> {
                     found
                 }
             })?;
-        let at = at.checked_sub(self.parse_start)?;
         (at + needle.len() <= to).then_some(at)
     }
 }
@@ -199,7 +142,6 @@ struct MarkupParser<'t, 'a> {
     out16: i32,
     entities: Vec<ComposerEntity>,
     last_quote: Option<usize>,
-    scan: Option<SeamScan>,
 }
 
 impl<'t, 'a> MarkupParser<'t, 'a> {
@@ -211,49 +153,17 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
             out16: 0,
             entities: Vec::new(),
             last_quote: None,
-            scan: None,
         }
     }
 
     fn parse_top(&mut self) {
         let end = self.text.len();
         self.parse_span(0, end, SpanLevel::Top);
-        if !self.stop_if_over_budget(end) {
-            self.note_seam(end, SpanLevel::Top);
-        }
         self.entities
             .sort_by_key(|e| (e.offset, std::cmp::Reverse(e.length)));
     }
 
-    fn stop_if_over_budget(&mut self, at: usize) -> bool {
-        let utf16_units = self.out16;
-        let Some(scan) = &mut self.scan else {
-            return false;
-        };
-        if !scan.stopped && utf16_units > scan.budget {
-            scan.stopped = true;
-            scan.seams.push(Seam {
-                byte: at,
-                utf16_units,
-                outside_spans: false,
-            });
-        }
-        scan.stopped
-    }
-
-    fn note_seam(&mut self, at: usize, level: SpanLevel) {
-        if level != SpanLevel::Inline
-            && let Some(scan) = &mut self.scan
-        {
-            scan.seams.push(Seam {
-                byte: at,
-                utf16_units: self.out16,
-                outside_spans: level == SpanLevel::Top,
-            });
-        }
-    }
-
-    fn push_quote_line(&mut self, start: OutPosition, first_seam: usize) {
+    fn push_quote_line(&mut self, start: OutPosition) {
         if let Some(prev) = self.last_quote.and_then(|ix| self.entities.get_mut(ix))
             && prev.offset + prev.length + 1 == start.utf16
             && start
@@ -264,12 +174,6 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
         {
             prev.length = self.out16 - prev.offset;
             prev.bytes.end = self.out.len();
-            if let Some(scan) = &mut self.scan {
-                let between = first_seam.saturating_sub(SEAMS_BETWEEN_LINES)..first_seam;
-                for seam in scan.seams.get_mut(between).unwrap_or_default() {
-                    seam.outside_spans = false;
-                }
-            }
             return;
         }
         self.last_quote = Some(self.entities.len());
@@ -284,10 +188,19 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
         let mut i = from;
         while i < to {
             scan_work::add(1);
-            if self.stop_if_over_budget(i) {
-                return;
+            if self
+                .text
+                .get(i..to)
+                .unwrap_or_default()
+                .starts_with(markup_boundary::ESCAPE)
+            {
+                i += markup_boundary::ESCAPE.len_utf8();
+                if let Some(ch) = self.text.get(i..to).and_then(|rest| rest.chars().next()) {
+                    self.push_char(ch);
+                    i += ch.len_utf8();
+                }
+                continue;
             }
-            self.note_seam(i, level);
             let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
             if level == SpanLevel::Top
                 && line_start
@@ -299,10 +212,9 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
                     .find(Target::Newline, content_start, to)
                     .unwrap_or(to);
                 let start = self.position();
-                let first_seam = self.scan.as_ref().map_or(0, |scan| scan.seams.len());
                 self.parse_span(content_start, line_end, SpanLevel::QuoteLine);
                 if self.out16 > start.utf16 {
-                    self.push_quote_line(start, first_seam);
+                    self.push_quote_line(start);
                 }
                 i = line_end;
                 continue;
@@ -452,16 +364,17 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
         if label_start == middle || url.is_empty() {
             return None;
         }
-        let kind = if mention_user_id(url).is_some() {
+        let url = markup_boundary::strip_barrier(url);
+        let kind = if mention_user_id(&url).is_some() {
             FormatKind::MentionName
-        } else if date_link_time(url).is_some() {
+        } else if date_link_time(&url).is_some() {
             FormatKind::DateTime
         } else {
             FormatKind::TextUrl
         };
         let start = self.position();
         self.parse_span(label_start, middle, SpanLevel::Inline);
-        self.push_entity(start, kind, url.to_string(), String::new());
+        self.push_entity(start, kind, url, String::new());
         Some(close_paren + 1)
     }
 
@@ -485,94 +398,17 @@ impl<'t, 'a> MarkupParser<'t, 'a> {
 
     fn push_range(&mut self, from: usize, to: usize) {
         let text = self.text.get(from..to).unwrap_or_default();
-        for (at, ch) in text.char_indices() {
+        for ch in text.chars() {
             scan_work::add(ch.len_utf8());
-            if self.stop_if_over_budget(from + at) {
-                return;
-            }
             self.push_char(ch);
         }
     }
 
     fn push_char(&mut self, ch: char) {
-        if ch == markup_boundary::BARRIER {
+        if matches!(ch, markup_boundary::BARRIER | markup_boundary::ESCAPE) {
             return;
         }
         self.out.push(ch);
         self.out16 += ch.len_utf16() as i32;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{MarkupScanner, parse_format_markup};
-
-    const MARKUPS: [&str; 6] = [
-        "plain words with no markers in them at all",
-        "**bold** then _italic_ then `code` then ~~gone~~ and more text",
-        "> first quoted line\n> second quoted line\nand a plain line after",
-        "[a link](https://t.me/x) and ![😀](tg://emoji?id=42) and more text",
-        "```rust\nlet a = 1;\n```\nthen plain text after the fence ends",
-        "*never closed and [never linked and `never coded with more text",
-    ];
-
-    fn units(markup: &str) -> i32 {
-        parse_format_markup(markup).0.encode_utf16().count() as i32
-    }
-
-    #[test]
-    fn a_scan_stops_just_past_its_budget() {
-        let markup = "word ".repeat(1000);
-        let mut scanner = MarkupScanner::new(&markup);
-        let seams = scanner.scan(10).expect("over the budget");
-        assert_eq!(seams.last().map(|seam| seam.utf16_units), Some(11));
-    }
-
-    #[test]
-    fn a_scan_of_text_that_fits_returns_nothing() {
-        for markup in MARKUPS {
-            assert_eq!(MarkupScanner::new(markup).scan(1000), None);
-        }
-    }
-
-    #[test]
-    fn a_clean_seam_counts_the_text_before_it() {
-        for markup in MARKUPS {
-            let mut scanner = MarkupScanner::new(markup);
-            let seams = scanner.scan(16).expect("over the budget");
-            for seam in seams.iter().filter(|seam| seam.outside_spans) {
-                let head = markup.get(..seam.byte).unwrap_or_default();
-                let at = seam.byte;
-                assert_eq!(units(head), seam.utf16_units, "{markup:?} at {at}");
-            }
-        }
-    }
-
-    #[test]
-    fn no_clean_seam_lies_inside_a_quote() {
-        let markup = "> one\n> two\n> three and more\nplain";
-        let mut scanner = MarkupScanner::new(markup);
-        let seams = scanner.scan(16).expect("over the budget");
-        let last_quoted = markup.len() - "\nplain".len();
-        assert!(
-            seams
-                .iter()
-                .filter(|seam| seam.byte < last_quoted)
-                .all(|seam| !seam.outside_spans || seam.byte == 0)
-        );
-    }
-
-    #[test]
-    fn a_shared_scanner_sees_a_suffix_as_a_fresh_one_does() {
-        for markup in MARKUPS {
-            let mut shared = MarkupScanner::new(markup);
-            for ch in markup.chars() {
-                let rest = shared.rest();
-                let fresh = MarkupScanner::new(rest).scan(8).map(<[_]>::to_vec);
-                let seen = shared.scan(8).map(<[_]>::to_vec);
-                assert_eq!(seen, fresh, "{rest:?}");
-                shared.advance(ch.len_utf8());
-            }
-        }
     }
 }

@@ -84,7 +84,7 @@ pub(crate) struct PlaybackUi {
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
     /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
     /// with the history row (and its animation layer) that draws it.
-    pub(super) gif: Option<std::rc::Rc<super::gif_clip::GifClip>>,
+    pub(super) gif: Option<std::sync::Arc<super::gif_clip::GifClip>>,
     pub(super) gif_started_at: Option<Instant>,
     /// The GIF decodes running, by message, and their cancel flags (set
     /// when playback stops; one decode per GIF at a time).

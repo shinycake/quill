@@ -2,6 +2,7 @@
 //! spoiler covers and blurred previews.
 
 use super::*;
+use crate::ui::render_decode::{OffRender, made_or_start};
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::MessageContent;
 
@@ -250,9 +251,8 @@ pub(in crate::ui) fn spoiler_surface(
 ) -> Stateful<Div> {
     let preview = minithumbnail
         .filter(|mini| !mini.data.is_empty())
-        .and_then(|mini| blurred_preview(row_id, &mini.data))
-        .map(|blurred| {
-            img(ImageSource::Render(blurred))
+        .map(|mini| {
+            img(blurred_preview(row_id, mini.data.clone()))
                 .absolute()
                 .inset_0()
                 .size_full()
@@ -289,16 +289,31 @@ pub(in crate::ui) fn spoiler_surface(
         .child(dust)
 }
 
-/// The minithumbnail scaled up and Gaussian-blurred, cached per message.
-fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
-    use crate::ui::lru::Lru;
-    use std::cell::RefCell;
-    thread_local! {
-        static CACHE: RefCell<Lru<u64, Arc<RenderImage>>> = RefCell::new(Lru::new(256));
-    }
-    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&row_id)) {
-        return Some(hit);
-    }
+thread_local! {
+    static BLURRED: std::cell::RefCell<OffRender<(u64, u64), Arc<RenderImage>>> = std::cell::RefCell::new(
+        OffRender::new(256, |old| crate::ui::image_budget::retire_all([old])),
+    );
+}
+
+/// The minithumbnail scaled up and Gaussian-blurred off the UI thread,
+/// cached per message and minithumbnail: an edit that replaces the media
+/// gets a new one.
+fn blurred_preview(row_id: u64, jpeg: Arc<[u8]>) -> ImageSource {
+    let key = (row_id, content_hash(&jpeg));
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        let jpeg = jpeg.clone();
+        made_or_start(&BLURRED, key, move || blur(&jpeg), window, cx).map(Ok)
+    }))
+}
+
+fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn blur(jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     let small = image::load_from_memory(jpeg).ok()?.to_rgba8();
     let (w, h) = small.dimensions();
     let scale = 160.0 / w.max(h).max(1) as f32;
@@ -312,13 +327,59 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     for pixel in blurred.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
-    let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+    Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(blurred),
-    ])));
-    CACHE.with(|cache| {
-        if let Some(old) = cache.borrow_mut().insert(row_id, render.clone()) {
-            crate::ui::image_budget::retire_all([old]);
+    ]))))
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{BLURRED, blurred_preview, content_hash};
+    use gpui_kit::{
+        Context, IntoElement, ParentElement, Render, Styled, TestAppContext, Window, div, img, px,
+    };
+    use std::sync::Arc;
+
+    struct Spoiler(Arc<[u8]>);
+
+    impl Render for Spoiler {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size(px(20.))
+                .child(img(blurred_preview(7, self.0.clone())).size(px(10.)))
         }
-    });
-    Some(render)
+    }
+
+    fn jpeg() -> Arc<[u8]> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(4, 3, image::Rgb([200, 40, 40]))
+            .write_to(&mut bytes, image::ImageFormat::Jpeg)
+            .expect("encoded");
+        bytes.into_inner().into()
+    }
+
+    /// A message whose minithumbnail could not be blurred gets a preview
+    /// once an edit brings a new one: the failure is kept for the old
+    /// bytes only.
+    #[gpui_kit::test]
+    fn a_new_minithumbnail_is_blurred_after_a_failed_one(cx: &mut TestAppContext) {
+        let broken: Arc<[u8]> = vec![1, 2, 3].into();
+        let (view, vcx) = cx.add_window_view(|_, _| Spoiler(broken.clone()));
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        vcx.run_until_parked();
+        let made = |bytes: &Arc<[u8]>| {
+            let key = (7, content_hash(bytes));
+            BLURRED.with_borrow_mut(|cache| cache.made(&key))
+        };
+        assert_eq!(made(&broken), Some(false));
+        let edited = jpeg();
+        view.update(vcx, |view, cx| {
+            view.0 = edited.clone();
+            cx.notify();
+        });
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        vcx.run_until_parked();
+        assert_eq!(made(&edited), Some(true));
+    }
 }

@@ -779,7 +779,6 @@
 "qll_ops_open_shared_media_message" = "Open shared media message {0}";
 "qll_ops_open_source_licenses" = "Open-source licenses";
 "qll_ops_open_this_link" = "Open this link?";
-"qll_ops_opened_mail" = "opened mail";
 "qll_ops_opening" = "opening @{username}…";
 "qll_ops_opening_the_live_stream" = "Opening the live stream…";
 "qll_ops_opening_the_thread" = "Opening the thread…";
@@ -858,7 +857,6 @@
 "qll_ops_retry" = "Retry";
 "qll_ops_retry_download" = "Retry download";
 "qll_ops_retry_loading_shared_media" = "Retry loading shared media";
-"qll_ops_revealed_in_file_manager" = "revealed in file manager";
 "qll_ops_revoked" = "{base}, {revoked} revoked";
 "qll_ops_revoked_an_invite_link" = "revoked an invite link";
 "qll_ops_revoked_invite_link" = "revoked invite link {quote}";
@@ -1105,6 +1103,7 @@
 "qll_ops_leave_group_title" = "Leave group?";
 "qll_polls_link_url" = "URL";
 "qll_ops_preparing_the_files" = "Preparing the files…";
+"qll_ops_photos_are_sending" = "The photos are being sent.";
 "qll_ops_video_tool_took_too_long" = "The video tool took too long to finish.";
 "qll_ops_video_playback_needs_ffmpeg" = "Video playback needs ffmpeg, and it could not be started.";
 "qll_ops_video_could_not_read" = "The video could not be read.";

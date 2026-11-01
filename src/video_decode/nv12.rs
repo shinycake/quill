@@ -1,9 +1,12 @@
 //! NV12 pictures: the layout the shim hands over without a colour
 //! conversion when asked (`qv_set_output`), for renderers that draw YUV
-//! themselves (Windows, `docs/decisions/video-player-nv12.md`). Packing
-//! the planes tightly, turning them upright, the colour matrices, and a
-//! CPU conversion to BGRA for when a renderer can't draw them after all.
+//! themselves (Windows and Linux, `docs/decisions/video-player-nv12.md`).
+//! Packing the planes tightly into pooled buffers, turning them upright,
+//! the colour matrices, and a CPU conversion to BGRA for when a renderer
+//! can't draw them after all.
 #![deny(clippy::indexing_slicing)]
+
+use std::sync::Arc;
 
 /// The picture layout asked of the decoder.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -86,10 +89,7 @@ pub enum Pixels {
     Bgra(Vec<u8>),
     /// The luma plane (`width * height`), then `height / 2` rows of
     /// `width / 2` interleaved (Cb, Cr) pairs. Even sides.
-    Nv12 {
-        bytes: std::sync::Arc<[u8]>,
-        color: YuvColor,
-    },
+    Nv12 { bytes: Arc<[u8]>, color: YuvColor },
 }
 
 impl Pixels {
@@ -141,21 +141,23 @@ pub(super) fn plane_span(stride: usize, rows: usize, row: usize) -> Option<usize
 }
 
 /// Turn a plane of `N`-byte elements (`width` x `height`, rows `stride`
-/// bytes apart) upright by `rotation` clockwise degrees into `out`,
-/// tightly packed. `false` (and nothing written) when `src` is shorter
-/// than its rows say.
+/// bytes apart) upright by `rotation` clockwise degrees into `out`, which
+/// holds exactly the tightly packed plane. `false` (and nothing written)
+/// when `src` is shorter than its rows say or `out` is not the plane's
+/// size.
 pub(super) fn turn_plane_into<const N: usize>(
     src: &[u8],
     (width, height): (usize, usize),
     stride: usize,
     rotation: u32,
-    out: &mut Vec<u8>,
+    out: &mut [u8],
 ) -> bool {
     let fits = width
         .checked_mul(N)
         .and_then(|row| plane_span(stride, height, row))
         .is_some_and(|need| need <= src.len());
-    if !fits {
+    let packed = width.checked_mul(height).and_then(|n| n.checked_mul(N));
+    if !fits || packed != Some(out.len()) {
         return false;
     }
     let (w, h) = (width, height);
@@ -167,35 +169,38 @@ pub(super) fn turn_plane_into<const N: usize>(
     };
     match rotation {
         90 | 180 | 270 => {
-            let (ow, oh) = if rotation == 180 { (w, h) } else { (h, w) };
-            out.reserve(ow * oh * N);
-            for oy in 0..oh {
-                for ox in 0..ow {
-                    let (sx, sy) = match rotation {
-                        // Clockwise: the left column becomes the top row.
-                        90 => (oy, h - 1 - ox),
-                        180 => (w - 1 - ox, h - 1 - oy),
-                        _ => (w - 1 - oy, ox),
-                    };
-                    out.extend_from_slice(&at(sx, sy));
-                }
+            let ow = if rotation == 180 { w } else { h };
+            let (pixels, []) = out.as_chunks_mut::<N>() else {
+                return false;
+            };
+            for (index, pixel) in pixels.iter_mut().enumerate() {
+                let (ox, oy) = (index % ow, index / ow);
+                let (sx, sy) = match rotation {
+                    // Clockwise: the left column becomes the top row.
+                    90 => (oy, h - 1 - ox),
+                    180 => (w - 1 - ox, h - 1 - oy),
+                    _ => (w - 1 - oy, ox),
+                };
+                *pixel = at(sx, sy);
             }
         }
         _ => {
             let row = w * N;
-            out.reserve(row * h);
-            for y in 0..h {
-                out.extend_from_slice(src.get(y * stride..y * stride + row).unwrap_or_default());
+            for (y, dst) in out.chunks_exact_mut(row).enumerate() {
+                if let Some(line) = src.get(y * stride..y * stride + row) {
+                    dst.copy_from_slice(line);
+                }
             }
         }
     }
     true
 }
 
-/// An NV12 picture from the shim's planes, packed tightly and turned
-/// upright: the bytes and the upright size. `None` for an odd or zero
-/// side, a stride narrower than a row, or planes shorter than their rows
-/// (`luma` and `chroma` are what the shim handed over).
+/// An NV12 picture from the shim's planes, packed tightly into `out` (of
+/// exactly [`nv12_len`] bytes) and turned upright: the upright size.
+/// `None` for an odd or zero side, a stride narrower than a row, planes
+/// shorter than their rows (`luma` and `chroma` are what the shim handed
+/// over), or an `out` of another length.
 pub fn pack_nv12(
     luma: &[u8],
     luma_stride: usize,
@@ -203,30 +208,76 @@ pub fn pack_nv12(
     chroma_stride: usize,
     (width, height): (u32, u32),
     rotation: u32,
-) -> Option<(Vec<u8>, u32, u32)> {
+    out: &mut [u8],
+) -> Option<(u32, u32)> {
     let total = nv12_len(width, height)?;
-    let (w, h) = (width as usize, height as usize);
-    let mut out = Vec::with_capacity(total);
-    if !turn_plane_into::<1>(luma, (w, h), luma_stride, rotation, &mut out) {
-        return None;
-    }
-    if !turn_plane_into::<2>(chroma, (w / 2, h / 2), chroma_stride, rotation, &mut out) {
-        return None;
-    }
     if out.len() != total {
         return None;
     }
-    let (ow, oh) = match rotation {
-        90 | 270 => (height, width),
-        _ => (width, height),
-    };
-    Some((out, ow, oh))
+    let (w, h) = (width as usize, height as usize);
+    let (out_luma, out_chroma) = out.split_at_mut_checked(w * h)?;
+    if !turn_plane_into::<1>(luma, (w, h), luma_stride, rotation, out_luma) {
+        return None;
+    }
+    if !turn_plane_into::<2>(chroma, (w / 2, h / 2), chroma_stride, rotation, out_chroma) {
+        return None;
+    }
+    match rotation {
+        90 | 270 => Some((height, width)),
+        _ => Some((width, height)),
+    }
+}
+
+/// Buffers kept at most: the decoder's queue, the picture being decoded,
+/// the one on screen and the one the last frame drew.
+const POOL_BUFFERS: usize = 8;
+
+/// NV12 picture buffers kept for reuse: a buffer is filled again once no
+/// picture holds it any more (the renderer uploaded it and the player let
+/// it go), so a playing clip stops allocating one per picture.
+#[derive(Default)]
+pub(super) struct BufferPool {
+    buffers: Vec<Arc<[u8]>>,
+}
+
+impl BufferPool {
+    /// A buffer of `len` bytes that nothing else holds, to fill: a pooled
+    /// one, else a new one. Buffers of other sizes go.
+    pub(super) fn take(&mut self, len: usize) -> Arc<[u8]> {
+        self.buffers.retain(|buffer| buffer.len() == len);
+        let free = self
+            .buffers
+            .iter()
+            .position(|buffer| Arc::strong_count(buffer) == 1 && Arc::weak_count(buffer) == 0);
+        match free {
+            Some(index) => self.buffers.swap_remove(index),
+            None => std::iter::repeat_n(0u8, len).collect(),
+        }
+    }
+
+    /// Keep a filled buffer, to take again once its picture is let go.
+    pub(super) fn keep(&mut self, buffer: &Arc<[u8]>) {
+        if self.buffers.len() < POOL_BUFFERS {
+            self.buffers.push(buffer.clone());
+        }
+    }
 }
 
 /// Convert a tightly packed NV12 picture to BGRA on the CPU (opaque),
 /// with the same matrix the GPU path uses. `None` when `bytes` doesn't
 /// hold a `width` x `height` NV12 picture.
 pub fn nv12_to_bgra(bytes: &[u8], width: u32, height: u32, color: YuvColor) -> Option<Vec<u8>> {
+    nv12_to_bgra_into(bytes, width, height, color, Vec::new())
+}
+
+/// [`nv12_to_bgra`] into `out`, whose old bytes are overwritten.
+pub fn nv12_to_bgra_into(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    color: YuvColor,
+    mut out: Vec<u8>,
+) -> Option<Vec<u8>> {
     let total = nv12_len(width, height)?;
     if bytes.len() != total {
         return None;
@@ -239,7 +290,8 @@ pub fn nv12_to_bgra(bytes: &[u8], width: u32, height: u32, color: YuvColor) -> O
         (value.clamp(0.0, 1.0) * 255.0).round() as u8
     };
     let [r_row, g_row, b_row] = &rows;
-    let mut out = Vec::with_capacity(w * h * 4);
+    out.clear();
+    out.reserve(w * h * 4);
     for (y, luma_row) in luma.chunks_exact(w).enumerate() {
         let chroma_row = chroma.get((y / 2) * w..(y / 2) * w + w).unwrap_or_default();
         for (x, &sample) in luma_row.iter().enumerate() {

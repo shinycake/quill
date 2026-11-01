@@ -61,7 +61,6 @@ pub use markup::{
     custom_emoji_markup, date_link, date_link_time, entities_to_markup, find_urls, mention_user_id,
 };
 pub use markup_parser::parse_format_markup;
-pub(crate) use markup_parser::{MarkupScanner, Seam};
 pub use media_options::{
     AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, MediaSendOptions, PAID_MEDIA_MAX_STARS,
     PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoScaleTimedOut, PriceInput, can_use_high_quality,
@@ -205,7 +204,7 @@ impl ComposerSnapshot {
         }
     }
 
-    /// Freeze a 2–10 photo/video album. Caption is the composer text.
+    /// Freeze a 2–10 photo/video or file album. Caption is the composer text.
     pub fn capture_album(
         chat_id: ChatId,
         view_generation: ViewGeneration,
@@ -276,13 +275,10 @@ impl ComposerSnapshot {
         ChatId(self.chat_id)
     }
 
-    pub fn is_media_album(&self) -> bool {
-        let n = self.album.len();
-        (2..=crate::album::ALBUM_MAX_ITEMS).contains(&n)
-            && self
-                .album
-                .iter()
-                .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
+    /// 2–10 photos and videos, or 2–10 files.
+    pub fn is_album(&self) -> bool {
+        self.album.len() <= crate::album::ALBUM_MAX_ITEMS
+            && ComposerAttachment::albumable(&self.album)
     }
 
     pub fn is_empty(&self) -> bool {

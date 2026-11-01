@@ -134,6 +134,7 @@ impl QuillApp {
             .chain(replays)
             .map(|(key, seen)| (key, seen.effect_id, seen.outgoing))
             .collect();
+        let now = cx.background_executor().now();
         WAITING.with(|waiting| {
             let mut waiting = waiting.borrow_mut();
             for (key, effect_id, outgoing) in requests {
@@ -141,10 +142,12 @@ impl QuillApp {
                     key,
                     effect_id,
                     outgoing,
-                    since: Instant::now(),
+                    since: now,
                 });
             }
-            waiting.retain(|w| shown.contains(&w.key.0) && w.since.elapsed() < WAIT);
+            waiting.retain(|w| {
+                shown.contains(&w.key.0) && now.saturating_duration_since(w.since) < WAIT
+            });
         });
         let ids: Vec<i64> = WAITING.with(|waiting| {
             waiting
@@ -196,7 +199,7 @@ impl QuillApp {
                 outgoing,
                 effect_id,
                 WAIT,
-                cx.background_executor().now(),
+                now,
             );
         }
     }

@@ -1,7 +1,7 @@
 use super::decode_loop::{Step, next_step};
 use super::{
-    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, Clock, Demuxer, Item,
-    MediaInfo, OpenOptions, PixelOutput, Player, VideoFrame, rotate_bgra, take_due,
+    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, BgraPool, Clock, Demuxer,
+    Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame, rotate_bgra, take_due,
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -38,17 +38,17 @@ fn rotate_turns_pictures_clockwise_and_packs_rows() {
     src.extend(a);
     src.extend(b);
     src.extend([9; 4]);
-    let (same, w, h) = rotate_bgra(&src, 2, 1, 12, 0);
+    let (same, w, h) = rotate_bgra(&src, 2, 1, 12, 0, &BgraPool::default());
     assert_eq!((w, h), (2, 1));
     assert_eq!(same, [a, b].concat());
     // 90° clockwise: A on top, B below.
-    let (cw, w, h) = rotate_bgra(&src, 2, 1, 12, 90);
+    let (cw, w, h) = rotate_bgra(&src, 2, 1, 12, 90, &BgraPool::default());
     assert_eq!((w, h), (1, 2));
     assert_eq!(cw, [a, b].concat());
-    let (half, w, h) = rotate_bgra(&src, 2, 1, 12, 180);
+    let (half, w, h) = rotate_bgra(&src, 2, 1, 12, 180, &BgraPool::default());
     assert_eq!((w, h), (2, 1));
     assert_eq!(half, [b, a].concat());
-    let (ccw, w, h) = rotate_bgra(&src, 2, 1, 12, 270);
+    let (ccw, w, h) = rotate_bgra(&src, 2, 1, 12, 270, &BgraPool::default());
     assert_eq!((w, h), (1, 2));
     assert_eq!(ccw, [b, a].concat());
 }
@@ -59,12 +59,21 @@ fn rotate_turns_pictures_clockwise_and_packs_rows() {
 fn rotate_rejects_a_buffer_shorter_than_its_rows() {
     let src = [0u8; 12];
     for rotation in [0, 90, 180, 270] {
-        assert_eq!(rotate_bgra(&src, 2, 2, 8, rotation), (Vec::new(), 0, 0));
-        assert_eq!(rotate_bgra(&src, 4, 1, 8, rotation), (Vec::new(), 0, 0));
-        assert_eq!(rotate_bgra(&src, 2, 0, 8, rotation), (Vec::new(), 0, 0));
+        assert_eq!(
+            rotate_bgra(&src, 2, 2, 8, rotation, &BgraPool::default()),
+            (Vec::new(), 0, 0)
+        );
+        assert_eq!(
+            rotate_bgra(&src, 4, 1, 8, rotation, &BgraPool::default()),
+            (Vec::new(), 0, 0)
+        );
+        assert_eq!(
+            rotate_bgra(&src, 2, 0, 8, rotation, &BgraPool::default()),
+            (Vec::new(), 0, 0)
+        );
     }
     // A tight last row is enough.
-    let (out, w, h) = rotate_bgra(&src, 1, 2, 8, 0);
+    let (out, w, h) = rotate_bgra(&src, 1, 2, 8, 0, &BgraPool::default());
     assert_eq!((out.len(), w, h), (8, 1, 2));
 }
 
@@ -73,9 +82,30 @@ fn rotate_90_maps_the_left_column_to_the_top_row() {
     // 2x2: [A B / C D] turned clockwise is [C A / D B].
     let px = |v: u8| [v, v, v, 255];
     let src = [px(1), px(2), px(3), px(4)].concat();
-    let (out, w, h) = rotate_bgra(&src, 2, 2, 8, 90);
+    let (out, w, h) = rotate_bgra(&src, 2, 2, 8, 90, &BgraPool::default());
     assert_eq!((w, h), (2, 2));
     assert_eq!(out, [px(3), px(1), px(4), px(2)].concat());
+}
+
+/// A player's BGRA pictures are turned into the buffers its images hand
+/// back, instead of a new one per picture.
+#[test]
+fn a_bgra_buffer_handed_back_is_turned_into_again() {
+    let pool = BgraPool::default();
+    let src = [7u8; 16];
+    let (mut first, ..) = rotate_bgra(&src, 2, 2, 8, 90, &pool);
+    assert_eq!(first.capacity(), 16, "a new buffer");
+    // The spare byte tells the handed-back buffer from a new one.
+    first.reserve_exact(1);
+    pool.give(first);
+    let (again, w, h) = rotate_bgra(&src, 2, 2, 8, 0, &pool);
+    assert!(again.capacity() > 16);
+    assert_eq!((again.as_slice(), w, h), (src.as_slice(), 2, 2));
+    // After a size change the kept buffers go.
+    pool.give(again);
+    let (small, ..) = rotate_bgra(&src, 1, 2, 8, 0, &pool);
+    assert_eq!(small.len(), 8);
+    assert_eq!(pool.take(16).capacity(), 16);
 }
 
 #[test]
@@ -269,12 +299,8 @@ fn a_paused_player_decodes_only_its_queue() {
 }
 
 #[test]
-fn a_silent_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
-    use super::{IDLE_POLL, idle_wait};
-    // Sound is drained without the state lock, so it keeps the short poll;
-    // a silent player is woken by every change and only needs a safety net.
-    assert_eq!(idle_wait(true), IDLE_POLL);
-    assert!(idle_wait(false) >= IDLE_POLL * 10);
+fn an_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
+    use super::IDLE_WAIT;
     let (mut player, calls) = scripted_player(None, false, 3);
     assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
     std::thread::sleep(Duration::from_millis(60));
@@ -283,7 +309,7 @@ fn a_silent_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
     let taken = Instant::now();
     assert!(player.take_frame().is_some());
     assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 4));
-    assert!(taken.elapsed() < idle_wait(false) / 2);
+    assert!(taken.elapsed() < IDLE_WAIT / 2);
 }
 
 #[test]
@@ -470,6 +496,11 @@ fn decoder() -> bool {
         return true;
     }
     let reason = super::unavailable_reason().unwrap_or("unknown");
+    // A shim that is there but out of date would skip these on every run.
+    assert!(
+        !reason.contains(super::ffi::STALE_HINT),
+        "quillvideo is out of date ({reason})"
+    );
     assert!(
         !require_video_lib(std::env::var_os("QUILL_REQUIRE_VIDEO_LIB").as_deref()),
         "QUILL_REQUIRE_VIDEO_LIB=1 but quillvideo is not available ({reason})"
@@ -502,6 +533,37 @@ fn decode_all(path: &Path, options: &OpenOptions) -> (MediaInfo, Vec<VideoFrame>
         }
     }
     (info, frames, samples)
+}
+
+/// The real decoder fills one buffer again and again when each picture
+/// is let go before the next, as a playing clip's images are.
+#[test]
+fn ffmpeg_turns_bgra_pictures_into_handed_back_buffers() {
+    if !decoder() {
+        return;
+    }
+    let pool = BgraPool::default();
+    let mut demuxer =
+        super::ffi::FfiDemuxer::open(&fixture("clip-h264-aac.mp4"), &OpenOptions::viewer())
+            .expect("open fixture")
+            .with_bgra_pool(pool.clone());
+    let mut handed_back = Vec::new();
+    while let Some(item) = demuxer.next().expect("decode fixture") {
+        if let Item::Video(frame) = item {
+            let Pixels::Bgra(mut bytes) = frame.pixels else {
+                panic!("the viewer asks for BGRA");
+            };
+            assert_eq!(bytes.len(), 96 * 64 * 4);
+            // A new buffer is exactly one picture long; one handed back
+            // here carries the spare byte.
+            handed_back.push(bytes.capacity() > bytes.len());
+            bytes.reserve_exact(1);
+            pool.give(bytes);
+        }
+    }
+    assert_eq!(handed_back.len(), 10);
+    assert_eq!(handed_back.first(), Some(&false));
+    assert!(handed_back.iter().skip(1).all(|&reused| reused));
 }
 
 #[test]

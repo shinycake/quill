@@ -10,6 +10,7 @@ use crate::calls::engine::{
     ExternalDevice, ExternalFrameMeta, ExternalFrameSender, external_frame_valid,
 };
 use crate::locks::LockExt;
+use crate::wake::Signal;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -28,6 +29,7 @@ struct SinkShared<T> {
     events: Mutex<VecDeque<CaptureEvent>>,
     dropped: AtomicU64,
     closed: AtomicBool,
+    wake: &'static Signal,
 }
 
 /// Where a capture backend puts its frames and events. Cloning shares
@@ -45,7 +47,13 @@ impl<T> Clone for FrameSink<T> {
 }
 
 impl<T> FrameSink<T> {
+    /// A sink whose events wake the poll loop.
     pub fn new(capacity: usize) -> Self {
+        Self::waking(capacity, &crate::wake::UPDATES)
+    }
+
+    /// A sink whose events poke `wake`.
+    pub fn waking(capacity: usize, wake: &'static Signal) -> Self {
         Self {
             shared: Arc::new(SinkShared {
                 frames: Mutex::new(VecDeque::with_capacity(capacity.max(1))),
@@ -54,6 +62,7 @@ impl<T> FrameSink<T> {
                 events: Mutex::new(VecDeque::new()),
                 dropped: AtomicU64::new(0),
                 closed: AtomicBool::new(false),
+                wake,
             }),
         }
     }
@@ -93,8 +102,10 @@ impl<T> FrameSink<T> {
         self.shared.dropped.load(Ordering::Relaxed)
     }
 
+    /// Report `event` and wake whoever reads it.
     pub fn push_event(&self, event: CaptureEvent) {
         self.shared.events.lock_or_recover().push_back(event);
+        self.shared.wake.poke();
     }
 
     /// Events reported since the last call, oldest first.

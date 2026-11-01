@@ -11,6 +11,9 @@ use quill::ids::ChatId;
 register_demos![
     DemoSpec::chat_list("ready-chats").setup(QuillApp::demo_ready_chats),
     DemoSpec::chat_list("ready-chats-composer").setup(QuillApp::demo_ready_chats_composer),
+    // The rich editor over formatted block markup, with its live preview.
+    // `QUILL_DEMO_RICH_BYTES` sets how much text it holds (default a short draft).
+    DemoSpec::chat_list("ready-rich-editor").setup(QuillApp::demo_ready_rich_editor),
     // Composer attachment chip + outgoing photo/document (injected, no live Telegram).
     DemoSpec::ready(
         "ready-send-media",
@@ -60,6 +63,21 @@ register_demos![
     .setup(QuillApp::demo_composer_bars),
 ];
 
+/// Block markup of at least `bytes` bytes, formatted on every line.
+pub(in crate::ui) fn rich_editor_markup(bytes: usize) -> String {
+    let mut markup = String::from("# Release notes\n\n");
+    let mut item = 0;
+    loop {
+        item += 1;
+        markup.push_str(&format!(
+            "## Section {item}\nSome **bold** and _italic_ text with a [link](https://x.y/{item}).\n- first ~~point~~\n- second `point`\n\n"
+        ));
+        if markup.len() >= bytes {
+            return markup;
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SpellcheckDemo {
     Spellcheck,
@@ -92,6 +110,18 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value("hello from composer", window, cx);
         });
+    }
+
+    fn demo_ready_rich_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bytes = std::env::var("QUILL_DEMO_RICH_BYTES")
+            .ok()
+            .and_then(|bytes| bytes.parse().ok())
+            .unwrap_or(0);
+        let markup = rich_editor_markup(bytes);
+        self.composer_ui.rich_editor_open = true;
+        self.set_composer_markup(&markup, window, cx);
+        self.composer
+            .update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn demo_group_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {

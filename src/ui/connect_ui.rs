@@ -225,10 +225,11 @@ impl super::app::QuillApp {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.playback.volume);
+                self.disk.seed(&mut live.driver);
                 self.live = Some(live);
             }
             Err(ConnectBlocker::DiskFull) => {
-                self.enter_disk_state(quill::disk_guard::DiskState::Full, cx);
+                self.refuse_screen_open(cx);
                 self.connection.set_note(StatusNote::silent(""));
             }
             Err(blocker) => match blocker.startup_failure() {

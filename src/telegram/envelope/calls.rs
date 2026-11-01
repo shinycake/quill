@@ -429,11 +429,7 @@ pub(crate) fn parse_group_call(value: Option<&Value>) -> Option<ParsedGroupCall>
             .and_then(Value::as_i64)
             .unwrap_or(0)
             .sat_i32(),
-        title: value
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
+        title: json_name_str(value, "title"),
         is_active: value
             .get("is_active")
             .and_then(Value::as_bool)

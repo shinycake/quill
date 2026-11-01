@@ -33,8 +33,9 @@ has no GPUI types. The UI half is `src/ui/sticker_player`.
   part of the key (`grid_hz`: 60 up to 61 Hz, else the display's rate up to
   120), so a window that moves to a faster display opens the clip again on
   the finer grid. Until that clip is ready, the old clip's frame stays up.
-  WebM stickers are decoded whole (the bundled decoder, else `ffmpeg`), keep
-  their own rate, and play from the store.
+  WebM stickers are decoded at open (the bundled decoder, else `ffmpeg`),
+  one frame at a time into the store, keep their own rate, and play from
+  the store.
 - Each view names a head (`HeadId`), so two views of one
   clip share frames but not position. Modes are loop, play once and rest on
   the first or last frame, a number of loops, and a fixed position (the
@@ -174,6 +175,106 @@ with its file swapped in, a frame log per paint):
 Before: the second half of the effect late, frames held for 1, 2 or 3
 refreshes (35, 72 and 29 times). After: 1 late paint out of 358, and
 146 of 150 frames held for exactly 2 refreshes (the rest at the switch).
+
+### Follow-up: one slow draw demoted a fast sticker (2026-11-01)
+
+The smoothed draw time started from the first draw and was tested on
+every draw, and a demotion never cleared. The first draw runs cold, and a
+worker preempted for 10 ms in the first loop lifts the average past the
+3.33 ms a 120 Hz grid allows from a 0.8 ms norm. That explains the 3 of
+about 24 runs where a normal sticker played at its file's rate: 107 window
+frames a second for 30 pictures.
+
+- The first draw is left out. The average is the plain mean of the next
+  draws until there are 8, then a running eighth, and it is tested only
+  from the 8th on. The 672 px effect still drops by its 9th draw (75 ms
+  at 120 Hz). One 14 ms draw among 0.8 ms ones never does.
+- `QUILL_TRACE_STICKERS` prints how many open clips play at their file's
+  rate (`coarse`).
+
+### Follow-up: emoji on the content grid skipped frames (2026-11-01)
+
+A quarter grid frame of slack is 8.33 ms for a 30 fps emoji, one whole
+refresh at 120 Hz. Emoji paint every fourth refresh there, so a head that
+started one refresh after that beat sat exactly on a frame boundary at
+every paint for its whole life: a paint a little early showed the frame
+before, one a little late the frame due, and each early-late pair was a
+skip and a 67 ms hold (4 to 11 per 945 frames, clumped by run). One head
+in four starts on that phase.
+
+The slack is now a quarter grid frame or half a refresh, whichever is
+less, so every phase sits at least 4.17 ms from a boundary at 120 Hz. 60
+fps files and 60 Hz displays keep a quarter frame. A seeded test of four
+start phases with paints up to 1.5 ms off shows every frame once; with
+the old slack the second phase skips or repeats on about half its paints.
+On displays reporting vsync times heads now read the target vsync, which
+removes the jitter there (`anim-frame-coalesce.md`); the slack stays for
+the others.
+
+### Follow-up: ticks that draw nothing new (2026-11-01)
+
+A clip at its file's rate still ticks at the display's rate, so each frame
+stays up for the same number of refreshes. Every tick drew the whole window:
+107 window frames a second for 30 pictures on a 120 Hz Mac.
+
+Ticking such a clip at twice its file's rate instead, which saves the wakes
+too, held 85% of frames for their 4 refreshes where the display's rate held
+97%, on the half-speed replica below. The clock runs free at 92% of a frame,
+so at that rate a tick and a frame's start beat against each other. A tick
+that draws nothing costs almost nothing, so the wakes were not worth it.
+
+The clock now asks an animation layer before it notifies it whether a
+draw before the next refresh would change anything: any clock-driven
+drawing or live tile does, a sticker only when its head would pick another
+frame than the one its view shows (`PlayHead::changes_at`, on a copy of
+the head). A layer that would not change keeps ticking without a draw.
+Frames still land on ticks, so they keep their even holds, and the check
+needs no vsync times, so it works on every system. A view unpainted for
+100 ms paints anyway, so a slow clip never reaches the 200 ms pause gap.
+
+In a model of a 30 fps clip at its file's rate ticked at 120 Hz, with each
+tick up to a refresh before its paint: 120 draws a second → 38, each of
+the 30 frames up for exactly 4 refreshes.
+
+No 120 Hz display was measured. On a 60 Hz Mac, a 15 fps file with the fine
+grid forced on is a half-speed replica of that clip: every ratio in refreshes
+matches. Window frames a second went from 57-59 to 16-30 for 15 pictures, and
+instructions from 247-257 M/s to 96-147 M/s (4 runs each, fastrel build). The
+spread is the head's phase: a tick can draw one refresh before a frame
+changes, so a frame costs one or two draws. The tap effect ticks the whole
+app from outside the layers (`emoji_effect.rs`), so the check does not cover
+it.
+
+### Follow-up: WebM opens held back other clips' frames (2026-11-01)
+
+A WebM sticker decodes every frame when it opens: 77 ms for a 512 px 3 s
+sticker at box 224, 28 ms at box 56, 280 to 470 ms through the `ffmpeg`
+fallback (`sweep-webm-stickers.md`). That ran on the sticker worker the clip
+was pinned to, and a worker took a pending open before any frame, so every
+clip on that worker got no frames meanwhile. Queued opens ran back to back.
+
+Clips decoded up front now open on opener threads of their own
+(`opener.rs`), one per worker, as many decodes at once as before. An opener
+installs the frames in the clip's store, and the clip's worker only unpacks
+them; a decoded clip holds no canvas, so the worker needs no source for it.
+Workers still open TGS clips, which keep their canvas there, but a frame now
+goes before an open unless 8 frames in a row already did. A test with one
+worker holds a WebM decode open and gets another clip's frame meanwhile;
+before, the decode ran on the worker.
+
+On a Mac with three workers, five 270 ms decodes started together: late
+paints on the clips playing beside them went from 19-22 to 0, and their
+longest hold from 448-518 ms to 67-83 ms. The last clip's first paint stayed
+at about 450 ms. A single opener took it to 390-1170 ms, which is why there
+is one per worker.
+
+An open used to hold all its raw frames at once (up to 58 MB at 448 px,
+inferred). They now go through a `FrameSink` one at a time, tinted and packed
+for the store as they come, so one raw frame is in memory at a time, and a
+held frame takes no more of the store. tdesktop's `Media::Clip` differs: it
+keeps a decoder open per clip and decodes three frames ahead, looping by a
+seek. Here a stored clip holds no decoder and its views can sit at any frame,
+which every other clip needs too, so the store stays.
 
 ## Verification
 

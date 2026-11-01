@@ -236,7 +236,7 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
 }
 
 fn landed(frame: &LiveFrame, target: Target) -> Option<Landed> {
-    let prepared = live_picture::convert(frame, target, false)?;
+    let prepared = live_picture::convert(frame, target, false, &mut Vec::new())?;
     Some(Landed {
         seq: frame.seq,
         prepared,
@@ -427,10 +427,11 @@ fn the_paused_picture_is_made_at_most_every_half_second() {
 #[test]
 fn a_mirrored_feed_converts_mirrored() {
     let shot = frame(1, 8, 4, Instant::now());
-    let picture = |mirrored| match live_picture::convert(&shot, Target::Bgra, mirrored) {
-        Some(Prepared::Bgra { bgra, width, .. }) => (bgra, width),
-        _ => panic!("a BGRA picture"),
-    };
+    let picture =
+        |mirrored| match live_picture::convert(&shot, Target::Bgra, mirrored, &mut Vec::new()) {
+            Some(Prepared::Bgra { bgra, width, .. }) => (bgra, width),
+            _ => panic!("a BGRA picture"),
+        };
     let (plain, width) = picture(false);
     let (mirrored, _) = picture(true);
     let row = width as usize * 4;
@@ -442,8 +443,36 @@ fn a_mirrored_feed_converts_mirrored() {
     assert_ne!(plain, mirrored);
 }
 
-// Windows' NV12 path (`live_surface.rs`), forced on so it runs on every
-// machine. Off Windows no renderer draws NV12 frames, so a frame shown
+#[test]
+fn a_turned_feed_converts_through_one_buffer() {
+    let (core, source) = inline_feed();
+    let mut backend = LiveBackend { core: core.clone() };
+    let t0 = Instant::now();
+    let turned = |seq| {
+        LiveFrame::new(
+            seq,
+            64,
+            36,
+            LiveRotation::R90,
+            gradient_frame(64, 36, 0),
+            t0,
+        )
+        .expect("frame")
+    };
+    source.push(turned(1));
+    assert!(backend.take_picture(&present()).picture.is_some());
+    let first = core.scratch.take();
+    let held = first.as_ptr();
+    assert!(!first.is_empty(), "the feed keeps its buffer");
+    core.scratch.set(first);
+    source.push(turned(2));
+    assert!(backend.take_picture(&present()).picture.is_some());
+    let second = core.scratch.take();
+    assert_eq!(second.as_ptr(), held);
+}
+
+// The Windows and Linux NV12 path (`live_surface.rs`), forced on so it runs
+// on every machine. On macOS no renderer draws NV12 frames, so a frame shown
 // there is its CPU image; the NV12 state, the pause and the buffers are
 // the same code.
 
@@ -564,11 +593,11 @@ fn a_refused_frame_is_replaced_by_its_image_and_images_follow_for_the_pause() {
     source.push(frame(4, 64, 36, t0 + NV12_RETRY));
     assert_eq!(format(&backend.take_picture(&present())), Some("nv12"));
     // Every image of the pause leaves the atlas: the refused frame's and
-    // the two BGRA frames. On Windows the NV12 frame after them retires
-    // both kept images; elsewhere NV12 frames are images themselves.
+    // the two BGRA frames. Off macOS the NV12 frame after them retires
+    // both kept images; on macOS NV12 frames are images themselves.
     let retired = core.take_retired().len();
     let kept = core.take_all_images().len();
-    if cfg!(target_os = "windows") {
+    if cfg!(not(target_os = "macos")) {
         assert_eq!((retired, kept), (3, 0));
     } else {
         assert_eq!((retired, kept), (3, 2));

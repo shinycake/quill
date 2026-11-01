@@ -13,6 +13,9 @@ pub enum SettingsPurpose {
     /// (`rich_html::RichHtmlExport`); the answer goes to the export whose
     /// link awaits this request id.
     ExportRichHtml,
+    /// `getRemoteFile` or `deleteFile` for a cache copy an export downloaded
+    /// for itself (`SettingsState::export_files`).
+    ExportCleanup,
     /// `setChatNotificationSettings`. Response is `ok`; mute via
     /// `updateChatNotificationSettings`.
     SetChatNotificationSettings,
@@ -300,6 +303,7 @@ flat_purposes!(Settings(SettingsPurpose) {
     ExportAccount,
     ExportChat,
     ExportRichHtml,
+    ExportCleanup,
     SetChatNotificationSettings,
     GetSavedNotificationSounds,
     GetScopeNotificationSettings,

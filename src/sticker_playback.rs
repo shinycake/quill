@@ -19,7 +19,7 @@ mod webm;
 mod webm_ffi;
 pub use fitz::{FitzType, apply_fitzpatrick};
 pub use tint::Tint;
-pub use webm::WebmFrames;
+pub use webm::{WebmFrame, WebmFrames, WebmStep, WebmSteps};
 
 /// Frames of a video sticker decoded at most (Telegram caps them at 3 s).
 pub const MAX_STICKER_FRAMES: usize = 120;
@@ -144,10 +144,26 @@ pub fn decode_tgs_sized(
 }
 
 /// A WebM video sticker fit into `edge` × `edge` px, with at most
-/// `max_frames` frames. Decoded in process by the bundled decoder when it
-/// is installed; otherwise by the `ffmpeg` binary, with PNG frames under
-/// `cache` (removed again) and the running process in `child` so the UI
-/// can stop it.
+/// `max_frames` frames, one frame at a time into `each`; its frames a
+/// second. Decoded in process by the bundled decoder when it is installed;
+/// otherwise by the `ffmpeg` binary, with PNG frames under `cache` (removed
+/// again) and the running process in `child` so the UI can stop it.
+pub fn stream_webm_sized(
+    path: &Path,
+    cache: &Path,
+    edge: usize,
+    max_frames: usize,
+    child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
+    cancelled: &AtomicBool,
+    each: &mut WebmSteps<'_>,
+) -> Result<f64, String> {
+    if let Some(fps) = webm::decode_in_process(path, edge, max_frames, cancelled, each)? {
+        return Ok(fps);
+    }
+    webm::decode_with_ffmpeg(path, cache, edge, max_frames, child, cancelled, each)
+}
+
+/// [`stream_webm_sized`] gathered in memory.
 pub fn decode_webm_sized(
     path: &Path,
     cache: &Path,
@@ -156,10 +172,20 @@ pub fn decode_webm_sized(
     child: &std::sync::Arc<Mutex<Option<std::process::Child>>>,
     cancelled: &AtomicBool,
 ) -> Result<WebmFrames, String> {
-    if let Some(frames) = webm::decode_in_process(path, edge, max_frames, cancelled)? {
-        return Ok(frames);
-    }
-    webm::decode_with_ffmpeg(path, cache, edge, max_frames, child, cancelled)
+    let mut frames = WebmFrames::default();
+    let fps = stream_webm_sized(
+        path,
+        cache,
+        edge,
+        max_frames,
+        child,
+        cancelled,
+        &mut |step| {
+            frames.keep(step);
+            Ok(())
+        },
+    )?;
+    Ok(WebmFrames { fps, ..frames })
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
-use crate::linux::X11ClientStatePtr;
+use crate::linux::{RecoveryTimers, TimerKind, X11ClientStatePtr};
 use gpui::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, ForegroundExecutor, GpuSpecs, Modifiers,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
@@ -44,7 +44,7 @@ use std::{
 
 use super::present_retry::PresentRetry;
 use super::{
-    FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
+    Frame, FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
 };
 
 x11rb::atom_manager! {
@@ -299,8 +299,8 @@ pub struct X11WindowState {
     force_render_after_recovery: bool,
     // Quill: forces another frame after the swapchain refused one.
     present_retry: PresentRetry,
-    // Quill: when the next GPU recovery attempt is due.
-    recovery_retry_at: Option<Instant>,
+    // Quill: the GPU recovery timers this window has armed.
+    recovery_timers: RecoveryTimers,
     fullscreen: bool,
     client_side_decorations_supported: bool,
     decorations: WindowDecorations,
@@ -338,11 +338,13 @@ pub(crate) struct X11WindowStatePtr {
 /// refresh rate forever. The timer now parks after `FRAME_IDLE_AFTER` of
 /// frames that neither drew, presented nor asked for another frame: it drops
 /// itself, so an idle window has no timer at all, and the frame waker starts
-/// a new one at once. All of it runs on the main thread.
+/// a new one at once, which parks again after one frame unless `FrameIdle`
+/// sees a burst. All of it runs on the main thread.
 pub(crate) struct X11FrameIdle {
-    /// Something drew, presented or asked for another frame since the
-    /// refresh timer last ran.
-    activity: Cell<bool>,
+    /// Something drew or presented since the refresh timer last ran.
+    drew: Cell<bool>,
+    /// GPUI asked for another frame since the refresh timer last ran.
+    asked: Cell<bool>,
     idle: Cell<FrameIdle>,
     /// Wakes the event loop, whose handler restarts the refresh timer at the
     /// refresh rate. Unset if the ping could not be created; the window then
@@ -359,7 +361,8 @@ pub(crate) struct X11FrameIdle {
 impl X11FrameIdle {
     fn new() -> Self {
         Self {
-            activity: Cell::new(false),
+            drew: Cell::new(false),
+            asked: Cell::new(false),
             idle: Cell::new(FrameIdle::new(Instant::now())),
             resume: OnceCell::new(),
             timer: Cell::new(0),
@@ -367,8 +370,20 @@ impl X11FrameIdle {
         }
     }
 
-    fn mark_activity(&self) {
-        self.activity.set(true);
+    fn mark_drawn(&self) {
+        self.drew.set(true);
+    }
+
+    fn mark_asked(&self) {
+        self.asked.set(true);
+    }
+
+    /// Before the refresh timer's frame request. A woken frame counts only
+    /// what GPUI asks for during it, not the request that woke it.
+    pub(crate) fn before_frame(&self) {
+        if self.idle.get().awaits_woken_frame() {
+            self.asked.set(false);
+        }
     }
 
     /// The frame waker: GPUI has a frame to draw.
@@ -386,12 +401,15 @@ impl X11FrameIdle {
     fn after_frame(&self, keep_running: bool) -> bool {
         // Never parks with the kill switch (`QUILL_IDLE_FRAMES=0`) or
         // without a way to resume.
-        let active = self.activity.take()
-            || keep_running
-            || self.resume.get().is_none()
-            || !idle_frames_enabled();
+        let frame = Frame {
+            drew: self.drew.take(),
+            asked: self.asked.take()
+                || keep_running
+                || self.resume.get().is_none()
+                || !idle_frames_enabled(),
+        };
         let mut idle = self.idle.get();
-        idle.frame(active, Instant::now());
+        idle.frame(frame, Instant::now());
         self.idle.set(idle);
         idle.is_parked()
     }
@@ -958,7 +976,7 @@ impl X11WindowState {
                 hovered: false,
                 force_render_after_recovery: false,
                 present_retry: PresentRetry::default(),
-                recovery_retry_at: None,
+                recovery_timers: RecoveryTimers::default(),
                 fullscreen: false,
                 maximized_vertical: false,
                 maximized_horizontal: false,
@@ -1177,9 +1195,12 @@ impl X11WindowStatePtr {
 
     /// Quill: look for the GPU while on the software renderer recovery fell
     /// back to (`WgpuRenderer::probe_hardware`), and look again later.
-    pub(crate) fn probe_hardware(&self) {
+    pub(crate) fn probe_hardware(&self, armed_for: Instant) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
+        if !state.recovery_timers.probe_fired(armed_for) {
+            return;
+        }
         let raw_window = self.raw_window(state);
         let Some(renderer) = state.renderer.as_mut() else {
             return;
@@ -1189,9 +1210,19 @@ impl X11WindowStatePtr {
             state.force_render_after_recovery = true;
             self.frame.demand();
         }
-        if let Some(at) = next {
-            schedule_hardware_probe(&state.client, self.x_window, at);
+        schedule_hardware_probe(state, self.x_window, next);
+    }
+
+    /// Quill: the GPU recovery attempt armed for `at` is due: force the frame
+    /// whose draw makes it.
+    pub(crate) fn recovery_retry_due(&self, at: Instant) {
+        let mut state = self.state.borrow_mut();
+        if !state.recovery_timers.retry_fired(at) {
+            return;
         }
+        state.force_render_after_recovery = true;
+        drop(state);
+        self.frame.demand();
     }
 
     pub fn should_close(&self) -> bool {
@@ -1328,11 +1359,11 @@ impl X11WindowStatePtr {
 
     /// Quill: called by the refresh timer after `refresh`; returns whether
     /// the timer should park (stop until a frame demand). A pending forced render
-    /// after GPU recovery keeps it running.
+    /// after GPU recovery keeps it running; a recovery attempt that is not due
+    /// yet does not, as its own timer demands the frame
+    /// (`recovery_retry_due`).
     pub(crate) fn frame_idle_after_refresh(&self) -> bool {
-        let state = self.state.borrow();
-        let recovering = state.force_render_after_recovery || state.recovery_retry_at.is_some();
-        drop(state);
+        let recovering = self.state.borrow().force_render_after_recovery;
         self.frame.after_frame(recovering)
     }
 
@@ -1342,13 +1373,6 @@ impl X11WindowStatePtr {
             // Expose events can present a frame before the refresh timer runs,
             // so every frame request must rebuild stale atlas references after recovery.
             let mut state = self.state.borrow_mut();
-            if state
-                .recovery_retry_at
-                .is_some_and(|at| Instant::now() >= at)
-            {
-                state.recovery_retry_at = None;
-                state.force_render_after_recovery = true;
-            }
             request_frame_options.force_render |=
                 std::mem::take(&mut state.force_render_after_recovery);
             drop(state);
@@ -1548,8 +1572,19 @@ impl X11WindowStatePtr {
     }
 }
 
-fn schedule_hardware_probe(client: &X11ClientStatePtr, x_window: xproto::Window, at: Instant) {
-    client.run_for_window_at(x_window, at, |window| window.probe_hardware());
+/// Quill: arm the window's probe timer for `at` unless it already is.
+fn schedule_hardware_probe(
+    state: &mut X11WindowState,
+    x_window: xproto::Window,
+    at: Option<Instant>,
+) {
+    if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at)))
+        && !state
+            .client
+            .run_for_window_at(x_window, at, move |window| window.probe_hardware(at))
+    {
+        state.recovery_timers.not_armed(TimerKind::Probe);
+    }
 }
 
 impl PlatformWindow for X11Window {
@@ -1872,7 +1907,7 @@ impl PlatformWindow for X11Window {
     // Quill: GPUI asks for another frame (the window is still dirty, or
     // next-frame callbacks are queued): keep the refresh timer running.
     fn schedule_frame(&self) {
-        self.0.frame.mark_activity();
+        self.0.frame.mark_asked();
     }
 
     // Quill: GPUI calls this when the window becomes dirty or queues a
@@ -1934,7 +1969,7 @@ impl PlatformWindow for X11Window {
 
     fn draw(&self, scene: &Scene) {
         // Quill: a drawn (or presented) frame keeps the refresh timer running.
-        self.0.frame.mark_activity();
+        self.0.frame.mark_drawn();
         let mut inner = self.0.state.borrow_mut();
         let inner = &mut *inner;
         let Some(renderer) = &mut inner.renderer else {
@@ -1950,38 +1985,58 @@ impl PlatformWindow for X11Window {
                 window_id: self.0.x_window,
                 visual_id: inner.visual_id,
             };
-            inner.recovery_retry_at = None;
             match renderer.recover(&raw_window) {
                 Recovery::Recovered => {
+                    inner.recovery_timers.clear_retry();
                     inner.force_render_after_recovery = true;
-                    if let Some(at) = renderer.hardware_probe_at() {
-                        schedule_hardware_probe(&inner.client, self.0.x_window, at);
-                    }
+                    let at = renderer.hardware_probe_at();
+                    schedule_hardware_probe(inner, self.0.x_window, at);
                 }
                 Recovery::RetryAt(at) => {
-                    inner.recovery_retry_at = Some(at);
-                    self.0.frame.demand();
+                    if inner.recovery_timers.arm_retry(at)
+                        && !inner
+                            .client
+                            .run_for_window_at(self.0.x_window, at, move |window| {
+                                window.recovery_retry_due(at)
+                            })
+                    {
+                        // No timer: ask again from the next refresh.
+                        inner.recovery_timers.not_armed(TimerKind::Retry);
+                        inner.force_render_after_recovery = true;
+                        self.0.frame.demand();
+                    }
                 }
-                Recovery::GaveUp => {}
+                Recovery::GaveUp => inner.recovery_timers.clear_retry(),
                 Recovery::CloseWindow => {
-                    inner
-                        .client
-                        .run_for_window_at(self.0.x_window, Instant::now(), |window| {
-                            window.close()
-                        });
+                    if inner.recovery_timers.arm_close()
+                        && !inner
+                            .client
+                            .run_for_window_at(self.0.x_window, Instant::now(), |window| {
+                                window.close()
+                            })
+                    {
+                        inner.recovery_timers.not_armed(TimerKind::Close);
+                        inner.force_render_after_recovery = true;
+                        self.0.frame.demand();
+                    }
                 }
             }
             return;
         }
 
         let presented = renderer.draw(scene);
+        let needs_redraw = renderer.needs_redraw();
+        // Quill: a window that opened on, or adopted, a software fallback
+        // looks for the GPU too, in case the one that recreated it closes.
+        let probe_at = renderer.hardware_probe_at();
+        schedule_hardware_probe(inner, self.0.x_window, probe_at);
         if inner.present_retry.after_draw(presented) {
             inner.force_render_after_recovery = true;
             // An expose can draw while the refresh timer is parked.
             self.0.frame.demand();
         }
 
-        if renderer.needs_redraw() {
+        if needs_redraw {
             inner.force_render_after_recovery = true;
         }
     }

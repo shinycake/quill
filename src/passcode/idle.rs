@@ -81,20 +81,55 @@ pub(super) enum IdleCache {
     Unknown,
     /// `ms` of idle time measured at `taken_ms` on the sampler clock.
     Sample { ms: u64, taken_ms: u64 },
-    /// No backend answered; never retried.
-    Failed,
+    /// No backend answered the last `failures` tries in a row; the next try
+    /// is at `retry_ms`. A desktop shell that restarts misses a sample or
+    /// two and is back.
+    Failed { failures: u32, retry_ms: u64 },
 }
+
+/// The first retry after a failed sample, doubling up to [`IDLE_RETRY_MAX_MS`].
+pub(super) const IDLE_RETRY_FIRST_MS: u64 = 2_000;
+pub(super) const IDLE_RETRY_MAX_MS: u64 = 120_000;
 
 impl IdleCache {
     /// Idle time at `now_ms` (same clock as `taken_ms`), extrapolated from
-    /// the last sample. `None` until a sample exists and forever after a
-    /// failure.
+    /// the last sample. `None` until a sample exists and while sampling
+    /// fails, so readers fall back to input to Quill's own windows.
     pub(super) fn read(self, now_ms: u64) -> Option<u64> {
         match self {
             Self::Sample { ms, taken_ms } => {
                 Some(ms.saturating_add(now_ms.saturating_sub(taken_ms)))
             }
-            Self::Unknown | Self::Failed => None,
+            Self::Unknown | Self::Failed { .. } => None,
+        }
+    }
+
+    /// Whether the sampler should try a sample at `now_ms`.
+    pub(super) fn sample_due(self, now_ms: u64) -> bool {
+        match self {
+            Self::Failed { retry_ms, .. } => now_ms >= retry_ms,
+            Self::Unknown | Self::Sample { .. } => true,
+        }
+    }
+
+    /// The cache after a sample taken at `now_ms` answered `ms`, or nothing.
+    pub(super) fn after_sample(self, now_ms: u64, ms: Option<u64>) -> Self {
+        if let Some(ms) = ms {
+            return Self::Sample {
+                ms,
+                taken_ms: now_ms,
+            };
+        }
+        let failures = match self {
+            Self::Failed { failures, .. } => failures.saturating_add(1),
+            Self::Unknown | Self::Sample { .. } => 1,
+        };
+        let wait = IDLE_RETRY_FIRST_MS
+            .saturating_mul(1 << failures.saturating_sub(1).min(16))
+            .min(IDLE_RETRY_MAX_MS);
+        Self::Failed {
+            failures,
+            retry_ms: now_ms.saturating_add(wait),
         }
     }
 }
@@ -148,8 +183,8 @@ mod sampler {
 
     /// Reads the cache a background thread refreshes every two seconds.
     /// A read starts the thread; it pauses once reads stop (auto-lock off or
-    /// locked) and stops for good when no backend answers. Never blocks on
-    /// D-Bus or X.
+    /// locked). While no backend answers it tries again less and less
+    /// often. Never blocks on D-Bus or X.
     pub(in crate::passcode) fn linux_idle_ms() -> Option<u64> {
         IDLE_LAST_READ.store(now_ms(), Ordering::Relaxed);
         start();
@@ -171,8 +206,12 @@ mod sampler {
     impl Sources {
         fn open(env: SessionEnv) -> Self {
             Self {
+                // A shell that takes the call and never answers would
+                // leave the last sample to extrapolate into a lock.
                 #[cfg(feature = "ui")]
-                bus: zbus::blocking::Connection::session().ok(),
+                bus: zbus::blocking::connection::Builder::session()
+                    .and_then(|bus| bus.method_timeout(Duration::from_secs(2)).build())
+                    .ok(),
                 x11: if env.x11 { connect_x11() } else { None },
             }
         }
@@ -247,21 +286,26 @@ mod sampler {
         select_backend(candidates, |backend| sources.sample(backend))
     }
 
-    /// Starts the sampler thread unless one is running or every backend
-    /// already failed. The thread exits when reads stop, and the next read
-    /// restarts it.
+    /// Starts the sampler thread unless one is running. The thread exits
+    /// when reads stop, and the next read restarts it.
     fn start() {
-        if cache() == IdleCache::Failed || IDLE_RUNNING.swap(true, Ordering::AcqRel) {
+        if IDLE_RUNNING.swap(true, Ordering::AcqRel) {
             return;
         }
         now_ms(); // pin the clock origin before the first sample
         // A sample from before a pause would extrapolate to a bogus huge idle
-        // time (and lock spuriously); drop it until the fresh one lands.
-        *IDLE.lock_or_recover() = IdleCache::Unknown;
+        // time (and lock spuriously); drop it until the fresh one lands. A
+        // failure keeps its backoff.
+        {
+            let mut idle = IDLE.lock_or_recover();
+            if matches!(*idle, IdleCache::Sample { .. }) {
+                *idle = IdleCache::Unknown;
+            }
+        }
         let spawned = crate::thread_guard::spawn_guarded("quill-idle", || {
             let env = SessionEnv::detect();
             let candidates = candidate_backends(env);
-            let sources = Sources::open(env);
+            let mut sources = Sources::open(env);
             let mut chosen = None;
             loop {
                 if !idle_sampling_wanted(last_read(), now_ms()) {
@@ -274,21 +318,23 @@ mod sampler {
                     }
                     return;
                 }
-                let Some((backend, ms)) = take_sample(&sources, chosen, candidates) else {
-                    *IDLE.lock_or_recover() = IdleCache::Failed;
-                    IDLE_RUNNING.store(false, Ordering::Release);
-                    return;
-                };
-                chosen = Some(backend);
-                *IDLE.lock_or_recover() = IdleCache::Sample {
-                    ms,
-                    taken_ms: now_ms(),
-                };
+                let before = cache();
+                if before.sample_due(now_ms()) {
+                    if matches!(before, IdleCache::Failed { .. }) {
+                        // The bus or the X server may be the one that went away.
+                        sources = Sources::open(env);
+                    }
+                    let sample = take_sample(&sources, chosen, candidates);
+                    if let Some((backend, _)) = sample {
+                        chosen = Some(backend);
+                    }
+                    let mut idle = IDLE.lock_or_recover();
+                    *idle = idle.after_sample(now_ms(), sample.map(|(_, ms)| ms));
+                }
                 std::thread::sleep(Duration::from_secs(2));
             }
         });
         if spawned.is_err() {
-            *IDLE.lock_or_recover() = IdleCache::Failed;
             IDLE_RUNNING.store(false, Ordering::Release);
         }
     }

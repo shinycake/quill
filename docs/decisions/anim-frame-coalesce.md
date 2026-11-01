@@ -62,7 +62,25 @@ the others (`shared`).
 - **Layer redraws.** When a clip's picture redraws an animation layer, its emoji
   draw with it. The clock's next tick then counts one content frame from that
   draw (`later_tick`, `LayerDraws`). A tick's own draw never counts, and the
-  due time is not clamped to now, so a late wake is never put off.
+  due time is not clamped to now, so a late wake is never put off. Only a
+  picture of a clip that keeps time with the emoji counts: its pictures come
+  a whole number of emoji frames apart, or the other way round, and steadily
+  (`frame_clock::clip_frame_keeps_time`, from `Cadence::even_spacing`). A
+  24 or 25 fps clip's land between the emoji's grid ticks, and a 12 fps
+  clip's on every other one, ten refreshes apart at 120 Hz. Counting those
+  held an emoji frame for 6 vsyncs in place of 4.
+- **Content time.** While the clock ticks on the grid, the main window's
+  play heads read the time of its last tick vsync at or before the frame
+  they paint for (`frame_grid::content_time`), not the paint's own time. A
+  head starts on whatever paint first shows its frame, so its frame
+  boundaries fall on any refresh. Read at paint time, a draw for an
+  off-grid clip or a scroll one or two refreshes after a boundary showed
+  the next frame early, and the next tick held it again: holds of 1 and 5
+  refreshes, or 3 and 5, in place of 4, at three of the four phases a head
+  can start on. Now a frame changes only on a tick, so each is held alike
+  at any phase. A frame that shows a picture of a clip keeping time with
+  the content counts as a tick (`content_at`): the tick it puts off moves
+  there, and reading the last tick's time on it would skip a frame.
 - **Layers a clip keeps drawing.** When a layer's inline clip has already asked
   for a picture due a display frame or more before the layer's content needs
   its next frame (a 60 fps clip beside 30 fps emoji), the layer asks for no tick
@@ -78,9 +96,7 @@ the others (`shared`).
 
 Nothing else changes:
 
-- A source animating alone keeps exactly its old timing.
 - Clock content at other rates (24, 25 fps GIFs) keeps its own rate.
-- At 60 Hz every vsync is on the grid.
 - At 90, 144 and 165 Hz there is no grid.
 - Without the display link's timing (Linux, Windows), behavior is as before.
 
@@ -119,6 +135,10 @@ Fixed in review, before → after:
   clip 90 → 60.
 - A 60 fps clip with 30 fps emoji on one layer: the clock woke 60 times a
   second → 0, with 60 window frames a second either way.
+- A 24 or 25 fps clip on the layer of 30 fps emoji (2026-11-01): emoji held
+  2, 4, 4, 6, 4 vsyncs over and over → 4 every time, at four clip phases.
+  On #1252 the Mac showed 36 to 45 of about 235 emoji holds at 50 ms,
+  against 5 to 11 before the grid.
 
 Clips sharing the grid keep their holds (4 display frames each at 30 fps). With
 late timers their holds are steadier than before: 3–5 frames before, 4 after.
@@ -128,15 +148,6 @@ pictures land on the same vsyncs as before.
 
 ## Not fixed
 
-- **The clock alone still drifts.** Each tick sleeps `1 / fps` after the last
-  fired, so with late timers a lone 30 fps emoji skips 2 to 3 frames a second
-  (6–10 in 3 s in the simulation). Ticking on the grid when alone (for rates
-  that divide 60) would fix it.
-- **The clock can stop early.** It stops when a tick fires before the previous
-  tick's frame drew, because the tick period (0.92 of a frame) is shorter than
-  the time from tick to draw. This hits 60 fps content on a 60 Hz display and
-  120 fps stickers at 120 Hz. In the simulation a lone 60 fps sticker at 60 Hz
-  draws about 26 of 60 frames.
 - **A lone clip's wake is tight.** It still wakes half a frame before its frame
   starts (`pacing::request_policy`), so with timers over 4 ms late at 120 Hz
   some pictures show a display frame late.
@@ -152,3 +163,49 @@ pictures land on the same vsyncs as before.
   after the display link's call but before that frame's draw draws on the
   latest vsync, not the one after. If sharing begins right then, the next tick
   can come one vsync late and hold a frame that much longer.
+
+## The clock on the display's vsyncs (2026-11-01)
+
+The clock ran free outside the grid, 92% of a frame after its last wake. A
+60 fps tap effect on a 60 Hz display missed one refresh, painted, then missed
+two, in about half of its 3 s plays. A wake a little late landed just after a
+frame started, so that frame drew nothing. The next wake came before the frame
+after it, with nothing asked since the last draw, and the clock stopped. That
+draw started it again at its first rate of 30 fps, whose 33 ms wait passed two
+more frames. In nine plays traced on a fast release build, six lost a refresh
+and all seven restarts came in play. With the changes below, none of nine did.
+
+- **Ticks.** Off the grid the clock ticks on the display's vsyncs when a whole
+  number of them make one content frame (`frame_grid::vsync_tick`), with the
+  grid's wake timing. Each wake then sits between two frame starts. A rate no
+  vsync fits (24 or 25 fps at 60 Hz, 60 fps at 144 Hz) runs free as before: a
+  chain of snapped ticks there would drift away from the rate.
+- **Stopping.** A wake with nothing asked no longer stops the clock; a second
+  one in a row does (`ClockRun::woke`). On systems without vsync times the
+  race remains, a late tick can still miss one refresh, and this keeps it from
+  missing three.
+- **Restarting.** A clock starts at the rate that asked, not at 30 fps.
+- **Play heads.** On a display reporting vsyncs, every head reads the vsync its
+  frame shows on (`frame_clock::content_at`), not the paint's wall time, in every
+  window. So a late paint moves nothing, and any draw between ticks shows what
+  the last tick showed. `grid_slack` stays for displays without vsync times.
+- **What a tick asks.** A tick that can skip its draw (`idle_layer_tick`, and
+  the tap effect through `request_app_tick_unless`) asks about the vsync it
+  draws on (`TickDraw::On`), so it draws only on the refresh a frame changes.
+  Without vsync times it still asks about the whole next refresh
+  (`TickDraw::Within`), and a frame costs one or two draws.
+
+A clock on vsyncs no longer drifts into phase with a 30 fps clip, so at 60 Hz
+the two could sit on opposite refreshes and draw close to 60 frames a second.
+A 60 Hz display now has a grid too, with every vsync on it. There, and at any
+other grid rate, a clip that keeps time with the clock's content sets the phase:
+the clock moves its ticks onto the clip's pictures (`clip_beat`, `later_tick`).
+The clip keeps its own pacing, since a late picture costs lip sync and a sticker
+held one refresh longer once costs nothing anyone sees. The clock follows only
+clips on its own display, whose vsyncs it shares, and stays put once it is on any
+one clip's pictures, so two clips in opposite phases cannot pull it back and
+forth. That chat went from 54 frames a second to 30, and 23% fewer instructions.
+
+A 24 fps sticker beside
+30 fps content now holds two or four refreshes rather than two, three or four: a
+clip's draw between ticks no longer shows it early.

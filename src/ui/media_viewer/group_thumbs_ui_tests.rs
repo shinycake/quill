@@ -264,13 +264,16 @@ fn a_photo_that_lands_has_its_thumb_asked_for_by_the_same_pass(cx: &mut TestAppC
 fn the_first_frame_of_a_viewer_wakes_the_pass_that_asks_for_its_thumbs(cx: &mut TestAppContext) {
     let (app, mut vcx) = group_info(cx);
     let vcx = &mut vcx;
-    let before = UPDATES.epoch();
+    let before = UPDATES.pokes_on_this_thread();
     click_the_avatar(vcx);
     assert!(
         app.read_with(vcx, |app, _| app.viewer.extra.strip_asked.is_empty()),
         "the open had no width to lay the strip out in"
     );
-    assert_ne!(UPDATES.epoch(), before, "a resting poll loop runs a pass");
+    assert!(
+        UPDATES.pokes_on_this_thread() > before,
+        "a resting poll loop runs a pass"
+    );
     let (asked, gallery) = app.update(vcx, |app, cx| {
         app.pump_profile_gallery(cx);
         (

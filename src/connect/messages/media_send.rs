@@ -83,7 +83,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// `sendMessageAlbum` for 2–10 local photos and/or videos.
+    /// `sendMessageAlbum` for 2–10 local photos and/or videos, or 2–10 files.
     pub(crate) fn send_album_snapshot(
         &mut self,
         snapshot: &ComposerSnapshot,
@@ -94,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.supported());
-        if !supported || !snapshot.is_media_album() || self.topic_send_is_closed(chat_id) {
+        if !supported || !snapshot.is_album() || self.topic_send_is_closed(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
@@ -122,34 +122,43 @@ impl<S: JsonSender> ConnectDriver<S> {
             let path = media_options::media_send_path(att, snapshot)
                 .ok_or(ConnectSendError::InvalidRequest)?;
             let item_caption = if index == last { caption } else { "" };
-            let content = match att.kind {
-                AttachmentKind::Photo => input_message_photo(
-                    &path,
-                    item_caption,
-                    snapshot.caption_above_media,
-                    self_destruct,
-                    is_secret,
-                ),
-                AttachmentKind::Video => {
-                    let probe = media_options::video_probe(att, snapshot)?;
-                    input_message_video(
+            let content =
+                match att.kind {
+                    AttachmentKind::Photo => input_message_photo(
                         &path,
-                        &VideoSend {
-                            duration: probe.duration,
-                            width: probe.width,
-                            height: probe.height,
-                            supports_streaming: probe.supports_streaming,
-                            self_destruct,
-                        },
                         item_caption,
                         snapshot.caption_above_media,
+                        self_destruct,
                         is_secret,
-                    )
-                }
-                AttachmentKind::Document | AttachmentKind::VideoNote => {
-                    return Err(ConnectSendError::InvalidRequest);
-                }
-            };
+                    ),
+                    AttachmentKind::Video => {
+                        let probe = media_options::video_probe(att, snapshot)?;
+                        input_message_video(
+                            &path,
+                            &VideoSend {
+                                duration: probe.duration,
+                                width: probe.width,
+                                height: probe.height,
+                                supports_streaming: probe.supports_streaming,
+                                self_destruct,
+                            },
+                            item_caption,
+                            snapshot.caption_above_media,
+                            is_secret,
+                        )
+                    }
+                    AttachmentKind::Document => {
+                        let thumbnail = att.extras.file_thumbnail.as_ref().map(|thumb| {
+                            VideoNoteThumbnailSend {
+                                path: thumb.path.to_string_lossy().into_owned(),
+                                width: thumb.width,
+                                height: thumb.height,
+                            }
+                        });
+                        input_message_document(&path, thumbnail.as_ref(), item_caption, is_secret)
+                    }
+                    AttachmentKind::VideoNote => return Err(ConnectSendError::InvalidRequest),
+                };
             let mut content = match att.kind {
                 AttachmentKind::Video => self.with_attachment_video_options(chat_id, att, content),
                 _ => content,

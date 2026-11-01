@@ -36,6 +36,7 @@ impl Fixture {
             _dir: dir,
         };
         fx.feed(r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#);
+        fx.recorder.sent.lock().unwrap().clear();
         fx
     }
 

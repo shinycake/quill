@@ -20,6 +20,12 @@ pub const KEEP_FOREVER_SECS: i64 = 2_000_000_000;
 /// 40000 would otherwise cap the cache silently).
 pub const UNLIMITED_FILE_COUNT: i64 = 2_000_000_000;
 
+/// tdesktop's starting limits (`lib_storage` `Cache::Database::Settings`:
+/// `totalSizeLimit` 1 GiB, `totalTimeLimit` 31 days), the "Total size
+/// limit" and "Clear files older than" slider defaults.
+pub const DEFAULT_SIZE: i64 = 1024 * MIB;
+pub const DEFAULT_KEEP: i64 = 31 * DAY;
+
 /// The TDLib options behind the limits, as last reported by `updateOption`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StorageLimits {
@@ -41,6 +47,14 @@ impl StorageLimits {
             }
             _ => {}
         }
+    }
+
+    /// Someone set the limits on this account already: the optimizer is on,
+    /// or an option holds the value Quill's "No limit" sends.
+    pub fn chosen(&self) -> bool {
+        self.optimizer_on
+            || self.max_files_size_kib == Some(UNLIMITED_KIB)
+            || self.max_time_secs == Some(KEEP_FOREVER_SECS)
     }
 
     /// The enforced total size limit in bytes, `None` = no limit.

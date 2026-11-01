@@ -98,7 +98,7 @@ impl QuillApp {
             &messages,
             |message| message.media_album_id,
             |message| message.is_outgoing,
-            |message| quill::album::is_album_media(&message.content),
+            |message| quill::album::album_kind(&message.content),
         );
         let mut rows: Vec<HistoryRow> = Vec::with_capacity(groups.len());
         // Sender of each row (first item for albums): a run is consecutive
