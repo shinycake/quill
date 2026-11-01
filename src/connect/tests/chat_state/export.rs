@@ -342,3 +342,77 @@ fn an_export_leaves_a_file_the_view_asked_for_in_the_cache() {
     assert_eq!(deletes(&recorder), 1, "a file only the export wanted goes");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[derive(Debug, PartialEq)]
+struct Sent {
+    deletes: usize,
+    downloads: usize,
+}
+
+fn open_chat_shows_a_file_the_export_holds(active: bool, done: bool, path: &str) -> Sent {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#;
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[chat]);
+    let history = driver.select_chat(ChatId(7)).unwrap().expect("history");
+    let (export, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(export);
+    worker
+        .send(serde_json::json!({"@type": "downloadFile", "file_id": 1}))
+        .unwrap();
+    driver.pump_chat_export();
+
+    let file = format!(
+        r#"{{"@type":"file","id":1,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"{path}","can_be_downloaded":true,"can_be_deleted":true,"is_downloading_active":{active},"is_downloading_completed":{done},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":4}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}}}"#
+    );
+    let page = format!(
+        r#"{{"@type":"messages","@extra":"{extra}","messages":[{{"id":20,"chat_id":7,"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":320,"height":240,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}]}}"#,
+        extra = history.0,
+    );
+    let seq = AtomicU64::new(100);
+    driver
+        .ingest(copy_and_parse(&page, &seq, &sink).unwrap())
+        .unwrap();
+
+    let link = &mut driver.session.settings.chat_export.as_mut().unwrap().link;
+    let download = link.pending.expect("the export's download went out");
+    link.reply(download, serde_json::json!({"@type": "ok"}));
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 1}))
+        .unwrap();
+    driver.pump_chat_export();
+    let count = |method: &str| {
+        let sent = recorder.snapshot().into_iter();
+        sent.filter(|json| json.contains(method)).count()
+    };
+    let sent = Sent {
+        deletes: count("deleteFile"),
+        downloads: count("downloadFile"),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    sent
+}
+
+#[test]
+fn an_export_leaves_a_file_the_open_chat_rides_along_on() {
+    let one_download = Sent {
+        deletes: 0,
+        downloads: 1,
+    };
+    assert_eq!(
+        open_chat_shows_a_file_the_export_holds(true, false, ""),
+        one_download,
+        "no delete, and only the export's own downloadFile"
+    );
+    let dir = crate::scratch::unique_dir("quill-export-finished");
+    let photo = dir.join("photo.jpg");
+    std::fs::write(&photo, b"jpeg").unwrap();
+    assert_eq!(
+        open_chat_shows_a_file_the_export_holds(false, true, &photo.to_string_lossy()),
+        one_download,
+        "already finished, the row showing it"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

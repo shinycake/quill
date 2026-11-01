@@ -85,12 +85,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The view asked for `file_id`: a running export must not delete it
     /// from TDLib's cache after copying it.
     pub(crate) fn note_view_file(&mut self, file_id: crate::ids::FileId) {
-        let settings = &mut self.session.settings;
-        if let Some(export) = settings.chat_export.as_mut() {
-            export.link.note_view_file(file_id.0);
-        }
-        if let Some(export) = settings.account_export.as_mut() {
-            export.link.note_view_file(file_id.0);
+        for link in self.session.settings.export_links_mut() {
+            link.note_view_file(file_id.0);
         }
     }
 

@@ -83,6 +83,7 @@ pub struct WorkerLink {
     /// Files the view asked for while the export ran. The export leaves
     /// them in TDLib's cache even when it downloaded them first.
     view_files: HashSet<i32>,
+    held_file: Option<i32>,
 }
 
 impl WorkerLink {
@@ -102,6 +103,7 @@ impl WorkerLink {
             pending: None,
             cancelled,
             view_files: HashSet::new(),
+            held_file: None,
         };
         (link, worker)
     }
@@ -115,23 +117,29 @@ impl WorkerLink {
     }
 
     /// The next request for TDLib, if the worker has one waiting.
-    pub fn next_request(&self) -> Option<Value> {
-        self.requests.try_recv().ok()
+    pub fn next_request(&mut self) -> Option<Value> {
+        let request = self.requests.try_recv().ok()?;
+        if request.at("@type") == "downloadFile" {
+            self.held_file = requested_file(&request);
+        } else if request.at("@type") == "deleteFile" {
+            self.held_file = None;
+        }
+        Some(request)
     }
 
     pub fn note_view_file(&mut self, file_id: i32) {
         self.view_files.insert(file_id);
     }
 
+    pub fn deletes_unless_asked(&self, file_id: i32) -> bool {
+        self.held_file == Some(file_id) && !self.view_files.contains(&file_id)
+    }
+
     /// Answer the worker's `deleteFile` for a file the view asked for
     /// without sending it. Returns whether `request` was one.
     pub fn keep_view_file(&mut self, request: &Value) -> bool {
         let kept = request.at("@type") == "deleteFile"
-            && request
-                .at("file_id")
-                .as_i64()
-                .and_then(|id| i32::try_from(id).ok())
-                .is_some_and(|id| self.view_files.contains(&id));
+            && requested_file(request).is_some_and(|id| self.view_files.contains(&id));
         if kept {
             let _ = self.replies.send(serde_json::json!({"@type": "ok"}));
         }
@@ -158,6 +166,10 @@ impl WorkerLink {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
     }
+}
+
+fn requested_file(request: &Value) -> Option<i32> {
+    i32::try_from(request.at("file_id").as_i64()?).ok()
 }
 
 impl Drop for WorkerLink {
