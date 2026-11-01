@@ -404,13 +404,22 @@ impl QuillApp {
             }
             StickerFormat::Webp | StickerFormat::Unknown => {
                 self.sticker_box.pick = None;
-                let pixels = self.local_media_path(item.file_id).and_then(|path| {
-                    super::super::editor_art::sticker_pixels(
-                        std::path::Path::new(&path),
-                        item.format,
-                    )
-                });
-                self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
+                let path = self.local_media_path(item.file_id);
+                let format = item.format;
+                self.run_off_ui_scoped_then(
+                    move || {
+                        path.and_then(|path| {
+                            super::super::editor_art::sticker_pixels(
+                                std::path::Path::new(&path),
+                                format,
+                            )
+                        })
+                    },
+                    move |this, pixels, cx| {
+                        this.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
+                    },
+                    cx,
+                );
             }
         }
     }
