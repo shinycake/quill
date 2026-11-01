@@ -629,6 +629,14 @@ impl Sim {
         self
     }
 
+    /// The clip's pictures come `offset` after the emoji's frames.
+    fn clip_offset(mut self, offset: Duration) -> Self {
+        if let Some(clip) = self.clip.as_mut() {
+            clip.start = self.t0 + offset;
+        }
+        self
+    }
+
     /// The clip plays from `from` on (until `until`), not from the start.
     fn playing(mut self, from: Duration, until: Option<Duration>) -> Self {
         let t0 = self.t0;
@@ -1312,6 +1320,39 @@ fn a_60_hz_display_shares_nothing_and_loses_no_refresh_beside_a_clip() {
             holds.len() > 20 && holds.iter().all(|at| *at == hold),
             "{emoji} + {clip} fps: {holds:?}"
         );
+    }
+}
+
+#[test]
+fn a_30_fps_clip_and_30_fps_emoji_share_vsyncs_at_60_hz() {
+    let mut display = 300;
+    for late in [Late::Little, Late::Realistic] {
+        for on_layer in [false, true] {
+            for head in 0..2 {
+                // The clip's pictures on either refresh of the emoji's two.
+                for offset in [0, 5, 17, 20, 30] {
+                    display += 1;
+                    let offset = Duration::from_millis(offset);
+                    let sim = Sim::new(display, 60.0, true)
+                        .emoji(30)
+                        .emoji_phase(head)
+                        .clip(30.0)
+                        .clip_offset(offset);
+                    let sim = if on_layer { sim.on_layer(offset) } else { sim };
+                    let sim = sim.late(late).run(3.0);
+                    let case = format!("{late:?}, on layer: {on_layer}, head {head}, {offset:?}");
+                    let draws = sim.draws_in_a_second();
+                    assert!(draws <= 31, "{case}: {draws} window frames in a second");
+                    let holds = sim.emoji_holds();
+                    assert!(
+                        holds.len() > 60 && holds.iter().all(|hold| *hold == 2),
+                        "{case}: {holds:?}"
+                    );
+                    assert!(sim.holds().iter().all(|hold| *hold == 2), "{case}");
+                    assert!(sim.clip_shows_every_picture_within(on_time(&sim)), "{case}");
+                }
+            }
+        }
     }
 }
 
