@@ -287,7 +287,7 @@ fn a_strip_wakes_a_pass_once_per_width() {
     let mut extra = ViewerExtra::default();
     let frames_at = |extra: &mut ViewerExtra, width: f32| {
         for _ in 0..3 {
-            extra.set_strip_lane(width, &WAKE);
+            extra.set_strip_lane_waking(width, &WAKE);
         }
         WAKE.epoch()
     };

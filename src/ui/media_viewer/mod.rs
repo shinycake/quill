@@ -97,7 +97,7 @@ pub(super) struct ViewerExtra {
 }
 
 impl ViewerExtra {
-    fn set_strip_lane(&mut self, lane: f32, wake: &quill::wake::Signal) {
+    fn set_strip_lane_waking(&mut self, lane: f32, wake: &quill::wake::Signal) {
         if self.strip_lane != Some(lane) {
             self.strip_lane = Some(lane);
             wake.poke();
