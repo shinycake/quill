@@ -5,7 +5,12 @@ use super::message_media::format_bytes;
 use super::status_note::StatusNote;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::alert::Alert;
-use gpui_kit::{AnyWindowHandle, Context, IntoElement as _, Styled as _, Window};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::{
+    AnyWindowHandle, Context, IntoElement as _, ParentElement as _, Styled as _, Window,
+    transparent_black,
+};
 use quill::auth::{AuthAction, AuthView};
 use quill::disk_guard::{DiskState, DiskStep, FLOORS, available_bytes, next_read_in};
 use quill::lang::{keys, tr, tr_with};
@@ -121,25 +126,51 @@ impl QuillApp {
     }
 
     pub(super) fn disk_full_view(&self) -> Option<AuthView> {
-        self.disk.is_full().then(|| AuthView {
-            title: tr(keys::Q_DISK_FULL_TITLE),
-            body: tr_with(
-                keys::Q_DISK_FULL_BODY,
-                &[
-                    ("free", &disk_size(self.disk.free.unwrap_or(0))),
-                    ("needed", &disk_size(FLOORS.open)),
-                ],
-            ),
-            action: AuthAction::ProvideParameters,
-            blocking: true,
+        self.disk.is_full().then(|| {
+            let needed = disk_size(FLOORS.open);
+            let sizes = match self.disk.free {
+                Some(free) => tr_with(
+                    keys::Q_DISK_FULL_SIZES,
+                    &[("free", &disk_size(free)), ("needed", &needed)],
+                ),
+                None => tr_with(keys::Q_DISK_FULL_NEEDED, &[("needed", &needed)]),
+            };
+            AuthView {
+                title: tr(keys::Q_DISK_FULL_TITLE),
+                body: format!("{}\n\n{sizes}", tr(keys::Q_DISK_FULL_BODY)),
+                action: AuthAction::ProvideParameters,
+                blocking: true,
+            }
         })
     }
 
+    /// The kit's banner has no action slot, so the row around it carries the
+    /// tint and the button.
     pub(super) fn disk_low_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
         (self.disk.state == DiskState::Low).then(|| {
-            Alert::warning("disk-low", tr(keys::Q_DISK_ALMOST_FULL))
-                .text_color(cx.theme().foreground)
-                .banner()
+            h_flex()
+                .w_full()
+                .flex_none()
+                .pr_4()
+                .bg(cx.theme().warning.opacity(0.1))
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(
+                    Alert::warning("disk-low", tr(keys::Q_DISK_ALMOST_FULL))
+                        .text_color(cx.theme().foreground)
+                        .banner()
+                        .flex_1()
+                        .min_w_0()
+                        .bg(transparent_black())
+                        .border_0(),
+                )
+                .child(
+                    Button::new("disk-low-storage")
+                        .label(tr(keys::Q_DISK_MANAGE_STORAGE))
+                        .outline()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.open_local_storage(cx))),
+                )
                 .into_any_element()
         })
     }

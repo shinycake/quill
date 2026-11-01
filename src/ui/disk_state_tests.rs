@@ -2,11 +2,13 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::connect::ConnectBlocker;
 use quill::disk_guard::FLOORS;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
+use quill::settings_catalog::Page;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     new_app_of_height(cx, 800.)
@@ -69,6 +71,39 @@ fn a_full_disk_shows_the_screen_with_what_is_free_and_what_is_needed(cx: &mut Te
     assert_eq!(view.title, tr(keys::Q_DISK_FULL_TITLE));
     assert!(view.body.contains("Available: 80.0 MB"), "{}", view.body);
     assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
+}
+
+#[gpui_kit::test]
+fn a_refusal_before_the_first_reading_says_only_what_is_needed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_client(Err(ConnectBlocker::DiskFull), cx);
+    });
+    let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
+    assert!(!view.body.contains("Available"), "{}", view.body);
+    assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
+}
+
+#[gpui_kit::test]
+fn the_low_bar_opens_the_storage_usage_list(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app_of_height(cx, 320.);
+    vcx.run_until_parked();
+    read(&app, &mut vcx, Some(FLOORS.warn - 1));
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, cx| window.click("disk-low-storage", cx));
+    for _ in 0..3 {
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.render_frame(cx));
+        vcx.update(|window, cx| window.simulate_next_frame(cx));
+    }
+    app.read_with(&vcx, |app, _| {
+        assert!(app.settings.open);
+        assert_eq!(app.settings.page, Some(Page::DataStorage));
+        assert!(
+            app.settings.storage_scroll.page.offset().y < px(0.),
+            "the storage usage list is below the fold at this height"
+        );
+    });
 }
 
 #[gpui_kit::test]
