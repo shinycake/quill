@@ -60,13 +60,9 @@ fn warm_with(load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
     #[cfg(not(target_os = "macos"))]
     use super::Warmed;
     use super::{supported_from, warm_with};
-=======
-    use super::{Warmed, supported_from, warm_with};
->>>>>>> origin/claude/fix-b14
     use gpui_kit::{App, TestAppContext};
     use std::sync::atomic::{AtomicUsize, Ordering};
 

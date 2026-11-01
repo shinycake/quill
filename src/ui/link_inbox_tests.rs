@@ -224,7 +224,6 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-<<<<<<< HEAD
 fn drop_with_link(cx: &mut TestAppContext, link: &str, from_agent: bool) -> Option<String> {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     app.update(&mut vcx, |app, _| {
@@ -247,7 +246,8 @@ fn a_link_the_closed_main_window_had_not_opened_goes_to_the_next(cx: &mut TestAp
         None,
         "an agent's link is not the user's"
     );
-=======
+}
+
 #[gpui_kit::test]
 fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAppContext) {
     static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
@@ -274,5 +274,4 @@ fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAp
     SIGNAL.poke();
     cx.run_until_parked();
     assert_eq!(turns.get(), 2, "the mid-turn poke woke the loop again");
->>>>>>> origin/claude/sweep-b10
 }
