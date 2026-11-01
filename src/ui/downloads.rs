@@ -149,7 +149,12 @@ impl QuillApp {
 
     /// Slice media-downloads-pause: resume a paused user-initiated download.
     pub(super) fn resume_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
+        if let Some(live) = self.live.as_mut()
+            && !live.driver.download_fits_disk(file_id)
+        {
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
+        } else if let Some(live) = self.live.as_mut() {
             self.connection
                 .set_note(match live.driver.resume_download(file_id) {
                     Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_RESUMED)),

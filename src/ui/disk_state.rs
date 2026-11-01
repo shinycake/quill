@@ -199,10 +199,19 @@ impl QuillApp {
         self.disk.confirming = confirming;
         self.disk.free = free.or(shown);
         let mut running = false;
-        let background = self.background.clients_mut();
-        for live in self.live.iter_mut().chain(background) {
+        let repaused = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.note_disk(after, free, &floors).ok())
+            .unwrap_or(0);
+        running |= self.live.is_some();
+        for live in self.background.clients_mut() {
             running = true;
             let _ = live.driver.note_disk(after, free, &floors);
+        }
+        if repaused > 0 {
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         }
         let room = free.is_some_and(|free| free >= floors.open);
         let retry_starts = self.disk.start_refused && room;
