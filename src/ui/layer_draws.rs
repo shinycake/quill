@@ -1,9 +1,11 @@
-//! What each animation layer of the main window drew since the frame
-//! clock (`frame_clock`) last ticked it.
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::EntityId;
 use std::time::Instant;
+
+/// Layers kept: the chat list's and the conversation's, with room for
+/// replaced ones, which age out.
+const MAX_LAYERS: usize = 4;
 
 /// What each animation layer of the main window drew since the clock last
 /// ticked it: a layer a clip's picture redrew (with its emoji) needs no
@@ -45,8 +47,7 @@ impl LayerDraws {
         if !counts {
             return;
         }
-        // The chat list's and the conversation's; a replaced one ages out.
-        if self.0.len() >= 4 {
+        if self.0.len() >= MAX_LAYERS {
             self.0.remove(0);
         }
         self.0.push(LayerDraw {

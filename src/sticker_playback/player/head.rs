@@ -154,7 +154,6 @@ impl PlayHead {
 
     /// Whether a paint at `at` would show another frame than `shown`, the
     /// one its view shows now, or its view went [`REPAINT_GAP`] unpainted.
-    /// Worked out on a copy: the head moves only when its view paints.
     pub fn changes_at(
         &self,
         at: Instant,

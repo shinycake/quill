@@ -430,8 +430,6 @@ fn a_window_leaving_its_chat_keeps_the_rest_of_it() {
     assert_eq!(player.head_known(window_list, 7), None);
 }
 
-/// A frame clock tick draws a view only when the frame it shows changes
-/// by the next refresh.
 #[test]
 fn a_tick_draws_a_view_only_when_its_frame_changes() {
     let (player, spec) = player(8);

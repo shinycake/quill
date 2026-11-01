@@ -964,9 +964,6 @@ fn a_clip_the_grid_would_hold_unevenly_keeps_its_vsyncs_beside_emoji() {
 
 #[test]
 fn a_clip_off_the_grid_on_the_emojis_layer_never_puts_their_tick_off() {
-    // A 24 or 25 fps clip drawn by the layer of 30 fps emoji redraws it
-    // between the grid vsyncs the emoji tick on, showing no new emoji
-    // frame: the emoji still tick every fourth vsync, not five or six.
     let mut display = 160;
     for fps in [24.0, 25.0] {
         for offset in [0, 5, 10, 20] {

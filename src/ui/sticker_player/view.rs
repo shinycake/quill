@@ -95,8 +95,6 @@ impl StickerView {
         )
     }
 
-    /// Where its clip and head stand: opening, gone, or open with the
-    /// frame its head shows last and the timeline it plays on.
     fn state(&self, inner: &super::Inner) -> ViewState {
         let key = self.spec.key(self.edge);
         // The clip drawn at the painted size, else the one asked for while

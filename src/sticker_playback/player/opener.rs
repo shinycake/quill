@@ -30,7 +30,6 @@ pub(super) fn run(shared: &Shared) {
         };
         open(shared, &mut scratch, key, decode, &cancel);
         shared.wake();
-        // The clip's worker may unpack its frames now.
         shared.work.notify_all();
     }
 }
@@ -49,7 +48,6 @@ fn open(shared: &Shared, scratch: &mut Scratch, key: ClipKey, decode: DecodeAll,
         });
     let mut state = lock_or_recover(&shared.state);
     let Some(clip) = state.clips.get_mut(&key) else {
-        // Closed meanwhile: freed outside the lock by a worker.
         state.freed.push(packed);
         return;
     };

@@ -1,4 +1,4 @@
-use super::head::{PAUSE_GAP, pick};
+use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
 use super::source::Source;
 use super::store::{self, Scratch, Store};
 use super::*;
@@ -84,6 +84,12 @@ fn jittered_paints_hold_each_frame_for_the_same_number_of_refreshes() {
     }
 }
 
+/// `index` on the lap of a 60 frame loop nearest `along`.
+fn nearest_lap(index: u32, along: i64) -> i64 {
+    let off = (i64::from(index) - along).rem_euclid(60);
+    along + if off > 30 { off - 60 } else { off }
+}
+
 /// Steps between the frames a 30 fps head shows when painted every fourth
 /// refresh of a 120 Hz display, started `offset` refreshes after that beat,
 /// with every paint up to 1.5 ms early or late.
@@ -105,9 +111,7 @@ fn emoji_steps_at_offset(offset: u32) -> Vec<i64> {
         let pos = Duration::from_secs_f64(paint - start);
         let along = (pos.as_secs_f64() * 30.0 + 0.5) as i64;
         let index = pick(pos, PlayMode::Loop, tl, false, 120.0).unwrap().index;
-        // Unwrapped: the loop's frame nearest the head's place.
-        let off = (i64::from(index) - along).rem_euclid(60);
-        shown.push(along + if off > 30 { off - 60 } else { off });
+        shown.push(nearest_lap(index, along));
     }
     shown
         .windows(2)
@@ -175,7 +179,6 @@ fn gaps(at: &[u32]) -> Vec<u32> {
 
 #[test]
 fn a_clip_at_its_files_rate_paints_only_for_its_own_frames() {
-    // A 30 fps sticker and a 60 fps tap effect, shown at the file's rate.
     for (tl, frames, hold) in [
         (timeline(480, 30.0, 4), 30, 4),
         (timeline(480, 60.0, 2), 60, 2),
@@ -197,10 +200,19 @@ fn a_clip_on_the_fine_grid_paints_every_refresh() {
 
 #[test]
 fn a_slow_clip_paints_often_enough_to_keep_playing() {
-    // 5 fps: a frame every 200 ms, as long as a pause.
-    let (paints, changes) = paints_when_changed(timeline(20, 5.0, 1), false, 120.0);
-    assert!(gaps(&paints).iter().all(|gap| *gap <= 12), "{paints:?}");
-    assert!(gaps(&changes).iter().all(|gap| *gap == 24), "{changes:?}");
+    let refreshes = |gap: Duration| (gap.as_secs_f64() * 120.0).round() as u32;
+    let fps = 1.0 / PAUSE_GAP.as_secs_f64();
+    let (paints, changes) = paints_when_changed(timeline(20, fps, 1), false, 120.0);
+    let longest_paint_gap = refreshes(REPAINT_GAP);
+    let frame_gap = refreshes(PAUSE_GAP);
+    assert!(
+        gaps(&paints).iter().all(|gap| *gap <= longest_paint_gap),
+        "{paints:?}"
+    );
+    assert!(
+        gaps(&changes).iter().all(|gap| *gap == frame_gap),
+        "{changes:?}"
+    );
 }
 
 #[test]
@@ -242,10 +254,11 @@ fn one_slow_draw_keeps_a_fast_clip_on_the_fine_grid() {
     }
 }
 
+const TAP_EFFECT_DRAWS_MS: [f64; 8] = [2.6, 6.0, 3.1, 2.6, 4.4, 2.8, 6.0, 2.6];
+
 #[test]
 fn a_clip_slow_from_the_start_drops_to_its_files_rate_within_16_draws() {
-    // The 672 px tap effect: median 2.6 ms, p90 6.0 ms.
-    let draws: Vec<f64> = [2.6, 6.0, 3.1, 2.6, 4.4, 2.8, 6.0, 2.6]
+    let draws: Vec<f64> = TAP_EFFECT_DRAWS_MS
         .iter()
         .copied()
         .cycle()
@@ -716,8 +729,6 @@ fn sticker_store_bench() {
     }
 }
 
-/// A clip decoded up front opens off the workers: while its decode runs,
-/// the clips a worker owns still get their frames.
 #[test]
 fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
     use std::sync::mpsc;
@@ -726,13 +737,11 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
     engine.set_waker(Arc::new(move || {
         let _ = woke.send(());
     }));
-    // A plays on the only worker: opened, its first frame drawn.
     let a = key(1, 16);
     engine.open(a, synthetic(16, 10));
     while !engine.take_rendered().iter().any(|r| r.key == a) {
         wakes.recv().unwrap();
     }
-    // B's decode starts, then waits for the test.
     let (started, decoding) = mpsc::channel::<Option<String>>();
     let (release, released) = mpsc::channel::<()>();
     let b = key(2, 16);
@@ -754,7 +763,6 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
         Some("quill-sticker-open"),
         "B decodes off the worker"
     );
-    // A's next frame arrives while B is still decoding.
     engine.want(&a, &[1]);
     while !engine
         .take_rendered()

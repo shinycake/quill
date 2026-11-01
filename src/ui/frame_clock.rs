@@ -232,9 +232,7 @@ impl QuillApp {
                             } else if !this.frame.main_covered.get() {
                                 // Only the slices with animated content
                                 // redraw; none under a chat window covering
-                                // the main window since they asked. A layer
-                                // whose frames stay the same keeps ticking
-                                // without a draw.
+                                // the main window since they asked.
                                 for id in targets.into_iter().flatten() {
                                     if let Some(fps) = this.idle_layer_tick(id) {
                                         this.request_animation_tick_for(Some(id), fps, cx);
@@ -514,7 +512,6 @@ pub(super) fn video_request(
 }
 
 thread_local! {
-    /// Each player's clip frame request.
     static VIDEO_ASKS: RefCell<Vec<VideoAsk>> = const { RefCell::new(Vec::new()) };
 }
 

@@ -61,7 +61,6 @@ pub(super) struct Clip {
     /// Round-robin order among a worker's clips.
     pub(super) served: u64,
     pub(super) cancel: Cancel,
-    /// How long its frames take to draw.
     pub(super) draw_cost: DrawCost,
     /// Its frames draw too slowly for the fine grid: it plays at its
     /// file's own rate from then on, so it never falls behind.
@@ -98,9 +97,8 @@ impl DrawCost {
         let Some(averaged) = self.seen.checked_sub(1).filter(|n| *n > 0) else {
             return false;
         };
-        // The plain mean of the first draws, then a running eighth.
-        let weight = averaged.min(SETTLED);
-        self.average = (self.average * (weight - 1) + draw) / weight;
+        let window = averaged.min(SETTLED);
+        self.average = (self.average * (window - 1) + draw) / window;
         averaged >= SETTLED && too_slow_for_grid(self.average, timeline)
     }
 }
