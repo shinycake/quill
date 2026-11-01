@@ -7098,6 +7098,7 @@ dependencies = [
  "tungstenite",
  "unicode-bidi",
  "unicode-bidi-mirroring",
+ "unicode-properties",
  "unicode-segmentation",
  "ureq",
  "webpki-roots",

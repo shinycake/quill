@@ -34,6 +34,7 @@ pub(super) fn paragraph_text(
     let mut link_flags: Vec<bool> = Vec::new();
     let mut spoilers: Vec<(std::ops::Range<usize>, f32)> = Vec::new();
     let mut inline_emoji: Vec<super::super::selectable_text::InlineEmoji> = Vec::new();
+    let mut filter = quill::display_text::FilterState::default();
     for (offset, run) in runs.iter().enumerate() {
         if run.text.is_empty() {
             continue;
@@ -114,7 +115,12 @@ pub(super) fn paragraph_text(
                 }
                 continue;
             }
-            text.push_str(piece);
+            // Ranges are taken from what was pushed, so dropped characters
+            // never shift a style or a click target.
+            text.push_str(&quill::display_text::filter_display_text(
+                piece,
+                &mut filter,
+            ));
             let range = at..text.len();
             let mut highlight = HighlightStyle::default();
             if style.bold {
@@ -183,3 +189,8 @@ pub(super) fn paragraph_text(
         inline_emoji,
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "paragraph_tests.rs"]
+mod tests;
