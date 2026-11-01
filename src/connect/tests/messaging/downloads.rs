@@ -551,3 +551,66 @@ fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
     assert!(avatar_downloads(&recorder, 95).is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn only_a_claim_the_next_pass_sends_wakes_it() {
+    let (mut driver, recorder, dyn_sink, dir) = avatar_driver();
+    let seq = AtomicU64::new(0);
+    let feed = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let tick = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+        driver.poll_ticks(
+            crate::connect::TickScope::OnScreen {
+                settings_open: false,
+            },
+            std::time::Instant::now(),
+        );
+    };
+    let user = |id: i64, file: i32| {
+        format!(
+            r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"U","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","small":{{"@type":"file","id":{file}}},"big":null}}}}}}"#
+        )
+    };
+    let wake = crate::wake::Signal::new();
+    feed(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    feed(&mut driver, &user(46, 96));
+    assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+    assert_eq!(wake.epoch(), 1, "the claim wakes the pass that sends it");
+    assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+    assert_eq!(wake.epoch(), 1, "a repeat before that pass costs nothing");
+    tick(&mut driver);
+    assert_eq!(avatar_downloads(&recorder, 96).len(), 1);
+    for _ in 0..3 {
+        assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+        tick(&mut driver);
+    }
+    assert_eq!(wake.epoch(), 1, "a file in flight never wakes the loop");
+    let sent = avatar_downloads(&recorder, 96);
+    let extra = serde_json::from_str::<Value>(&sent[0]).unwrap()["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    feed(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"FILE_ID_INVALID"}}"#
+        ),
+    );
+    for _ in 0..3 {
+        assert_eq!(driver.session.user_photo_path_waking(46, &wake), None);
+        tick(&mut driver);
+    }
+    assert_eq!(avatar_downloads(&recorder, 96).len(), 1);
+    assert_eq!(wake.epoch(), 1, "a failed file is not sent, so it never wakes");
+    feed(&mut driver, &user(47, 97));
+    driver.session.settings.media_prefs.data_saver = true;
+    assert_eq!(driver.session.user_photo_path_waking(47, &wake), None);
+    assert_eq!(wake.epoch(), 1, "data saver sends nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}

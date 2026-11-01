@@ -1,5 +1,6 @@
 //! Forum topics.
 use super::*;
+use crate::wake::Signal;
 
 impl Session {
     /// Phase 5.1: enter a forum topic's view. Returns the topic's cached
@@ -160,29 +161,49 @@ impl Session {
     /// The user's downloaded small avatar. A missing one is claimed for
     /// download, the way tdesktop loads a userpic when it paints it.
     pub fn user_photo_path(&self, user_id: i64) -> Option<&str> {
+        self.user_photo_path_waking(user_id, &crate::wake::UPDATES)
+    }
+
+    /// [`Self::user_photo_path`], poking `wake` for a claim the next pass
+    /// will send: the view that claimed draws nothing new, so no other
+    /// pass may come for the poll loop's whole rest. A claim it would not
+    /// send stays quiet, or a list with a stuck download pokes every frame.
+    pub(crate) fn user_photo_path_waking(&self, user_id: i64, wake: &Signal) -> Option<&str> {
         let file_id = self.users.get(&user_id)?.photo_small_file_id;
         let path = self
             .media
             .files
             .get(&file_id)
             .and_then(ParsedFile::usable_path);
-        if path.is_none()
-            && file_id != 0
-            && let Ok(mut claims) = self.media.avatar_claims.try_borrow_mut()
-        {
-            claims.insert(file_id);
+        if path.is_none() && file_id != 0 {
+            let claimed = self
+                .media
+                .avatar_claims
+                .try_borrow_mut()
+                .is_ok_and(|mut claims| claims.insert(file_id));
+            if claimed && self.avatar_claim_sends(FileId(file_id)) {
+                wake.poke();
+            }
         }
         path
     }
 
-    /// The claimed user avatars that still need a download; drains the
-    /// claims.
+    /// Whether a pass sends this claim. A download that failed stays
+    /// failed, as for every automatic download, though the file still
+    /// counts as missing.
+    fn avatar_claim_sends(&self, file_id: FileId) -> bool {
+        !self.settings.media_prefs.data_saver
+            && self.should_download(file_id)
+            && !self.media.downloads.is_stalled_auto(file_id.0)
+    }
+
+    /// The claimed user avatars to send now; drains the claims.
     pub fn take_avatar_claims(&mut self) -> Vec<FileId> {
         let claims = std::mem::take(self.media.avatar_claims.get_mut());
         claims
             .into_iter()
             .map(FileId)
-            .filter(|id| self.should_download(*id))
+            .filter(|id| self.avatar_claim_sends(*id))
             .collect()
     }
 
