@@ -579,7 +579,11 @@ fn only_a_claim_the_next_pass_sends_wakes_it() {
         tick_on_screen(&mut driver);
     }
     assert_eq!(avatar_downloads(&recorder, 96).len(), 1);
-    assert_eq!(wake.epoch(), 1, "a failed file is not sent, so it never wakes");
+    assert_eq!(
+        wake.epoch(),
+        1,
+        "a failed file is not sent, so it never wakes"
+    );
     feed(&mut driver, &avatar_user(47, 97));
     driver.session.settings.media_prefs.data_saver = true;
     assert_eq!(driver.session.user_photo_path_waking(47, &wake), None);

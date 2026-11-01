@@ -539,5 +539,8 @@ fn what_the_worker_publishes_wakes_the_poll_pass() {
     let slot = std::sync::Mutex::new(Progress::starting());
     super::handle::publish(&slot, &wake, |progress| progress.stage = Stage::Cancelled);
     assert_eq!(wake.epoch(), 1);
-    assert!(slot.lock().is_ok_and(|p| matches!(p.stage, Stage::Cancelled)));
+    assert!(
+        slot.lock()
+            .is_ok_and(|p| matches!(p.stage, Stage::Cancelled))
+    );
 }
