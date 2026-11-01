@@ -200,7 +200,17 @@ impl QuillApp {
     /// which nothing asked.
     #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_animation_tick_for(self.slices.current(), fps, cx);
+        let target = self.frame.tick_view.get().or(self.slices.current());
+        self.request_animation_tick_for(target, fps, cx);
+    }
+
+    /// [`Self::request_animation_tick`] for what `QuillApp` builds itself
+    /// around the slices (the tap effect, the sent sticker's flight): it
+    /// renders, and every slice replays.
+    #[track_caller]
+    pub(super) fn request_app_tick(&self, fps: u32, cx: &mut Context<Self>) {
+        let target = self.frame.tick_view.get().or(self.slices.app_only_id());
+        self.request_animation_tick_for(target, fps, cx);
     }
 
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
@@ -241,7 +251,7 @@ impl QuillApp {
         // (`chat_window::cover`): its slices and their layers get no tick.
         // A tick for the whole app still comes, whichever window asks; it
         // redraws every window but that one then (`tick_app`).
-        if target.is_some() && self.frame.main_covered.get() {
+        if self.frame.main_covered.get() && target.is_some_and(|id| self.slices.owns(id)) {
             return;
         }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
@@ -295,12 +305,19 @@ impl QuillApp {
                             }
                             if targets.contains(&None) {
                                 this.tick_app(cx);
-                            } else if !this.frame.main_covered.get() {
-                                // Only the slices with animated content
-                                // redraw; none under a chat window covering
-                                // the main window since they asked.
+                            } else {
+                                // Only the views with animated content
+                                // redraw; none of the main window's under
+                                // a chat window covering it since they
+                                // asked.
+                                let covered = this.frame.main_covered.get();
+                                let views: Vec<_> = targets
+                                    .into_iter()
+                                    .flatten()
+                                    .filter(|id| !covered || !this.slices.owns(*id))
+                                    .collect();
                                 let app: &mut App = cx;
-                                for id in targets.into_iter().flatten() {
+                                for id in views {
                                     app.notify(id);
                                 }
                             }

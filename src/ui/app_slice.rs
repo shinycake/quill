@@ -182,6 +182,32 @@ impl Slices {
     pub(super) fn app_only(&self) -> Option<Entity<AppOnly>> {
         self.app_only.clone()
     }
+
+    pub(super) fn app_only_id(&self) -> Option<EntityId> {
+        self.app_only.as_ref().map(Entity::entity_id)
+    }
+
+    /// Whether `id` is a view of the main window: a slice, a layer's
+    /// painter, or [`AppOnly`].
+    pub(super) fn owns(&self, id: EntityId) -> bool {
+        let layered = [&self.sidebar, &self.conversation]
+            .into_iter()
+            .flatten()
+            .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()]);
+        let slices = [
+            &self.composer,
+            &self.viewer,
+            &self.viewer_chrome,
+            &self.story,
+        ]
+        .into_iter()
+        .flatten()
+        .map(Entity::entity_id);
+        layered
+            .chain(slices)
+            .chain(self.app_only_id())
+            .any(|view| view == id)
+    }
 }
 
 impl QuillApp {
@@ -634,7 +660,7 @@ impl QuillApp {
                 // Laid out at the bottom of its box: while the box still
                 // has last frame's height, a taller composer grows over
                 // the history (as its popups do) for that one frame.
-                let redraw = self.slices.app_only.as_ref().map(Entity::entity_id);
+                let redraw = self.slices.app_only_id();
                 div()
                     .size_full()
                     .flex()

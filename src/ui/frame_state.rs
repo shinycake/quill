@@ -38,6 +38,10 @@ pub(crate) struct FrameUi {
     pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
     /// The main window's last frame `QuillApp::main_frame_starts` ran for.
     pub(super) frame_started: std::cell::Cell<u64>,
+    /// The chat or call window's view being drawn: animated content asks
+    /// ticks for it, not for the app. Not `windows.scope`, which input in a
+    /// chat window leaves in place for any window to draw under.
+    pub(super) tick_view: std::cell::Cell<Option<EntityId>>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
@@ -87,6 +91,7 @@ impl FrameUi {
             title_badge: Default::default(),
             media_roots_frame: Default::default(),
             frame_started: Default::default(),
+            tick_view: Default::default(),
             frame_clock_running: Default::default(),
             clock_timing: Default::default(),
             layers_drawn: Default::default(),

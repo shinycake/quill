@@ -319,7 +319,7 @@ impl QuillApp {
             self.notify_conversation(cx);
             return None;
         };
-        self.request_animation_tick_for(None, TICK_FPS, cx);
+        self.request_app_tick(TICK_FPS, cx);
         let origin = ORIGIN.with(Cell::get);
         let positioned = started.zip(TARGET.with(Cell::get)).zip(origin);
         let picture = positioned.map(|((started, target), origin)| {

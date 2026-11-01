@@ -3,6 +3,7 @@
 //! takes the live controller's paused overlay, and the full-screen stage
 //! shows a volume slider for anyone but you. Nothing reaches Telegram.
 use crate::ui::app::QuillApp;
+use crate::ui::frame_clock::frames_over;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -125,4 +126,29 @@ fn the_stage_shows_the_volume_of_anyone_but_you(cx: &mut TestAppContext) {
         "your share on the stage"
     );
     assert!(find(call, "group-stage-volume").is_none(), "none for you");
+}
+
+/// The microphone's halo plays by ticks for the call window alone: while it
+/// moves, the main window draws nothing for it.
+#[gpui_kit::test]
+fn the_halo_redraws_the_call_window_alone(cx: &mut TestAppContext) {
+    let (app, mut main, mut call) = open_share(cx);
+    main.update(|window, _| window.activate_window());
+    let _ = frames_over(&mut main, 3);
+    app.update(&mut main, |app, cx| {
+        let live = app.demo_session.as_deref_mut();
+        if let Some(call) = live.and_then(|s| s.calls.active_group_call.as_mut()) {
+            call.is_muted_self = false;
+        }
+        let now = app.group_call_now_ms();
+        app.group_call.level_anim.retarget(1.0, now);
+        cx.notify();
+    });
+    let _ = frames_over(&mut call, 1);
+    let drawn = frames_over(&mut call, 2);
+    let panel = drawn.get("group-call-panel").copied().unwrap_or(0);
+    assert!(panel > 5, "the halo moves: {drawn:?}");
+    for slice in ["app", "sidebar", "conversation", "composer"] {
+        assert_eq!(drawn.get(slice), None, "{drawn:?}");
+    }
 }

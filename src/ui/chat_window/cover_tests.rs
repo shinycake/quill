@@ -367,6 +367,29 @@ fn a_covering_chat_window_keeps_its_own_stickers_animating(cx: &mut TestAppConte
     assert_eq!(main_draws(vcx), (0, 0), "the main window under it");
 }
 
+/// Beside the main window, a chat window's stickers redraw that window
+/// alone: no main window slice renders for them, and `QuillApp` neither.
+#[gpui_kit::test]
+fn a_chat_window_beside_the_main_window_ticks_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let chat = open_chat_window(&app, vcx, OPEN, beside());
+    for _ in 0..4 {
+        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        let _ = frames_over(vcx, 1);
+    }
+    let frame = |vcx: &mut VisualTestContext| {
+        vcx.update_window(chat, |_, window, _| window.frame_number())
+            .expect("the chat window")
+    };
+    let before = frame(vcx);
+    let drawn = frames_over(vcx, 2);
+    assert!(frame(vcx) > before + 5, "its stickers animate: {drawn:?}");
+    for main in ["app", "sidebar", "conversation", "composer"] {
+        assert_eq!(drawn.get(main), None, "the main window: {drawn:?}");
+    }
+}
+
 /// A call window's own animation (the group call's microphone halo and
 /// speaking blobs) asks the app for ticks: it plays on while the active
 /// chat window covers the main window, in the main window's state as live

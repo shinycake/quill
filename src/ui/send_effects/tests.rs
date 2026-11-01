@@ -110,6 +110,26 @@ fn an_unread_message_plays_its_effect_once_when_it_shows(cx: &mut TestAppContext
     assert!(crate::ui::emoji_effect::message_effect_playing(key));
 }
 
+/// An effect plays over the history: its ticks render `QuillApp`, which
+/// draws it, and every slice replays.
+#[gpui_kit::test]
+fn the_ticks_of_an_effect_leave_the_slices_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let key = (CHAT, ARRIVING);
+    vcx.update(|window, _| window.activate_window());
+    // The chat's entry settles (`arrive` needs a still history).
+    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
+    arrive(&app, vcx);
+    let _ = crate::ui::frame_clock::frames_over(vcx, 1);
+    let drawn = crate::ui::frame_clock::frames_over(vcx, 2);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    assert!(drawn.get("app").is_some_and(|app| *app > 5), "{drawn:?}");
+    for slice in ["sidebar", "conversation", "composer"] {
+        assert_eq!(drawn.get(slice), None, "{drawn:?}");
+    }
+}
+
 /// A message sent with an effect that arrives behind another app keeps its
 /// effect for when the window is activated (tdesktop `markingContentsRead`)
 /// and draws nothing meanwhile. Its badge asked for a frame on every paint
