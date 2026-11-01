@@ -64,7 +64,7 @@ pub(super) fn chat_preview_line(
         std::borrow::Cow::Borrowed(_) => text,
         std::borrow::Cow::Owned(shown) => shown,
     };
-    (shown(name), shown(body), id)
+    (name, shown(body), id)
 }
 
 /// kit Phase 3: one flat item for the virtualized chat list — a chat row
@@ -744,8 +744,7 @@ pub(super) fn session_chat_row(
                                     .child(if announced {
                                         String::new()
                                     } else {
-                                        quill::display_text::filtered(&chat.last_preview_sender)
-                                            .into_owned()
+                                        chat.last_preview_sender.clone()
                                     }),
                             )
                         })
@@ -782,10 +781,7 @@ pub(super) fn session_chat_row(
                                                         } else {
                                                             accent().into()
                                                         })
-                                                        .child(format!(
-                                                            "{}: ",
-                                                            quill::display_text::filtered(&sender)
-                                                        )),
+                                                        .child(format!("{sender}: ")),
                                                 )
                                             },
                                         )

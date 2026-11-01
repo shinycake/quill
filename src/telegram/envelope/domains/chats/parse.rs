@@ -14,11 +14,7 @@ pub(crate) fn parse_chats_payload(
     let payload = match type_name {
         "updateChatTitle" => Ok(EnvelopePayload::Chats(ChatsPayload::UpdateChatTitle {
             chat_id: ChatId(int53(value.get("chat_id"))?),
-            title: value
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            title: json_name_str(value, "title"),
         })),
         "updateChatReadInbox" => Ok(EnvelopePayload::Chats(ChatsPayload::UpdateChatReadInbox {
             chat_id: ChatId(int53(value.get("chat_id"))?),

@@ -53,7 +53,6 @@ pub(crate) fn chat_list_preview_line_layered(
     // One line, as in Telegram Desktop: line breaks read as spaces (same
     // byte length, so entity offsets still hold).
     let preview = preview.replace(['\n', '\r'], " ");
-    let prefix = prefix.map(|prefix| quill::display_text::filtered(&prefix).into_owned());
     // Emoji the active set draws need the run-by-run row below; the
     // system font keeps the single text node.
     let sprites =
