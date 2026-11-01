@@ -1,9 +1,9 @@
 use super::super::app::QuillApp;
 use super::super::scheduled::new_date_time_picker;
-use gpui_kit::component::date_picker::DatePickerState;
+use crate::ui::scheduled::TimePicker;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::local_time::now_unix;
 use quill::moderation::RestrictUntil;
 use quill::telegram::envelope::ChatPermissions;
 
@@ -17,7 +17,7 @@ pub struct RestrictDialog {
     pub(crate) ban: bool,
     pub(crate) until: RestrictUntil,
     /// The custom date and time; shown while `until` is `Custom`.
-    pub(crate) custom: Entity<DatePickerState>,
+    pub(crate) custom: TimePicker,
     pub(crate) error: Option<&'static str>,
     pub(crate) permissions: ChatPermissions,
 }
@@ -37,7 +37,7 @@ impl RestrictDialog {
         let until = existing_until.unwrap_or(RestrictUntil::Forever);
         let tomorrow = match until {
             RestrictUntil::Custom(unix) => unix,
-            _ => now_unix() + 86_400,
+            _ => WallClock::of(cx).now() + 86_400,
         };
         Self {
             chat_id,

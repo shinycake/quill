@@ -66,21 +66,43 @@ pub fn civil_at(unix: i64, offset_secs: i32) -> CivilTime {
 /// The OS's UTC offset (seconds east) in effect at `unix`. Falls back to
 /// UTC where the platform offers no zone lookup.
 pub fn utc_offset_at(unix: i64) -> i32 {
-    // Renders format every visible stamp each frame; zones only change
-    // offset on hour boundaries, so remember the answer per hour.
+    // Renders format every visible stamp each frame, so remember the
+    // offset of the last UTC hour asked about.
     thread_local! {
-        static BY_HOUR: std::cell::RefCell<(i64, i32)> = const { std::cell::RefCell::new((i64::MIN, 0)) };
+        static BY_HOUR: std::cell::RefCell<HourOffset> = const { std::cell::RefCell::new(HourOffset::EMPTY) };
     }
-    let hour = unix.div_euclid(3600);
-    if let Some(offset) = BY_HOUR.with(|cell| {
-        let (cached_hour, offset) = *cell.borrow();
-        (cached_hour == hour).then_some(offset)
-    }) {
-        return offset;
+    BY_HOUR.with(|cell| cell.borrow_mut().offset_at(unix, os_utc_offset_at))
+}
+
+/// The offset of one UTC hour in which the zone does not change.
+struct HourOffset {
+    hour: i64,
+    offset: i32,
+}
+
+impl HourOffset {
+    const EMPTY: Self = Self {
+        hour: i64::MIN,
+        offset: 0,
+    };
+
+    /// Some zones change in the middle of a UTC hour (Lord Howe at 15:30
+    /// UTC), so an hour is kept only when it starts and ends on one offset.
+    fn offset_at(&mut self, unix: i64, lookup: impl Fn(i64) -> i32) -> i32 {
+        let hour = unix.div_euclid(3600);
+        if hour == self.hour {
+            return self.offset;
+        }
+        let start = lookup(hour * 3600);
+        if lookup(hour * 3600 + 3599) != start {
+            return lookup(unix);
+        }
+        *self = Self {
+            hour,
+            offset: start,
+        };
+        start
     }
-    let offset = os_utc_offset_at(unix);
-    BY_HOUR.with(|cell| *cell.borrow_mut() = (hour, offset));
-    offset
 }
 
 fn os_utc_offset_at(unix: i64) -> i32 {
@@ -324,6 +346,18 @@ mod tests {
 
     // 2026-09-28 21:42:00 UTC, a Monday.
     const T: i64 = 1_790_631_720;
+
+    #[test]
+    fn an_offset_change_inside_a_utc_hour_is_not_cached_across_it() {
+        // Lord Howe: 02:00 +10:30 becomes 02:30 +11 at 15:30 UTC.
+        let switch = 1_791_041_400;
+        let lord_howe = |t: i64| if t < switch { 37_800 } else { 39_600 };
+        let mut cache = HourOffset::EMPTY;
+        assert_eq!(cache.offset_at(switch + 600, lord_howe), 39_600);
+        assert_eq!(cache.offset_at(switch - 600, lord_howe), 37_800);
+        assert_eq!(cache.offset_at(switch + 4000, lord_howe), 39_600);
+        assert_eq!(cache.offset_at(switch + 3600, lord_howe), 39_600);
+    }
 
     #[test]
     fn civil_matches_known_dates() {

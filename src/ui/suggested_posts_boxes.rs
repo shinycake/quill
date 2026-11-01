@@ -7,6 +7,7 @@ use super::shell::{DialogKind, QuillShell};
 use super::suggested_posts_state::{BalanceFor, PriceBox, SuggestTarget, TimeBox, TimeTarget};
 use super::suggested_posts_ui::price_amount;
 use crate::ui::status_note::StatusNote;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
@@ -235,7 +236,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let limits = self.suggest_limits();
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let picker = super::scheduled::new_date_time_picker(
             window,
             cx,
@@ -277,7 +278,9 @@ impl QuillApp {
                 cx.notify();
                 return;
             };
-            let clamped = self.suggest_limits().clamp_time(now_unix(), picked);
+            let clamped = self
+                .suggest_limits()
+                .clamp_time(WallClock::of(cx).now(), picked);
             i32::try_from(clamped).unwrap_or(i32::MAX)
         };
         let target = time_box.target;
@@ -505,7 +508,7 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(
-                    DatePicker::new(&time_box.picker)
+                    DatePicker::new(&time_box.picker.state)
                         .placeholder(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME_2)),
                 )
                 .children(

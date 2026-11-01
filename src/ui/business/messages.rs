@@ -4,7 +4,8 @@
 use super::{AwayDraft, GreetingDraft, Leave, MessageKind, ScheduleChoice};
 use crate::ui::app::QuillApp;
 use crate::ui::quick_replies::View as QuickRepliesView;
-use crate::ui::scheduled::{picked_unix, picker_value};
+use crate::ui::scheduled::{TimePicker, picked_unix};
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -16,7 +17,6 @@ use quill::business_settings::{
     self as bs, AwaySchedule, AwaySettings, BusinessRecipients, GreetingSettings,
 };
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 use quill::quick_replies::count_label;
 
 fn greeting_about() -> &'static str {
@@ -33,20 +33,13 @@ fn offline_about() -> &'static str {
 
 /// A date and time picker for the custom away schedule. Unlike the
 /// message scheduler it allows past days (tdesktop's minimum is 2013).
-fn away_picker(
-    window: &mut Window,
-    cx: &mut Context<QuillApp>,
-    unix: i64,
-) -> Entity<DatePickerState> {
+fn away_picker(window: &mut Window, cx: &mut Context<QuillApp>, unix: i64) -> TimePicker {
     let state = cx.new(|cx| {
         DatePickerState::new(window, cx)
             .time_precision(TimePrecision::Minute)
             .hour_cycle(HourCycle::H23)
     });
-    if let Some(value) = picker_value(unix) {
-        state.update(cx, |s, cx| s.set_date_time(value, window, cx));
-    }
-    state
+    TimePicker::open(state, unix, window, cx)
 }
 
 impl QuillApp {
@@ -89,8 +82,10 @@ impl QuillApp {
 
     pub(super) fn new_away_draft(&self, window: &mut Window, cx: &mut Context<Self>) -> AwayDraft {
         let saved = self.my_business().away;
-        let (start, end) =
-            bs::initial_custom_interval(saved.as_ref().map(|s| s.schedule), now_unix());
+        let (start, end) = bs::initial_custom_interval(
+            saved.as_ref().map(|s| s.schedule),
+            WallClock::of(cx).now(),
+        );
         let schedule = match saved.as_ref().map(|s| s.schedule) {
             Some(AwaySchedule::OutsideOpeningHours) => ScheduleChoice::OutsideHours,
             Some(AwaySchedule::Custom { .. }) => ScheduleChoice::Custom,
@@ -356,7 +351,7 @@ impl QuillApp {
                         .child(div().text_sm().child(label))
                         .child(
                             div().w(px(240.)).child(
-                                DatePicker::new(&state)
+                                DatePicker::new(&state.state)
                                     .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
                             ),
                         ),
