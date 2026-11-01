@@ -66,7 +66,6 @@ ui = [
     "dep:cpal",
     "dep:rusty-opus",
     "dep:resvg",
-    "dep:futures-channel",
     "dep:gpui_macos",
     "dep:gpui_windows",
     "dep:objc2-image-io",
@@ -146,7 +145,7 @@ chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 smallvec = { version = "1", optional = true }
 # Interface scale (docs/decisions/codex-interface-scale-full.md): the platform
 # decorator names GPUI's oneshot receiver type. Already in the lockfile via GPUI.
-futures-channel = { version = "0.3", optional = true }
+futures-channel = "0.3"
 # Mini apps (docs/decisions/codex-miniapp-webview.md): the wire types shared
 # with the quill-webview helper process.
 quill-webview-protocol = { path = "crates/webview-protocol" }
@@ -271,6 +270,7 @@ gpui_macos = { package = "gpui-pre-macos", version = "=0.3.10", optional = true,
 objc2-media-player = { version = "0.3.2", optional = true, default-features = false, features = ["std", "MPNowPlayingInfoCenter", "MPRemoteCommandCenter", "MPRemoteCommand", "MPMediaItem", "MPRemoteCommandEvent", "block2"] }
 
 [dev-dependencies]
+futures-lite = "2"
 pretty_assertions = "1"
 unicode-bidi-mirroring = "0.4"
 # Turns on the test-only branches of the library (private media-cache root) for

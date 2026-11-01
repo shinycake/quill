@@ -216,22 +216,12 @@ fn missing_message(what: &str, os: &str) -> String {
 
 /// True when Windows' privacy settings block this device for desktop apps
 /// (Settings › Privacy & security › Camera / Microphone). Reads the
-/// CapabilityAccessManager consent store; `false` when it can't tell.
+/// CapabilityAccessManager consent store in process, as tdesktop does;
+/// `false` when it can't tell.
 pub fn windows_privacy_denied(camera: bool) -> bool {
     #[cfg(windows)]
     {
-        let device = if camera { "webcam" } else { "microphone" };
-        let base = format!(
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{device}"
-        );
-        [base.clone(), format!(r"{base}\NonPackaged")]
-            .iter()
-            .any(|key| {
-                let mut command = Command::new("reg");
-                command.args(["query", key, "/v", "Value"]);
-                crate::child_timeout::output_within(&mut command, crate::child_timeout::PROBE_LIMIT)
-                    .is_ok_and(|out| consent_denies(&String::from_utf8_lossy(&out.stdout)))
-            })
+        any_key_denies(&consent_store_keys(camera))
     }
     #[cfg(not(windows))]
     {
@@ -240,14 +230,31 @@ pub fn windows_privacy_denied(camera: bool) -> bool {
     }
 }
 
-/// `reg query … /v Value` output with the value set to `Deny`.
-pub fn consent_denies(reg_output: &str) -> bool {
-    reg_output.lines().any(|line| {
-        let mut parts = line.split_whitespace();
-        parts.next() == Some("Value")
-            && parts.next() == Some("REG_SZ")
-            && parts.next() == Some("Deny")
+#[cfg(windows)]
+fn consent_store_keys(camera: bool) -> [String; 2] {
+    let device = if camera { "webcam" } else { "microphone" };
+    let base = format!(
+        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{device}"
+    );
+    [base.clone(), format!(r"{base}\NonPackaged")]
+}
+
+#[cfg(windows)]
+fn any_key_denies(keys: &[String]) -> bool {
+    keys.iter().any(|key| {
+        consent_denies(
+            crate::winreg::get_string(key, "Value")
+                .ok()
+                .flatten()
+                .as_deref(),
+        )
     })
+}
+
+/// The consent store's `Value` string blocks the device; a missing value
+/// does not.
+pub fn consent_denies(value: Option<&str>) -> bool {
+    value == Some("Deny")
 }
 
 /// Same as [`command`], which already hides the console window on Windows.
@@ -581,12 +588,23 @@ mod tests {
 
     #[test]
     fn registry_consent_value_deny_is_detected() {
-        let deny = "\nHKEY_CURRENT_USER\\Software\\X\\microphone\n    Value    REG_SZ    Deny\n";
-        assert!(consent_denies(deny));
-        assert!(!consent_denies(&deny.replace("Deny", "Allow")));
-        assert!(!consent_denies(
-            "ERROR: The system was unable to find the registry key"
-        ));
+        assert!(consent_denies(Some("Deny")));
+        assert!(!consent_denies(Some("Allow")));
+        assert!(!consent_denies(None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn consent_store_value_is_read_in_process() {
+        let subkey = format!(r"Software\Quill\Tests\consent-{}", std::process::id());
+        let missing = format!(r"{subkey}\Missing");
+        let keys = [subkey.clone(), missing];
+        assert!(!any_key_denies(&keys));
+        crate::winreg::set_string(&subkey, "Value", "Allow").unwrap();
+        assert!(!any_key_denies(&keys));
+        crate::winreg::set_string(&subkey, "Value", "Deny").unwrap();
+        assert!(any_key_denies(&keys));
+        crate::winreg::delete_tree(&subkey).unwrap();
     }
 
     #[test]

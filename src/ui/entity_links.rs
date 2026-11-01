@@ -152,12 +152,15 @@ impl QuillApp {
                 self.send_bot_command(chat_id, message_id, &command, cx);
             }
             LinkTarget::Email(address) => {
-                self.connection
-                    .set_note(if quill::platform::open_mailto(&address) {
+                let open = quill::platform::open_mailto(&address);
+                self.when_os_answers(open, cx, |this, opened, cx| {
+                    this.connection.set_note(if opened {
                         StatusNote::silent(tr(keys::Q_OPS_OPENED_MAIL))
                     } else {
                         StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL))
                     });
+                    cx.notify();
+                });
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
                 if let LinkTarget::BankCard(number) = &link {
