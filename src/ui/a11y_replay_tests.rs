@@ -97,6 +97,46 @@ fn replayed_slices_keep_their_nodes_focus_and_tags(cx: &mut TestAppContext) {
     assert_eq!(vcx.update(|window, _| window.hovered_a11y_tags()), hovered);
 }
 
+/// Draws the frame of a tick for the conversation's animation layer.
+/// Returns how many frames built a tree over it.
+fn tick_the_layer(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> u64 {
+    let (_, painter) = app
+        .read_with(vcx, |app, _| app.slices.conversation_ids())
+        .expect("the conversation slice");
+    let progress = |vcx: &mut VisualTestContext| {
+        vcx.update(|window, _| (window.frame_number(), window.a11y_tree_frame()))
+    };
+    let (frames, trees) = progress(vcx);
+    vcx.update(|_, cx| cx.notify(painter));
+    vcx.run_until_parked();
+    let (frames_after, trees_after) = progress(vcx);
+    assert_eq!(frames_after, frames + 1, "the tick draws a frame");
+    trees_after - trees
+}
+
+/// A tick builds no tree and sends none: layers add no nodes, so the tree
+/// the last whole frame sent stands, focus included.
+#[gpui_kit::test]
+fn a_layer_tick_leaves_the_tree_as_it_is(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    read_the_tree_with_the_composer_focused(&app, vcx);
+    let before = tree(vcx);
+    let focused = vcx.update(|window, _| window.focused_a11y_tags());
+    assert!(before.1.is_some(), "the composer reports the focus");
+
+    assert_eq!(tick_the_layer(&app, vcx), 0);
+    assert_eq!(tree(vcx), before);
+    assert_eq!(vcx.update(|window, _| window.focused_a11y_tags()), focused);
+
+    redraw_only_the_conversation(&app, vcx);
+    assert_eq!(
+        tree(vcx).1,
+        before.1,
+        "a whole frame after it keeps the focus"
+    );
+}
+
 #[gpui_kit::test]
 fn a_replayed_composer_takes_a_value_from_assistive_technology(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

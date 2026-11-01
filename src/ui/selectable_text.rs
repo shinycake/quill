@@ -8,7 +8,8 @@
 
 use gpui_kit::base::input::bidi_paragraph::BidiParagraph;
 use gpui_kit::base::{
-    RunGeometry, TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
+    RunGeometry, TextSelection, TextSelectionEvent, TextSelectionHandle, TextSelectionRegistration,
+    TextSelectionRun,
 };
 use gpui_kit::*;
 use std::cell::Cell;
@@ -284,6 +285,17 @@ impl SelectableRichText {
     }
 }
 
+fn redraw_on_selection(handle: &TextSelectionHandle, view: EntityId, cx: &mut App) -> Subscription {
+    handle.subscribe(
+        move |event, cx| {
+            if matches!(event, TextSelectionEvent::SelectionChanged(_)) {
+                cx.notify(view);
+            }
+        },
+        cx,
+    )
+}
+
 /// The laid-out text a paragraph reads positions from, whichever path made it.
 #[derive(Clone)]
 enum Laid {
@@ -393,19 +405,18 @@ impl Element for SelectableRichText {
     ) -> (LayoutId, Self::RequestLayoutState) {
         // The selection handle lives in element state, so a selection
         // survives re-renders of the row. A selection change redraws the
-        // whole window: the text may sit in a cached view (`app_slice`)
-        // that would otherwise replay its old highlight.
+        // view drawing the text.
         // `id()` is always `Some`, so GPUI always passes a global id.
         let handle = match global_id {
             Some(global_id) => window.with_element_state(
                 global_id,
                 |retained: Option<(TextSelectionHandle, Subscription)>, window| {
-                    let (handle, refresh) = retained.unwrap_or_else(|| {
+                    let (handle, redraw) = retained.unwrap_or_else(|| {
                         let handle = TextSelectionHandle::new(self.text.clone(), cx);
-                        let refresh = handle.refresh_window_on_change(window, cx);
-                        (handle, refresh)
+                        let redraw = redraw_on_selection(&handle, window.current_view(), cx);
+                        (handle, redraw)
                     });
-                    (handle.clone(), (handle, refresh))
+                    (handle.clone(), (handle, redraw))
                 },
             ),
             None => TextSelectionHandle::new(self.text.clone(), cx),
@@ -553,7 +564,6 @@ impl Element for SelectableRichText {
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
         let layout = self.laid(bounds);
-        let selected_before = TextSelection::selected_text(window, cx);
         if let Some(message) = self.message {
             OWNERS.with(|owners| {
                 let mut owners = owners.borrow_mut();
@@ -599,9 +609,6 @@ impl Element for SelectableRichText {
                 .filter_map(|range| map.source_of(&self.text, range.clone()))
                 .collect();
             handle.copy_with(move |_| copied.clone(), cx);
-        }
-        if selected_before != TextSelection::selected_text(window, cx) {
-            window.refresh();
         }
         if !self.emoji.is_empty() || SELECTED_EMOJI.with(|map| !map.borrow().is_empty()) {
             let order = self.document_order;
@@ -687,6 +694,7 @@ impl Element for SelectableRichText {
                 }
             }
             let hover_cell = over.clone();
+            let view = window.current_view();
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                 let over = &hover_cell;
                 if phase != DispatchPhase::Bubble {
@@ -702,7 +710,7 @@ impl Element for SelectableRichText {
                 if now != over.get() {
                     over.set(now);
                     handler(now.map(|ix| (ix, event.position)), window, cx);
-                    window.refresh();
+                    cx.notify(view);
                 }
             });
         }
@@ -899,6 +907,11 @@ impl Element for SelectionViewport {
         VIEWPORT.with(|viewport| viewport.set(outer));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "selectable_text_redraw_tests.rs"]
+mod redraw_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
