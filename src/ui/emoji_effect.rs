@@ -23,6 +23,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::frame_clock::TickDraw;
 use super::premium_sticker_effect;
 use super::sticker_player::{HeadId, Part, StickerView, ViewAsk};
 use gpui_kit::*;
@@ -33,6 +34,7 @@ use quill::sticker_playback::player::{PlayMode, Rest};
 use quill::telegram::envelope::{MessageContent, StickerFormat};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// tdesktop `kMaxDelay`: an effect whose sticker has not arrived by then
@@ -102,6 +104,64 @@ struct Active {
     message: Option<MessageEffectPlay>,
     /// How long a sticker that has not arrived is waited for.
     wait: Duration,
+}
+
+struct Drawn {
+    key: Key,
+    outgoing: bool,
+    seed: u64,
+    premium: bool,
+    message: bool,
+    view: StickerView,
+    painted: Cell<Option<Bounds<Pixels>>>,
+}
+
+impl Drawn {
+    /// Where it shows now, by what it follows as last painted.
+    fn bounds(&self) -> Option<Bounds<Pixels>> {
+        let (side, (x, y)) = if self.message {
+            let bounds = super::message_effect_badge::seen(self.key)?.bounds;
+            (
+                MESSAGE_EFFECT_SIDE,
+                message_effect_origin(
+                    (
+                        f32::from(bounds.left()),
+                        f32::from(bounds.top()),
+                        f32::from(bounds.right()),
+                        f32::from(bounds.bottom()),
+                    ),
+                    MESSAGE_EFFECT_SIDE,
+                    self.outgoing,
+                ),
+            )
+        } else if self.premium {
+            let sticker = premium_sticker_effect::anchor(self.key)?;
+            premium_sticker_effect::effect_rect(sticker, self.outgoing)
+        } else {
+            let anchor = anchor(self.key)?;
+            let height = f32::from(anchor.size.height);
+            let side = EMOJI_EFFECT_SIDE;
+            let origin = effect_origin(
+                (
+                    f32::from(anchor.left()),
+                    f32::from(anchor.top()),
+                    f32::from(anchor.right()),
+                    f32::from(anchor.bottom()),
+                ),
+                side,
+                self.outgoing,
+                shift_for(self.seed, height),
+            );
+            (side, origin)
+        };
+        Some(Bounds::new(point(px(x), px(y)), size(px(side), px(side))))
+    }
+
+    /// Whether a tick's `draw` would show it as it stands: on the same
+    /// frame, where it was painted. The chat scrolling under it moves it.
+    fn stays(&self, draw: TickDraw) -> bool {
+        self.view.plays_on(draw) && self.painted.get() == self.bounds()
+    }
 }
 
 /// What a message effect needs besides the sticker it plays.
@@ -290,6 +350,15 @@ fn begin_pass(keep: &dyn Fn(i64) -> bool) {
 
 fn anchor(key: Key) -> Option<Bounds<Pixels>> {
     ANCHORS.with(|anchors| anchors.borrow().get(&key).copied())
+}
+
+#[cfg(test)]
+pub(super) fn move_anchor(key: Key, by: Pixels) {
+    ANCHORS.with(|anchors| {
+        if let Some(anchor) = anchors.borrow_mut().get_mut(&key) {
+            anchor.origin.y += by;
+        }
+    });
 }
 
 /// An invisible child that notes where a lone emoji is painted: the whole
@@ -539,20 +608,21 @@ impl QuillApp {
         follow_badges(open, now);
         let shown = self.chats_on_screen();
         self.advance_effects(open, &shown, now, cx);
-        let drawn: Vec<(Key, bool, u64, bool, bool, StickerView)> = ACTIVE.with(|active| {
+        let drawn: Vec<Drawn> = ACTIVE.with(|active| {
             active
                 .borrow()
                 .iter()
                 .filter(|a| a.effect.chat_id == open)
                 .filter_map(|a| {
-                    Some((
-                        (a.effect.chat_id.0, a.effect.message_id.0),
-                        a.outgoing,
-                        a.seed,
-                        a.premium,
-                        a.message.is_some(),
-                        a.view.as_ref()?.0.clone(),
-                    ))
+                    Some(Drawn {
+                        key: (a.effect.chat_id.0, a.effect.message_id.0),
+                        outgoing: a.outgoing,
+                        seed: a.seed,
+                        premium: a.premium,
+                        message: a.message.is_some(),
+                        view: a.view.as_ref()?.0.clone(),
+                        painted: Cell::new(None),
+                    })
                 })
                 .collect()
         });
@@ -561,61 +631,34 @@ impl QuillApp {
         }
         let fps = drawn
             .iter()
-            .map(|(.., view)| view.fps())
+            .map(|effect| effect.view.fps())
             .max()
             .unwrap_or(0)
             .max(OPENING_FPS);
-        self.request_app_tick(fps, cx);
+        let drawn = Rc::new(drawn);
+        let every_one_drawn = ACTIVE.with(|active| {
+            let here = active.borrow();
+            here.iter()
+                .filter(|a| a.effect.chat_id == open)
+                .all(|a| a.view.is_some())
+        });
+        if every_one_drawn {
+            let effects = drawn.clone();
+            let still = move |draw: TickDraw| effects.iter().all(|effect| effect.stays(draw));
+            self.request_app_tick_unless(Rc::new(still), fps, cx);
+        } else {
+            self.request_app_tick(fps, cx);
+        }
         Some(
             canvas(
                 |_, _, _| {},
-                move |_, _, window, cx| {
-                    super::sticker_player::note_display(window, cx);
-                    for (key, outgoing, seed, premium, message, view) in &drawn {
-                        let (side, (x, y)) = if *message {
-                            let Some(badge) = super::message_effect_badge::seen(*key) else {
-                                continue;
-                            };
-                            let bounds = badge.bounds;
-                            (
-                                MESSAGE_EFFECT_SIDE,
-                                message_effect_origin(
-                                    (
-                                        f32::from(bounds.left()),
-                                        f32::from(bounds.top()),
-                                        f32::from(bounds.right()),
-                                        f32::from(bounds.bottom()),
-                                    ),
-                                    MESSAGE_EFFECT_SIDE,
-                                    *outgoing,
-                                ),
-                            )
-                        } else if *premium {
-                            let Some(sticker) = premium_sticker_effect::anchor(*key) else {
-                                continue;
-                            };
-                            premium_sticker_effect::effect_rect(sticker, *outgoing)
-                        } else {
-                            let Some(anchor) = anchor(*key) else {
-                                continue;
-                            };
-                            let height = f32::from(anchor.size.height);
-                            let side = EMOJI_EFFECT_SIDE;
-                            let origin = effect_origin(
-                                (
-                                    f32::from(anchor.left()),
-                                    f32::from(anchor.top()),
-                                    f32::from(anchor.right()),
-                                    f32::from(anchor.bottom()),
-                                ),
-                                side,
-                                *outgoing,
-                                shift_for(*seed, height),
-                            );
-                            (side, origin)
-                        };
-                        let bounds = Bounds::new(point(px(x), px(y)), size(px(side), px(side)));
-                        view.paint(bounds, window);
+                move |_, _, window, _| {
+                    for effect in drawn.iter() {
+                        let bounds = effect.bounds();
+                        effect.painted.set(bounds);
+                        if let Some(bounds) = bounds {
+                            effect.view.paint(bounds, window);
+                        }
                     }
                 },
             )

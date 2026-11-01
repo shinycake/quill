@@ -180,8 +180,7 @@ fn effect_element(frame: StarEffectFrame, badge: Div, burst: Option<StickerView>
                 .child(
                     canvas(
                         |_, _, _| {},
-                        move |bounds, (), window, cx| {
-                            crate::ui::sticker_player::note_display(window, cx);
+                        move |bounds, (), window, _| {
                             view.paint(bounds, window);
                         },
                     )

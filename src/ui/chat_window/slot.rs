@@ -27,6 +27,7 @@ use super::super::image_budget::{BoundedImageCache, WindowDraw};
 use super::super::message_state::MessageUi;
 use super::super::pickers_state::PickerUi;
 use super::super::share_state::ShareUi;
+use super::super::sticker_player;
 use super::super::viewer_state::ViewerUi;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
@@ -206,6 +207,8 @@ impl QuillApp {
         if started == frame {
             return;
         }
+        let display = window.display(cx).map(|display| u64::from(display.id()));
+        sticker_player::note_display(Some(chat), display, window, cx);
         self.sticker_frame_starts(cx);
         images.update(cx, |images, cx| {
             images.begin_window_frame(draw, window, cx);
