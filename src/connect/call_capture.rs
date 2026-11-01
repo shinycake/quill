@@ -151,6 +151,15 @@ impl CallCapture {
             .is_some_and(|active| active.controls.system_audio().is_some())
     }
 
+    /// How long until a lost microphone is opened again, so the poll
+    /// loop wakes for it. Nothing once that is due.
+    pub(crate) fn reopen_deadline(&self, now: Instant) -> Option<Duration> {
+        let waited = now.saturating_duration_since(self.failed_at?);
+        REOPEN_AFTER
+            .checked_sub(waited)
+            .filter(|left| !left.is_zero())
+    }
+
     fn open(
         &mut self,
         target: CaptureTarget,
@@ -158,6 +167,7 @@ impl CallCapture {
         noise_suppression: bool,
         muted: bool,
         sender: Arc<dyn crate::calls::engine::ExternalFrameSender>,
+        now: Instant,
     ) {
         let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
         controls.set_muted(muted);
@@ -170,7 +180,7 @@ impl CallCapture {
         let mic = match opened {
             Ok(mic) => mic,
             Err(err) => {
-                self.failed_at = Some(Instant::now());
+                self.failed_at = Some(now);
                 self.error = Some(err.to_string());
                 return;
             }
@@ -191,7 +201,7 @@ impl CallCapture {
             Err(err) => {
                 let mut mic = mic;
                 mic.stop();
-                self.failed_at = Some(Instant::now());
+                self.failed_at = Some(now);
                 self.error = Some(format!("Couldn't start the call microphone: {err}"));
             }
         }
@@ -257,9 +267,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|device| device.name.clone())
     }
 
+    /// The microphone and the shared screen report on threads of their
+    /// own, and a connected call may get no Telegram updates, so every
+    /// poll reads them too. Returns whether the call window changed.
+    pub(crate) fn pump_call_media(&mut self, now: Instant) -> bool {
+        let shown = |driver: &Self| {
+            (
+                driver.call_capture.target(),
+                driver.call_capture.error.clone(),
+                driver.call_screen.target(),
+                driver.call_screen.paused(),
+                driver.call_screen.error.clone(),
+            )
+        };
+        let before = shown(self);
+        self.pump_call_capture(now);
+        self.pump_call_screen();
+        before != shown(self)
+    }
+
     /// Start, follow and stop the call microphone. Called from the
     /// driver pump.
-    pub(crate) fn pump_call_capture(&mut self) {
+    pub(crate) fn pump_call_capture(&mut self, now: Instant) {
         let wanted = self.capture_wanted();
         let device = self.capture_device_name();
         let group_pref = self.session.calls.prefs.call_noise_suppression;
@@ -284,7 +313,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         if let Some(err) = failure {
             capture.stop();
-            capture.failed_at = Some(Instant::now());
+            capture.failed_at = Some(now);
             capture.error = Some(err);
         }
         let Some((target, muted)) = wanted else {
@@ -301,7 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !capture.enabled()
             || capture
                 .failed_at
-                .is_some_and(|at| at.elapsed() < REOPEN_AFTER)
+                .is_some_and(|at| now.saturating_duration_since(at) < REOPEN_AFTER)
         {
             return;
         }
@@ -314,7 +343,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        capture.open(target, device, noise_suppression, muted, sender);
+        capture.open(target, device, noise_suppression, muted, sender, now);
     }
 
     /// Apply the noise suppression switch (the voice chat window's

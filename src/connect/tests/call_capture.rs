@@ -119,20 +119,20 @@ fn group_call_microphone_feeds_the_engine_and_follows_mute() {
     let (dir, mut driver, engine, mics) = group_driver();
 
     // Not in a call: nothing opens.
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.opened.lock().unwrap().is_empty());
 
     // Joined but the transport is not up yet: still nothing.
     let mut call = joined_group_call(false);
     call.transport_ready = false;
     driver.session.calls.active_group_call = Some(call);
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.opened.lock().unwrap().is_empty());
 
     // Transport up: the default microphone opens and its frames reach the
     // group's external microphone.
     driver.session.calls.active_group_call = Some(joined_group_call(false));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(*mics.opened.lock().unwrap(), vec![None]);
     assert_eq!(
         driver.call_capture().target(),
@@ -161,13 +161,13 @@ fn group_call_microphone_feeds_the_engine_and_follows_mute() {
         .as_mut()
         .unwrap()
         .is_muted_self = true;
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(driver.call_capture().muted(), Some(true));
     assert_eq!(mics.opened.lock().unwrap().len(), 1, "no reopen on mute");
 
     // Leaving closes the microphone.
     driver.session.calls.active_group_call = None;
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.stopped.load(Ordering::SeqCst));
     assert_eq!(driver.call_capture().target(), None);
     std::fs::remove_dir_all(dir).ok();
@@ -178,7 +178,7 @@ fn noise_suppression_switch_applies_to_the_running_microphone() {
     let (dir, mut driver, _engine, mics) = group_driver();
     driver.session.calls.prefs.call_noise_suppression = false;
     driver.session.calls.active_group_call = Some(joined_group_call(false));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     let controls = mics.controls.lock().unwrap().clone().unwrap();
     assert!(!controls.noise_suppression());
     // The switch flips it at once, without a pump.
@@ -193,19 +193,19 @@ fn noise_suppression_switch_applies_to_the_running_microphone() {
 fn a_lost_microphone_is_reported_and_reopened_later() {
     let (dir, mut driver, _engine, mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(false));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     let sink = mics.sink.lock().unwrap().clone().unwrap();
     sink.push_event(CaptureEvent::Failed(CaptureError::Device(
         "Microphone stopped: device gone".into(),
     )));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.stopped.load(Ordering::SeqCst));
     assert_eq!(
         driver.group_call_level_error(),
         Some("Microphone stopped: device gone")
     );
     // Within the retry delay nothing reopens.
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(mics.opened.lock().unwrap().len(), 1);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -215,7 +215,7 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
     let (dir, mut driver, _engine, mics) = group_driver();
     mics.fail.store(true, Ordering::SeqCst);
     driver.session.calls.active_group_call = Some(joined_group_call(false));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(driver.call_capture().target(), None);
     assert_eq!(
         driver.group_call_level_error(),
@@ -223,7 +223,7 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
     );
     // Leaving clears the note.
     driver.session.calls.active_group_call = None;
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(driver.group_call_level_error(), None);
     std::fs::remove_dir_all(dir).ok();
 }
@@ -232,7 +232,7 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
 fn your_level_comes_from_the_call_microphone() {
     let (dir, mut driver, _engine, _mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(false));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     driver.pump_call_audio().unwrap();
     assert!(driver.call_audio.is_open());
     driver.call_capture().level().record(1.3);
@@ -254,7 +254,7 @@ fn private_call_uses_the_chosen_microphone() {
     // The switch belongs to group calls; 1:1 calls always denoise.
     driver.session.calls.prefs.call_noise_suppression = false;
     // No transport yet: nothing opens.
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.opened.lock().unwrap().is_empty());
 
     let mut engine = handle.clone();
@@ -275,7 +275,7 @@ fn private_call_uses_the_chosen_microphone() {
         )
         .unwrap();
     driver.session.calls.active_call.as_mut().unwrap().transport = Some(TransportState::Connected);
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(
         *mics.opened.lock().unwrap(),
         vec![Some("USB Mic".to_string())]
@@ -294,7 +294,7 @@ fn private_call_uses_the_chosen_microphone() {
 
     // Picking another microphone reopens on it.
     driver.selected_devices.0 = None;
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert_eq!(
         *mics.opened.lock().unwrap(),
         vec![Some("USB Mic".to_string()), None]
@@ -302,7 +302,7 @@ fn private_call_uses_the_chosen_microphone() {
 
     // A failed transport stops the microphone.
     driver.session.calls.active_call.as_mut().unwrap().transport = Some(TransportState::Failed);
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     assert!(mics.stopped.load(Ordering::SeqCst));
     std::fs::remove_dir_all(dir).ok();
 }
@@ -313,7 +313,7 @@ fn private_call_uses_the_chosen_microphone() {
 fn talking_while_muted_shows_the_hint_until_you_unmute() {
     let (dir, mut driver, _engine, mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(true));
-    driver.pump_call_capture();
+    driver.pump_call_capture(Instant::now());
     let controls = mics.controls.lock().unwrap().clone().expect("open");
     let t0 = Instant::now();
     assert!(!driver.request_tick(t0), "starts listening");
@@ -346,5 +346,39 @@ fn talking_while_muted_shows_the_hint_until_you_unmute() {
         .is_muted_self = false;
     assert!(driver.request_tick(t0 + Duration::from_millis(1600)));
     assert!(!driver.group_call_muted_speech_hint());
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A connected call may get no Telegram updates: the poll alone notices the
+/// lost microphone, says so, and opens it again 2 s later.
+#[test]
+fn a_lost_microphone_needs_no_telegram_update() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    let t0 = Instant::now();
+    driver.pump_call_capture(t0);
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+    let sink = mics.sink.lock().unwrap().clone().expect("open");
+
+    let woken = crate::wake::UPDATES.epoch();
+    sink.push_event(CaptureEvent::Ended);
+    assert_ne!(crate::wake::UPDATES.epoch(), woken, "the poll loop wakes");
+
+    assert!(driver.request_tick(t0), "the call window shows the note");
+    assert_eq!(driver.call_capture().target(), None);
+    assert_eq!(
+        driver.call_capture().error.as_deref(),
+        Some("The microphone was disconnected.")
+    );
+    let t1 = t0 + Duration::from_secs(1);
+    assert_eq!(driver.next_deadline(t1, 0), Some(Duration::from_secs(1)));
+    assert!(!driver.request_tick(t1), "too early to try again");
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+
+    assert!(driver.request_tick(t0 + Duration::from_secs(2)));
+    assert_eq!(mics.opened.lock().unwrap().len(), 2);
+    assert!(driver.call_capture().target().is_some());
+    assert_eq!(driver.call_capture().error, None);
+    assert_eq!(driver.next_deadline(t0, 0), None);
     std::fs::remove_dir_all(dir).ok();
 }

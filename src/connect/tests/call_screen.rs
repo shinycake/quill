@@ -224,7 +224,7 @@ fn a_closed_window_ends_the_share() {
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
     driver.pump_call_screen();
     sink_of(&screens).push_event(CaptureEvent::Ended);
-    driver.pump_call_screen();
+    assert!(driver.request_tick(Instant::now()), "no Telegram update needed");
     assert!(screens.stopped.load(Ordering::SeqCst));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     let call = driver.session.calls.active_group_call.as_ref().unwrap();

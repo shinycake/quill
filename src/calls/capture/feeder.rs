@@ -93,8 +93,10 @@ impl<T> FrameSink<T> {
         self.shared.dropped.load(Ordering::Relaxed)
     }
 
+    /// Report `event` and wake the poll loop, which reads it.
     pub fn push_event(&self, event: CaptureEvent) {
         self.shared.events.lock_or_recover().push_back(event);
+        crate::wake::UPDATES.poke();
     }
 
     /// Events reported since the last call, oldest first.
