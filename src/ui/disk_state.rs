@@ -13,7 +13,7 @@ use gpui_kit::{
     transparent_black,
 };
 use quill::auth::{AuthAction, AuthView};
-use quill::disk_guard::{DiskState, DiskStep, FLOORS, available_bytes, next_read_in};
+use quill::disk_guard::{DiskClients, DiskState, DiskStep, FLOORS, available_bytes, next_read_in};
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 
@@ -79,9 +79,15 @@ impl QuillApp {
             running = true;
             let _ = live.driver.note_disk(after, free, &FLOORS);
         }
-        let retry = self.disk.start_refused && free.is_some_and(|free| free >= FLOORS.open);
+        let retry_starts = self.disk.start_refused && free.is_some_and(|free| free >= FLOORS.open);
         let before = self.enter_disk_state(after, cx);
-        match before.step(after, running, retry) {
+        match before.step(
+            after,
+            DiskClients {
+                running,
+                retry_starts,
+            },
+        ) {
             DiskStep::Hold => {}
             DiskStep::Close => self.close_clients_for_full_disk(cx),
             DiskStep::Reconnect if self.account.passcode.locked => {
@@ -146,7 +152,7 @@ impl QuillApp {
     }
 
     /// The kit's banner has no action slot, so the row around it carries the
-    /// tint and the button. Sign-in has no Settings for the button to open.
+    /// tint and the button.
     pub(super) fn disk_low_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
         (self.disk.state == DiskState::Low).then(|| {
             let settings_can_show = self.pane_mode() != PaneMode::Connecting;

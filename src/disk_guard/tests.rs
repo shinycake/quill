@@ -7,6 +7,23 @@ const FLOORS: DiskFloors = DiskFloors {
     open: 200,
 };
 
+const NONE: DiskClients = DiskClients {
+    running: false,
+    retry_starts: false,
+};
+const RUNNING: DiskClients = DiskClients {
+    running: true,
+    ..NONE
+};
+const RETRY: DiskClients = DiskClients {
+    retry_starts: true,
+    ..NONE
+};
+const RUNNING_AND_RETRY: DiskClients = DiskClients {
+    running: true,
+    retry_starts: true,
+};
+
 fn walk(start: DiskState, reads: &[Option<u64>]) -> Vec<DiskState> {
     let mut state = start;
     reads
@@ -96,22 +113,22 @@ fn a_read_that_says_nothing_never_changes_the_state() {
 fn going_full_closes_clients_and_leaving_full_reconnects() {
     use DiskState::{Full, Healthy, Low};
     for before in [Healthy, Low] {
-        assert_eq!(before.step(Full, false, false), DiskStep::Close);
-        assert_eq!(before.step(Full, true, true), DiskStep::Close);
+        assert_eq!(before.step(Full, NONE), DiskStep::Close);
+        assert_eq!(before.step(Full, RUNNING_AND_RETRY), DiskStep::Close);
     }
-    assert_eq!(Full.step(Full, false, true), DiskStep::Hold, "all closed");
-    assert_eq!(Full.step(Full, true, false), DiskStep::Close, "one opened");
-    assert_eq!(Full.step(Low, false, false), DiskStep::Reconnect);
-    assert_eq!(Full.step(Healthy, false, true), DiskStep::Reconnect);
+    assert_eq!(Full.step(Full, RETRY), DiskStep::Hold, "all closed");
+    assert_eq!(Full.step(Full, RUNNING), DiskStep::Close, "one opened");
+    assert_eq!(Full.step(Low, NONE), DiskStep::Reconnect);
+    assert_eq!(Full.step(Healthy, RETRY), DiskStep::Reconnect);
 }
 
 #[test]
 fn a_refused_start_goes_again_only_outside_full() {
     use DiskState::{Healthy, Low};
-    assert_eq!(Low.step(Low, true, true), DiskStep::RetryStarts);
-    assert_eq!(Low.step(Healthy, true, true), DiskStep::RetryStarts);
-    assert_eq!(Low.step(Low, true, false), DiskStep::Hold);
-    assert_eq!(Healthy.step(Healthy, true, false), DiskStep::Hold);
+    assert_eq!(Low.step(Low, RUNNING_AND_RETRY), DiskStep::RetryStarts);
+    assert_eq!(Low.step(Healthy, RUNNING_AND_RETRY), DiskStep::RetryStarts);
+    assert_eq!(Low.step(Low, RUNNING), DiskStep::Hold);
+    assert_eq!(Healthy.step(Healthy, RUNNING), DiskStep::Hold);
 }
 
 #[test]
@@ -134,7 +151,7 @@ fn reads_speed_up_as_the_disk_nears_the_close_floor() {
     assert_eq!(next_read_in(Some(u64::MAX), &floors), LONGEST_READ);
     assert_eq!(next_read_in(None, &floors), LONGEST_READ);
     assert_eq!(
-        next_read_in(Some(floors.close + 10 * FASTEST_WRITER), &floors),
+        next_read_in(Some(floors.close + 10 * FASTEST_WRITER_PER_SEC), &floors),
         Duration::from_secs(10)
     );
     assert_eq!(next_read_in(Some(floors.close), &floors), SHORTEST_READ);

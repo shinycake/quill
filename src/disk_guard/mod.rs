@@ -16,26 +16,22 @@ const MIB: u64 = 1 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskFloors {
-    /// About 20 of the largest automatic download (`AUTO_DOWNLOAD_MAX_BYTES`,
-    /// 50 MiB), so the warning comes while there is still room to act on it.
     pub warn: u64,
     pub warn_clear: u64,
-    /// A clean close still writes: one binlog rewrite (a copy of its live
-    /// events, which TDLib calls large past 10 MiB) and one SQLite WAL
-    /// checkpoint (4 MiB at the default 1000 pages), for each open account.
-    /// That is 42 MiB for three accounts, rounded up to [`CLOSE_WRITES`],
-    /// plus one [`next_read_in`] step at [`FASTEST_WRITER`], plus
-    /// [`APFS_RESERVE`].
     pub close: u64,
     pub open: u64,
 }
 
+/// TDLib's close flushes each binlog and checkpoints each SQLite WAL, and
+/// until a binlog closes any new event can start a reindex, which writes a
+/// copy of its live events.
 const CLOSE_WRITES: u64 = 64 * MIB;
 /// Free space `statfs` reports and APFS will not hand out: a new file failed
 /// with 32.1 MiB reported free on 2, 4 and 8 GiB volumes.
 const APFS_RESERVE: u64 = 32 * MIB;
 const CATCH_UP_ROOM: u64 = 128 * MIB;
-const CLOSE_FLOOR: u64 = CLOSE_WRITES + FASTEST_WRITER + APFS_RESERVE;
+const WRITTEN_IN_SHORTEST_READ: u64 = FASTEST_WRITER_PER_SEC * SHORTEST_READ.as_secs();
+const CLOSE_FLOOR: u64 = CLOSE_WRITES + WRITTEN_IN_SHORTEST_READ + APFS_RESERVE;
 
 pub const FLOORS: DiskFloors = DiskFloors {
     warn: 1024 * MIB,
@@ -44,9 +40,7 @@ pub const FLOORS: DiskFloors = DiskFloors {
     open: CLOSE_FLOOR + CATCH_UP_ROOM,
 };
 
-/// The fastest write the reads have to keep up with: a download at about
-/// 500 Mbit/s.
-const FASTEST_WRITER: u64 = 64 * MIB;
+const FASTEST_WRITER_PER_SEC: u64 = 64 * MIB;
 const SHORTEST_READ: Duration = Duration::from_secs(1);
 const LONGEST_READ: Duration = Duration::from_secs(30);
 
@@ -54,14 +48,11 @@ const LONGEST_READ: Duration = Duration::from_secs(30);
 pub enum DiskState {
     #[default]
     Healthy,
-    /// Clients run; the bar shows and automatic downloads wait.
     Low,
-    /// No client runs. Holds until `open` is free, however it was reached.
     Full,
 }
 
 impl DiskState {
-    /// `None` is no reading: the state stays.
     pub fn next(self, free: Option<u64>, floors: &DiskFloors) -> Self {
         let Some(free) = free else {
             return self;
@@ -79,20 +70,24 @@ impl DiskState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiskStep {
     Hold,
-    /// Close every client and end the starts in flight.
     Close,
     Reconnect,
     RetryStarts,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiskClients {
+    pub running: bool,
+    pub retry_starts: bool,
+}
+
 impl DiskState {
-    /// `running`: a client is up. `retry`: a refused start can go again.
-    pub fn step(self, after: Self, running: bool, retry: bool) -> DiskStep {
+    pub fn step(self, after: Self, clients: DiskClients) -> DiskStep {
         match (self, after) {
-            (Self::Full, Self::Full) if !running => DiskStep::Hold,
+            (Self::Full, Self::Full) if !clients.running => DiskStep::Hold,
             (_, Self::Full) => DiskStep::Close,
             (Self::Full, _) => DiskStep::Reconnect,
-            _ if retry => DiskStep::RetryStarts,
+            _ if clients.retry_starts => DiskStep::RetryStarts,
             _ => DiskStep::Hold,
         }
     }
@@ -110,7 +105,7 @@ pub fn next_read_in(free: Option<u64>, floors: &DiskFloors) -> Duration {
     let Some(free) = free else {
         return LONGEST_READ;
     };
-    Duration::from_secs(free.saturating_sub(floors.close) / FASTEST_WRITER)
+    Duration::from_secs(free.saturating_sub(floors.close) / FASTEST_WRITER_PER_SEC)
         .clamp(SHORTEST_READ, LONGEST_READ)
 }
 
