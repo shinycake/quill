@@ -38,6 +38,12 @@ fn read(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, free: Option<u64>) 
     app.update_in(vcx, |app, _, cx| app.apply_disk_reading(free, cx));
 }
 
+/// Two readings below close, as the watcher takes them `CONFIRM_READ` apart.
+fn fill(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, free: Option<u64>) {
+    read(app, vcx, free);
+    read(app, vcx, free);
+}
+
 fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, u64) {
     app.update_in(vcx, |app, _, cx| {
         (
@@ -72,7 +78,7 @@ fn the_bar_shows_only_while_the_disk_is_low(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_full_disk_shows_the_screen_with_what_is_free_and_what_is_needed(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
-    read(&app, &mut vcx, Some(FLOORS.close / 2));
+    fill(&app, &mut vcx, Some(FLOORS.close / 2));
     assert!(!shown(&app, &mut vcx).0, "the screen replaces the bar");
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
     assert_eq!(view.title, tr(keys::Q_DISK_FULL_TITLE));
@@ -136,7 +142,7 @@ fn a_full_disk_closes_chat_windows(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     assert_eq!(vcx.windows().len(), main_only + 1, "the chat window opened");
-    read(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
     vcx.run_until_parked();
     assert_eq!(vcx.windows().len(), main_only);
 }
@@ -146,11 +152,11 @@ fn going_full_brings_the_main_window_forward_once(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     vcx.run_until_parked();
     vcx.deactivate_window();
-    read(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
     vcx.run_until_parked();
     assert!(vcx.update(|window, _| window.is_window_active()));
     vcx.deactivate_window();
-    read(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
     vcx.run_until_parked();
     assert!(!vcx.update(|window, _| window.is_window_active()), "once");
 }
@@ -170,7 +176,7 @@ fn a_refused_open_brings_the_main_window_forward(cx: &mut TestAppContext) {
 fn leaving_a_full_disk_reconnects_once(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;
-    read(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
     assert_eq!(shown(&app, &mut vcx), (false, true, start));
     read(&app, &mut vcx, Some(FLOORS.open - 1));
     assert_eq!(
@@ -205,7 +211,7 @@ fn a_refused_open_holds_the_screen_until_the_open_floor(cx: &mut TestAppContext)
 fn recovering_while_locked_connects_at_the_unlock(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;
-    read(&app, &mut vcx, Some(0));
+    fill(&app, &mut vcx, Some(0));
     app.update_in(&mut vcx, |app, _, _| app.account.passcode.locked = true);
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     assert_eq!(shown(&app, &mut vcx), (false, false, start));
@@ -256,9 +262,11 @@ fn more_accounts_need_more_room_on_the_full_screen(cx: &mut TestAppContext) {
         accounts: 6,
         ..DataUse::ONE
     });
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.apply_data_reading(Some(FLOORS.close), six, cx)
-    });
+    for _ in 0..2 {
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.apply_data_reading(Some(FLOORS.close), six, cx)
+        });
+    }
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
     assert!(
         view.body
@@ -266,4 +274,24 @@ fn more_accounts_need_more_room_on_the_full_screen(cx: &mut TestAppContext) {
         "{}",
         view.body
     );
+}
+
+#[gpui_kit::test]
+fn one_low_reading_closes_nothing_until_the_next_agrees(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let start = shown(&app, &mut vcx).2;
+    let wait = app.update_in(&mut vcx, |app, _, cx| {
+        app.apply_data_reading(Some(0), FLOORS, cx)
+    });
+    assert_eq!(wait, quill::disk_guard::CONFIRM_READ);
+    assert_eq!(shown(&app, &mut vcx), (false, false, start), "not full yet");
+    read(&app, &mut vcx, Some(FLOORS.warn_clear));
+    read(&app, &mut vcx, Some(0));
+    assert_eq!(
+        shown(&app, &mut vcx),
+        (false, false, start),
+        "the count restarted"
+    );
+    read(&app, &mut vcx, Some(0));
+    assert!(shown(&app, &mut vcx).1, "two in a row");
 }

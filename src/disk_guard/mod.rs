@@ -47,7 +47,8 @@ const CLOSE_WRITES_PER_ACCOUNT: u64 = 14 * MIB;
 const APFS_RESERVE: u64 = 32 * MIB;
 const CATCH_UP_ROOM: u64 = 128 * MIB;
 const WRITTEN_IN_SHORTEST_READ: u64 = FASTEST_WRITER_PER_SEC * SHORTEST_READ.as_secs();
-const CLOSE_FIXED: u64 = WRITTEN_IN_SHORTEST_READ + APFS_RESERVE;
+const WRITTEN_WHILE_CONFIRMING: u64 = FASTEST_WRITER_PER_SEC * CONFIRM_READ.as_secs();
+const CLOSE_FIXED: u64 = WRITTEN_IN_SHORTEST_READ + WRITTEN_WHILE_CONFIRMING + APFS_RESERVE;
 
 /// What the data folders hold that the floors scale with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +91,10 @@ pub const FLOORS: DiskFloors = DiskFloors::for_data(DataUse::ONE);
 const FASTEST_WRITER_PER_SEC: u64 = 64 * MIB;
 const SHORTEST_READ: Duration = Duration::from_secs(1);
 const LONGEST_READ: Duration = Duration::from_secs(30);
+/// A drop below close is read again this much later before clients close:
+/// one bad reading (a copy that is deleted at once, a volume that answers
+/// late) must not take every account offline.
+pub const CONFIRM_READ: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DiskState {
@@ -111,6 +116,27 @@ impl DiskState {
             Self::Low | Self::Full if free >= floors.warn_clear => Self::Healthy,
             _ => Self::Low,
         }
+    }
+}
+
+impl DiskState {
+    /// [`Self::next`], where a first reading below close only arms
+    /// `below_once`, and Full needs the next reading to agree. Returns the
+    /// state and the new `below_once`.
+    pub fn confirmed(
+        self,
+        free: Option<u64>,
+        floors: &DiskFloors,
+        below_once: bool,
+    ) -> (Self, bool) {
+        if free.is_none() {
+            return (self, below_once);
+        }
+        let after = self.next(free, floors);
+        if after != Self::Full || self == Self::Full || below_once {
+            return (after, false);
+        }
+        (self, true)
     }
 }
 

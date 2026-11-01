@@ -14,16 +14,19 @@ use gpui_kit::{
 };
 use quill::auth::{AuthAction, AuthView};
 use quill::disk_guard::{
-    DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors, data_free_bytes,
-    next_read_in,
+    CONFIRM_READ, DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors,
+    data_free_bytes, next_read_in,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub(crate) struct DiskUi {
     state: DiskState,
     free: Option<u64>,
     floors: DiskFloors,
+    /// The last reading was below close and the next one decides.
+    confirming: bool,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -42,6 +45,7 @@ impl DiskUi {
             state: DiskState::default(),
             free: None,
             floors: FLOORS,
+            confirming: false,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -80,15 +84,11 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
                     (free, data_floors(&folder))
                 })
                 .await;
-            if this
-                .update(cx, |this, cx| this.apply_data_reading(free, floors, cx))
-                .is_err()
-            {
+            let Ok(wait) = this.update(cx, |this, cx| this.apply_data_reading(free, floors, cx))
+            else {
                 break;
-            }
-            cx.background_executor()
-                .timer(next_read_in(free, &floors))
-                .await;
+            };
+            cx.background_executor().timer(wait).await;
         }
     })
     .detach();
@@ -110,20 +110,30 @@ fn demo_reading() -> Option<u64> {
 
 impl QuillApp {
     /// A reading with the floors for what the data folders hold now.
+    /// Returns how long to wait for the next one.
     pub(super) fn apply_data_reading(
         &mut self,
         free: Option<u64>,
         floors: DiskFloors,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Duration {
         self.disk.floors = floors;
         self.apply_disk_reading(free, cx);
+        if self.disk.confirming {
+            CONFIRM_READ
+        } else {
+            next_read_in(free, &floors)
+        }
     }
 
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
         let shown = self.disk.free;
         let floors = self.disk.floors;
-        let after = self.disk.state.next(free, &floors);
+        let (after, confirming) = self
+            .disk
+            .state
+            .confirmed(free, &floors, self.disk.confirming);
+        self.disk.confirming = confirming;
         self.disk.free = free.or(shown);
         let mut running = false;
         let background = self.background.clients_mut();

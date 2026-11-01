@@ -34,6 +34,7 @@ fn an_account_still_closing_when_space_returns_starts_again(cx: &mut TestAppCont
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(2), fake.boxed(), false);
         app.apply_disk_reading(FULL, cx);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(ROOM, cx);
         app.ensure_background_accounts(cx);
         assert!(
@@ -58,6 +59,7 @@ fn nothing_starts_while_the_disk_is_full(cx: &mut TestAppContext) {
     let fake = Fake::default();
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(2), fake.boxed(), true);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(FULL, cx);
     });
     fake.close();
@@ -111,6 +113,7 @@ fn a_full_reading_ends_a_start_in_flight(cx: &mut TestAppContext) {
         app.ensure_background_accounts(cx);
         assert!(app.background.starting.contains(&account(1)));
         app.apply_disk_reading(FULL, cx);
+        app.apply_disk_reading(FULL, cx);
         assert!(!app.background.starting.contains(&account(1)));
     });
     vcx.run_until_parked();
@@ -141,6 +144,7 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
     let (app, mut vcx, root) = app_with_unsigned_accounts(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.start_connection(cx);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(FULL, cx);
     });
     vcx.run_until_parked();

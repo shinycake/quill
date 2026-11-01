@@ -324,3 +324,32 @@ fn the_open_floor_leaves_room_to_migrate_the_largest_database() {
     assert_eq!(big.close, small.close);
     assert_eq!(big.open - small.open, 2048 * MIB);
 }
+
+#[test]
+fn one_low_reading_waits_for_a_second_before_full() {
+    use DiskState::{Full, Healthy, Low};
+    assert_eq!(Healthy.confirmed(Some(0), &FLOORS, false), (Healthy, true));
+    assert_eq!(Healthy.confirmed(Some(0), &FLOORS, true), (Full, false));
+    assert_eq!(Low.confirmed(Some(99), &FLOORS, false), (Low, true));
+    assert_eq!(Low.confirmed(Some(99), &FLOORS, true), (Full, false));
+    assert_eq!(
+        Low.confirmed(Some(500), &FLOORS, true),
+        (Low, false),
+        "the second read disagreed"
+    );
+    assert_eq!(
+        Low.confirmed(None, &FLOORS, true),
+        (Low, true),
+        "no reading"
+    );
+    assert_eq!(Full.confirmed(Some(0), &FLOORS, false), (Full, false));
+    assert_eq!(Full.confirmed(Some(250), &FLOORS, false), (Low, false));
+}
+
+#[test]
+fn the_close_floor_covers_the_wait_for_the_second_reading() {
+    let floors = super::FLOORS;
+    let room =
+        super::FASTEST_WRITER_PER_SEC * (SHORTEST_READ.as_secs() + super::CONFIRM_READ.as_secs());
+    assert!(floors.close >= room + super::APFS_RESERVE + super::CLOSE_WRITES_PER_ACCOUNT);
+}
