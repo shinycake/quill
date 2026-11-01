@@ -1127,3 +1127,38 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         .unwrap_or_default();
     assert_eq!(left, 0, "the dropped edit's PNG was deleted");
 }
+
+/// Whether `window` drew the status toast.
+fn status_toast_drawn(window: AnyWindowHandle, cx: &mut TestAppContext) -> bool {
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("status-toast").is_some()
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(OTHER));
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::error(
+                "Couldn't open the link",
+            ));
+        app.set_window_scope(None);
+        cx.notify();
+    });
+    assert!(status_toast_drawn(chat_window, cx), "the window shows it");
+    assert!(!status_toast_drawn(h.main, cx), "the main window does not");
+
+    // The next input in the main window brings the toast there.
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(None);
+        cx.notify();
+    });
+    assert!(status_toast_drawn(h.main, cx));
+    assert!(!status_toast_drawn(chat_window, cx));
+}

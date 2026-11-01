@@ -5,6 +5,8 @@
 
 use super::*;
 use crate::ui::status_note::{NoteKind, StatusNote};
+use gpui_kit::TestSupportExt;
+use quill::ids::ChatId;
 
 /// The pill's widest line, so a long failure wraps instead of stretching.
 const TOAST_MAX_WIDTH: f32 = 440.;
@@ -81,6 +83,45 @@ impl QuillApp {
         self.connection.toasts.visible().cloned()
     }
 
+    /// The toast `host`'s window shows this frame (`None`: the main
+    /// window). It shows in the window the last input happened in, where a
+    /// kit dialog would open, so a note answers the window that asked.
+    pub(in crate::ui) fn status_toast_in(
+        &mut self,
+        host: Option<ChatId>,
+        cx: &mut Context<Self>,
+    ) -> Option<StatusNote> {
+        let note = self.status_toast_visible(cx)?;
+        (self.windows.last_input == host).then_some(note)
+    }
+
+    /// A chat window's toast. Put in the box around its compose field, it
+    /// sits [`TOAST_GAP`] above that box, centred over the conversation;
+    /// with the media viewer open, put in the window's body, it sits above
+    /// the viewer's bar.
+    pub(in crate::ui) fn chat_window_toast(
+        &mut self,
+        note: &StatusNote,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        if self.viewer.state.is_open() {
+            let insets = self.toast_insets(window, cx);
+            return self.status_toast_layer(note, insets, cx);
+        }
+        let insets = ToastInsets {
+            left: px(0.),
+            right: px(0.),
+            bottom: px(TOAST_GAP),
+        };
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom(relative(1.))
+            .child(self.status_toast_layer(note, insets, cx))
+    }
+
     /// How far the toast sits above the window's bottom edge: clear of the
     /// composer by [`TOAST_GAP`], measured from the composer's laid-out
     /// height (a taller composer, with a reply or attachments, lifts it). A toast only shows with a session, when the footer
@@ -137,6 +178,7 @@ impl QuillApp {
             .child(
                 div()
                     .id("status-toast")
+                    .test_support()
                     .role(role)
                     .aria_label(note.text().to_string())
                     .cursor_pointer()
@@ -197,13 +239,33 @@ impl QuillApp {
     pub(super) fn demo_pins_toast(&self) -> bool {
         self.live.is_none()
             && self.demo_session.is_some()
-            && std::env::var_os("QUILL_DEMO_SHOW_TOAST").is_some()
+            && (std::env::var_os("QUILL_DEMO_SHOW_TOAST").is_some() || pinned_for_tests())
     }
 
     #[cfg(not(feature = "demo-capture"))]
     pub(super) fn demo_pins_toast(&self) -> bool {
         false
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PIN_FOR_TESTS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Tests on this thread keep the demo's toasts up, as
+/// `QUILL_DEMO_SHOW_TOAST=1` does, without touching the environment.
+#[cfg(test)]
+pub(in crate::ui) fn pin_toasts_for_tests() {
+    PIN_FOR_TESTS.with(|pin| pin.set(true));
+}
+
+#[cfg(feature = "demo-capture")]
+fn pinned_for_tests() -> bool {
+    #[cfg(test)]
+    return PIN_FOR_TESTS.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    false
 }
 
 #[cfg(test)]

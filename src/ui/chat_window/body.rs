@@ -71,6 +71,15 @@ impl QuillApp {
         let bottom = self
             .conversation(ConversationPart::Bottom, cx)
             .into_any_element();
+        let viewer_open = self.viewer.state.is_open();
+        let toast = self
+            .status_toast_in(Some(chat_id), cx)
+            .map(|note| self.chat_window_toast(&note, window, cx));
+        let (composer_toast, viewer_toast) = if viewer_open {
+            (None, toast)
+        } else {
+            (toast, None)
+        };
         let conversation = div()
             .id("chat-window-history")
             .test_support()
@@ -100,11 +109,11 @@ impl QuillApp {
                     .flex_col()
                     .flex_none()
                     .child(bottom)
-                    .children(self.pull_hint_overlay(cx)),
+                    .children(self.pull_hint_overlay(cx))
+                    .children(composer_toast),
             )
             .children(drop_overlay)
             .children(effects);
-        let viewer_open = self.viewer.state.is_open();
         div()
             .id("chat-window-body")
             .relative()
@@ -122,6 +131,8 @@ impl QuillApp {
                     cx,
                 ))
             })
+            // Above the viewer, like the main window's toast.
+            .children(viewer_toast)
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
             .when_some(self.message_ui.menu, |this, menu| {
