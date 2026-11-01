@@ -1,0 +1,26 @@
+#[cfg(test)]
+thread_local! {
+    static SCANNED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static BUDGET: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
+}
+
+#[inline(always)]
+pub(crate) fn add(bytes: usize) {
+    #[cfg(test)]
+    {
+        let scanned = SCANNED.get().saturating_add(bytes as u64);
+        SCANNED.set(scanned);
+        assert!(scanned <= BUDGET.get(), "scanned past the budget");
+    }
+    #[cfg(not(test))]
+    let _ = bytes;
+}
+
+#[cfg(test)]
+pub(crate) fn measure(budget: u64, work: impl FnOnce()) -> u64 {
+    SCANNED.set(0);
+    BUDGET.set(budget);
+    work();
+    BUDGET.set(u64::MAX);
+    SCANNED.get()
+}

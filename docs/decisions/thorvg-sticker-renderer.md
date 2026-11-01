@@ -68,8 +68,69 @@ un-premultiply passes in `src/ui/sticker_playback.rs` and `src/ui/editor_art.rs`
 are gone. The gift theme stills (`src/ui/peer_qr/gift_art.rs`) had been fed
 premultiplied pixels; they are straight now too.
 
-The validation in `tgs_json` is unchanged: 1 MiB file cap, 8 MiB gunzip cap,
-size 1 to 4096, frame rate 1 to 120, at most 30 s, no external image assets.
+`tgs_json` checks a document before ThorVG sees it: 1 MiB file cap, 8 MiB gunzip
+cap, size 1 to 4096, frame rate 1 to 120, at most 30 s, no external image assets,
+then the structural limits in `src/sticker_playback/lottie_check.rs` over the
+parsed JSON. It always hands ThorVG the document serialized from the value it
+checked. The check refuses a document, from the root down, unless every key and
+string is plain text. A value of the wrong type ends ThorVG's parse, as it does in
+rlottie. A load has to read the document to its end. These rules narrow how far the
+two readings can part, and they do not prove that the two always match. Metadata
+Quill never uses is skipped, as rlottie does, so an odd value there costs no sticker.
+Both load paths (the player and `decode_tgs_sized`) go through it. A refused file
+shows as a sticker that failed to load. The ThorVG side of the limits, for values
+only known while a frame is evaluated, is in
+`native/patches/thorvg-sticker-limits.patch`.
+
+rlottie keeps what it read before a value of the wrong type and draws it, while
+Quill shows a sticker that failed to load.
+
+ThorVG reads no text layers, fonts, glyphs or slots. rlottie never drew text
+(`createLayerItem` has no case for it), so tdesktop shows nothing for those layers
+and neither does Quill. rlottie drops such a layer from its list and ThorVG keeps
+it empty, so a layer parented to a text layer, or matted against one, can still
+come out differently.
+
+### Limits and the real documents behind them
+
+Each limit sits well above what real documents use, since a wrong refusal costs a
+sticker tdesktop shows. The real set is 245 documents: every `.tgs` and Lottie JSON
+in the reference tdesktop and rlottie checkouts, plus the golden stickers. None
+goes over a limit below. Three rlottie samples stay refused by the older rules:
+two with external images and one a frame past 30 s. `third_party/thorvg`
+vendors no samples.
+
+| Limit | Cap | Most in a real document | Headroom |
+| --- | --- | --- | --- |
+| Size of any number | 2^20 | 10,047 | 104x |
+| Layers in a document | 8,192 | 263 | 31x |
+| Masks on a layer | 256 | 3 | 85x |
+| Precomp depth | 32 | 5 | 6x |
+| Shape group depth | 64 | 6 | 10x |
+| Star points, at their largest value | 1,024 | 40 | 25x |
+| Repeater copies, at their largest value | 1,024 | 115 | 8.9x |
+| Color stops of a gradient | 1,024 | 15 | 68x |
+| Work per frame, see below | 2^22 | 288,624 | 14.5x |
+| Dash entries of a stroke (ThorVG side) | 64 | 3 | 21x |
+| Repeater copies in a list (ThorVG side) | 4,096 | 45 | 91x |
+
+A property's largest value counts how far its easing handles overshoot, so it can
+sit above the number the file states. Zigzags share the star limit; the real set
+has none.
+
+A wider set of 479 Lottie documents from app bundles on a Mac, 349 of them from
+Telegram's macOS app, stays under every limit too. Its closest are 6.7x under the
+work budget and 2.5x under the precomp depth limit, and the most in a Telegram file
+is 10.8x under the work budget.
+
+Work is a rough cost of one frame once precomps, repeaters and modifiers are
+expanded: 16 per vertex, 64 per layer or shape in a paint, and 1,024 per mask,
+matte or drawn effect, since those copy the canvas. Everything before a repeater
+or path modifier in a list multiplies with it, nine times for an offset, whose
+curve splitting ThorVG holds to eight times its input, and twice for the others.
+A list's total multiplies with its fills and strokes. A precomp is walked once
+and counted at each use. The check
+itself took at most 2.4 ms on the costliest real document.
 
 ## Skin tones
 
@@ -90,10 +151,9 @@ ThorVG sees it, following `lottieparser.cpp` call for call:
   without the chosen tone maps to black, as rlottie reads a missing key as 0.
 
 `FitzType::from_tdlib` maps TDLib's `fitzpatrick_type` (1 and 2 share the
-light set), as Telegram X's decoder does. When nothing changes the original
-bytes go to ThorVG; otherwise the document is serialized again, in the
-file's key order (`serde_json` has `preserve_order`), which ThorVG's streaming
-parser needs for `"ty"`. The reference tdesktop checkout's `lib_lottie` now
+light set), as Telegram X's decoder does. The document is serialized after the
+swap, in the file's key order (`serde_json` has `preserve_order`), which ThorVG's
+streaming parser needs. The reference tdesktop checkout's `lib_lottie` now
 calls a `tlottie` library that is not in the reference repos, so the port
 follows tg-rlottie. `decode_tgs_sized` takes the tone; every caller passes
 `FitzType::None` until emoji messages pass the real one.
@@ -132,8 +192,8 @@ tags a release.
   same except that an allocation failure returns null instead of throwing,
   and every party treats that as fatal anyway.
 - ThorVG aborts the process on allocation failure in its constructors
-  (the C API header says so). The size caps above bound what a sticker can
-  ask for.
+  (the C API header says so). The size caps and structural limits above bound
+  what a sticker can ask for.
 - Each thread that decodes keeps a ThorVG memory pool until exit. Decodes run
   on the fixed GPUI background pool, so this is bounded by its size.
 - Windows (MSVC) and Linux (GCC) builds are proven by CI, not locally. The

@@ -249,6 +249,7 @@ struct SwStroke
 
 struct SwDashStroke
 {
+    uint32_t steps = 8192;   //QUILL
     RenderPath* path = nullptr;
     float curLen = 0;
     int32_t curIdx = 0;

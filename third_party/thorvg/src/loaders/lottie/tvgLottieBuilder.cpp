@@ -178,25 +178,27 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
 
 void LottieBuilder::updateTransform(LottieLayer* layer, float frameNo)
 {
-    if (!layer) return;
-
-    if (tween.active) {
-        layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
-    } else {
-        if (tvg::equal(layer->cache.frameNo, frameNo)) return;
-        layer->cache.frameNo = frameNo;
+    //QUILL
+    Array<LottieLayer*> chain;
+    for (; layer; layer = layer->parent) {
+        if (tween.active) {
+            layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
+        } else {
+            if (tvg::equal(layer->cache.frameNo, frameNo)) break;
+            layer->cache.frameNo = frameNo;
+        }
+        chain.push(layer);
     }
 
-    auto transform = layer->transform;
-    auto parent = layer->parent;
+    for (auto i = chain.count; i > 0; --i) {
+        auto link = chain[i - 1];
+        auto parent = link->parent;
+        auto& matrix = link->cache.matrix;
 
-    if (parent) updateTransform(parent, frameNo);
+        _update(link->transform, frameNo, matrix, link->cache.opacity, link->autoOrient, tween, exps);
 
-    auto& matrix = layer->cache.matrix;
-
-    _update(transform, frameNo, matrix, layer->cache.opacity, layer->autoOrient, tween, exps);
-
-    if (parent) layer->cache.matrix = parent->cache.matrix * matrix;
+        if (parent) link->cache.matrix = parent->cache.matrix * matrix;
+    }
 }
 
 
@@ -409,6 +411,10 @@ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>*
     Array<Shape*> shapes;
 
     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
+        //QUILL
+        constexpr uint64_t MAX_COPIES = 4096;
+        if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
+
         shapes.reserve(repeater->cnt);
 
         for (int i = 0; i < repeater->cnt; ++i) {
@@ -554,6 +560,14 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float 
 }
 
 
+//QUILL
+static float _limitCount(float count)
+{
+    constexpr auto MAX_COUNT = 1024.0f;
+    return (count > MAX_COUNT) ? MAX_COUNT : ((count >= 0.0f) ? count : 0.0f);
+}
+
+
 static void _close(Array<Point>& pts, const Point& p, bool round)
 {
     if (round && tvg::zero(pts.last() - pts[pts.count - 2])) pts[pts.count - 2] = p;
@@ -564,7 +578,7 @@ void LottieBuilder::updateStar(LottiePolyStar* star, float frameNo, Matrix* tran
 {
     static constexpr auto POLYSTAR_MAGIC_NUMBER = 0.47829f / 0.28f;
 
-    auto ptsCnt = star->ptsCnt(frameNo, tween, exps);
+    auto ptsCnt = _limitCount(star->ptsCnt(frameNo, tween, exps));
     if (ptsCnt < 1.0f) return;
 
     auto innerRadius = star->innerRadius(frameNo, tween, exps);
@@ -679,7 +693,7 @@ void LottieBuilder::updatePolygon(LottiePolyStar* star, float frameNo, Matrix* t
 {
     static constexpr auto POLYGON_MAGIC_NUMBER = 0.25f;
 
-    auto ptsCnt = int(floor(star->ptsCnt(frameNo, tween, exps)));
+    auto ptsCnt = int(floor(_limitCount(star->ptsCnt(frameNo, tween, exps))));
     if (ptsCnt < 1) return;
 
     auto radius = star->outerRadius(frameNo, tween, exps);
@@ -802,7 +816,7 @@ void LottieBuilder::updateZigZag(TVG_UNUSED LottieGroup* parent, LottieObject** 
     auto zigzag = static_cast<LottieZigZag*>(*child);
     auto amplitude = zigzag->amplitude(frameNo, tween, exps);
     if (tvg::zero(amplitude)) return;
-    auto frequency = zigzag->frequency(frameNo, tween, exps);
+    auto frequency = (int)_limitCount(zigzag->frequency(frameNo, tween, exps));
     auto point = (LottieZigZagModifier::PointType)zigzag->point(frameNo, tween, exps);
     ctx->update(new LottieZigZagModifier(amplitude, frequency, point));
 }
@@ -812,7 +826,7 @@ void LottieBuilder::updateRepeater(TVG_UNUSED LottieGroup* parent, LottieObject*
     auto repeater = static_cast<LottieRepeater*>(*child);
 
     RenderRepeater r;
-    r.cnt = static_cast<int>(repeater->copies(frameNo, tween, exps));
+    r.cnt = static_cast<int>(_limitCount(repeater->copies(frameNo, tween, exps)));
     r.transform = ctx->propagator->transform();
     r.offset = repeater->offset(frameNo, tween, exps);
     r.position = repeater->position(frameNo, tween, exps);
@@ -1621,6 +1635,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
     ARRAY_FOREACH(p, comp->assets) {
         if (layer->rid != (*p)->id) continue;
         if (layer->type == LottieLayer::Precomp) {
+            if ((*p)->type != LottieObject::Composition) break;  //QUILL
             auto asset = static_cast<LottieRootLayer*>(*p);
             if (_buildComposition(comp, asset)) {
                 layer->children = asset->children;
@@ -1687,8 +1702,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
 static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
 {
     if (parent->children.count == 0) return false;
-    if (parent->buildDone) return true;
+    if (parent->buildDone) return !parent->building;  //QUILL
     parent->buildDone = true;
+    parent->building = true;
 
     ARRAY_FOREACH(p, parent->children) {
         auto child = static_cast<LottieLayer*>(*p);
@@ -1717,6 +1733,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
         //attach the necessary font data
         if (child->type == LottieLayer::Text) _attachFont(comp, child);
     }
+
+    //QUILL
+    ARRAY_FOREACH(p, parent->children) {
+        auto child = static_cast<LottieLayer*>(*p);
+        auto target = child->matteTarget;
+        for (auto i = 0; target && i < 16; ++i) target = target->matteTarget;
+        if (target) child->matteTarget = nullptr;
+    }
+
+    parent->building = false;
     return true;
 }
 
