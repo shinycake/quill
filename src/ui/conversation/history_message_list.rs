@@ -53,8 +53,8 @@ impl QuillApp {
                 thread_id: thread.thread_id,
                 unread_anchor: thread.unread_anchor,
                 unread_count: thread.unread_count,
-                has_newer: thread.has_newer,
-                window_epoch: thread.window_epoch,
+                has_newer: thread.history.has_newer,
+                window_epoch: thread.history.window_epoch,
                 saved_open: thread.saved_anchor.is_some(),
             });
         let history_key = (
@@ -63,18 +63,24 @@ impl QuillApp {
             thread_window.as_ref().map_or(0, |thread| thread.thread_id),
         );
         // The loaded window: the thread's own (it opens around its read
-        // position and pages forward like the main history) or the main
-        // history's (topic views page their own history and have none of
-        // this).
+        // position and pages forward like the main history), the topic's
+        // (no unread divider) or the main history's.
         let (unread_anchor, has_newer, window_epoch) = match &thread_window {
             Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
             None => session
-                .filter(|_| viewed_topic.is_none())
                 .and_then(|s| {
                     let chat = viewed_chat?;
-                    s.histories
-                        .get(&chat.0)
-                        .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch))
+                    match viewed_topic {
+                        Some(topic) => s
+                            .threads
+                            .topic_histories
+                            .get(&(chat.0, topic))
+                            .map(|h| (None, h.has_newer, h.window_epoch)),
+                        None => s
+                            .histories
+                            .get(&chat.0)
+                            .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch)),
+                    }
                 })
                 .unwrap_or((None, false, 0)),
         };

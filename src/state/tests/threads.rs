@@ -387,7 +387,7 @@ fn an_unread_thread_opens_around_the_read_position_and_pages_forward() {
     thread_page(&mut session, &seq, &sink, false, &[46, 45, 44, 43]);
     {
         let thread = session.thread_for_chat(ChatId(14)).unwrap();
-        assert!(thread.has_newer);
+        assert!(thread.history.has_newer);
         assert!(!thread.history.loaded_complete);
         assert_eq!(thread.history.next_from_message_id, MessageId(43));
         assert_eq!(thread.unread_anchor, Some(MessageId(44)));
@@ -433,7 +433,7 @@ fn an_unread_thread_opens_around_the_read_position_and_pages_forward() {
     thread_page(&mut session, &seq, &sink, true, &[50, 49, 48, 47, 46]);
     {
         let thread = session.thread_for_chat(ChatId(14)).unwrap();
-        assert!(!thread.has_newer);
+        assert!(!thread.history.has_newer);
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![43, 44, 45, 46, 47, 48, 49, 50]);
         assert!(!thread.history.loaded_complete, "older side still open");
@@ -444,16 +444,28 @@ fn an_unread_thread_opens_around_the_read_position_and_pages_forward() {
     // An empty newer page just closes the newer side.
     let thread = session.threads.thread.as_mut().unwrap();
     thread.last_message_id = 60;
-    thread.has_newer = true;
+    thread.history.has_newer = true;
     thread_page(&mut session, &seq, &sink, true, &[]);
-    assert!(!session.thread_for_chat(ChatId(14)).unwrap().has_newer);
+    assert!(
+        !session
+            .thread_for_chat(ChatId(14))
+            .unwrap()
+            .history
+            .has_newer
+    );
 }
 
 #[test]
 fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
     let (mut session, sink, seq) = unread_group_thread();
     thread_page(&mut session, &seq, &sink, false, &[46, 45, 44, 43]);
-    assert!(session.thread_for_chat(ChatId(14)).unwrap().has_newer);
+    assert!(
+        session
+            .thread_for_chat(ChatId(14))
+            .unwrap()
+            .history
+            .has_newer
+    );
     // An older page is in flight when the window is replaced: its answer
     // is dropped.
     let stale = session.request(
@@ -470,9 +482,9 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         let thread = session.thread_for_chat(ChatId(14)).unwrap();
         let ids: Vec<i64> = thread.history.messages.keys().copied().collect();
         assert_eq!(ids, vec![-7, 40], "root and the pending send only");
-        assert!(!thread.has_newer);
+        assert!(!thread.history.has_newer);
         assert!(thread.reload_needed);
-        assert_eq!(thread.window_epoch, 1);
+        assert_eq!(thread.history.window_epoch, 1);
         assert!(!thread.history.loaded_complete);
         assert_eq!(thread.history.next_from_message_id, MessageId(0));
     }
@@ -492,7 +504,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
         !thread.history.messages.contains_key(&42),
         "stale page dropped"
     );
-    assert_eq!(thread.window_epoch, 2);
+    assert_eq!(thread.history.window_epoch, 2);
     // The newest page lands in the fresh window and reaches the root.
     thread_page(
         &mut session,
@@ -503,7 +515,7 @@ fn an_own_send_while_newer_replies_are_unloaded_replaces_the_window() {
     );
     let thread = session.thread_for_chat(ChatId(14)).unwrap();
     assert!(thread.history.loaded_complete);
-    assert!(!thread.has_newer);
+    assert!(!thread.history.has_newer);
     assert!(
         thread.history.messages.contains_key(&-7),
         "the pending row stays"
@@ -566,7 +578,7 @@ fn reading_comments_clears_the_posts_unread_dot_and_follows_server_read_marks() 
     );
     {
         let thread = session.thread_for_chat(ChatId(14)).unwrap();
-        assert!(!thread.has_newer);
+        assert!(!thread.history.has_newer);
         assert_eq!(thread.unread_count, 2);
     }
     // Both comments on screen: the thread is read, and the post's bar
@@ -641,7 +653,7 @@ fn a_thread_left_open_at_the_tail_stays_within_the_cap_and_keeps_its_root() {
     assert!(thread.history.messages.len() <= crate::state::HISTORY_WINDOW_CAP);
     assert!(thread.history.messages.contains_key(&40), "the pinned root");
     assert_eq!(thread.newest_loaded_id(), Some(MessageId(40 + cap + 3)));
-    assert!(!thread.has_newer);
+    assert!(!thread.history.has_newer);
     assert!(
         !thread.history.loaded_complete,
         "older replies page back in"
@@ -660,7 +672,7 @@ fn a_thread_reader_near_the_top_keeps_the_root_and_the_tail_waits() {
     apply_json(&mut session, &seq, &sink, &reply(40 + cap));
     let thread = session.thread_for_chat(ChatId(14)).unwrap();
     assert!(thread.history.loaded_complete, "the rows above stay");
-    assert!(thread.has_newer, "paged back in below");
+    assert!(thread.history.has_newer, "paged back in below");
     let newest = thread.newest_loaded_id().unwrap();
     assert!(newest.0 < 40 + cap);
     apply_json(&mut session, &seq, &sink, &reply(40 + cap + 1));
@@ -715,7 +727,7 @@ fn reading_far_back_and_forth_through_a_thread_keeps_its_window_bounded() {
     assert_eq!(thread.ordered().first().map(|m| m.id.0), Some(40));
     assert!(thread.history.loaded_complete);
     assert_eq!(thread.last_message_id, top - 1, "the end is remembered");
-    assert!(thread.has_newer, "scrolling down pages it back in");
+    assert!(thread.history.has_newer, "scrolling down pages it back in");
     let newest = thread.newest_loaded_id().unwrap().0;
 
     let newer: Vec<i64> = (newest..top).rev().collect();
@@ -723,7 +735,7 @@ fn reading_far_back_and_forth_through_a_thread_keeps_its_window_bounded() {
     let thread = session.thread_for_chat(ChatId(14)).unwrap();
     assert!(thread.history.messages.len() < crate::state::HISTORY_WINDOW_CAP);
     assert!(thread.history.messages.contains_key(&40), "the pinned root");
-    assert!(!thread.has_newer);
+    assert!(!thread.history.has_newer);
     assert!(!thread.history.loaded_complete);
     let oldest = thread.history.messages.keys().nth(1).copied().unwrap();
     assert_eq!(thread.history.next_from_message_id, MessageId(oldest));

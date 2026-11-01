@@ -66,6 +66,7 @@ mod story_tray_load;
 mod subsection_tabs;
 mod threads;
 mod topic_load;
+mod topic_window_cap;
 mod unread_totals;
 mod update_batches;
 mod updates_sync;

@@ -444,7 +444,8 @@ pub enum ChatSearchJumpNeed {
 /// `searchChatMessages` (`topic_id = messageTopicForum`, empty query).
 /// `next_from_message_id` pages older messages the same way `foundChatMessages`
 /// does for in-chat search; `loaded_complete` once a page returns
-/// `next_from_message_id` 0 (or an empty page).
+/// `next_from_message_id` 0 (or an empty page). The window is capped at
+/// both ends like the main history (`topic_window`).
 #[derive(Debug)]
 pub struct TopicHistory {
     pub messages: HistoryMessages,
@@ -458,6 +459,20 @@ pub struct TopicHistory {
     /// "the message is gone" (`Session::message_deleted`).
     pub tombstones: HashSet<i64>,
     pub reader: ReaderPosition,
+    /// The window stops short of the newest message: newer pages load as
+    /// the reader scrolls down, and live messages wait outside it.
+    pub has_newer: bool,
+    /// The last newer page failed; auto-paging stops until a jump.
+    pub newer_failed: bool,
+    /// The newest server id known to lie past the window's newest end
+    /// (trimmed away or held out while `has_newer`).
+    pub latest_seen: i64,
+    /// Bumped whenever the window is replaced, so the UI re-anchors its
+    /// scroll.
+    pub window_epoch: u64,
+    /// Page requests issued for a window end that was dropped or replaced
+    /// since: their answers would land across a gap and are dropped.
+    pub stale_pages: HashSet<u64>,
 }
 
 impl Default for TopicHistory {
@@ -469,6 +484,11 @@ impl Default for TopicHistory {
             total_count: 0,
             tombstones: HashSet::new(),
             reader: ReaderPosition::Tail,
+            has_newer: false,
+            newer_failed: false,
+            latest_seen: 0,
+            window_epoch: 0,
+            stale_pages: HashSet::new(),
         }
     }
 }

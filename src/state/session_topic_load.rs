@@ -32,9 +32,7 @@ impl Session {
             Some(history) => {
                 history.messages.is_empty()
                     && !history.loaded_complete
-                    && self
-                        .requests
-                        .has_purpose_for_chat(RequestPurpose::GetTopicHistory, chat_id)
+                    && self.topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
             }
         }
     }

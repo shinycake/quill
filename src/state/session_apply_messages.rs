@@ -224,34 +224,13 @@ impl Session {
             self.apply_chat_photo_history(messages, total_count, next_from_message_id, pending);
             return;
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTopicHistory) {
-            // Phase 5.1: per-topic history page. Correlated by chat +
-            // topic; stored separately from the chat's general history.
-            if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                && let Some(forum_topic_id) = pending.and_then(|p| p.forum_topic_id)
-            {
-                for message in &messages {
-                    self.remember_files(&message.files);
-                }
-                let empty = messages.is_empty();
-                let rows: Vec<HistoryMessage> = messages
-                    .into_iter()
-                    .map(|message| history_message(message, false))
-                    .collect();
-                for row in &rows {
-                    self.index_poll(row);
-                }
-                self.clear_topic_load_failed(chat_id, forum_topic_id);
-                let entry = self.topic_history_entry(chat_id, forum_topic_id);
-                for row in rows {
-                    entry.messages.insert(row.id.0, row);
-                }
-                if next_from_message_id.0 == 0 || empty {
-                    entry.loaded_complete = true;
-                }
-                entry.next_from_message_id = next_from_message_id;
-                entry.total_count = total_count.max(entry.messages.len() as i32);
-            }
+        if let Some(pending) = pending.filter(|p| {
+            matches!(
+                p.purpose,
+                RequestPurpose::GetTopicHistory | RequestPurpose::GetTopicHistoryNewer
+            )
+        }) {
+            self.apply_topic_page(messages, total_count, next_from_message_id, pending);
             return;
         }
         if matches!(
@@ -501,7 +480,7 @@ impl Session {
                 if let Some(topic_history) =
                     self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
                 {
-                    topic_history.upsert(row);
+                    topic_history.note_live(row);
                 }
             }
         }

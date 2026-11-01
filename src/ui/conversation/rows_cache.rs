@@ -227,7 +227,7 @@ impl QuillApp {
             scope: topic.map_or(0, i64::from),
             messages: history.map(|h| &h.messages),
             extra: 0,
-            window_epoch: 0,
+            window_epoch: history.map_or(0, |h| h.window_epoch),
             unread_anchor: None,
             translated: None,
             tail: Some(0),
@@ -252,7 +252,7 @@ impl QuillApp {
             scope: thread.thread_id,
             messages: Some(&thread.history.messages),
             extra: hash_of(&thread.root_ids),
-            window_epoch: thread.window_epoch,
+            window_epoch: thread.history.window_epoch,
             unread_anchor: thread.unread_anchor,
             translated: None,
             // The root post and the "Discussion started" divider head the
