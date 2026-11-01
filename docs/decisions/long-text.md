@@ -90,6 +90,11 @@ A frame built an element for every block, which cost 100 ms a keystroke at 100 K
 The blocks are now parsed once per revision, and from 32 blocks, which always fill the preview's
 320 px, they go in a `list` that lays out what is in view.
 
+An edit touches one block, so `PreviewBlocks` keeps the editor blocks of the last revision and
+parses only those between the shared start and the shared end. Comparing blocks is a memory compare,
+far cheaper than a parse, and `every_edit_shows_what_a_fresh_parse_shows` holds it to a fresh parse.
+The list gets the same range, so blocks outside the edit keep their measured heights.
+
 ## Kit tests
 `cargo test -p gpui-base` is refused outside the workspace and CI does not run the kit's tests. The
 ones that need a real text system are in `src/ui/composer_long_line_tests.rs`, which CI runs. To run

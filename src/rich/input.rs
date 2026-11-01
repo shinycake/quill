@@ -120,17 +120,18 @@ pub fn input_page_block_json(block: &RichBlock) -> Option<Value> {
                 "size": size,
             }))
         }
-        RichBlock::List { ordered: _, items } => {
+        RichBlock::List { ordered, items } => {
             let inputs: Vec<Value> = items
                 .iter()
-                .map(|item| {
+                .enumerate()
+                .map(|(index, item)| {
                     json!({
                         "@type": "inputPageBlockListItem",
                         "blocks": [{ "@type": "inputPageBlockParagraph", "text": block_rich_text(&item.text) }],
                         "has_checkbox": item.checked.is_some(),
                         "is_checked": item.checked.unwrap_or(false),
-                        "value": 0,
-                        "type": "",
+                        "value": if *ordered { index + 1 } else { 0 },
+                        "type": if *ordered { "1" } else { "" },
                     })
                 })
                 .collect();
@@ -412,7 +413,9 @@ mod tests {
             RichBlock::List {
                 ordered: false,
                 items: vec![RichListItem {
+                    label: String::new(),
                     text: "cd".into(),
+                    entities: Vec::new(),
                     checked: None,
                 }],
             },

@@ -171,9 +171,8 @@ fn summary_lines(block: &RichBlock, lines: &mut Vec<String>) {
     }
 }
 
-/// A parsed `pageBlock*` as the editor holds it: paragraph and heading
-/// text with its entities written as markup. List and details text is
-/// plain already.
+/// A parsed `pageBlock*` as the editor holds it: paragraph, heading and
+/// list text with its entities written as markup. Details text is plain.
 fn editor_block(block: &RichBlock) -> RichBlock {
     match block {
         RichBlock::Paragraph {
@@ -193,6 +192,18 @@ fn editor_block(block: &RichBlock) -> RichBlock {
             level: *level,
             text: crate::composer::entities_to_markup(text, entities),
             entities: Vec::new(),
+        },
+        RichBlock::List { ordered, items } => RichBlock::List {
+            ordered: *ordered,
+            items: items
+                .iter()
+                .map(|item| RichListItem {
+                    label: String::new(),
+                    text: crate::composer::entities_to_markup(&item.text, &item.entities),
+                    entities: Vec::new(),
+                    checked: item.checked,
+                })
+                .collect(),
         },
         other => other.clone(),
     }
