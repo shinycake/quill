@@ -511,11 +511,9 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
 
 bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const char* key)
 {
-    if (KEY_AS("ix")) {
-        prop.ix = getInt();
-    } else if (KEY_AS("x") && expressions) {
+    if (KEY_AS("x") && expressions) {
         getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
-    } else if (KEY_AS("sid")) {
+    } else if (KEY_AS("ix") || KEY_AS("sid")) {
         skip();  //QUILL
     } else return false;
     return true;

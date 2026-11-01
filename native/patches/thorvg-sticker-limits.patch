@@ -376,7 +376,7 @@ index 0ab0d875c..a9641ee02 100644
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
 diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..e493dc011 100644
+index 242d52a98..48cceafa9 100644
 --- a/src/loaders/lottie/tvgLottieParser.cpp
 +++ b/src/loaders/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
@@ -428,16 +428,23 @@ index 242d52a98..e493dc011 100644
              else if (getValue(prop.value)) break; //multi value property with no keyframes
          }
          prop.prepare();
-@@ -508,7 +516,7 @@ bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const ch
-     } else if (KEY_AS("x") && expressions) {
+@@ -503,12 +511,10 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
+ 
+ bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const char* key)
+ {
+-    if (KEY_AS("ix")) {
+-        prop.ix = getInt();
+-    } else if (KEY_AS("x") && expressions) {
++    if (KEY_AS("x") && expressions) {
          getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
-     } else if (KEY_AS("sid")) {
+-    } else if (KEY_AS("sid")) {
 -        registerSlot(obj, getString(), prop);
++    } else if (KEY_AS("ix") || KEY_AS("sid")) {
 +        skip();  //QUILL
      } else return false;
      return true;
  }
-@@ -633,7 +641,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
+@@ -633,7 +639,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
              if (KEY_AS("n")) style = getString();
              else if (KEY_AS("v")) {
                  if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
@@ -447,7 +454,7 @@ index 242d52a98..e493dc011 100644
              } else skip();
          }
      }
-@@ -918,25 +927,34 @@ LottieObject* LottieParser::parseObject(const char* type)
+@@ -918,25 +925,34 @@ LottieObject* LottieParser::parseObject(const char* type)
  //capture the type name if the upcoming type is irregularly addressed after the actual properties.
  char* LottieParser::captureType()
  {
@@ -494,7 +501,7 @@ index 242d52a98..e493dc011 100644
          }
      }
      return nullptr;
-@@ -1593,10 +1611,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+@@ -1593,10 +1609,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
          else if (KEY_AS("hd")) layer->hidden = getBool();
          else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
          else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
@@ -506,7 +513,7 @@ index 242d52a98..e493dc011 100644
      }
  
      layer->prepare(&color);
-@@ -1787,14 +1804,9 @@ bool LottieParser::parse()
+@@ -1787,14 +1802,9 @@ bool LottieParser::parse()
          else if (KEY_AS("op")) outPoint = getFloat();
          else if (KEY_AS("w")) comp->w = getFloat();
          else if (KEY_AS("h")) comp->h = getFloat();
