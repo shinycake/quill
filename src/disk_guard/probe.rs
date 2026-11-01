@@ -58,9 +58,16 @@ pub(super) fn usable(blocks: u64, available: u64, block_size: u64) -> Volume {
 #[cfg(target_os = "macos")]
 fn read_available(path: &Path) -> Volume {
     match statfs_available(path) {
-        Volume::Free(free) => Volume::Free(important_usage(path).unwrap_or(free)),
+        Volume::Free(free) => Volume::Free(with_important_usage(free, important_usage(path))),
         other => other,
     }
+}
+
+/// Volumes that do not track it (exFAT, HFS+ and network shares) answer
+/// the key with 0, which is no reading: statfs then decides.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn with_important_usage(statfs: u64, important: Option<u64>) -> u64 {
+    important.filter(|bytes| *bytes > 0).unwrap_or(statfs)
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -200,6 +207,13 @@ mod tests {
     fn a_full_volume_reads_as_zero() {
         assert_eq!(usable(100, 0, 4096), Volume::Free(0));
         assert_eq!(usable(100, 3, 4096), Volume::Free(12_288));
+    }
+
+    #[test]
+    fn a_zero_important_usage_answer_falls_back_to_statfs() {
+        assert_eq!(with_important_usage(5 << 30, Some(0)), 5 << 30);
+        assert_eq!(with_important_usage(5 << 30, None), 5 << 30);
+        assert_eq!(with_important_usage(5 << 30, Some(9 << 30)), 9 << 30);
     }
 
     #[test]
