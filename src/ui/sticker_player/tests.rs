@@ -357,7 +357,11 @@ fn a_head_at_rest_keeps_its_frame_while_another_head_plays_the_clip() {
     }
     let late = player.screen_stats().late;
     assert_eq!(shown(&player, &spec, resting, once, t1 + ms(102)), 11);
-    assert_eq!(player.screen_stats().late, late, "its frame was still there");
+    assert_eq!(
+        player.screen_stats().late,
+        late,
+        "its frame was still there"
+    );
 }
 
 /// A quiet window draws nothing, however long, so its heads were forgotten
@@ -375,11 +379,21 @@ fn a_head_outlives_a_quiet_window_that_still_shows_it() {
     }
     chat_frame(&player, chat);
     let t1 = t0 + HEAD_TTL + ms(1000);
-    let _ = player.frame(&spec, elsewhere, PlayMode::Loop, EDGE, false, Some(chat), t1);
+    let _ = player.frame(
+        &spec,
+        elsewhere,
+        PlayMode::Loop,
+        EDGE,
+        false,
+        Some(chat),
+        t1,
+    );
     let _ = player.close_stale(t1);
     assert_eq!(shown(&player, &spec, resting, once, t1), 2);
     assert_eq!(
-        player.head_progress(resting, 7).map(|(pos, _)| pos >= ms(100)),
+        player
+            .head_progress(resting, 7)
+            .map(|(pos, _)| pos >= ms(100)),
         Some(true),
         "it stayed played"
     );

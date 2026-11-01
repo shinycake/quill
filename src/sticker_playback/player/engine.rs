@@ -115,6 +115,8 @@ pub(super) struct State {
     /// system, which the UI thread (closing clips) should not wait for.
     pub(super) freed: Vec<Store>,
     pub(super) stop: bool,
+    /// A worker ended: what it owned will never finish.
+    worker_gone: bool,
     pub(super) budget: usize,
     pub(super) store_bytes: usize,
     pub(super) stats: EngineStats,
@@ -124,6 +126,8 @@ pub(super) struct State {
 pub(super) struct Shared {
     pub(super) state: Mutex<State>,
     pub(super) work: Condvar,
+    /// Signalled when a worker runs out of work or ends.
+    pub(super) drained: Condvar,
     pub(super) waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -134,6 +138,17 @@ impl Shared {
         if let Some(waker) = waker {
             waker();
         }
+    }
+}
+
+/// Held by a worker's thread: it goes on return, on a panic, and with the
+/// closure of a thread that never started.
+struct WorkerEnd(Arc<Shared>);
+
+impl Drop for WorkerEnd {
+    fn drop(&mut self) {
+        lock_or_recover(&self.0.state).worker_gone = true;
+        self.0.drained.notify_all();
     }
 }
 
@@ -156,19 +171,23 @@ impl Engine {
                 closed: vec![Vec::new(); workers],
                 freed: Vec::new(),
                 stop: false,
+                worker_gone: false,
                 budget,
                 store_bytes: 0,
                 stats: EngineStats::default(),
                 served: 0,
             }),
             work: Condvar::new(),
+            drained: Condvar::new(),
             waker: Mutex::new(None),
         });
         let mut started = 0;
         for index in 0..workers {
             let shared = shared.clone();
+            let end = WorkerEnd(shared.clone());
             let spawned =
                 crate::thread_guard::spawn_guarded(format!("quill-sticker-{index}"), move || {
+                    let _end = end;
                     super::worker::run(index, &shared)
                 });
             if spawned.is_ok() {
@@ -275,6 +294,9 @@ impl Engine {
         };
         clip.used = Instant::now();
         clip.wanted.clear();
+        if matches!(clip.state, ClipState::Failed(_)) {
+            return;
+        }
         for index in frames.iter().copied() {
             let pending = clip.drawing == Some(index)
                 || rendered
@@ -291,13 +313,17 @@ impl Engine {
         }
     }
 
-    /// Whether the workers have nothing to do: every clip opened and no
-    /// frame is asked for or being drawn.
-    pub fn idle(&self) -> bool {
-        lock_or_recover(&self.shared.state)
-            .clips
-            .values()
-            .all(|clip| clip.origin.is_none() && !clip.busy && clip.wanted.is_empty())
+    /// Blocks until the workers have nothing to do (every clip opened and no
+    /// frame asked for or being drawn), or one of them ended.
+    pub fn wait_idle(&self) {
+        let mut state = lock_or_recover(&self.shared.state);
+        while !state.worker_gone && !state.idle() {
+            state = self
+                .shared
+                .drained
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
     }
 
     /// Mark `key` as shown now, so its store is kept.
@@ -361,6 +387,12 @@ impl Drop for Engine {
 }
 
 impl State {
+    fn idle(&self) -> bool {
+        self.clips
+            .values()
+            .all(|clip| clip.origin.is_none() && !clip.busy && clip.wanted.is_empty())
+    }
+
     pub(super) fn close(&mut self, key: &ClipKey) {
         let Some(clip) = self.clips.remove(key) else {
             return;

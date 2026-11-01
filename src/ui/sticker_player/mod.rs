@@ -342,10 +342,7 @@ impl Player {
     /// what they drew.
     #[cfg(test)]
     pub(super) fn settle(&self) {
-        let until = Instant::now() + Duration::from_secs(10);
-        while !self.engine.idle() && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        self.engine.wait_idle();
         self.drain();
     }
 
