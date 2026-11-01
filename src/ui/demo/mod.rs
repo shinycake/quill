@@ -340,6 +340,7 @@ pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
 pub(super) enum HistoryAnim {
     /// A photo and a text behind spoilers (not part of `all`).
     Spoiler,
+    Spoiler12,
     /// A video that autoplays inline (macOS).
     Video,
     /// A text message with three animated custom emoji.
@@ -353,9 +354,6 @@ pub(super) enum HistoryAnim {
     Stickers60,
 }
 
-/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler,stickers60` (any
-/// subset; `all` for the first four): the ready-chats fixture's open chat
-/// ends with that content, to measure what history animations cost.
 pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
     let Ok(value) = std::env::var("QUILL_DEMO_HISTORY_ANIM") else {
         return Vec::new();
@@ -376,6 +374,7 @@ pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
             "note" => &all[3..4],
             "all" => &all[..],
             "spoiler" => &[HistoryAnim::Spoiler],
+            "spoiler12" => &[HistoryAnim::Spoiler12],
             "stickers60" => &[HistoryAnim::Stickers60],
             _ => &[],
         })
@@ -435,6 +434,17 @@ fn history_anim_fixture(wanted: &[HistoryAnim]) -> Vec<String> {
                         r#"{{"@type":"updateNewMessage","message":{{"id":{album_id},"chat_id":11,"is_outgoing":false,"date":1790633000,"media_album_id":"90100","content":{content}}}}}"#
                     ));
                 }
+            }
+            HistoryAnim::Spoiler12 => {
+                let text = "The ending stays covered until someone asks to see it. ".repeat(12);
+                let text = text.trim_end();
+                let length = text.encode_utf16().count();
+                out.push(message(
+                    format!(
+                        r#"{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[{{"@type":"textEntity","offset":0,"length":{length},"type":{{"@type":"textEntityTypeSpoiler"}}}}]}}}}"#
+                    ),
+                    false,
+                ));
             }
             HistoryAnim::Stickers => {
                 for (file_id, name, format, outgoing) in [
