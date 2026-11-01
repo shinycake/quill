@@ -113,15 +113,33 @@ impl InputContent {
         tag: impl Into<SharedString>,
     ) -> Result<Self, InlineTokenError> {
         let tag = tag.into();
+        self.check_span(&range, &tag)?;
+        self.spans.push(super::TextSpan::new(range, tag));
+        super::text_spans::normalize(&mut self.spans);
+        Ok(self)
+    }
+    fn check_span(&self, range: &Range<usize>, tag: &SharedString) -> Result<(), InlineTokenError> {
         if range.is_empty() || range.end > self.text.len() || tag.is_empty() {
             return Err(InlineTokenError::InvalidRange);
         }
         if !self.text.is_char_boundary(range.start) || !self.text.is_char_boundary(range.end) {
             return Err(InlineTokenError::InvalidBoundary);
         }
-        self.spans.push(super::TextSpan::new(range, tag));
+        Ok(())
+    }
+    /// Attach many formatting spans at once, leaving out the ones
+    /// [`Self::with_span`] refuses (Quill patch).
+    pub fn with_spans(
+        mut self,
+        spans: impl IntoIterator<Item = (Range<usize>, SharedString)>,
+    ) -> Self {
+        for (range, tag) in spans {
+            if self.check_span(&range, &tag).is_ok() {
+                self.spans.push(super::TextSpan::new(range, tag));
+            }
+        }
         super::text_spans::normalize(&mut self.spans);
-        Ok(self)
+        self
     }
     /// The formatting spans, sorted by start.
     pub fn spans(&self) -> &[super::TextSpan] {
