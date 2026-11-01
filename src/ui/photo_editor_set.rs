@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::photo_edit::{CropRect, Placed, Stroke, overlay_item, render};
+use super::photo_edit::{CropRect, Orientation, Placed, Stroke, overlay_item, render};
 use super::photo_editor::{EditorPurpose, HANDLE_GRAB, PhotoEditor, preview_of};
 use super::photo_editor_items::ItemDrag;
 use gpui_kit::component::button::*;
@@ -134,31 +134,49 @@ impl PhotoEditor {
         self.selected = self.item_drag.is_some().then_some(0);
     }
 
-    /// What "Done" renders, without the editor's UI handles, so it can
-    /// run off the UI thread.
-    pub(super) fn set_render_job(&self) -> SetRenderJob {
-        let mut items = self.placed.iter().map(|(item, _)| item.clone());
-        let base = self.base_item.then(|| items.next()).flatten();
+    /// What "Done" renders, without the editor's UI handles, taken out of
+    /// the editor so the full-size canvas turns off the UI thread.
+    pub(super) fn into_set_render_job(self) -> SetRenderJob {
+        let (base, rest) = self.set_items();
         SetRenderJob {
-            canvas: self.orientation.apply(self.working.clone()),
+            working: self.working,
+            orientation: self.orientation,
             base,
-            rest: items.collect(),
-            strokes: self.strokes.clone(),
+            rest,
+            strokes: self.strokes,
             crop: self.crop,
         }
+    }
+
+    /// The picked image (when it is still the base) and the other items.
+    fn set_items(&self) -> (Option<Placed>, Vec<Placed>) {
+        let mut items = self.placed.iter().map(|(item, _)| item.clone());
+        let base = self.base_item.then(|| items.next()).flatten();
+        (base, items.collect())
     }
 
     /// The result: the picked image drawn on the canvas first, then the
     /// strokes and the other items, cropped.
     #[cfg(test)]
     pub(super) fn render_set_image(&self) -> RgbaImage {
-        self.set_render_job().render()
+        let (base, rest) = self.set_items();
+        SetRenderJob {
+            working: self.working.clone(),
+            orientation: self.orientation,
+            base,
+            rest,
+            strokes: self.strokes.clone(),
+            crop: self.crop,
+        }
+        .render()
     }
 }
 
-/// The Set mode's canvas, items and strokes, ready to render anywhere.
+/// The Set mode's canvas, its pending turns, items and strokes, ready to
+/// render anywhere.
 pub(super) struct SetRenderJob {
-    canvas: RgbaImage,
+    working: RgbaImage,
+    orientation: Orientation,
     base: Option<Placed>,
     rest: Vec<Placed>,
     strokes: Vec<Stroke>,
@@ -166,8 +184,8 @@ pub(super) struct SetRenderJob {
 }
 
 impl SetRenderJob {
-    pub(super) fn render(&self) -> RgbaImage {
-        let mut canvas = self.canvas.clone();
+    pub(super) fn render(self) -> RgbaImage {
+        let mut canvas = self.orientation.apply(self.working);
         if let Some(base) = &self.base {
             overlay_item(&mut canvas, base);
         }
@@ -311,6 +329,20 @@ mod tests {
         let prepared = quill::sticker_image::prepared_sticker_image(&kept, 512, Corners::Large);
         assert_eq!(prepared.get_pixel(0, 0)[3], 0, "rounded corner");
         assert_eq!(prepared.get_pixel(256, 128)[3], 255);
+    }
+
+    /// Done hands the canvas to the worker as it is: the turn waits for
+    /// the render there instead of copying the picture on the UI thread.
+    #[test]
+    fn done_hands_the_canvas_over_unturned() {
+        let mut turned = editor(400, 200, SetKind::Stickers);
+        turned.rotate();
+        turned.flip();
+        let expected = turned.render_set_image();
+        let pixels = turned.working.as_ptr();
+        let job = turned.into_set_render_job();
+        assert_eq!(job.working.as_ptr(), pixels, "no copy at Done");
+        assert!(job.render() == expected, "the same picture");
     }
 
     #[test]

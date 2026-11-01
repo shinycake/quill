@@ -293,7 +293,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
             .photo_editor
             .take()
             .expect("editor")
-            .set_render_job();
+            .into_set_render_job();
         app.finish_set_image(
             78,
             quill::sticker_set_box::SetKind::Stickers,
