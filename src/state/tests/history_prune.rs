@@ -884,3 +884,23 @@ fn a_report_answered_after_the_drop_still_hides_its_ad() {
         "the reported ad stays hidden"
     );
 }
+
+#[test]
+fn a_cache_only_delete_in_an_unknown_chat_creates_no_history() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    switch(&mut session, 7);
+    feed(&mut session, 7, 200);
+    switch(&mut session, 8);
+    assert!(is_closed_tail(&session, 7));
+    let closed_before: Vec<ChatId> = session.history_pruning.closed_chats().collect();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateDeleteMessages","chat_id":99,"message_ids":[5],"is_permanent":false,"from_cache":true}"#,
+    );
+    assert!(!session.histories.contains_key(&99));
+    let closed_after: Vec<ChatId> = session.history_pruning.closed_chats().collect();
+    assert_eq!(closed_after, closed_before);
+}
