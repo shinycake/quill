@@ -81,7 +81,7 @@ mod frame_grid;
 mod free_heap;
 pub mod link_inbox;
 mod wake_wait;
-pub use wake_wait::sleep_or_wake;
+pub use wake_wait::{PassEnd, run_chrome_loop};
 mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;

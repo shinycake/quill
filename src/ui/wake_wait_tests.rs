@@ -1,5 +1,5 @@
 //! The poll loops' pacing, on the test scheduler's clock.
-use super::{NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
+use super::{CHROME_PACE, NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
 use gpui_kit::TestAppContext;
 use quill::wake::Signal;
 use std::cell::{Cell, RefCell};
@@ -244,4 +244,31 @@ fn a_quiet_pass_rests_until_the_sooner_of_its_due_time_and_the_ceiling() {
         NextPass::Rest(PACE.ceiling)
     );
     assert_eq!(PACE.next(due(ms(0)), false), NextPass::Rest(PACE.gap));
+}
+
+/// The tray and icon badge recount on each pass. Every applied update batch
+/// pokes `wake::CHROME`, so a busy account pokes many times a second: the
+/// first poke still syncs at once, the rest at most four times a second.
+#[gpui_kit::test]
+fn a_burst_of_chrome_pokes_syncs_the_badge_four_times_a_second(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let passes = counted_loop(cx, &SIGNAL, CHROME_PACE, |_| IDLE);
+    cx.background_executor.advance_clock(ms(5000));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 1);
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 2, "the first update syncs at once");
+    for _ in 0..20 {
+        cx.background_executor.advance_clock(ms(50));
+        SIGNAL.poke();
+        cx.run_until_parked();
+    }
+    assert_eq!(passes.get(), 6, "one second of pokes: four more syncs");
+    cx.background_executor.advance_clock(ms(250));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 7, "the last poke still lands");
+    cx.background_executor.advance_clock(ms(2000));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 7, "then it rests");
 }

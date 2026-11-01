@@ -383,23 +383,15 @@ fn install_main_window_tray(
         }
     });
     // parity:platform-tray-icon — system tray icon with
-    // unread count, synced on a 1s UI-thread timer. The
+    // unread count, synced when `wake::CHROME` is poked. The
     // tray module no-ops when the count is unchanged or
     // the OS exposes no system tray.
     cx.spawn({
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
-            // Fallback for what no event announces (a tray host that
-            // appears late, the menu bar theme); everything else pokes
-            // `wake::CHROME` (applied updates, tray menu clicks, settings).
-            let mut wait = std::time::Duration::from_secs(10);
-            let mut seen = quill::wake::CHROME.epoch();
-            loop {
-                ui::sleep_or_wake(cx.background_executor(), &quill::wake::CHROME, seen, wait).await;
-                // Taken before the work: a poke during it runs the loop again.
-                seen = quill::wake::CHROME.epoch();
-                wait = std::time::Duration::from_secs(10);
+            let executor = cx.background_executor().clone();
+            ui::run_chrome_loop(executor, || {
                 let alive = tray_view
                     .update(cx, |this, _| {
                         quill::tray::sync_tray(this.session());
@@ -411,8 +403,10 @@ fn install_main_window_tray(
                     })
                     .is_ok();
                 if !alive {
-                    break;
+                    return None;
                 }
+                #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+                let mut due = None;
                 #[cfg(target_os = "macos")]
                 let _ = tray_window.update(cx, |_, window, cx| {
                     let enabled = tray_view
@@ -431,7 +425,7 @@ fn install_main_window_tray(
                             {
                                 // Check again soon; a minimized window
                                 // has no event to announce its state.
-                                wait = std::time::Duration::from_secs(1);
+                                due = Some(std::time::Duration::from_secs(1));
                                 // Keep it minimized while hidden. Deminiaturizing
                                 // here would finish its animation by unhiding the app.
                                 cx.hide();
@@ -465,7 +459,12 @@ fn install_main_window_tray(
                         }
                     });
                 }
-            }
+                Some(ui::PassEnd {
+                    work_left: false,
+                    due,
+                })
+            })
+            .await;
         }
     })
     .detach();
