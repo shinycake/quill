@@ -71,19 +71,6 @@ pub struct GroupCallJoinParams {
 }
 
 impl GroupCallJoinParams {
-    /// The honest no-device join: `audio_source_id` is 0 and `payload`
-    /// is empty. Used when no call engine is available or the native
-    /// offer fails — TDLib accepts these and the join still goes out;
-    /// Phase C2g normally replaces this with the real tgcalls offer.
-    pub fn honest_no_device() -> Self {
-        GroupCallJoinParams {
-            audio_source_id: 0,
-            payload: String::new(),
-            is_muted: false,
-            is_my_video_enabled: false,
-        }
-    }
-
     pub fn to_value(&self) -> Value {
         json!({
             "@type": "groupCallJoinParameters",

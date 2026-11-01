@@ -201,13 +201,17 @@ fn send_call_debug_information_shape() {
 /// pinned schema (1.8.67) constructors, never invented.
 #[test]
 fn group_call_request_shapes() {
-    // The honest signaling-only join params: no device, no payload.
-    let p = GroupCallJoinParams::honest_no_device();
+    let p = GroupCallJoinParams {
+        audio_source_id: 7,
+        payload: "offer".into(),
+        is_muted: true,
+        is_my_video_enabled: false,
+    };
     let pv = p.to_value();
     assert_eq!(pv["@type"], "groupCallJoinParameters");
-    assert_eq!(pv["audio_source_id"], 0);
-    assert_eq!(pv["payload"], "");
-    assert_eq!(pv["is_muted"], false);
+    assert_eq!(pv["audio_source_id"], 7);
+    assert_eq!(pv["payload"], "offer");
+    assert_eq!(pv["is_muted"], true);
     assert_eq!(pv["is_my_video_enabled"], false);
 
     assert_eq!(
