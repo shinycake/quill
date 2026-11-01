@@ -3,9 +3,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::store::{Store, StoredFrame};
-use super::{Cancel, ClipInfo, ClipKey, ClipState, Origin, Rendered, Timeline};
+use super::{Cancel, ClipInfo, ClipKey, ClipState, DecodeAll, Origin, Rendered, Timeline};
 use crate::locks::lock_or_recover;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,8 @@ use std::time::{Duration, Instant};
 const ON_SCREEN: Duration = Duration::from_millis(500);
 /// Frames asked for at once, per clip.
 const MAX_WANTED: usize = 8;
+/// Frames a worker draws in a row while a clip waits for it to open.
+const FRAMES_BEFORE_OPEN: u32 = 8;
 
 /// What the engine did, for the decision doc's measurements and
 /// `QUILL_TRACE_STICKERS`.
@@ -118,10 +121,8 @@ pub(super) fn too_slow_for_grid(draw_cost: Duration, timeline: Timeline) -> bool
 const COARSE_SHARE: f64 = 0.4;
 
 pub(super) enum Job {
-    Open {
-        key: ClipKey,
-        origin: Origin,
-    },
+    /// Open a TGS clip (decoded clips open on the opener thread).
+    Open { key: ClipKey, path: PathBuf },
     Frame {
         key: ClipKey,
         index: u32,
@@ -144,6 +145,9 @@ pub(super) struct State {
     pub(super) store_bytes: usize,
     pub(super) stats: EngineStats,
     served: u64,
+    /// Frames each worker drew in a row while one of its clips waited to
+    /// open.
+    frames_in_a_row: Vec<u32>,
 }
 
 pub(super) struct Shared {
@@ -185,9 +189,14 @@ impl Engine {
                 store_bytes: 0,
                 stats: EngineStats::default(),
                 served: 0,
+                frames_in_a_row: vec![0; workers],
             }),
             work: Condvar::new(),
             waker: Mutex::new(None),
+        });
+        let opener = shared.clone();
+        let _ = crate::thread_guard::spawn_guarded("quill-sticker-open".to_string(), move || {
+            super::opener::run(&opener)
         });
         let mut started = 0;
         for index in 0..workers {
@@ -479,18 +488,38 @@ impl State {
         }
     }
 
-    /// The next job for worker `me`: a clip to open, else the soonest
-    /// frame of the clip served longest ago.
+    /// The next job for worker `me`: the soonest frame of its clip served
+    /// longest ago, else a TGS clip to open. A clip waiting to open goes
+    /// first once [`FRAMES_BEFORE_OPEN`] frames went before it.
     pub(super) fn next_job(&mut self, me: usize) -> Option<Job> {
-        if let Some((key, clip)) = self
-            .clips
-            .iter_mut()
-            .find(|(_, clip)| clip.worker == me && !clip.busy && clip.origin.is_some())
-        {
-            let origin = clip.origin.take()?;
-            clip.busy = true;
-            return Some(Job::Open { key: *key, origin });
+        let opening = self.clips.iter().find_map(|(key, clip)| {
+            let tgs = matches!(clip.origin, Some(Origin::Lottie(_)));
+            (clip.worker == me && !clip.busy && tgs).then_some(*key)
+        });
+        let in_a_row = self.frames_in_a_row.get(me).copied().unwrap_or(0);
+        let frames_first = opening.is_none() || in_a_row < FRAMES_BEFORE_OPEN;
+        let job = frames_first.then(|| self.next_frame(me)).flatten();
+        if let Some(count) = self.frames_in_a_row.get_mut(me) {
+            *count = match (&job, opening) {
+                (Some(_), Some(_)) => count.saturating_add(1),
+                _ => 0,
+            };
         }
+        if job.is_some() {
+            return job;
+        }
+        let key = opening?;
+        let clip = self.clips.get_mut(&key)?;
+        let Some(Origin::Lottie(path)) = clip.origin.take() else {
+            return None;
+        };
+        clip.busy = true;
+        Some(Job::Open { key, path })
+    }
+
+    /// The soonest frame worker `me` has to draw, of its clip served
+    /// longest ago.
+    fn next_frame(&mut self, me: usize) -> Option<Job> {
         let key = self
             .clips
             .iter()
@@ -511,5 +540,18 @@ impl State {
         clip.served = served;
         let stored = clip.store.get(index);
         Some(Job::Frame { key, index, stored })
+    }
+
+    /// The next clip for the opener to decode, with what stops it.
+    pub(super) fn next_decode(&mut self) -> Option<(ClipKey, DecodeAll, Cancel)> {
+        let (key, clip) = self
+            .clips
+            .iter_mut()
+            .find(|(_, clip)| !clip.busy && matches!(clip.origin, Some(Origin::Decoded(_))))?;
+        let Some(Origin::Decoded(decode)) = clip.origin.take() else {
+            return None;
+        };
+        clip.busy = true;
+        Some((*key, decode, clip.cancel.clone()))
     }
 }

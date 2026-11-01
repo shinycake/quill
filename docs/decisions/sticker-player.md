@@ -232,6 +232,26 @@ tick up to a refresh before its paint: 120 draws a second → 38, each of
 the 30 frames up for exactly 4 refreshes. The window frame count on a real
 120 Hz display still needs a Mac.
 
+### Follow-up: WebM opens held back other clips' frames (2026-11-01)
+
+A WebM sticker decodes every frame when it opens: 77 ms for a 512 px 3 s
+sticker at box 224, 28 ms at box 56, 280 to 470 ms through the `ffmpeg`
+fallback (`sweep-webm-stickers.md`). That ran on the sticker worker the clip
+was pinned to, and a worker took a pending open before any frame, so every
+clip on that worker got no frames meanwhile. Queued opens ran back to back.
+
+Clips decoded up front now open on one opener thread of their own
+(`opener.rs`). It installs the frames in the clip's store, and the clip's
+worker only unpacks them; a decoded clip holds no canvas, so the worker
+needs no source for it. Workers still open TGS clips, which keep their
+canvas there, but a frame now goes before an open unless 8 frames in a row
+already did. A test with one worker holds a WebM decode open and gets
+another clip's frame meanwhile; before, the decode ran on the worker.
+
+Each open still holds all its raw frames at once (up to 58 MB at 448 px,
+inferred), and opens still queue on the one opener. Streaming WebM frame by
+frame through the shim, as tdesktop's `Media::Clip` does, would remove both.
+
 ## Verification
 
 `/verify` captures at 2x, before and after: a sticker message in history,

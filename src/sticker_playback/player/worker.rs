@@ -1,12 +1,14 @@
-//! A worker thread: opens its clips and draws or unpacks their frames.
+//! A worker thread: opens its TGS clips and draws or unpacks the frames
+//! of the clips it owns.
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::{Job, Shared, State};
-use super::source::{Kind, Source, frame_len};
-use super::store::{self, Scratch, Store, StoredFrame};
-use super::{ClipInfo, ClipKey, ClipState, Origin, Rendered};
+use super::source::{Source, frame_len};
+use super::store::{self, Scratch, StoredFrame};
+use super::{ClipInfo, ClipKey, ClipState, Rendered};
 use crate::locks::lock_or_recover;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::MutexGuard;
 use std::time::{Duration, Instant};
 
@@ -44,8 +46,8 @@ pub(super) fn run(me: usize, shared: &Shared) {
         // The UI is woken when a clip opened or failed and for a clip's
         // first frame; later frames are picked up as views paint.
         let wake = match job {
-            Job::Open { key, origin } => {
-                open(shared, &mut sources, &mut scratch, key, origin);
+            Job::Open { key, path } => {
+                open(shared, &mut sources, key, &path);
                 true
             }
             Job::Frame { key, index, stored } => {
@@ -65,32 +67,9 @@ fn wait<'a>(shared: &Shared, state: MutexGuard<'a, State>) -> MutexGuard<'a, Sta
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn open(
-    shared: &Shared,
-    sources: &mut HashMap<ClipKey, Source>,
-    scratch: &mut Scratch,
-    key: ClipKey,
-    origin: Origin,
-) {
-    let cancel = lock_or_recover(&shared.state)
-        .clips
-        .get(&key)
-        .map(|clip| clip.cancel.clone())
-        .unwrap_or_default();
-    let mut packed = Store::default();
-    let opened = match origin {
-        Origin::Lottie(path) => Source::lottie(&path, key),
-        Origin::Decoded(decode) => decode(&cancel)
-            .and_then(|decoded| Source::stored(key, decoded))
-            .and_then(|(source, frames)| {
-                for (index, frame) in (0u32..).zip(&frames) {
-                    let frame = store::encode(frame, scratch)
-                        .ok_or_else(|| "Could not keep animated sticker frames".to_string())?;
-                    packed.insert(index, frame);
-                }
-                Ok(source)
-            }),
-    };
+/// Opens a TGS clip on this worker, which keeps its canvas.
+fn open(shared: &Shared, sources: &mut HashMap<ClipKey, Source>, key: ClipKey, path: &Path) {
+    let opened = Source::lottie(path, key);
     let mut state = lock_or_recover(&shared.state);
     let Some(clip) = state.clips.get_mut(&key) else {
         // Closed meanwhile.
@@ -102,14 +81,7 @@ fn open(
             clip.state = ClipState::Ready(ClipInfo {
                 timeline: source.timeline,
             });
-            // A drawing source holds its canvas.
-            clip.source_bytes = match source.kind {
-                Kind::Lottie(_) => frame_len(key).unwrap_or(0),
-                Kind::Stored => 0,
-            };
-            if let Kind::Stored = source.kind {
-                state.install(&key, packed);
-            }
+            clip.source_bytes = frame_len(key).unwrap_or(0);
             sources.insert(key, source);
         }
         Err(error) => {
@@ -139,9 +111,7 @@ fn frame(
     // The pixels, and what to store (a frame just drawn).
     let mut drawn: Option<(Vec<u8>, Option<&[u8]>)> = None;
     let mut timing = Timing::default();
-    if let Some(source) = sources.get_mut(&key)
-        && let Ok(len) = frame_len(key)
-    {
+    if let Ok(len) = frame_len(key) {
         let started = Instant::now();
         let unpacked = stored.as_ref().and_then(|stored| {
             let mut out = vec![0u8; len];
@@ -150,7 +120,7 @@ fn frame(
         if let Some(pixels) = unpacked {
             timing.unpack = Some(started.elapsed());
             drawn = Some((pixels, None));
-        } else if let Some(pixels) = source.draw(index) {
+        } else if let Some(pixels) = sources.get_mut(&key).and_then(|source| source.draw(index)) {
             timing.draw = Some(started.elapsed());
             let packing = Instant::now();
             let packed = store::encode(&pixels, scratch);

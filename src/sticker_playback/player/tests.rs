@@ -710,3 +710,65 @@ fn sticker_store_bench() {
         );
     }
 }
+
+/// A clip decoded up front opens off the workers: while its decode runs,
+/// the clips a worker owns still get their frames.
+#[test]
+fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
+    use std::sync::mpsc;
+    let engine = Engine::new(1, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<()>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(());
+    }));
+    // A plays on the only worker: opened, its first frame drawn.
+    let a = key(1, 16);
+    engine.open(a, synthetic(16, 10));
+    while !engine.take_rendered().iter().any(|r| r.key == a) {
+        wakes.recv().unwrap();
+    }
+    // B's decode starts, then waits for the test.
+    let (started, decoding) = mpsc::channel::<Option<String>>();
+    let (release, released) = mpsc::channel::<()>();
+    let b = key(2, 16);
+    let len = 16 * 16 * 4;
+    engine.open(
+        b,
+        Origin::Decoded(Box::new(move |_| {
+            let _ = started.send(std::thread::current().name().map(str::to_owned));
+            let _ = released.recv();
+            Ok(DecodedFrames {
+                frames: vec![vec![7; len]; 3],
+                fps: 30.0,
+            })
+        })),
+    );
+    let thread = decoding.recv().unwrap();
+    assert_eq!(
+        thread.as_deref(),
+        Some("quill-sticker-open"),
+        "B decodes off the worker"
+    );
+    // A's next frame arrives while B is still decoding.
+    engine.want(&a, &[1]);
+    while !engine
+        .take_rendered()
+        .iter()
+        .any(|r| r.key == a && r.index == 1)
+    {
+        std::thread::yield_now();
+    }
+    assert_eq!(engine.state(&b), Some(ClipState::Opening));
+    release.send(()).unwrap();
+    while engine.info(&b).is_none() {
+        wakes.recv().unwrap();
+    }
+    engine.want(&b, &[2]);
+    while !engine
+        .take_rendered()
+        .iter()
+        .any(|r| r.key == b && r.index == 2)
+    {
+        std::thread::yield_now();
+    }
+}

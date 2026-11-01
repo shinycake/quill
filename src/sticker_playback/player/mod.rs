@@ -13,7 +13,8 @@
 //! - Each worker keeps the clips it opened: ThorVG's software renderer uses
 //!   the memory pool of the thread that created a canvas
 //!   (`tvgSwMemPool.cpp`, a `thread_local`), so a canvas is drawn only on
-//!   the thread that made it.
+//!   the thread that made it. Clips decoded up front (WebM) are decoded on
+//!   one opener thread of their own ([`opener`]), off the workers.
 //! - Stored frames are evicted least recently used first under one byte
 //!   budget for every clip ([`Engine::new`]); a clip shown in the last half
 //!   second keeps its frames.
@@ -24,6 +25,7 @@
 
 mod engine;
 pub mod head;
+mod opener;
 mod source;
 mod store;
 mod worker;
