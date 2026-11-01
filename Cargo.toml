@@ -160,6 +160,8 @@ lz4_flex = { version = "0.14", default-features = false, features = ["std", "che
 thiserror = "2"
 unicode-segmentation = "1.13"
 unicode-bidi = "0.3"
+# Combining-mark limit in message text (`display_text`).
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }

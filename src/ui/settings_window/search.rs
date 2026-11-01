@@ -174,11 +174,7 @@ impl QuillApp {
         let recent = self.search_recent();
         recent.record(target.id());
         let recent = recent.clone();
-        if let Err(err) =
-            quill::settings::save_settings_search_recent(&QuillApp::appearance_paths(), &recent)
-        {
-            eprintln!("quill: could not save settings_search_recent.json: {err}");
-        }
+        quill::settings::save_settings_search_recent(&QuillApp::appearance_paths(), &recent);
         self.settings.search.pending_clear = true;
         self.show_settings_page(target.page(), cx);
         if let Some(section) = super::agent_page::section_for_entry(target.id()) {
@@ -417,7 +413,7 @@ impl QuillApp {
                             let recent = this.search_recent();
                             recent.remove(target.id());
                             let recent = recent.clone();
-                            let _ = quill::settings::save_settings_search_recent(
+                            quill::settings::save_settings_search_recent(
                                 &QuillApp::appearance_paths(),
                                 &recent,
                             );

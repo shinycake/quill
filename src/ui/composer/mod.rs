@@ -102,6 +102,18 @@ impl QuillApp {
                 if self.submit_suggested_change(&text, window, cx) {
                     return;
                 }
+                // The tray goes, now or once its renders land: an editor
+                // asked for mid-render no longer opens.
+                self.viewer.photo_editor_after = None;
+                // A photo's edit is still rendering: the Send waits for it,
+                // so the unedited file never goes out.
+                if self.tray_renders_an_edit() {
+                    self.update_pending_send(|send| send.held_send = Some(text));
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+                    cx.notify();
+                    return;
+                }
                 // B4: the forward bar sends the comment, then the forward.
                 if self.forward_bar_here() {
                     self.submit_forward_bar(text, window, cx);
@@ -334,7 +346,9 @@ impl QuillApp {
                     }
                     // Phase A1: slow-mode gate (centralized in
                     // `slow_mode_blocked`).
-                    if self.slow_mode_blocked(chat_id, cx) {
+                    if self.slow_mode_refuses(chat_id, snaps.len(), cx)
+                        || self.slow_mode_blocked(chat_id, cx)
+                    {
                         return;
                     }
                     // MED1: ungrouped sends go out one message at a time.
@@ -382,6 +396,16 @@ impl QuillApp {
                         && attachments.iter().all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
                         });
+                    let messages = if albumable && self.composer_group_media_effective() {
+                        ComposerAttachment::split_for_send(&attachments, true).len()
+                    } else {
+                        attachments.len().max(1)
+                    };
+                    if demo_chat
+                        .is_some_and(|chat_id| self.slow_mode_refuses(chat_id, messages, cx))
+                    {
+                        return;
+                    }
                     if albumable && self.composer_group_media_effective() {
                         self.apply_demo_album(&text, &attachments, reply.as_ref());
                     } else if attachments.len() >= 2 {
