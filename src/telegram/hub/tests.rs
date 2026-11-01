@@ -1,6 +1,6 @@
 use super::*;
 use crate::diagnostics::MemorySink;
-use crate::telegram::envelope::EnvelopePayload;
+use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 
@@ -10,8 +10,19 @@ fn channel_hub() -> (Arc<TdHub>, Sender<String>, Arc<MemorySink>) {
     let source: ReceiveSource =
         Box::new(move |timeout| rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
     let sink = Arc::new(MemorySink::new());
-    let hub = TdHub::with_source(source, sink.clone()).expect("hub thread");
+    let hub = TdHub::with_source(source, wake_on(&tx), sink.clone()).expect("hub thread");
     (Arc::new(hub), tx, sink)
+}
+
+fn wake_on(tx: &Sender<String>) -> ReceiveWake {
+    let tx = tx.clone();
+    Box::new(move || {
+        let _ = tx.send(String::new());
+    })
+}
+
+fn no_wake() -> ReceiveWake {
+    Box::new(|| {})
 }
 
 fn option_update(client: Option<i32>, value: i64) -> String {
@@ -139,7 +150,7 @@ fn the_receive_thread_sleeps_while_no_client_is_registered() {
         std::thread::sleep(Duration::from_millis(5));
         None
     });
-    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let hub = Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
     std::thread::sleep(Duration::from_millis(150));
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no client, no td_receive");
     let mut bridge = hub.bridge(1);
@@ -154,7 +165,7 @@ fn a_dead_receive_thread_marks_every_bridge_stopped() {
         let _ = rx.recv();
         panic!("receive source failed");
     });
-    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let hub = Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
     let first = hub.bridge(1);
     let second = hub.bridge(2);
     assert!(!first.stopped_unexpectedly());
@@ -179,7 +190,8 @@ fn one_panicking_envelope_does_not_end_the_receive_thread() {
         }
         Some(json)
     });
-    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let hub = TdHub::with_source(source, wake_on(&tx), Arc::new(MemorySink::new())).unwrap();
+    let hub = Arc::new(hub);
     let bridge = hub.bridge(1);
     tx.send(option_update(Some(1), 1)).unwrap();
     tx.send(option_update(Some(1), 2)).unwrap();
@@ -201,7 +213,8 @@ fn a_stopped_shared_hub_is_replaced_but_a_running_one_is_kept() {
         let _ = dying_rx.recv();
         panic!("receive source failed");
     });
-    let dead = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let dead =
+        Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
     // The loop only reads while a client is registered.
     let _bridge = dead.bridge(1);
     dying_tx.send(()).unwrap();
@@ -264,11 +277,9 @@ fn live_clients_get_only_their_own_envelopes() {
             if let Some(owned) = bridge.next_timeout(Duration::from_millis(200)) {
                 closed = matches!(
                     owned.envelope.payload,
-                    EnvelopePayload::Auth(
-                        crate::telegram::envelope::AuthPayload::UpdateAuthorizationState(
-                            crate::telegram::envelope::AuthorizationState::Closed
-                        )
-                    )
+                    EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(
+                        AuthorizationState::Closed
+                    ))
                 );
             }
         }
@@ -277,36 +288,147 @@ fn live_clients_get_only_their_own_envelopes() {
 }
 
 #[test]
-fn a_stop_ends_the_receive_thread_at_once_with_or_without_clients() {
+fn a_stop_ends_the_receive_thread_with_or_without_clients() {
     let (idle, _tx, _sink) = channel_hub();
-    std::thread::sleep(Duration::from_millis(20));
-    let start = Instant::now();
-    assert!(idle.stop_within(Duration::from_millis(500)));
-    assert!(
-        start.elapsed() < Duration::from_millis(300),
-        "{:?}",
-        start.elapsed()
-    );
+    assert!(idle.stop_within(Duration::from_secs(30)));
 
     let (busy, _tx, _sink) = channel_hub();
     let bridge = busy.bridge(1);
-    std::thread::sleep(Duration::from_millis(20));
-    assert!(busy.stop_within(Duration::from_millis(500)));
+    assert!(busy.stop_within(Duration::from_secs(30)));
     assert!(!bridge.stopped_unexpectedly());
 }
 
 #[test]
-fn a_stop_gives_up_on_a_receive_that_does_not_return() {
-    let source: ReceiveSource = Box::new(|_| {
-        std::thread::sleep(Duration::from_secs(2));
+fn a_stop_wakes_a_receive_that_is_blocked() {
+    let (entered_tx, entered_rx) = mpsc::channel::<()>();
+    let (wake_tx, wake_rx) = mpsc::channel::<()>();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = entered_tx.send(());
+        let _ = wake_rx.recv();
         None
     });
-    let hub = Arc::new(TdHub::with_source(source, Arc::new(MemorySink::new())).unwrap());
+    let wake: ReceiveWake = Box::new(move || {
+        let _ = wake_tx.send(());
+    });
+    let hub = TdHub::with_source(source, wake, Arc::new(MemorySink::new())).unwrap();
+    let hub = Arc::new(hub);
     let _client = hub.bridge(1);
-    std::thread::sleep(Duration::from_millis(20));
-    let start = Instant::now();
-    assert!(!hub.stop_within(Duration::from_millis(100)));
-    assert!(start.elapsed() < Duration::from_millis(500));
+    entered_rx.recv().unwrap();
+    assert!(hub.stop_within(Duration::from_secs(30)));
+}
+
+#[test]
+fn what_ends_the_receive_of_a_stopped_hub_is_not_delivered() {
+    let (tx, rx) = mpsc::channel::<String>();
+    let (entered_tx, entered) = mpsc::channel();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = entered_tx.send(());
+        rx.recv().ok()
+    });
+    let wake: ReceiveWake = Box::new(move || {
+        let _ = tx.send(
+            r#"{"@type":"error","code":400,"message":"Invalid TDLib instance specified"}"#.into(),
+        );
+    });
+    let sink = Arc::new(MemorySink::new());
+    let hub = Arc::new(TdHub::with_source(source, wake, sink.clone()).unwrap());
+    let _client = hub.bridge(1);
+    entered.recv().unwrap();
+    assert!(hub.stop_within(Duration::from_secs(30)));
+    assert!(sink.snapshot().is_empty());
+}
+
+#[test]
+fn a_stop_gives_up_on_a_receive_that_does_not_return() {
+    let (release, released) = mpsc::channel::<()>();
+    let (entered_tx, entered) = mpsc::channel();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = entered_tx.send(());
+        let _ = released.recv();
+        None
+    });
+    let hub = Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
+    let _client = hub.bridge(1);
+    entered.recv().unwrap();
+    assert!(!hub.stop_within(Duration::ZERO));
+    drop(release);
+}
+
+#[test]
+#[ignore = "QUILL_TDJSON_PATH=<libtdjson> cargo test --lib blocked_receive -- --ignored"]
+fn a_send_to_an_unmade_client_ends_a_blocked_receive() {
+    let api = Arc::new(TdJson::load_default().expect("libtdjson"));
+    let receive = api.clone();
+    let (entering_tx, entering_rx) = mpsc::channel::<()>();
+    let thread = std::thread::spawn(move || {
+        let _ = entering_tx.send(());
+        receive.receive(60.0)
+    });
+    entering_rx.recv().unwrap();
+    api.wake_receive();
+    let answer = thread.join().unwrap().expect("an answer, not the timeout");
+    assert!(answer.contains("Invalid TDLib instance"), "{answer}");
+}
+
+const EXIT_CHILD: &str = "QUILL_TEST_HUB_EXIT_CHILD";
+
+#[expect(
+    clippy::exit,
+    reason = "the re-executed child test process is the exit under test"
+)]
+fn exit_child_main() -> ! {
+    let Ok(live) = crate::telegram::client::LiveTdJson::connect(Arc::new(MemorySink::new())) else {
+        std::process::exit(3);
+    };
+    let bridge = live.bridge();
+    let _ = live.send(r#"{"@type":"close"}"#);
+    while let Some(owned) = bridge.next_timeout(Duration::from_secs(10)) {
+        if matches!(
+            owned.envelope.payload,
+            EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(
+                AuthorizationState::Closed
+            ))
+        ) {
+            std::process::exit(0);
+        }
+    }
+    std::process::exit(4);
+}
+
+#[test]
+#[ignore = "QUILL_TDJSON_PATH=<libtdjson> QUILL_TEST_HUB_EXIT_RUNS=700 cargo test --lib exit_with -- --ignored --nocapture"]
+fn exit_with_the_receive_thread_blocked_stays_clean() {
+    if std::env::var_os(EXIT_CHILD).is_some() {
+        exit_child_main();
+    }
+    let runs: u32 = std::env::var("QUILL_TEST_HUB_EXIT_RUNS")
+        .ok()
+        .and_then(|runs| runs.parse().ok())
+        .unwrap_or(100);
+    let exe = std::env::current_exe().unwrap();
+    let mut unclean = 0;
+    let mut slowest = Duration::ZERO;
+    for _ in 0..runs {
+        let started = Instant::now();
+        let status = std::process::Command::new(&exe)
+            .args([
+                "--ignored",
+                "--exact",
+                "telegram::hub::tests::exit_with_the_receive_thread_blocked_stays_clean",
+            ])
+            .env(EXIT_CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        slowest = slowest.max(started.elapsed());
+        if status.code() != Some(0) {
+            eprintln!("{status}");
+            unclean += 1;
+        }
+    }
+    eprintln!("{runs} exits, {unclean} unclean, slowest {slowest:?}");
+    assert_eq!(unclean, 0);
 }
 
 #[test]

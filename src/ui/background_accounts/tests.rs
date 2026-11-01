@@ -4,6 +4,7 @@
 use super::calls::BackgroundRing;
 use super::{AccountUnread, BackgroundClient, BackgroundStatus, PendingOpen};
 use crate::ui::app::QuillApp;
+use crate::ui::call_sounds::CallSound;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::DialogKind;
@@ -91,6 +92,30 @@ fn a_dismissed_prompt_stops_ringing_in_the_app(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| assert!(!app.background_ring_audible()));
     shell.read_with(&vcx, |shell, _| {
         assert_ne!(shell.open_dialog, Some(DialogKind::BackgroundCall));
+    });
+}
+
+#[gpui_kit::test]
+fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.background.ringing = Some(ring());
+        app.ensure_call_tick(cx);
+        assert_eq!(app.calls.sounds.looping(), None);
+    });
+    vcx.executor().advance_clock(Duration::from_secs(1));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
+        assert!(app.calls.tick_active);
+    });
+    app.update_in(&mut vcx, |app, _, _| {
+        app.background.ringing = None;
+    });
+    vcx.executor().advance_clock(Duration::from_secs(1));
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.calls.tick_active, "no ring, no tick");
     });
 }
 

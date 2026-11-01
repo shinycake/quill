@@ -11,7 +11,8 @@
 //! The process-wide hub ([`TdHub::shared`]) is made once and never dropped,
 //! so `libtdjson` is never unloaded while TDLib worker threads run. With no
 //! client registered the receive thread sleeps on a condition variable
-//! instead of polling `td_receive`.
+//! instead of calling `td_receive`, and with one it sleeps inside
+//! `td_receive` until something arrives.
 //!
 //! It is stopped once, at process exit, before TDLib's own teardown: `exit`
 //! destroys TDLib's static client manager, and a receive thread still inside
@@ -27,16 +28,22 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// Seconds one `td_receive` call may block. Shutdown is noticed after it.
-const RECEIVE_TIMEOUT_SECS: f64 = 0.2;
+/// Seconds one `td_receive` call may block. Anything TDLib has to say ends
+/// it sooner, and a stop makes TDLib say something ([`ReceiveWake`]), so
+/// nothing depends on this length.
+const RECEIVE_TIMEOUT_SECS: f64 = 60.0;
 
 /// How long process exit waits for the receive thread to leave
-/// `td_receive`: one receive timeout and a margin. Past it, exit goes on.
+/// `td_receive`, which [`ReceiveWake`] takes milliseconds to bring about.
+/// Past it, exit goes on.
 const EXIT_STOP_WAIT: Duration = Duration::from_millis(500);
 
 /// Where the receive thread reads JSON from: `td_receive` live, a channel
 /// in tests. The argument is the timeout in seconds.
 pub type ReceiveSource = Box<dyn FnMut(f64) -> Option<String> + Send>;
+
+/// Ends a call into the [`ReceiveSource`] that is blocked, or the next one.
+pub type ReceiveWake = Box<dyn Fn() + Send + Sync>;
 
 /// What happened to one received envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,14 +124,18 @@ impl Routes {
         }
     }
 
-    /// Block while no client is registered (up to `max`), so a process
-    /// with no live account does not wake `td_receive` five times a second.
-    /// The shutdown flag is read under the lock [`TdHub::request_stop`]
-    /// notifies under, so a stop is never missed and waited out.
-    fn wait_for_client(&self, max: Duration, shutdown: &AtomicBool) {
-        let map = lock(&self.map);
-        if map.is_empty() && !shutdown.load(Ordering::SeqCst) {
-            let _ = self.changed.wait_timeout(map, max);
+    /// Block while no client is registered, so `td_receive` only runs after
+    /// a client id was made, and with it the exit hook
+    /// ([`stop_shared_before_tdlib_teardown`]). The shutdown flag is read
+    /// under the lock [`TdHub::request_stop`] notifies under, so a stop is
+    /// never missed.
+    fn wait_for_client(&self, shutdown: &AtomicBool) {
+        let mut map = lock(&self.map);
+        while map.is_empty() && !shutdown.load(Ordering::SeqCst) {
+            map = self
+                .changed
+                .wait(map)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 }
@@ -135,6 +146,7 @@ pub struct TdHub {
     routes: Arc<Routes>,
     seq: Arc<AtomicU64>,
     shutdown: Arc<AtomicBool>,
+    wake: ReceiveWake,
     /// Set when the receive loop ends without a shutdown request (a panic):
     /// every bridge then reports itself stopped.
     stopped: Arc<AtomicBool>,
@@ -188,14 +200,10 @@ impl TdHub {
             Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
         };
         let receive = api.clone();
-        let source: ReceiveSource = Box::new(move |timeout| {
-            let json = receive.receive(timeout);
-            // An idle loop still calls `td_receive`, which makes TDLib's
-            // client manager before any client id exists.
-            stop_shared_before_tdlib_teardown();
-            json
-        });
-        let mut hub = TdHub::with_source(source, sink).map_err(|_| TdJsonError::Load)?;
+        let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
+        let waker = api.clone();
+        let wake: ReceiveWake = Box::new(move || waker.wake_receive());
+        let mut hub = TdHub::with_source(source, wake, sink).map_err(|_| TdJsonError::Load)?;
         hub.api = Some(api);
         let hub = Arc::new(hub);
         *slot = Some(hub.clone());
@@ -231,6 +239,7 @@ impl TdHub {
     /// A hub reading from `source` on its own thread.
     pub fn with_source(
         source: ReceiveSource,
+        wake: ReceiveWake,
         sink: Arc<dyn DiagnosticSink>,
     ) -> std::io::Result<Self> {
         let routes = Arc::new(Routes::default());
@@ -255,6 +264,7 @@ impl TdHub {
             routes,
             seq,
             shutdown,
+            wake,
             stopped,
             thread: Mutex::new(Some(thread)),
         })
@@ -316,8 +326,10 @@ impl TdHub {
 
     fn request_stop(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
-        let _map = lock(&self.routes.map);
+        let map = lock(&self.routes.map);
         self.routes.changed.notify_all();
+        drop(map);
+        (self.wake)();
     }
 }
 
@@ -325,12 +337,18 @@ static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
 
 /// Stop the shared hub's receive thread when the process exits, before
 /// TDLib destroys its static client manager under it. Call right after a
-/// client id is made or a `td_receive` returns: `atexit` hooks and static
+/// client id is made and before its route exists: `atexit` hooks and static
 /// destructors run in reverse order of registration, and TDLib registers the
-/// manager's destructor when either first runs, so a hook registered after
-/// that runs first.
-pub fn stop_shared_before_tdlib_teardown() {
+/// manager's destructor then, so a hook registered after that runs first.
+///
+/// TDLib's function-local statics go in that order too, so one first used
+/// after the hook is registered is gone when the hook runs, and a `td_send`
+/// in the hook aborts on it. The wake therefore runs once here, and
+/// `td_receive` is free because no route exists yet.
+pub fn stop_shared_before_tdlib_teardown(api: &TdJson) {
     EXIT_HOOK.call_once(|| {
+        api.wake_receive();
+        let _ = api.receive(0.0);
         // SAFETY: `stop_shared_at_exit` is a plain `extern "C" fn()` that
         // catches every panic. A failed registration leaves exit as before.
         let _ = unsafe { libc::atexit(stop_shared_at_exit) };
@@ -399,13 +417,17 @@ fn receive_one(
     shutdown: &AtomicBool,
     sink: &Arc<dyn DiagnosticSink>,
 ) {
-    routes.wait_for_client(Duration::from_secs(1), shutdown);
+    routes.wait_for_client(shutdown);
     if shutdown.load(Ordering::SeqCst) {
         return;
     }
     let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
         return;
     };
+    // What ended the call may be the stop's own wake.
+    if shutdown.load(Ordering::SeqCst) {
+        return;
+    }
     // A conference call's frame answers go to the call thread waiting on
     // them, before anything else looks at the envelope.
     if crate::telegram::group_call_crypto::intercept(&json) {

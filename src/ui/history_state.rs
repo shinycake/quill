@@ -27,6 +27,8 @@ pub(crate) struct HistoryUi {
     /// bottom is shown), not the list's overdraw. Reported as
     /// `viewMessages` on the next render.
     pub(super) seen: std::rc::Rc<std::cell::RefCell<Option<(ChatId, Vec<MessageId>)>>>,
+    /// Messages of the rows inside the viewport at the last paint.
+    pub(super) on_screen: std::rc::Rc<std::cell::RefCell<Vec<MessageId>>>,
     /// Last `(chat, message ids)` reported as visible, to skip repeats.
     pub(super) reported_visible: Option<(ChatId, Vec<MessageId>)>,
     /// Window activity at the last render (message effects play only
@@ -174,6 +176,7 @@ impl HistoryUi {
             rows: Vec::new(),
             painted_ids: Default::default(),
             seen: Default::default(),
+            on_screen: Default::default(),
             reported_visible: None,
             window_active: false,
             shared: HistoryShared::default(),

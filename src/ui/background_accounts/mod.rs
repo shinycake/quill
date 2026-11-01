@@ -20,7 +20,7 @@ use super::app::QuillApp;
 use super::export_progress::take_ended_exports;
 use super::selection_html::rich_html_note;
 use super::status_note::StatusNote;
-use super::wake_wait::{PassEnd, PollPace, run_poll_loop};
+use super::wake_wait::{PassEnd, PollPace, backlog_hold, run_poll_loop};
 use gpui_kit::*;
 use quill::connect::{ClosingSet, ConnectBlocker, LiveConnect, start_background_live_connect};
 use quill::diagnostics::DiscardSink;
@@ -399,10 +399,12 @@ impl QuillApp {
         let generation = self.background.generation;
         Self::spawn_main(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
+            let hold = backlog_hold(&executor);
             run_poll_loop(
                 executor,
                 &quill::wake::BACKGROUND_UPDATES,
                 POLL_PACE,
+                hold,
                 || {
                     this.update(cx, |this, cx| {
                         if generation != this.background.generation {

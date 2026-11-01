@@ -400,6 +400,14 @@ fn a_mac_hides_while_an_account_is_signed_in_and_quits_without_one() {
 }
 
 #[test]
+fn minimize_hides_the_main_window_only_on_a_mac_running_in_the_background() {
+    assert!(minimize_hides_main_window(true, true, true));
+    assert!(!minimize_hides_main_window(false, true, true));
+    assert!(!minimize_hides_main_window(true, false, true));
+    assert!(!minimize_hides_main_window(true, true, false));
+}
+
+#[test]
 fn badge_cache_follows_revision_and_prefs() {
     use super::badge_cache::BadgeCache;
     let mut session = session_with(&[3, 4]);

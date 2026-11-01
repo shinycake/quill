@@ -2,7 +2,7 @@
 //! first, and the pacing of the poll loops that do.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::{BackgroundExecutor, Task};
+use gpui_kit::{ActivityGuard, BackgroundExecutor, Task};
 use quill::wake::Signal;
 use std::future::Future;
 use std::pin::Pin;
@@ -105,6 +105,13 @@ impl PollPace {
     }
 }
 
+/// About a minute after Quill is hidden, App Nap runs its timers up to
+/// 200 ms late, so a backlog that takes a second took about 19.
+pub(super) fn backlog_hold(executor: &BackgroundExecutor) -> impl Fn() -> ActivityGuard + use<> {
+    let executor = executor.clone();
+    move || executor.prevent_app_nap("applying Telegram updates")
+}
+
 /// Run `pass` until it returns `None`, paced by `pace`. Every envelope
 /// pokes `signal`, and a future holds the main thread until it returns
 /// `Pending`, so a wait that a poke has already ended would run pass after
@@ -114,17 +121,23 @@ pub(super) async fn run_poll_loop(
     executor: BackgroundExecutor,
     signal: &'static Signal,
     pace: PollPace,
+    hold: impl Fn() -> ActivityGuard,
     mut pass: impl FnMut() -> Option<PassEnd>,
 ) {
     let mut timer = RestTimer::default();
+    let mut held = None;
     loop {
         let seen = signal.epoch();
         let Some(end) = pass() else {
             break;
         };
         match pace.next(end, signal.epoch() != seen) {
-            NextPass::Yield(gap) => executor.timer(gap).await,
+            NextPass::Yield(gap) => {
+                held.get_or_insert_with(&hold);
+                executor.timer(gap).await;
+            }
             NextPass::Rest(longest) => {
+                held = None;
                 let began = executor.now();
                 timer.rest(&executor, signal, seen, longest).await;
                 let rested = executor.now().saturating_duration_since(began);

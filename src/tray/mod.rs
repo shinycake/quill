@@ -410,6 +410,17 @@ pub fn close_outcome(
     }
 }
 
+/// Only the main window goes, as a close does (tdesktop
+/// `MainWindow::hideNoQuit`), so a call, Picture-in-Picture and chat windows
+/// stay on screen.
+pub fn minimize_hides_main_window(
+    run_in_background: bool,
+    tray_available: bool,
+    macos: bool,
+) -> bool {
+    run_in_background && tray_available && macos
+}
+
 /// The "Show tray icon" preference, mirrored here so the 1s tray timer needs
 /// no handle on the app. Set from `set_appearance` and at startup.
 static TRAY_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

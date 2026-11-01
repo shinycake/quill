@@ -355,6 +355,7 @@ impl QuillApp {
         let row_hover = self.history.row_hover.clone();
         let painted_ids = self.history.painted_ids.clone();
         let seen = self.history.seen.clone();
+        let on_screen_rows = self.history.on_screen.clone();
         let seen_app = cx.weak_entity();
         let bar_probe = self.history.bar_probe.clone();
         let bar_anchor = self.history.bar_anchor.clone();
@@ -559,6 +560,7 @@ impl QuillApp {
                         super::history_reads::note_seen(
                             &painted_ids,
                             &seen,
+                            &on_screen_rows,
                             viewed_chat,
                             bounds,
                             || {

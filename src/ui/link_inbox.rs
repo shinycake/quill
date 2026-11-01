@@ -66,6 +66,7 @@ pub fn install_link_inbox(
 /// Brings the main window to the front, restoring it from the tray, the
 /// Dock (minimized) or a hidden app.
 pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    take_hide_after_full_screen(cx);
     // Hidden to the tray (Windows, X11) or minimized (everywhere): show it
     // again, then bring it to the front.
     super::window_control::set_visible(window, true);
@@ -79,6 +80,7 @@ pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) 
 struct MainWindow {
     handle: gpui_kit::AnyWindowHandle,
     closed_by_user: bool,
+    hide_after_full_screen: bool,
 }
 
 impl gpui_kit::Global for MainWindow {}
@@ -88,7 +90,13 @@ pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
     cx.set_global(MainWindow {
         handle: window.window_handle(),
         closed_by_user: false,
+        hide_after_full_screen: false,
     });
+}
+
+fn take_hide_after_full_screen(cx: &mut gpui_kit::App) -> bool {
+    cx.has_global::<MainWindow>()
+        && std::mem::take(&mut cx.global_mut::<MainWindow>().hide_after_full_screen)
 }
 
 /// macOS calls this for a Dock click, with windows showing or not: a main
@@ -101,7 +109,7 @@ pub fn reopen_main_window(cx: &mut gpui_kit::App) {
 fn raise_main_window_if(hidden: impl FnOnce(&gpui_kit::Window) -> bool, cx: &mut gpui_kit::App) {
     if let Some(main) = cx.try_global::<MainWindow>().copied() {
         let _ = main.handle.update(cx, |_, window, cx| {
-            if hidden(window) {
+            if main.hide_after_full_screen || hidden(window) {
                 raise_main_window(window, cx);
             }
         });
@@ -121,10 +129,11 @@ fn main_window_on_activation(
         return;
     };
     let closed = main.closed_by_user
-        && main
-            .handle
-            .update(cx, |_, window, _| hidden(window))
-            .unwrap_or(false);
+        && (main.hide_after_full_screen
+            || main
+                .handle
+                .update(cx, |_, window, _| hidden(window))
+                .unwrap_or(false));
     if !closed {
         return;
     }
@@ -152,11 +161,22 @@ const LEFT_FULLSCREEN_POLLS: u32 = 30;
 
 /// Hide the main window, tdesktop's `closeWithoutDestroy`: on a Mac it
 /// leaves full screen first, because hiding it there leaves a black Space.
-fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
-    if cx.has_global::<MainWindow>() {
-        cx.global_mut::<MainWindow>().closed_by_user = true;
+/// Raising the window during that wait undoes the close, unlike tdesktop,
+/// where the wait then hides the window the user just asked for.
+pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    let waiting = cx
+        .try_global::<MainWindow>()
+        .is_some_and(|main| main.hide_after_full_screen);
+    if waiting {
+        return;
     }
-    if !(cfg!(target_os = "macos") && window.is_fullscreen()) {
+    let leave_full_screen = cfg!(target_os = "macos") && window.is_fullscreen();
+    if cx.has_global::<MainWindow>() {
+        let main = cx.global_mut::<MainWindow>();
+        main.closed_by_user = true;
+        main.hide_after_full_screen = leave_full_screen;
+    }
+    if !leave_full_screen {
         hide_or_minimize(window);
         return;
     }
@@ -172,7 +192,11 @@ fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
                 break;
             }
         }
-        let _ = main.update(cx, |_, window, _| hide_or_minimize(window));
+        let _ = main.update(cx, |_, window, cx| {
+            if take_hide_after_full_screen(cx) {
+                hide_or_minimize(window);
+            }
+        });
     })
     .detach();
 }

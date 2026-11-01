@@ -1,9 +1,11 @@
 //! The poll loops' pacing, on the test scheduler's clock.
 use super::{NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
-use gpui_kit::TestAppContext;
+use gpui_kit::{ActivityGuard, TestAppContext};
 use quill::wake::Signal;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 const fn ms(n: u64) -> Duration {
@@ -41,7 +43,13 @@ fn counted_loop(
     };
     let executor = cx.background_executor.clone();
     cx.foreground_executor
-        .spawn(run_poll_loop(executor, signal, pace, pass))
+        .spawn(run_poll_loop(
+            executor,
+            signal,
+            pace,
+            ActivityGuard::noop,
+            pass,
+        ))
         .detach();
     cx.run_until_parked();
     passes
@@ -72,7 +80,13 @@ fn flood(cx: &mut TestAppContext, signal: &'static Signal, end: PassEnd) -> Vec<
     };
     let executor = cx.background_executor.clone();
     cx.foreground_executor
-        .spawn(run_poll_loop(executor, signal, PACE, pass))
+        .spawn(run_poll_loop(
+            executor,
+            signal,
+            PACE,
+            ActivityGuard::noop,
+            pass,
+        ))
         .detach();
     cx.run_until_parked();
     for _ in 0..PASSES {
@@ -105,6 +119,42 @@ fn a_backlog_comes_back_after_the_gap_without_a_poke(cx: &mut TestAppContext) {
     cx.background_executor.advance_clock(ms(1));
     cx.run_until_parked();
     assert_eq!(passes.get(), 2);
+}
+
+#[gpui_kit::test]
+fn a_backlog_holds_app_nap_off_once_until_the_loop_rests(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let begun = Arc::new(AtomicUsize::new(0));
+    let held = Arc::new(AtomicUsize::new(0));
+    let hold = {
+        let (begun, held) = (begun.clone(), held.clone());
+        move || {
+            begun.fetch_add(1, Ordering::SeqCst);
+            held.fetch_add(1, Ordering::SeqCst);
+            let held = held.clone();
+            ActivityGuard::new(move || {
+                held.fetch_sub(1, Ordering::SeqCst);
+            })
+        }
+    };
+    let passes = Cell::new(0);
+    let pass = move || {
+        passes.set(passes.get() + 1);
+        Some(if passes.get() < 3 { BACKLOG } else { IDLE })
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    let state = || (begun.load(Ordering::SeqCst), held.load(Ordering::SeqCst));
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 0));
 }
 
 #[gpui_kit::test]
