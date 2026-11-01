@@ -864,6 +864,39 @@ mod tests {
     }
 
     #[test]
+    fn test_adjacent_runs_shape_alike_past_the_font_limit() {
+        let kept = AppleTextSystem::new();
+        let helvetica = font("Helvetica");
+        let font_id = kept.font_id(&helvetica).unwrap();
+        // Two runs of one font take the `next_up` size that breaks ligatures.
+        let (line, split) = ("office fine", 3);
+        let runs = [
+            FontRun { font_id, len: split },
+            FontRun {
+                font_id,
+                len: line.len() - split,
+            },
+        ];
+        let before = kept.layout_line(line, px(16.), &runs);
+        for extra in 0..MAX_SIZED_FONTS {
+            let size = px(100. + extra as f32);
+            kept.layout_line("x", size, &[FontRun { font_id, len: 1 }]);
+        }
+        let new = AppleTextSystem::new();
+        let new_id = new.font_id(&helvetica).unwrap();
+        let new_runs = runs.map(|run| FontRun {
+            font_id: new_id,
+            len: run.len,
+        });
+        let new_layout = new.layout_line(line, px(16.), &new_runs);
+        let after = kept.layout_line(line, px(16.), &runs);
+
+        assert_eq!(shaped(&before), shaped(&new_layout));
+        assert_eq!(shaped(&after), shaped(&new_layout));
+        assert_eq!(after.width, new_layout.width);
+    }
+
+    #[test]
     fn test_layout_line_bom_char() {
         let fonts = AppleTextSystem::new();
         let font_id = fonts.font_id(&font("Helvetica")).unwrap();
