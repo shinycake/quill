@@ -112,6 +112,48 @@ fn a_patch_frame_lets_go_of_the_layer_alone() {
     }
 }
 
+/// A patch frame leaves the last whole frame on screen, so what that frame
+/// could paint stays until the next one. What was made after it leaves on
+/// patch frames alone, so patches never add to what is held.
+#[test]
+fn images_made_after_a_whole_frame_leave_on_patch_frames_alone() {
+    let layer = EntityId::from((1_u64 << 32) | 23);
+    let on_screen = picture();
+    begin_frame();
+    slice_rendered(layer);
+    MainFrame::now();
+    begin_patch_frame();
+    slice_rendered(layer);
+    MainFrame::now();
+    let held = on_screen.id;
+    retire_all([on_screen]);
+
+    let mut left = Vec::new();
+    for _ in 0..30 {
+        let shown = picture();
+        let id = shown.id;
+        begin_patch_frame();
+        slice_rendered(layer);
+        MainFrame::now();
+        begin_patch_frame();
+        slice_rendered(layer);
+        MainFrame::now();
+        retire_all([shown]);
+        begin_patch_frame();
+        slice_rendered(layer);
+        MainFrame::now();
+        left.extend(main_sweep().iter().map(|image| image.id));
+        assert!(left.contains(&id), "a picture after the whole frame left");
+        assert!(!left.contains(&held), "the whole frame still shows this");
+    }
+
+    begin_frame();
+    MainFrame::now();
+    begin_frame();
+    let gone: Vec<_> = main_sweep().iter().map(|image| image.id).collect();
+    assert_eq!(gone, [held], "it leaves with the next whole frame");
+}
+
 /// A slice render may paint whatever exists until its frame is done.
 #[test]
 fn a_slice_render_covers_what_was_made_until_its_frame_was_done() {
