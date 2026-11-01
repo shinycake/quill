@@ -17,7 +17,8 @@ use crate::locks::LockExt as _;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
-use zbus::blocking::{Connection, MessageIterator, fdo::PropertiesProxy};
+use std::time::Duration;
+use zbus::blocking::{Connection, MessageIterator, connection, fdo::PropertiesProxy};
 use zbus::zvariant::OwnedValue;
 
 const NOT_LISTENING: u32 = 0;
@@ -148,14 +149,22 @@ pub fn start() {
     });
 }
 
+/// A connection whose calls give up after `limit`: [`refresh`] runs on the
+/// background executor, and a service that never answers would hold that
+/// thread for good.
+fn connect(bus: connection::Builder<'_>, limit: Duration) -> zbus::Result<Connection> {
+    bus.method_timeout(limit).build()
+}
+
 /// Subscribe, read the current value, then follow every change until the
 /// bus closes. Errors when the service does not answer.
 fn listen(source: &'static Source) -> zbus::Result<()> {
-    let connection = if source.session {
-        Connection::session()?
+    let bus = if source.session {
+        connection::Builder::session()?
     } else {
-        Connection::system()?
+        connection::Builder::system()?
     };
+    let connection = connect(bus, crate::child_timeout::DESKTOP_QUERY_LIMIT)?;
 
     // Subscribe before the first read so no change is missed.
     let rule = zbus::MatchRule::builder()
@@ -191,7 +200,7 @@ fn listen(source: &'static Source) -> zbus::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OPEN, SOURCES, latest, record, refresh, signal_answer, store};
+    use super::{OPEN, SOURCES, connect, latest, record, refresh, signal_answer, store};
     use crate::locks::LockExt as _;
     use std::collections::HashMap;
     use std::io::{BufRead as _, BufReader};
@@ -265,6 +274,61 @@ mod tests {
         *OPEN.lock_or_recover() = None;
         store(None);
         assert_eq!(refresh(), None);
+        let _ = daemon.kill();
+        let _ = daemon.wait();
+    }
+
+    /// A portal that takes the call and never answers it.
+    struct HungMonitor;
+
+    #[zbus::interface(name = "org.freedesktop.portal.PowerProfileMonitor")]
+    impl HungMonitor {
+        #[zbus(property, name = "power-saver-enabled")]
+        async fn power_saver_enabled(&self) -> bool {
+            std::future::pending().await
+        }
+    }
+
+    #[test]
+    fn a_service_that_never_answers_does_not_hold_the_probe() {
+        let _serial = SERIAL.lock_or_recover();
+        let mut daemon = Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--print-address=1"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("dbus-daemon runs");
+        let mut address = String::new();
+        BufReader::new(daemon.stdout.take().unwrap())
+            .read_line(&mut address)
+            .unwrap();
+        let [portal, _] = &SOURCES;
+        let _service = zbus::blocking::connection::Builder::address(address.trim())
+            .unwrap()
+            .name(portal.destination)
+            .unwrap()
+            .serve_at(portal.path, HungMonitor)
+            .unwrap()
+            .build()
+            .unwrap();
+        let watcher = connect(
+            zbus::blocking::connection::Builder::address(address.trim()).unwrap(),
+            std::time::Duration::from_millis(200),
+        )
+        .unwrap();
+        let properties = PropertiesProxy::builder(&watcher)
+            .destination(portal.destination)
+            .unwrap()
+            .path(portal.path)
+            .unwrap()
+            .build()
+            .unwrap();
+        *OPEN.lock_or_recover() = Some((properties, portal));
+
+        // Returns, with no answer, instead of waiting for the portal forever.
+        assert_eq!(refresh(), Some(None));
+
+        *OPEN.lock_or_recover() = None;
+        store(None);
         let _ = daemon.kill();
         let _ = daemon.wait();
     }
