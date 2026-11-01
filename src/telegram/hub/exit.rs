@@ -15,7 +15,7 @@ use crate::telegram::client::OwnedEnvelope;
 use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
 use crate::telegram::ffi::TdJson;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 /// Client ids made in this process that TDLib has not confirmed Closed.
 static MAY_BE_OPEN: Mutex<Vec<i32>> = Mutex::new(Vec::new());
@@ -58,6 +58,26 @@ fn tdlib_may_be_busy() -> bool {
 
 static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
 
+/// Set when the wake ([`TdJson::wake_receive`]) did not get TDLib's answer
+/// for a client it never made: then only a short `td_receive` lets a stop
+/// end it in time, before exit tears TDLib down under the thread.
+static WAKE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// What TDLib answers the wake with.
+fn wakes(answer: Option<&str>) -> bool {
+    answer.is_some_and(|answer| answer.contains("Invalid TDLib instance"))
+}
+
+/// Seconds one `td_receive` call may block: `long` while the wake works,
+/// the 0.2 s it was before the wake otherwise.
+pub(super) fn receive_timeout_secs(long: f64) -> f64 {
+    if WAKE_FAILED.load(Ordering::Relaxed) {
+        0.2
+    } else {
+        long
+    }
+}
+
 /// Stop the shared hub's receive thread when the process exits, before
 /// TDLib destroys its static client manager under it, and skip that
 /// teardown while a client may be open. Call right after a client id is
@@ -68,11 +88,15 @@ static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
 /// TDLib's function-local statics go in that order too, so one first used
 /// after the hook is registered is gone when the hook runs, and a `td_send`
 /// in the hook aborts on it. The wake therefore runs once here, and
-/// `td_receive` is free because no route exists yet.
+/// `td_receive` is free because no route exists yet. TDLib answers the wake
+/// inside `td_send`, so its answer also says whether the wake works.
 pub fn stop_shared_before_tdlib_teardown(api: &TdJson) {
     EXIT_HOOK.call_once(|| {
         api.wake_receive();
-        let _ = api.receive(0.0);
+        if !wakes(api.receive(0.0).as_deref()) {
+            WAKE_FAILED.store(true, Ordering::Relaxed);
+            log::warn!("TDLib did not answer the receive wake; td_receive polls every 0.2 s");
+        }
         register_exit_hook();
     });
 }

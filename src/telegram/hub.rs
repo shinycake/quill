@@ -36,7 +36,8 @@ pub use exit::{set_exit_status, stop_shared_before_tdlib_teardown};
 
 /// Seconds one `td_receive` call may block. Anything TDLib has to say ends
 /// it sooner, and a stop makes TDLib say something ([`ReceiveWake`]), so
-/// nothing depends on this length.
+/// nothing depends on this length, unless the wake was seen to fail
+/// ([`exit::receive_timeout_secs`]).
 const RECEIVE_TIMEOUT_SECS: f64 = 60.0;
 
 /// How long process exit waits for the receive thread to leave
@@ -392,7 +393,7 @@ fn receive_one(
     if shutdown.load(Ordering::SeqCst) {
         return;
     }
-    let Some(json) = source(RECEIVE_TIMEOUT_SECS) else {
+    let Some(json) = source(exit::receive_timeout_secs(RECEIVE_TIMEOUT_SECS)) else {
         return;
     };
     // What ended the call may be the stop's own wake.

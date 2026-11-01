@@ -44,6 +44,14 @@ fn a_client_may_be_open_from_its_making_until_tdlib_says_closed() {
     assert!(tdlib_may_be_busy());
 }
 
+#[test]
+fn only_the_answer_for_a_client_never_made_counts_as_a_wake() {
+    let answer = r#"{"@type":"error","code":400,"message":"Invalid TDLib instance specified"}"#;
+    assert!(wakes(Some(answer)));
+    assert!(!wakes(None), "nothing came back in time");
+    assert!(!wakes(Some(r#"{"@type":"updateOption","@client_id":0}"#)));
+}
+
 /// Stands in for TDLib's static destructors, which abort while a client
 /// runs: registered before the exit hook, it runs after it.
 extern "C" fn teardown() {
