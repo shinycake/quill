@@ -45,6 +45,14 @@ use windows::{
 use crate::{window_list::WindowList, *};
 use gpui::*;
 
+impl<W: Clone> WindowList<W> {
+    /// Quill: a copy of the list as it is now. The vsync thread takes one on every tick, so up to
+    /// four windows are copied without a heap allocation, as before the list had a lock of its own.
+    pub(crate) fn snapshot(&self) -> SmallVec<[W; 4]> {
+        self.collect()
+    }
+}
+
 #[derive(Clone)]
 struct TrackedWindow {
     handle: SafeHwnd,
@@ -2245,6 +2253,15 @@ mod tests {
     use windows::core::{PCWSTR, PWSTR};
 
     use super::{encode_restart_arguments, username_and_password};
+
+    #[test]
+    fn copying_up_to_four_windows_takes_no_heap() {
+        let windows = crate::window_list::WindowList::new();
+        (1..=4).for_each(|window| windows.push(window));
+        assert!(!windows.snapshot().spilled());
+        windows.push(5);
+        assert!(windows.snapshot().spilled());
+    }
 
     #[test]
     fn test_read_credential_with_username() {
