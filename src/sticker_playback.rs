@@ -11,6 +11,7 @@ use std::sync::{
 };
 
 mod fitz;
+mod lottie_check;
 pub mod player;
 mod thorvg;
 mod tint;
@@ -66,6 +67,7 @@ fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     }
     let mut value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| "Invalid animated sticker")?;
+    drop(bytes);
     for dimension in ["w", "h"] {
         if !value
             .get(dimension)
@@ -98,12 +100,12 @@ fn tgs_json(path: &Path, fitz: FitzType) -> Result<Tgs, String> {
     {
         return Err("Invalid animated sticker duration".into());
     }
-    if apply_fitzpatrick(&mut value, fitz) {
-        // serde_json keeps the file's key order (preserve_order), which
-        // ThorVG's streaming parser needs ("ty" first in a shape).
-        bytes = serde_json::to_vec(&value).map_err(|_| "Invalid animated sticker")?;
-    }
-    Ok(Tgs { json: bytes, fps })
+    apply_fitzpatrick(&mut value, fitz);
+    lottie_check::check(&value).map_err(|_| "Invalid animated sticker")?;
+    // serde_json keeps the file's key order (preserve_order), which ThorVG's
+    // streaming parser needs.
+    let json = serde_json::to_vec(&value).map_err(|_| "Invalid animated sticker")?;
+    Ok(Tgs { json, fps })
 }
 
 /// A TGS file's frames at `edge` × `edge` px, at most `max_frames` of

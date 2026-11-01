@@ -1,0 +1,406 @@
+use super::{Malformed, check};
+use serde_json::{Value, json};
+
+fn with_layers(layers: Value) -> Value {
+    json!({"layers": layers})
+}
+
+fn with_shapes(shapes: Value) -> Value {
+    with_layers(json!([{"ty": 4, "shapes": shapes}]))
+}
+
+fn with_assets(layers: Value, assets: Value) -> Value {
+    json!({"layers": layers, "assets": assets})
+}
+
+fn precomp(id: &str) -> Value {
+    json!({"ty": 0, "refId": id})
+}
+
+#[test]
+fn a_plain_document_passes() {
+    let doc = with_shapes(json!([{
+        "ty": "gr",
+        "it": [
+            {"ty": "rc", "s": {"k": [10, 10]}},
+            {"ty": "fl", "c": {"k": [1, 0, 0, 1]}},
+            {"ty": "tr", "o": {"k": 100}},
+        ],
+    }]));
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn a_document_needs_a_layer_list() {
+    assert_eq!(check(&json!({})), Err(Malformed::Layer));
+    assert_eq!(check(&json!({"layers": 1})), Err(Malformed::Layer));
+    assert_eq!(check(&with_layers(json!([1]))), Err(Malformed::Layer));
+}
+
+#[test]
+fn numbers_past_the_limit_are_refused_only_in_animation_data() {
+    let big = with_shapes(json!([{"ty": "rc", "s": {"k": [2_000_000, 1]}}]));
+    assert_eq!(check(&big), Err(Malformed::Number));
+    let at_the_limit = with_shapes(json!([{"ty": "rc", "s": {"k": [1_048_576, 1]}}]));
+    assert_eq!(check(&at_the_limit), Ok(()));
+    let elsewhere = json!({"layers": [], "meta": {"t": 1e30}, "op": 1e30});
+    assert_eq!(check(&elsewhere), Ok(()));
+}
+
+#[test]
+fn keys_and_strings_are_held_to_plain_text_from_the_root_down() {
+    for doc in [
+        json!({"layers": [], "layers\u{0}x": [{"ty": 0}]}),
+        json!({"layers": [], "assets\u{0}": []}),
+        json!({"layers": [], "nm": "a\u{0}"}),
+        json!({"layers": [], "meta": {"list": [{"g\u{0}": 1}]}}),
+        with_layers(json!([{"ty": 4, "shapes\u{0}": []}])),
+        with_layers(json!([{"nm": "\u{0}"}])),
+        with_shapes(json!([{"ty": "gr\u{0}", "it": []}])),
+        with_shapes(json!([{"ty": "gr", "it\u{0}": []}])),
+        with_assets(json!([]), json!([{"id": "a\u{0}", "layers": []}])),
+    ] {
+        assert_eq!(check(&doc), Err(Malformed::Text), "{doc}");
+    }
+}
+
+#[test]
+fn plain_text_is_settled_before_anything_else_is_read() {
+    let doc = json!({"layers": 1, "nm": "\u{0}"});
+    assert_eq!(check(&doc), Err(Malformed::Text));
+}
+
+#[test]
+fn punctuation_in_names_is_ordinary_text() {
+    let doc = json!({"layers": [{"nm": "{\"a\\b\"}\n\t\u{1}\u{2028}é"}], "nm": "}"});
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn property_arrays_hold_one_kind_of_value() {
+    for values in [json!([1, null]), json!([1, {"t": 0}]), json!([[1]])] {
+        let doc = with_shapes(json!([{"ty": "rc", "s": {"k": values}}]));
+        assert_eq!(check(&doc), Err(Malformed::Array), "{doc}");
+    }
+    let keyframes = with_shapes(json!([{"ty": "rc", "s": {"k": [{"t": 0}, {"t": 1}]}}]));
+    assert_eq!(check(&keyframes), Ok(()));
+}
+
+#[test]
+fn a_layer_kind_is_a_small_whole_number() {
+    for kind in [json!(16), json!(1.5), json!("4"), json!(-1), json!(null)] {
+        let doc = with_layers(json!([{"ty": kind}]));
+        assert_eq!(check(&doc), Err(Malformed::Layer), "{kind}");
+    }
+    assert_eq!(check(&with_layers(json!([{"nm": "no kind"}]))), Ok(()));
+}
+
+#[test]
+fn shape_lists_fit_the_layer_kind() {
+    let listed = |kind: u64, shapes: Value| with_layers(json!([{"ty": kind, "shapes": shapes}]));
+    let rect = json!([{"ty": "rc"}]);
+    assert_eq!(check(&listed(0, rect.clone())), Err(Malformed::Layer));
+    assert_eq!(check(&listed(0, json!([]))), Ok(()));
+    assert_eq!(check(&listed(4, rect)), Ok(()));
+    assert_eq!(check(&listed(4, json!([]))), Ok(()));
+}
+
+#[test]
+fn layer_fields_have_their_kinds() {
+    let shapes = with_layers(json!([{"ty": 4, "shapes": 1}]));
+    assert_eq!(check(&shapes), Err(Malformed::Layer));
+    let reference = with_layers(json!([{"ty": 0, "refId": 1}]));
+    assert_eq!(check(&reference), Err(Malformed::Layer));
+}
+
+#[test]
+fn masks_on_a_layer_are_limited() {
+    let masks = vec![json!({}); 257];
+    let doc = with_layers(json!([{"ty": 4, "masksProperties": masks}]));
+    assert_eq!(check(&doc), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn layers_in_a_document_are_limited() {
+    let layers = vec![json!({"ty": 3}); 8193];
+    assert_eq!(
+        check(&with_layers(json!(layers))),
+        Err(Malformed::TooComplex)
+    );
+    let layers = vec![json!({"ty": 3}); 8192];
+    assert_eq!(check(&with_layers(json!(layers))), Ok(()));
+}
+
+#[test]
+fn shapes_are_objects_with_a_text_kind() {
+    assert_eq!(check(&with_shapes(json!([1]))), Err(Malformed::Shape));
+    assert_eq!(
+        check(&with_shapes(json!([{"ty": 1}]))),
+        Err(Malformed::Shape)
+    );
+    let group = with_shapes(json!([{"ty": "gr", "it": 1}]));
+    assert_eq!(check(&group), Err(Malformed::Shape));
+}
+
+#[test]
+fn counts_are_limited_directly_and_in_keyframes() {
+    for shape in [
+        json!({"ty": "sr", "pt": {"k": 1025}}),
+        json!({"ty": "rp", "c": {"k": 1025}}),
+        json!({"ty": "zz", "r": {"k": 1025}}),
+        json!({"ty": "sr", "pt": {"k": [{"s": [1025]}, {"s": [3]}]}}),
+    ] {
+        let doc = with_shapes(json!([shape]));
+        assert_eq!(check(&doc), Err(Malformed::TooComplex), "{doc}");
+    }
+    let fine = with_shapes(json!([{"ty": "sr", "pt": {"k": 5}}]));
+    assert_eq!(check(&fine), Ok(()));
+}
+
+#[test]
+fn gradient_stops_are_a_small_whole_number() {
+    for stops in [json!(1025), json!(1.5), json!("3")] {
+        let doc = with_shapes(json!([{"ty": "gf", "g": {"p": stops}}]));
+        assert_eq!(check(&doc), Err(Malformed::Shape), "{stops}");
+    }
+    let doc = with_shapes(json!([{"ty": "gf", "g": {"p": 3}}]));
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn a_reference_to_nothing_is_fine() {
+    assert_eq!(check(&with_layers(json!([precomp("gone")]))), Ok(()));
+}
+
+#[test]
+fn asset_ids_are_text_or_whole_numbers() {
+    for id in [json!(1.5), json!(true)] {
+        let doc = with_assets(json!([]), json!([{"id": id, "layers": []}]));
+        assert_eq!(check(&doc), Err(Malformed::Asset), "{id}");
+    }
+    let doc = with_assets(json!([]), json!([{"id": 7, "layers": []}]));
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn an_asset_without_layers_is_not_a_precomp() {
+    let doc = with_assets(
+        json!([precomp("a")]),
+        json!([{"id": "a", "u": "", "p": ""}]),
+    );
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn asset_graphs_are_validated() {
+    let direct = with_assets(
+        json!([precomp("a")]),
+        json!([{"id": "a", "layers": [precomp("a")]}]),
+    );
+    assert_eq!(check(&direct), Err(Malformed::Asset));
+    let through_another = with_assets(
+        json!([]),
+        json!([
+            {"id": "a", "layers": [precomp("b")]},
+            {"id": "b", "layers": [precomp("a")]},
+        ]),
+    );
+    assert_eq!(check(&through_another), Err(Malformed::Asset));
+}
+
+#[test]
+fn a_reference_goes_where_the_renderer_would_send_it() {
+    let (id, same_key) = ("a!", "`B");
+    let doc = with_assets(
+        json!([precomp(same_key)]),
+        json!([{"id": id, "layers": [precomp(same_key)]}]),
+    );
+    assert_eq!(check(&doc), Err(Malformed::Asset));
+}
+
+#[test]
+fn a_number_id_matches_its_decimal_text() {
+    let doc = with_assets(
+        json!([precomp("7")]),
+        json!([{"id": 7, "layers": [precomp("7")]}]),
+    );
+    assert_eq!(check(&doc), Err(Malformed::Asset));
+}
+
+#[test]
+fn precomps_nest_only_so_deep() {
+    let mut assets: Vec<Value> = (0..40)
+        .map(|n| json!({"id": n.to_string(), "layers": [precomp(&(n + 1).to_string())]}))
+        .collect();
+    assets.push(json!({"id": "40", "layers": []}));
+    let doc = with_assets(json!([precomp("0")]), json!(assets));
+    assert_eq!(check(&doc), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn nesting_is_limited_in_whatever_order_the_layers_come() {
+    let ids = 0..40;
+    let assets: Vec<Value> = ids
+        .clone()
+        .map(|n| json!({"id": n.to_string(), "layers": [precomp(&(n + 1).to_string())]}))
+        .collect();
+    let deepest_first: Vec<Value> = ids.rev().map(|n| precomp(&n.to_string())).collect();
+    let doc = with_assets(json!(deepest_first), json!(assets));
+    assert_eq!(check(&doc), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn groups_nest_only_so_deep() {
+    let mut shape = json!({"ty": "rc"});
+    for _ in 0..70 {
+        shape = json!({"ty": "gr", "it": [shape]});
+    }
+    assert_eq!(
+        check(&with_shapes(json!([shape]))),
+        Err(Malformed::TooComplex)
+    );
+}
+
+#[test]
+fn shared_precomps_count_every_time_they_are_shown() {
+    let levels = 12;
+    let mut assets: Vec<Value> = (0..levels)
+        .map(|n| {
+            let next = (n + 1).to_string();
+            let layers = vec![precomp(&next); 4];
+            json!({"id": n.to_string(), "layers": layers})
+        })
+        .collect();
+    assets.push(json!({"id": levels.to_string(), "layers": []}));
+    let doc = with_assets(json!([precomp("0")]), json!(assets));
+    assert_eq!(check(&doc), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn repeaters_in_a_list_multiply_what_they_copy() {
+    let repeater = json!({"ty": "rp", "c": {"k": 1000}});
+    let rect = json!({"ty": "rc"});
+    let doc = with_shapes(json!([rect, repeater, repeater]));
+    assert_eq!(check(&doc), Err(Malformed::TooComplex));
+    let doc = with_shapes(json!([rect, repeater]));
+    assert_eq!(check(&doc), Ok(()));
+}
+
+#[test]
+fn every_paint_in_a_list_counts_against_its_paths() {
+    let mut shapes = vec![json!({"ty": "st"}); 1100];
+    shapes.extend(vec![json!({"ty": "rc"}); 1100]);
+    assert_eq!(
+        check(&with_shapes(json!(shapes))),
+        Err(Malformed::TooComplex)
+    );
+    let mut shapes = vec![json!({"ty": "st"}); 5];
+    shapes.extend(vec![json!({"ty": "rc"}); 1100]);
+    assert_eq!(check(&with_shapes(json!(shapes))), Ok(()));
+}
+
+#[test]
+fn modifiers_in_a_list_multiply_the_paths_before_them() {
+    let vertices = vec![json!([0, 0]); 64];
+    let path = json!({"ty": "sh", "ks": {"k": {"v": vertices}}});
+    let modifiers = |count| vec![json!({"ty": "rd", "r": {"k": 9}}); count];
+    let mut shapes = vec![path.clone()];
+    shapes.extend(modifiers(3));
+    assert_eq!(check(&with_shapes(json!(shapes))), Ok(()));
+    let mut shapes = vec![path];
+    shapes.extend(modifiers(20));
+    assert_eq!(
+        check(&with_shapes(json!(shapes))),
+        Err(Malformed::TooComplex)
+    );
+}
+
+#[test]
+fn an_offset_multiplies_more_than_a_rounded_corner() {
+    let stacked = |kind: &str| {
+        let mut shapes = vec![json!({"ty": "rc"})];
+        shapes.extend(vec![json!({"ty": kind}); 6]);
+        with_shapes(json!(shapes))
+    };
+    assert_eq!(check(&stacked("rd")), Ok(()));
+    assert_eq!(check(&stacked("op")), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn a_zigzag_multiplies_by_its_ridges() {
+    let ridges = |count| json!({"ty": "zz", "r": {"k": count}});
+    let rect = json!({"ty": "rc"});
+    let fine = with_shapes(json!([rect, ridges(100)]));
+    assert_eq!(check(&fine), Ok(()));
+    let stacked = with_shapes(json!([rect, ridges(1000), ridges(1000)]));
+    assert_eq!(check(&stacked), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn a_long_path_counts_by_its_vertices() {
+    let path = |count| vec![json!([0, 0]); count];
+    let copied = |path: Vec<Value>| {
+        with_shapes(json!([
+            {"ty": "sh", "ks": {"k": {"v": path}}},
+            {"ty": "rp", "c": {"k": 1024}},
+        ]))
+    };
+    assert_eq!(check(&copied(path(100))), Ok(()));
+    assert_eq!(check(&copied(path(1000))), Err(Malformed::TooComplex));
+    let keyframed = with_shapes(json!([
+        {"ty": "sh", "ks": {"k": [{"s": [{"v": path(1000)}]}]}},
+        {"ty": "rp", "c": {"k": 1024}},
+    ]));
+    assert_eq!(check(&keyframed), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn easing_counts_toward_a_repeat() {
+    let eased = |y| {
+        with_shapes(json!([{"ty": "sr", "pt": {"k": [
+            {"s": [100], "e": [100], "i": {"y": [y]}, "o": {"y": [0]}},
+            {"s": [100]},
+        ]}}]))
+    };
+    assert_eq!(check(&eased(1)), Ok(()));
+    assert_eq!(check(&eased(100)), Err(Malformed::TooComplex));
+}
+
+#[test]
+fn layers_that_draw_offscreen_cost_more() {
+    let plain = vec![json!({"ty": 3}); 4000];
+    assert_eq!(check(&with_layers(json!(plain))), Ok(()));
+    let matte = vec![json!({"ty": 3, "tt": 1}); 4000];
+    assert_eq!(
+        check(&with_layers(json!(matte))),
+        Err(Malformed::TooComplex)
+    );
+    let effect = vec![json!({"ty": 3, "ef": [{"ty": 29}]}); 4000];
+    assert_eq!(
+        check(&with_layers(json!(effect))),
+        Err(Malformed::TooComplex)
+    );
+    let masked = vec![json!({"ty": 3, "masksProperties": [{}]}); 4000];
+    assert_eq!(
+        check(&with_layers(json!(masked))),
+        Err(Malformed::TooComplex)
+    );
+    let slider = vec![json!({"ty": 3, "ef": [{"ty": 5}]}); 4000];
+    assert_eq!(check(&with_layers(json!(slider))), Ok(()));
+}
+
+#[test]
+fn a_dashed_stroke_costs_more_than_a_plain_one() {
+    let shapes = |dashed: bool| {
+        let stroke = if dashed {
+            json!({"ty": "st", "d": []})
+        } else {
+            json!({"ty": "st"})
+        };
+        let mut shapes = vec![json!({"ty": "rc"}); 4000];
+        shapes.push(stroke);
+        with_shapes(json!(shapes))
+    };
+    assert_eq!(check(&shapes(false)), Ok(()));
+    assert_eq!(check(&shapes(true)), Err(Malformed::TooComplex));
+}

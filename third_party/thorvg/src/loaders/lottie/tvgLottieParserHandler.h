@@ -152,13 +152,12 @@ struct LookaheadParserHandler
     void Error()
     {
         TVGERR("LOTTIE", "Invalid JSON: unexpected or misaligned data fields.");
-        state = kError;
-        reader.IterativeParseNext<PARSE_FLAGS>(iss, *this);   //something wrong but try advancement.
+        state = kError;  //QUILL
     }
 
     bool Invalid()
     {
-        return state == kError;
+        return state == kError || !reader.IterativeParseComplete();  //QUILL
     }
 
     bool enterObject();

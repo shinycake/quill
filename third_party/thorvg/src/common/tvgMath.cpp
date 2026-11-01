@@ -42,16 +42,17 @@ static float _length(const Point& pt1, const Point& pt2)
 }
 
 
+//QUILL
 template<typename LengthFunc>
-float _bezLength(const Bezier& cur, LengthFunc lineLengthFunc)
+float _bezLength(const Bezier& cur, LengthFunc lineLengthFunc, int depth = 8)
 {
     Bezier left, right;
     auto len = lineLengthFunc(cur.start, cur.ctrl1) + lineLengthFunc(cur.ctrl1, cur.ctrl2) + lineLengthFunc(cur.ctrl2, cur.end);
     auto chord = lineLengthFunc(cur.start, cur.end);
 
-    if (fabsf(len - chord) > BEZIER_EPSILON) {
+    if (depth > 0 && fabsf(len - chord) > BEZIER_EPSILON) {
         cur.split(left, right);
-        return _bezLength(left, lineLengthFunc) + _bezLength(right, lineLengthFunc);
+        return _bezLength(left, lineLengthFunc, depth - 1) + _bezLength(right, lineLengthFunc, depth - 1);
     }
     return len;
 }

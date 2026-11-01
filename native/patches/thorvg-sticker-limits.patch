@@ -1,0 +1,1098 @@
+diff --git a/src/common/tvgMath.cpp b/src/common/tvgMath.cpp
+index 920a5f2a5..f8bb1e10b 100644
+--- a/src/common/tvgMath.cpp
++++ b/src/common/tvgMath.cpp
+@@ -42,16 +42,17 @@ static float _length(const Point& pt1, const Point& pt2)
+ }
+ 
+ 
++//QUILL
+ template<typename LengthFunc>
+-float _bezLength(const Bezier& cur, LengthFunc lineLengthFunc)
++float _bezLength(const Bezier& cur, LengthFunc lineLengthFunc, int depth = 8)
+ {
+     Bezier left, right;
+     auto len = lineLengthFunc(cur.start, cur.ctrl1) + lineLengthFunc(cur.ctrl1, cur.ctrl2) + lineLengthFunc(cur.ctrl2, cur.end);
+     auto chord = lineLengthFunc(cur.start, cur.end);
+ 
+-    if (fabsf(len - chord) > BEZIER_EPSILON) {
++    if (depth > 0 && fabsf(len - chord) > BEZIER_EPSILON) {
+         cur.split(left, right);
+-        return _bezLength(left, lineLengthFunc) + _bezLength(right, lineLengthFunc);
++        return _bezLength(left, lineLengthFunc, depth - 1) + _bezLength(right, lineLengthFunc, depth - 1);
+     }
+     return len;
+ }
+diff --git a/src/common/tvgMath.h b/src/common/tvgMath.h
+index f09ca98eb..925e2c902 100644
+--- a/src/common/tvgMath.h
++++ b/src/common/tvgMath.h
+@@ -85,7 +85,7 @@ static inline constexpr const T& clamp(const T& v, const T& min, const T& max)
+ template<typename T = uint8_t>
+ static inline T remap255(float val)
+ {
+-    return static_cast<T>(nearbyintf(val * 255.0f));
++    return static_cast<T>(nearbyintf(clamp(val, 0.0f, 1.0f) * 255.0f));  //QUILL
+ }
+ 
+ /************************************************************************/
+@@ -574,9 +574,11 @@ static inline T lerp(const T &start, const T &end, float t)
+     return static_cast<T>(start + (end - start) * t);
+ }
+ 
+-static inline uint8_t lerp(const uint8_t& start, const uint8_t& end, float t)
++//QUILL
++template <>
++inline uint8_t lerp<uint8_t>(const uint8_t& start, const uint8_t& end, float t)
+ {
+-    return static_cast<uint8_t>(clamp(static_cast<int>(start + (end - start) * t), 0, 255));
++    return static_cast<uint8_t>(clamp(start + (end - start) * t, 0.0f, 255.0f));
+ }
+ 
+ static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)
+diff --git a/src/loaders/lottie/tvgLottieBuilder.cpp b/src/loaders/lottie/tvgLottieBuilder.cpp
+index d4f7c385c..2a16c79e8 100644
+--- a/src/loaders/lottie/tvgLottieBuilder.cpp
++++ b/src/loaders/lottie/tvgLottieBuilder.cpp
+@@ -178,25 +178,27 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
+ 
+ void LottieBuilder::updateTransform(LottieLayer* layer, float frameNo)
+ {
+-    if (!layer) return;
+-
+-    if (tween.active) {
+-        layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
+-    } else {
+-        if (tvg::equal(layer->cache.frameNo, frameNo)) return;
+-        layer->cache.frameNo = frameNo;
++    //QUILL
++    Array<LottieLayer*> chain;
++    for (; layer; layer = layer->parent) {
++        if (tween.active) {
++            layer->cache.frameNo = -1.0f;  // tweening doesn't cache the result; invalidate it
++        } else {
++            if (tvg::equal(layer->cache.frameNo, frameNo)) break;
++            layer->cache.frameNo = frameNo;
++        }
++        chain.push(layer);
+     }
+ 
+-    auto transform = layer->transform;
+-    auto parent = layer->parent;
+-
+-    if (parent) updateTransform(parent, frameNo);
++    for (auto i = chain.count; i > 0; --i) {
++        auto link = chain[i - 1];
++        auto parent = link->parent;
++        auto& matrix = link->cache.matrix;
+ 
+-    auto& matrix = layer->cache.matrix;
++        _update(link->transform, frameNo, matrix, link->cache.opacity, link->autoOrient, tween, exps);
+ 
+-    _update(transform, frameNo, matrix, layer->cache.opacity, layer->autoOrient, tween, exps);
+-
+-    if (parent) layer->cache.matrix = parent->cache.matrix * matrix;
++        if (parent) link->cache.matrix = parent->cache.matrix * matrix;
++    }
+ }
+ 
+ 
+@@ -409,6 +411,10 @@ static void _repeat(LottieGroup* parent, Shape* path, LottieRenderPooler<Shape>*
+     Array<Shape*> shapes;
+ 
+     ARRAY_REVERSE_FOREACH(repeater, ctx->repeaters) {
++        //QUILL
++        constexpr uint64_t MAX_COPIES = 4096;
++        if ((uint64_t)propagators.count * repeater->cnt > MAX_COPIES) break;
++
+         shapes.reserve(repeater->cnt);
+ 
+         for (int i = 0; i < repeater->cnt; ++i) {
+@@ -554,6 +560,14 @@ void LottieBuilder::updatePath(LottieGroup* parent, LottieObject** child, float
+ }
+ 
+ 
++//QUILL
++static float _limitCount(float count)
++{
++    constexpr auto MAX_COUNT = 1024.0f;
++    return (count > MAX_COUNT) ? MAX_COUNT : ((count >= 0.0f) ? count : 0.0f);
++}
++
++
+ static void _close(Array<Point>& pts, const Point& p, bool round)
+ {
+     if (round && tvg::zero(pts.last() - pts[pts.count - 2])) pts[pts.count - 2] = p;
+@@ -564,7 +578,7 @@ void LottieBuilder::updateStar(LottiePolyStar* star, float frameNo, Matrix* tran
+ {
+     static constexpr auto POLYSTAR_MAGIC_NUMBER = 0.47829f / 0.28f;
+ 
+-    auto ptsCnt = star->ptsCnt(frameNo, tween, exps);
++    auto ptsCnt = _limitCount(star->ptsCnt(frameNo, tween, exps));
+     if (ptsCnt < 1.0f) return;
+ 
+     auto innerRadius = star->innerRadius(frameNo, tween, exps);
+@@ -679,7 +693,7 @@ void LottieBuilder::updatePolygon(LottiePolyStar* star, float frameNo, Matrix* t
+ {
+     static constexpr auto POLYGON_MAGIC_NUMBER = 0.25f;
+ 
+-    auto ptsCnt = int(floor(star->ptsCnt(frameNo, tween, exps)));
++    auto ptsCnt = int(floor(_limitCount(star->ptsCnt(frameNo, tween, exps))));
+     if (ptsCnt < 1) return;
+ 
+     auto radius = star->outerRadius(frameNo, tween, exps);
+@@ -802,7 +816,7 @@ void LottieBuilder::updateZigZag(TVG_UNUSED LottieGroup* parent, LottieObject**
+     auto zigzag = static_cast<LottieZigZag*>(*child);
+     auto amplitude = zigzag->amplitude(frameNo, tween, exps);
+     if (tvg::zero(amplitude)) return;
+-    auto frequency = zigzag->frequency(frameNo, tween, exps);
++    auto frequency = (int)_limitCount(zigzag->frequency(frameNo, tween, exps));
+     auto point = (LottieZigZagModifier::PointType)zigzag->point(frameNo, tween, exps);
+     ctx->update(new LottieZigZagModifier(amplitude, frequency, point));
+ }
+@@ -812,7 +826,7 @@ void LottieBuilder::updateRepeater(TVG_UNUSED LottieGroup* parent, LottieObject*
+     auto repeater = static_cast<LottieRepeater*>(*child);
+ 
+     RenderRepeater r;
+-    r.cnt = static_cast<int>(repeater->copies(frameNo, tween, exps));
++    r.cnt = static_cast<int>(_limitCount(repeater->copies(frameNo, tween, exps)));
+     r.transform = ctx->propagator->transform();
+     r.offset = repeater->offset(frameNo, tween, exps);
+     r.position = repeater->position(frameNo, tween, exps);
+@@ -1621,6 +1635,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
+     ARRAY_FOREACH(p, comp->assets) {
+         if (layer->rid != (*p)->id) continue;
+         if (layer->type == LottieLayer::Precomp) {
++            if ((*p)->type != LottieObject::Composition) break;  //QUILL
+             auto asset = static_cast<LottieRootLayer*>(*p);
+             if (_buildComposition(comp, asset)) {
+                 layer->children = asset->children;
+@@ -1687,8 +1702,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
+ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+ {
+     if (parent->children.count == 0) return false;
+-    if (parent->buildDone) return true;
++    if (parent->buildDone) return !parent->building;  //QUILL
+     parent->buildDone = true;
++    parent->building = true;
+ 
+     ARRAY_FOREACH(p, parent->children) {
+         auto child = static_cast<LottieLayer*>(*p);
+@@ -1717,6 +1733,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+         //attach the necessary font data
+         if (child->type == LottieLayer::Text) _attachFont(comp, child);
+     }
++
++    //QUILL
++    ARRAY_FOREACH(p, parent->children) {
++        auto child = static_cast<LottieLayer*>(*p);
++        auto target = child->matteTarget;
++        for (auto i = 0; target && i < 16; ++i) target = target->matteTarget;
++        if (target) child->matteTarget = nullptr;
++    }
++
++    parent->building = false;
+     return true;
+ }
+ 
+diff --git a/src/loaders/lottie/tvgLottieCommon.h b/src/loaders/lottie/tvgLottieCommon.h
+index f91e6d8f8..55087370b 100644
+--- a/src/loaders/lottie/tvgLottieCommon.h
++++ b/src/loaders/lottie/tvgLottieCommon.h
+@@ -33,8 +33,8 @@ struct PathSet
+ {
+     Point* pts = nullptr;
+     PathCommand* cmds = nullptr;
+-    uint16_t ptsCnt = 0;
+-    uint16_t cmdsCnt = 0;
++    uint32_t ptsCnt = 0;  //QUILL
++    uint32_t cmdsCnt = 0;
+ 
+     void convert(RenderPath& to)
+     {
+@@ -135,10 +135,11 @@ struct AssetSrc
+ 
+ static inline RGB32 lerp(const RGB32& s, const RGB32& e, float t)
+ {
++    //QUILL
+     return {
+-        tvg::clamp((int32_t)(s.r + (e.r - s.r) * t), (int32_t)0, (int32_t)255),
+-        tvg::clamp((int32_t)(s.g + (e.g - s.g) * t), (int32_t)0, (int32_t)255),
+-        tvg::clamp((int32_t)(s.b + (e.b - s.b) * t), (int32_t)0, (int32_t)255)
++        (int32_t)tvg::clamp(s.r + (e.r - s.r) * t, 0.0f, 255.0f),
++        (int32_t)tvg::clamp(s.g + (e.g - s.g) * t, 0.0f, 255.0f),
++        (int32_t)tvg::clamp(s.b + (e.b - s.b) * t, 0.0f, 255.0f)
+     };
+ }
+ 
+diff --git a/src/loaders/lottie/tvgLottieModel.cpp b/src/loaders/lottie/tvgLottieModel.cpp
+index e0cc2a647..5aa5b857c 100644
+--- a/src/loaders/lottie/tvgLottieModel.cpp
++++ b/src/loaders/lottie/tvgLottieModel.cpp
+@@ -497,6 +497,7 @@ LottieGroup::LottieGroup(LottieObject::Type type) : LottieObject(type)
+ {
+     reqFragment = false;
+     buildDone = false;
++    building = false;
+     trimpath = false;
+     visible = false;
+     allowMerge = true;
+@@ -671,6 +672,9 @@ void LottieLayer::prepare(RGB32* color)
+         return;
+     }
+ 
++    //QUILL
++    if (type == LottieLayer::Precomp) clear();
++
+     // prepare the viewport clipper or a solid fill in advance if it is a layer type.
+     if (type == LottieLayer::Precomp || (color && type == LottieLayer::Solid)) {
+         auto obj = Shape::gen();
+diff --git a/src/loaders/lottie/tvgLottieModel.h b/src/loaders/lottie/tvgLottieModel.h
+index e9beabec6..665aaec63 100644
+--- a/src/loaders/lottie/tvgLottieModel.h
++++ b/src/loaders/lottie/tvgLottieModel.h
+@@ -229,7 +229,7 @@ struct LottieMask
+     LottiePathSet pathset;
+     LottieFloat expand = 0.0f;
+     LottieOpacity opacity = 255;
+-    MaskMethod method;
++    MaskMethod method = MaskMethod::None;  //QUILL
+     bool inverse = false;
+ };
+ 
+@@ -817,9 +817,13 @@ struct LottieGradient : LottieObject
+         if (!colorStops.populated) {
+             auto count = colorStops.count;  //colorstop count can be modified after population
+             if (colorStops.frames) {
++                //QUILL
++                auto least = UINT32_MAX;
+                 ARRAY_FOREACH(v, *colorStops.frames) {
+-                    colorStops.count = populate(v->value, count);
++                    auto stops = populate(v->value, count);
++                    if (stops < least) least = stops;
+                 }
++                colorStops.count = least;
+             } else {
+                 colorStops.count = populate(colorStops.value, count);
+             }
+@@ -1094,6 +1098,7 @@ struct LottieGroup : LottieObject, LottieRenderPooler<tvg::Shape>
+ 
+     bool reqFragment : 1;   //requirement to fragment the render context
+     bool buildDone : 1;     //completed in building the composition.
++    bool building : 1;      //QUILL
+     bool trimpath : 1;      //this group has a trimpath.
+     bool visible : 1;       //this group has visible contents.
+     bool allowMerge : 1;    //if this group is consisted of simple (transformed) shapes.
+diff --git a/src/loaders/lottie/tvgLottieModifier.cpp b/src/loaders/lottie/tvgLottieModifier.cpp
+index e94d4dc03..47532581e 100644
+--- a/src/loaders/lottie/tvgLottieModifier.cpp
++++ b/src/loaders/lottie/tvgLottieModifier.cpp
+@@ -167,6 +167,14 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
+ {
+     constexpr auto ROUNDED_POLYSTAR_MAGIC_NUMBER = 0.47829f;
+ 
++    //QUILL
++    if (in.pts.count < 3) {
++        if (next) return next->path(in, out, nullptr);
++        out.cmds.push(in.cmds);
++        out.pts.push(in.pts);
++        return;
++    }
++
+     auto& path = (next) ? RenderPath::scratch() : out;
+ 
+     auto len = length(in.pts[1] - in.pts[2]);
+@@ -222,7 +230,8 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
+     }
+     path.cmds.push(PathCommand::Close);
+ 
+-    if (next) return next->polystar(path, out, outerRoundness, hasRoundness);
++    //QUILL
++    if (next) return next->path(path, out, nullptr);
+ }
+ 
+ void LottieRoundnessModifier::rect(const RenderPath& in, RenderPath& out, const Point& pos, const Point& size, float r, bool clockwise)
+@@ -286,7 +295,8 @@ void LottieOffsetModifier::corner(RenderPath& out, Line& line, Line& nextLine, u
+     if (intersected(line, nextLine, intersect, inside)) {
+         if (inside) {
+             if (nextClose) {
+-                if (tvg::zero(out.pts[movetoOutIndex] - out.pts[movetoOutIndex + 1])) out.pts[movetoOutIndex + 1] = intersect;
++                //QUILL
++                if (movetoOutIndex + 1 < out.pts.count && tvg::zero(out.pts[movetoOutIndex] - out.pts[movetoOutIndex + 1])) out.pts[movetoOutIndex + 1] = intersect;
+                 out.pts[movetoOutIndex] = intersect;
+             }
+             _lineTo(out, intersect);
+@@ -343,7 +353,7 @@ void LottieOffsetModifier::line(RenderPath& out, PathCommand* inCmds, uint32_t i
+     ++curPt;
+ }
+ 
+-void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending)
++void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending, uint32_t limit)
+ {
+     Point intersect{};
+     Array<Bezier> stack{5};
+@@ -356,7 +366,7 @@ void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, flo
+         auto& bezier = stack.last();
+         auto len = tvg::length(bezier.start - bezier.ctrl1) + tvg::length(bezier.ctrl1 - bezier.ctrl2) + tvg::length(bezier.ctrl2 - bezier.end);
+ 
+-        if (len > threshold * bezier.length() && len > 1.0f) {
++        if (path.pts.count + stack.count * 3 < limit && len > threshold * bezier.length() && len > 1.0f) {
+             Bezier next;
+             bezier.split(0.5f, next);
+             stack.push(next);
+@@ -424,6 +434,7 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out,
+     auto offset = clockwise(in.pts.data, in.pts.count) ? this->offset : -this->offset;
+     auto threshold = 1.0f / fabsf(offset) + 1.0f;
+     uint32_t pending{};
++    auto limit = path.pts.count + in.pts.count * 8;  //QUILL
+ 
+     for (uint32_t iCmd = 0, iPt = 0; iCmd < in.cmds.count; ++iCmd) {
+         switch (in.cmds[iCmd]) {
+@@ -444,11 +455,12 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out,
+                     ++iPt;
+                     continue;
+                 }
+-                cubic(path, in.pts.data + iPt - 1, state, offset, threshold, pending);
++                cubic(path, in.pts.data + iPt - 1, state, offset, threshold, pending, limit);
+                 iPt += 3;
+                 break;
+             }
+             default: {
++                if (state.moveto) break;  //QUILL
+                 if (!tvg::zero(in.pts[iPt - 1] - in.pts[state.movetoInIndex])) {
+                     corner(path, state.line, state.firstLine, state.movetoOutIndex, true);
+                 }
+diff --git a/src/loaders/lottie/tvgLottieModifier.h b/src/loaders/lottie/tvgLottieModifier.h
+index 0ab0d875c..a9641ee02 100644
+--- a/src/loaders/lottie/tvgLottieModifier.h
++++ b/src/loaders/lottie/tvgLottieModifier.h
+@@ -97,7 +97,7 @@ private:
+     };
+ 
+     RenderPath& modify(const RenderPath& in, RenderPath& out, Matrix* transform);
+-    void cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending);
++    void cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending, uint32_t limit);
+     bool intersected(Line& line1, Line& line2, Point& intersection, bool& inside);
+     Line shift(Point& p1, Point& p2, float offset);
+     void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
+diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
+index 242d52a98..1ccec8f66 100644
+--- a/src/loaders/lottie/tvgLottieParser.cpp
++++ b/src/loaders/lottie/tvgLottieParser.cpp
+@@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
+         //discard rest
+         while (nextArrayValue()) getInt();
+     } else {
+-        val = (int8_t) getFloat();
++        val = (int8_t)tvg::clamp(getFloat(), -128.0f, 127.0f);  //QUILL
+     }
+     return false;
+ }
+@@ -255,11 +255,11 @@ bool LottieParser::getValue(uint8_t& val)
+ {
+     if (peekType() == kArrayType) {
+         enterArray();
+-        if (nextArrayValue()) val = (uint8_t)(getFloat() * 2.55f);
++        if (nextArrayValue()) val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);  //QUILL
+         //discard rest
+         while (nextArrayValue()) getFloat();
+     } else {
+-        val = (uint8_t)(getFloat() * 2.55f);
++        val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);
+     }
+     return false;
+ }
+@@ -337,6 +337,7 @@ void LottieParser::getInterpolatorPoint(Point& pt)
+     while (auto key = nextObjectKey()) {
+         if (KEY_AS("x")) getValue(pt.x);
+         else if (KEY_AS("y")) getValue(pt.y);
++        else skip();  //QUILL
+     }
+ }
+ 
+@@ -354,11 +355,11 @@ void LottieParser::parseSlotProperty(T& prop)
+ template<typename T>
+ bool LottieParser::parseTangent(const char *key, LottieVectorFrame<T>& value)
+ {
+-    if (KEY_AS("ti") && getValue(value.inTangent)) ;
+-    else if (KEY_AS("to") && getValue(value.outTangent)) ;       
+-    else return false;
+-
+-    value.hasTangent = true;
++    //QUILL
++    auto in = KEY_AS("ti");
++    if (!in && !KEY_AS("to")) return false;
++    if (peekType() == kNullType) getNull();
++    else if (getValue(in ? value.inTangent : value.outTangent)) value.hasTangent = true;
+     return true;
+ }
+ 
+@@ -382,8 +383,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+     LottieInterpolator* interpolator = nullptr;
+ 
+     //get a cached interpolator if it has any.
+-    ARRAY_FOREACH(p, comp->interpolators) {
+-        if (!strncmp((*p)->key, key, sizeof(buf))) interpolator = *p;
++    //QUILL
++    constexpr uint32_t MAX_SEARCH = 1024;
++    auto cached = comp->interpolators.count;
++    for (uint32_t i = 0; i < cached && i < MAX_SEARCH; ++i) {
++        auto p = comp->interpolators[cached - 1 - i];
++        if (!strncmp(p->key, key, sizeof(buf))) {
++            interpolator = p;
++            break;
++        }
+     }
+ 
+     //new interpolator
+@@ -400,7 +408,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
+ template<typename T>
+ void LottieParser::parseKeyFrame(T& prop)
+ {
+-    Point inTangent, outTangent;
++    Point inTangent{}, outTangent{};  //QUILL
+     const char* interpolatorKey = nullptr;
+     auto& frame = prop.newFrame();
+     auto interpolator = false;
+@@ -455,6 +463,7 @@ void LottieParser::parsePropertyInternal(T& prop)
+         enterArray();
+         while (nextArrayValue()) {
+             if (peekType() == kObjectType) parseKeyFrame(prop);  //keyframes value
++            else if (peekType() == kNullType) getNull();  //QUILL
+             else if (getValue(prop.value)) break; //multi value property with no keyframes
+         }
+         prop.prepare();
+@@ -503,12 +512,10 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
+ 
+ bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const char* key)
+ {
+-    if (KEY_AS("ix")) {
+-        prop.ix = getInt();
+-    } else if (KEY_AS("x") && expressions) {
++    if (KEY_AS("x") && expressions) {
+         getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
+-    } else if (KEY_AS("sid")) {
+-        registerSlot(obj, getString(), prop);
++    } else if (KEY_AS("ix") || KEY_AS("sid")) {
++        skip();  //QUILL
+     } else return false;
+     return true;
+ }
+@@ -633,7 +640,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
+             if (KEY_AS("n")) style = getString();
+             else if (KEY_AS("v")) {
+                 if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
+-                else parseProperty(stroke->dashValue());
++                else if (!stroke->dashattr || stroke->dashattr->size < 64) parseProperty(stroke->dashValue());  //QUILL
++                else skip();
+             } else skip();
+         }
+     }
+@@ -918,25 +926,34 @@ LottieObject* LottieParser::parseObject(const char* type)
+ //capture the type name if the upcoming type is irregularly addressed after the actual properties.
+ char* LottieParser::captureType()
+ {
+-    if (!isPrimitive() || !strcmp(val.GetString(), "ty")) return nullptr;
++    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL
+ 
+     auto level = 0;
+     for (auto p = getPos(); *p != '\0'; ++p) {
+         if (*p == '{') level++;
+         else if (*p == '}') {
+             if (--level < 0) break;
+-        } else if (level == 0) {
+-            if (!strncmp(p, "\"ty\"", 4)) {
+-                p += 4;
+-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+-                if (*p++ != ':') return nullptr;
+-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+-                if (*p++ != '\"') return nullptr;
+-                const char* start = p;
+-                while (*p != '\0' && *p != '\"') ++p;
+-                if (*p == '\"') return tvg::duplicate(start, p - start);
+-                return nullptr;
++        } else if (*p == '\"') {
++            //QUILL
++            auto name = p + 1;
++            for (++p; *p != '\0' && *p != '\"'; ++p) {
++                if (*p == '\\' && p[1] != '\0') ++p;
+             }
++            if (*p == '\0') return nullptr;
++            if (level != 0 || p - name != 2 || strncmp(name, "ty", 2)) continue;
++            ++p;
++            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
++            if (*p != ':') {
++                --p;
++                continue;
++            }
++            ++p;
++            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
++            if (*p++ != '\"') return nullptr;
++            const char* start = p;
++            while (*p != '\0' && *p != '\"') ++p;
++            if (*p == '\"') return tvg::duplicate(start, p - start);
++            return nullptr;
+         }
+     }
+     return nullptr;
+@@ -1557,7 +1574,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+     context.layer = layer;
+ 
+     auto ddd = false;
+-    RGB32 color;
++    RGB32 color{};  //QUILL
+ 
+     enterObject();
+ 
+@@ -1593,10 +1610,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+         else if (KEY_AS("hd")) layer->hidden = getBool();
+         else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
+         else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
+-        else if (KEY_AS("t")) parseText(layer->children);
+         else if (KEY_AS("ef")) parseEffects(layer);
+         else if (KEY_AS("au")) parseVolume(layer);
+-        else skip();
++        else skip();  //QUILL
+     }
+ 
+     layer->prepare(&color);
+@@ -1787,14 +1803,9 @@ bool LottieParser::parse()
+         else if (KEY_AS("op")) outPoint = getFloat();
+         else if (KEY_AS("w")) comp->w = getFloat();
+         else if (KEY_AS("h")) comp->h = getFloat();
+-        else if (KEY_AS("nm")) comp->name = getStringCopy();
+         else if (KEY_AS("assets")) parseAssets();
+         else if (KEY_AS("layers")) comp->root = parseLayers();
+-        else if (KEY_AS("fonts")) parseFonts();
+-        else if (KEY_AS("chars")) parseChars(glyphs);
+-        else if (KEY_AS("markers")) parseMarkers();
+-        else if (KEY_AS("slots")) captureSlots(key);
+-        else skip();
++        else skip();  //QUILL
+     }
+ 
+     if (Invalid() || !comp->root) {
+diff --git a/src/loaders/lottie/tvgLottieParserHandler.cpp b/src/loaders/lottie/tvgLottieParserHandler.cpp
+index e0933642f..41a9c7670 100644
+--- a/src/loaders/lottie/tvgLottieParserHandler.cpp
++++ b/src/loaders/lottie/tvgLottieParserHandler.cpp
+@@ -20,6 +20,7 @@
+  * SOFTWARE.
+  */
+ 
++#include <limits.h>
+ #include "tvgStr.h"
+ #include "tvgLottieParserHandler.h"
+ 
+@@ -59,7 +60,9 @@ bool LookaheadParserHandler::nextArrayValue()
+ int LookaheadParserHandler::getInt()
+ {
+     if (state == kHasNumber) {
+-        auto result = val.GetInt();
++        //QUILL
++        auto number = val.GetDouble();
++        auto result = number <= -INT_MAX ? -INT_MAX : (number >= INT_MAX ? INT_MAX : (int)number);
+         parseNext();
+         return result;
+     }
+diff --git a/src/loaders/lottie/tvgLottieParserHandler.h b/src/loaders/lottie/tvgLottieParserHandler.h
+index 348f3ec81..1e3a21430 100644
+--- a/src/loaders/lottie/tvgLottieParserHandler.h
++++ b/src/loaders/lottie/tvgLottieParserHandler.h
+@@ -152,13 +152,12 @@ struct LookaheadParserHandler
+     void Error()
+     {
+         TVGERR("LOTTIE", "Invalid JSON: unexpected or misaligned data fields.");
+-        state = kError;
+-        reader.IterativeParseNext<PARSE_FLAGS>(iss, *this);   //something wrong but try advancement.
++        state = kError;  //QUILL
+     }
+ 
+     bool Invalid()
+     {
+-        return state == kError;
++        return state == kError || !reader.IterativeParseComplete();  //QUILL
+     }
+ 
+     bool enterObject();
+diff --git a/src/renderer/cpu_engine/tvgSwCommon.h b/src/renderer/cpu_engine/tvgSwCommon.h
+index 4cd4d9934..601bee93d 100644
+--- a/src/renderer/cpu_engine/tvgSwCommon.h
++++ b/src/renderer/cpu_engine/tvgSwCommon.h
+@@ -249,6 +249,7 @@ struct SwStroke
+ 
+ struct SwDashStroke
+ {
++    uint32_t steps = 8192;   //QUILL
+     RenderPath* path = nullptr;
+     float curLen = 0;
+     int32_t curIdx = 0;
+diff --git a/src/renderer/cpu_engine/tvgSwPostEffect.cpp b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
+index 513e497f1..85b4727cf 100644
+--- a/src/renderer/cpu_engine/tvgSwPostEffect.cpp
++++ b/src/renderer/cpu_engine/tvgSwPostEffect.cpp
+@@ -106,6 +106,10 @@ static int _gaussianInit(SwGaussianBlur* data, float sigma, int quality)
+ 
+     if (tvg::zero(sigma)) return 0;
+ 
++    //QUILL
++    constexpr auto MAX_SIGMA = 1048576.0f;
++    if (!(sigma <= MAX_SIGMA)) sigma = MAX_SIGMA;
++
+     data->level = int(SwGaussianBlur::MAX_LEVEL * ((quality - 1) * 0.01f)) + 1;
+ 
+     //compute box kernel sizes
+diff --git a/src/renderer/cpu_engine/tvgSwRle.cpp b/src/renderer/cpu_engine/tvgSwRle.cpp
+index 3bc4b241c..0ccdc6536 100644
+--- a/src/renderer/cpu_engine/tvgSwRle.cpp
++++ b/src/renderer/cpu_engine/tvgSwRle.cpp
+@@ -198,6 +198,10 @@
+ constexpr auto PIXEL_BITS = 8;   //must be at least 6 bits!
+ constexpr auto ONE_PIXEL = (1 << PIXEL_BITS);
+ 
++//QUILL
++constexpr uint32_t BUSY_OUTLINE_PTS = 1024;
++constexpr auto ROW_BUCKETS = 64;
++
+ struct Band
+ {
+     int32_t min, max;
+@@ -239,6 +243,8 @@ struct RleWorker
+ 
+     SwCell** yCells;
+     int32_t yCnt;
++    int32_t rowBuckets;  //QUILL
++    int32_t xShift;      //QUILL
+ 
+     bool invalid;
+     bool antiAlias;
+@@ -367,6 +373,13 @@ static void _horizLine(RleWorker& rw, int32_t x, int32_t y, int32_t area, int32_
+ }
+ 
+ 
++//QUILL
++static inline int32_t _coverArea(int32_t cover, long area = 0)
++{
++    return static_cast<int32_t>(static_cast<uint32_t>(cover) * static_cast<uint32_t>(ONE_PIXEL * 2) - static_cast<uint32_t>(area));
++}
++
++
+ static void _sweep(RleWorker& rw)
+ {
+     if (rw.cellsCnt == 0) return;
+@@ -374,18 +387,21 @@ static void _sweep(RleWorker& rw)
+     for (int y = 0; y < rw.yCnt; ++y) {
+         auto cover = 0;
+         auto x = 0;
+-        auto cell = rw.yCells[y];
+-
+-        while (cell) {
+-            if (cell->x > x && cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), cell->x - x);
+-            cover += cell->cover;
+-            auto area = cover * (ONE_PIXEL * 2) - cell->area;
+-            if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
+-            x = cell->x + 1;
+-            cell = cell->next;
++
++        for (auto list = 0; list < rw.rowBuckets; ++list) {
++            auto cell = rw.yCells[y * rw.rowBuckets + list];
++
++            while (cell) {
++                if (cell->x > x && cover != 0) _horizLine(rw, x, y, _coverArea(cover), cell->x - x);  //QUILL
++                cover += cell->cover;
++                auto area = _coverArea(cover, cell->area);  //QUILL
++                if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
++                x = cell->x + 1;
++                cell = cell->next;
++            }
+         }
+ 
+-        if (cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), rw.cellXCnt - x);
++        if (cover != 0) _horizLine(rw, x, y, _coverArea(cover), rw.cellXCnt - x);  //QUILL
+     }
+ }
+ 
+@@ -395,7 +411,7 @@ static SwCell* _findCell(RleWorker& rw)
+     auto x = rw.cellPos.x;
+     if (x > rw.cellXCnt) x = rw.cellXCnt;
+ 
+-    auto pcell = &rw.yCells[rw.cellPos.y];
++    auto pcell = &rw.yCells[rw.cellPos.y * rw.rowBuckets + ((x + 1) >> rw.xShift)];
+ 
+     while(true) {
+         auto cell = *pcell;
+@@ -417,6 +433,22 @@ static SwCell* _findCell(RleWorker& rw)
+ }
+ 
+ 
++//QUILL
++constexpr uint32_t KEPT_POOL_SIZE = DEFAULT_POOL_SIZE * 256;  //QUILL
++
++static bool _growCells(RleWorker& rw, SwCellPool* pool)
++{
++    constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
++    if (pool->size > MAX_POOL_SIZE / 4) return false;
++    pool->size *= 4;
++    tvg::free(pool->buffer);
++    pool->buffer = tvg::malloc<SwCell>(pool->size);
++    rw.buffer = pool->buffer;
++    rw.bufferSize = pool->size;
++    return true;
++}
++
++
+ static bool _recordCell(RleWorker& rw)
+ {
+     if (rw.area | rw.cover) {
+@@ -491,6 +523,13 @@ static bool _moveTo(RleWorker& rw, const SwPoint& to)
+ }
+ 
+ 
++//QUILL
++static bool _pastCells(const RleWorker& rw, const SwPoint& e1, const SwPoint& e2)
++{
++    return (e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y);
++}
++
++
+ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+ {
+     auto e1 = TRUNC(rw.pos);
+@@ -510,6 +549,22 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+     while (line < end) {
+         auto diff = line[0] - line[1];
+ 
++        e1 = TRUNC(line[1]);
++        e2 = TRUNC(line[0]);
++
++        if (_pastCells(rw, e1, e2)) {  //QUILL
++            if (!_setCell(rw, e2)) return false;
++            rw.pos = line[0];
++            if (line-- == rw.lineStack) return true;
++            continue;
++        }
++
++        //QUILL
++        if (e1.x < rw.cellMin.x && e2.x < rw.cellMin.x) {
++            diff.x = 0;
++            e2.x = e1.x;
++        }
++
+         // avoid possible arithmetic overflow below by splitting
+         if (HYPOT(diff) > SHRT_MAX) {
+             _splitLine(line);
+@@ -517,9 +572,6 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+             continue;
+         }
+ 
+-        e1 = TRUNC(line[1]);
+-        e2 = TRUNC(line[0]);
+-
+         auto f1 = FRACT(line[1]);
+         SwPoint f2;
+ 
+@@ -620,6 +672,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+ }
+ 
+ 
++//QUILL
++static bool _besideCells(const RleWorker& rw, const SwPoint* arc)
++{
++    auto min = arc[0].x;
++    auto max = arc[0].x;
++    for (auto i = 1; i < 4; ++i) {
++        if (arc[i].x < min) min = arc[i].x;
++        if (arc[i].x > max) max = arc[i].x;
++    }
++    return TRUNC(min) >= rw.cellMax.x || TRUNC(max) < rw.cellMin.x;
++}
++
++
+ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, const SwPoint& to)
+ {
+     auto arc = rw.bezStack;
+@@ -640,7 +705,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+         if (y > max) max = y;
+     }
+ 
+-    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y) goto draw;
++    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y || _besideCells(rw, arc)) goto draw;
+ 
+     /* Decide whether to split or draw. See `Rapid Termination          */
+     /* Evaluation for Recursive Subdivision of Bezier Curves' by Thomas */
+@@ -653,23 +718,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+             auto L = HYPOT(diff);
+ 
+             //avoid possible arithmetic overflow below by splitting
+-            if (L > SHRT_MAX) goto split;
++            if (L > SHRT_MAX) {
++                if (_besideCells(rw, arc)) goto draw;  //QUILL
++                goto split;
++            }
+ 
+             //max deviation may be as much as (s/L) * 3/4 (if Hain's v = 1)
+             auto sLimit = L * (ONE_PIXEL / 6);
+ 
++            //QUILL
+             auto diff1 = arc[1] - arc[0];
+-            if (abs(diff.y * diff1.x - diff.x * diff1.y) > sLimit) goto split;
++            if (llabs((int64_t)diff.y * diff1.x - (int64_t)diff.x * diff1.y) > sLimit) goto split;
+ 
+             //s is L * the perpendicular distance from P2 to the line P0 - P3
+             auto diff2 = arc[2] - arc[0];
+-            if (abs(diff.y * diff2.x - diff.x * diff2.y) > sLimit) goto split;
++            if (llabs((int64_t)diff.y * diff2.x - (int64_t)diff.x * diff2.y) > sLimit) goto split;
+ 
+             /* Split super curvy segments where the off points are so far
+             from the chord that the angles P0-P1-P3 or P0-P2-P3 become
+             acute as detected by appropriate dot products */
+-            if (diff1.x * (diff1.x - diff.x) + diff1.y * (diff1.y - diff.y) > 0 ||
+-                diff2.x * (diff2.x - diff.x) + diff2.y * (diff2.y - diff.y) > 0)
++            if ((int64_t)diff1.x * (diff1.x - diff.x) + (int64_t)diff1.y * (diff1.y - diff.y) > 0 ||
++                (int64_t)diff2.x * (diff2.x - diff.x) + (int64_t)diff2.y * (diff2.y - diff.y) > 0)
+                 goto split;
+ 
+             //no reason to split
+@@ -774,6 +843,13 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+     rw.bandSize = rw.bufferSize / (sizeof(SwCell) * 2);
+     rw.bandShoot = 0;
+     rw.antiAlias = antiAlias;
++    rw.rowBuckets = 1;
++    rw.xShift = 31;
++    if (outline->out.count >= BUSY_OUTLINE_PTS) {
++        rw.rowBuckets = ROW_BUCKETS;
++        rw.xShift = 0;
++        while (((rw.cellXCnt + 1) >> rw.xShift) >= ROW_BUCKETS) ++rw.xShift;
++    }
+ 
+     if (!rle) rw.rle = new SwRle;
+     else rw.rle = rle;
+@@ -806,7 +882,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+             rw.yCells = reinterpret_cast<SwCell**>(rw.buffer);
+             rw.yCnt = band->max - band->min;
+ 
+-            int cellStart = sizeof(SwCell*) * (int)rw.yCnt;
++            auto listCnt = rw.yCnt * rw.rowBuckets;
++            int cellStart = sizeof(SwCell*) * listCnt;
+             int cellMod = cellStart % sizeof(SwCell);
+ 
+             if (cellMod > 0) cellStart += sizeof(SwCell) - cellMod;
+@@ -819,7 +896,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+             rw.maxCells = cellsMax - rw.cells;
+             if (rw.maxCells < 2) goto reduce_bands;
+ 
+-            for (int y = 0; y < rw.yCnt; ++y)
++            for (int y = 0; y < listCnt; ++y)
+                 rw.yCells[y] = nullptr;
+ 
+             rw.cellsCnt = 0;
+@@ -835,6 +912,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+             }
+ 
+         reduce_bands:
++            if (_growCells(rw, cellPool)) continue;  //QUILL
++
+             /* render pool overflow: we will reduce the render band by half */
+             auto bottom = band->min;
+             auto top = band->max;
+@@ -859,6 +938,12 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+     if (rw.bandShoot > 8 && rw.bandSize > 16) {
+         rw.bandSize = (rw.bandSize >> 1);
+     }
++    //QUILL
++    if (cellPool->size > KEPT_POOL_SIZE) {
++        cellPool->size = KEPT_POOL_SIZE;
++        tvg::free(cellPool->buffer);
++        cellPool->buffer = tvg::malloc<SwCell>(cellPool->size);
++    }
+     return rw.rle;
+ }
+ 
+diff --git a/src/renderer/cpu_engine/tvgSwShape.cpp b/src/renderer/cpu_engine/tvgSwShape.cpp
+index 974d7e524..0cf1edf39 100644
+--- a/src/renderer/cpu_engine/tvgSwShape.cpp
++++ b/src/renderer/cpu_engine/tvgSwShape.cpp
+@@ -55,7 +55,8 @@ static void _dashLineTo(SwDashStroke& dash, const Point& to, bool validPoint)
+         }
+     //draw the current line partially
+     } else {
+-        while (len - dash.curLen > DASH_PATTERN_THRESHOLD) {
++        while (len - dash.curLen > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL
++            --dash.steps;
+             Line left, right;
+             if (dash.curLen > 0) {
+                 len -= dash.curLen;
+@@ -119,7 +120,8 @@ static void _dashCubicTo(SwDashStroke& dash, const Point& ctrl1, const Point& ct
+         }
+     //draw the current line partially
+     } else {
+-        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD) {
++        while ((len - dash.curLen) > DASH_PATTERN_THRESHOLD && dash.steps > 0) {  //QUILL
++            --dash.steps;
+             Bezier left, right;
+             if (dash.curLen > 0) {
+                 len -= dash.curLen;
+diff --git a/src/renderer/cpu_engine/tvgSwStroke.cpp b/src/renderer/cpu_engine/tvgSwStroke.cpp
+index b0d6b6bfa..8081c4110 100644
+--- a/src/renderer/cpu_engine/tvgSwStroke.cpp
++++ b/src/renderer/cpu_engine/tvgSwStroke.cpp
+@@ -36,10 +36,11 @@ static inline float _sideToRotate(int32_t s)
+     return (MATH_PI2 - float(s) * MATH_PI);
+ }
+ 
+-static inline bool _tiny(const Point& pt)
++static constexpr float TINY_STEP = 2.0f / 64.0f;
++
++static inline bool _tiny(const Point& pt, float limit = TINY_STEP)
+ {
+-    constexpr float EPSILON = 2.0f / 64.0f;
+-    return fabsf(pt.x) < EPSILON && fabsf(pt.y) < EPSILON;
++    return fabsf(pt.x) < limit && fabsf(pt.y) < limit;
+ }
+ 
+ static inline float _mean(float angle1, float angle2)
+@@ -60,7 +61,7 @@ static void _rotate(Point& pt, float radian)
+ static void _growBorder(SwStrokeBorder* border, uint32_t newPts)
+ {
+     if (border->pts.count + newPts <= border->pts.reserved) return;
+-    border->pts.grow(newPts * 20);
++    border->pts.grow(std::max(newPts * 20, border->pts.count / 2));  //QUILL
+     border->tags = tvg::realloc<uint8_t>(border->tags, border->pts.reserved);      //align the pts / tags memory size
+ }
+ 
+@@ -363,22 +364,32 @@ static void _lineTo(SwStroke& stroke, const Point& to)
+     stroke.length = length;
+ }
+ 
+-static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float& angleOut)
++//QUILL
++static float _tinyStep(const Point& a, const Point& b, const Point& c, const Point& d)
++{
++    constexpr auto FLOAT_ROUNDING = 1.0f / 2097152.0f;
++    auto farX = std::max(std::max(fabsf(a.x), fabsf(b.x)), std::max(fabsf(c.x), fabsf(d.x)));
++    auto farY = std::max(std::max(fabsf(a.y), fabsf(b.y)), std::max(fabsf(c.y), fabsf(d.y)));
++    return std::max(TINY_STEP, std::max(farX, farY) * FLOAT_ROUNDING);
++}
++
++
++static int _cubicAngle(const Point* base, float tiny, float& angleIn, float& angleMid, float& angleOut)
+ {
+     auto d1 = base[2] - base[3];
+     auto d2 = base[1] - base[2];
+     auto d3 = base[0] - base[1];
+ 
+-    if (_tiny(d1)) {
+-        if (_tiny(d2)) {
+-            if (_tiny(d3)) {
++    if (_tiny(d1, tiny)) {
++        if (_tiny(d2, tiny)) {
++            if (_tiny(d3, tiny)) {
+                 angleIn = angleMid = angleOut = 0;
+                 return -1;  // ignoreable
+             } else {
+                 angleIn = angleMid = angleOut = tvg::atan(d3);
+             }
+         } else {
+-            if (_tiny(d3)) {
++            if (_tiny(d3, tiny)) {
+                 angleIn = angleMid = angleOut = tvg::atan(d2);
+             } else {
+                 angleIn = angleMid = tvg::atan(d2);
+@@ -386,8 +397,8 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
+             }
+         }
+     } else {
+-        if (_tiny(d2)) {
+-            if (_tiny(d3)) {
++        if (_tiny(d2, tiny)) {
++            if (_tiny(d3, tiny)) {
+                 angleIn = angleMid = angleOut = tvg::atan(d1);
+             } else {
+                 angleIn = tvg::atan(d1);
+@@ -395,7 +406,7 @@ static int _cubicAngle(const Point* base, float& angleIn, float& angleMid, float
+                 angleMid = _mean(angleIn, angleOut);
+             }
+         } else {
+-            if (_tiny(d3)) {
++            if (_tiny(d3, tiny)) {
+                 angleIn = tvg::atan(d1);
+                 angleMid = angleOut = tvg::atan(d2);
+             } else {
+@@ -442,13 +453,14 @@ static void _cubicTo(SwStroke& stroke, const Point& ctrl1, const Point& ctrl2, c
+     arc[3] = stroke.center;
+ 
+     auto join = stroke.join; // backup
++    auto tiny = _tinyStep(to, ctrl2, ctrl1, stroke.center);
+ 
+     while (arc >= bezStack) {
+         float angleIn, angleOut, angleMid;
+ 
+         //initialize with current direction
+         angleIn = angleOut = angleMid = stroke.angleIn;
+-        auto valid = _cubicAngle(arc, angleIn, angleMid, angleOut);
++        auto valid = _cubicAngle(arc, tiny, angleIn, angleMid, angleOut);
+ 
+         //valid size
+         if (valid > 0 && arc < limit) {
+diff --git a/src/renderer/cpu_engine/tvgSwUtil.cpp b/src/renderer/cpu_engine/tvgSwUtil.cpp
+index f7723a889..7f59bdf05 100644
+--- a/src/renderer/cpu_engine/tvgSwUtil.cpp
++++ b/src/renderer/cpu_engine/tvgSwUtil.cpp
+@@ -27,6 +27,14 @@
+ /* External Class Implementation                                        */
+ /************************************************************************/
+ 
++//QUILL
++static inline float _rasterRange(float v)
++{
++    constexpr auto LIMIT = 1048576.0f;
++    return (v > LIMIT) ? LIMIT : ((v >= -LIMIT) ? v : -LIMIT);
++}
++
++
+ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
+ {
+     outline->out.reserve(outline->path->pts.count);
+@@ -35,6 +43,7 @@ void utilExport(SwOutline* outline, const Matrix& transform, BBox& bbox)
+ 
+     ARRAY_FOREACH(pt, outline->path->pts) {
+         auto t = *pt * transform;
++        t = {_rasterRange(t.x), _rasterRange(t.y)};
+         if (bbox.min.x > t.x) bbox.min.x = t.x;
+         if (bbox.max.x < t.x) bbox.max.x = t.x;
+         if (bbox.min.y > t.y) bbox.min.y = t.y;
+diff --git a/src/renderer/tvgPaint.cpp b/src/renderer/tvgPaint.cpp
+index 44e8f724f..a3bf5fb4f 100644
+--- a/src/renderer/tvgPaint.cpp
++++ b/src/renderer/tvgPaint.cpp
+@@ -31,6 +31,15 @@
+ /* Internal Class Implementation                                        */
+ /************************************************************************/
+ 
++//QUILL
++static int32_t _toInt(float v)
++{
++    constexpr auto LARGEST_FLOAT_UNDER_2_31 = 2147483520.0f;
++    if (!(v > -LARGEST_FLOAT_UNDER_2_31)) return static_cast<int32_t>(-LARGEST_FLOAT_UNDER_2_31);
++    if (v > LARGEST_FLOAT_UNDER_2_31) return static_cast<int32_t>(LARGEST_FLOAT_UNDER_2_31);
++    return static_cast<int32_t>(nearbyint(v));
++}
++
+ #define PAINT_METHOD(ret, METHOD) \
+     switch (paint->type()) { \
+         case Type::Shape: ret = to<ShapeImpl>(paint)->METHOD; break; \
+@@ -110,10 +119,10 @@ static bool _compFastTrack(RenderMethod* renderer, Paint* cmpTarget, const Matri
+             if (v1.x > v2.x) std::swap(v1.x, v2.x);
+             if (v1.y > v2.y) std::swap(v1.y, v2.y);
+ 
+-            after.xMin = static_cast<int32_t>(nearbyint(v1.x));
+-            after.yMin = static_cast<int32_t>(nearbyint(v1.y));
+-            after.xMax = static_cast<int32_t>(nearbyint(v2.x));
+-            after.yMax = static_cast<int32_t>(nearbyint(v2.y));
++            after.xMin = _toInt(v1.x);
++            after.yMin = _toInt(v1.y);
++            after.xMax = _toInt(v2.x);
++            after.yMax = _toInt(v2.y);
+ 
+             if (after.xMax < after.xMin) after.xMax = after.xMin;
+             if (after.yMax < after.yMin) after.yMax = after.yMin;
