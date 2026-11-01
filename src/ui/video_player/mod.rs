@@ -922,9 +922,14 @@ pub(crate) fn plays_gif_files() -> bool {
     if cfg!(target_os = "macos") {
         return backend_ffmpeg::preferred_on_macos();
     }
-    // Read without loading the shim on the UI thread: a load still running
-    // counts as a success, and the player reports it if it fails.
-    quill::video_decode::available_now() != Some(false)
+    gif_player_from(quill::video_decode::available_now())
+}
+
+/// Only a finished load: a GIF opened while the shim still loads plays in
+/// process, which every GIF can, instead of failing later in a player
+/// whose shim turns out to be missing.
+fn gif_player_from(loaded: Option<bool>) -> bool {
+    loaded == Some(true)
 }
 
 /// A process-unique player id (the `QUILL_TRACE_VIDEO` column).

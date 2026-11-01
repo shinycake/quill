@@ -824,3 +824,10 @@ mod viewer {
         (app, vcx)
     }
 }
+
+#[test]
+fn a_gif_goes_to_the_player_only_once_the_shim_has_loaded() {
+    assert!(!super::gif_player_from(None), "still loading");
+    assert!(!super::gif_player_from(Some(false)), "missing");
+    assert!(super::gif_player_from(Some(true)));
+}
