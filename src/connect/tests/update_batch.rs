@@ -398,3 +398,48 @@ fn a_content_change_in_the_open_chat_downloads_its_new_photo() {
     assert_eq!(downloads(), vec![1, 2]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A reply strip in the open chat shows a message from another chat: when
+/// that message turns into a photo, the strip's thumbnail is downloaded
+/// without waiting for an update in the open chat.
+#[test]
+fn a_cross_chat_reply_target_that_turns_into_a_photo_gets_its_thumbnail() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let downloads = || {
+        sent_of_type(&recorder, "downloadFile")
+            .iter()
+            .filter_map(|request| request["file_id"].as_i64())
+            .collect::<Vec<i64>>()
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    ingest(&mut driver, &text_message(30, 8));
+    driver.select_chat(ChatId(7)).unwrap();
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewMessage","message":{"id":40,"chat_id":7,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"look","entities":[]}},"reply_to":{"@type":"messageReplyToMessage","chat_id":8,"message_id":30}}}"#,
+    );
+    assert_eq!(downloads(), Vec::<i64>::new());
+    driver.begin_batch();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateMessageContent","chat_id":8,"message_id":30,"new_content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{},"width":320,"height":240,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}"#,
+            photo_file(5, 10),
+        ),
+    );
+    driver.end_batch().unwrap();
+    assert_eq!(downloads(), vec![5]);
+    let _ = std::fs::remove_dir_all(dir);
+}

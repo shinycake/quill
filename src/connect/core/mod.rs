@@ -87,14 +87,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .envelope
             .extra
             .and_then(|id| self.session.requests.purpose(id));
-        // A message landing in a chat nobody shows changes no open view.
+        // A message landing in a chat nobody shows changes no open view,
+        // unless a shown chat's reply strip shows it.
         let shown_message = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
                 self.session.chat_is_shown(message.chat_id)
             }
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent {
-                chat_id, ..
-            }) => self.session.chat_is_shown(*chat_id),
+                chat_id,
+                message_id,
+                ..
+            }) => {
+                self.session.chat_is_shown(*chat_id)
+                    || self
+                        .session
+                        .shows_cross_chat_reply_to(*chat_id, *message_id)
+            }
             _ => false,
         };
         let view_after = match &owned.envelope.payload {
