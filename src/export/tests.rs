@@ -735,3 +735,38 @@ fn cancelling_after_a_download_still_releases_the_cache_copy() {
     assert_eq!(fake.count("deleteFile"), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_repeated_file_with_another_thumbnail_keeps_both_thumbnails() {
+    let dir = scratch("repeat-thumb");
+    let td = dir.join("td");
+    std::fs::create_dir_all(&td).unwrap();
+    std::fs::write(td.join("v.mp4"), b"video").unwrap();
+    std::fs::write(td.join("t1.jpg"), b"first").unwrap();
+    std::fs::write(td.join("t2.jpg"), b"second").unwrap();
+    let with_thumb = |id, date, thumb| {
+        let mut message = video_message(id, date, 20, 5);
+        message["content"]["video"]["thumbnail"] = json!({"format": {"@type": "thumbnailFormatJpeg"},
+            "width": 90, "height": 50, "file": {"id": thumb, "size": 5}});
+        message
+    };
+    let mut fake = Fake::new(vec![
+        with_thumb(2, 1_700_000_200, 22),
+        with_thumb(1, 1_700_000_100, 21),
+    ]);
+    fake.files.insert(20, td.join("v.mp4"));
+    fake.files.insert(21, td.join("t1.jpg"));
+    fake.files.insert(22, td.join("t2.jpg"));
+    let mut s = settings(&dir);
+    s.format = ExportFormat::Json;
+    s.media = MediaTypes::all();
+    let run = export(&mut fake, &s, &td);
+    run.result.unwrap();
+    let result: Value = serde_json::from_str(&read(&run.out.join("result.json"))).unwrap();
+    let first = result["messages"][0]["thumbnail"].as_str().unwrap();
+    let second = result["messages"][1]["thumbnail"].as_str().unwrap();
+    assert_eq!(result["messages"][1]["file"], result["messages"][0]["file"]);
+    assert_eq!(std::fs::read(run.out.join(first)).unwrap(), b"first");
+    assert_eq!(std::fs::read(run.out.join(second)).unwrap(), b"second");
+    let _ = std::fs::remove_dir_all(&dir);
+}

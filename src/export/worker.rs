@@ -328,7 +328,7 @@ fn save_file<T: Tdlib>(
     };
     let thumb = match media.thumb {
         Some(preview) => save_once(job, tdlib, out, preview.file_id, None, |_| {
-            namer.thumb_path(&path)
+            namer.thumb_path(media.kind.folder(), &path)
         })?
         .ok(),
         None => None,
