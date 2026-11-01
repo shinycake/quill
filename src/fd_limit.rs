@@ -1,20 +1,15 @@
-//! A process started by launchd gets a soft limit of 256 open files, and a
-//! Terminal run hides that. Each account's TDLib client holds its binlog, its
-//! SQLite files and a socket per data center, so a few accounts with media open
-//! come near it, and past it every `open` and `socket` fails.
+//! A process started by launchd gets a soft limit of 256 open files.
 
 /// `FD_SETSIZE`: `select()`, which WebRTC's socket server uses on macOS, can't
 /// take a descriptor at or above this.
 #[cfg(unix)]
 const TARGET: libc::rlim_t = 1024;
 
-/// The soft limit to set, when `soft` is below [`TARGET`].
 #[cfg(unix)]
 fn raised_soft_limit(soft: libc::rlim_t, hard: libc::rlim_t) -> Option<libc::rlim_t> {
     (soft < TARGET).then_some(TARGET.min(hard))
 }
 
-/// Raises the soft limit on open files towards [`TARGET`].
 pub fn raise_open_file_limit() {
     #[cfg(unix)]
     {

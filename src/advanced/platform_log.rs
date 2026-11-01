@@ -1,8 +1,3 @@
-//! The `log` crate's backend. GPUI and its platform crates report through
-//! `log`, and without a backend every line goes nowhere, Windows giving up on
-//! a lost GPU device among them. Warnings and errors go to the small always-on
-//! `logs/platform.log`.
-
 use super::debug_mode;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -10,7 +5,6 @@ struct PlatformLog;
 
 static LOGGER: PlatformLog = PlatformLog;
 
-/// Installs the backend. Calls after the first do nothing.
 pub fn install() {
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(LevelFilter::Warn);

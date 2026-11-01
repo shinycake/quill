@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tail_ends_within_a_tenth_of_the_old_second() {
+    fn the_tail_ends_150_ms_after_the_last_input() {
         let (tracker, last) = after_gesture(120);
         assert!(!tracker.is_high_rate(last + Duration::from_millis(151)));
     }

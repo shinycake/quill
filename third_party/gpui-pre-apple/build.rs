@@ -26,6 +26,7 @@ mod apple_build {
         // the Metal toolchain falls back to compiling the source at run time,
         // and the release build sets QUILL_REQUIRE_METALLIB to rule that out.
         println!("cargo:rerun-if-env-changed=QUILL_REQUIRE_METALLIB");
+        println!("cargo::rustc-check-cfg=cfg(quill_metallib)");
         let required = cfg!(not(feature = "runtime_shaders"))
             || env::var_os("QUILL_REQUIRE_METALLIB").is_some();
         match compile_metal_shaders(&header_path) {
