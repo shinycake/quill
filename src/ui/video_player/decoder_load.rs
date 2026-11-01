@@ -60,7 +60,7 @@ fn warm_with(load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{supported_from, warm_with};
+    use super::{Warmed, supported_from, warm_with};
     use gpui_kit::{App, TestAppContext};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
