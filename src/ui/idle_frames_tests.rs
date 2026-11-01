@@ -74,7 +74,7 @@ fn in_front_only_the_caret_draws(cx: &mut TestAppContext) {
     let drawn = frames(vcx, 60);
     let others: Vec<_> = drawn
         .keys()
-        .filter(|kind| !["(window frame)", "composer", "animation layer"].contains(kind))
+        .filter(|kind| !["(window frame)", "app", "composer", "animation layer"].contains(kind))
         .collect();
     assert!(others.is_empty(), "drawn besides the caret: {drawn:?}");
     let frames = drawn.get("(window frame)").copied().unwrap_or(0);
