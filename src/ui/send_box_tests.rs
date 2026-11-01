@@ -237,7 +237,7 @@ fn paste_picture(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 #[gpui_kit::test]
-fn a_picture_pasted_over_a_file_joins_it_as_a_file(cx: &mut TestAppContext) {
+fn a_picture_pasted_over_a_file_stays_a_photo_beside_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, _, _| {
         tray(app, &[("demo-notes.txt", AttachmentKind::Document)]);
@@ -245,7 +245,8 @@ fn a_picture_pasted_over_a_file_joins_it_as_a_file(cx: &mut TestAppContext) {
     paste_picture(&app, &mut vcx);
     app.update_in(&mut vcx, |app, _, _| {
         let kinds: Vec<AttachmentKind> = app.pending_attachments().iter().map(|a| a.kind).collect();
-        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Document]);
+        // tdesktop keeps it a photo; the send splits the tray by type.
+        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
         assert_eq!(app.pending_attachments()[0].file_name, "demo-notes.txt");
         assert!(app.connection.note().text().contains("quill-paste-"));
     });
