@@ -437,6 +437,43 @@ mod tests {
         assert_eq!(civil_at(picked, -5 * 3600).hour, 3);
     }
 
+    /// Lord Howe moves by half an hour: 02:00 +11 goes back to 01:30
+    /// +10:30 at 15:00 UTC, and 02:00 +10:30 jumps to 02:30 +11 at 15:30.
+    fn lord_howe(switch: i64, before: i32, after: i32) -> impl Fn(i64) -> i32 {
+        move |t| if t < switch { before } else { after }
+    }
+
+    /// 2026-04-04 15:00 UTC, when Lord Howe's clocks go back.
+    const LORD_HOWE_BACK: i64 = 1_775_314_800;
+    /// 2026-10-03 15:30 UTC, when Lord Howe's clocks go forward.
+    const LORD_HOWE_FORWARD: i64 = 1_791_041_400;
+
+    #[test]
+    fn a_repeated_half_hour_resolves_like_a_repeated_hour() {
+        let zone = lord_howe(LORD_HOWE_BACK, 39_600, 37_800);
+        let one_forty_five = civil(1, 45, LORD_HOWE_BACK, 37_800);
+        let (first, second) = (LORD_HOWE_BACK - 900, LORD_HOWE_BACK + 900);
+        // Before the switch, the first pass (+11).
+        let before = LORD_HOWE_BACK - 3600;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, before), first);
+        // At 01:35 +10:30, five minutes into the second pass, the one ahead.
+        let during = LORD_HOWE_BACK + 300;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, during), second);
+        // Once both are past, the first.
+        let after = LORD_HOWE_BACK + 3600;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, after), first);
+    }
+
+    #[test]
+    fn a_skipped_half_hour_lands_as_far_past_the_gap() {
+        let zone = lord_howe(LORD_HOWE_FORWARD, 37_800, 39_600);
+        let ten_past_two = civil(2, 10, LORD_HOWE_FORWARD, 37_800);
+        let picked = civil_to_unix_with(&ten_past_two, &zone, LORD_HOWE_FORWARD - 3600);
+        assert_eq!(picked, LORD_HOWE_FORWARD + 600);
+        let shown = civil_at(picked, 39_600);
+        assert_eq!((shown.hour, shown.minute), (2, 40));
+    }
+
     #[test]
     fn times_beside_a_switch_resolve_once() {
         for (switch, before, after) in [(SPRING_FORWARD, -6, -5), (FALL_BACK, -5, -6)] {
