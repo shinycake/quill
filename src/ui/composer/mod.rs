@@ -401,7 +401,15 @@ impl QuillApp {
                         return;
                     }
                     if albumable && self.composer_group_media_effective() {
-                        self.apply_demo_album(&text, &attachments, reply.as_ref());
+                        let groups = ComposerAttachment::split_for_send(&attachments, true);
+                        for (i, group) in groups.iter().enumerate() {
+                            let text = if i == 0 { text.as_str() } else { "" };
+                            let reply = reply.as_ref().filter(|_| i == 0);
+                            match group.as_slice() {
+                                [one] => self.apply_demo_outgoing(text, Some(one), reply),
+                                _ => self.apply_demo_album(text, group, reply),
+                            }
+                        }
                     } else if attachments.len() >= 2 {
                         for (i, att) in attachments.iter().enumerate() {
                             self.apply_demo_outgoing(

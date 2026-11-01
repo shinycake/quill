@@ -15,10 +15,20 @@ impl QuillApp {
         let Some(chat_id) = session.open_chat else {
             return;
         };
+        self.demo_ui
+            .seq
+            .fetch_max(session.last_seq, std::sync::atomic::Ordering::Relaxed);
         let dyn_sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         let caption = quill::composer::strip_barrier(text.trim());
         let caption = caption.as_str();
-        let album_id = "88001";
+        // After the newest message, so albums sent one after another each
+        // keep their own messages.
+        let first = session
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.keys().next_back().copied())
+            .map_or(1, |last| last.max(0) + 1);
+        let album_id = 88_000 + first;
         let reply_json = reply
             .filter(|r| r.chat_id == chat_id)
             .map(|r| {
@@ -29,17 +39,17 @@ impl QuillApp {
             })
             .unwrap_or_default();
         for (index, att) in attachments.iter().enumerate() {
-            let id = -((index as i64) + 20);
+            let id = first + index as i64;
             let item_caption = if index + 1 == attachments.len() {
                 caption
             } else {
                 ""
             };
             let path = att.path.to_string_lossy();
-            let file = demo_file_json(910 + index as i32, &path, true);
+            let file = demo_file_json((900_000 + id) as i32, &path, true);
             let json = match att.kind {
                 AttachmentKind::Photo => format!(
-                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{file},"width":240,"height":160,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":{},"entities":[]}},"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
                     chat_id.0,
                     serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
                 ),
@@ -53,7 +63,7 @@ impl QuillApp {
                         },
                     );
                     format!(
-                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":{},"width":{},"height":{},"file_name":{},"mime_type":"video/mp4","has_stickers":false,"supports_streaming":{},"minithumbnail":null,"thumbnail":null,"video":{file}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":{},"entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}}}{reply_json}}}}}"#,
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messageVideo","video":{{"@type":"video","duration":{},"width":{},"height":{},"file_name":{},"mime_type":"video/mp4","has_stickers":false,"supports_streaming":{},"minithumbnail":null,"thumbnail":null,"video":{file}}},"alternative_videos":[],"storyboards":[],"cover":null,"start_timestamp":0,"caption":{{"@type":"formattedText","text":{},"entities":[]}},"show_caption_above_media":false,"has_spoiler":false,"is_secret":false}}{reply_json}}}}}"#,
                         chat_id.0,
                         probe.duration,
                         probe.width,
