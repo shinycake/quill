@@ -4,6 +4,7 @@ use crate::{
     BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
+    link_pace::{LinkChange, LinkPace, Step},
     ns_string, renderer,
 };
 #[cfg(any(test, feature = "test-support"))]
@@ -69,7 +70,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Once, Weak,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -639,25 +640,14 @@ unsafe fn apply_simple_fullscreen_plan(
     }
 }
 
-/// Quill: how long the display link keeps running after the last frame
-/// that drew, presented or asked for another frame. Animations at 4 fps
-/// and up keep it running; after high-rate input GPUI keeps presenting
-/// for a second, which counts as activity. A change after a stop draws at
-/// once (the frame waker) and restarts the link.
-const FRAME_IDLE_AFTER: Duration = Duration::from_millis(250);
-
-/// Quill: how long a window must stay idle (display link stopped) before
-/// its spare drawables are freed. Long enough that typing, reading a
-/// message or a pause in scrolling keeps them; the first frame after a
-/// release allocates one window-sized surface.
-const DRAWABLE_RELEASE_AFTER: Duration = Duration::from_secs(3);
-
 /// Quill: lock-free state shared by the display link, `schedule_frame`
 /// and the frame waker (see `step`).
 #[derive(Default)]
 struct FrameIdle {
-    /// Something drew, presented or asked for a frame during this step.
-    activity: AtomicBool,
+    drew: AtomicBool,
+    /// GPUI asked for another frame during this step, after its draw if it
+    /// drew. Earlier requests are the frame the draw served.
+    demand: AtomicBool,
     /// The display link is pacing this window's frames.
     running: AtomicBool,
     /// AppKit last reported the window visible (its occlusion state). A
@@ -666,9 +656,6 @@ struct FrameIdle {
     /// found no screen yet or missed the occlusion change that would have
     /// retried it.
     visible: AtomicBool,
-    /// Counts idle stops, so a drawable release scheduled by one stop is
-    /// skipped once the window drew again, even if it went idle again.
-    idle_stops: AtomicU64,
 }
 
 struct MacWindowState {
@@ -683,7 +670,8 @@ struct MacWindowState {
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
     frame_idle: Arc<FrameIdle>,
-    last_frame_activity: Instant,
+    link_pace: LinkPace,
+    drawable_release_armed: bool,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -852,7 +840,7 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
-        self.last_frame_activity = Instant::now();
+        self.link_pace.link_started(Instant::now());
         let visible = self
             .native_window()
             .occlusionState()
@@ -1129,7 +1117,8 @@ impl MacWindow {
                 cursor_visible,
                 frame_source: None,
                 frame_idle: frame_idle.clone(),
-                last_frame_activity: Instant::now(),
+                link_pace: LinkPace::new(Instant::now()),
+                drawable_release_armed: false,
                 renderer,
                 request_frame_callback: None,
                 event_callback: None,
@@ -2153,7 +2142,10 @@ impl PlatformWindow for MacWindow {
     }
 
     fn draw(&self, scene: &gpui::Scene) {
-        self.2.activity.store(true, Ordering::Relaxed);
+        // Quill: GPUI's effect flushes call `schedule_frame` while the
+        // window is dirty, before the draw that cleans it.
+        self.2.demand.store(false, Ordering::Relaxed);
+        self.2.drew.store(true, Ordering::Relaxed);
         let mut this = self.0.lock();
         this.renderer.draw(scene);
     }
@@ -2161,7 +2153,7 @@ impl PlatformWindow for MacWindow {
     // Quill: GPUI asks for another frame (the window is still dirty, or
     // next-frame callbacks are queued): keep the display link running.
     fn schedule_frame(&self) {
-        self.2.activity.store(true, Ordering::Relaxed);
+        self.2.demand.store(true, Ordering::Relaxed);
     }
 
     // Quill: GPUI calls this when the window becomes dirty or queues a
@@ -3454,13 +3446,11 @@ extern "C" fn step(view: *mut c_void) {
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
     let idle = lock.frame_idle.clone();
-    // Quill: the display link runs only while frames are wanted. A step
-    // that neither draws, presents nor asks for another frame is idle;
-    // after `FRAME_IDLE_AFTER` of those the link stops (each tick woke
-    // the main thread and a CoreVideo thread 60–120 times a second for
-    // nothing). The frame waker brings it back on the next change.
-    idle.activity.store(false, Ordering::Relaxed);
-    let woken = !idle.running.load(Ordering::Relaxed);
+    // Quill: the display link runs only while frames are wanted (`link_pace`).
+    // The frame waker brings steps back on the next change.
+    idle.drew.store(false, Ordering::Relaxed);
+    idle.demand.store(false, Ordering::Relaxed);
+    let running = idle.running.load(Ordering::Relaxed);
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
         let (signal_at, signal_source) = lock
@@ -3481,37 +3471,50 @@ extern "C" fn step(view: *mut c_void) {
         lock.request_frame_callback = Some(callback);
     }
 
-    if idle.activity.load(Ordering::Relaxed) {
-        lock.last_frame_activity = Instant::now();
-        if woken {
-            // Back from idle: pace the next frames by the display again.
-            lock.start_display_link();
-        }
-    } else if !woken
-        && lock.last_frame_activity.elapsed() >= FRAME_IDLE_AFTER
-        && lock
-            .frame_source
-            .as_ref()
-            .is_some_and(WindowFrameSource::is_running)
-    {
-        lock.stop_display_link();
-        let stop = idle.idle_stops.fetch_add(1, Ordering::Relaxed) + 1;
-        let window = Arc::downgrade(&window_state);
-        if let Ok(when) = DRAWABLE_RELEASE_AFTER.try_into() {
-            let _ = DispatchQueue::main().after(when, move || {
-                let Some(window) = window.upgrade() else {
-                    return;
-                };
-                let mut lock = window.lock();
-                let idle = &lock.frame_idle;
-                if !idle.running.load(Ordering::Relaxed)
-                    && idle.idle_stops.load(Ordering::Relaxed) == stop
-                {
-                    lock.renderer.release_idle_drawables();
-                }
-            });
-        }
+    let step = Step {
+        drew: idle.drew.load(Ordering::Relaxed),
+        demand: idle.demand.load(Ordering::Relaxed),
+    };
+    let change = lock.link_pace.step(running, step, Instant::now());
+    match change {
+        LinkChange::Keep => {}
+        LinkChange::Start => lock.start_display_link(),
+        LinkChange::Stop => lock.stop_display_link(),
     }
+    if (step.drew || change == LinkChange::Stop) && !idle.running.load(Ordering::Relaxed) {
+        schedule_drawable_release(&window_state, &mut lock);
+    }
+}
+
+/// Quill: free the spare drawables once the window stayed idle long enough.
+/// One timer at a time, so a blinking caret does not arm one per draw.
+fn schedule_drawable_release(
+    window_state: &Arc<Mutex<MacWindowState>>,
+    state: &mut MacWindowState,
+) {
+    if state.drawable_release_armed {
+        return;
+    }
+    let Ok(when) = state.link_pace.drawable_release_in(Instant::now()).try_into() else {
+        return;
+    };
+    state.drawable_release_armed = true;
+    let window = Arc::downgrade(window_state);
+    let _ = DispatchQueue::main().after(when, move || {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        let mut lock = window.lock();
+        lock.drawable_release_armed = false;
+        if lock.frame_idle.running.load(Ordering::Relaxed) {
+            return;
+        }
+        if lock.link_pace.drawable_release_in(Instant::now()).is_zero() {
+            lock.renderer.release_idle_drawables();
+        } else {
+            schedule_drawable_release(&window, &mut lock);
+        }
+    });
 }
 
 extern "C" fn valid_attributes_for_marked_text(_: &AnyObject, _: Sel) -> *mut AnyObject {

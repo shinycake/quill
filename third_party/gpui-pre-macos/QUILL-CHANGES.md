@@ -19,9 +19,16 @@ The Quill project changed it in 2026 so an idle window stops costing CPU:
   after 250 ms of those the window unsubscribes from the display link.
   `MacWindow` implements `frame_waker` (GPUI calls it when a window becomes
   dirty or queues a next-frame callback) to request one step on the window's
-  dispatch source while the window is visible and the link is not running;
-  that step draws and resubscribes. `schedule_frame` and `draw` mark
-  activity. The waker keys on whether the link runs, not on why it stopped:
+  dispatch source while the window is visible and the link is not running.
+  That step draws, and the link stays stopped after a lone draw: it comes
+  back when GPUI asks for another frame after the draw, or for a second
+  woken draw within 100 ms, so a caret blink wakes the app once per blink
+  and scrolling is still paced by the display. `schedule_frame` before a
+  draw does not count, because GPUI's effect flushes call it for any dirty
+  window. The decision is in `src/link_pace.rs` (new, standard library only;
+  `scripts/test-frame-idle.sh` runs its tests on any host). Spare drawables
+  go 3 s after the last activity, one timer at a time.
+  The waker keys on whether the link runs, not on why it stopped:
   a restart that finds no screen yet, or misses the occlusion change that
   would retry it, no longer leaves a visible window that never repaints
   (`docs/decisions/notification-click-repaint.md`). The waker holds the window's
