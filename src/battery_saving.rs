@@ -128,7 +128,7 @@ fn probe_native() -> Option<bool> {
 #[cfg(target_os = "linux")]
 fn probe_native() -> Option<bool> {
     #[cfg(feature = "ui")]
-    let announced = crate::battery_signal::latest();
+    let announced = crate::battery_signal::refresh();
     #[cfg(not(feature = "ui"))]
     let announced = None;
     probe_linux(announced, |args| {
@@ -158,7 +158,7 @@ pub fn event_driven() -> bool {
     false
 }
 
-/// The value the D-Bus listener last saw (`announced`), or else ask with
+/// The value the D-Bus listener read (`announced`), or else ask with
 /// `run`, which spawns `gdbus`.
 #[cfg(target_os = "linux")]
 pub(crate) fn probe_linux(
