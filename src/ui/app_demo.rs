@@ -594,6 +594,7 @@ impl QuillApp {
         // Remember the window's geometry when the user moves or resizes it.
         cx.observe_window_bounds(window, |this, window, cx| {
             this.schedule_window_state_save(window, cx);
+            this.main_window_placed(window, cx);
         })
         .detach();
         // The main window's display, and displays added, removed or resized.
