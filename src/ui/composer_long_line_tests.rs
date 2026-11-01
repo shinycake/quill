@@ -222,13 +222,14 @@ fn a_mixed_line_keeps_its_directions_far_from_where_it_starts() {
             prepare(&input, window, cx);
             let text = mixed_line(LONG);
             load_text(&input, &text, window, cx);
-            let word = text[text.len() / 2..].find("بالعالم").unwrap() + text.len() / 2;
+            let word =
+                text.get(text.len() / 2..).unwrap().find("بالعالم").unwrap() + text.len() / 2;
             scroll_to_row_of(&input, word, window, cx);
             // Right to left inside the word, left to right after it.
             let letter = "ب".len();
             let x = |at: usize, cx: &App| caret(&input, at, cx).left();
             assert!(x(word + letter, cx) < x(word, cx));
-            let latin = text[word..].find("jumps").unwrap() + word;
+            let latin = text.get(word..).unwrap().find("jumps").unwrap() + word;
             assert!(x(latin + 2, cx) > x(latin, cx));
             let right_edge = |input: &Entity<TextareaState>, cx: &App| -> Pixels {
                 let bounds = input.read(cx).range_to_rects(&(word..word + letter));
@@ -241,7 +242,7 @@ fn a_mixed_line_keeps_its_directions_far_from_where_it_starts() {
             load_text(&input, &text, window, cx);
             let middle = char_at_or_after(&text, text.len() / 2);
             scroll_to_row_of(&input, middle, window, cx);
-            let word = text[middle..].find("the quick").unwrap() + middle;
+            let word = text.get(middle..).unwrap().find("the quick").unwrap() + middle;
             let starts = row_starts(&input, cx);
             let row = starts.partition_point(|&start| start <= word);
             let (start, end) = (starts[row - 1], starts[row]);
