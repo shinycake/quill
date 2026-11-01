@@ -119,7 +119,7 @@ pub(super) fn too_slow_for_grid(draw_cost: Duration, timeline: Timeline) -> bool
 const COARSE_SHARE: f64 = 0.4;
 
 pub(super) enum Job {
-    /// Open a TGS clip (decoded clips open on the opener thread).
+    /// Open a TGS clip (decoded clips open on the opener threads).
     Open { key: ClipKey, path: PathBuf },
     Frame {
         key: ClipKey,
@@ -192,12 +192,13 @@ impl Engine {
             work: Condvar::new(),
             waker: Mutex::new(None),
         });
-        let opener = shared.clone();
-        let _ = crate::thread_guard::spawn_guarded("quill-sticker-open".to_string(), move || {
-            super::opener::run(&opener)
-        });
         let mut started = 0;
         for index in 0..workers {
+            let opener = shared.clone();
+            let _ = crate::thread_guard::spawn_guarded(
+                format!("quill-sticker-open-{index}"),
+                move || super::opener::run(&opener),
+            );
             let shared = shared.clone();
             let spawned =
                 crate::thread_guard::spawn_guarded(format!("quill-sticker-{index}"), move || {
@@ -540,7 +541,7 @@ impl State {
         Some(Job::Frame { key, index, stored })
     }
 
-    /// The next clip for the opener to decode, with what stops it.
+    /// The next clip for an opener to decode, with what stops it.
     pub(super) fn next_decode(&mut self) -> Option<(ClipKey, DecodeAll, Cancel)> {
         let (key, clip) = self
             .clips

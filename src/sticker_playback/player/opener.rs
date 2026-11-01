@@ -1,8 +1,8 @@
-//! The opener thread: decodes clips whose frames all come up front (WebM
-//! video stickers) and fills their stores. A decode takes tens to hundreds
-//! of milliseconds, so on a worker it would hold back the frames of every
-//! clip that worker owns. A decoded clip holds no canvas, so nothing ties
-//! the decode to the worker that later unpacks its frames.
+//! The opener threads, one per worker: they decode clips whose frames all
+//! come up front (WebM video stickers) and fill their stores. A decode takes
+//! tens to hundreds of milliseconds, so on a worker it would hold back the
+//! frames of every clip that worker owns. A decoded clip holds no canvas, so
+//! nothing ties the decode to the worker that later unpacks its frames.
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;

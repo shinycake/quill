@@ -216,10 +216,10 @@ stays up for the same number of refreshes. Every tick drew the whole window:
 107 window frames a second for 30 pictures on a 120 Hz Mac.
 
 Ticking such a clip at twice its file's rate instead, which saves the wakes
-too, gave 86% of frames their 4 refreshes where the display's rate gave 100%,
-with 8 frames in 118 held 3 and 8 held 5. The clock runs free at 92% of a
-frame, so at that rate a tick and a frame's start beat against each other. A
-tick that draws nothing costs almost nothing, so the wakes were not worth it.
+too, held 85% of frames for their 4 refreshes where the display's rate held
+97%, on the half-speed replica below. The clock runs free at 92% of a frame,
+so at that rate a tick and a frame's start beat against each other. A tick
+that draws nothing costs almost nothing, so the wakes were not worth it.
 
 The clock now asks an animation layer before it notifies it whether a
 draw before the next refresh would change anything: any clock-driven
@@ -232,8 +232,16 @@ needs no vsync times, so it works on every system. A view unpainted for
 
 In a model of a 30 fps clip at its file's rate ticked at 120 Hz, with each
 tick up to a refresh before its paint: 120 draws a second → 38, each of
-the 30 frames up for exactly 4 refreshes. The window frame count on a real
-120 Hz display still needs a Mac.
+the 30 frames up for exactly 4 refreshes.
+
+No 120 Hz display was measured. On a 60 Hz Mac, a 15 fps file with the fine
+grid forced on is a half-speed replica of that clip: every ratio in refreshes
+matches. Window frames a second went from 57-59 to 16-30 for 15 pictures, and
+instructions from 247-257 M/s to 96-147 M/s (4 runs each, fastrel build). The
+spread is the head's phase: a tick can draw one refresh before a frame
+changes, so a frame costs one or two draws. The tap effect ticks the whole
+app from outside the layers (`emoji_effect.rs`), so the check does not cover
+it.
 
 ### Follow-up: WebM opens held back other clips' frames (2026-11-01)
 
@@ -243,8 +251,9 @@ fallback (`sweep-webm-stickers.md`). That ran on the sticker worker the clip
 was pinned to, and a worker took a pending open before any frame, so every
 clip on that worker got no frames meanwhile. Queued opens ran back to back.
 
-Clips decoded up front now open on one opener thread of their own
-(`opener.rs`). It installs the frames in the clip's store, and the clip's
+Clips decoded up front now open on opener threads of their own
+(`opener.rs`), one per worker, as many decodes at once as before. An opener
+installs the frames in the clip's store, and the clip's
 worker only unpacks them; a decoded clip holds no canvas, so the worker
 needs no source for it. Workers still open TGS clips, which keep their
 canvas there, but a frame now goes before an open unless 8 frames in a row
@@ -252,8 +261,8 @@ already did. A test with one worker holds a WebM decode open and gets
 another clip's frame meanwhile; before, the decode ran on the worker.
 
 Each open still holds all its raw frames at once (up to 58 MB at 448 px,
-inferred), and opens still queue on the one opener. Streaming WebM frame by
-frame through the shim, as tdesktop's `Media::Clip` does, would remove both.
+inferred). Streaming WebM frame by frame through the shim, as tdesktop's
+`Media::Clip` does, would remove that.
 
 ## Verification
 

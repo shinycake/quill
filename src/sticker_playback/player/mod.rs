@@ -14,7 +14,7 @@
 //!   the memory pool of the thread that created a canvas
 //!   (`tvgSwMemPool.cpp`, a `thread_local`), so a canvas is drawn only on
 //!   the thread that made it. Clips decoded up front (WebM) are decoded on
-//!   one opener thread of their own ([`opener`]), off the workers.
+//!   opener threads of their own ([`opener`]), off the workers.
 //! - Stored frames are evicted least recently used first under one byte
 //!   budget for every clip ([`Engine::new`]); a clip shown in the last half
 //!   second keeps its frames.

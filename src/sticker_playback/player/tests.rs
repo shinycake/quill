@@ -730,6 +730,35 @@ fn sticker_store_bench() {
 }
 
 #[test]
+fn clips_decoding_at_once_do_not_wait_for_each_other() {
+    use std::sync::{Barrier, mpsc};
+    let engine = Engine::new(2, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<()>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(());
+    }));
+    let both_decoding = Arc::new(Barrier::new(2));
+    let len = 16 * 16 * 4;
+    let keys = [key(1, 16), key(2, 16)];
+    for key in keys {
+        let both_decoding = both_decoding.clone();
+        engine.open(
+            key,
+            Origin::Decoded(Box::new(move |_| {
+                both_decoding.wait();
+                Ok(DecodedFrames {
+                    frames: vec![vec![7; len]; 3],
+                    fps: 30.0,
+                })
+            })),
+        );
+    }
+    while keys.iter().any(|key| engine.info(key).is_none()) {
+        wakes.recv().unwrap();
+    }
+}
+
+#[test]
 fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
     use std::sync::mpsc;
     let engine = Engine::new(1, 64 << 20);
@@ -760,7 +789,7 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
     let thread = decoding.recv().unwrap();
     assert_eq!(
         thread.as_deref(),
-        Some("quill-sticker-open"),
+        Some("quill-sticker-open-0"),
         "B decodes off the worker"
     );
     engine.want(&a, &[1]);
