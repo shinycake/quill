@@ -168,10 +168,16 @@ mod linux {
         };
         assert_eq!(super::super::super::route_now().v4, hop(None));
         // The watcher hears the new route and moves the epoch TDLib reads.
-        // Every change above is queued on `watcher` already.
+        // Every change above is queued on `watcher` already, and a new
+        // bridge's own forwarding entries arrive as neighbour news, which
+        // the filter drops: read on to the first change it lets through.
         listen(&watcher, |batch| {
             heard(batch);
-            ControlFlow::Break(())
+            if netlink::only_other_neighbours(batch, |_| false) {
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
         });
         assert!(epoch() > before);
         assert_eq!(
