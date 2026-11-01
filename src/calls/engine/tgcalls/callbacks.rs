@@ -3,10 +3,9 @@
 //! `qc_p2p_destroy` returns only once no callback can run, and the reaper
 //! keeps the context alive until then.
 use super::super::{CallbackShared, EngineEvent, RemoteVideoState, TransportState};
+use super::SoundSlot;
 use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
-use crate::calls::stream_audio::StreamAudio;
 use crate::locks::LockExt;
-use arc_swap::ArcSwapOption;
 use quill_calls_sys::{
     QC_P2P_ESTABLISHED, QC_P2P_FAILED, QC_P2P_RECONNECTING, QC_P2P_WAIT_INIT, QC_P2P_WAIT_INIT_ACK,
     QC_VIDEO_ACTIVE, QC_VIDEO_PAUSED, qc_p2p_callbacks, qc_video_frame,
@@ -19,8 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) struct CallContext {
     pub(super) call_id: i32,
     pub(super) shared: Arc<CallbackShared>,
-    /// Where the call's sound goes; `None` drops it (no output open).
-    pub(super) sound: ArcSwapOption<StreamAudio>,
+    pub(super) sound: Arc<SoundSlot>,
     retired: AtomicBool,
 }
 
@@ -29,7 +27,7 @@ impl CallContext {
         Self {
             call_id,
             shared: Arc::clone(shared),
-            sound: ArcSwapOption::empty(),
+            sound: Arc::default(),
             retired: AtomicBool::new(false),
         }
     }
@@ -201,7 +199,8 @@ unsafe extern "C" fn on_audio(user: *mut c_void, samples: *const i16, count: usi
         if samples.is_null() || count == 0 {
             return;
         }
-        let Some(sound) = call.sound.load_full() else {
+        let sound = call.sound.audio();
+        let Some(sound) = sound.as_ref() else {
             return;
         };
         // SAFETY: the library hands `count` samples at `samples` for this

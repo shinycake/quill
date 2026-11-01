@@ -33,7 +33,7 @@ pub(super) struct GroupCall {
     camera: Option<Native<qc_video_capture>>,
     speaker: Option<String>,
     playback_muted: bool,
-    sound: Option<StreamPlayer>,
+    sound: Option<DeviceThread>,
     /// The participant videos last asked for, kept so a connect or a
     /// new stream quality asks again without waiting for the driver.
     video_sources: Vec<GroupVideoSource>,
@@ -59,6 +59,7 @@ struct Presentation {
 /// refuses it.
 fn create_instance(
     api: &'static Loader,
+    reaper: &Reaper,
     context: &Arc<GroupContext>,
     video: *mut qc_video_capture,
 ) -> Option<(Native<qc_group>, String)> {
@@ -88,7 +89,7 @@ fn create_instance(
             context.retire();
             close_conference(context);
             let context = Arc::clone(context);
-            reaper::hand_off(move || {
+            reaper.hand_off(move || {
                 // SAFETY: the instance made above, destroyed once and never
                 // from its own callback; the context outlives it.
                 unsafe { (api.qc_group_destroy)(handle.as_ptr()) };
@@ -158,13 +159,13 @@ fn stop_camera(api: &Loader, call: &mut GroupCall) {
 }
 
 /// Ends the presentation: no screen picture reaches it afterwards.
-fn stop_presentation(api: &'static Loader, call: &mut GroupCall) {
+fn stop_presentation(api: &'static Loader, reaper: &Reaper, call: &mut GroupCall) {
     let Some(presentation) = call.presentation.take() else {
         return;
     };
     call.gate.set_screen(None);
     presentation.retire();
-    reaper::hand_off(move || presentation.destroy(api));
+    reaper.hand_off(move || presentation.destroy(api));
 }
 
 impl Presentation {
@@ -185,20 +186,20 @@ impl Presentation {
     }
 }
 
-pub(super) fn retire_group(api: &'static Loader, mut call: GroupCall) {
+pub(super) fn retire_group(api: &'static Loader, reaper: &Reaper, mut call: GroupCall) {
     call.context.retire();
     close_conference(&call.context);
     if let Some(presentation) = call.presentation.as_ref() {
         presentation.retire();
     }
     call.gate.close();
-    call.context.sound.store(None);
+    call.context.sound.clear();
+    call.sound = None;
     stop_camera(api, &mut call);
-    reaper::hand_off(move || destroy_group(api, &mut call));
+    reaper.hand_off(move || destroy_group(api, &mut call));
 }
 
 fn destroy_group(api: &Loader, call: &mut GroupCall) {
-    call.sound = None;
     if let Some(presentation) = call.presentation.take() {
         presentation.destroy(api);
     }
@@ -231,19 +232,20 @@ impl TgcallsEngine {
         crypto: Option<Arc<dyn FrameCrypto>>,
     ) -> Result<String, EngineError> {
         if let Some(old) = self.groups.remove(&group_call_id) {
-            retire_group(self.api, old);
+            retire_group(self.api, &self.reaper, old);
         }
         let mut context = GroupContext::new(group_call_id, chat_id, false, &self.callback);
         if let Some(crypto) = crypto.as_ref() {
             context = context.conference(Arc::clone(crypto));
         }
         let context = Arc::new(context);
-        let (handle, payload) = create_instance(self.api, &context, std::ptr::null_mut()).ok_or(
-            EngineError::Engine {
-                op: "qc_group_create",
-                code: -1,
-            },
-        )?;
+        let (handle, payload) =
+            create_instance(self.api, &self.reaper, &context, std::ptr::null_mut()).ok_or(
+                EngineError::Engine {
+                    op: "qc_group_create",
+                    code: -1,
+                },
+            )?;
         crate::advanced::debug_mode::call_log(&format!(
             "[call] group {group_call_id} tgcalls create ({role:?})"
         ));
@@ -325,7 +327,7 @@ impl TgcallsEngine {
     }
 
     /// Opens (or reopens, for another speaker) the output the call's
-    /// sound plays on. A failed open leaves the call silent and logs why.
+    /// sound plays on, off this thread.
     fn open_group_sound(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         let stream_volume = self.stream_volume;
         let call = self.group_mut(group_call_id)?;
@@ -336,19 +338,13 @@ impl TgcallsEngine {
         } else {
             1.0
         };
-        match StreamPlayer::open(name.as_deref(), volume, call.playback_muted) {
-            Ok(player) => {
-                call.context.sound.store(Some(player.audio().clone()));
-                call.sound = Some(player);
-            }
-            Err(err) => {
-                crate::advanced::debug_mode::call_log(&format!(
-                    "[call] group {group_call_id} sound output did not open ({err})"
-                ));
-                call.context.sound.store(None);
-                call.sound = None;
-            }
-        }
+        let label = format!("group {group_call_id}");
+        call.sound = None;
+        call.sound = Some(
+            call.context
+                .sound
+                .open(label, name, volume, call.playback_muted),
+        );
         Ok(())
     }
 
@@ -540,9 +536,7 @@ impl TgcallsEngine {
         let reopen = call.speaker.as_deref() != speaker && call.connected;
         call.speaker = speaker.map(str::to_owned);
         call.playback_muted = muted;
-        if let Some(player) = call.sound.as_ref() {
-            player.audio().gain().set_muted(muted);
-        }
+        call.context.sound.set_muted(muted);
         if reopen {
             self.open_group_sound(group_call_id)?;
         }
@@ -554,8 +548,9 @@ impl TgcallsEngine {
     pub(super) fn start_presentation(&mut self, group_call_id: i32) -> Result<String, EngineError> {
         let api = self.api;
         let shared = Arc::clone(&self.callback);
+        let reaper = Arc::clone(&self.reaper);
         let call = self.group_mut(group_call_id)?;
-        stop_presentation(api, call);
+        stop_presentation(api, &reaper, call);
         // SAFETY: returns a new external screencast source owned here.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
         let screen = Native::new(screen).ok_or(EngineError::NoScreenSource)?;
@@ -564,7 +559,8 @@ impl TgcallsEngine {
             context = context.conference(Arc::clone(crypto));
         }
         let context = Arc::new(context);
-        let Some((handle, payload)) = create_instance(api, &context, screen.as_ptr()) else {
+        let Some((handle, payload)) = create_instance(api, &reaper, &context, screen.as_ptr())
+        else {
             // SAFETY: Quill's only reference to the source made above.
             unsafe { (api.qc_video_capture_free)(screen.as_ptr()) };
             return Err(EngineError::Engine {
@@ -610,7 +606,8 @@ impl TgcallsEngine {
         group_call_id: i32,
     ) -> Result<(), EngineError> {
         let api = self.api;
-        stop_presentation(api, self.group_mut(group_call_id)?);
+        let reaper = Arc::clone(&self.reaper);
+        stop_presentation(api, &reaper, self.group_mut(group_call_id)?);
         Ok(())
     }
 
@@ -632,7 +629,7 @@ impl TgcallsEngine {
             .remove(&from)
             .ok_or(EngineError::NoSuchCall(from))?;
         if let Some(old) = self.groups.remove(&to) {
-            retire_group(self.api, old);
+            retire_group(self.api, &self.reaper, old);
         }
         call.context.set_group_call_id(to);
         if let Some(presentation) = call.presentation.as_ref() {
@@ -665,7 +662,7 @@ impl TgcallsEngine {
             crate::advanced::debug_mode::call_log(&format!(
                 "[call] group {group_call_id} tgcalls leave"
             ));
-            retire_group(self.api, call);
+            retire_group(self.api, &self.reaper, call);
         }
     }
 
@@ -713,10 +710,8 @@ impl TgcallsEngine {
     pub(super) fn set_streams_volume(&mut self, volume: f32) {
         self.stream_volume = volume;
         for call in self.groups.values() {
-            if call.mode.is_stream()
-                && let Some(player) = call.sound.as_ref()
-            {
-                player.audio().gain().set_volume(volume);
+            if call.mode.is_stream() {
+                call.context.sound.set_volume(volume);
             }
         }
     }
@@ -729,7 +724,11 @@ impl TgcallsEngine {
         if !call.mode.is_stream() {
             return None;
         }
-        call.sound.as_ref().map(|player| player.audio().health())
+        call.context
+            .sound
+            .audio()
+            .as_ref()
+            .map(|audio| audio.health())
     }
 
     /// There is no device output inside the library: reopen Quill's.

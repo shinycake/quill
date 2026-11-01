@@ -7,7 +7,7 @@
 //! microphone capture pushes 10 ms frames in (the external frame sender),
 //! and the call's sound comes out to a `StreamPlayer`.
 use super::*;
-use crate::calls::stream_audio::StreamPlayer;
+use crate::calls::capture::device_thread::DeviceThread;
 use quill_calls_sys::{Loader, qc_p2p, qc_video_capture};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -24,10 +24,13 @@ mod group_conference;
 mod group_config;
 mod reaper;
 mod sender;
+mod sound;
 
 pub use reaper::await_call_teardown;
 
 use callbacks::CallContext;
+use reaper::Reaper;
+use sound::SoundSlot;
 
 /// The library, loaded once and never unloaded (tgcalls keeps its threads).
 static LIBRARY: OnceLock<Result<Loader, String>> = OnceLock::new();
@@ -90,7 +93,7 @@ struct P2pCall {
     /// The external source a screen share pushes into, owned by Quill: the
     /// gate borrows it, so it's freed only after the gate lets go.
     screen: Option<Native<qc_video_capture>>,
-    sound: Option<StreamPlayer>,
+    sound: Option<DeviceThread>,
 }
 
 pub struct TgcallsEngine {
@@ -102,10 +105,16 @@ pub struct TgcallsEngine {
     /// The media viewer's volume, for the streams Quill plays.
     stream_volume: f32,
     callback: Arc<CallbackShared>,
+    /// Where this engine's calls end.
+    reaper: Arc<Reaper>,
 }
 
 impl TgcallsEngine {
     pub fn load() -> Result<Self, EngineError> {
+        Self::load_with(reaper::shared())
+    }
+
+    fn load_with(reaper: Arc<Reaper>) -> Result<Self, EngineError> {
         let api = library()?;
         // SAFETY: the library returns a NUL-ended string it keeps for the
         // life of the process.
@@ -130,6 +139,7 @@ impl TgcallsEngine {
             groups: HashMap::new(),
             stream_volume: 1.0,
             callback: Arc::new(CallbackShared::new()),
+            reaper,
         })
     }
 
@@ -146,24 +156,16 @@ impl TgcallsEngine {
     }
 
     /// Opens (or reopens, for another speaker) the output the call's sound
-    /// plays on. A failed open leaves the call silent and logs why.
+    /// plays on, off this thread.
     fn open_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         let call = self.call_mut(call_id)?;
-        let speaker = call.media.speaker.clone();
-        let name = devices::speaker_name(speaker.as_deref());
-        match StreamPlayer::open(name.as_deref(), 1.0, false) {
-            Ok(player) => {
-                call.context.sound.store(Some(player.audio().clone()));
-                call.sound = Some(player);
-            }
-            Err(err) => {
-                crate::advanced::debug_mode::call_log(&format!(
-                    "[call] {call_id} sound output did not open ({err})"
-                ));
-                call.context.sound.store(None);
-                call.sound = None;
-            }
-        }
+        let name = devices::speaker_name(call.media.speaker.as_deref());
+        call.sound = None;
+        call.sound = Some(
+            call.context
+                .sound
+                .open(call_id.to_string(), name, 1.0, false),
+        );
         Ok(())
     }
 
@@ -237,7 +239,7 @@ fn release_screen(api: &Loader, call: &mut P2pCall) {
 }
 
 impl P2pCall {
-    fn retire_instance(&mut self, api: &'static Loader) {
+    fn retire_instance(&mut self, api: &'static Loader, reaper: &Reaper) {
         let Some(handle) = self.handle.take() else {
             return;
         };
@@ -245,7 +247,8 @@ impl P2pCall {
         let old = std::mem::replace(&mut self.context, Arc::new(fresh));
         old.retire();
         self.gate.close();
-        old.sound.store(None);
+        old.sound.clear();
+        self.sound = None;
         if let Some(camera) = self.camera {
             // SAFETY: Quill's live reference; the new context stays in the
             // call until the preview is cleared (`stop_camera`).
@@ -257,9 +260,7 @@ impl P2pCall {
                 );
             }
         }
-        let sound = self.sound.take();
-        reaper::hand_off(move || {
-            drop(sound);
+        reaper.hand_off(move || {
             // SAFETY: a live call destroyed once, never from its own
             // callback; its context outlives the destroy.
             unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
@@ -268,16 +269,16 @@ impl P2pCall {
     }
 }
 
-fn retire(api: &'static Loader, mut call: P2pCall) {
+fn retire(api: &'static Loader, reaper: &Reaper, mut call: P2pCall) {
     call.context.retire();
     call.gate.close();
-    call.context.sound.store(None);
+    call.context.sound.clear();
+    call.sound = None;
     stop_camera(api, &mut call);
-    reaper::hand_off(move || destroy(api, &mut call));
+    reaper.hand_off(move || destroy(api, &mut call));
 }
 
 fn destroy(api: &Loader, call: &mut P2pCall) {
-    call.sound = None;
     if let Some(handle) = call.handle.take() {
         crate::advanced::debug_mode::call_log(&format!(
             "[call] {} tgcalls end: {}",
@@ -294,10 +295,10 @@ fn destroy(api: &Loader, call: &mut P2pCall) {
 impl Drop for TgcallsEngine {
     fn drop(&mut self) {
         for (_, call) in self.calls.drain() {
-            retire(self.api, call);
+            retire(self.api, &self.reaper, call);
         }
         for (_, call) in self.groups.drain() {
-            group::retire_group(self.api, call);
+            group::retire_group(self.api, &self.reaper, call);
         }
     }
 }
@@ -349,9 +350,10 @@ fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
 mod tests {
     use super::*;
 
-    /// The engine for one test. Dropping it waits for the teardowns it
-    /// handed off: the test binary must not exit while one runs.
-    pub(super) struct TestEngine(Option<TgcallsEngine>);
+    /// The engine for one test, with a reaper of its own, so a test waits
+    /// behind no other test's teardown. Dropping it waits for the teardowns
+    /// it handed off: the test binary must not exit while one runs.
+    pub(super) struct TestEngine(Option<TgcallsEngine>, Arc<Reaper>);
 
     impl std::ops::Deref for TestEngine {
         type Target = TgcallsEngine;
@@ -370,14 +372,15 @@ mod tests {
     impl Drop for TestEngine {
         fn drop(&mut self) {
             if self.0.take().is_some() {
-                reaper::wait_for_teardowns_so_far();
+                self.1.wait_drained();
             }
         }
     }
 
     pub(super) fn engine() -> Option<TestEngine> {
-        match TgcallsEngine::load() {
-            Ok(engine) => Some(TestEngine(Some(engine))),
+        let reaper = Arc::new(Reaper::start());
+        match TgcallsEngine::load_with(Arc::clone(&reaper)) {
+            Ok(engine) => Some(TestEngine(Some(engine), reaper)),
             Err(_) => {
                 eprintln!("SKIP: libquill_calls not built; run scripts/build-tgcalls.sh");
                 None
