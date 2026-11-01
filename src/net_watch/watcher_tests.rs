@@ -4,7 +4,11 @@
 #[cfg(target_os = "linux")]
 mod linux {
     use super::super::backend::{listen, subscribe};
+    use crate::net_watch::link::Link;
+    use crate::net_watch::netlink::{self, Request};
+    use crate::net_watch::{Hop, Path};
     use std::io;
+    use std::net::Ipv4Addr;
     use std::ops::ControlFlow;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::process::CommandExt;
@@ -15,11 +19,23 @@ mod linux {
     #[test]
     #[ignore = "needs user namespaces; CI turns them on and runs it"]
     fn a_link_coming_up_wakes_the_watcher_in_a_fresh_network_namespace() {
+        run_in_a_fresh_namespace("in_the_namespace");
+    }
+
+    #[test]
+    #[ignore = "needs user namespaces; CI turns them on and runs it"]
+    fn the_hop_to_telegram_follows_the_policy_rules_in_a_fresh_network_namespace() {
+        run_in_a_fresh_namespace("in_the_namespace_the_hop_follows_the_policy_rules");
+    }
+
+    /// Runs the test `name` of this module again in a new user and network
+    /// namespace.
+    fn run_in_a_fresh_namespace(name: &str) {
         let mut child = Command::new(std::env::current_exe().unwrap());
         child
             .args([
                 "--exact",
-                "net_watch::platform::watcher_tests::linux::in_the_namespace",
+                &format!("net_watch::platform::watcher_tests::linux::{name}"),
                 "--ignored",
                 "--test-threads=1",
             ])
@@ -100,6 +116,93 @@ mod linux {
         if std::path::Path::new("/proc/sys/net/ipv6").exists() {
             assert!(families.contains(&libc::AF_INET6), "{families:?}");
         }
+    }
+
+    #[test]
+    #[ignore = "run by the namespace test above"]
+    fn in_the_namespace_the_hop_follows_the_policy_rules() {
+        if std::env::var_os(CHILD).is_none() {
+            return;
+        }
+        bring_loopback_up();
+        // SAFETY: a NUL-terminated name.
+        let lo = unsafe { libc::if_nametoindex(c"lo".as_ptr()) };
+        let socket = netlink::open(0).unwrap();
+        let ip = |last| Ipv4Addr::new(192, 0, 2, last);
+        add_address(&socket, lo, ip(2));
+        // The main table says .1; a rule sends Telegram's range to .9, as a
+        // VPN or a split tunnel does.
+        add_route(&socket, lo, libc::RT_TABLE_MAIN, None, ip(1));
+        let telegram = (Ipv4Addr::new(149, 154, 0, 0), 16);
+        add_route(&socket, lo, 100, Some(telegram), ip(9));
+        add_rule(&socket, telegram, 100);
+        assert_eq!(
+            super::super::super::route_now().v4,
+            Path::Via(Hop {
+                local: ip(2).into(),
+                link: Link {
+                    interface: lo,
+                    gateway: Some(ip(9).into()),
+                },
+            })
+        );
+    }
+
+    fn add_address(socket: &OwnedFd, interface: u32, local: Ipv4Addr) {
+        let mut header = vec![libc::AF_INET as u8, 32, 0, 0];
+        header.extend_from_slice(&interface.to_ne_bytes());
+        let flags = (libc::NLM_F_CREATE | libc::NLM_F_EXCL) as u16;
+        Request::new(libc::RTM_NEWADDR, flags, &header)
+            .attribute(libc::IFA_LOCAL, &local.octets())
+            .attribute(libc::IFA_ADDRESS, &local.octets())
+            .send(socket)
+            .unwrap();
+    }
+
+    /// A route on `interface` through `gateway`, taken as on the link.
+    fn add_route(
+        socket: &OwnedFd,
+        interface: u32,
+        table: u8,
+        to: Option<(Ipv4Addr, u8)>,
+        gateway: Ipv4Addr,
+    ) {
+        const ONLINK: u32 = 4;
+        let length = to.map_or(0, |(_, length)| length);
+        let mut header = vec![
+            libc::AF_INET as u8,
+            length,
+            0,
+            0,
+            table,
+            libc::RTPROT_BOOT,
+            libc::RT_SCOPE_UNIVERSE,
+            libc::RTN_UNICAST,
+        ];
+        header.extend_from_slice(&ONLINK.to_ne_bytes());
+        let flags = (libc::NLM_F_CREATE | libc::NLM_F_EXCL) as u16;
+        let mut request = Request::new(libc::RTM_NEWROUTE, flags, &header)
+            .attribute(libc::RTA_GATEWAY, &gateway.octets())
+            .attribute(libc::RTA_OIF, &interface.to_ne_bytes());
+        if let Some((to, _)) = to {
+            request = request.attribute(libc::RTA_DST, &to.octets());
+        }
+        request.send(socket).unwrap();
+    }
+
+    /// `ip rule add to <to> table <table> priority 100`.
+    fn add_rule(socket: &OwnedFd, (to, length): (Ipv4Addr, u8), table: u8) {
+        const TO_TABLE: u8 = 1;
+        const FRA_DST: u16 = 1;
+        const FRA_PRIORITY: u16 = 6;
+        let mut header = vec![libc::AF_INET as u8, length, 0, 0, table, 0, 0, TO_TABLE];
+        header.extend_from_slice(&0u32.to_ne_bytes());
+        let flags = (libc::NLM_F_CREATE | libc::NLM_F_EXCL) as u16;
+        Request::new(libc::RTM_NEWRULE, flags, &header)
+            .attribute(FRA_DST, &to.octets())
+            .attribute(FRA_PRIORITY, &100u32.to_ne_bytes())
+            .send(socket)
+            .unwrap();
     }
 
     fn bring_loopback_up() {

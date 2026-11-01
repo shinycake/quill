@@ -96,7 +96,7 @@ mod backend {
 mod backend {
     use std::io;
     use std::ops::ControlFlow;
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::fd::{AsRawFd, OwnedFd};
 
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
@@ -107,35 +107,7 @@ mod backend {
         | libc::RTMGRP_IPV6_ROUTE;
 
     pub(in crate::net_watch) fn subscribe() -> io::Result<OwnedFd> {
-        // SAFETY: constant arguments; the result is checked before use.
-        let raw = unsafe {
-            libc::socket(
-                libc::AF_NETLINK,
-                libc::SOCK_RAW | libc::SOCK_CLOEXEC,
-                libc::NETLINK_ROUTE,
-            )
-        };
-        if raw < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `raw` is a socket this call just opened and nothing else owns.
-        let socket = unsafe { OwnedFd::from_raw_fd(raw) };
-        // SAFETY: all-zero is a valid `sockaddr_nl`.
-        let mut address: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
-        address.nl_family = libc::AF_NETLINK as libc::sa_family_t;
-        address.nl_groups = GROUPS as u32;
-        // SAFETY: `address` is a live `sockaddr_nl` of the size passed.
-        let bound = unsafe {
-            libc::bind(
-                socket.as_raw_fd(),
-                (&raw const address).cast(),
-                size_of::<libc::sockaddr_nl>() as libc::socklen_t,
-            )
-        };
-        if bound < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(socket)
+        super::super::netlink::open(GROUPS as u32)
     }
 
     pub(in crate::net_watch) fn watch() {

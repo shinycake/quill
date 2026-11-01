@@ -9,6 +9,8 @@
 #![deny(clippy::indexing_slicing)]
 
 mod link;
+#[cfg(target_os = "linux")]
+mod netlink;
 mod platform;
 #[cfg(test)]
 mod tests;

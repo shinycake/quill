@@ -3,8 +3,6 @@
 //! TDLib's connections do not survive the move between them.
 
 use std::net::IpAddr;
-#[cfg(any(target_os = "linux", test))]
-use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Link {
@@ -18,7 +16,7 @@ pub(super) fn of(local: IpAddr, to: IpAddr) -> Link {
     backend::of(local, to)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 mod unix {
     use std::ffi::CStr;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -72,70 +70,24 @@ mod unix {
     }
 }
 
+/// The kernel's own route lookup toward `to`, which goes through the
+/// policy rules (VPN tables, per-connection tables, split tunnels) as a
+/// real packet does.
 #[cfg(target_os = "linux")]
 mod backend {
     use super::Link;
+    use crate::net_watch::netlink;
     use std::net::IpAddr;
 
-    pub(super) fn of(local: IpAddr, _to: IpAddr) -> Link {
-        let Some((name, interface)) = super::unix::interface_of(local) else {
+    pub(super) fn of(_local: IpAddr, to: IpAddr) -> Link {
+        let Ok(socket) = netlink::open(0) else {
             return Link::default();
         };
-        let gateway = match local {
-            IpAddr::V4(_) => std::fs::read_to_string("/proc/net/route")
-                .ok()
-                .and_then(|table| super::ipv4_gateway(&table, &name))
-                .map(IpAddr::V4),
-            IpAddr::V6(_) => std::fs::read_to_string("/proc/net/ipv6_route")
-                .ok()
-                .and_then(|table| super::ipv6_gateway(&table, &name))
-                .map(IpAddr::V6),
+        let Some((interface, gateway)) = netlink::route_to(&socket, to) else {
+            return Link::default();
         };
         Link { interface, gateway }
     }
-}
-
-/// The default gateway on `interface` from `/proc/net/route`, lowest metric
-/// first. Addresses are the kernel's in-memory bytes printed as a native u32.
-#[cfg(any(target_os = "linux", test))]
-fn ipv4_gateway(table: &str, interface: &str) -> Option<Ipv4Addr> {
-    table
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let name = fields.next()?;
-            let destination = fields.next()?;
-            let gateway = u32::from_str_radix(fields.next()?, 16).ok()?;
-            let metric: u32 = fields.nth(3)?.parse().ok()?;
-            let mask = fields.next()?;
-            (name == interface && destination == "00000000" && mask == "00000000" && gateway != 0)
-                .then(|| (metric, Ipv4Addr::from(gateway.to_ne_bytes())))
-        })
-        .min_by_key(|(metric, _)| *metric)
-        .map(|(_, gateway)| gateway)
-}
-
-/// The default gateway on `interface` from `/proc/net/ipv6_route`.
-#[cfg(any(target_os = "linux", test))]
-fn ipv6_gateway(table: &str, interface: &str) -> Option<Ipv6Addr> {
-    table
-        .lines()
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            let [destination, length, _, _, hop, metric, _, _, _, name] = fields.as_slice() else {
-                return None;
-            };
-            let hop = u128::from_str_radix(hop, 16).ok()?;
-            let metric = u32::from_str_radix(metric, 16).ok()?;
-            (*name == interface
-                && *length == "00"
-                && destination.bytes().all(|digit| digit == b'0')
-                && hop != 0)
-                .then(|| (metric, Ipv6Addr::from(hop)))
-        })
-        .min_by_key(|(metric, _)| *metric)
-        .map(|(_, gateway)| gateway)
 }
 
 #[cfg(target_os = "macos")]
@@ -261,45 +213,5 @@ mod backend {
 
     pub(super) fn of(_local: IpAddr, _to: IpAddr) -> Link {
         Link::default()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ipv4_gateway, ipv6_gateway};
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    #[test]
-    #[cfg(target_endian = "little")]
-    fn the_ipv4_default_gateway_is_the_cheapest_one_on_the_interface() {
-        let table = "\
-Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
-wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
-eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0
-wlan0\t00000000\t0201A8C0\t0003\t0\t0\t50\t00000000\t0\t0\t0
-wlan0\t0001A8C0\t00000000\t0001\t0\t0\t600\t00FFFFFF\t0\t0\t0
-";
-        assert_eq!(
-            ipv4_gateway(table, "wlan0"),
-            Some(Ipv4Addr::new(192, 168, 1, 2))
-        );
-        assert_eq!(
-            ipv4_gateway(table, "eth0"),
-            Some(Ipv4Addr::new(10, 0, 0, 1))
-        );
-        assert_eq!(ipv4_gateway(table, "wg0"), None);
-    }
-
-    #[test]
-    fn the_ipv6_default_gateway_is_read_from_the_route_table() {
-        let table = "\
-00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00450003 wlan0
-fe800000000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001 wlan0
-";
-        assert_eq!(
-            ipv6_gateway(table, "wlan0"),
-            Some(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))
-        );
-        assert_eq!(ipv6_gateway(table, "eth0"), None);
     }
 }
