@@ -434,3 +434,7 @@ Added in 2026, after an audit of the earlier panic pass
   without a device context and returns an error after the last adapter, and
   `DirectXDevices::new` logs an unexpected feature level. No `unwrap` or
   `unreachable!` is left in the file.
+- `src/platform.rs`: `begin_vsync_thread` returns the thread's spawn error
+  instead of unwrapping it. `attach_gpu` then detaches the GPU again and
+  returns the error, so launch fails with the startup alert and
+  `request_windowing(Windowed)` fails, instead of the app panicking.

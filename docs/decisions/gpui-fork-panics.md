@@ -113,6 +113,12 @@ platform. Each is fixed in its own commit:
   error: `attach_gpu` at launch (the startup alert) and
   `try_to_recover_from_device_lost` after a device loss (retry, then close
   the windows).
+- `platform.rs`, `begin_vsync_thread`: a failed spawn of the vsync thread
+  (out of threads or memory) was `unwrap`ped. It now returns the error, and
+  `attach_gpu` releases the devices it just made and returns it. At launch
+  that is `connect_initially`'s DirectX error, which the first
+  `open_window` returns and `main.rs` shows in the startup alert; from
+  `request_windowing(Windowed)` it is that call's error.
 
 ### macOS (`gpui-pre-macos`)
 

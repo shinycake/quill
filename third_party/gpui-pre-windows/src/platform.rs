@@ -436,8 +436,11 @@ impl WindowsPlatform {
             text_system.handle_gpu_lost(&devices)?;
         }
         *self.inner.state.directx_devices.borrow_mut() = Some(devices);
+        if let Err(error) = self.begin_vsync_thread() {
+            self.detach_gpu();
+            return Err(error);
+        }
         self.inner.state.gpu_error.borrow_mut().take();
-        self.begin_vsync_thread();
         Ok(())
     }
 
@@ -456,12 +459,13 @@ impl WindowsPlatform {
         self.inner.state.directx_devices.borrow_mut().take();
     }
 
-    fn begin_vsync_thread(&self) {
+    /// Quill: returns the spawn error (upstream unwraps it), which `attach_gpu` reports.
+    fn begin_vsync_thread(&self) -> Result<()> {
         let Some(directx_devices) = self.inner.state.directx_devices.borrow().clone() else {
-            return;
+            return Ok(());
         };
         let Some(direct_write_text_system) = &self.direct_write_text_system else {
-            return;
+            return Ok(());
         };
         let stop = Arc::new(AtomicBool::new(false));
         *self.vsync_stop.borrow_mut() = Some(stop.clone());
@@ -551,7 +555,8 @@ impl WindowsPlatform {
                     }
                 }
             })
-            .unwrap();
+            .context("Starting the vsync thread")?;
+        Ok(())
     }
 }
 
