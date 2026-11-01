@@ -145,9 +145,7 @@ fn note_new_glyphs(window: &mut Window) {
 fn sweep(window: &mut Window, pending: PendingSweep) {
     let gone = window.sweep_emoji_glyphs(pending.mark);
     let kept = window.emoji_glyph_count();
-    let text_gone = pending
-        .text
-        .then(|| window.sweep_text_glyphs(pending.mark));
+    let text_gone = pending.text.then(|| window.sweep_text_glyphs(pending.mark));
     let text_kept = window.text_glyph_count();
     with_sweep(window.window_handle().window_id(), |sweep| {
         sweep.kept = kept;

@@ -179,9 +179,11 @@ fn path_tag(path: &Path<ScaledPixels>) -> u32 {
 }
 
 fn clipped(primitive: &Primitive) -> Rect {
-    primitive
-        .painted_bounds()
-        .intersect(&primitive.content_mask().bounds)
+    let bounds = match primitive {
+        Primitive::Shadow(shadow) => shadow.bounds.dilate(shadow.blur_radius * 3.),
+        primitive => *primitive.bounds(),
+    };
+    bounds.intersect(&primitive.content_mask().bounds)
 }
 
 #[derive(Clone)]
