@@ -120,6 +120,12 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   away, made an instance and a surface on the UI thread. Test:
   `a_look_for_the_gpu_runs_off_the_ui_thread`. Not measured: there is no
   display or GPU loss here to time a look against.
+  While a look runs, `hardware_probe_at` gives the instant of the next
+  check for its answer (`HardwareProbe::next_at`), which stays put until a
+  check moves it. It used to give the past instant the look started at, so
+  every draw armed a timer that fired at once and polled again, one probe
+  step a frame instead of one each 250 ms. Test:
+  `draws_during_a_look_ask_for_the_armed_check`.
 - A GPU that keeps dying is not recovered onto forever (sweep bundle B13,
   L10): `SharedRecovery` counts the shared context's losses (once per
   context, by the window that sees it lost first) over 10 minutes. From the

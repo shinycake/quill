@@ -2455,7 +2455,7 @@ impl WgpuRenderer {
     pub fn hardware_probe_at(&self) -> Option<Instant> {
         let slot = self.context.as_ref()?;
         let probe = slot.recovery.borrow().probe();
-        probe.map(|probe| probe.due())
+        probe.map(|probe| probe.next_at())
     }
 
     /// Quill: on a CPU adapter that recovery fell back to, look for the GPU
@@ -2492,14 +2492,19 @@ impl WgpuRenderer {
             ProbeStep::Wait(due) => return Some(due),
             ProbeStep::Look => {
                 *gpu_context.look.borrow_mut() = Some(look_for_gpu());
-                probe.started();
+                probe.started(now);
                 gpu_context.recovery.borrow_mut().set_probe(Some(probe));
-                return probe.step(now).at();
+                return Some(probe.next_at());
             }
-            ProbeStep::Await(again) => {
+            ProbeStep::Await(check) if now < check => return Some(check),
+            ProbeStep::Await(_) => {
                 let mut look = gpu_context.look.borrow_mut();
                 match look.as_ref().map(|answer| answer.try_recv()) {
-                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => return Some(again),
+                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                        probe.polled(now);
+                        gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                        return Some(probe.next_at());
+                    }
                     Some(Ok(seen)) => {
                         *look = None;
                         seen

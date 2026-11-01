@@ -234,8 +234,8 @@ impl Recovering {
 pub(crate) struct HardwareProbe {
     looks: u32,
     due: Instant,
-    /// A look is running on its own thread.
-    looking: bool,
+    /// A look is running on its own thread: when to check for its answer.
+    looking: Option<Instant>,
 }
 
 /// What a window does when its probe timer fires.
@@ -247,16 +247,6 @@ pub(crate) enum ProbeStep {
     Look,
     /// A look is running: check for its answer at this instant.
     Await(Instant),
-}
-
-impl ProbeStep {
-    /// When the window's timer fires next.
-    pub(crate) fn at(self) -> Option<Instant> {
-        match self {
-            Self::Wait(at) | Self::Await(at) => Some(at),
-            Self::Look => None,
-        }
-    }
 }
 
 impl HardwareProbe {
@@ -276,7 +266,7 @@ impl HardwareProbe {
         (from_gpu && landed_on_software).then_some(Self {
             looks: 0,
             due: now + PROBE_FIRST,
-            looking: false,
+            looking: None,
         })
     }
 
@@ -284,24 +274,34 @@ impl HardwareProbe {
         self.due
     }
 
+    /// When a window's probe timer is due: the next check for a running
+    /// look's answer, else the next look. The same instant on every draw
+    /// until a step moves it, so a draw does not arm another timer.
+    pub(crate) fn next_at(&self) -> Instant {
+        self.looking.unwrap_or(self.due)
+    }
+
     pub(crate) fn step(&self, now: Instant) -> ProbeStep {
-        if self.looking {
-            ProbeStep::Await(now + PROBE_POLL)
-        } else if now < self.due {
-            ProbeStep::Wait(self.due)
-        } else {
-            ProbeStep::Look
+        match self.looking {
+            Some(check) => ProbeStep::Await(check),
+            None if now < self.due => ProbeStep::Wait(self.due),
+            None => ProbeStep::Look,
         }
     }
 
     /// A look started on its own thread.
-    pub(crate) fn started(&mut self) {
-        self.looking = true;
+    pub(crate) fn started(&mut self, now: Instant) {
+        self.looking = Some(now + PROBE_POLL);
+    }
+
+    /// The running look had no answer yet: check again later.
+    pub(crate) fn polled(&mut self, now: Instant) {
+        self.looking = Some(now + PROBE_POLL);
     }
 
     /// The GPU was not back: look again later, less often each time.
     pub(crate) fn missed(&mut self, now: Instant) {
-        self.looking = false;
+        self.looking = None;
         self.looks = self.looks.saturating_add(1);
         self.due = now
             + PROBE_FIRST
@@ -670,13 +670,39 @@ mod tests {
         assert_eq!(probe.step(start), ProbeStep::Wait(start + PROBE_FIRST));
         let due = probe.due();
         assert_eq!(probe.step(due), ProbeStep::Look);
-        probe.started();
+        probe.started(due);
         // Another window's timer, or the same one, while the look runs.
         assert_eq!(probe.step(due), ProbeStep::Await(due + PROBE_POLL));
-        let answered = due + Duration::from_millis(80);
+        let checked = due + PROBE_POLL;
+        probe.polled(checked);
+        assert_eq!(probe.step(checked), ProbeStep::Await(checked + PROBE_POLL));
+        let answered = checked + Duration::from_millis(80);
         probe.missed(answered);
         assert_eq!(probe.step(answered), ProbeStep::Wait(probe.due()));
         assert!(probe.due() > answered);
+    }
+
+    /// While a look runs, every draw (one each 16 ms) asks for the timer
+    /// the poll armed, not for the past instant the look started at.
+    #[test]
+    fn draws_during_a_look_ask_for_the_armed_check() {
+        let start = Instant::now();
+        let mut probe = HardwareProbe::after_recovery(start, Some(hardware()), true)
+            .expect("falling back to a CPU adapter looks for the GPU");
+        let due = probe.next_at();
+        probe.started(due);
+        let ProbeStep::Await(check) = probe.step(due) else {
+            panic!("a running look awaits its answer");
+        };
+        let mut now = due;
+        while now < check {
+            assert_eq!(probe.next_at(), check);
+            now += Duration::from_millis(16);
+        }
+        probe.polled(check);
+        assert_eq!(probe.next_at(), check + PROBE_POLL);
+        probe.missed(check + PROBE_POLL);
+        assert_eq!(probe.next_at(), probe.due());
     }
 
     /// A GPU that dies again after every recovery (a failing card, a driver
