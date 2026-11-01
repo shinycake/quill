@@ -107,25 +107,34 @@ fn open_intro(path: &std::path::Path, cx: &mut Context<QuillApp>) -> Option<Vide
 
 /// The bundled clip as a file the player can open (the players read
 /// files, not memory), written once into the app's own data folder under
-/// a name that changes with its content. One write at a time: Replay
-/// while the first write runs waits for it and finds the file written,
-/// where a second rename onto the clip the player holds open would fail on
-/// Windows.
+/// a name that changes with its content.
 fn intro_file() -> Option<PathBuf> {
-    use std::io::Write;
     static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _one_at_a_time = quill::locks::lock_or_recover(&WRITING);
-    let hash = INTRO_MP4
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-        });
     let dir = quill::settings::safe_app_root()?.join("intro");
+    write_clip(&dir, INTRO_MP4, &WRITING, |file, bytes| {
+        std::io::Write::write_all(file, bytes)
+    })
+}
+
+/// `bytes` as `dir/intro-<hash>.mp4`. One write at a time under `writing`:
+/// Replay while the first write runs waits for it and finds the file
+/// written, where a second rename onto the clip the player holds open
+/// would fail on Windows.
+fn write_clip(
+    dir: &std::path::Path,
+    bytes: &[u8],
+    writing: &std::sync::Mutex<()>,
+    write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> Option<PathBuf> {
+    let _one_at_a_time = quill::locks::lock_or_recover(writing);
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    });
     let path = dir.join(format!("intro-{hash:016x}.mp4"));
-    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() == INTRO_MP4.len() as u64) {
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() == bytes.len() as u64) {
         return Some(path);
     }
-    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::create_dir_all(dir).ok()?;
     let partial = dir.join(format!(
         "intro-{hash:016x}.{}-{}.part",
         std::process::id(),
@@ -138,7 +147,7 @@ fn intro_file() -> Option<PathBuf> {
         .create_new(true)
         .open(&partial)
         .ok()?;
-    let written = file.write_all(INTRO_MP4).and_then(|()| file.sync_all());
+    let written = write(&mut file, bytes).and_then(|()| file.sync_all());
     drop(file);
     match written
         .and_then(|()| quill::fs_retry::rename_retrying(&partial, &path, quill::fs_retry::SHORT))
@@ -443,4 +452,41 @@ fn highlight_row(icon: IconName, title: &'static str, body: &'static str, cx: &A
                 )
                 .child(paragraph(body, cx.theme().muted_foreground)),
         )
+}
+
+#[cfg(test)]
+mod intro_file_tests {
+    use super::write_clip;
+    use std::sync::Mutex;
+
+    /// Replay pressed while the first write of the clip runs: the second
+    /// write cannot start until the first is done, and then finds the clip
+    /// there and leaves the file the player holds alone.
+    #[test]
+    fn a_replay_during_the_first_write_waits_and_reuses_the_written_clip() {
+        static WRITING: Mutex<()> = Mutex::new(());
+        let dir = quill::scratch::process_dir("quill-intro-race");
+        let _ = std::fs::remove_dir_all(&dir);
+        let clip = b"not really an mp4";
+        let first = write_clip(&dir, clip, &WRITING, |file, bytes| {
+            assert!(
+                WRITING.try_lock().is_err(),
+                "a second write could start while this one runs"
+            );
+            std::io::Write::write_all(file, bytes)
+        })
+        .expect("the clip is written");
+        let second = write_clip(&dir, clip, &WRITING, |_, _| panic!("written twice"));
+        assert_eq!(second.as_ref(), Some(&first));
+        assert_eq!(std::fs::read(&first).unwrap(), clip);
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.path().extension().is_some_and(|ext| ext == "part"))
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+    }
 }

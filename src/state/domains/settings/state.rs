@@ -238,12 +238,6 @@ impl SettingsState {
             .chain(self.rich_html_exports.iter().map(|export| &export.link))
     }
 
-    /// Whether an export still runs: neither stopped nor ended.
-    pub fn exporting(&self) -> bool {
-        self.export_links()
-            .any(|link| !link.is_cancelled() && !link.worker_ended())
-    }
-
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),

@@ -20,6 +20,23 @@ pub(super) fn of(local: IpAddr, to: IpAddr) -> Link {
     backend::of(local, to)
 }
 
+/// Makes the system look up `gateway`'s link-layer address now rather than
+/// on the next packet that happens to pass it: one empty datagram to the
+/// discard port. Windows already resolves in [`of`].
+pub(super) fn resolve(gateway: IpAddr) {
+    if cfg!(windows) {
+        return;
+    }
+    let any: IpAddr = if gateway.is_ipv6() {
+        std::net::Ipv6Addr::UNSPECIFIED.into()
+    } else {
+        std::net::Ipv4Addr::UNSPECIFIED.into()
+    };
+    if let Ok(socket) = std::net::UdpSocket::bind((any, 0)) {
+        let _ = socket.send_to(&[], (gateway, 9));
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod unix {
     use std::ffi::CStr;
@@ -134,16 +151,26 @@ mod backend {
                 ..Link::default()
             };
         }
-        // configd records the router's address once ARP has resolved it,
-        // and IPv4 only (`kSCPropNetIPv4ARPResolvedHardwareAddress`).
-        let gateway_hardware = text(&global, "PrimaryService")
-            .filter(|_| local.is_ipv4())
-            .and_then(|service| store_value(&format!("State:/Network/Service/{service}/IPv4")))
-            .and_then(|service| text(&service, "ARPResolvedHardwareAddress"))
-            .and_then(|text| super::hardware_from_text(&text));
+        // configd may write a link-local router with its zone.
+        let gateway: Option<IpAddr> = text(&global, "Router").and_then(|router| {
+            router
+                .split('%')
+                .next()
+                .and_then(|router| router.parse().ok())
+        });
+        let gateway_hardware = match gateway {
+            // configd records the router's address once ARP has resolved
+            // it, and IPv4 only (`kSCPropNetIPv4ARPResolvedHardwareAddress`).
+            Some(IpAddr::V4(_)) => text(&global, "PrimaryService")
+                .and_then(|service| store_value(&format!("State:/Network/Service/{service}/IPv4")))
+                .and_then(|service| text(&service, "ARPResolvedHardwareAddress"))
+                .and_then(|text| super::hardware_from_text(&text)),
+            Some(IpAddr::V6(router)) => super::super::llinfo::hardware(interface, router),
+            None => None,
+        };
         Link {
             interface,
-            gateway: text(&global, "Router").and_then(|router| router.parse().ok()),
+            gateway,
             gateway_hardware,
         }
     }
@@ -182,11 +209,49 @@ fn hardware_from_text(text: &str) -> Option<[u8; 6]> {
     parts.next().is_none().then_some(out)
 }
 
+/// One neighbour resolve in flight per IP version, so a slow ARP answer
+/// does not hold up the IPv6 router's, nor the other way round.
+#[cfg(any(windows, test))]
+struct Resolving {
+    v4: std::sync::atomic::AtomicBool,
+    v6: std::sync::atomic::AtomicBool,
+}
+
+/// A resolve in flight; its IP version is free again on drop, including
+/// when the thread that holds it never starts.
+#[cfg(any(windows, test))]
+struct Resolve(&'static std::sync::atomic::AtomicBool);
+
+#[cfg(any(windows, test))]
+impl Resolving {
+    const fn new() -> Self {
+        Self {
+            v4: std::sync::atomic::AtomicBool::new(false),
+            v6: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn begin(&'static self, gateway: IpAddr) -> Option<Resolve> {
+        let flag = if gateway.is_ipv6() {
+            &self.v6
+        } else {
+            &self.v4
+        };
+        (!flag.swap(true, std::sync::atomic::Ordering::AcqRel)).then_some(Resolve(flag))
+    }
+}
+
+#[cfg(any(windows, test))]
+impl Drop for Resolve {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[cfg(windows)]
 mod backend {
     use super::Link;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use windows_sys::Win32::Foundation::NO_ERROR;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         GetBestRoute2, GetIpNetEntry2, MIB_IPFORWARD_ROW2, MIB_IPNET_ROW2, ResolveIpNetEntry2,
@@ -242,25 +307,25 @@ mod backend {
         row.PhysicalAddress.get(..6)?.try_into().ok()
     }
 
-    static RESOLVING: AtomicBool = AtomicBool::new(false);
+    static RESOLVING: super::Resolving = super::Resolving::new();
 
     fn resolve_later(mut row: MIB_IPNET_ROW2) {
-        if RESOLVING.swap(true, Ordering::AcqRel) {
+        let Some(gateway) = ip_of(&row.Address) else {
             return;
-        }
-        let spawned = crate::thread_guard::spawn_guarded("quill-net-neighbour", move || {
+        };
+        let Some(resolving) = RESOLVING.begin(gateway) else {
+            return;
+        };
+        let _ = crate::thread_guard::spawn_guarded("quill-net-neighbour", move || {
             // SAFETY: `row` is live and names the entry; a null source lets
             // Windows pick one. The call blocks until ARP or ND answers.
             let resolved =
                 unsafe { ResolveIpNetEntry2(&raw mut row, std::ptr::null()) } == NO_ERROR;
-            RESOLVING.store(false, Ordering::Release);
+            drop(resolving);
             if resolved {
                 super::super::network_changed();
             }
         });
-        if spawned.is_err() {
-            RESOLVING.store(false, Ordering::Release);
-        }
     }
 
     fn socket_address(ip: IpAddr) -> SOCKADDR_INET {
@@ -305,6 +370,21 @@ mod backend {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ipv4_router_still_resolving_does_not_hold_up_the_ipv6_one() {
+        static RESOLVING: super::Resolving = super::Resolving::new();
+        let v4: std::net::IpAddr = "192.168.0.1".parse().unwrap();
+        let v6: std::net::IpAddr = "fe80::1".parse().unwrap();
+        let arp = RESOLVING.begin(v4).expect("the IPv4 resolve starts");
+        assert!(RESOLVING.begin(v4).is_none(), "one IPv4 resolve at a time");
+        let nd = RESOLVING
+            .begin(v6)
+            .expect("the IPv6 resolve starts as well");
+        drop(arp);
+        assert!(RESOLVING.begin(v4).is_some(), "free again once it ends");
+        drop(nd);
+    }
+
     #[test]
     fn a_hardware_address_reads_with_or_without_leading_zeros() {
         let router = Some([0x00, 0x1b, 0x63, 0x0a, 0xbc, 0xde]);

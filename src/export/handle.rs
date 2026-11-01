@@ -100,9 +100,14 @@ impl Tdlib for ChannelTdlib {
     }
 }
 
+/// Which export a [`WorkerLink`] serves, unique for the process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExportId(u64);
+
 /// The session's end of a worker: its next request, the one the driver
 /// sent and awaits, and the cancel flag.
 pub struct WorkerLink {
+    id: ExportId,
     requests: mpsc::Receiver<Value>,
     replies: mpsc::Sender<Value>,
     /// The request the driver sent and awaits an answer for.
@@ -126,7 +131,9 @@ impl WorkerLink {
             leftovers,
             _alive: alive,
         };
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let link = Self {
+            id: ExportId(NEXT.fetch_add(1, Ordering::Relaxed)),
             requests,
             replies,
             pending: None,
@@ -134,6 +141,15 @@ impl WorkerLink {
             ended,
         };
         (link, worker)
+    }
+
+    pub fn id(&self) -> ExportId {
+        self.id
+    }
+
+    /// Neither stopped nor ended.
+    pub fn running(&self) -> bool {
+        !self.is_cancelled() && !self.worker_ended()
     }
 
     pub fn idle_or_cancelled(&self) -> bool {

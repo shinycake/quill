@@ -58,8 +58,8 @@ const MAX_HEADER_BYTES: usize = 64;
 /// Upper bound on forwarded arguments honored per connection.
 const MAX_ARGS: usize = 256;
 /// How many launches the owner serves at once; further connections are
-/// dropped (the sender sees a closed pipe and counts the owner as gone,
-/// which `forward` handles).
+/// answered `busy` and closed. A bare close would read as a dead owner, and
+/// that launch would take the endpoint over from this live one.
 const MAX_CLIENT_THREADS: usize = 8;
 /// How long a connected client may stay silent before its thread gives up.
 /// Unix sockets only: Windows named pipes have no timeouts, so there the
@@ -295,10 +295,9 @@ fn forward_with(endpoint: &Endpoint, header: &str, args: &[String]) -> Forward {
     // No thread: `tx` is dropped with the closure and the waits below end.
     let _ = crate::thread_guard::spawn_guarded("quill-single-instance-send", move || {
         let mut stream = stream;
-        if let Err(error) = stream.write_all(message.as_bytes()).and(stream.flush()) {
-            let _ = tx.send(Err(error));
-            return;
-        }
+        // An owner over its client cap says `busy` and closes before it
+        // reads, so the write can fail with that answer waiting to be read.
+        let _ = stream.write_all(message.as_bytes()).and(stream.flush());
         let mut reader = BufReader::new(&stream);
         loop {
             let mut line = String::new();
@@ -316,6 +315,7 @@ fn forward_with(endpoint: &Endpoint, header: &str, args: &[String]) -> Forward {
     match rx.recv_timeout(ACK_TIMEOUT) {
         Ok(Ok(answer)) if answer == "ok" => Forward::Delivered,
         Ok(Ok(answer)) if answer == "queued" => Forward::Queued(rx),
+        Ok(Ok(answer)) if answer == "busy" => Forward::Unresponsive,
         // Connected, then dropped or garbled: a dying owner counts as gone.
         Ok(_) => Forward::NoOwner,
         Err(_) => Forward::Unresponsive,
@@ -470,12 +470,35 @@ const APP_OWNER: Owner = Owner {
     answer: UI_ANSWER,
 };
 
+/// An accepted connection no client thread has taken yet. Dropped untaken
+/// (over the cap, or the thread could not start) it says `busy` first.
+struct Unserved(Option<Stream>);
+
+impl Unserved {
+    fn take(mut self) -> Option<Stream> {
+        self.0.take()
+    }
+}
+
+impl Drop for Unserved {
+    fn drop(&mut self) {
+        if let Some(stream) = self.0.take() {
+            let mut out = &stream;
+            let _ = out.write_all(b"busy\n");
+            let _ = out.flush();
+        }
+    }
+}
+
 fn serve(
-    stream: Stream,
+    stream: Unserved,
     slot: ClientSlot,
     on_launch: &(dyn Fn(Vec<String>) + Send + Sync),
     owner: Owner,
 ) {
+    let Some(stream) = stream.take() else {
+        return;
+    };
     let connection = Connection::new(stream);
     let stream = connection.stream();
     // Best effort: Windows named pipes refuse timeouts.
@@ -622,13 +645,12 @@ fn acquire_as(
         let slots = ClientSlots::default();
         for stream in listener.incoming() {
             let stream = match stream {
-                Ok(stream) => stream,
+                Ok(stream) => Unserved(Some(stream)),
                 Err(_) => {
                     std::thread::sleep(ACCEPT_ERROR_PAUSE);
                     continue;
                 }
             };
-            // Over the cap the connection is dropped, not queued.
             let Some(slot) = slots.try_take(MAX_CLIENT_THREADS) else {
                 continue;
             };
@@ -832,7 +854,12 @@ mod tests {
             let stream = listener.accept().unwrap();
             let slot = ClientSlots::default().try_take(1).unwrap();
             let ui = owner.ui;
-            super::serve(stream, slot, &move |_| on_launch(ui), owner);
+            super::serve(
+                super::Unserved(Some(stream)),
+                slot,
+                &move |_| on_launch(ui),
+                owner,
+            );
         });
         let mut client = Stream::connect(endpoint.name().unwrap()).unwrap();
         client
@@ -915,6 +942,38 @@ mod tests {
             Launch::after(&acquire(&endpoint, &[], |_| ())),
             Launch::OwnerStuck
         );
+    }
+
+    #[test]
+    fn a_launch_past_the_client_cap_is_told_the_owner_is_busy_and_does_not_take_over() {
+        use interprocess::local_socket::{Stream, prelude::*};
+        use std::io::{BufRead, Write};
+        let (ui, clock) = (heartbeat(), fake_clock());
+        ui.start();
+        let endpoint = Endpoint::for_root(&temp_root("over-cap"));
+        let first = super::acquire_as(&endpoint, &[], |_| (), owner(ui, clock)).unwrap();
+        assert_eq!(first, Acquired::Primary);
+        // Launches the frozen window holds: each keeps its client thread.
+        let held: Vec<_> = (0..super::MAX_CLIENT_THREADS)
+            .map(|_| {
+                let mut client = Stream::connect(endpoint.name().unwrap()).unwrap();
+                client
+                    .write_all(super::encode_message(super::HEADER, &[]).as_bytes())
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(client);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert_eq!(line, "queued\n");
+                reader
+            })
+            .collect();
+        let over = acquire(&endpoint, &[], |_| panic!("not the owner"));
+        assert_eq!(
+            over.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::TimedOut)
+        );
+        ui.stop();
+        drop(held);
     }
 
     #[test]

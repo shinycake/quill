@@ -14,7 +14,7 @@ use gpui::{
     BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, GraphicalEnvironment,
     KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
     PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
-    PlatformWindow, QuitAnswer, Result, SystemMenuType, Task, ThermalState, WindowAppearance,
+    PlatformWindow, QuitAnswer, QuitStep, Result, SystemMenuType, Task, ThermalState, WindowAppearance,
     WindowKind, WindowParams, WindowingRequest, popup::PopupNotSupportedError,
 };
 use gpui_apple::{
@@ -1438,7 +1438,7 @@ extern "C-unwind" fn should_terminate(
         QuitAnswer::Allow => NSApplicationTerminateReply::TerminateNow,
         QuitAnswer::Refuse => NSApplicationTerminateReply::TerminateCancel,
         QuitAnswer::Later => {
-            ask_quit_request_later(platform);
+            ask_quit_request_later(platform, 1);
             NSApplicationTerminateReply::TerminateLater
         }
     }
@@ -1458,10 +1458,14 @@ fn ask_quit_request(platform: &MacPlatform) -> QuitAnswer {
     answer
 }
 
+/// How many asks the quit AppKit waits on has had; one quit waits at a time.
+static QUIT_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 // The app was busy when AppKit asked: it waits for
 // `replyToApplicationShouldTerminate:`, and the app is asked again from the
-// main queue.
-fn ask_quit_request_later(platform: &MacPlatform) {
+// main queue, at most `QUIT_ASKS_AGAIN` times (`QuitAnswer::step`).
+fn ask_quit_request_later(platform: &MacPlatform, asked: u32) {
+    QUIT_ASKED.store(asked, std::sync::atomic::Ordering::Relaxed);
     let platform_ptr = platform as *const MacPlatform as *mut c_void;
     // SAFETY: platform lives for the process lifetime while callbacks are registered.
     unsafe {
@@ -1471,10 +1475,12 @@ fn ask_quit_request_later(platform: &MacPlatform) {
     extern "C" fn answer_later(context: *mut c_void) {
         // SAFETY: context is the MacPlatform pointer queued above.
         let platform = unsafe { &*(context as *const MacPlatform) };
-        match ask_quit_request(platform) {
-            QuitAnswer::Later => ask_quit_request_later(platform),
-            answer => NSApplication::sharedApplication(platform.1)
-                .replyToApplicationShouldTerminate(answer == QuitAnswer::Allow),
+        let asked = QUIT_ASKED.load(std::sync::atomic::Ordering::Relaxed);
+        match ask_quit_request(platform).step(asked) {
+            QuitStep::AskAgain(asked) => ask_quit_request_later(platform, asked),
+            QuitStep::Settled(allow) => {
+                NSApplication::sharedApplication(platform.1).replyToApplicationShouldTerminate(allow)
+            }
         }
     }
 }

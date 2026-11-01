@@ -375,6 +375,36 @@ pub enum QuitAnswer {
     Later,
 }
 
+/// Quill: how many times a platform asks again, from its event loop, an app
+/// that keeps answering [`QuitAnswer::Later`]. A nested run loop (a modal
+/// panel) can hold the app for as long as it is up, and each ask comes
+/// straight back.
+pub const QUIT_ASKS_AGAIN: u32 = 100;
+
+/// Quill: what a platform does with an answer to a quit it asked about
+/// `asked` times before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitStep {
+    /// The quit goes ahead (`true`) or is cancelled.
+    Settled(bool),
+    /// Ask again from the event loop; carry this count to that ask.
+    AskAgain(u32),
+}
+
+impl QuitAnswer {
+    /// The step after this answer. An app still busy after
+    /// [`QUIT_ASKS_AGAIN`] asks refuses the quit, as it would while busy,
+    /// rather than keep the event loop spinning; the user can quit again.
+    pub fn step(self, asked: u32) -> QuitStep {
+        match self {
+            Self::Allow => QuitStep::Settled(true),
+            Self::Refuse => QuitStep::Settled(false),
+            Self::Later if asked < QUIT_ASKS_AGAIN => QuitStep::AskAgain(asked.saturating_add(1)),
+            Self::Later => QuitStep::Settled(false),
+        }
+    }
+}
+
 #[expect(missing_docs)]
 pub trait Platform: 'static {
     /// Returns the host OS and application target reported by this backend.

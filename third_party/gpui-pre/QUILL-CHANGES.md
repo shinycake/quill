@@ -525,7 +525,8 @@ started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
 - `src/platform.rs`: `Platform::on_quit_request`, by default never called,
   whose callback answers a `QuitAnswer`: `Allow`, `Refuse`, or `Later` when
   the app is busy further up the stack. Linux has no session-end hook to call
-  it from.
+  it from. `QuitAnswer::step` and `QUIT_ASKS_AGAIN` bound how often a
+  platform asks again after `Later` before it takes the quit as refused.
 - `src/app.rs`: `App::on_quit_request`. A request that finds the app borrowed
   answers `Later`, so the platform holds the quit and asks again from its
   event loop instead of letting it through unasked.

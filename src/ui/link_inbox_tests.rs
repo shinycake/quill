@@ -252,7 +252,6 @@ fn a_link_the_closed_main_window_had_not_opened_goes_to_the_next(cx: &mut TestAp
 fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAppContext) {
     static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
     static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
-    UI.start();
     let turns = std::rc::Rc::new(std::cell::Cell::new(0));
     let counted = turns.clone();
     cx.update(|cx| {
@@ -260,7 +259,7 @@ fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAp
             answer_wakes(cx, &SIGNAL, &UI, |_| {
                 counted.set(counted.get() + 1);
                 // A second launch marks the beat and pokes mid-turn.
-                if counted.get() == 1 {
+                if counted.get() == 2 {
                     SIGNAL.poke();
                 }
                 true
@@ -270,8 +269,35 @@ fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAp
         .detach();
     });
     cx.run_until_parked();
-    assert_eq!(turns.get(), 0, "asleep until a poke");
+    assert_eq!(turns.get(), 1, "the first turn, then asleep until a poke");
     SIGNAL.poke();
     cx.run_until_parked();
-    assert_eq!(turns.get(), 2, "the mid-turn poke woke the loop again");
+    assert_eq!(turns.get(), 3, "the mid-turn poke woke the loop again");
+}
+
+#[gpui_kit::test]
+fn a_launch_that_pokes_before_the_inbox_first_runs_is_answered_at_once(cx: &mut TestAppContext) {
+    static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
+    static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
+    let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = turns.clone();
+    cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            answer_wakes(cx, &SIGNAL, &UI, |_| {
+                counted.set(counted.get() + 1);
+                true
+            })
+            .await;
+        })
+        .detach();
+    });
+    // A double-click on the app icon while Quill starts: the second launch
+    // queues its activation and pokes before the inbox task has run.
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(
+        turns.get(),
+        1,
+        "the launch's activation is handled, not left for 60 s"
+    );
 }

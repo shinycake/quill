@@ -510,7 +510,8 @@ so its `test-support` feature comes through Quill's `demo-capture`).
   cannot be asked (broadcasts arrive mid-update, for example inside a COM
   call), it answers 0 and posts `WM_GPUI_QUIT_REQUEST_LATER`
   (`src/gpui_message.rs`), which asks from the message loop and quits if the
-  app then allows it.
+  app then allows it. The message's `lparam` counts the asks; after
+  `QUIT_ASKS_AGAIN` (`QuitAnswer::step`) the quit counts as refused.
 - `src/window.rs`: `set_shutdown_block_reason` calls
   `ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy` (the
   `Win32_System_Shutdown` feature in `Cargo.toml`).

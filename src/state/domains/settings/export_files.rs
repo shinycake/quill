@@ -2,6 +2,7 @@
 //! (`export::leftovers`): the files the view asked for, the deletes held
 //! back for a chat on screen, the deletes and checks in flight, and which
 //! entry each one clears when TDLib answers.
+use crate::export::handle::ExportId;
 use crate::export::leftovers::{Earlier, Leftovers};
 use crate::ids::RequestId;
 use crate::json_access::JsonExt;
@@ -9,15 +10,23 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Held {
+    chat: i64,
+    file_id: i32,
+    export: ExportId,
+}
+
 #[derive(Default)]
 pub struct ExportFiles {
     leftovers: Option<Leftovers>,
     /// Files the view asked for while an export ran. Their cache copy
     /// stays even when an export downloaded them first.
     view_files: HashSet<i32>,
-    /// Deletes held back while their chat is on screen: (chat, file). A
-    /// row that loads meanwhile finds the file in the cache.
-    held: Vec<(i64, i32)>,
+    /// Deletes held back while their chat is on screen: the chat, the
+    /// file, and the export that copied it. A row that loads meanwhile
+    /// finds the file in the cache.
+    held: Vec<Held>,
     /// `getRemoteFile` for an entry an earlier run left.
     checks: HashMap<RequestId, Earlier>,
     /// A `deleteFile` in flight and the entry its answer clears.
@@ -76,25 +85,29 @@ impl ExportFiles {
         !self.held.is_empty()
     }
 
-    pub(crate) fn hold(&mut self, chat: i64, file_id: i32) {
-        self.held.push((chat, file_id));
+    pub(crate) fn hold(&mut self, chat: i64, file_id: i32, export: ExportId) {
+        self.held.push(Held {
+            chat,
+            file_id,
+            export,
+        });
     }
 
     /// The held deletes that go now: each whose chat left the screen, or
-    /// every one once no export runs. A file the view asked for meanwhile
+    /// whose export no longer runs. A file the view asked for meanwhile
     /// stays in the cache and leaves the list.
     pub(crate) fn release_held(
         &mut self,
         shown: impl Fn(i64) -> bool,
-        exporting: bool,
+        running: impl Fn(ExportId) -> bool,
     ) -> Vec<i32> {
         let (keep, release): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held)
             .into_iter()
-            .partition(|(chat, _)| exporting && shown(*chat));
+            .partition(|held| running(held.export) && shown(held.chat));
         self.held = keep;
         let (kept, gone): (Vec<_>, Vec<_>) = release
             .into_iter()
-            .map(|(_, file_id)| file_id)
+            .map(|held| held.file_id)
             .partition(|file_id| self.view_files.contains(file_id));
         for file_id in kept {
             self.kept(file_id);
@@ -119,7 +132,11 @@ impl ExportFiles {
         let Some(leftovers) = &self.leftovers else {
             return;
         };
-        if let Some(name) = self.deletes.remove(&request) {
+        // A failed delete leaves the file in the cache: its entry stays for
+        // the next start's check to try again.
+        if let Some(name) = self.deletes.remove(&request)
+            && value.at("@type") != "error"
+        {
             leftovers.forget(&name);
         }
         if let Some(earlier) = self.checks.remove(&request) {

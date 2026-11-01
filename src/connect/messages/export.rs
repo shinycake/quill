@@ -121,11 +121,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         };
         if let Some(file_id) = deleted_file(&request) {
-            if let Some(link) = link(&mut self.session) {
+            let Some(export) = link(&mut self.session).map(|link| {
                 link.answer_ok();
-            }
+                link.id()
+            }) else {
+                return true;
+            };
             let chat = request.at("chat_id").as_i64();
-            self.release_export_file(file_id, chat);
+            self.release_export_file(file_id, chat, export);
             return true;
         }
         let extra = self.session.request(purpose, None);

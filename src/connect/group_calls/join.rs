@@ -363,7 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// docs: "user was kicked from the call because of network loss and
     /// the call needs to be rejoined"). Same attempt discipline as the
     /// C2d 1:1 reconnect: at most 3 attempts with identical join params
-    /// (current self-mute state, honest no-device). A failed attempt
+    /// (current self-mute state, a fresh payload). A failed attempt
     /// re-arms `reconnecting` via the `JoinVideoChat` error arm so the
     /// driver's auto-rejoin retries; `manual` (the UI Rejoin button)
     /// resets the counter — explicit user intent starts the attempts
@@ -491,9 +491,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase C2g: start the native group context for a (re)join, so the
-    /// request carries the real tgcalls offer. A call in no known chat has
-    /// no context and goes out at once with the honest no-device params.
-    /// The joins that call this refuse first without an engine.
+    /// request carries the real tgcalls offer. The joins that call this
+    /// refuse first without an engine.
     fn start_group_offer(&mut self, group_call_id: i32, extra: RequestId, send: OfferSend) {
         self.refresh_call_devices();
         // The native call key is the chat id; resolve it through the
@@ -517,20 +516,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.yield_story_stream_to_chat(chat_id);
         }
         let key = GroupOfferKey::Call(group_call_id);
-        let started = match (chat_id, self.call_engine.as_deref_mut()) {
-            (Some(chat_id), Some(engine)) if engine.is_available() => {
-                Some(engine.create_group_call(group_call_id, chat_id, role))
+        // A call in no chat known here (opened from a link before its chat
+        // loaded) still gets its instance: the chat only keys stream
+        // channels, and a conference uses 0 the same way. With no engine
+        // the offer fails, as a join without media would show you in a
+        // call you can't hear.
+        let started = match self.call_engine.as_deref_mut() {
+            Some(engine) if engine.is_available() => {
+                engine.create_group_call(group_call_id, chat_id.unwrap_or(0), role)
             }
-            _ => None,
+            _ => Err(crate::calls::engine::EngineError::Unavailable),
         };
-        match started {
-            Some(started) => self.wait_for_offer(key, extra, send, started),
-            None => {
-                let mut params = GroupCallJoinParams::honest_no_device();
-                self.set_join_flags(&mut params, group_call_id, &send);
-                self.send_offer(key, extra, send, &params);
-            }
-        }
+        self.wait_for_offer(key, extra, send, started);
     }
 
     /// Phase C3a: `leaveGroupCall` (schema 1.8.67, :14458). Drops the

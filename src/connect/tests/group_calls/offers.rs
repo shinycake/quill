@@ -211,3 +211,29 @@ fn a_failed_share_payload_clears_the_pending_share() {
     assert!(!handle.presentation_active(555));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A voice chat opened from a link before its chat loaded: the join still
+/// gets its instance and carries the real payload, not an empty one that
+/// would show you in a call you can't hear.
+#[test]
+fn a_voice_chat_in_no_known_chat_joins_with_an_instance_and_its_payload() {
+    let (dir, mut driver, recorder, handle, _sink, _seq) = ready_group_call_driver();
+    if let Some(chat) = driver.session.chats.get_mut(&51) {
+        chat.video_chat = None;
+    }
+    assert_eq!(
+        driver.group_call_chat_id(555),
+        None,
+        "no chat holds the call"
+    );
+    driver.join_video_chat(555).expect("join tracked call");
+    land(&mut driver, &handle);
+    assert_eq!(
+        handle.group_offers(),
+        [(555, 0)],
+        "an instance, keyed by no chat"
+    );
+    let join = sent_request(&recorder, "joinVideoChat");
+    assert_eq!(join["join_parameters"]["payload"], "mock-group-offer-555");
+    let _ = std::fs::remove_dir_all(&dir);
+}
