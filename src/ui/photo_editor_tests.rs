@@ -335,3 +335,43 @@ fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
     assert_eq!(image::image_dimensions(&edited).ok(), Some((17, 71)));
     let _ = std::fs::remove_file(edited);
 }
+
+/// Tap the rendering card and press Send, in `order`: the photo goes once
+/// the render lands, and no editor opens over the empty tray.
+fn send_with_a_deferred_open(cx: &mut TestAppContext, name: &str, send_first: bool) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture(name, 73, if send_first { 29 } else { 31 });
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        if send_first {
+            app.submit_composer(String::new(), window, cx);
+            app.open_photo_editor(0, cx);
+        } else {
+            app.open_photo_editor(0, cx);
+            app.submit_composer(String::new(), window, cx);
+        }
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert!(app.pending_attachments().is_empty(), "the photo went");
+        assert!(
+            app.viewer.photo_editor.is_none(),
+            "no editor on a sent photo"
+        );
+    });
+    if let Some(sent) = newest_sent_photo(&app, &mut vcx) {
+        let _ = std::fs::remove_file(sent);
+    }
+}
+
+#[gpui_kit::test]
+fn a_tap_then_send_mid_render_sends_and_opens_no_editor(cx: &mut TestAppContext) {
+    send_with_a_deferred_open(cx, "tap-send.png", false);
+}
+
+#[gpui_kit::test]
+fn a_send_then_tap_mid_render_sends_and_opens_no_editor(cx: &mut TestAppContext) {
+    send_with_a_deferred_open(cx, "send-tap.png", true);
+}

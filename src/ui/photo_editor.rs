@@ -391,8 +391,11 @@ impl QuillApp {
             move |this, result, cx| {
                 match result {
                     Ok(pixels) => {
-                        // Another editor opened while this one decoded: keep it.
-                        if this.viewer.photo_editor.is_none() {
+                        // Another editor opened while this one decoded: keep
+                        // it. A photo sent or removed meanwhile has no editor.
+                        if this.viewer.photo_editor.is_none()
+                            && this.composer_sends.holds_item(&item)
+                        {
                             this.viewer.photo_editor =
                                 Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }

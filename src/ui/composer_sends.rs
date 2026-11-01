@@ -194,6 +194,14 @@ impl ComposerSends {
         result
     }
 
+    /// Whether `item` is still in its tray, as the same file.
+    pub(super) fn holds_item(&self, item: &TrayItem) -> bool {
+        self.get(&item.slot)
+            .attachments
+            .get(item.index)
+            .is_some_and(|attachment| attachment.path == item.path)
+    }
+
     /// The slot's send went: hand back what it held.
     pub(super) fn finish(&mut self, slot: &SendSlot) -> Option<PendingSend> {
         let sent = self

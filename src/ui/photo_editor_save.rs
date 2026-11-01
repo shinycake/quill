@@ -87,16 +87,25 @@ impl QuillApp {
             let landed = app.update_in(cx, |this, window, cx| {
                 let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
                 let here = this.send_slot().as_ref() == Some(&item.slot);
-                if this.viewer.photo_editor_after == Some(render) {
+                let opens = this.viewer.photo_editor_after == Some(render);
+                if opens {
                     this.viewer.photo_editor_after = None;
-                    if here && let Some(path) = &landed.path {
-                        this.open_photo_editor_on(path, cx);
-                    }
                 }
                 match landed.held {
-                    Some(text) if here => this.submit_composer(text, window, cx),
+                    // The tray goes now, so no editor opens on it.
+                    Some(text) if here => {
+                        this.viewer.photo_editor_after = None;
+                        this.submit_composer(text, window, cx);
+                    }
                     Some(_) => this.note_held_send_dropped(),
-                    None => {}
+                    None => {
+                        if opens
+                            && here
+                            && let Some(path) = &landed.path
+                        {
+                            this.open_photo_editor_on(path, cx);
+                        }
+                    }
                 }
             });
             // The window closed: the tray outlives it, so the edit still
