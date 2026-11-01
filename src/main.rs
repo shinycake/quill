@@ -332,6 +332,7 @@ fn ui_main(args: &[String]) {
         })
         .detach();
     });
+    log::logger().flush();
 }
 
 #[cfg(feature = "ui")]

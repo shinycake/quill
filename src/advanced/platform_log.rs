@@ -13,6 +13,8 @@ const REPEAT_WINDOW: Duration = Duration::from_secs(60);
 /// thread that draws. A full queue drops the line.
 const QUEUE_LINES: usize = 256;
 
+const WRITER_THREAD: &str = "platform-log";
+
 static LOGGER: PlatformLog = PlatformLog::new(debug_mode::platform_log, Instant::now);
 
 pub fn install() {
@@ -57,7 +59,7 @@ impl PlatformLog {
 fn spawn_writer(write: fn(&str)) -> Option<SyncSender<Message>> {
     let (queue, messages) = mpsc::sync_channel(QUEUE_LINES);
     std::thread::Builder::new()
-        .name("platform-log".to_owned())
+        .name(WRITER_THREAD.to_owned())
         .spawn(move || {
             let mut repeats = Repeats::default();
             for message in messages {
@@ -137,7 +139,13 @@ impl Log for PlatformLog {
         let _ = queue.try_send(Message::Line(Line { site, text, at }));
     }
 
+    /// Blocks until the writer has written every line queued before the call.
+    /// The writer itself can't wait on its own queue, so a panic on that
+    /// thread skips the flush instead of hanging the panic hook.
     fn flush(&self) {
+        if std::thread::current().name() == Some(WRITER_THREAD) {
+            return;
+        }
         let Some(queue) = self.queue.get().and_then(Option::as_ref) else {
             return;
         };
@@ -229,6 +237,24 @@ mod tests {
         logger.flush();
 
         assert_eq!(LINES.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn flush_returns_after_every_queued_line_is_written() {
+        static LINES: AtomicUsize = AtomicUsize::new(0);
+        let logger = PlatformLog::new(
+            |_| {
+                LINES.fetch_add(1, Ordering::Relaxed);
+            },
+            frozen_clock,
+        );
+
+        for site in 1..=100 {
+            send(&logger, Level::Error, site, "the renderer failed");
+        }
+        logger.flush();
+
+        assert_eq!(LINES.load(Ordering::Relaxed), 100);
     }
 
     fn line(site: &str, at: Instant) -> Line {

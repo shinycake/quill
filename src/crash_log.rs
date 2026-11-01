@@ -82,12 +82,14 @@ impl ReportKind {
 
 /// Install the crash-log hook in front of the current panic hook. Call it
 /// first thing in `main`; the previous hook (the standard stderr message)
-/// still runs after the report is written.
+/// still runs after the report is written. The platform log is flushed
+/// too, since the line that explains the panic may still be in its queue.
 pub fn install_panic_hook() {
     session_start();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         record_panic(info);
+        log::logger().flush();
         previous(info);
     }));
 }

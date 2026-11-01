@@ -38,6 +38,7 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     if let Some(root) = quill::settings::safe_app_root() {
         quill::crash_log::mark_clean_exit(&root);
     }
+    log::logger().flush();
     show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message, &summary);
     std::process::exit(1)
 }
