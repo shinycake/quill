@@ -108,6 +108,11 @@ pub fn await_call_teardown(deadline: Instant) {
     reaper.backlog.wait_empty(deadline);
 }
 
+/// The exit status of a process that left with a teardown still running.
+/// `atexit` hooks never learn the status `exit` was given, so a quit that
+/// meant to fail must not be reported as success, nor a stuck one as clean.
+const STUCK_TEARDOWN_STATUS: i32 = 70;
+
 /// Runs inside `exit`, so it never calls `std::thread::current()` or prints:
 /// on macOS that ends the process silently once `exit` has torn down thread
 /// locals.
@@ -117,9 +122,12 @@ extern "C" fn leave_if_stuck() {
             .get()
             .is_some_and(|reaper| !reaper.backlog.is_empty())
         {
-            // SAFETY: ends the process at once and skips the static
-            // destructors the running teardown would crash in.
-            unsafe { libc::_exit(0) };
+            // SAFETY: ends the process at once. Registered last, this runs
+            // first, so every exit hook registered before it is given up
+            // with the static destructors the running teardown would crash
+            // in: TDLib's and ffmpeg's log flushes among them, and stdio
+            // buffers are not flushed.
+            unsafe { libc::_exit(STUCK_TEARDOWN_STATUS) };
         }
     });
 }
@@ -171,6 +179,37 @@ mod tests {
         );
         assert!(ran.iter().all(|job| job.1 == ran[0].1));
         assert_ne!(ran[0].1, thread::current().id());
+    }
+
+    #[test]
+    fn a_quit_with_a_stuck_teardown_does_not_report_success() {
+        if std::env::var_os("QUILL_TEST_STUCK_TEARDOWN_CHILD").is_some() {
+            exit_with_a_stuck_teardown();
+        }
+        let exe = std::env::current_exe().expect("test executable");
+        let status = std::process::Command::new(exe)
+            .env("QUILL_TEST_STUCK_TEARDOWN_CHILD", "1")
+            .args([
+                "--exact",
+                "calls::engine::tgcalls::reaper::tests::a_quit_with_a_stuck_teardown_does_not_report_success",
+            ])
+            .output()
+            .expect("spawn child test")
+            .status;
+        assert_eq!(status.code(), Some(STUCK_TEARDOWN_STATUS));
+    }
+
+    #[expect(
+        clippy::exit,
+        reason = "the child reports through its exit status, as a quit does"
+    )]
+    fn exit_with_a_stuck_teardown() -> ! {
+        let (_held, stuck) = channel::<()>();
+        hand_off(move || {
+            let _ = stuck.recv();
+        });
+        await_call_teardown(Instant::now());
+        std::process::exit(0);
     }
 
     #[test]

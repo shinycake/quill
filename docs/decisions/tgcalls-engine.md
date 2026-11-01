@@ -139,8 +139,10 @@ Where the build deliberately differs from tdesktop's:
   instance while the old one may still be going, as tdesktop's
   `GroupCall::destroyController` does with `crl::async`. Quit waits for the
   reaper inside `QUIT_CLOSE_DEADLINE`; if a teardown is still running when
-  `exit` starts, the process leaves through `_exit`, since static destructors
-  would crash under it.
+  `exit` starts, the process leaves through `_exit` with status 70, since
+  static destructors would crash under it. That skips every exit hook
+  registered earlier too, and an `atexit` hook cannot learn the status
+  `exit` was given, so the status says the quit was not clean.
 
 ## Group calls (`qc_group_*`)
 
