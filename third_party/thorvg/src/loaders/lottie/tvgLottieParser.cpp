@@ -355,11 +355,11 @@ void LottieParser::parseSlotProperty(T& prop)
 template<typename T>
 bool LottieParser::parseTangent(const char *key, LottieVectorFrame<T>& value)
 {
-    if (KEY_AS("ti") && getValue(value.inTangent)) ;
-    else if (KEY_AS("to") && getValue(value.outTangent)) ;       
-    else return false;
-
-    value.hasTangent = true;
+    //QUILL
+    auto in = KEY_AS("ti");
+    if (!in && !KEY_AS("to")) return false;
+    if (peekType() == kNullType) getNull();
+    else if (getValue(in ? value.inTangent : value.outTangent)) value.hasTangent = true;
     return true;
 }
 

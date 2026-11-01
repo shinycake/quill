@@ -376,7 +376,7 @@ index 0ab0d875c..a9641ee02 100644
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
 diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..499ed99e8 100644
+index 242d52a98..1ccec8f66 100644
 --- a/src/loaders/lottie/tvgLottieParser.cpp
 +++ b/src/loaders/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
@@ -408,6 +408,23 @@ index 242d52a98..499ed99e8 100644
          else if (KEY_AS("y")) getValue(pt.y);
 +        else skip();  //QUILL
      }
+ }
+ 
+@@ -354,11 +355,11 @@ void LottieParser::parseSlotProperty(T& prop)
+ template<typename T>
+ bool LottieParser::parseTangent(const char *key, LottieVectorFrame<T>& value)
+ {
+-    if (KEY_AS("ti") && getValue(value.inTangent)) ;
+-    else if (KEY_AS("to") && getValue(value.outTangent)) ;       
+-    else return false;
+-
+-    value.hasTangent = true;
++    //QUILL
++    auto in = KEY_AS("ti");
++    if (!in && !KEY_AS("to")) return false;
++    if (peekType() == kNullType) getNull();
++    else if (getValue(in ? value.inTangent : value.outTangent)) value.hasTangent = true;
+     return true;
  }
  
 @@ -382,8 +383,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
