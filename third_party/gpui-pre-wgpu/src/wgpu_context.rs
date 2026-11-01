@@ -2,6 +2,8 @@
 #[cfg(not(target_family = "wasm"))]
 use anyhow::Context as _;
 #[cfg(not(target_family = "wasm"))]
+use crate::device_recovery::Adapters;
+#[cfg(not(target_family = "wasm"))]
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -140,24 +142,16 @@ impl WgpuContext {
         surface: &wgpu::Surface<'_>,
         compositor_gpu: Option<CompositorGpuHint>,
     ) -> anyhow::Result<Self> {
-        Self::new_with_options(instance, surface, compositor_gpu, false)
+        Self::new_on(instance, surface, compositor_gpu, Adapters::Any)
     }
 
+    /// Quill: a context on the first adapter of the kinds `adapters` admits.
     #[cfg(not(target_family = "wasm"))]
-    pub fn new_rejecting_software(
+    pub(crate) fn new_on(
         instance: wgpu::Instance,
         surface: &wgpu::Surface<'_>,
         compositor_gpu: Option<CompositorGpuHint>,
-    ) -> anyhow::Result<Self> {
-        Self::new_with_options(instance, surface, compositor_gpu, true)
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    fn new_with_options(
-        instance: wgpu::Instance,
-        surface: &wgpu::Surface<'_>,
-        compositor_gpu: Option<CompositorGpuHint>,
-        reject_software: bool,
+        adapters: Adapters,
     ) -> anyhow::Result<Self> {
         let device_id_filter = Self::device_id_filter();
 
@@ -169,7 +163,7 @@ impl WgpuContext {
                 device_id_filter,
                 surface,
                 compositor_gpu.as_ref(),
-                reject_software,
+                adapters,
             ))?;
 
         Ok(Self::from_native_adapter_and_device(
@@ -513,7 +507,7 @@ impl WgpuContext {
         device_id_filter: Option<u32>,
         surface: &wgpu::Surface<'_>,
         compositor_gpu: Option<&CompositorGpuHint>,
-        reject_software: bool,
+        admitted: Adapters,
     ) -> anyhow::Result<(
         wgpu::Adapter,
         wgpu::Device,
@@ -551,9 +545,10 @@ impl WgpuContext {
         for adapter in adapters {
             let info = adapter.get_info();
 
-            if reject_software && info.device_type == wgpu::DeviceType::Cpu {
+            if !admitted.admits(info.device_type == wgpu::DeviceType::Cpu) {
                 log::info!(
-                    "Skipping software renderer: {} ({:?})",
+                    "Skipping {:?} adapter for {admitted:?}: {} ({:?})",
+                    info.device_type,
                     info.name,
                     info.backend
                 );

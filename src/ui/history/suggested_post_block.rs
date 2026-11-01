@@ -4,6 +4,7 @@
 //! Accept / Decline / Suggest Changes buttons in the bubble.
 
 use crate::ui::app::QuillApp;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -11,7 +12,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
-use quill::local_time::{civil_local, now_unix};
 use quill::state::{HistoryMessage, Session};
 use quill::suggested_posts::{
     BLOCK_CHECK_BELOW, Changes, SuggestionButtons, block_labels, block_time_label, block_title,
@@ -35,6 +35,18 @@ fn resolve_changes(session: &Session, message: &HistoryMessage) -> Option<Change
     Changes::resolve(Some(was), now, original.content == message.content)
 }
 
+/// The block's time row, on the clock the pickers and the bar read.
+pub(in crate::ui) fn block_time(send_date: i32, cx: &App) -> String {
+    if send_date <= 0 {
+        return tr(keys::Q_MONEY_ANYTIME).to_string();
+    }
+    let clock = WallClock::of(cx);
+    block_time_label(
+        &clock.civil(i64::from(send_date)),
+        &clock.civil(clock.now()),
+    )
+}
+
 /// The centered block above a suggested post.
 pub(in crate::ui) fn suggested_post_block(
     session: &Session,
@@ -46,14 +58,7 @@ pub(in crate::ui) fn suggested_post_block(
     let from = crate::ui::suggested_posts_ui::sender_short_name(session, message.sender);
     let title = block_title(message.is_outgoing, &from, changes);
     let (price_title, time_title) = block_labels(changes);
-    let time = if info.send_date > 0 {
-        block_time_label(
-            &civil_local(i64::from(info.send_date)),
-            &civil_local(now_unix()),
-        )
-    } else {
-        tr(keys::Q_MONEY_ANYTIME).to_string()
-    };
+    let time = block_time(info.send_date, cx);
     // 12px text on the service background: labels keep the full
     // foreground for contrast (WCAG AA 4.5:1) and step back by weight
     // only; values are semibold.

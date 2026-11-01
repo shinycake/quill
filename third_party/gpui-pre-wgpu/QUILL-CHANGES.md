@@ -101,8 +101,11 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   failures reset (so the hardware-only and software steps started over),
   and the other windows adopted a context the recreating window could not
   draw with. Now the slot stays empty and the recreation backs off and falls
-  back as one sequence. Not run: there is no way to make the renderer build
-  fail on a working device here, and no GPU loss to recover from.
+  back as one sequence. The order lives in `install_once_built`, which
+  `try_recover` calls with the renderer build and the slot write. Test:
+  `a_context_the_renderer_failed_on_is_not_installed` (a failed build leaves
+  the slot empty and the window recreating, its failure counted). Not run:
+  a real renderer build failing on a working device, and a GPU loss.
 - The look for the GPU belongs to the shared context, not to the window
   that recreated it (sweep bundle B13, N45): `GpuContext` is now
   `Rc<GpuSlot>`, the context plus a `SharedRecovery` holding the
@@ -120,16 +123,29 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   away, made an instance and a surface on the UI thread. Test:
   `a_look_for_the_gpu_runs_off_the_ui_thread`. Not measured: there is no
   display or GPU loss here to time a look against.
+  While a look runs, `hardware_probe_at` gives the instant of the next
+  check for its answer (`HardwareProbe::next_at`), which stays put until a
+  check moves it. It used to give the past instant the look started at, so
+  every draw armed a timer that fired at once and polled again, one probe
+  step a frame instead of one each 250 ms. Test:
+  `draws_during_a_look_ask_for_the_armed_check`.
 - A GPU that keeps dying is not recovered onto forever (sweep bundle B13,
   L10): `SharedRecovery` counts the shared context's losses (once per
   context, by the window that sees it lost first) over 10 minutes. From the
-  3rd, recovery accepts a CPU adapter at once and does not look for the GPU
-  again; at the 6th it gives up (`on_device_gone`: Quill's alert and exit).
-  Before, each successful recovery started afresh, so a card or driver that
-  failed again after every recovery flashed the windows through recoveries
-  for the rest of the session, and the probe moved them back onto it.
-  `Target::Recreate`'s field is now `software_at_once`. Tests:
-  `a_gpu_that_keeps_dying_is_left_and_then_given_up_on`,
+  3rd, recovery makes the new context on a CPU adapter only
+  (`Adapters::SoftwareOnly`, which `select_adapter_and_device` applies the
+  way it applies hardware-only) and does not look for the GPU again. It
+  gives up (`on_device_gone`: Quill's alert and exit) when no CPU adapter
+  configures, or when that forced CPU context is lost too. Before, each
+  successful recovery started afresh, so a card or driver that failed again
+  after every recovery flashed the windows through recoveries for the rest
+  of the session, and the probe moved them back onto it. A first version of
+  this fix only allowed a CPU adapter, so the sort still put the dying GPU
+  first. `Target::Recreate` and `Attempt::Recreate` now carry `Adapters`
+  (hardware only, any, software only), and `new_rejecting_software` became
+  `WgpuContext::new_on`. Tests:
+  `a_gpu_that_keeps_dying_is_left_for_a_cpu_adapter`,
+  `a_keeps_dying_attempt_takes_the_cpu_adapter_listed_after_the_gpu`,
   `losses_far_apart_are_each_recovered_from_afresh`.
 
 The Quill project also changed it in 2026 so Linux draws NV12 video pictures
