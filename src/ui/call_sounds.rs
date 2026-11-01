@@ -130,6 +130,12 @@ impl CallSounds {
         self.spawn(sound);
     }
 
+    /// The sound kept looping, for tests.
+    #[cfg(test)]
+    pub(super) fn looping(&self) -> Option<CallSound> {
+        self.looping
+    }
+
     /// Keep `sound` looping, or stop looping with `None`. Call it often
     /// (every call tick): it restarts the loop after its gap.
     pub(super) fn keep_looping(&mut self, sound: Option<CallSound>) {

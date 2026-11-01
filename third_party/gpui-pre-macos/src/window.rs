@@ -2526,6 +2526,18 @@ unsafe fn is_gpui_window(window: *mut AnyObject) -> bool {
     }
 }
 
+/// Quill: whether AppKit is still taking `ns_window` out of native full
+/// screen. Its style mask loses the full screen flag before the animation
+/// ends, and an `orderOut:` during the animation does not last.
+///
+/// # Safety
+///
+/// `ns_window` must point to a live `NSWindow`.
+pub unsafe fn is_exiting_fullscreen(ns_window: *mut c_void) -> bool {
+    let window = ns_window.cast::<AnyObject>();
+    unsafe { is_gpui_window(window) && get_window_state(&*window).lock().is_exiting_fullscreen }
+}
+
 unsafe fn get_window_state(object: &AnyObject) -> Arc<Mutex<MacWindowState>> {
     unsafe {
         let raw = *object

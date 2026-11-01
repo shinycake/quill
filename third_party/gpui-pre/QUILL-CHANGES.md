@@ -432,3 +432,9 @@ The Quill project also changed it in 2026 so tests can seed a window's atlas
 (`src/ui/glyph_sweep_tests.rs`):
 
 - `src/window.rs`: `Window::sprite_atlas`, in test support only.
+
+The Quill project also changed it in 2026 so the docs say what macOS now
+emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
+
+- `src/app.rs`, `src/platform.rs`: the docs of `App::on_app_lifecycle` and
+  `Platform::on_app_lifecycle` say macOS emits `AppLifecyclePhase::Active`.

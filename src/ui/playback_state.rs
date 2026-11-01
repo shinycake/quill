@@ -132,6 +132,12 @@ impl PlaybackUi {
         self.audio.state()
     }
 
+    /// Paused by the user, with no seek waiting to be applied: nothing
+    /// changes until a resume, a seek or a new track.
+    pub(super) fn held_paused(&self) -> bool {
+        self.engine_state() == super::audio::EngineState::Paused && !self.audio.seek_pending()
+    }
+
     /// The play button: true while the sound is being consumed, or on its
     /// way (tdesktop shows Pause for a track that is starting).
     pub(super) fn is_playing(&self) -> bool {

@@ -28,7 +28,7 @@ use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
 use quill::notify_accounts::{
-    AccountUnread, BackgroundDrain, BackgroundStatus, background_status, drain_background,
+    AccountUnread, BackgroundStatus, NotifyDrain, background_status, drain_background,
     set_other_accounts_unread,
 };
 use quill::settings::{
@@ -324,7 +324,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let (live, status) = match started {
-            Ok(live) => (Some(live), BackgroundStatus::Connecting),
+            Ok(live) => {
+                live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
+                (Some(live), BackgroundStatus::Connecting)
+            }
             Err(ConnectBlocker::DiskFull) => {
                 self.disk.refused_start();
                 return;
@@ -396,25 +399,30 @@ impl QuillApp {
         let generation = self.background.generation;
         Self::spawn_main(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
-            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, || {
-                this.update(cx, |this, cx| {
-                    if generation != this.background.generation {
-                        return None;
-                    }
-                    let work_left = this.poll_background(cx);
-                    if this.background.has_work() {
-                        Some(PassEnd {
-                            work_left,
-                            due: None,
-                        })
-                    } else {
-                        this.background.polling = false;
-                        None
-                    }
-                })
-                .ok()
-                .flatten()
-            })
+            run_poll_loop(
+                executor,
+                &quill::wake::BACKGROUND_UPDATES,
+                POLL_PACE,
+                || {
+                    this.update(cx, |this, cx| {
+                        if generation != this.background.generation {
+                            return None;
+                        }
+                        let work_left = this.poll_background(cx);
+                        if this.background.has_work() {
+                            Some(PassEnd {
+                                work_left,
+                                due: None,
+                            })
+                        } else {
+                            this.background.polling = false;
+                            None
+                        }
+                    })
+                    .ok()
+                    .flatten()
+                },
+            )
             .await;
         })
         .detach();
@@ -438,7 +446,7 @@ impl QuillApp {
         let now = Instant::now();
         let mut backlog = false;
         let mut changed = false;
-        let mut drained: Vec<(AccountKey, BackgroundDrain)> = Vec::new();
+        let mut drained: Vec<(AccountKey, NotifyDrain)> = Vec::new();
         let proxy_target = self.app_proxy_list();
         // Clients on their way out: one non-blocking drain each.
         self.reap_closing(cx);

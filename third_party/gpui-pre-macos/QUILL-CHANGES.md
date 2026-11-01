@@ -124,3 +124,16 @@ window, not the app:
   before any AppKit object, so a renderer error leaves no half-made window.
   gpui-pre-apple's `new_renderer` no longer takes the window and view.
   `src/platform.rs` passes the error on from `open_window`.
+
+The Quill project also changed it in 2026 so a main window hidden by its
+close button comes back the way Telegram Desktop's does:
+
+- `src/platform.rs`: `should_handle_reopen` runs the reopen callback with
+  windows showing too (upstream skips it then). A call or
+  Picture-in-Picture window counts as showing, and the Dock click must still
+  bring back a hidden main window.
+- `src/platform.rs`: `applicationDidBecomeActive:` reaches
+  `Platform::on_app_lifecycle` as `AppLifecyclePhase::Active`, deferred to
+  the main queue. The other phases stay unused on macOS.
+- `src/window.rs`: public `is_exiting_fullscreen`, so Quill can wait out the
+  animation before it hides a full screen window.

@@ -65,6 +65,8 @@ static LAST: Mutex<Option<(NowPlaying, Instant)>> = Mutex::new(None);
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
 pub(crate) fn push_command(command: Command) {
     COMMANDS.lock_or_recover().push(command);
+    // The player's progress tick, asleep while a track is paused.
+    crate::wake::CHROME.poke();
 }
 
 /// Drain the commands received since the last call.
@@ -127,6 +129,16 @@ fn set_backend(_info: Option<&NowPlaying>) {}
 mod tests {
     use super::{NowPlaying, needs_update};
     use std::time::Duration;
+
+    #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
+    #[test]
+    fn a_key_is_queued_and_wakes_a_paused_tick() {
+        use super::{Command, push_command, take_commands};
+        let seen = crate::wake::CHROME.epoch();
+        push_command(Command::Play);
+        assert_ne!(crate::wake::CHROME.epoch(), seen);
+        assert_eq!(take_commands(), [Command::Play]);
+    }
 
     fn playing(position: f64) -> NowPlaying {
         NowPlaying {

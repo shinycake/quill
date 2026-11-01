@@ -265,6 +265,8 @@ impl QuillApp {
                 && !self.playback.audio.is_ended()
             {
                 let at = clock.elapsed_secs();
+                // The progress tick sleeps while the track is paused.
+                quill::wake::CHROME.poke();
                 if self.playback.audio.resume(at).is_ok() {
                     clock.resume();
                     resumed_preview = true;
