@@ -182,30 +182,15 @@ impl Render for QuillApp {
             // kit Phase 7: window-chrome actions behind the File / Window /
             // View / Help menus (same dispatch path as the key bindings).
             .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                use quill::tray::{CloseOutcome, close_outcome};
                 if guard::refuse_hard_if_injecting(HardSurface::Window) {
                     return;
                 }
-                match close_outcome(
-                    this.appearance.minimize_to_tray,
-                    quill::tray::tray_available(),
-                    cfg!(target_os = "macos"),
-                    super::window_control::hide_supported(window),
-                ) {
-                    CloseOutcome::HideApp => cx.hide(),
-                    CloseOutcome::Hide => {
-                        if !super::window_control::set_visible(window, false) {
-                            window.minimize_window();
-                        }
-                    }
-                    CloseOutcome::Minimize => window.minimize_window(),
-                    CloseOutcome::Quit => {
-                        window.remove_window();
-                        // macOS keeps a windowless app alive for its menu
-                        // bar; elsewhere closing the only window quits.
-                        #[cfg(not(target_os = "macos"))]
-                        cx.quit();
-                    }
+                let (background, signed_in) = (this.minimize_to_tray(), this.signed_in());
+                if super::link_inbox::close_main_window(background, signed_in, window, cx) {
+                    window.remove_window();
+                    // Elsewhere closing the only window quits.
+                    #[cfg(not(target_os = "macos"))]
+                    cx.quit();
                 }
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {
