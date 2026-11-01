@@ -825,3 +825,8 @@ impl Element for MeasureHeight {
         self.child.paint(window, cx);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "scene_replay_tests.rs"]
+mod scene_replay_tests;

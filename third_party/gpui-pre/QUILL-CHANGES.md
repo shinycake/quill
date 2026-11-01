@@ -361,3 +361,60 @@ Added in 2026, the follow-up named in `docs/decisions/platform-small-fixes.md`:
   missing.
 
 Not run on Windows by the author.
+
+## A replayed range enters the bounds tree once
+
+Changed in 2026 for the deep sweep. `Scene::replay` sent every layer, and every
+primitive outside a layer, back through `BoundsTree::insert` on each frame a
+cached view replays, to work out orders the last frame had already stored in
+`paint_operations`.
+
+- `src/bounds_tree.rs`: `insert_span(bounds, orderings_after_first)` inserts one
+  box standing for that many orderings plus one and returns the first, one above
+  whatever it meets. Later bounds that meet it come after the last. `insert` is
+  `insert_span(bounds, 0)`.
+- `src/scene.rs`: `replay` keeps the `filtered` early return, then
+  `replay_as_one` takes the union of the range's clipped bounds and its lowest
+  and highest stored order, inserts that box once, and moves every primitive by
+  the same amount. `StartLayer` and `EndLayer` are copied, since a primitive in
+  a layer already stores the layer's order. A primitive in a layer counts in the
+  union even where it pokes out of the layer's bounds, which `insert_primitive`
+  never put in the tree. `insert_primitive` is split in two, and the second half,
+  `push_primitive`, is what both call. `PathId` is still assigned there.
+- `repaint_operations` is the old loop, for a replay into an open layer (a
+  primitive takes that layer's order) or while `suppressed`.
+- `Scene::refuse_paint_for_test` (test support) sets `filtered` and `suppressed`.
+
+Primitives the tree saw keep their order where their bounds overlap, but orders
+are not always what painting again would give:
+
+- A later primitive over the box but over nothing the range drew sorts higher
+  than it had to, so it can land in another batch. On 777 demo frames compared
+  with the old loop, 620 kept their batch count, 99 gained up to 4 and 58 lost up
+  to 8.
+- A layer takes an order whether anything draws in it or not, and a replay only
+  knows the orders primitives stored. A view that opens with a layer that drew
+  nothing slides down as a whole on its first replay. With views that do not
+  touch, that changed the batch count in 9 of 200 random cases, by -3 to +1.
+- The tree never sees a shadow's blur, so a tail can change sides with a
+  neighbour. Nothing here holds a tail to paint order: an earlier view's tail can
+  land over a later view's quad. On the same 777 frames, 263 of 4.46 million pairs
+  overlapping once blur is counted changed sides, none against paint order. 4 of
+  92 captures differed, by at most 9 of 255 levels. The shadow's alpha sets the
+  ceiling, since a tail's edge is half of it: about 13 levels on white at alpha
+  .10 and 32 at .25. A frame that paints fresh keeps the old order, so a tail can
+  shift between a painted frame and the next replay.
+- Painting never shows the tree a primitive past its layer's bounds, such as a
+  glyph past its line, and a replayed box counts it. So a later view's quad over
+  that overhang sorts above the glyph on a replay and can sort under it on a fresh
+  paint. The replay follows paint order, in all 1,246 of 10,387 cross-view
+  overlaps that differed in a model with offset glyphs. These are full-strength
+  pixels, at glyph edges only, and they can change between a painted frame and
+  the next replay.
+
+On a demo chat of 4,813 paint operations with a looping sticker, `Scene::replay`
+went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.
+
+The crate's own tests do not build in Quill's tree, so `src/ui/scene_replay_tests.rs`
+holds the tests: random overlapping primitives with layers, replayed, replayed
+again through outer views, and compared with painting everything from scratch.

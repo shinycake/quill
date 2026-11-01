@@ -379,3 +379,31 @@ Added in 2026:
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on Linux. Not run on Windows by the author.
+
+## Giving up on a lost device closes the windows
+
+Added in 2026:
+
+- `src/gpui_message.rs` (new, std-only; unit tests run with
+  `scripts/test-gpui-message.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the `WM_GPUI_*` ids move here from `src/events.rs` as `GpuiMessageId`, whose
+  value can't be read outside the module. `ValidationNumber::message` is the
+  only way to build a `GpuiMessage`, so an id can't reach `PostMessageW` or
+  `SendMessageW` without the number. Upstream's ids are plain `u32`s and every
+  sender passes the number by hand.
+- `src/wrapper.rs`: `GpuiMessage::post` and `send`, the only places that hand
+  one to Win32.
+- `src/platform.rs`: `destroy_all_windows_after_device_lost` posted
+  `WPARAM::default()`, so the windows' `handle_gpui_events` dropped the message
+  and every window stayed open and blank. It now gets the number.
+- `src/events.rs`, `src/platform.rs`: `handle_msg` passes whatever it does not
+  handle itself to `handle_gpui_events`, which parses the id with
+  `GpuiMessageId::from_raw` and then checks the number. The window's check now
+  calls `log::error!` on a wrong number, as the platform's always did. Quill
+  installs no `log` backend, so a shipped build still writes that nowhere.
+- `src/dispatcher.rs`, `src/window.rs`: `validation_number` is a
+  `ValidationNumber`.
+- `src/gpui_windows.rs`: declares the new module.
+
+Type-checked with `cargo check -p gpui-pre-windows --target
+x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
