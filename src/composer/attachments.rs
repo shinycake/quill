@@ -31,6 +31,23 @@ pub fn without_sound_track(path: &Path) -> bool {
     crate::video_edit::probe_source(path).is_some_and(|source| !source.has_audio)
 }
 
+/// tdesktop `AlbumType`: what may share one album.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AlbumType {
+    PhotoVideo,
+    File,
+    Music,
+}
+
+/// An audio file, sent in an album only with other audio files (tdesktop
+/// `PreparedFile::Type::Music`).
+fn is_audio_path(path: &Path) -> bool {
+    let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
+    ["mp3", "m4a", "ogg", "oga", "opus", "flac", "wav", "aac"]
+        .iter()
+        .any(|audio| ext.eq_ignore_ascii_case(audio))
+}
+
 /// The media kind a file is sent as when dropped or pasted, by extension:
 /// formats Telegram sends as photos or videos. Anything else is a file.
 pub fn media_kind_for(path: &Path) -> Option<AttachmentKind> {
@@ -102,36 +119,50 @@ impl ComposerAttachment {
         self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
     }
 
-    /// Whether the tray can go as albums: two or more photos and videos,
-    /// or two or more files (tdesktop `AlbumType::PhotoVideo` and
-    /// `AlbumType::File`); the two never share an album.
-    pub fn albumable(list: &[Self]) -> bool {
-        let media = |att: &Self| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video);
-        list.len() >= 2
-            && (list.iter().all(media)
-                || list.iter().all(|att| att.kind == AttachmentKind::Document))
+    /// The album this attachment can share (tdesktop `GroupTypeForFile`):
+    /// photos and videos, files, or audio files, which TDLib does not mix
+    /// with other files. `None` goes alone: a video note, and a video
+    /// turned into a GIF.
+    fn album_type(&self) -> Option<AlbumType> {
+        match self.kind {
+            AttachmentKind::VideoNote => None,
+            _ if self.extras.gif && self.extras.sound_removed => None,
+            AttachmentKind::Photo | AttachmentKind::Video => Some(AlbumType::PhotoVideo),
+            AttachmentKind::Document if is_audio_path(&self.path) => Some(AlbumType::Music),
+            AttachmentKind::Document => Some(AlbumType::File),
+        }
     }
 
-    /// The messages the tray is sent as: albums of at most
-    /// [`ALBUM_MAX_ITEMS`](crate::album::ALBUM_MAX_ITEMS) in order (tdesktop
-    /// `DivideByGroups`); when `grouped` is false every file is its own
-    /// message, and a video turned into a GIF leaves the album and goes
-    /// alone (tdesktop `GroupRanges`). Each inner list of two or more is an
-    /// album.
+    /// Whether `list` is one album: two or more attachments of one album
+    /// type.
+    pub fn albumable(list: &[Self]) -> bool {
+        list.len() >= 2
+            && list
+                .first()
+                .and_then(Self::album_type)
+                .is_some_and(|kind| list.iter().all(|att| att.album_type() == Some(kind)))
+    }
+
+    /// The messages the tray is sent as, in tray order (tdesktop
+    /// `GroupRanges`): a new message starts where the album type changes
+    /// or an album reaches [`ALBUM_MAX_ITEMS`](crate::album::ALBUM_MAX_ITEMS),
+    /// and an attachment of no album type goes alone. When `grouped` is
+    /// false every file is its own message. Each inner list of two or more
+    /// is an album.
     pub fn split_for_send(list: &[Self], grouped: bool) -> Vec<Vec<Self>> {
-        if !grouped {
-            return list.iter().map(|att| vec![att.clone()]).collect();
+        let mut groups: Vec<Vec<Self>> = Vec::new();
+        for att in list {
+            let kind = att.album_type().filter(|_| grouped);
+            let joins = groups.last().is_some_and(|group| {
+                kind.is_some()
+                    && group.len() < crate::album::ALBUM_MAX_ITEMS
+                    && group.first().and_then(Self::album_type) == kind
+            });
+            match groups.last_mut() {
+                Some(group) if joins => group.push(att.clone()),
+                _ => groups.push(vec![att.clone()]),
+            }
         }
-        let (alone, together): (Vec<&Self>, Vec<&Self>) = list
-            .iter()
-            .partition(|att| att.extras.gif && att.extras.sound_removed);
-        let mut groups = Vec::new();
-        groups.extend(
-            together
-                .chunks(crate::album::ALBUM_MAX_ITEMS)
-                .map(|chunk| chunk.iter().map(|att| (*att).clone()).collect()),
-        );
-        groups.extend(alone.into_iter().map(|att| vec![att.clone()]));
         groups
     }
 
@@ -375,11 +406,18 @@ mod tests {
         muted.extras.gif = true;
         muted.extras.sound_removed = true;
         let photo = attachment("c.jpg", AttachmentKind::Photo);
-        let list = [silent.clone(), muted.clone(), photo.clone()];
+        let list = [silent.clone(), photo.clone(), muted.clone()];
         let groups = ComposerAttachment::split_for_send(&list, true);
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].len(), 2, "a soundless video stays in the album");
         assert_eq!(groups[1], [muted.clone()]);
+        // In tray order: the GIF between two photos splits them.
+        let between = [photo.clone(), muted.clone(), photo.clone()];
+        let sizes: Vec<usize> = ComposerAttachment::split_for_send(&between, true)
+            .iter()
+            .map(Vec::len)
+            .collect();
+        assert_eq!(sizes, [1, 1, 1]);
         // Ungrouped: one message each.
         assert_eq!(ComposerAttachment::split_for_send(&list, false).len(), 3);
         assert!(silent.sends_as_animation(1, true));
@@ -436,6 +474,32 @@ mod tests {
         mixed.push(attachment("c.jpg", AttachmentKind::Photo));
         assert!(!ComposerAttachment::albumable(&mixed));
         assert!(!ComposerAttachment::albumable(&files[..1]));
+    }
+
+    #[test]
+    fn a_mixed_tray_goes_as_one_message_per_album_type_in_order() {
+        let names = |groups: Vec<Vec<ComposerAttachment>>| -> Vec<Vec<String>> {
+            groups
+                .into_iter()
+                .map(|group| group.into_iter().map(|att| att.file_name).collect())
+                .collect()
+        };
+        let photo = |name: &str| attachment(name, AttachmentKind::Photo);
+        let file = |name: &str| attachment(name, AttachmentKind::Document);
+        let tray = [photo("a.jpg"), photo("b.jpg"), file("c.txt")];
+        assert_eq!(
+            names(ComposerAttachment::split_for_send(&tray, true)),
+            [vec!["a.jpg", "b.jpg"], vec!["c.txt"]]
+        );
+        // Audio files are their own album type: TDLib does not group them
+        // with other files.
+        let tray = [file("a.mp3"), file("b.mp3"), file("c.txt"), file("d.pdf")];
+        assert_eq!(
+            names(ComposerAttachment::split_for_send(&tray, true)),
+            [vec!["a.mp3", "b.mp3"], vec!["c.txt", "d.pdf"]]
+        );
+        assert!(!ComposerAttachment::albumable(&tray[1..3]));
+        assert_eq!(ComposerAttachment::split_for_send(&tray, false).len(), 4);
     }
 
     #[test]
