@@ -60,7 +60,10 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
             ConnectBlocker::MissingKeyAgainstExistingDb,
             StartupFailure::KeyMissing,
         ),
-        (ConnectBlocker::DataFolder, StartupFailure::DataFolder),
+        (
+            ConnectBlocker::DataFolder,
+            StartupFailure::DataFolder { detail: None },
+        ),
         (ConnectBlocker::MissingTdjson, StartupFailure::Library),
         (ConnectBlocker::TdjsonLoad, StartupFailure::Library),
         (ConnectBlocker::TdjsonVersion, StartupFailure::Library),
@@ -81,10 +84,13 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
 #[gpui_kit::test]
 fn a_database_tdlib_refused_shows_its_reason_and_retry(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
-    for failure in [StartupFailure::WrongKey, StartupFailure::DataFolder] {
+    for failure in [
+        StartupFailure::WrongKey,
+        StartupFailure::DataFolder { detail: None },
+    ] {
         app.update(&mut vcx, |app, cx| {
             app.connection.status = ConnectUiStatus::Live;
-            app.auth_ui.demo_state = AuthorizationState::StartupFailed(failure);
+            app.auth_ui.demo_state = AuthorizationState::StartupFailed(failure.clone());
             cx.notify();
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");

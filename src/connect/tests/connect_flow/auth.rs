@@ -652,24 +652,24 @@ fn request_logout_sends_logout_then_logging_out_then_closed() {
 /// read-only folder and a parent that is a file (`TdDb.cpp` for the key).
 #[test]
 fn a_refused_database_replaces_connecting_with_the_reason() {
-    for (code, message, failure, detail) in [
+    let data_folder = |detail: &str| StartupFailure::DataFolder {
+        detail: Some(detail.to_string()),
+    };
+    for (code, message, failure) in [
         (
             400,
             r#"File \"/data/td.binlog\" can't be opened/created for reading and writing"#,
-            StartupFailure::DataFolder,
-            Some("File can't be opened/created for reading and writing"),
+            data_folder("File can't be opened/created for reading and writing"),
         ),
         (
             400,
             "Can't init database in the directory \\\"/data/db\\\": [PosixError : Not a directory : 20]",
-            StartupFailure::DataFolder,
-            Some("Can't init database in the directory: [PosixError: Not a directory: 20]"),
+            data_folder("Can't init database in the directory: [PosixError: Not a directory: 20]"),
         ),
         (
             401,
             "Wrong database encryption key",
             StartupFailure::WrongKey,
-            None,
         ),
     ] {
         let store = MemorySecretStore::new();
@@ -687,17 +687,22 @@ fn a_refused_database_replaces_connecting_with_the_reason() {
         driver
             .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
             .unwrap();
+        let body = match &failure {
+            StartupFailure::DataFolder {
+                detail: Some(detail),
+            } => format!("{}\n{detail}", failure.reason()),
+            _ => failure.reason().to_string(),
+        };
         assert_eq!(
             driver.session.auth,
             AuthorizationState::StartupFailed(failure)
         );
         assert_eq!(driver.session.auth_view.action, AuthAction::StartupFailed);
-        let body = match detail {
-            Some(detail) => format!("{}\n{detail}", failure.reason()),
-            None => failure.reason().to_string(),
-        };
         assert_eq!(driver.session.auth_view.body, body);
         assert!(!driver.session.auth_view.body.contains("/data"));
+        // The view is derived again from state, as a language change does.
+        driver.session.set_auth(driver.session.auth.clone());
+        assert_eq!(driver.session.auth_view.body, body);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -740,7 +745,10 @@ fn a_data_folder_that_cannot_be_made_is_not_called_a_key_problem() {
     let blocker = prepare_connect(&dir, AccountKey::primary(), &store, &test_credentials())
         .map(drop)
         .expect_err("the folder cannot be created");
-    assert_eq!(blocker.startup_failure(), Some(StartupFailure::DataFolder));
+    assert_eq!(
+        blocker.startup_failure(),
+        Some(StartupFailure::DataFolder { detail: None })
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
