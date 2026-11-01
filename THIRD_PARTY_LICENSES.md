@@ -12,7 +12,7 @@ compiled into it (ThorVG with RapidJSON) and bundled data files are listed in
 
 ## Overview
 
-- MIT License: 678
+- MIT License: 680
 - Apache License 2.0: 42
 - Unicode License v3: 24
 - ISC License: 22
@@ -11543,6 +11543,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
+- [quill-panic-guard 0.1.0](https://github.com/shinycake/quill)
 - [quill-calls-sys 0.1.0](https://github.com/shinycake/quill)
 - [quill-webview-protocol 0.1.0](https://github.com/shinycake/quill)
 - [accesskit 0.24.1](https://github.com/AccessKit/accesskit)
@@ -12109,6 +12110,8 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
+- [quill 0.1.0](https://github.com/shinycake/quill)
+- [blocking 1.7.0](https://github.com/smol-rs/blocking)
 - [adler2 2.0.1](https://github.com/oyvindln/adler2)
 - [anyhow 1.0.104](https://github.com/dtolnay/anyhow)
 - [async-channel 2.5.0](https://github.com/smol-rs/async-channel)
@@ -12122,7 +12125,6 @@ Used by:
 - [async-task 4.7.1](https://github.com/smol-rs/async-task)
 - [async-trait 0.1.92](https://github.com/dtolnay/async-trait)
 - [atomic-waker 1.1.2](https://github.com/smol-rs/atomic-waker)
-- [blocking 1.7.0](https://github.com/smol-rs/blocking)
 - [concurrent-queue 2.5.0](https://github.com/smol-rs/concurrent-queue)
 - [displaydoc 0.2.7](https://github.com/yaahc/displaydoc)
 - [dyn-clone 1.0.20](https://github.com/dtolnay/dyn-clone)
