@@ -97,11 +97,13 @@ impl QuillApp {
 
     /// A chat window's toast. Put in the box around its compose field, it
     /// sits [`TOAST_GAP`] above that box, centred over the conversation;
-    /// with the media viewer open, put in the window's body, it sits above
-    /// the viewer's bar.
+    /// `in_body`, put in the window's body, it sits above the media
+    /// viewer's bar, or [`TOAST_GAP`] above the bottom of a window that
+    /// shows only the topic list.
     pub(in crate::ui) fn chat_window_toast(
         &mut self,
         note: &StatusNote,
+        in_body: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -114,6 +116,9 @@ impl QuillApp {
             right: px(0.),
             bottom: px(TOAST_GAP),
         };
+        if in_body {
+            return self.status_toast_layer(note, insets, cx);
+        }
         div()
             .absolute()
             .left_0()

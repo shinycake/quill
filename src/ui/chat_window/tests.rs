@@ -32,14 +32,17 @@ struct Harness {
 }
 
 fn new_app(cx: &mut TestAppContext) -> Harness {
+    new_demo_app(cx, "ready-chats")
+}
+
+fn new_demo_app(cx: &mut TestAppContext, demo: &'static str) -> Harness {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         let focus = view.focus_handle(cx);
         window.focus(&focus, cx);
         let shell = cx.new(|_| QuillShell::new(view.clone()));
@@ -1234,4 +1237,30 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     });
     assert!(status_toast_drawn(h.main, cx));
     assert!(!status_toast_drawn(chat_window, cx));
+}
+
+#[gpui_kit::test]
+fn a_narrow_forum_window_showing_its_topics_draws_the_toast(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_demo_app(cx, "ready-composer-bars");
+    let forum = crate::ui::demos::composer::FORUM_CHAT;
+    let chat_window = h.open_in_new_window(forum, cx);
+    cx.simulate_window_resize(chat_window, size(px(700.), px(700.)));
+    cx.run_until_parked();
+    let topics_only = cx
+        .update_window(chat_window, |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find("chat-window-history").is_none()
+        })
+        .unwrap();
+    assert!(topics_only, "the window shows only the topic list");
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(forum));
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::error(
+                "Couldn't open the link",
+            ));
+        cx.notify();
+    });
+    assert!(status_toast_drawn(chat_window, cx));
 }

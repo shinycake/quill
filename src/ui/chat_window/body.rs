@@ -65,10 +65,12 @@ impl QuillApp {
         let drop_state = self.visible_drop_state(cx);
         let drop_overlay = drop_state.map(|state| self.drop_zone_overlay(state, cx));
         let viewer_open = self.viewer.state.is_open();
+        // Without a conversation there is no compose box to sit above.
+        let toast_in_body = viewer_open || topics_only;
         let toast = self
             .status_toast_in(Some(chat_id), cx)
-            .map(|note| self.chat_window_toast(&note, window, cx));
-        let (composer_toast, viewer_toast) = if viewer_open {
+            .map(|note| self.chat_window_toast(&note, toast_in_body, window, cx));
+        let (composer_toast, body_toast) = if toast_in_body {
             (None, toast)
         } else {
             (toast, None)
@@ -121,8 +123,8 @@ impl QuillApp {
                     cx,
                 ))
             })
-            // Above the viewer, like the main window's toast.
-            .children(viewer_toast)
+            // Above the viewer or the topic list, like the main window's toast.
+            .children(body_toast)
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
             .when_some(self.message_ui.menu, |this, menu| {
