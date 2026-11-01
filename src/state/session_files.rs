@@ -80,14 +80,14 @@ impl Session {
     /// notification sounds. A file a row shows is read on every render,
     /// so it is among the most recently used (kept by recency, not held).
     fn evict_unused_files(&mut self) {
-        if self.media.files.len() <= FILES_MAX {
+        if !self.media.files.evict_due() {
             return;
         }
         let media = &mut self.media;
         let downloads = &media.downloads;
         let avatars = &media.avatar_file_refs;
         let open_chat = &media.open_chat_media_downloads;
-        let extras: HashSet<i32> = media.download_extras.values().copied().collect();
+        let extras = &media.download_extras;
         let sounds = &self.settings.sound_file_ids;
         // Queued tracks are not rendered, so no read keeps them recent.
         let queued: HashSet<i32> = media
@@ -106,7 +106,7 @@ impl Session {
                 || queued.contains(&id)
                 || avatars.contains_key(&id)
                 || open_chat.contains(&id)
-                || extras.contains(&id)
+                || extras.has_file(id)
                 || sounds.contains_key(&id)
         });
     }
@@ -116,7 +116,7 @@ impl Session {
     pub(crate) fn unstick_download(&mut self, file_id: i32) {
         self.note_avatar_file_changed(file_id);
         self.media.downloads.settle(file_id);
-        self.media.download_extras.retain(|_, id| *id != file_id);
+        self.media.download_extras.remove_file(file_id);
     }
 
     /// Record a finished user-initiated download in the downloads manager's
@@ -200,7 +200,7 @@ impl Session {
     pub fn abort_download(&mut self, file_id: FileId) {
         self.note_avatar_file_changed(file_id.0);
         self.media.downloads.cancel(file_id.0);
-        self.media.download_extras.retain(|_, id| *id != file_id.0);
+        self.media.download_extras.remove_file(file_id.0);
     }
 
     /// Files the inline results panel shows, most urgent first: each
