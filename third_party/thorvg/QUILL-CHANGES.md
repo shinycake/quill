@@ -8,23 +8,25 @@ Background: `docs/decisions/thorvg-sticker-renderer.md`.
 
 Sticker files come from any chat. `src/sticker_playback/lottie_check.rs` checks a
 document's structure before ThorVG reads it. These changes hold the same limits
-for what only exists once a frame is evaluated, and keep the loader's handling
-of optional fields and odd values well defined. Real stickers stay far below every
-limit here. Their pixels do not change, apart from the text that the parser below
-no longer reads.
+for what only exists once a frame is evaluated, make a value of the wrong type end
+the parse, as in rlottie, and define the loader's handling of optional fields and
+odd values. Real stickers stay far below every limit here. Their pixels do not
+change, apart from the text that the parser below no longer reads.
 
 ## Changes
 
 `src/loaders/lottie/tvgLottieParser.cpp`: the scan for a shape's type reads
 strings whole and counts only a key. Property arrays may hold a null. The search
-for a shared interpolator looks at the newest 1,024 entries. Slot ids are skipped,
-since Quill overrides no slot. Text, fonts, glyphs and slots are not read, since
-rlottie draws no text and tdesktop shows none. Percentages that become 8-bit values
-and 8-bit file values are clamped. A dash array keeps its first 64 entries.
+for a shared interpolator looks at the newest 1,024 entries. Slots and slot ids are
+not read, since Quill overrides no slot. Text, fonts and glyphs are not read, since
+rlottie draws no text and tdesktop shows none. Metadata Quill never uses is skipped,
+as rlottie does. Percentages that become 8-bit values and 8-bit file values are
+clamped. A dash array keeps its first 64 entries.
 
-`src/loaders/lottie/tvgLottieParserHandler.cpp`: an integer written as a float
-reads as that number, and one past an `int` stops inside its limits, so a field
-read as a number minus one stays in range.
+`src/loaders/lottie/tvgLottieParserHandler.cpp`, `tvgLottieParserHandler.h`: an
+integer written as a float reads as that number, and one past an `int` stops inside
+its limits, so a field read as a number minus one stays in range. The first value
+of the wrong type ends the parse.
 
 `src/loaders/lottie/tvgLottieBuilder.cpp`: a composition builds once and is used
 only when finished, and only a composition asset can back a precomp. A matte chain
