@@ -4,12 +4,33 @@ use crate::proxy::ProxyDraft;
 
 #[cfg(target_os = "macos")]
 pub(super) fn detect() -> Option<ProxyDraft> {
-    let text = crate::child_timeout::stdout_within(
-        "/usr/sbin/scutil",
-        &["--proxy"],
-        crate::child_timeout::DESKTOP_QUERY_LIMIT,
-    )?;
-    super::parse_scutil_proxy(&text)
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::number::CFNumber;
+    use core_foundation::string::CFString;
+
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    unsafe extern "C" {
+        fn SCDynamicStoreCopyProxies(store: *const std::ffi::c_void) -> CFDictionaryRef;
+    }
+    // SAFETY: a null store is allowed; the call uses a session of its own.
+    let proxies = unsafe { SCDynamicStoreCopyProxies(std::ptr::null()) };
+    if proxies.is_null() {
+        return None;
+    }
+    // SAFETY: a non-null dictionary from a Copy call, owned from here on.
+    let proxies: CFDictionary<CFString, CFType> =
+        unsafe { CFDictionary::wrap_under_create_rule(proxies) };
+    super::proxy_from_dictionary(|key| {
+        let value = proxies.find(CFString::new(key))?;
+        value.downcast::<CFString>().map_or_else(
+            || {
+                let number = value.downcast::<CFNumber>()?;
+                Some(number.to_i64()?.to_string())
+            },
+            |text| Some(text.to_string()),
+        )
+    })
 }
 
 #[cfg(windows)]
