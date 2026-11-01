@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use crate::composer::markup_boundary::{closer_ok, is_marker_char, opener_ok};
+use crate::composer::markup_boundary::{closer_ok, opener_ok};
 use crate::composer::{FormatKind, parse_format_markup, scan_work};
 use crate::text::{TextEntity, TextEntityKind};
 

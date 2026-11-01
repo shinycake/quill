@@ -312,7 +312,10 @@ mod tests {
         for part in &parts {
             let doc = ComposerDoc::from_markup(part);
             assert!(!doc.text.contains('`'), "{part:?}");
-            assert_eq!(doc.spans.first().map(|span| &span.tag), Some(&ComposerTag::Pre("rust".into())));
+            assert_eq!(
+                doc.spans.first().map(|span| &span.tag),
+                Some(&ComposerTag::Pre("rust".into()))
+            );
         }
     }
 

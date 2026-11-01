@@ -89,8 +89,8 @@ impl QuillApp {
         }
         if !memo.is_counting(key) {
             let markup = self.composer_markup(cx);
-            let count = cx
-                .background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
+            let count =
+                cx.background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
             let task = Self::spawn_main(cx, async move |this, cx| {
                 let note = count.await;
                 this.update(cx, |this, cx| {
