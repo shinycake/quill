@@ -87,10 +87,15 @@ impl QuillApp {
             let landed = app.update_in(cx, |this, window, cx| {
                 let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
                 let here = this.send_slot().as_ref() == Some(&item.slot);
-                let opens = this.viewer.photo_editor_after == Some(render);
-                if opens {
-                    this.viewer.photo_editor_after = None;
-                }
+                let view = this
+                    .session()
+                    .map(|s| s.view_generation)
+                    .unwrap_or_default();
+                let opens = this
+                    .viewer
+                    .photo_editor_after
+                    .take_if(|open| open.render == render)
+                    .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
                     Some(text) if here => {

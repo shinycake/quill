@@ -6,6 +6,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use image::{Rgba, RgbaImage};
 use quill::composer::{AttachmentExtras, AttachmentKind, ComposerAttachment};
@@ -13,6 +14,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_in(cx, "ready-privacy")
+}
+
+fn new_app_in(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualTestContext) {
+    let demo = demo.to_string();
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -23,7 +29,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
                 window,
                 cx,
                 None,
-                Some(ScreenshotDemo::named("ready-privacy")),
+                Some(ScreenshotDemo::named(&demo)),
             )
         });
         *slot_in.borrow_mut() = Some(view.clone());
@@ -374,4 +380,79 @@ fn a_tap_then_send_mid_render_sends_and_opens_no_editor(cx: &mut TestAppContext)
 #[gpui_kit::test]
 fn a_send_then_tap_mid_render_sends_and_opens_no_editor(cx: &mut TestAppContext) {
     send_with_a_deferred_open(cx, "send-tap.png", true);
+}
+
+/// Whether tray card `index` shows that its edit is still being saved.
+fn card_shows_rendering(vcx: &mut VisualTestContext, index: usize) -> bool {
+    vcx.update(|window, cx| window.render_frame(cx));
+    let selector: &'static str =
+        Box::leak(format!("composer-attach-rendering-{index}").into_boxed_str());
+    vcx.debug_bounds(selector).is_some()
+}
+
+#[gpui_kit::test]
+fn a_rendering_card_shows_it_until_the_edit_lands(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app_in(cx, "ready-chats");
+    let original = picture("spin.png", 79, 13);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+    });
+    assert!(card_shows_rendering(&mut vcx, 0));
+    vcx.run_until_parked();
+    assert!(!card_shows_rendering(&mut vcx, 0));
+    if let Some(edited) = tray_path(&app, &mut vcx) {
+        let _ = std::fs::remove_file(edited);
+    }
+}
+
+/// Tap the rendering card, do `then`, and let the render land: the editor
+/// stays closed.
+fn tap_mid_render_then(
+    cx: &mut TestAppContext,
+    name: &str,
+    height: u32,
+    then: impl FnOnce(&mut QuillApp, &mut gpui_kit::Context<QuillApp>),
+) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture(name, 83, height);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.open_photo_editor(0, cx);
+        then(app, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert!(
+            app.viewer.photo_editor.is_none(),
+            "no editor long after the tap"
+        );
+    });
+    if let Some(edited) = tray_path(&app, &mut vcx) {
+        let _ = std::fs::remove_file(edited);
+    }
+}
+
+#[gpui_kit::test]
+fn a_tap_mid_render_then_a_chat_change_opens_nothing(cx: &mut TestAppContext) {
+    tap_mid_render_then(cx, "away.png", 11, |app, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let open = session.open_chat.expect("an open chat");
+        let other = session
+            .chats
+            .keys()
+            .map(|&chat| quill::ids::ChatId(chat))
+            .find(|&chat| chat != open)
+            .expect("another chat");
+        session.open_chat(other);
+        session.open_chat(open);
+    });
+}
+
+#[gpui_kit::test]
+fn a_tap_mid_render_then_an_editor_closing_opens_nothing(cx: &mut TestAppContext) {
+    tap_mid_render_then(cx, "closed.png", 9, |app, cx| app.close_photo_editor(cx));
 }

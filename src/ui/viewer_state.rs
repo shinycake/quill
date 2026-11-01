@@ -9,6 +9,14 @@ use quill::media_viewer::ViewerZoom;
 use quill::media_viewer::WheelNav;
 use std::path::PathBuf;
 
+/// The editor opens on the photo of render `render` once it lands, unless
+/// the user has left the chat view `view` it was asked for in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct DeferredOpen {
+    pub(super) render: u64,
+    pub(super) view: quill::ids::ViewGeneration,
+}
+
 pub(crate) struct ViewerUi {
     /// Phase 4.5: fullscreen media viewer (photo/video overlay).
     pub(super) state: MediaViewer,
@@ -17,9 +25,8 @@ pub(crate) struct ViewerUi {
     pub(super) extra: super::media_viewer::ViewerExtra,
     /// The photo editor over a pending photo attachment, when open.
     pub(super) photo_editor: Option<super::photo_editor::PhotoEditor>,
-    /// The render whose photo the editor opens on once it lands: opening a
-    /// photo mid-render shows its pending edit, not the original.
-    pub(super) photo_editor_after: Option<u64>,
+    /// Opening a photo mid-render shows its pending edit, not the original.
+    pub(super) photo_editor_after: Option<DeferredOpen>,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
     pub(super) zoom: ViewerZoom,
     /// The viewer's media frame for the current window size (zoom/pan

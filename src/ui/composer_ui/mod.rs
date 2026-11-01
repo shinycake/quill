@@ -586,6 +586,7 @@ impl QuillApp {
             };
             let spoiler = attachment.spoiler;
             let is_photo = attachment.kind == AttachmentKind::Photo;
+            let rendering = attachment.extras.photo_render.is_some();
             // "Edit video" and "Cover" on a video, no spoiler on paid media
             // (`send_box_options.rs`).
             let video_actions = self.video_card_actions(index, attachment, cx);
@@ -616,7 +617,20 @@ impl QuillApp {
                                 .when(is_photo, |actions| {
                                     actions.child(
                                         Button::new(("composer-attach-edit", index as u64))
-                                            .icon(IconName::Pencil)
+                                            .map(|button| {
+                                                // Its edit is still being saved.
+                                                if rendering {
+                                                    button
+                                                        .icon(spinner::Spinner::new())
+                                                        .debug_selector(move || {
+                                                            format!(
+                                                                "composer-attach-rendering-{index}"
+                                                            )
+                                                        })
+                                                } else {
+                                                    button.icon(IconName::Pencil)
+                                                }
+                                            })
                                             .xsmall()
                                             .ghost()
                                             .tooltip(tr(keys::Q_CHAT_EDIT))

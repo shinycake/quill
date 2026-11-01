@@ -365,11 +365,18 @@ impl QuillApp {
             .pending_attachments()
             .get(index)
             .and_then(|attachment| attachment.extras.photo_render);
-        self.viewer.photo_editor_after = render;
-        if render.is_some() {
+        if let Some(render) = render {
+            self.viewer.photo_editor_after = Some(super::viewer_state::DeferredOpen {
+                render,
+                view: self
+                    .session()
+                    .map(|s| s.view_generation)
+                    .unwrap_or_default(),
+            });
             cx.notify();
             return;
         }
+        self.viewer.photo_editor_after = None;
         self.open_photo_editor_for(item, cx);
     }
 
@@ -412,6 +419,7 @@ impl QuillApp {
 
     pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
         self.viewer.photo_editor = None;
+        self.viewer.photo_editor_after = None;
         cx.notify();
     }
 

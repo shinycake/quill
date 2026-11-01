@@ -102,6 +102,9 @@ impl QuillApp {
                 if self.submit_suggested_change(&text, window, cx) {
                     return;
                 }
+                // The tray goes, now or once its renders land: an editor
+                // asked for mid-render no longer opens.
+                self.viewer.photo_editor_after = None;
                 // A photo's edit is still rendering: the Send waits for it,
                 // so the unedited file never goes out.
                 if self.tray_renders_an_edit() {
