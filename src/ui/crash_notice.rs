@@ -16,7 +16,6 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, AppContext as _, Window};
 use quill::crash_log::PendingCrash;
 use quill::lang::{keys, tr};
-use quill::platform::OsOpen;
 use std::path::{Path, PathBuf};
 
 /// Call once while the main window is built: arms the clean-exit marker and
@@ -123,10 +122,16 @@ fn notice(crash: &PendingCrash) -> Notification {
                 .on_click(cx.listener(move |note, _, window, cx| {
                     let open = quill::platform::reveal_in_file_manager(&report);
                     note.dismiss(window, cx);
-                    if matches!(open, OsOpen::Answered(false)) {
+                    cx.spawn_in(window, async move |_, cx| {
+                        if open.opened().await {
+                            return;
+                        }
                         let failure = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER);
-                        window.push_notification(Notification::new().message(failure), cx);
-                    }
+                        let _ = cx.update(|window, cx| {
+                            window.push_notification(Notification::new().message(failure), cx);
+                        });
+                    })
+                    .detach();
                 }))
         })
 }
@@ -152,7 +157,7 @@ mod gate_tests {
 #[cfg(feature = "demo-capture")]
 mod tests {
     use super::{show_crash, show_once_visible};
-    use gpui_kit::component::Root;
+    use gpui_kit::component::{Root, WindowExt as _};
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
         AppContext as _, Context, IntoElement, Render, TestAppContext, VisualTestContext, Window,
@@ -187,6 +192,36 @@ mod tests {
             assert!(window.try_find("crash-notice-show-log").is_some());
         });
         assert_eq!(quill::crash_log::pending_crash(&root), None, "shown once");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[gpui_kit::test]
+    fn show_log_says_so_when_the_folder_fails_to_open_late(cx: &mut TestAppContext) {
+        let root =
+            std::env::temp_dir().join(format!("quill-crash-notice-late-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let logs = quill::crash_log::log_dir(&root);
+        quill::crash_log::write_crash_file(&logs, 3_000, "report", 3).unwrap();
+
+        cx.update(gpui_kit::init);
+        let handle = cx.open_window(size(px(800.), px(500.)), |window, cx| {
+            Root::new(cx.new(|_| Blank), window, cx)
+        });
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        let crash = quill::crash_log::pending_crash(&root).unwrap();
+        vcx.update(|window, cx| show_crash(&root, &crash, window, cx));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.render_frame(cx));
+        let (answer, answered) = futures_channel::oneshot::channel();
+        quill::platform::script_next_os_open(quill::platform::OsOpen::Pending(answered));
+        vcx.update(|window, cx| window.click("crash-notice-show-log", cx));
+        vcx.run_until_parked();
+        let shown =
+            |vcx: &mut VisualTestContext| vcx.update(|window, cx| window.notifications(cx).len());
+        let before = shown(&mut vcx);
+        answer.send(false).unwrap();
+        vcx.run_until_parked();
+        assert_eq!(shown(&mut vcx), before + 1, "the failure note");
         let _ = std::fs::remove_dir_all(&root);
     }
 
