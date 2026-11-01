@@ -423,6 +423,9 @@ struct AudioShared {
     queue: Mutex<AudioQueue>,
     /// Bumped by every seek: the output drops what it held.
     generation: AtomicU64,
+    /// Where the sound of the current generation starts (f64 bits): the
+    /// seek target, 0 at open. Stored before `generation` is bumped.
+    origin: AtomicU64,
     /// Seqlock-style: the position of the next sample the output will
     /// play (f64 bits), tagged with the generation it belongs to.
     played: AtomicU64,
@@ -458,6 +461,7 @@ impl AudioShared {
         let mut queue = lock(&self.queue);
         queue.chunks.clear();
         queue.buffered = 0;
+        self.origin.store(secs.to_bits(), Ordering::Release);
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.played.store(secs.to_bits(), Ordering::Release);
         self.played_generation.store(generation, Ordering::Release);
@@ -498,7 +502,7 @@ pub struct AudioTap {
     at: usize,
     chunk_pts: f64,
     /// Where the sound played so far ends, since the last seek.
-    end_pts: Option<f64>,
+    end_pts: f64,
     /// Silent samples owed before `chunk`, for a gap in the sound.
     gap: usize,
     gap_at: usize,
@@ -528,7 +532,8 @@ impl AudioTap {
             self.generation = generation;
             self.chunk.clear();
             self.at = 0;
-            self.end_pts = None;
+            let origin = f64::from_bits(self.shared.origin.load(Ordering::Acquire));
+            self.end_pts = origin;
             self.gap = 0;
         }
         if self.gap_at < self.gap {
@@ -584,7 +589,7 @@ impl AudioTap {
     fn start_chunk(&mut self, chunk: AudioChunk) {
         let channels = usize::from(self.channels());
         let rate = f64::from(self.sample_rate());
-        let gap = self.end_pts.map_or(0.0, |end| chunk.pts - end);
+        let gap = chunk.pts - self.end_pts;
         self.gap = if gap > SOUND_GAP_MIN {
             (gap * rate).round() as usize * channels
         } else {
@@ -592,7 +597,7 @@ impl AudioTap {
         };
         self.gap_at = 0;
         let frames = chunk.samples.len() / channels;
-        self.end_pts = Some(chunk.pts + frames as f64 / rate);
+        self.end_pts = chunk.pts + frames as f64 / rate;
         self.chunk_pts = chunk.pts;
         self.chunk = chunk.samples;
         self.at = 0;

@@ -49,6 +49,9 @@ struct Shape {
     held_packet_limit: usize,
     /// No sound from the first time up to the second.
     sound_gap: (f64, f64),
+    /// Sound from the first time on is stamped the second later (a broken
+    /// timestamp).
+    sound_jump: (f64, f64),
 }
 
 impl Shape {
@@ -61,6 +64,7 @@ impl Shape {
             duration: picture_secs.max(sound_secs),
             held_packet_limit: 1024,
             sound_gap: (0.0, 0.0),
+            sound_jump: (f64::INFINITY, 0.0),
         }
     }
 
@@ -77,7 +81,11 @@ impl Shape {
                         let (from, to) = self.sound_gap;
                         !(from - 1e-9..to - 1e-9).contains(pts)
                     })
-                    .map(|pts| (pts + self.sound_behind_secs, Packet::Sound(pts))),
+                    .map(|pts| {
+                        let (from, by) = self.sound_jump;
+                        let stamped = if pts >= from - 1e-9 { pts + by } else { pts };
+                        (pts + self.sound_behind_secs, Packet::Sound(stamped))
+                    }),
             )
             .collect();
         keyed.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -562,6 +570,40 @@ fn sound_after_a_gap_plays_at_its_time() {
     assert!((heard - expected).abs() < 0.01, "{heard}");
     let heard = play(1.0);
     assert!((heard - (expected + 1.0)).abs() < 0.01, "{heard}");
+}
+
+#[test]
+fn a_seek_into_a_gap_in_the_sound_waits_for_the_sound_after_it() {
+    let mut rig = Rig::open(Shape {
+        sound_gap: (1.0, 2.0),
+        ..Shape::clip(4.0, 4.0)
+    });
+    rig.player.seek(1.5);
+    rig.settle();
+    rig.player.play();
+    for _ in 0..3 {
+        rig.pull_sound(0.1);
+        rig.settle();
+    }
+    let heard = rig.player.heard().expect("the gap plays as silence");
+    let expected = 1.8 - AUDIO_OUTPUT_LATENCY;
+    assert!((heard - expected).abs() < 0.01, "{heard}");
+}
+
+#[test]
+fn sound_that_starts_late_plays_at_its_time() {
+    let mut rig = Rig::open(Shape {
+        sound_gap: (0.0, 1.0),
+        ..Shape::clip(3.0, 3.0)
+    });
+    rig.player.play();
+    for _ in 0..5 {
+        rig.pull_sound(0.1);
+        rig.settle();
+    }
+    let heard = rig.player.heard().expect("the start plays as silence");
+    let expected = 0.5 - AUDIO_OUTPUT_LATENCY;
+    assert!((heard - expected).abs() < 0.01, "{heard}");
 }
 
 #[test]
