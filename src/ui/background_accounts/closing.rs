@@ -95,8 +95,8 @@ impl QuillApp {
         }
     }
 
-    pub(in crate::ui) fn close_every_client_later(&mut self, cx: &mut Context<Self>) {
-        self.close_screen_client(cx);
+    /// Close every background client, keeping each one's restart.
+    pub(in crate::ui) fn close_background_clients_later(&mut self, cx: &mut Context<Self>) {
         self.stop_background_clients(cx);
         self.background.closing.restart_all();
     }

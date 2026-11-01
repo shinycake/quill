@@ -7,3 +7,4 @@
 "qll_disk_full_last_time" = "The disk was full. Free up space to keep Quill running.";
 "qll_disk_unwritable_title" = "Can't write to Quill's data";
 "qll_disk_unwritable_body" = "Quill closed its connection to keep your data safe, because the disk that holds its data is missing or can only be read.\n\nReconnect the disk, or check it for errors. Quill reconnects by itself once it can write there again.";
+"qll_disk_full_in_call" = "Disk is full. Quill will disconnect when the call ends.";

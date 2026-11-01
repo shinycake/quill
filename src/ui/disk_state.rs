@@ -35,6 +35,9 @@ pub(crate) struct DiskUi {
     /// says so, while clients already running keep going until a reading
     /// falls below close.
     screen_refused: bool,
+    /// At Full, the on-screen client stays open for its call, and closes
+    /// at the first reading after the call ends.
+    held_for_call: bool,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -57,6 +60,7 @@ impl DiskUi {
             waited: Duration::ZERO,
             unwritable: false,
             screen_refused: false,
+            held_for_call: false,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -69,7 +73,7 @@ impl DiskUi {
     /// The full-disk screen is up: the disk is full, or the on-screen
     /// client was refused.
     pub(super) fn shows_screen(&self) -> bool {
-        self.is_full() || self.screen_refused
+        (self.is_full() && !self.held_for_call) || self.screen_refused
     }
 
     pub(super) fn holds_auto_downloads(&self) -> bool {
@@ -229,6 +233,9 @@ impl QuillApp {
 
     fn enter_disk_state(&mut self, after: DiskState, cx: &mut Context<Self>) -> DiskState {
         let before = std::mem::replace(&mut self.disk.state, after);
+        if after != DiskState::Full {
+            self.disk.held_for_call = false;
+        }
         if after == DiskState::Full && before != DiskState::Full {
             self.bring_main_window_forward(cx);
         }
@@ -248,9 +255,21 @@ impl QuillApp {
     }
 
     fn close_clients_for_full_disk(&mut self, cx: &mut Context<Self>) {
+        let held = self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.driver.call_in_progress());
+        if held != self.disk.held_for_call {
+            self.disk.held_for_call = held;
+            cx.notify();
+        }
+        self.close_background_clients_later(cx);
+        if held {
+            return;
+        }
         self.flush_leaving_draft(cx);
         self.close_chat_windows_for_switch(cx);
-        self.close_every_client_later(cx);
+        self.close_screen_client(cx);
         self.connection.set_note(StatusNote::silent(""));
     }
 
@@ -285,7 +304,14 @@ impl QuillApp {
     /// The kit's banner has no action slot, so the row around it carries the
     /// tint and the button.
     pub(super) fn disk_low_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        (self.disk.state == DiskState::Low && !self.disk.shows_screen()).then(|| {
+        let held = self.disk.is_full() && self.disk.held_for_call;
+        let low = self.disk.state == DiskState::Low && !self.disk.shows_screen();
+        (low || held).then(|| {
+            let message = if held {
+                tr(keys::Q_DISK_FULL_IN_CALL)
+            } else {
+                tr(keys::Q_DISK_ALMOST_FULL)
+            };
             let settings_can_show = self.pane_mode() != PaneMode::Connecting;
             h_flex()
                 .w_full()
@@ -295,7 +321,7 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .child(
-                    Alert::warning("disk-low", tr(keys::Q_DISK_ALMOST_FULL))
+                    Alert::warning("disk-low", message)
                         .text_color(cx.theme().foreground)
                         .banner()
                         .flex_1()

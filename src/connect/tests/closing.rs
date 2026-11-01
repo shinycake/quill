@@ -716,3 +716,43 @@ fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
         recorder.snapshot()
     );
 }
+
+#[test]
+fn a_running_call_or_joined_voice_chat_is_a_call_in_progress() {
+    assert!(!calling_driver().driver.call_in_progress());
+    assert!(
+        calling_driver()
+            .with_call(true, CallState::Ready)
+            .driver
+            .call_in_progress()
+    );
+    assert!(
+        !calling_driver()
+            .with_call(true, CallState::HangingUp)
+            .driver
+            .call_in_progress()
+    );
+    let ringing = CallState::Pending {
+        is_created: true,
+        is_received: true,
+    };
+    assert!(
+        !calling_driver()
+            .with_call(false, ringing)
+            .driver
+            .call_in_progress(),
+        "a call ringing in can be answered elsewhere"
+    );
+    assert!(
+        calling_driver()
+            .with_group_call(true)
+            .driver
+            .call_in_progress()
+    );
+    assert!(
+        !calling_driver()
+            .with_group_call(false)
+            .driver
+            .call_in_progress()
+    );
+}

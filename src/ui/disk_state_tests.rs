@@ -343,3 +343,23 @@ fn a_data_folder_that_cannot_be_written_closes_with_its_own_screen(cx: &mut Test
     });
     assert_eq!(shown(&app, &mut vcx), (false, false, start + 1), "back");
 }
+
+#[gpui_kit::test]
+fn a_call_held_open_at_full_keeps_the_app_with_the_bar(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    fill(&app, &mut vcx, Some(0));
+    app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
+    assert_eq!(shown(&app, &mut vcx).0, true, "the bar");
+    assert_eq!(
+        shown(&app, &mut vcx).1,
+        false,
+        "no full screen during the call"
+    );
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(
+        vcx.update(|window, _| window.try_find("disk-low-storage").is_some()),
+        "the bar is on screen"
+    );
+    read(&app, &mut vcx, Some(FLOORS.warn_clear));
+    app.read_with(&vcx, |app, _| assert!(!app.disk.held_for_call));
+}
