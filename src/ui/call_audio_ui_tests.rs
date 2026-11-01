@@ -88,3 +88,16 @@ fn stopping_the_test_while_the_microphone_opens_leaves_it_off(cx: &mut TestAppCo
     );
     assert_eq!(open.load(Ordering::SeqCst), 0, "the microphone was closed");
 }
+
+#[gpui_kit::test]
+fn closing_settings_while_the_microphone_opens_leaves_it_off(cx: &mut TestAppContext) {
+    let (app, mut vcx, open) = settings_with_a_microphone(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.open_settings(Some(quill::settings_catalog::Page::Calls));
+        app.toggle_mic_test(cx);
+        app.close_settings();
+    });
+    vcx.run_until_parked();
+    assert!(!testing(&app, &vcx));
+    assert_eq!(open.load(Ordering::SeqCst), 0, "the microphone was closed");
+}

@@ -122,6 +122,8 @@ impl QuillApp {
             Page::Devices => self.leave_devices(),
             Page::DataStorage => self.leave_data_storage(),
             Page::AgentAccess => self.leave_agent_page(),
+            // The test lives with its section, as in tdesktop.
+            Page::Calls => self.calls.mic_test = Default::default(),
             _ => {}
         }
     }
@@ -142,7 +144,8 @@ impl QuillApp {
 
     fn settings_back(&mut self, narrow: bool, cx: &mut Context<Self>) {
         if self.settings.sub.take().is_none() {
-            if narrow && self.settings.page.is_some() {
+            if narrow && let Some(page) = self.settings.page {
+                self.leave_settings_page(page);
                 self.settings.page = None;
             } else {
                 self.close_settings();
