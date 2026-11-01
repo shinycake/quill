@@ -64,7 +64,6 @@ fn work(doc: &Value) -> Result<u64, Malformed> {
 
 /// Everything below reads keys and strings as `serde_json` decoded them, and
 /// ThorVG has to read the same ones, so this holds for the whole document.
-/// `serde_json`'s recursion limit bounds the depth.
 fn check_text(value: &Value) -> Result<(), Malformed> {
     let plain = |text: &str| !text.contains('\0');
     match value {
@@ -81,7 +80,6 @@ fn check_text(value: &Value) -> Result<(), Malformed> {
     }
 }
 
-/// `serde_json`'s recursion limit bounds the depth.
 fn check_values(value: &Value) -> Result<(), Malformed> {
     match value {
         Value::Number(number) => {
@@ -124,7 +122,6 @@ fn easing_overshoot(handle: f64) -> f64 {
     1.0 + 2.0 * handle
 }
 
-/// `serde_json`'s recursion limit bounds the depth.
 fn scan(value: &Value, biggest: &mut f64, handle: &mut f64) {
     match value {
         Value::Number(number) => {
@@ -148,7 +145,6 @@ fn scan(value: &Value, biggest: &mut f64, handle: &mut f64) {
     }
 }
 
-/// `serde_json`'s recursion limit bounds the depth.
 fn vertices(path: &Value) -> u64 {
     match path {
         Value::Array(items) => items.iter().map(vertices).max().unwrap_or(0),

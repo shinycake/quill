@@ -1027,7 +1027,7 @@ index f7723a889..7f59bdf05 100644
          if (bbox.max.x < t.x) bbox.max.x = t.x;
          if (bbox.min.y > t.y) bbox.min.y = t.y;
 diff --git a/src/renderer/tvgPaint.cpp b/src/renderer/tvgPaint.cpp
-index 44e8f724f..6d409c0df 100644
+index 44e8f724f..a3bf5fb4f 100644
 --- a/src/renderer/tvgPaint.cpp
 +++ b/src/renderer/tvgPaint.cpp
 @@ -31,6 +31,15 @@
@@ -1037,9 +1037,9 @@ index 44e8f724f..6d409c0df 100644
 +//QUILL
 +static int32_t _toInt(float v)
 +{
-+    constexpr auto LIMIT = 2147483520.0f;  //the largest float under 2^31.
-+    if (!(v > -LIMIT)) return static_cast<int32_t>(-LIMIT);
-+    if (v > LIMIT) return static_cast<int32_t>(LIMIT);
++    constexpr auto LARGEST_FLOAT_UNDER_2_31 = 2147483520.0f;
++    if (!(v > -LARGEST_FLOAT_UNDER_2_31)) return static_cast<int32_t>(-LARGEST_FLOAT_UNDER_2_31);
++    if (v > LARGEST_FLOAT_UNDER_2_31) return static_cast<int32_t>(LARGEST_FLOAT_UNDER_2_31);
 +    return static_cast<int32_t>(nearbyint(v));
 +}
 +

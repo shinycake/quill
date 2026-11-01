@@ -145,10 +145,9 @@ ThorVG sees it, following `lottieparser.cpp` call for call:
   without the chosen tone maps to black, as rlottie reads a missing key as 0.
 
 `FitzType::from_tdlib` maps TDLib's `fitzpatrick_type` (1 and 2 share the
-light set), as Telegram X's decoder does. When nothing changes the original
-bytes go to ThorVG; otherwise the document is serialized again, in the
-file's key order (`serde_json` has `preserve_order`), which ThorVG's streaming
-parser needs for `"ty"`. The reference tdesktop checkout's `lib_lottie` now
+light set), as Telegram X's decoder does. The document is serialized after the
+swap, in the file's key order (`serde_json` has `preserve_order`), which ThorVG's
+streaming parser needs. The reference tdesktop checkout's `lib_lottie` now
 calls a `tlottie` library that is not in the reference repos, so the port
 follows tg-rlottie. `decode_tgs_sized` takes the tone; every caller passes
 `FitzType::None` until emoji messages pass the real one.

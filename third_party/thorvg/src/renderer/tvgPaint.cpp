@@ -34,9 +34,9 @@
 //QUILL
 static int32_t _toInt(float v)
 {
-    constexpr auto LIMIT = 2147483520.0f;  //the largest float under 2^31.
-    if (!(v > -LIMIT)) return static_cast<int32_t>(-LIMIT);
-    if (v > LIMIT) return static_cast<int32_t>(LIMIT);
+    constexpr auto LARGEST_FLOAT_UNDER_2_31 = 2147483520.0f;
+    if (!(v > -LARGEST_FLOAT_UNDER_2_31)) return static_cast<int32_t>(-LARGEST_FLOAT_UNDER_2_31);
+    if (v > LARGEST_FLOAT_UNDER_2_31) return static_cast<int32_t>(LARGEST_FLOAT_UNDER_2_31);
     return static_cast<int32_t>(nearbyint(v));
 }
 

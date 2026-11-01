@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Copy the part of ThorVG that Quill builds (CPU engine, Lottie loader without
-# expressions, raw loader, C API) into third_party/thorvg/, apply Quill's patch
-# (native/patches/thorvg-sticker-limits.patch, described in
-# third_party/thorvg/QUILL-CHANGES.md, which stays), and record the tag and
-# commit in third_party/thorvg/VERSION. build.rs compiles it with `cc`.
+# expressions, raw loader, C API) into third_party/thorvg/, apply Quill's patch,
+# and record the tag and commit in third_party/thorvg/VERSION. build.rs compiles
+# it with `cc`.
 #
 # Usage: scripts/vendor-thorvg.sh <tag> [thorvg-checkout]
 #   With no checkout, the tag is shallow-cloned from github.com/thorvg/thorvg.
