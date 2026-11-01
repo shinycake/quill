@@ -76,15 +76,11 @@ pub(super) fn doc_content(doc: &ComposerDoc) -> InputContent {
             content = next;
         }
     }
-    for span in &doc.spans {
-        if let Ok(next) = content
-            .clone()
-            .with_span(span.range.clone(), span.tag.to_tag())
-        {
-            content = next;
-        }
-    }
-    content
+    content.with_spans(
+        doc.spans
+            .iter()
+            .map(|span| (span.range.clone(), span.tag.to_tag().into())),
+    )
 }
 
 /// Engine spans for document spans.

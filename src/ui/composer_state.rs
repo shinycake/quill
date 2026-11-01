@@ -175,6 +175,7 @@ pub(crate) struct ComposerUi {
     pub(super) checklist_dialog: Option<ChecklistDialog>,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
+    pub(super) text_limit: super::composer_ui::TextLimitMemo,
 }
 
 impl ComposerUi {
@@ -247,6 +248,7 @@ impl ComposerUi {
             poll_dialog: None,
             checklist_dialog: None,
             send_box: super::send_box_state::SendBoxUi::new(),
+            text_limit: Default::default(),
         }
     }
 }

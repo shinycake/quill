@@ -35,7 +35,7 @@ use std::rc::Rc;
 pub(super) struct WindowSlot {
     pub(super) history: HistoryUi,
     pub(super) composer: Entity<TextareaState>,
-    pub(super) composer_ui: ComposerUi,
+    pub(super) composer_ui: Box<ComposerUi>,
     pub(super) message_ui: MessageUi,
     pub(super) pickers: PickerUi,
     pub(super) viewer: ViewerUi,
@@ -79,7 +79,7 @@ impl WindowSlot {
         Self {
             history: HistoryUi::new(cx),
             composer,
-            composer_ui: ComposerUi::new(),
+            composer_ui: Box::new(ComposerUi::new()),
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),

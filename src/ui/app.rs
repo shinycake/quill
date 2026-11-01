@@ -37,7 +37,7 @@ pub struct QuillApp {
     /// Window and per-frame bookkeeping: animation demand, focus restore, quit guard (`ui/frame_state.rs`).
     pub(super) frame: super::frame_state::FrameUi,
     /// Composer state: menus, attachments, send options, reply and edit drafts (`ui/composer_state.rs`).
-    pub(super) composer_ui: super::composer_state::ComposerUi,
+    pub(super) composer_ui: Box<super::composer_state::ComposerUi>,
     /// The next send's attachments and options, per account, chat and topic (`ui/composer_sends.rs`).
     pub(super) composer_sends: super::composer_sends::ComposerSends,
     /// Emoji, sticker and GIF panel and their search fields (`ui/pickers_state.rs`).
