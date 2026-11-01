@@ -106,8 +106,13 @@ impl ToastQueue {
         }
     }
 
-    /// The window `closed` went: its toasts move to the main window.
-    pub(crate) fn window_closed(&mut self, closed: ChatId, _now: Instant) {
+    /// The window `closed` went: its toasts move to the main window, and a
+    /// hover there can never end, so the visible toast's timer runs again.
+    pub(crate) fn window_closed(&mut self, closed: ChatId, now: Instant) {
+        let showing_there = self
+            .showing
+            .as_ref()
+            .is_some_and(|showing| showing.toast.host == Some(closed));
         for toast in self
             .showing
             .iter_mut()
@@ -116,6 +121,9 @@ impl ToastQueue {
             .filter(|toast| toast.host == Some(closed))
         {
             toast.host = None;
+        }
+        if showing_there {
+            self.set_hovered(false, now);
         }
     }
 
@@ -337,18 +345,28 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_windows_toasts_move_to_the_main_window() {
+    fn a_closed_windows_toasts_move_to_the_main_window_and_run_again() {
         let t0 = Instant::now();
         let window = quill::ids::ChatId(12);
         let mut queue = ToastQueue::default();
         queue.push_in(StatusNote::error("one"), Some(window), t0);
         queue.push_in(StatusNote::info("two"), Some(window), t0);
         assert_eq!(queue.visible_host(), Some(Some(window)));
+        queue.set_hovered(true, secs(t0, 1));
+        assert_eq!(queue.deadline(secs(t0, 2)), None, "paused");
         queue.window_closed(window, secs(t0, 2));
         assert_eq!(queue.visible_host(), Some(None), "in the main window");
+        assert!(
+            queue.deadline(secs(t0, 2)).is_some(),
+            "the timer runs again"
+        );
         queue.dismiss(secs(t0, 3));
         assert_eq!(text(&queue), Some("two"));
         assert_eq!(queue.visible_host(), Some(None));
+        assert!(
+            queue.deadline(secs(t0, 3)).is_some(),
+            "the next is not paused"
+        );
     }
 
     #[test]
