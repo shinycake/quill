@@ -59,8 +59,8 @@ fn a_full_disk_shows_the_screen_with_what_is_free_and_what_is_needed(cx: &mut Te
     assert!(!shown(&app, &mut vcx).0, "the screen replaces the bar");
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
     assert_eq!(view.title, tr(keys::Q_DISK_FULL_TITLE));
-    assert!(view.body.contains("Available: 64.0 MB"), "{}", view.body);
-    assert!(view.body.contains("Needed: 256.0 MB"), "{}", view.body);
+    assert!(view.body.contains("Available: 80.0 MB"), "{}", view.body);
+    assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
 }
 
 #[gpui_kit::test]

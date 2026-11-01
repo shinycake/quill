@@ -10,7 +10,13 @@ pub fn available_bytes(path: &Path) -> Option<u64> {
     if let Some(free) = demo_available_bytes() {
         return Some(free);
     }
-    read_available(path)
+    read_available(nearest_existing(path))
+}
+
+fn nearest_existing(path: &Path) -> &Path {
+    path.ancestors()
+        .find(|folder| folder.exists())
+        .unwrap_or(path)
 }
 
 #[cfg(feature = "demo-capture")]
@@ -101,6 +107,15 @@ mod tests {
     #[test]
     fn a_huge_volume_saturates() {
         assert_eq!(usable(u64::MAX, u64::MAX, 4096), Some(u64::MAX));
+    }
+
+    #[test]
+    fn a_deleted_folder_reads_its_nearest_parent() {
+        let temp = std::env::temp_dir();
+        let deleted = temp.join("quill-no-such-folder/accounts");
+        assert_eq!(nearest_existing(&deleted), temp);
+        assert_eq!(nearest_existing(&temp), temp);
+        assert!(available_bytes(&deleted).is_some());
     }
 
     #[test]

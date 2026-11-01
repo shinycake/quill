@@ -133,7 +133,6 @@ pub enum ConnectBlocker {
     TdjsonVersion,
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
-    /// Too little free disk for TDLib to open safely (`crate::disk_guard`).
     DiskFull,
 }
 

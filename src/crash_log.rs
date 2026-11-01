@@ -45,8 +45,8 @@ const CLEAN_EXIT_FILE: &str = "clean-exit";
 /// Present while a Quill process runs: process id, version, start time.
 const RUNNING_FILE: &str = "running";
 const NATIVE_FATAL_FILE: &str = "tdlib-fatal";
-/// [`NATIVE_FATAL_FILE`]'s size, written while there is room. A full disk
-/// refuses a new file (and a rename, on APFS) but not an overwrite.
+/// [`NATIVE_FATAL_FILE`]'s size. A full disk refuses a new file (and a
+/// rename, on APFS) but not an overwrite.
 const NATIVE_FATAL_SLOT: usize = 128;
 const DISK_FULL_LINE: &str = "The disk was full.";
 /// A caught panic from one code location is filed at most this often, so a
@@ -312,7 +312,6 @@ fn prune_report_files(dir: &Path, kind: ReportKind, keep: usize) {
 pub struct PendingCrash {
     pub unix_secs: u64,
     pub path: PathBuf,
-    /// TDLib aborted with the disk full.
     pub disk_full: bool,
 }
 
@@ -521,8 +520,8 @@ pub fn arm_native_fatal_breadcrumb(root: &Path) {
 }
 
 /// TDLib logged at verbosity 0 (fatal): it aborts right after the callback
-/// returns. Leave a breadcrumb for the next launch. The message text is
-/// never read: native logs can contain account data. Failures are ignored.
+/// returns. The message text is never read: native logs can contain account
+/// data.
 pub fn note_native_fatal() {
     if let Some(path) = NATIVE_FATAL_PATH.get() {
         let _ = write_native_fatal(path, unix_now());

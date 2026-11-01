@@ -397,7 +397,6 @@ fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `updateFile` for a file of `size` bytes with `done` of them on disk.
 fn file_update(id: i32, size: i64, done: i64) -> String {
     format!(
         r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":{size},"expected_size":{size},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":{done},"downloaded_size":{done}}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":{size}}}}}}}"#

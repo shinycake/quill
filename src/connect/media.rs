@@ -353,9 +353,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Apply a disk reading to this client. While the disk is low, automatic
-    /// downloads wait, and a listed download whose rest would not fit above
-    /// the close floor pauses.
     pub fn note_disk(
         &mut self,
         state: DiskState,

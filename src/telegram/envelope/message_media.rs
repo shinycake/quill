@@ -180,7 +180,6 @@ impl ParsedFile {
         }
     }
 
-    /// Bytes still to come, as far as TDLib knows the size.
     pub fn download_left(&self) -> u64 {
         let left = self
             .display_size()

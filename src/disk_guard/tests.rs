@@ -93,6 +93,28 @@ fn a_read_that_says_nothing_never_changes_the_state() {
 }
 
 #[test]
+fn going_full_closes_clients_and_leaving_full_reconnects() {
+    use DiskState::{Full, Healthy, Low};
+    for before in [Healthy, Low] {
+        assert_eq!(before.step(Full, false, false), DiskStep::Close);
+        assert_eq!(before.step(Full, true, true), DiskStep::Close);
+    }
+    assert_eq!(Full.step(Full, false, true), DiskStep::Hold, "all closed");
+    assert_eq!(Full.step(Full, true, false), DiskStep::Close, "one opened");
+    assert_eq!(Full.step(Low, false, false), DiskStep::Reconnect);
+    assert_eq!(Full.step(Healthy, false, true), DiskStep::Reconnect);
+}
+
+#[test]
+fn a_refused_start_goes_again_only_outside_full() {
+    use DiskState::{Healthy, Low};
+    assert_eq!(Low.step(Low, true, true), DiskStep::RetryStarts);
+    assert_eq!(Low.step(Healthy, true, true), DiskStep::RetryStarts);
+    assert_eq!(Low.step(Low, true, false), DiskStep::Hold);
+    assert_eq!(Healthy.step(Healthy, true, false), DiskStep::Hold);
+}
+
+#[test]
 fn opening_is_refused_only_on_a_read_below_the_open_floor() {
     assert!(refuses_open(Some(199), &FLOORS));
     assert!(!refuses_open(Some(200), &FLOORS));
