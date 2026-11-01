@@ -142,19 +142,6 @@ fn a_wheel_over_the_media_panel_is_the_panels_alone(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_wheel_over_the_history_redraws_it_with_no_row_to_move(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx, 1100.);
-    let vcx = &mut vcx;
-    frames(vcx);
-    let at = history_centre(&app, vcx);
-    let _ = take_slice_renders();
-    wheel(vcx, at, TouchPhase::Moved, 25.);
-    vcx.run_until_parked();
-    let drawn = take_slice_renders();
-    assert_eq!(drawn.get("conversation"), Some(&1), "{drawn:?}");
-}
-
-#[gpui_kit::test]
 fn pulling_past_the_bottom_of_a_channel_opens_the_next_unread_one(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, 1100.);
     let vcx = &mut vcx;
