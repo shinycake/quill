@@ -110,10 +110,8 @@ impl QuillApp {
             .create(true)
             .append(true)
             .open(&path);
-        if !quill::platform::reveal_in_file_manager(&path) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS)));
-        }
+        let open = quill::platform::reveal_in_file_manager(&path);
+        self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS), cx);
         cx.notify();
     }
 

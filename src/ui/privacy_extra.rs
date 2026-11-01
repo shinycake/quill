@@ -557,14 +557,7 @@ impl QuillApp {
             return;
         }
         let open = quill::platform::open_local_file(path);
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            this.connection.set_note(if opened {
-                StatusNote::silent(tr(keys::Q_PREFS_OPENED_FILE))
-            } else {
-                StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE))
-            });
-            cx.notify();
-        });
+        self.report_failed_open(open, tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE), cx);
     }
 
     /// The warning's confirm: remember the choice when ticked, then open.

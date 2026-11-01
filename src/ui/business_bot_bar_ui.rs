@@ -138,7 +138,7 @@ impl QuillApp {
             self.queue_deep_link(url.to_string());
             cx.notify();
         } else {
-            self.open_message_url(url, cx);
+            self.open_link(url, cx);
         }
     }
 }

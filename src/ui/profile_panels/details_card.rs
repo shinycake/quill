@@ -377,7 +377,10 @@ impl QuillApp {
                                 copy_menu(menu, &owner, std::iter::once(&copy).chain(&extra_copy));
                             match fragment_note.clone() {
                                 Some(url) => crate::ui::profile_business::fragment_note_menu(
-                                    menu, muted, url,
+                                    menu,
+                                    muted,
+                                    url,
+                                    owner.clone(),
                                 ),
                                 None => menu,
                             }

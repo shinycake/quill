@@ -4,6 +4,8 @@
 //! (`premium_hub::fragment`).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ui::app::QuillApp;
+use crate::ui::os_open::open_link_in;
 use gpui_kit::component::*;
 use gpui_kit::*;
 
@@ -16,6 +18,7 @@ pub(super) fn text_with_link(
     link: &str,
     after: &str,
     url: String,
+    app: WeakEntity<QuillApp>,
     cx: &App,
 ) -> InteractiveText {
     let mut text = String::from(before);
@@ -31,5 +34,5 @@ pub(super) fn text_with_link(
         id,
         StyledText::new(text).with_highlights(vec![(range.clone(), style)]),
     )
-    .on_click(vec![range], move |_, _, cx| cx.open_url(&url))
+    .on_click(vec![range], move |_, _, cx| open_link_in(&app, &url, cx))
 }

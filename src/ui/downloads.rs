@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId};
 use quill::lang::{keys, tr, tr_with};
+use quill::platform::OsOpen;
 use std::path::PathBuf;
 
 impl QuillApp {
@@ -96,13 +97,10 @@ impl QuillApp {
             .and_then(|s| s.media.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
-        self.connection.set_note(match path {
-            Some(path) if quill::platform::reveal_in_file_manager(&path) => {
-                StatusNote::silent(tr(keys::Q_OPS_REVEALED_IN_FILE_MANAGER))
-            }
-            _ => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE)),
+        let open = path.map_or(OsOpen::Answered(false), |path| {
+            quill::platform::reveal_in_file_manager(&path)
         });
-        cx.notify();
+        self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE), cx);
     }
 
     /// Cancel an in-flight download: listed (user-initiated) downloads go

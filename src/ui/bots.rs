@@ -162,15 +162,7 @@ impl QuillApp {
             });
             cx.notify();
         } else {
-            let open = quill::platform::open_external_url(&answer.url);
-            self.when_os_answers(open, cx, |this, opened, cx| {
-                this.connection.set_note(if opened {
-                    StatusNote::info(tr(keys::Q_MEDIA_OPENED_LINK))
-                } else {
-                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_LINK))
-                });
-                cx.notify();
-            });
+            self.open_link(&answer.url, cx);
         }
     }
 
@@ -197,7 +189,7 @@ impl QuillApp {
             _ => {
                 // Not connected, or TDLib refused the send: plain URL-button
                 // behavior is the honest fallback.
-                self.open_message_url(url, cx);
+                self.open_link(url, cx);
             }
         }
     }
@@ -658,7 +650,7 @@ impl QuillApp {
                 "bot-privacy-policy",
                 tr(keys::Q_MEDIA_PRIVACY_POLICY),
                 cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&url, cx);
+                    this.open_link(&url, cx);
                 }),
             ));
         } else if info.commands.iter().any(|c| c.command == "privacy") {
@@ -868,7 +860,7 @@ fn bot_menu_link(text: String, url: String, cx: &mut Context<QuillApp>) -> AnyEl
     Button::new("bot-menu-button")
         .label(text)
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_message_url(&url, cx);
+            this.open_link(&url, cx);
         }))
         .into_any_element()
 }

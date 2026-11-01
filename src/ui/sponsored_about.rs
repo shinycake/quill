@@ -7,6 +7,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::os_open::open_link_in;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -134,7 +135,10 @@ impl QuillApp {
                             Button::new("sponsored-about-learn-more")
                                 .label(tr(keys::Q_OPS_LEARN_MORE))
                                 .link()
-                                .on_click(|_, _, cx| cx.open_url(ADS_PLATFORM_URL)),
+                                .on_click({
+                                    let app = app.downgrade();
+                                    move |_, _, cx| open_link_in(&app, ADS_PLATFORM_URL, cx)
+                                }),
                         ),
                     ),
                 );

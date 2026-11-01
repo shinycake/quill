@@ -5,6 +5,7 @@
 
 use super::{CustomBox, InviteLinkBox};
 use crate::ui::app::QuillApp;
+use crate::ui::os_open::open_link_in;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -158,7 +159,10 @@ impl QuillApp {
                             },
                         )]),
                     )
-                    .on_click(vec![range], |_, _, cx| cx.open_url(STARS_TERMS_URL)),
+                    .on_click(vec![range], {
+                        let app = cx.weak_entity();
+                        move |_, _, cx| open_link_in(&app, STARS_TERMS_URL, cx)
+                    }),
                 ),
         )
     }

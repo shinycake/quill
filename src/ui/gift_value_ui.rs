@@ -211,7 +211,7 @@ impl QuillApp {
             label: None,
         };
         match open_decision(&link) {
-            OpenDecision::Open => self.open_message_url(&url, cx),
+            OpenDecision::Open => self.open_link(&url, cx),
             // A look-alike address asks first, in the same "Open this
             // link?" box a message link uses; its Open button opens it.
             OpenDecision::Confirm {

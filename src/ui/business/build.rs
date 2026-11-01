@@ -114,7 +114,7 @@ impl QuillApp {
                     .child(
                         Link::new("business-ads-platform")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_message_url(ADS_URL, cx);
+                                this.open_link(ADS_URL, cx);
                             }))
                             .child(tr(keys::Q_OPS_TELEGRAM_AD_PLATFORM)),
                     ),

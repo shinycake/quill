@@ -281,7 +281,6 @@
 "qll_media_could_not_load_the_bots" = "Could not load the bot's details.";
 "qll_media_could_not_load_voters" = "could not load voters";
 "qll_media_could_not_look_up_the" = "could not look up the bot";
-"qll_media_could_not_open_link" = "could not open link";
 "qll_media_could_not_open_map" = "could not open map";
 "qll_media_could_not_open_message" = "could not open message";
 "qll_media_could_not_open_the_sticker" = "could not open the sticker set";
@@ -517,7 +516,6 @@
 "qll_media_open_story" = "Open story";
 "qll_media_open_the_bots_chat_to" = "Open the bot's chat to use its menu.";
 "qll_media_open_the_sticker_panel_once" = "Open the sticker panel once to load stickers to choose from.";
-"qll_media_opened_link" = "opened link";
 "qll_media_opening_the_mini_app" = "Opening the mini app…";
 "qll_media_option" = "Option {index_1}";
 "qll_media_option_added_demo" = "option added (demo)";
@@ -733,7 +731,6 @@
 "qll_media_updating_checklist" = "updating checklist…";
 "qll_media_updating_favorite_stickers" = "updating favorite stickers…";
 "qll_media_user" = "User {user_id}";
-"qll_media_venue" = "Venue";
 "qll_media_verification_description" = "Verification description";
 "qll_media_verified" = "{name} (verified)";
 "qll_media_verifying_as_a" = "Verifying {name} as a {noun}…";

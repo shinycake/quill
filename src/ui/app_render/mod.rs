@@ -121,7 +121,7 @@ impl Render for QuillApp {
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
-        let status_toast = self.status_toast_visible(cx);
+        let status_toast = self.status_toast_in(None, cx);
         self.frame.context_menu_items.begin();
         let menu_open = self.context_menu_open();
         if menu_open && !self.frame.context_menu_was_open {
@@ -262,8 +262,7 @@ impl Render for QuillApp {
                 this.set_appearance(cx, |a| a.theme = next);
             }))
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
-                let _ = this;
-                cx.open_url("https://github.com/shinycake/quill");
+                this.open_link("https://github.com/shinycake/quill", cx);
             }))
             .on_action(cx.listener(|this, _: &OpenShortcuts, _, cx| {
                 this.open_settings(Some(quill::settings_catalog::Page::Shortcuts));
@@ -910,5 +909,7 @@ impl Render for QuillApp {
 
 mod frame_upkeep;
 mod status_toast;
+#[cfg(test)]
+pub(in crate::ui) use status_toast::pin_toasts_for_tests;
 #[allow(unused_imports)]
 use status_toast::*;

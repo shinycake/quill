@@ -564,7 +564,7 @@ pub(in crate::ui) fn session_history_row(
                     .child(tr(keys::Q_CHAT_QUILL_CANNOT_DISPLAY_THIS_MESSAGE)))
                 .child(Button::new(("unsupported-update", message.id.0 as u64))
                     .label(tr(keys::Q_CHAT_GET_LATEST_QUILL))
-                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(quill::updater::RELEASES_URL))))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_link(quill::updater::RELEASES_URL, cx))))
                 .into_any_element(),
         ),
     };

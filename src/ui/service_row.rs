@@ -79,7 +79,7 @@ fn pill(id: (&'static str, u64), text: &ServiceText, cx: &mut Context<QuillApp>)
                     ServiceLink::Message(message_id) => {
                         this.jump_to_replied_message(MessageId(message_id), cx)
                     }
-                    ServiceLink::Url(url) => this.open_message_url(&url, cx),
+                    ServiceLink::Url(url) => this.open_link(&url, cx),
                 });
             })
             .into_any_element()
