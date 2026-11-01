@@ -652,21 +652,24 @@ fn request_logout_sends_logout_then_logging_out_then_closed() {
 /// read-only folder and a parent that is a file (`TdDb.cpp` for the key).
 #[test]
 fn a_refused_database_replaces_connecting_with_the_reason() {
-    for (code, message, failure) in [
+    for (code, message, failure, detail) in [
         (
             400,
             r#"File \"/data/td.binlog\" can't be opened/created for reading and writing"#,
             StartupFailure::DataFolder,
+            Some("File can't be opened/created for reading and writing"),
         ),
         (
             400,
             "Can't init database in the directory \\\"/data/db\\\": [PosixError : Not a directory : 20]",
             StartupFailure::DataFolder,
+            Some("Can't init database in the directory: [PosixError: Not a directory: 20]"),
         ),
         (
             401,
             "Wrong database encryption key",
             StartupFailure::WrongKey,
+            None,
         ),
     ] {
         let store = MemorySecretStore::new();
@@ -689,7 +692,12 @@ fn a_refused_database_replaces_connecting_with_the_reason() {
             AuthorizationState::StartupFailed(failure)
         );
         assert_eq!(driver.session.auth_view.action, AuthAction::StartupFailed);
-        assert_eq!(driver.session.auth_view.body, failure.reason());
+        let body = match detail {
+            Some(detail) => format!("{}\n{detail}", failure.reason()),
+            None => failure.reason().to_string(),
+        };
+        assert_eq!(driver.session.auth_view.body, body);
+        assert!(!driver.session.auth_view.body.contains("/data"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

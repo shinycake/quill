@@ -29,6 +29,10 @@ pub struct TdError {
     /// it as Telegram Desktop does (the passkey sign-in) read it. Free text,
     /// which can carry secrets, never lands here.
     pub server_type: Option<String>,
+    /// TDLib's words about a database or file it could not open, with the
+    /// quoted paths cut out ([`crate::auth::database_error_detail`]). The
+    /// startup card shows it under the reason.
+    pub database_detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +117,7 @@ impl TdError {
             premium_limit: None,
             earn_hint: None,
             server_type: None,
+            database_detail: None,
         }
     }
 
@@ -517,6 +522,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             premium_limit: None,
             earn_hint,
             server_type,
+            database_detail: None,
         };
     }
     let ai_class = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -537,6 +543,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             premium_limit: None,
             earn_hint,
             server_type,
+            database_detail: None,
         };
     }
     if value
@@ -552,6 +559,7 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
             premium_limit: None,
             earn_hint,
             server_type,
+            database_detail: None,
         };
     }
     let permission = match value.and_then(|v| v.get("message")).and_then(Value::as_str) {
@@ -573,6 +581,10 @@ pub(crate) fn parse_error(value: Option<&Value>) -> TdError {
     }
     err.flood_wait_secs = flood_wait_secs;
     err.earn_hint = earn_hint;
+    err.database_detail = value
+        .and_then(|v| v.get("message"))
+        .and_then(Value::as_str)
+        .and_then(crate::auth::database_error_detail);
     err.server_type = server_type;
     err.limit_hint = value
         .and_then(|v| v.get("message"))
