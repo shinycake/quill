@@ -846,3 +846,5 @@ impl QuillApp {
 
 mod command_menu_view;
 mod send_sticker_pick;
+mod text_limit;
+pub(in crate::ui) use text_limit::TextLimitMemo;

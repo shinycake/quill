@@ -1,6 +1,3 @@
-//! Formatting markup: parsing `**bold**`-style markers into entities,
-//! rebuilding markup from entities, and applying or clearing formats.
-
 /// M1: composer text formatting. The composer stays plain text; formatting
 /// is authored as lightweight markup (Telegram X `InputView` format menu /
 /// tdesktop markdown behavior) and converted to TDLib `textEntities` on
@@ -41,6 +38,8 @@ pub enum FormatKind {
 pub struct ComposerEntity {
     pub offset: i32,
     pub length: i32,
+    /// The same text as UTF-8 byte offsets.
+    pub bytes: std::ops::Range<usize>,
     pub kind: FormatKind,
     /// `TextUrl` target.
     pub url: String,
@@ -93,21 +92,8 @@ impl FormatAction {
     }
 }
 
-/// M1: parse composer markup into clean text + entities. Returns the text
-/// with markers stripped and entities with UTF-16 offsets into it.
-pub fn parse_format_markup(text: &str) -> (String, Vec<ComposerEntity>) {
-    let mut parser = MarkupParser {
-        text,
-        out: String::with_capacity(text.len()),
-        out16: 0,
-        entities: Vec::new(),
-    };
-    parser.parse_top();
-    (parser.out, parser.entities)
-}
-
 /// Composer markup for `text` and its TDLib entities: the inverse of
-/// [`parse_format_markup`], used to restore drafts that come back from
+/// [`parse_format_markup`](super::parse_format_markup), used to restore drafts that come back from
 /// Telegram. Kinds the markup can't express (URLs, mentions, …) stay plain
 /// text; TDLib detects those again on send.
 pub fn entities_to_markup(text: &str, entities: &[crate::text::TextEntity]) -> String {
@@ -219,273 +205,6 @@ fn apply_block_quote(text: &str, start: usize, end: usize) -> (String, std::ops:
     new_text.push_str(text.get(line_end..).unwrap_or_default());
     // Select the quoted lines (predictable; the user can keep typing).
     (new_text, line_start..line_end + added_total)
-}
-
-struct MarkupParser<'a> {
-    text: &'a str,
-    out: String,
-    /// UTF-16 code-unit length of `out`.
-    out16: i32,
-    entities: Vec<ComposerEntity>,
-}
-
-impl<'a> MarkupParser<'a> {
-    fn parse_top(&mut self) {
-        self.parse_span(0, self.text.len(), true);
-        // Consecutive `> ` lines are one quote, newlines included.
-        let mut merged: Vec<ComposerEntity> = Vec::with_capacity(self.entities.len());
-        for entity in self.entities.drain(..) {
-            if entity.kind == FormatKind::BlockQuote
-                && let Some(prev) = merged
-                    .iter_mut()
-                    .rev()
-                    .find(|e| e.kind == FormatKind::BlockQuote)
-                && prev.offset + prev.length + 1 == entity.offset
-                && self
-                    .out
-                    .as_bytes()
-                    .get(utf16_to_byte(&self.out, prev.offset + prev.length))
-                    == Some(&b'\n')
-            {
-                prev.length = entity.offset + entity.length - prev.offset;
-                continue;
-            }
-            merged.push(entity);
-        }
-        merged.sort_by_key(|e| (e.offset, std::cmp::Reverse(e.length)));
-        self.entities = merged;
-    }
-
-    /// Parse `self.text[from..to]`. Block syntax (`> ` quote lines) only at
-    /// the top level; inline spans nest (`**a *b* c**`), except inside code,
-    /// which stays literal.
-    fn parse_span(&mut self, from: usize, to: usize, top: bool) {
-        let bytes = self.text.as_bytes();
-        let mut i = from;
-        while i < to {
-            let line_start = i == 0 || bytes.get(i - 1) == Some(&b'\n');
-            if top && line_start && self.text.get(i..to).unwrap_or_default().starts_with("> ") {
-                let content_start = i + 2;
-                let line_end = self
-                    .text
-                    .get(content_start..to)
-                    .unwrap_or_default()
-                    .find('\n')
-                    .map(|k| content_start + k)
-                    .unwrap_or(to);
-                let entity_start = self.out16;
-                self.parse_span(content_start, line_end, false);
-                let entity_len = self.out16 - entity_start;
-                if entity_len > 0 {
-                    self.entities.push(ComposerEntity {
-                        offset: entity_start,
-                        length: entity_len,
-                        kind: FormatKind::BlockQuote,
-                        url: String::new(),
-                        language: String::new(),
-                    });
-                }
-                i = line_end;
-                continue;
-            }
-            if let Some(consumed) = self.try_inline(i, to) {
-                i = consumed;
-                continue;
-            }
-            if let Some(consumed) = self.try_custom_emoji(i, to) {
-                i = consumed;
-                continue;
-            }
-            if let Some(consumed) = self.try_link(i, to) {
-                i = consumed;
-                continue;
-            }
-            // `i` always advances by whole chars, so it stays on a boundary.
-            let Some(ch) = self.text.get(i..).and_then(|rest| rest.chars().next()) else {
-                break;
-            };
-            self.push_char(ch);
-            i += ch.len_utf8();
-        }
-    }
-
-    /// Try a paired delimiter at byte offset `i`. Returns the offset just
-    /// past the closing delimiter on success. Check order matters: longer
-    /// delimiters first (`**` before `*`, `__` before `_`, ` ``` ` before
-    /// `` ` ``).
-    fn try_inline(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = self.text.get(i..to).unwrap_or_default();
-        // Fenced code block first (may span lines, optional language).
-        if let Some(after) = rest.strip_prefix("```") {
-            return self.try_fenced(i, after);
-        }
-        for (open, kind) in [
-            ("**", FormatKind::Bold),
-            ("__", FormatKind::Underline),
-            ("~~", FormatKind::Strikethrough),
-            ("||", FormatKind::Spoiler),
-            ("`", FormatKind::Code),
-            ("*", FormatKind::Italic),
-            ("_", FormatKind::Italic),
-        ] {
-            if let Some(after_open) = rest.strip_prefix(open) {
-                // A lone `*`/`_` that continues a `**`/`__` pair never opens
-                // italic: an unmatched `**bold` must not re-parse the second
-                // `*` as an italic opener (unmatched delimiters stay literal).
-                if open.len() == 1
-                    && i > 0
-                    && self.text.as_bytes().get(i - 1) == open.as_bytes().first()
-                {
-                    continue;
-                }
-                // A marker inside a word is plain text.
-                if !super::markup_boundary::opener_ok(self.text, i, open) {
-                    return None;
-                }
-                // Inline spans stay on one line (Telegram entities do).
-                let inner_start = i + open.len();
-                let line_end = after_open.find('\n').unwrap_or(after_open.len());
-                if let Some(inner_end) = super::markup_boundary::find_closer(
-                    self.text,
-                    inner_start,
-                    inner_start + line_end,
-                    open,
-                ) {
-                    let entity_start = self.out16;
-                    if kind == FormatKind::Code {
-                        self.push_str(self.text.get(inner_start..inner_end).unwrap_or_default());
-                    } else {
-                        self.parse_span(inner_start, inner_end, false);
-                    }
-                    self.entities.push(ComposerEntity {
-                        offset: entity_start,
-                        length: self.out16 - entity_start,
-                        kind,
-                        url: String::new(),
-                        language: String::new(),
-                    });
-                    return Some(inner_end + open.len());
-                }
-                return None;
-            }
-        }
-        None
-    }
-
-    fn try_fenced(&mut self, i: usize, after: &str) -> Option<usize> {
-        // Language = first line after the fence (may be empty).
-        let first_nl = after.find('\n')?;
-        let language = after.get(..first_nl).unwrap_or_default().trim().to_string();
-        let body_start = first_nl + 1;
-        let close_rel = after.get(body_start..).unwrap_or_default().find("```")?;
-        let inner = after
-            .get(body_start..body_start + close_rel)
-            .unwrap_or_default();
-        // A fenced block with only whitespace is not formatting.
-        if inner.trim().is_empty() {
-            return None;
-        }
-        // The newline before the closing fence is block syntax, not content.
-        let inner = inner
-            .strip_suffix("\r\n")
-            .or_else(|| inner.strip_suffix('\n'))
-            .unwrap_or(inner);
-        let entity_start = self.out16;
-        self.push_str(inner);
-        self.entities.push(ComposerEntity {
-            offset: entity_start,
-            length: self.out16 - entity_start,
-            kind: FormatKind::Pre,
-            url: String::new(),
-            language,
-        });
-        Some(i + 3 + body_start + close_rel + 3)
-    }
-
-    /// `![emoji](tg://emoji?id=N)` — Telegram's markup for a custom emoji.
-    fn try_custom_emoji(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = self.text.get(i..to).unwrap_or_default();
-        let after_bang = rest.strip_prefix("![")?;
-        let close_bracket = after_bang.find("](")?;
-        let fallback = after_bang.get(..close_bracket).unwrap_or_default();
-        let after_paren = after_bang.get(close_bracket + 2..).unwrap_or_default();
-        let close_paren = after_paren.find(')')?;
-        let url = after_paren.get(..close_paren).unwrap_or_default();
-        let id = url.strip_prefix("tg://emoji?id=")?;
-        if fallback.is_empty() || id.is_empty() || id.parse::<i64>().is_err() {
-            return None;
-        }
-        let entity_start = self.out16;
-        self.push_str(fallback);
-        self.entities.push(ComposerEntity {
-            offset: entity_start,
-            length: self.out16 - entity_start,
-            kind: FormatKind::CustomEmoji,
-            url: url.to_string(),
-            language: String::new(),
-        });
-        Some(i + 2 + close_bracket + 2 + close_paren + 1)
-    }
-
-    /// `[label](url)`; a `tg://user?id=N` target is a mention of a user
-    /// without a username. The label may hold other inline formatting.
-    fn try_link(&mut self, i: usize, to: usize) -> Option<usize> {
-        let rest = self.text.get(i..to).unwrap_or_default();
-        let after_bracket = rest.strip_prefix('[')?;
-        let close_bracket = after_bracket.find("](")?;
-        let after_paren = after_bracket.get(close_bracket + 2..).unwrap_or_default();
-        // URL stays on one line.
-        let line_end = after_paren.find('\n').unwrap_or(after_paren.len());
-        let close_paren = after_paren.get(..line_end).unwrap_or_default().find(')')?;
-        let label = after_bracket.get(..close_bracket).unwrap_or_default();
-        let url = after_paren.get(..close_paren).unwrap_or_default();
-        if label.is_empty() || url.is_empty() {
-            return None;
-        }
-        let kind = if mention_user_id(url).is_some() {
-            FormatKind::MentionName
-        } else if date_link_time(url).is_some() {
-            FormatKind::DateTime
-        } else {
-            FormatKind::TextUrl
-        };
-        let entity_start = self.out16;
-        self.parse_span(i + 1, i + 1 + close_bracket, false);
-        self.entities.push(ComposerEntity {
-            offset: entity_start,
-            length: self.out16 - entity_start,
-            kind,
-            url: url.to_string(),
-            language: String::new(),
-        });
-        Some(i + 1 + close_bracket + 2 + close_paren + 1)
-    }
-
-    fn push_str(&mut self, s: &str) {
-        for ch in s.chars() {
-            self.push_char(ch);
-        }
-    }
-
-    fn push_char(&mut self, ch: char) {
-        if ch == super::markup_boundary::BARRIER {
-            return;
-        }
-        self.out.push(ch);
-        self.out16 += ch.len_utf16() as i32;
-    }
-}
-
-/// The byte offset of the UTF-16 offset `units` in `text` (clamped).
-fn utf16_to_byte(text: &str, units: i32) -> usize {
-    let mut count = 0;
-    for (ix, ch) in text.char_indices() {
-        if count >= units {
-            return ix;
-        }
-        count += ch.len_utf16() as i32;
-    }
-    text.len()
 }
 
 /// The user id of a `tg://user?id=N` mention link.
@@ -617,6 +336,7 @@ pub fn custom_emoji_markup(fallback: &str, custom_emoji_id: i64) -> String {
 mod tests {
     #![allow(clippy::string_slice, reason = "test code slices known-good literals")]
     use super::*;
+    use crate::composer::parse_format_markup;
     use crate::text::{TextEntity, TextEntityKind as K};
 
     #[test]
