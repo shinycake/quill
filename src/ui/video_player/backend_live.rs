@@ -202,6 +202,7 @@ pub(super) struct LiveCore {
     /// Shown mirrored left to right (your camera preview), in the plane
     /// copy each frame gets anyway.
     mirrored: Cell<bool>,
+    scratch: Cell<Vec<u8>>,
     /// Every picture is an image, never a pixel buffer: a small picture
     /// over another one (your camera's corner preview) rounds its own
     /// corners, which a surface can't do over a picture.
@@ -280,6 +281,7 @@ impl LiveCore {
             tile,
             inline_always: capture_mode(),
             mirrored: Cell::new(false),
+            scratch: Cell::default(),
             images_only: Cell::new(false),
             #[cfg(any(target_os = "windows", test))]
             nv12: Cell::new(super::live_surface::nv12_live()),
@@ -445,6 +447,7 @@ impl LiveCore {
     /// The feed ended (no frame converts any more) or the player goes
     /// (`gone`): its NV12 buffers go.
     fn release_buffers(&self, gone: bool) {
+        self.scratch.take();
         #[cfg(any(target_os = "windows", test))]
         if let Ok(mut track) = self.track.try_borrow_mut() {
             if gone {
@@ -603,7 +606,10 @@ impl Backend for LiveBackend {
         let mirrored = self.core.mirrored.get();
         let inline = self.core.take_inline().and_then(|(frame, target)| {
             let started = Instant::now();
-            live_picture::convert(&frame, target, mirrored).map(|prepared| Landed {
+            let mut scratch = self.core.scratch.take();
+            let prepared = live_picture::convert(&frame, target, mirrored, &mut scratch);
+            self.core.scratch.set(scratch);
+            prepared.map(|prepared| Landed {
                 seq: frame.seq,
                 prepared,
                 convert_us: elapsed_us(started),
@@ -810,23 +816,30 @@ fn spawn_waker(
                 let shown = VideoPlayer(player).shown_count();
                 let view = live.wake_view(shown, Instant::now());
                 let job = view.and_then(|_| live.take_background());
-                (view, job.map(|job| (job, live.mirrored.get())))
+                (
+                    view,
+                    job.map(|job| (job, live.mirrored.get(), live.scratch.take())),
+                )
             };
-            if let Some(((frame, target), mirrored)) = job {
+            if let Some(((frame, target), mirrored, mut scratch)) = job {
                 let seq = frame.seq;
-                let (prepared, convert_us) = cx
+                let (prepared, convert_us, scratch) = cx
                     .background_spawn(async move {
                         let started = Instant::now();
-                        let prepared = live_picture::convert(&frame, target, mirrored);
-                        (prepared, elapsed_us(started))
+                        let prepared =
+                            live_picture::convert(&frame, target, mirrored, &mut scratch);
+                        (prepared, elapsed_us(started), scratch)
                     })
                     .await;
                 match core.upgrade() {
-                    Some(live) => live.landed(prepared.map(|prepared| Landed {
-                        seq,
-                        prepared,
-                        convert_us,
-                    })),
+                    Some(live) => {
+                        live.scratch.set(scratch);
+                        live.landed(prepared.map(|prepared| Landed {
+                            seq,
+                            prepared,
+                            convert_us,
+                        }));
+                    }
                     None => return,
                 }
             }

@@ -26,7 +26,6 @@ use gpui_kit::RenderImage;
 use quill::calls::live_video::LiveFrame;
 use quill::calls::live_video::convert::{I420, i420_to_bgra, mirror_planes, rotate_planes};
 use smallvec::SmallVec;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Where a frame is converted into.
@@ -70,29 +69,41 @@ pub(super) struct SendBuffer(
 unsafe impl Send for SendBuffer {}
 
 /// The frame's planes as shown: turned when the sender turned them, then
-/// mirrored when the feed is (one copy at most for each).
-fn upright(frame: &LiveFrame, mirrored: bool) -> Option<(Cow<'_, [u8]>, u16, u16)> {
+/// mirrored when the feed is.
+fn upright<'a>(
+    frame: &'a LiveFrame,
+    mirrored: bool,
+    scratch: &'a mut Vec<u8>,
+) -> Option<(&'a [u8], u16, u16)> {
     let src = frame.i420()?;
-    let (mut planes, width, height) = match rotate_planes(&src, frame.rotation) {
-        Some((planes, width, height)) => (Cow::Owned(planes), width, height),
-        None => (
-            Cow::Borrowed(frame.planes.as_slice()),
-            frame.width,
-            frame.height,
-        ),
-    };
+    let turned = rotate_planes(&src, frame.rotation, scratch);
+    let (width, height) = turned.unwrap_or((frame.width, frame.height));
     if mirrored {
-        mirror_planes(planes.to_mut(), width, height);
+        if turned.is_none() {
+            scratch.clear();
+            scratch.extend_from_slice(&frame.planes);
+        }
+        mirror_planes(scratch, width, height);
     }
+    let planes = if turned.is_some() || mirrored {
+        scratch.as_slice()
+    } else {
+        frame.planes.as_slice()
+    };
     Some((planes, width, height))
 }
 
 /// Convert `frame` into `target`, mirrored when `mirrored`; a pixel
 /// buffer or NV12 buffer that can't be filled falls back to BGRA. `None`
 /// for a malformed frame.
-pub(super) fn convert(frame: &LiveFrame, target: Target, mirrored: bool) -> Option<Prepared> {
-    let (planes, width, height) = upright(frame, mirrored)?;
-    let src = I420::new(&planes, width, height)?;
+pub(super) fn convert(
+    frame: &LiveFrame,
+    target: Target,
+    mirrored: bool,
+    scratch: &mut Vec<u8>,
+) -> Option<Prepared> {
+    let (planes, width, height) = upright(frame, mirrored, scratch)?;
+    let src = I420::new(planes, width, height)?;
     match target {
         #[cfg(target_os = "macos")]
         Target::Surface(buffer) => {
@@ -429,7 +440,12 @@ mod tests {
             width,
             height,
             bgra,
-        }) = convert(&frame(64, 36, LiveRotation::R90), Target::Bgra, false)
+        }) = convert(
+            &frame(64, 36, LiveRotation::R90),
+            Target::Bgra,
+            false,
+            &mut Vec::new(),
+        )
         else {
             panic!("bgra");
         };
@@ -456,6 +472,7 @@ mod tests {
             &frame(64, 36, LiveRotation::None),
             Target::Surface(buffer),
             false,
+            &mut Vec::new(),
         ) else {
             panic!("filled");
         };
@@ -475,7 +492,8 @@ mod tests {
             convert(
                 &frame(64, 36, LiveRotation::None),
                 Target::Surface(bigger),
-                false
+                false,
+                &mut Vec::new()
             ),
             Some(Prepared::Bgra { .. })
         ));

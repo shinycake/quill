@@ -189,7 +189,8 @@ fn turned_planes_match_the_engine_turning_rgba() {
     let planes = gradient(w, h);
     let frame = I420::new(&planes, w, h).expect("a frame");
     for rotation in cases {
-        let (turned, tw, th) = rotate_planes(&frame, rotation).expect("turned");
+        let mut turned = Vec::new();
+        let (tw, th) = rotate_planes(&frame, rotation, &mut turned).expect("turned");
         assert_eq!(
             (tw, th),
             if rotation.swaps_sides() {
@@ -206,7 +207,39 @@ fn turned_planes_match_the_engine_turning_rgba() {
             "{rotation:?}"
         );
     }
-    assert!(rotate_planes(&frame, LiveRotation::None).is_none());
+    assert!(rotate_planes(&frame, LiveRotation::None, &mut Vec::new()).is_none());
+}
+
+#[test]
+fn every_size_turns_pixel_for_pixel() {
+    for rotation in [LiveRotation::R90, LiveRotation::R180, LiveRotation::R270] {
+        for (w, h) in (1..=26).flat_map(|w| (1..=26).map(move |h| (w, h))) {
+            let plane: Vec<u8> = (0..w * h).map(|at| (at % 251) as u8).collect();
+            let mut out = vec![0u8; w * h];
+            rotate_plane(&plane, w, h, rotation, &mut out);
+            let dw = if rotation.swaps_sides() { h } else { w };
+            for (y, x) in (0..h).flat_map(|y| (0..w).map(move |x| (y, x))) {
+                let (dx, dy) = turned(x, y, w, h, rotation);
+                assert_eq!(
+                    out[dy * dw + dx],
+                    plane[y * w + x],
+                    "{rotation:?} {w}x{h} at {x},{y}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn turning_again_reuses_the_buffer() {
+    let (w, h) = (24u16, 10u16);
+    let planes = gradient(w, h);
+    let frame = I420::new(&planes, w, h).expect("a frame");
+    let mut out = Vec::new();
+    rotate_planes(&frame, LiveRotation::R90, &mut out).expect("turned");
+    let first = out.as_ptr();
+    rotate_planes(&frame, LiveRotation::R90, &mut out).expect("turned");
+    assert_eq!(out.as_ptr(), first);
 }
 
 #[test]
@@ -216,7 +249,9 @@ fn turning_four_quarters_is_the_identity() {
     let mut current = (planes.clone(), w, h);
     for _ in 0..4 {
         let frame = I420::new(&current.0, current.1, current.2).expect("frame");
-        current = rotate_planes(&frame, LiveRotation::R90).expect("turned");
+        let mut turned = Vec::new();
+        let (tw, th) = rotate_planes(&frame, LiveRotation::R90, &mut turned).expect("turned");
+        current = (turned, tw, th);
     }
     assert_eq!(current, (planes, w, h));
 }
@@ -536,7 +571,8 @@ fn packed_nv12_of_a_turned_and_mirrored_frame_matches_the_planes() {
     let (w, h) = (4u16, 2u16);
     let planes = gradient(w, h);
     let frame = I420::new(&planes, w, h).expect("frame");
-    let (mut turned, tw, th) = rotate_planes(&frame, LiveRotation::R90).expect("turned");
+    let mut turned = Vec::new();
+    let (tw, th) = rotate_planes(&frame, LiveRotation::R90, &mut turned).expect("turned");
     assert_eq!((tw, th), (2, 4));
     assert!(mirror_planes(&mut turned, tw, th));
     let shown = I420::new(&turned, tw, th).expect("turned frame");

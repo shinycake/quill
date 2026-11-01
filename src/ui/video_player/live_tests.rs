@@ -236,7 +236,7 @@ fn large_frames_wait_for_the_background_and_small_ones_convert_at_once() {
 }
 
 fn landed(frame: &LiveFrame, target: Target) -> Option<Landed> {
-    let prepared = live_picture::convert(frame, target, false)?;
+    let prepared = live_picture::convert(frame, target, false, &mut Vec::new())?;
     Some(Landed {
         seq: frame.seq,
         prepared,
@@ -427,10 +427,11 @@ fn the_paused_picture_is_made_at_most_every_half_second() {
 #[test]
 fn a_mirrored_feed_converts_mirrored() {
     let shot = frame(1, 8, 4, Instant::now());
-    let picture = |mirrored| match live_picture::convert(&shot, Target::Bgra, mirrored) {
-        Some(Prepared::Bgra { bgra, width, .. }) => (bgra, width),
-        _ => panic!("a BGRA picture"),
-    };
+    let picture =
+        |mirrored| match live_picture::convert(&shot, Target::Bgra, mirrored, &mut Vec::new()) {
+            Some(Prepared::Bgra { bgra, width, .. }) => (bgra, width),
+            _ => panic!("a BGRA picture"),
+        };
     let (plain, width) = picture(false);
     let (mirrored, _) = picture(true);
     let row = width as usize * 4;
@@ -440,6 +441,34 @@ fn a_mirrored_feed_converts_mirrored() {
         assert_eq!(mirrored.as_chunks::<4>().0, reversed.as_slice());
     }
     assert_ne!(plain, mirrored);
+}
+
+#[test]
+fn a_turned_feed_converts_through_one_buffer() {
+    let (core, source) = inline_feed();
+    let mut backend = LiveBackend { core: core.clone() };
+    let t0 = Instant::now();
+    let turned = |seq| {
+        LiveFrame::new(
+            seq,
+            64,
+            36,
+            LiveRotation::R90,
+            gradient_frame(64, 36, 0),
+            t0,
+        )
+        .expect("frame")
+    };
+    source.push(turned(1));
+    assert!(backend.take_picture(&present()).picture.is_some());
+    let first = core.scratch.take();
+    let held = first.as_ptr();
+    assert!(!first.is_empty(), "the feed keeps its buffer");
+    core.scratch.set(first);
+    source.push(turned(2));
+    assert!(backend.take_picture(&present()).picture.is_some());
+    let second = core.scratch.take();
+    assert_eq!(second.as_ptr(), held);
 }
 
 // Windows' NV12 path (`live_surface.rs`), forced on so it runs on every
