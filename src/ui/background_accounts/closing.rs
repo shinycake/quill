@@ -17,6 +17,18 @@ use quill::connect::{EXPORT_STOP_HOLD, QUIT_CLOSE_DEADLINE, deadline_after};
 /// How often a waiter checks the closing set again.
 const CLOSE_POLL: Duration = Duration::from_millis(16);
 
+thread_local! {
+    /// What a dropped app could not confirm closed. Windows opens a new app
+    /// after a lost GPU; it must not open those databases either.
+    static LEFT_BY_DROPPED_APP: std::cell::RefCell<ClosingSet> =
+        std::cell::RefCell::new(ClosingSet::new());
+}
+
+/// The closing set a new app starts with.
+pub(super) fn take_left_by_dropped_app() -> ClosingSet {
+    LEFT_BY_DROPPED_APP.with(|left| std::mem::take(&mut *left.borrow_mut()))
+}
+
 /// What work waiting on closing clients should do now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) enum CloseWait {
@@ -173,6 +185,8 @@ impl QuillApp {
     /// the same shared deadline, never one wait per client.
     pub(in crate::ui) fn close_clients_on_drop(&mut self) {
         self.close_all_for_quit(deadline_after(QUIT_CLOSE_DEADLINE));
+        let closing = std::mem::take(&mut self.background.closing);
+        LEFT_BY_DROPPED_APP.with(|left| left.borrow_mut().absorb(closing));
     }
 
     /// Close every client when the app quits (once per app).

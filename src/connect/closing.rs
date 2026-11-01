@@ -259,6 +259,13 @@ impl ClosingSet {
         keys
     }
 
+    /// Take over `other`'s clients and its unconfirmed accounts.
+    pub fn absorb(&mut self, mut other: ClosingSet) {
+        self.entries.append(&mut other.entries);
+        self.unconfirmed
+            .extend(std::mem::take(&mut other.unconfirmed));
+    }
+
     /// Nothing restarts any more (local data is about to be wiped).
     pub fn cancel_restarts(&mut self) {
         for entry in &mut self.entries {

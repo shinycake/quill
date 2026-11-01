@@ -36,10 +36,11 @@ fn after_window_closed(windows_left: usize, gpu_gone: bool, recovered_before: bo
     }
 }
 
-/// Watch for the GPU going away. `reopen` opens the main window again.
+/// Watch for the GPU going away. `reopen` opens the main window again,
+/// with the link the old one had not opened yet.
 pub(crate) fn recover_after_gpu_loss(
     cx: &mut App,
-    reopen: impl Fn(&mut AsyncApp) -> gpui_kit::Result<()> + 'static,
+    reopen: impl Fn(&mut AsyncApp, Option<String>) -> gpui_kit::Result<()> + 'static,
 ) {
     cx.set_quit_mode(QuitMode::Explicit);
     let reopen = Rc::new(reopen);
@@ -66,7 +67,7 @@ pub(crate) fn recover_after_gpu_loss(
                         ))
                     });
                     let reopened = match request.await {
-                        Ok(()) => reopen(cx),
+                        Ok(()) => reopen(cx, crate::ui::deep_links::take_left_by_dropped_app()),
                         Err(error) => Err(error),
                     };
                     if let Err(error) = reopened {

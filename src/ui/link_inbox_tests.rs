@@ -1,5 +1,6 @@
-//! The main window brought back on a Mac, and Quit with no key window
-//! (needs the `demo-capture` feature for gpui-kit's test support). Which
+//! The main window brought back on a Mac, Quit with no key window, and a
+//! link a closed main window had not opened yet (needs the `demo-capture`
+//! feature for gpui-kit's test support). Which
 //! close hides on which platform: `quill::tray`'s tests. The test platform
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
@@ -221,4 +222,28 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
         }
     });
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn drop_with_link(cx: &mut TestAppContext, link: &str, from_agent: bool) -> Option<String> {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    app.update(&mut vcx, |app, _| {
+        app.pending_deep_link = Some(link.to_owned());
+        app.links.agent_pending_link = from_agent.then(|| link.to_owned());
+    });
+    vcx.update(|window, _| window.remove_window());
+    drop(app);
+    // GPUI drops released entities when it next flushes its effects.
+    vcx.cx.update(|_| {});
+    crate::ui::deep_links::take_left_by_dropped_app()
+}
+
+#[gpui_kit::test]
+fn a_link_the_closed_main_window_had_not_opened_goes_to_the_next(cx: &mut TestAppContext) {
+    let link = "tg://resolve?domain=quill";
+    assert_eq!(drop_with_link(cx, link, false).as_deref(), Some(link));
+    assert_eq!(
+        drop_with_link(cx, link, true),
+        None,
+        "an agent's link is not the user's"
+    );
 }

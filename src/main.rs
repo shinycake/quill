@@ -268,12 +268,15 @@ fn ui_main(args: &[String]) {
         };
         #[cfg(windows)]
         ui::startup_failure::recover_after_gpu_loss(cx, {
-            let launch = MainWindowLaunch {
-                pending_deep_link: None,
-                start_in_tray: false,
-                ..launch.clone()
-            };
-            move |cx| open_main_window(cx, launch.clone())
+            let credentials = launch.credentials.clone();
+            move |cx, pending_deep_link| {
+                let launch = MainWindowLaunch {
+                    credentials: credentials.clone(),
+                    pending_deep_link,
+                    start_in_tray: false,
+                };
+                open_main_window(cx, launch)
+            }
         });
         cx.spawn(async move |cx| {
             open_main_window(cx, launch)

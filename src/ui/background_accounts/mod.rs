@@ -139,7 +139,7 @@ impl BackgroundAccounts {
             notify_from_all: true,
             attention: false,
             ringing: None,
-            closing: ClosingSet::new(),
+            closing: closing::take_left_by_dropped_app(),
             quit_close: None,
             deleting: HashSet::new(),
             wiping: false,
