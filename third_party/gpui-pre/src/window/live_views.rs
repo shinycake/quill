@@ -40,17 +40,29 @@ impl LiveView {
     fn is(&self, view: EntityId) -> bool {
         self.scene.is_some() && self.view.entity_id() == view
     }
+
+    /// A patch draws it as a site of its own.
+    fn draws_itself(&self) -> bool {
+        !self.nested && self.scene.is_some()
+    }
+
+    /// A patch reaches it, as one of `sites` or inside one.
+    fn patched(&self, sites: &[Self]) -> bool {
+        sites
+            .iter()
+            .any(|site| site.draws_itself() && self.id_stack.starts_with(&site.id_stack[..]))
+    }
 }
 
 impl Window {
     /// A live view prepaints at `bounds`. Returns its entry in the frame.
     pub(crate) fn note_live_view(&mut self, view: AnyView, bounds: Bounds<Pixels>) -> usize {
         let id_stack = self.element_id_stack.clone();
-        let nested = self
-            .next_frame
-            .live_views
-            .iter()
-            .any(|outer| id_stack.starts_with(&outer.id_stack[..]));
+        // An equal stack is this view's own earlier prepaint, not a view
+        // around it.
+        let nested = self.next_frame.live_views.iter().any(|outer| {
+            outer.id_stack.len() < id_stack.len() && id_stack.starts_with(&outer.id_stack[..])
+        });
         self.next_frame.live_views.push(LiveView {
             view,
             id_stack,
@@ -83,8 +95,10 @@ impl Window {
         }
     }
 
-    /// Whether this frame can be a patch: nothing but live views of the last
-    /// whole frame changed, and nothing asks for a frame drawn in full.
+    /// Whether this frame can be a patch: nothing but live views a patch
+    /// reaches changed, and nothing asks for a frame drawn in full. A tick
+    /// passed to a patch that misses its view draws nothing, and that view
+    /// never asks for the next one.
     pub(super) fn only_live_views_changed(&self, cx: &App) -> bool {
         #[cfg(feature = "profiler")]
         if self.debug_frame_overlay.mode() != crate::DebugFrameOverlayMode::Hidden {
@@ -102,8 +116,11 @@ impl Window {
             return false;
         }
         let sites = &self.rendered_frame.live_views;
-        self.invalidator
-            .all_views(|view| sites.iter().any(|site| site.is(view)))
+        self.invalidator.all_views(|view| {
+            sites
+                .iter()
+                .any(|site| site.is(view) && site.patched(sites))
+        })
     }
 
     /// A whole frame follows patches, which drew every live view of the last
@@ -134,7 +151,7 @@ impl Window {
         let layouts = self.text_system.layout_index();
 
         let mut sites = std::mem::take(&mut self.rendered_frame.live_views);
-        sites.retain(|site| !site.nested && site.scene.is_some());
+        sites.retain(LiveView::draws_itself);
         sites.sort_by_key(|site| site.scene.as_ref().map(|scene| scene.start));
 
         let mut elements: SmallVec<[AnyElement; 4]> = SmallVec::new();

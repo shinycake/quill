@@ -268,8 +268,10 @@ impl<T: Render> Entity<T> {
     /// tests, focus or accessibility tree: those stay as the last whole frame
     /// left them, and what it builds in such a frame only paints. A cached
     /// view holding a live view that redrew on its own renders again in the
-    /// next whole frame rather than replay, and a live view inside another
-    /// live view redraws with it.
+    /// next whole frame rather than replay. A live view inside another live
+    /// view redraws with it, unless a cached view sits between them: that
+    /// view replays, so the inner one shows its old paint until a whole
+    /// frame.
     #[track_caller]
     pub fn live(self) -> ViewElement<Entity<T>> {
         let live = AnyView::from(self.clone());

@@ -455,7 +455,11 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
 - `window/a11y.rs` holds the tree still during a patch: live views add no nodes,
   and nothing is sent.
 - A live view whose element path runs through another live view's is drawn by
-  that one, so a patch skips it as a site of its own.
+  that one, so a patch skips it as a site of its own. A cached view between the two
+  replays, so the inner one shows its old paint until a whole frame.
+- `Window::transact` drops the entries of a prepaint it rolls back, and a view
+  prepainted twice is not nested in itself. A notified view no patch reaches draws a
+  whole frame, since a tick that draws nothing would stop asking for the next.
 - The whole frame after a patch marks every live view it drew dirty, so a cached
   view holding one renders again instead of replaying an older paint.
 
