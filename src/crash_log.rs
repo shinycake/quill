@@ -517,8 +517,19 @@ static NATIVE_FATAL_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub fn arm_native_fatal_breadcrumb(root: &Path) {
     let path = log_dir(root).join(NATIVE_FATAL_FILE);
     let _ = fs::create_dir_all(log_dir(root));
-    let _ = fs::write(&path, [b' '; NATIVE_FATAL_SLOT]);
+    arm_slot(&path);
     let _ = NATIVE_FATAL_PATH.set(path);
+}
+
+/// A slot of full size is kept as it is: another Quill process that loads
+/// TDLib (the agent command, a second library load) would otherwise blank a
+/// breadcrumb the next launch has not read yet, and `fs::write` truncates
+/// first, so on a full volume it can leave a slot too short to hold one.
+fn arm_slot(path: &Path) {
+    if fs::metadata(path).is_ok_and(|slot| slot.len() >= NATIVE_FATAL_SLOT as u64) {
+        return;
+    }
+    let _ = fs::write(path, [b' '; NATIVE_FATAL_SLOT]);
 }
 
 /// TDLib logged at verbosity 0 (fatal): it aborts right after the callback
@@ -606,7 +617,7 @@ fn write_marker(dir: &Path, unix_secs: u64) -> io::Result<()> {
 mod tests {
     use super::{
         CAUGHT_REPORT_INTERVAL_SECS, CrashDetails, KEEP_CRASH_FILES, MAX_CAUGHT_SITES,
-        NATIVE_FATAL_FILE, NATIVE_FATAL_SLOT, RUNNING_FILE, ReportKind, acknowledge,
+        NATIVE_FATAL_FILE, NATIVE_FATAL_SLOT, RUNNING_FILE, ReportKind, acknowledge, arm_slot,
         begin_run_for_session, caught_site_due, crash_files, format_report, log_dir,
         mark_clean_exit, mark_clean_exit_for_session, parse_report_name, pending_crash,
         pending_crash_before, report_files, take_native_fatal, write_crash_file, write_marker,
@@ -865,6 +876,44 @@ mod tests {
         assert_eq!(fatal.unix_secs, 2_100);
         assert_eq!(fatal.version, crate::version::APP);
         assert!(fatal.free_bytes.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn arming_again_keeps_a_breadcrumb_not_read_yet() {
+        let root = temp_root("rearm");
+        let dir = log_dir(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(NATIVE_FATAL_FILE);
+        arm_slot(&path);
+        write_native_fatal(&path, 2_100).unwrap();
+        arm_slot(&path);
+        assert_eq!(take_native_fatal(&dir).unwrap().unix_secs, 2_100);
+        arm_slot(&path);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            NATIVE_FATAL_SLOT as u64,
+            "a consumed slot is made again"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_breadcrumb_records_the_real_disk_not_a_demo_reading() {
+        let root = temp_root("real-free");
+        let dir = log_dir(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(NATIVE_FATAL_FILE);
+        arm_slot(&path);
+        // SAFETY: no other test in this crate sets or reads this variable.
+        unsafe { std::env::set_var("QUILL_DEMO_DISK_FREE_MB", "0") };
+        let written = write_native_fatal(&path, 2_100);
+        // SAFETY: as above.
+        unsafe { std::env::remove_var("QUILL_DEMO_DISK_FREE_MB") };
+        written.unwrap();
+        let fatal = take_native_fatal(&dir).unwrap();
+        assert!(fatal.free_bytes.is_some());
+        assert_ne!(fatal.free_bytes, Some(0), "the demo reading leaked in");
         let _ = std::fs::remove_dir_all(&root);
     }
 

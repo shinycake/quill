@@ -57,7 +57,7 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
             let folder = root.clone();
             let free = cx
                 .background_executor()
-                .spawn(async move { available_bytes(&folder) })
+                .spawn(async move { demo_reading().or_else(|| available_bytes(&folder)) })
                 .await;
             if this
                 .update(cx, |this, cx| this.apply_disk_reading(free, cx))
@@ -71,6 +71,20 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
         }
     })
     .detach();
+}
+
+/// `QUILL_DEMO_DISK_FREE_MB` stands in for the disk in a capture build. It
+/// lives here, not in `disk_guard`, so the crash breadcrumb and the open
+/// refusal only ever see the real disk.
+fn demo_reading() -> Option<u64> {
+    if !cfg!(feature = "demo-capture") {
+        return None;
+    }
+    std::env::var("QUILL_DEMO_DISK_FREE_MB")
+        .ok()?
+        .parse::<u64>()
+        .ok()?
+        .checked_mul(1 << 20)
 }
 
 impl QuillApp {

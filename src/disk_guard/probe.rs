@@ -6,10 +6,6 @@ use std::path::Path;
 /// Free bytes on the volume holding `path`. `None` when the read fails or
 /// the volume reports no sizes.
 pub fn available_bytes(path: &Path) -> Option<u64> {
-    #[cfg(feature = "demo-capture")]
-    if let Some(free) = demo_available_bytes() {
-        return Some(free);
-    }
     read_available(nearest_existing(path))
 }
 
@@ -17,15 +13,6 @@ fn nearest_existing(path: &Path) -> &Path {
     path.ancestors()
         .find(|folder| folder.exists())
         .unwrap_or(path)
-}
-
-#[cfg(feature = "demo-capture")]
-fn demo_available_bytes() -> Option<u64> {
-    std::env::var("QUILL_DEMO_DISK_FREE_MB")
-        .ok()?
-        .parse::<u64>()
-        .ok()?
-        .checked_mul(super::MIB)
 }
 
 /// Some network and FUSE volumes report zero blocks: that is no reading,
