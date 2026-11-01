@@ -366,16 +366,18 @@ fn talking_while_muted_shows_the_hint_until_you_unmute() {
 
 #[test]
 fn a_lost_microphone_needs_no_telegram_update() {
+    static WAKE: crate::wake::Signal = crate::wake::Signal::new();
     let (dir, mut driver, _engine, mics) = group_driver();
+    driver.call_capture.inject_wake(&WAKE);
     driver.session.calls.active_group_call = Some(joined_group_call(false));
     let t0 = Instant::now();
     pump_until_mic_answers(&mut driver);
     assert_eq!(mics.opened.lock().unwrap().len(), 1);
     let sink = mics.sink.lock().unwrap().clone().expect("open");
 
-    let woken = crate::wake::UPDATES.epoch();
+    let woken = WAKE.epoch();
     sink.push_event(CaptureEvent::Ended);
-    assert_ne!(crate::wake::UPDATES.epoch(), woken, "the poll loop wakes");
+    assert_ne!(WAKE.epoch(), woken, "the poll loop wakes");
 
     assert!(driver.request_tick(t0), "the call window shows the note");
     assert_eq!(driver.call_capture().target(), None);

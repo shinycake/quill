@@ -25,6 +25,7 @@ use crate::calls::capture::{
 use crate::calls::engine::{
     CaptureTarget, ExternalFrameSender, MediaDeviceKind, TransportState, external_capture_enabled,
 };
+use crate::wake::Signal;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -58,6 +59,8 @@ pub struct CallCapture {
     /// Why the microphone could not be opened or stopped, for the call
     /// window's note.
     pub error: Option<String>,
+    /// Poked when the microphone has news; the poll loop's by default.
+    wake: Option<&'static Signal>,
 }
 
 struct ActiveCapture {
@@ -75,6 +78,15 @@ impl CallCapture {
     /// on in builds and modes where it would be off.
     pub fn inject_opener(&mut self, opener: MicOpener) {
         self.opener = Some(opener);
+    }
+
+    /// Poke `wake` instead of the poll loop's signal (tests).
+    pub fn inject_wake(&mut self, wake: &'static Signal) {
+        self.wake = Some(wake);
+    }
+
+    fn wake(&self) -> &'static Signal {
+        self.wake.unwrap_or(&crate::wake::UPDATES)
     }
 
     /// Whether Quill captures the call microphone at all. Unit tests
@@ -174,7 +186,7 @@ impl CallCapture {
         let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
         controls.set_muted(muted);
         controls.set_system_audio(self.system_audio.clone());
-        let sink = FrameSink::new(AUDIO_SINK_FRAMES);
+        let sink = FrameSink::waking(AUDIO_SINK_FRAMES, self.wake());
         let opener = self.opener.clone();
         let mic = DeviceThread::open(
             "quill-call-mic",
