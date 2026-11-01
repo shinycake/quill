@@ -1,9 +1,11 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
-// `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
+// `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back; NV12 video
+// surfaces (`yuv_surfaces`). See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
     Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
+use crate::yuv_surfaces::{SURFACE_PARAMS_SIZE, YuvSurfaces};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -72,29 +74,6 @@ struct GlobalParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PodBounds {
-    origin: [f32; 2],
-    size: [f32; 2],
-}
-
-impl From<Bounds<ScaledPixels>> for PodBounds {
-    fn from(bounds: Bounds<ScaledPixels>) -> Self {
-        Self {
-            origin: [bounds.origin.x.0, bounds.origin.y.0],
-            size: [bounds.size.width.0, bounds.size.height.0],
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct SurfaceParams {
-    bounds: PodBounds,
-    content_mask: PodBounds,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
 struct GammaParams {
     gamma_ratios: [f32; 4],
     grayscale_enhanced_contrast: f32,
@@ -139,7 +118,6 @@ struct WgpuPipelines {
     mono_sprites: wgpu::RenderPipeline,
     subpixel_sprites: Option<wgpu::RenderPipeline>,
     poly_sprites: wgpu::RenderPipeline,
-    #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
 }
 
@@ -223,6 +201,7 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    yuv_surfaces: YuvSurfaces,
 }
 
 struct CachedTextureBindGroup {
@@ -611,10 +590,8 @@ impl WgpuRendererCore {
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(
-                            std::mem::size_of::<SurfaceParams>() as u64
-                        ),
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(SURFACE_PARAMS_SIZE),
                     },
                     count: None,
                 },
@@ -1497,6 +1474,7 @@ impl WgpuRendererCore {
             ],
         });
         let max_texture_size = device.limits().max_texture_dimension_2d;
+        let yuv_surfaces = YuvSurfaces::new(&device);
 
         Self {
             resources: WgpuResources {
@@ -1514,6 +1492,7 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                yuv_surfaces,
             },
             atlas,
             path_globals_offset,
@@ -1658,6 +1637,13 @@ impl WgpuRendererCore {
                 )
             })?;
         self.prepare_texture_bind_groups(scene);
+        let resources = &mut self.resources;
+        resources.yuv_surfaces.prepare(
+            &resources.device,
+            &resources.queue,
+            &resources.bind_group_layouts.surfaces,
+            &scene.surfaces,
+        );
 
         let mut encoder =
             self.resources()
@@ -1770,9 +1756,15 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
-                    // Surfaces are macOS-only for video playback and are not
-                    // implemented by the WGPU renderer.
-                    PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::Surfaces(range) => {
+                        let resources = self.resources();
+                        resources.yuv_surfaces.draw(
+                            range,
+                            &resources.pipelines.surfaces,
+                            &resources.globals_bind_group,
+                            &mut pass,
+                        );
+                    }
                 }
             }
         }
@@ -1781,6 +1773,9 @@ impl WgpuRendererCore {
             .resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
+        self.resources
+            .yuv_surfaces
+            .end_frame(!scene.surfaces.is_empty());
         Ok(submission)
     }
 
@@ -2812,6 +2807,12 @@ impl WgpuHeadlessRenderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.render_target = Some(HeadlessRenderTarget { texture, view });
         Ok(())
+    }
+
+    /// Quill: the NV12 texture pairs this renderer holds.
+    #[cfg(test)]
+    pub(crate) fn yuv_slot_count(&self) -> usize {
+        self.core.resources.yuv_surfaces.slot_count()
     }
 
     fn check_gpu_errors(&mut self) -> anyhow::Result<()> {

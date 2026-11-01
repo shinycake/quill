@@ -80,8 +80,11 @@ pub fn library_name() -> &'static str {
 }
 
 /// `quill --video-probe <file>`: decode a whole file with the installed
-/// decoder and print what came out. The package smoke tests run it against
-/// the bundled libraries. Returns the process exit code.
+/// decoder and print what came out, with the mean and worst time spent
+/// turning a decoded picture into its pixels. The package smoke tests run
+/// it against the bundled libraries. `QUILL_VIDEO_PROBE_OUTPUT=nv12` asks
+/// for NV12 pictures, as the Linux and Windows player does. Returns the
+/// process exit code.
 pub fn probe_cli(path: Option<&str>) -> i32 {
     let Some(path) = path else {
         eprintln!("usage: quill --video-probe <file>");
@@ -98,14 +101,21 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
             return 1;
         }
     };
+    if std::env::var("QUILL_VIDEO_PROBE_OUTPUT").is_ok_and(|output| output == "nv12") {
+        demuxer.set_output(PixelOutput::Nv12);
+    }
     let info = demuxer.info();
     let (mut frames, mut samples) = (0usize, 0usize);
     let mut size = (0, 0);
+    let (mut convert_total, mut convert_max, mut format) = (0u64, 0u32, "none");
     loop {
         match demuxer.next() {
             Ok(Some(Item::Video(frame))) => {
                 frames += 1;
                 size = (frame.width, frame.height);
+                convert_total += u64::from(frame.convert_us);
+                convert_max = convert_max.max(frame.convert_us);
+                format = frame.pixels.trace_name();
             }
             Ok(Some(Item::Audio(chunk))) => samples += chunk.samples.len(),
             Ok(None) => break,
@@ -116,12 +126,14 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
         }
     }
     println!(
-        "video={} {}x{} frames={frames} audio={} samples={samples} hardware={}",
+        "video={} {}x{} frames={frames} audio={} samples={samples} hardware={} \
+         pixels={format} convert_us_mean={} convert_us_max={convert_max}",
         info.video_codec,
         size.0,
         size.1,
         info.audio_codec,
-        demuxer.info().hardware
+        demuxer.info().hardware,
+        convert_total.checked_div(frames as u64).unwrap_or(0),
     );
     i32::from(info.has_video && frames == 0)
 }
@@ -281,7 +293,14 @@ pub fn rotate_bgra(
     stride: usize,
     rotation: u32,
 ) -> (Vec<u8>, u32, u32) {
-    let mut out = Vec::new();
+    // The image the picture becomes owns these bytes, so they can't come
+    // from a pool. Zeroed memory this large is fresh pages, not a memset.
+    let mut out = vec![
+        0u8;
+        (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4)
+    ];
     // The last row may stop at its pixels, without the padding.
     if !nv12::turn_plane_into::<4>(
         src,

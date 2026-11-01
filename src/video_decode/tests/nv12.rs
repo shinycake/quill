@@ -4,6 +4,7 @@
 //! real shim's NV12 pictures (skipped where the shim isn't installed).
 
 use super::super::ffi::{FfiDemuxer, PictureLayout, picture_layout};
+use super::super::nv12::BufferPool;
 use super::super::{
     Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame, YuvColor,
     YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12,
@@ -29,12 +30,68 @@ fn nv12_needs_even_sides() {
     assert_eq!(nv12_len(0, 2), None);
 }
 
+/// `pack_nv12` into a buffer of the picture's size (12 bytes for the 4x2
+/// pictures here when the size is refused).
+fn pack(
+    luma: &[u8],
+    luma_stride: usize,
+    chroma: &[u8],
+    chroma_stride: usize,
+    size: (u32, u32),
+    rotation: u32,
+) -> Option<(Vec<u8>, u32, u32)> {
+    let mut out = vec![0u8; nv12_len(size.0, size.1).unwrap_or(12)];
+    let (w, h) = pack_nv12(
+        luma,
+        luma_stride,
+        chroma,
+        chroma_stride,
+        size,
+        rotation,
+        &mut out,
+    )?;
+    Some((out, w, h))
+}
+
+#[test]
+fn a_buffer_is_packed_into_only_once_no_picture_holds_it() {
+    let mut pool = BufferPool::default();
+    let luma = [1, 2, 3, 4, 5, 6, 7, 8];
+    let chroma = [10, 11, 20, 21];
+    let fill = |pool: &mut BufferPool| {
+        let mut bytes = pool.take(12);
+        let out = Arc::get_mut(&mut bytes).expect("nothing else holds it");
+        pack_nv12(&luma, 4, &chroma, 4, (4, 2), 0, out).expect("packs");
+        pool.keep(&bytes);
+        bytes
+    };
+    let first = fill(&mut pool);
+    // The first picture is still shown: the next one gets its own buffer.
+    let second = fill(&mut pool);
+    assert!(!Arc::ptr_eq(&first, &second));
+    assert_eq!(*first, [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 20, 21]);
+    // Once the first is let go, its buffer is filled again.
+    let reused = Arc::as_ptr(&first);
+    drop(first);
+    let third = fill(&mut pool);
+    assert_eq!(Arc::as_ptr(&third), reused);
+    // A picture of another size drops the old buffers.
+    drop((second, third));
+    assert_eq!(pool.take(24).len(), 24);
+}
+
+#[test]
+fn a_buffer_of_the_wrong_length_is_refused() {
+    let mut out = [0u8; 11];
+    assert!(pack_nv12(&[0; 8], 4, &[0; 4], 4, (4, 2), 0, &mut out).is_none());
+}
+
 #[test]
 fn nv12_planes_are_packed_without_their_stride_padding() {
     // 4x2 luma with rows 6 bytes apart; one chroma row of two pairs.
     let luma = [1, 2, 3, 4, 0, 0, 5, 6, 7, 8];
     let chroma = [10, 11, 20, 21];
-    let (bytes, w, h) = pack_nv12(&luma, 6, &chroma, 6, (4, 2), 0).expect("packs");
+    let (bytes, w, h) = pack(&luma, 6, &chroma, 6, (4, 2), 0).expect("packs");
     assert_eq!((w, h), (4, 2));
     assert_eq!(bytes, [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 20, 21]);
 }
@@ -43,12 +100,12 @@ fn nv12_planes_are_packed_without_their_stride_padding() {
 fn nv12_planes_turn_upright_with_the_stream() {
     let luma = [1, 2, 3, 4, 5, 6, 7, 8];
     let chroma = [10, 11, 20, 21];
-    let (bytes, w, h) = pack_nv12(&luma, 4, &chroma, 4, (4, 2), 90).expect("packs");
+    let (bytes, w, h) = pack(&luma, 4, &chroma, 4, (4, 2), 90).expect("packs");
     assert_eq!((w, h), (2, 4));
     // Clockwise: the left column becomes the top row; chroma pairs move
     // as pairs.
     assert_eq!(bytes, [5, 1, 6, 2, 7, 3, 8, 4, 10, 11, 20, 21]);
-    let (half, w, h) = pack_nv12(&luma, 4, &chroma, 4, (4, 2), 180).expect("packs");
+    let (half, w, h) = pack(&luma, 4, &chroma, 4, (4, 2), 180).expect("packs");
     assert_eq!((w, h), (4, 2));
     assert_eq!(half, [8, 7, 6, 5, 4, 3, 2, 1, 20, 21, 10, 11]);
 }
@@ -57,18 +114,18 @@ fn nv12_planes_turn_upright_with_the_stream() {
 fn nv12_planes_shorter_than_their_rows_are_refused() {
     let luma = [0u8; 8];
     let chroma = [0u8; 4];
-    assert!(pack_nv12(&luma, 4, &chroma, 4, (4, 2), 0).is_some());
+    assert!(pack(&luma, 4, &chroma, 4, (4, 2), 0).is_some());
     // Odd sides.
-    assert!(pack_nv12(&luma, 4, &chroma, 4, (3, 2), 0).is_none());
-    assert!(pack_nv12(&luma, 4, &chroma, 4, (4, 1), 0).is_none());
+    assert!(pack(&luma, 4, &chroma, 4, (3, 2), 0).is_none());
+    assert!(pack(&luma, 4, &chroma, 4, (4, 1), 0).is_none());
     // A stride narrower than a row.
-    assert!(pack_nv12(&luma, 3, &chroma, 4, (4, 2), 0).is_none());
-    assert!(pack_nv12(&luma, 4, &chroma, 3, (4, 2), 0).is_none());
+    assert!(pack(&luma, 3, &chroma, 4, (4, 2), 0).is_none());
+    assert!(pack(&luma, 4, &chroma, 3, (4, 2), 0).is_none());
     // Planes shorter than their rows.
     let short_luma = luma.get(..7).unwrap_or_default();
     let short_chroma = chroma.get(..3).unwrap_or_default();
-    assert!(pack_nv12(short_luma, 4, &chroma, 4, (4, 2), 0).is_none());
-    assert!(pack_nv12(&luma, 4, short_chroma, 4, (4, 2), 0).is_none());
+    assert!(pack(short_luma, 4, &chroma, 4, (4, 2), 0).is_none());
+    assert!(pack(&luma, 4, short_chroma, 4, (4, 2), 0).is_none());
 }
 
 #[test]

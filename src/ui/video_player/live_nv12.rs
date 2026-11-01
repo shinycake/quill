@@ -1,4 +1,4 @@
-//! The live backend's side of Windows NV12 frames (`live_surface.rs`):
+//! The live backend's side of NV12 frames (`live_surface.rs`):
 //! a refused frame replaced by its image, the element kept asking until
 //! the renderer answers, and the test hooks for both. A child of
 //! `backend_live`, so it reads the core's state directly.
@@ -9,7 +9,7 @@ use super::LiveCore;
 use std::time::Instant;
 
 impl LiveCore {
-    /// The window refused the NV12 frame on screen (Windows): the same
+    /// The window refused the NV12 frame on screen: the same
     /// picture as an image, and images for the file player's pause.
     pub(super) fn replace_refused(&self, now: Instant) -> Option<Picture> {
         let now = self.time(now);
@@ -31,7 +31,7 @@ impl LiveCore {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 impl super::super::VideoPlayer {
-    /// Tests: convert frames to NV12 surface frames (Windows' path) or
+    /// Tests: convert frames to NV12 surface frames (the Windows and Linux path) or
     /// not, from the next frame on.
     pub(crate) fn set_live_nv12(&self, nv12: bool) {
         if let Some(core) = self.0.live.as_ref() {
@@ -56,8 +56,8 @@ impl super::super::VideoPlayer {
     }
 
     /// Tests: what the player's pull does when the renderer refused the
-    /// surface on screen (Windows), for platforms whose renderer draws no
-    /// NV12 frames, so the picture on screen can't report a refusal.
+    /// surface on screen, for macOS, whose renderer draws no NV12 frames,
+    /// so the picture on screen can't report a refusal.
     pub(crate) fn live_replace_refused(&self, now: Instant) {
         let raw = self
             .with_backend(|backend| backend.replace_refused(now))
