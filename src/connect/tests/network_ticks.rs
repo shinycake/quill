@@ -44,20 +44,20 @@ fn nothing_is_said_until_something_changes_and_then_once() {
     let (mut driver, recorder) = driver();
     let now = Instant::now();
     let background = TickScope::Background;
-    driver.ticks_on(background, now, network(4, true));
-    driver.ticks_on(background, now, network(4, true));
+    driver.poll_ticks(background, now, network(4, true));
+    driver.poll_ticks(background, now, network(4, true));
     assert!(told(&recorder).is_empty(), "the start is not a change");
 
     assert!(
         driver
-            .ticks_on(background, now, network(5, true))
+            .poll_ticks(background, now, network(5, true))
             .progressed
     );
-    driver.ticks_on(background, now, network(5, true));
+    driver.poll_ticks(background, now, network(5, true));
     assert_eq!(told(&recorder), ["networkTypeOther"]);
 
-    driver.ticks_on(background, now, network(6, false));
-    driver.ticks_on(background, now, network(7, true));
+    driver.poll_ticks(background, now, network(6, false));
+    driver.poll_ticks(background, now, network(7, true));
     assert_eq!(
         told(&recorder),
         ["networkTypeOther", "networkTypeNone", "networkTypeOther"]
@@ -70,7 +70,7 @@ fn a_client_started_offline_is_told_at_once() {
     let scope = TickScope::OnScreen {
         settings_open: false,
     };
-    driver.ticks_on(scope, Instant::now(), network(0, false));
+    driver.poll_ticks(scope, Instant::now(), network(0, false));
     assert_eq!(told(&recorder), ["networkTypeNone"]);
 }
 
@@ -82,7 +82,7 @@ fn a_client_without_parameters_is_told_nothing_yet() {
     let recorder = Arc::new(RecordingSender::new());
     let session = Session::new(AccountKey::primary(), sink);
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
-    driver.ticks_on(TickScope::Background, Instant::now(), network(0, false));
+    driver.poll_ticks(TickScope::Background, Instant::now(), network(0, false));
     assert!(recorder.snapshot().is_empty());
 }
 
@@ -90,9 +90,9 @@ fn a_client_without_parameters_is_told_nothing_yet() {
 fn a_closing_client_is_told_nothing() {
     let (mut driver, recorder) = driver();
     let now = Instant::now();
-    driver.ticks_on(TickScope::Background, now, network(0, true));
+    driver.poll_ticks(TickScope::Background, now, network(0, true));
     driver.request_close().unwrap();
-    driver.ticks_on(TickScope::Background, now, network(1, true));
+    driver.poll_ticks(TickScope::Background, now, network(1, true));
     assert!(told(&recorder).is_empty());
 }
 
@@ -111,9 +111,9 @@ fn a_proxy_keeps_tdlib_trying_with_no_route_out() {
     let (mut driver, recorder) = driver();
     let now = Instant::now();
     driver.session.settings.proxy.list = Some(vec![enabled_proxy()]);
-    driver.ticks_on(TickScope::Background, now, network(0, false));
+    driver.poll_ticks(TickScope::Background, now, network(0, false));
     assert!(told(&recorder).is_empty(), "the start is not a change");
-    driver.ticks_on(TickScope::Background, now, network(1, false));
+    driver.poll_ticks(TickScope::Background, now, network(1, false));
     assert_eq!(told(&recorder), ["networkTypeOther"]);
 }
 
@@ -122,16 +122,16 @@ fn a_proxy_known_after_the_first_poll_gets_tdlib_going_again() {
     let (mut driver, recorder) = driver();
     let now = Instant::now();
     let background = TickScope::Background;
-    driver.ticks_on(background, now, network(0, false));
+    driver.poll_ticks(background, now, network(0, false));
     assert_eq!(told(&recorder), ["networkTypeNone"]);
 
     driver.session.settings.proxy.system = vec![enabled_proxy()];
-    driver.ticks_on(background, now, network(0, false));
-    driver.ticks_on(background, now, network(0, false));
+    driver.poll_ticks(background, now, network(0, false));
+    driver.poll_ticks(background, now, network(0, false));
     assert_eq!(told(&recorder), ["networkTypeNone", "networkTypeOther"]);
 
     driver.session.settings.proxy.system.clear();
-    driver.ticks_on(background, now, network(0, false));
+    driver.poll_ticks(background, now, network(0, false));
     assert_eq!(
         told(&recorder),
         ["networkTypeNone", "networkTypeOther", "networkTypeNone"]
@@ -146,18 +146,18 @@ fn only_a_client_opening_a_connection_has_the_os_proxy_read_again() {
     };
     let start = Instant::now();
     driver.session.connection = ConnectionState::Ready;
-    driver.ticks_on(scope, start, network(0, true));
+    driver.poll_ticks(scope, start, network(0, true));
     assert_eq!(driver.system_proxy_asked, None);
 
     driver.session.connection = ConnectionState::Connecting;
-    driver.ticks_on(scope, start, network(0, true));
+    driver.poll_ticks(scope, start, network(0, true));
     assert_eq!(driver.system_proxy_asked, Some(start));
 
-    driver.ticks_on(scope, start + Duration::from_secs(1), network(0, true));
+    driver.poll_ticks(scope, start + Duration::from_secs(1), network(0, true));
     assert_eq!(driver.system_proxy_asked, Some(start));
 
     let later = start + Duration::from_secs(15);
-    driver.ticks_on(scope, later, network(0, true));
+    driver.poll_ticks(scope, later, network(0, true));
     assert_eq!(driver.system_proxy_asked, Some(later));
 }
 

@@ -1,5 +1,3 @@
-//! Nothing here opens TDLib: the app has no credentials, so a retry stops at
-//! the gate, and `prepare_connect` is covered in `connect::tests`.
 use crate::ui::app::{PaneMode, QuillApp};
 use crate::ui::connect_ui::ConnectUiStatus;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -42,7 +40,6 @@ fn shown(vcx: &mut VisualTestContext, id: &'static str) -> bool {
     vcx.update(|window, _| window.try_find(id).is_some())
 }
 
-/// Whether the card shows `text`, as a screen reader would read it.
 fn reads(vcx: &mut VisualTestContext, text: &str) -> bool {
     let quoted = format!("{text:?}");
     vcx.update(|window, cx| {

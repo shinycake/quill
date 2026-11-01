@@ -1,8 +1,6 @@
-//! The package download. A limit on the whole download fails a slow link at
-//! the same point every time, so only a stall ends an attempt, and what
-//! arrived stays for the next one (tdesktop `update_checker.cpp` asks for
-//! `Range: bytes=<already>-`). The hash check that follows stays the only
-//! judge of the bytes.
+//! A limit on the whole download fails a slow link at the same point every
+//! time, so only a stall ends an attempt, and what arrived stays for the next
+//! one (tdesktop `update_checker.cpp` asks for `Range: bytes=<already>-`).
 #![deny(clippy::indexing_slicing)]
 
 use super::{swap, trusted_file};
@@ -15,8 +13,6 @@ use std::time::Duration;
 const STALL_LIMIT: Duration = Duration::from_secs(60);
 const CONNECT_LIMIT: Duration = Duration::from_secs(30);
 
-/// Outside `swap::TEMP_PREFIX`: a partial download outlives the sweep that
-/// starts each attempt, and a restart of Quill.
 const PARTIAL_PREFIX: &str = ".quill-partial-";
 
 const FAILED: &str = "Download failed. Check your connection and retry.";
@@ -27,8 +23,6 @@ const NO_FILE: &str =
 pub(super) const MISMATCH: &str =
     "Update checksum or size mismatch. Nothing was installed. Retry the release check.";
 
-/// Where the package with this hash collects. `sha256` is hex
-/// (`updater::valid_asset`).
 pub(super) fn partial_path(stage_root: &Path, sha256: &str) -> PathBuf {
     stage_root.join(format!(
         "{PARTIAL_PREFIX}{}.archive",
@@ -36,7 +30,6 @@ pub(super) fn partial_path(stage_root: &Path, sha256: &str) -> PathBuf {
     ))
 }
 
-/// Drops what an older release's download left.
 pub(super) fn clear_other_partials(stage_root: &Path, keep: &Path) {
     let Ok(entries) = fs::read_dir(stage_root) else {
         return;
@@ -60,12 +53,10 @@ pub(super) fn agent(https_only: bool, redirects: u32) -> ureq::Agent {
         .new_agent()
 }
 
-/// What a server's answer to a request for the bytes after `have` means.
 enum Answer {
     Continues,
     Whole,
-    /// The body is not what was asked for.
-    Refused,
+    WrongRange,
 }
 
 fn read_answer(status: u16, content_range: Option<&str>, have: u64) -> Answer {
@@ -79,12 +70,10 @@ fn read_answer(status: u16, content_range: Option<&str>, have: u64) -> Answer {
     if start == Some(have) {
         Answer::Continues
     } else {
-        Answer::Refused
+        Answer::WrongRange
     }
 }
 
-/// The bytes worth keeping from an earlier attempt. Anything but this user's
-/// own file of a possible length goes.
 fn kept_bytes(partial: &Path, size: u64) -> u64 {
     let Ok(meta) = fs::symlink_metadata(partial) else {
         return 0;
@@ -112,8 +101,6 @@ fn open_partial(path: &Path, append: bool) -> io::Result<File> {
     options.open(path)
 }
 
-/// Brings `partial` up to `size` bytes from `url`. On an error it keeps what
-/// arrived, except when it is longer than the package.
 pub(super) fn fetch(
     agent: &ureq::Agent,
     url: &str,
@@ -147,7 +134,7 @@ pub(super) fn fetch(
                 have = 0;
                 break response;
             }
-            Answer::Refused => have = 0,
+            Answer::WrongRange => have = 0,
         }
     };
     progress.set(have);

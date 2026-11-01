@@ -25,13 +25,6 @@
 //! TDLib reaches the servers through an HTTP proxy with `CONNECT`.
 //! Proxy auto-config scripts (PAC, WPAD) are not evaluated: with only a
 //! PAC URL configured Quill connects directly.
-//!
-//! tdesktop asks the system as it builds a connection, with no timer. Here a
-//! read happens when "use system proxy" comes on, when `net_watch` sees the
-//! network change or the computer wake, and every [`REREAD_EVERY`] while
-//! TDLib is trying to connect. On macOS the dynamic store also says when the
-//! proxy setting alone changed; elsewhere that takes effect at the next
-//! reconnect.
 #![deny(clippy::indexing_slicing)]
 
 mod platform;
@@ -64,7 +57,6 @@ pub struct SentStep {
 
 pub const SYSTEM_PROXY_COMMENT: &str = "Quill: system proxy";
 
-/// How often the OS configuration is read again while TDLib tries to connect.
 const REREAD_EVERY: Duration = Duration::from_secs(15);
 
 /// Whether `entry` is the system proxy's entry.
@@ -94,7 +86,6 @@ static WANTED: AtomicBool = AtomicBool::new(false);
 
 struct Reader {
     detected: Arc<Mutex<Detected>>,
-    /// Holds one request: an ask while one waits changes nothing.
     asks: SyncSender<()>,
 }
 
@@ -131,7 +122,6 @@ fn reader() -> &'static Reader {
                 *slot = found;
                 drop(slot);
                 if changed {
-                    // The poll loop applies it now, not at its next wake.
                     crate::wake::UPDATES.poke();
                 }
             });
@@ -164,8 +154,6 @@ pub fn refresh() {
     }
 }
 
-/// Whether a poll should ask for a read: TDLib is opening a connection, and
-/// the last ask was at `asked`.
 pub fn reread_due(connection: ConnectionState, asked: Option<Instant>, now: Instant) -> bool {
     matches!(
         connection,

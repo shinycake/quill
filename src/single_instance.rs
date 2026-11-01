@@ -131,7 +131,6 @@ pub enum Acquired {
     Forwarded,
 }
 
-/// What a launch does next.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Launch {
     /// Handed to the running Quill: exit.
@@ -145,7 +144,6 @@ pub enum Launch {
 }
 
 impl Launch {
-    /// The decision for what [`acquire`] returned.
     pub fn after(acquired: &io::Result<Acquired>) -> Self {
         match acquired {
             Ok(Acquired::Forwarded) => Self::Forwarded,

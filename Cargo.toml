@@ -273,7 +273,6 @@ objc2-media-player = { version = "0.3.2", optional = true, default-features = fa
 futures-lite = "2"
 pretty_assertions = "1"
 unicode-bidi-mirroring = "0.4"
-# The update download's tests on the core build (src/update_install/fetch.rs).
 ureq = { version = "3.5", default-features = false }
 # Turns on the test-only branches of the library (private media-cache root) for
 # every test target, including the binary's tests.

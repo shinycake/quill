@@ -447,7 +447,11 @@ impl QuillApp {
             let _ = live.driver.end_batch();
             ingested |= live
                 .driver
-                .poll_ticks(quill::connect::TickScope::Background, now)
+                .poll_ticks(
+                    quill::connect::TickScope::Background,
+                    now,
+                    quill::net_watch::latest(),
+                )
                 .progressed;
             // One proxy list for the app (`quill::proxy_sync`; tdesktop keeps
             // proxies app-wide): follow the account on screen, whose

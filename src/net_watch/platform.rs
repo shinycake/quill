@@ -1,9 +1,3 @@
-//! One blocking watcher per platform. Each calls
-//! [`super::network_changed`] when something about the network may have
-//! moved, and returns only when it cannot go on.
-
-/// macOS: `SCDynamicStore` on the watcher's own run loop. The store also
-/// names the proxy settings, so an event can mean those changed alone.
 #[cfg(target_os = "macos")]
 mod backend {
     use core_foundation::array::{CFArray, CFArrayRef};
@@ -103,7 +97,6 @@ mod backend {
     use std::io;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
-    /// Reading the proxy may start `gsettings`, and netlink is chatty.
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
     const GROUPS: libc::c_int = libc::RTMGRP_LINK
@@ -179,7 +172,6 @@ mod backend {
 mod backend {
     use windows_sys::Win32::NetworkManagement::IpHelper::NotifyAddrChange;
 
-    /// The registry holds the proxy, and nothing here is told when it moves.
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
     pub(in crate::net_watch) fn watch() {

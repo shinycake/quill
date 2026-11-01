@@ -1,6 +1,3 @@
-// Why an account could not start, on the sign-in card (src/auth.rs
-// `StartupFailure`), and the alert when a running Quill does not answer
-// (src/ui/startup_failure.rs).
 "qll_startup_failed_title" = "Couldn't open this account";
 "qll_startup_wrong_key" = "The saved key doesn't open your local data. If you restored this computer or moved your data, restore the key too, then try again.";
 "qll_startup_data_folder" = "Quill can't read or write its data folder. Check that the disk is connected and has free space, and that you have permission to use the folder.";

@@ -333,7 +333,6 @@ fn ui_main(args: &[String]) {
     });
 }
 
-/// Tries to hand this launch to a running instance.
 #[cfg(feature = "ui")]
 fn single_instance(args: &[String]) -> quill::single_instance::Launch {
     use quill::single_instance::{Endpoint, Launch, acquire};

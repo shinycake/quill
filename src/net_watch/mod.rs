@@ -6,13 +6,6 @@
 //! `networkTypeNone` is what turns "Connecting" into "Waiting for network…".
 //! tdesktop gets the same from `base::NetworkReachability`, restarting
 //! MTProto on `availableChanges` (`mtp_instance.cpp`).
-//!
-//! The state is the [`Route`] to Telegram: the local address the system
-//! would use for each IP version, which the same `connect` finds on every
-//! platform. Looking a route up sends nothing. A backend in [`platform`] only
-//! says "look again", on a thread that blocks in the OS with no timer, and
-//! the route decides whether anything happened: most events are not about
-//! the way to Telegram.
 #![deny(clippy::indexing_slicing)]
 
 mod platform;
@@ -37,7 +30,6 @@ const TELEGRAM_V6: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
 enum Path {
     Via(IpAddr),
     NoRoute,
-    /// The lookup failed in a way that says nothing about the network.
     Unknown,
 }
 
@@ -76,8 +68,7 @@ impl Route {
     }
 }
 
-/// The local address a socket to `to` would use. `connect` on UDP only asks
-/// the routing table.
+/// `connect` on UDP only asks the routing table.
 fn local_address(bind: IpAddr, to: SocketAddr) -> io::Result<SocketAddr> {
     let socket = UdpSocket::bind(SocketAddr::new(bind, 0))?;
     socket.connect(to)?;
@@ -91,7 +82,6 @@ fn route_now() -> Route {
     }
 }
 
-/// What the connection drivers read on each poll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NetworkState {
     /// Moves whenever TDLib should hear about the network again.
@@ -139,21 +129,15 @@ impl Tracker {
 fn tracker() -> &'static Mutex<Tracker> {
     static TRACKER: OnceLock<Mutex<Tracker>> = OnceLock::new();
     TRACKER.get_or_init(|| {
-        // A failed spawn only loses the events: wake-ups still arrive.
-        let _ = crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch);
+        if let Err(error) = crate::thread_guard::spawn_guarded("quill-net-watch", platform::watch) {
+            eprintln!("quill: no network watcher: {error}");
+        }
         Mutex::new(Tracker::new(route_now()))
     })
 }
 
 /// The network as last seen. The first call starts the watcher.
 pub fn latest() -> NetworkState {
-    // Polls in tests must not depend on the machine's network.
-    if cfg!(any(test, feature = "test-support")) {
-        return NetworkState {
-            epoch: 0,
-            available: true,
-        };
-    }
     lock_or_recover(tracker()).state(route_now)
 }
 
@@ -164,7 +148,6 @@ pub fn system_woke() {
     crate::system_proxy::refresh();
 }
 
-/// A backend's "look again". Runs on the watcher's thread.
 fn network_changed() {
     let route = route_now();
     let moved = lock_or_recover(tracker()).observe(route);

@@ -8,6 +8,13 @@ use crate::state::{RequestPurpose, ShutdownPhase};
 use crate::telegram::requests::{NetworkType, set_network_type};
 use std::time::Instant;
 
+/// The network as one client sees it. `net_watch` only knows routes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Reach {
+    epoch: u64,
+    way_out: bool,
+}
+
 /// Which account the poll is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TickScope {
@@ -40,11 +47,7 @@ impl TickOutcome {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Run every tick that is due for `scope`.
-    pub fn poll_ticks(&mut self, scope: TickScope, now: Instant) -> TickOutcome {
-        self.ticks_on(scope, now, crate::net_watch::latest())
-    }
-
-    pub(super) fn ticks_on(
+    pub fn poll_ticks(
         &mut self,
         scope: TickScope,
         now: Instant,
@@ -56,7 +59,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.redraw(self.request_tick(now));
         // `parity:data-proxy-web`: carrier failures and hosting changes.
         outcome.redraw(self.carrier_tick());
-        // Every client keeps its own connections.
         outcome.progress(self.network_tick(network));
         let TickScope::OnScreen { settings_open } = scope else {
             return outcome;
@@ -83,9 +85,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome
     }
 
-    /// TDLib hears nothing at the start unless it has no way out, then one
-    /// word per change. A proxy on the local network works with no route, and
-    /// the proxy list arrives after the first poll, so it counts as a change.
+    /// A proxy on the local network works with no route, and the proxy list
+    /// arrives after the first poll, so it counts as a change.
     fn network_tick(&mut self, network: NetworkState) -> bool {
         if !self.parameters_sent || !matches!(self.session.shutdown, ShutdownPhase::Running) {
             return false;
@@ -93,15 +94,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let proxy = &self.session.settings.proxy;
         let through_proxy =
             proxy.enabled().is_some() || proxy.system.iter().any(|entry| entry.is_enabled);
-        let network = NetworkState {
-            available: network.available || through_proxy,
-            ..network
+        let reach = Reach {
+            epoch: network.epoch,
+            way_out: network.available || through_proxy,
         };
-        let seen = self.network_seen.replace(network);
-        if seen == Some(network) || (seen.is_none() && network.available) {
+        let seen = self.network_seen.replace(reach);
+        if seen == Some(reach) || (seen.is_none() && reach.way_out) {
             return false;
         }
-        let kind = if network.available {
+        let kind = if reach.way_out {
             NetworkType::Other
         } else {
             NetworkType::None

@@ -64,7 +64,6 @@ pub enum StartupFailure {
 }
 
 impl StartupFailure {
-    /// What the user reads on the failure card.
     pub fn reason(self) -> &'static str {
         match self {
             Self::KeyLocked => tr(keys::Q_STARTUP_KEY_LOCKED),

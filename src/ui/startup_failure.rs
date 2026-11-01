@@ -2,8 +2,7 @@
 //! or a remote session without one): say so in a native alert where the
 //! platform has one, write the error to stderr, and exit with a failure code
 //! instead of panicking. On Linux, when nothing can draw the window, the
-//! alert says which Vulkan piece is missing and what to install. A launch
-//! that a stuck Quill ignored says so through the same alert.
+//! alert says which Vulkan piece is missing and what to install.
 #![deny(clippy::indexing_slicing)]
 
 #[cfg(any(test, target_os = "linux"))]

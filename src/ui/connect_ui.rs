@@ -19,7 +19,6 @@ use std::sync::Arc;
 #[derive(Clone, PartialEq, Eq)]
 pub enum ConnectUiStatus {
     NeedCredentials,
-    /// No client: the sign-in card shows why and offers Retry.
     Blocked,
     /// Synthetic WaitPhoneNumber surface for screenshot proof (no live TDLib).
     DemoWaitPhone,
