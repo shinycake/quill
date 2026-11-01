@@ -43,32 +43,41 @@ pub(super) fn run(me: usize, shared: &Shared) {
         let Some(job) = job else {
             continue;
         };
-        // The UI is woken when a clip opened or failed and for a clip's
-        // first frame; later frames are picked up as views paint.
-        let wake = match job {
-            Job::Open { key, id, path } => {
-                open(shared, &mut sources, key, id, &path);
-                true
-            }
-            Job::Decode {
-                key,
-                id,
-                decode,
-                cancel,
-            } => {
-                super::opener::open(shared, &mut scratch, key, id, decode, &cancel);
-                true
-            }
-            Job::Frame {
-                key,
-                id,
-                index,
-                stored,
-            } => frame(shared, &mut sources, &mut scratch, (key, id), index, stored),
-        };
-        if wake {
+        if work(shared, &mut sources, &mut scratch, job) {
             shared.wake();
         }
+    }
+}
+
+/// Does one job; true when the UI should be woken: a clip opened or failed,
+/// or a clip's first frame is ready. Later frames are picked up as views
+/// paint.
+pub(super) fn work(
+    shared: &Shared,
+    sources: &mut HashMap<ClipKey, Source>,
+    scratch: &mut Scratch,
+    job: Job,
+) -> bool {
+    match job {
+        Job::Open { key, id, path } => {
+            open(shared, sources, key, id, &path);
+            true
+        }
+        Job::Decode {
+            key,
+            id,
+            decode,
+            cancel,
+        } => {
+            super::opener::open(shared, scratch, key, id, decode, &cancel);
+            true
+        }
+        Job::Frame {
+            key,
+            id,
+            index,
+            stored,
+        } => frame(shared, sources, scratch, (key, id), index, stored),
     }
 }
 

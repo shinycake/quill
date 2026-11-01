@@ -1,6 +1,6 @@
 use super::super::frame_clock::{
-    ClockRun, ClockTiming, Woke, clip_frame_keeps_time, content_at, later_tick,
-    layer_redrawn_by_clip, note_clock_playing, video_request, video_request_done,
+    ClockRun, ClockTiming, Woke, clip_frame_keeps_time, content_at, forget_video_requests,
+    later_tick, layer_redrawn_by_clip, note_clock_playing, video_request, video_request_done,
 };
 use super::super::layer_draws::LayerDraws;
 use super::super::video_player::FrameRequested;
@@ -384,6 +384,7 @@ const PLAYER: u64 = 7;
 
 impl Sim {
     fn new(display: u64, rate: f64, grid: bool) -> Self {
+        forget_video_requests();
         let t0 = Instant::now();
         let period = hz(rate);
         Self {
@@ -1150,4 +1151,30 @@ fn a_clip_faster_than_the_emoji_on_its_layer_leaves_the_clock_idle() {
         after >= 17,
         "{after} emoji draws in the 0.6 s after the clip"
     );
+}
+
+#[test]
+fn a_sim_after_one_with_a_clip_that_keeps_time_holds_emoji_frames_alike() {
+    // The same test thread ran a 60 fps clip first: its answered pictures
+    // fall on this sim's vsyncs too.
+    for on_layer in [false, true] {
+        let first = Sim::new(201, 120.0, true).emoji(30).clip(60.0);
+        let first = if on_layer {
+            first.on_layer(Duration::ZERO)
+        } else {
+            first
+        };
+        first.run(3.0);
+        let sim = Sim::new(202, 120.0, true)
+            .emoji(30)
+            .emoji_phase(1)
+            .clip(24.0)
+            .on_layer(Duration::ZERO)
+            .run(3.0);
+        let holds = sim.emoji_holds();
+        assert!(
+            holds.len() > 60 && holds.iter().all(|hold| *hold == 4),
+            "after a 60 fps clip (on its layer: {on_layer}): {holds:?}"
+        );
+    }
 }

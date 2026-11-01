@@ -692,6 +692,14 @@ thread_local! {
     static ANSWERED: RefCell<Vec<Answered>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Forget every clip's asks and answers: a simulated clock starts again at
+/// a real `Instant`, which an earlier simulation on this thread ran past.
+#[cfg(test)]
+pub(super) fn forget_video_requests() {
+    VIDEO_ASKS.with(|asks| asks.borrow_mut().clear());
+    ANSWERED.with(|answered| answered.borrow_mut().clear());
+}
+
 /// Whether the frame shown on `vsync` draws a picture of a clip that keeps
 /// time with content whose frames come `frame` apart ([`keeps_time`]), in
 /// `target` (`None`: any view). Content shows its own time on that frame

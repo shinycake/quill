@@ -861,21 +861,26 @@ fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
 
 #[test]
 fn video_stickers_open_when_no_opener_thread_starts() {
-    use std::sync::mpsc;
-    let spawn = |name: String, body: Box<dyn FnOnce() + Send>| {
+    // The worker thread "starts" without running: the test does its jobs.
+    let spawn = |name: String, _body: Box<dyn FnOnce() + Send>| {
         if name.starts_with("quill-sticker-open") {
             return Err(std::io::Error::other("no more threads"));
         }
-        std::thread::Builder::new().name(name).spawn(body).map(drop)
+        Ok(())
     };
     let engine = engine::Engine::start(1, 64 << 20, &spawn);
-    let (woke, wakes) = mpsc::channel::<()>();
-    engine.set_waker(Arc::new(move || {
-        let _ = woke.send(());
-    }));
     let key = key(1, 16);
     engine.open(key, synthetic(16, 3));
-    while engine.info(&key).is_none() {
-        wakes.recv().unwrap();
-    }
+    let job = crate::locks::lock_or_recover(&engine.shared().state).next_job(0);
+    let Some(job @ engine::Job::Decode { key: decoding, .. }) = job else {
+        panic!("no thread takes the clip to decode it");
+    };
+    assert_eq!(decoding, key);
+    worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        job,
+    );
+    assert!(engine.info(&key).is_some(), "{:?}", engine.state(&key));
 }

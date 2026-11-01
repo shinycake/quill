@@ -256,6 +256,11 @@ impl Engine {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn shared(&self) -> &Shared {
+        &self.shared
+    }
+
     /// Called (on a worker thread) whenever frames are ready or a clip
     /// opened or failed.
     pub fn set_waker(&self, waker: Arc<dyn Fn() + Send + Sync>) {
