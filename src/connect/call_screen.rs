@@ -104,6 +104,7 @@ impl SharedAudio {
         let mix = Arc::new(SystemAudioMix::default());
         let capture = DeviceThread::open(
             "quill-system-audio",
+            &crate::wake::UPDATES,
             {
                 let mix = mix.clone();
                 move || match opener {
@@ -210,6 +211,7 @@ impl CallScreen {
         let opener = self.opener.clone();
         let capture = DeviceThread::open(
             "quill-screen-open",
+            &crate::wake::UPDATES,
             {
                 let source = source.clone();
                 let sink = sink.clone();

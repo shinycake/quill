@@ -190,6 +190,7 @@ impl CallCapture {
         let opener = self.opener.clone();
         let mic = DeviceThread::open(
             "quill-call-mic",
+            self.wake(),
             {
                 let device = device.clone();
                 let controls = controls.clone();
