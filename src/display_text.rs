@@ -58,15 +58,17 @@ impl SourceMap {
 
     /// The source text of `filtered[range]`. What was dropped inside the
     /// range or right at its end comes back; what was dropped right at its
-    /// start belongs to the character before it. `None` when `range` is
-    /// not on `filtered`'s char boundaries.
+    /// start belongs to the character before it, or to the range when
+    /// there is none. `None` when `range` is not on `filtered`'s char
+    /// boundaries.
     pub fn source_of(&self, filtered: &str, range: std::ops::Range<usize>) -> Option<String> {
         let mut out = String::with_capacity(range.len());
         let mut from = range.start;
+        let leading = range.start == 0;
         for (at, text) in self
             .dropped
             .iter()
-            .filter(|(at, _)| range.start < *at && *at <= range.end)
+            .filter(|(at, _)| (range.start < *at || (leading && *at == 0)) && *at <= range.end)
         {
             out.push_str(filtered.get(from..*at)?);
             out.push_str(text);
@@ -295,6 +297,24 @@ mod tests {
         );
         assert_eq!(map.source_of(&out, 1..2).as_deref(), Some("b"));
         assert_eq!(map.source_of(&out, 0..3), None, "inside a mark");
+    }
+
+    #[test]
+    fn what_was_dropped_before_the_first_character_comes_back() {
+        let mut leading = SourceMap::default();
+        let mut shown = String::new();
+        push_filtered(
+            &mut shown,
+            "\u{2028}\u{0}hi",
+            &mut FilterState::default(),
+            &mut leading,
+        );
+        assert_eq!(shown, "hi");
+        assert_eq!(
+            leading.source_of(&shown, 0..1).as_deref(),
+            Some("\u{2028}\u{0}h")
+        );
+        assert_eq!(leading.source_of(&shown, 1..2).as_deref(), Some("i"));
     }
 
     #[test]
