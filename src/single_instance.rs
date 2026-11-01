@@ -9,9 +9,10 @@
 //!
 //! Wire protocol (one short-lived connection per launch): the client sends
 //! the header line `quill-ipc 1`, then one line per forwarded argument, then
-//! an empty line; the owner answers `ok`. A connection that does not answer
-//! in [`ACK_TIMEOUT`] means the owner is hung; the caller refuses to start
-//! a second instance rather than risk the database.
+//! an empty line; the owner answers `ok`, or `stuck` when its UI thread does
+//! not answer. A connection that says `stuck` or does not answer in
+//! [`ACK_TIMEOUT`] means the owner is hung; the caller refuses to start a
+//! second instance rather than risk the database.
 //!
 //! The header `quill-agent 1` instead opens a long-lived agent connection
 //! (see [`crate::agent::server`]); the rest of this file does not change for
@@ -38,6 +39,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const HEADER: &str = "quill-ipc 1";
+/// The owner's answer when its UI thread did not beat in time.
+const STUCK: &str = "stuck";
 /// How long a launch waits for the owner to acknowledge before giving up.
 pub const ACK_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long the owner waits for its UI thread before leaving a launch
@@ -269,20 +272,21 @@ fn forward(endpoint: &Endpoint, args: &[String]) -> Forward {
     let (tx, rx) = mpsc::channel();
     // No thread: `tx` is dropped with the closure and the wait below ends.
     let _ = crate::thread_guard::spawn_guarded("quill-single-instance-send", move || {
-        let result = (|| -> io::Result<bool> {
+        let result = (|| -> io::Result<String> {
             let mut stream = stream;
             stream.write_all(message.as_bytes())?;
             stream.flush()?;
             let mut ack = String::new();
             BufReader::new(&stream).read_line(&mut ack)?;
-            Ok(ack.trim() == "ok")
+            Ok(ack.trim().to_string())
         })();
         let _ = tx.send(result);
     });
     match rx.recv_timeout(ACK_TIMEOUT) {
-        Ok(Ok(true)) => Forward::Delivered,
+        Ok(Ok(answer)) if answer == "ok" => Forward::Delivered,
+        Ok(Ok(answer)) if answer == STUCK => Forward::Unresponsive,
         // Connected, then dropped or garbled: a dying owner counts as gone.
-        Ok(Ok(false) | Err(_)) => Forward::NoOwner,
+        Ok(_) => Forward::NoOwner,
         Err(_) => Forward::Unresponsive,
     }
 }
@@ -410,16 +414,23 @@ impl Drop for Connection {
     }
 }
 
-fn serve(stream: Stream, slot: ClientSlot, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
-    serve_while(stream, slot, on_launch, &UI, UI_ANSWER);
+/// The UI an owner checks before it acknowledges a launch.
+#[derive(Clone, Copy)]
+struct Owner {
+    ui: &'static Heartbeat,
+    answer: Duration,
 }
 
-fn serve_while(
+const APP_OWNER: Owner = Owner {
+    ui: &UI,
+    answer: UI_ANSWER,
+};
+
+fn serve(
     stream: Stream,
     slot: ClientSlot,
     on_launch: &(dyn Fn(Vec<String>) + Send + Sync),
-    ui: &Heartbeat,
-    wait: Duration,
+    owner: Owner,
 ) {
     let connection = Connection::new(stream);
     let stream = connection.stream();
@@ -441,15 +452,18 @@ fn serve_while(
     let Some(args) = decode_args(stream) else {
         return;
     };
-    let mark = ui.mark();
+    let mark = owner.ui.mark();
     on_launch(args);
     crate::wake::LINKS.poke();
-    if !ui.answered_since(mark, wait) {
-        // No answer: the launch times out and says this copy is stuck.
-        return;
-    }
+    // Closing without an answer would read as a dead owner, and the launch
+    // would start a second Quill on this profile.
+    let answer = if owner.ui.answered_since(mark, owner.answer) {
+        "ok"
+    } else {
+        STUCK
+    };
     let mut out = stream;
-    let _ = out.write_all(b"ok\n");
+    let _ = writeln!(out, "{answer}");
     let _ = out.flush();
 }
 
@@ -469,6 +483,15 @@ pub fn acquire(
     endpoint: &Endpoint,
     args: &[String],
     on_launch: impl Fn(Vec<String>) + Send + Sync + 'static,
+) -> io::Result<Acquired> {
+    acquire_as(endpoint, args, on_launch, APP_OWNER)
+}
+
+fn acquire_as(
+    endpoint: &Endpoint,
+    args: &[String],
+    on_launch: impl Fn(Vec<String>) + Send + Sync + 'static,
+    owner: Owner,
 ) -> io::Result<Acquired> {
     #[cfg(unix)]
     if let Some(parent) = endpoint.path.parent() {
@@ -535,7 +558,7 @@ pub fn acquire(
             let on_launch = Arc::clone(&on_launch);
             // A client that connects and stalls must not block others.
             let _ = crate::thread_guard::spawn_guarded("quill-single-instance-client", move || {
-                serve(stream, slot, &*on_launch)
+                serve(stream, slot, &*on_launch, owner)
             });
         }
     })?;
@@ -687,7 +710,11 @@ mod tests {
                     ui.beat();
                 }
             };
-            super::serve_while(stream, slot, &on_launch, ui, Duration::ZERO);
+            let owner = super::Owner {
+                ui,
+                answer: Duration::ZERO,
+            };
+            super::serve(stream, slot, &on_launch, owner);
         });
         let mut client = Stream::connect(endpoint.name().unwrap()).unwrap();
         client
@@ -700,10 +727,32 @@ mod tests {
     }
 
     #[test]
-    fn an_owner_whose_window_is_frozen_leaves_the_launch_unanswered() {
+    fn an_owner_whose_window_is_frozen_says_it_is_stuck() {
         static FROZEN: super::Heartbeat = super::Heartbeat::new();
         FROZEN.start();
-        assert_eq!(ack_from("frozen", &FROZEN, false), "");
+        assert_eq!(ack_from("frozen", &FROZEN, false), "stuck\n");
+    }
+
+    #[test]
+    fn a_launch_against_a_frozen_owner_is_told_so_and_does_not_take_over() {
+        static FROZEN: super::Heartbeat = super::Heartbeat::new();
+        FROZEN.start();
+        let owner = super::Owner {
+            ui: &FROZEN,
+            answer: Duration::ZERO,
+        };
+        let endpoint = Endpoint::for_root(&temp_root("frozen-acquire"));
+        let first = super::acquire_as(&endpoint, &[], |_| (), owner).unwrap();
+        assert_eq!(first, Acquired::Primary);
+        let second = acquire(&endpoint, &[], |_| panic!("not the owner"));
+        assert_eq!(
+            second.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::TimedOut)
+        );
+        assert_eq!(
+            Launch::after(&acquire(&endpoint, &[], |_| ())),
+            Launch::OwnerStuck
+        );
     }
 
     #[test]
