@@ -119,6 +119,9 @@ impl QuillApp {
                 && app
                     .main()
                     .update(cx, |this, cx| {
+                        this.viewer
+                            .photo_editor_after
+                            .take_if(|open| open.render == render);
                         let landed =
                             this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
                         if landed.held.is_some() {

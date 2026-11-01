@@ -25,12 +25,7 @@ fn new_app_in(cx: &mut TestAppContext, demo: &str) -> (Entity<QuillApp>, VisualT
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(900.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| {
-            QuillApp::new_with_demo(
-                window,
-                cx,
-                None,
-                Some(ScreenshotDemo::named(&demo)),
-            )
+            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(&demo)))
         });
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| crate::ui::shell::QuillShell::new(view));
