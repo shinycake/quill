@@ -16,6 +16,7 @@ pub fn install_link_inbox(
         }
     })
     .detach();
+    quill::single_instance::UI.start();
     cx.spawn({
         let view = view.downgrade();
         let window_handle = window.window_handle();
@@ -38,6 +39,8 @@ pub fn install_link_inbox(
                     wait,
                 )
                 .await;
+                // A second launch waits for this before it is acknowledged.
+                quill::single_instance::UI.beat();
                 let alive = view
                     .update(cx, |this, _| {
                         if this.pending_deep_link.is_none()
@@ -48,6 +51,7 @@ pub fn install_link_inbox(
                     })
                     .is_ok();
                 if !alive {
+                    quill::single_instance::UI.stop();
                     break;
                 }
                 if quill::deep_link_inbox::take_activation() {
