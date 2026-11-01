@@ -46,6 +46,10 @@ impl DiskUi {
         self.state == DiskState::Full
     }
 
+    pub(super) fn holds_auto_downloads(&self) -> bool {
+        self.state != DiskState::Healthy
+    }
+
     pub(super) fn refused_start(&mut self) {
         self.start_refused = true;
     }
@@ -131,6 +135,9 @@ impl QuillApp {
         let before = std::mem::replace(&mut self.disk.state, after);
         if after == DiskState::Full && before != DiskState::Full {
             self.bring_main_window_forward(cx);
+        }
+        if after == DiskState::Healthy && before != DiskState::Healthy {
+            self.auto_download_update(cx);
         }
         before
     }

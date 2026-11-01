@@ -70,13 +70,22 @@ impl QuillApp {
     /// can install starts downloading at once.
     pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
         self.settings.update_state = state;
+        self.auto_download_update(cx);
+        cx.notify();
+    }
+
+    /// Starts the found release's download, unless the disk bar says
+    /// automatic downloads wait: then the disk's return to healthy starts it.
+    pub(super) fn auto_download_update(&mut self, cx: &mut Context<Self>) {
+        if self.disk.holds_auto_downloads() {
+            return;
+        }
         if let Some(release) = UpdateControl::auto_download(
             &self.settings.update_state,
             quill::update_install::self_update_availability(),
         ) {
             self.download_update(release, cx);
         }
-        cx.notify();
     }
 
     /// The update button for the current state (`UpdateControl::of`).
