@@ -10,6 +10,7 @@
  * and A/V sync itself.
  */
 #include "quillvideo.h"
+#include "bgra_layout.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -576,7 +577,8 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
     sws_freeContext(c->sws);
     c->sws = sws_getContext(f->width, f->height, (enum AVPixelFormat)f->format,
                             ow, oh, AV_PIX_FMT_BGRA,
-                            SWS_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+                            qv_bgra_sws_flags(SWS_BILINEAR, ow), NULL, NULL,
+                            NULL);
     if (!c->sws)
       return AVERROR(EINVAL);
     /* Ignored (harmlessly fails) for RGB sources such as GIF palettes. */
@@ -591,7 +593,8 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
     c->sws_cs = cs;
     c->sws_range = range;
   }
-  size_t need = (size_t)ow * (size_t)oh * 4;
+  int stride = qv_bgra_stride(ow);
+  size_t need = qv_bgra_size(ow, oh);
   if (need > c->rgb_size) {
     av_free(c->rgb);
     c->rgb = av_malloc(need);
@@ -600,13 +603,13 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
       return AVERROR(ENOMEM);
   }
   uint8_t *dst[4] = {c->rgb, NULL, NULL, NULL};
-  int dst_stride[4] = {ow * 4, 0, 0, 0};
+  int dst_stride[4] = {stride, 0, 0, 0};
   int rows = sws_scale(c->sws, (const uint8_t *const *)f->data, f->linesize, 0,
                        f->height, dst, dst_stride);
   if (rows <= 0)
     return AVERROR(EINVAL);
   out->data = c->rgb;
-  out->stride = ow * 4;
+  out->stride = stride;
   out->width = ow;
   out->height = oh;
   out->format = QV_PIXEL_BGRA;

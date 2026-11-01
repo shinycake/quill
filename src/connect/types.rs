@@ -4,6 +4,7 @@ use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice};
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{AccountKey, ChatId, RequestId};
+use crate::lang::{keys, tr};
 use crate::lifecycle::RestoreBlocker;
 use crate::platform::DatabaseKey;
 use crate::settings::AccountPaths;
@@ -136,6 +137,7 @@ pub enum ConnectBlocker {
     TdjsonVersion,
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
+    DiskFull,
 }
 
 impl ConnectBlocker {
@@ -161,6 +163,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonVersion => {
                 "tdjson is a different TDLib version than this build of Quill needs — rebuild it with scripts/build-tdlib.sh"
             }
+            ConnectBlocker::DiskFull => tr(keys::Q_DISK_FULL_TITLE),
         }
     }
 
@@ -175,6 +178,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonLoad => "tdjson-load",
             ConnectBlocker::TdjsonVersion => "tdjson-version",
             ConnectBlocker::ReceiveThread => "receive-thread",
+            ConnectBlocker::DiskFull => "disk-full",
         }
     }
 }

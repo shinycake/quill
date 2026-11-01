@@ -178,6 +178,9 @@ impl QuillApp {
         if self.settings.page == Some(Page::AgentAccess) && quill::agent::access::enabled() {
             self.ensure_agent_page(window, cx);
         }
+        if self.settings.page == Some(Page::DataStorage) {
+            self.ensure_storage_scroll(window, cx);
+        }
         let searching = self.settings_searching(window, cx);
         // A narrow window shows the results in the list's place.
         let list = !narrow || (self.settings.page.is_none() && !searching);
@@ -263,6 +266,9 @@ impl QuillApp {
                 .debug_selector(move || format!("settings-page-{}", page.id()))
                 .when(page == Page::AgentAccess && sub.is_none(), |this| {
                     this.track_scroll(&self.agent_ui.page.scroll)
+                })
+                .when(page == Page::DataStorage && sub.is_none(), |this| {
+                    this.track_scroll(&self.settings.storage_scroll.page)
                 })
                 .size_full()
                 .overflow_y_scroll()

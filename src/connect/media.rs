@@ -1,5 +1,6 @@
 //! Connect driver: media downloads.
 use super::*;
+use crate::disk_guard::{DiskFloors, DiskState};
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use crate::state::{DownloadOrigin, RequestPurpose};
 use crate::story_preload::PreloadRequest;
@@ -367,6 +368,36 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err)
             }
         }
+    }
+
+    pub fn note_disk(
+        &mut self,
+        state: DiskState,
+        free: Option<u64>,
+        floors: &DiskFloors,
+    ) -> Result<(), ConnectSendError> {
+        self.session.media.disk_holds_auto_downloads = state != DiskState::Healthy;
+        let (DiskState::Low, Some(free), true) = (state, free, self.chats_path_active()) else {
+            return Ok(());
+        };
+        let room = free.saturating_sub(floors.close);
+        let media = &self.session.media;
+        let over: Vec<FileId> = media
+            .downloads
+            .user_ids()
+            .filter(|id| !media.downloads.is_paused(*id))
+            .filter(|id| {
+                media
+                    .files
+                    .get(id)
+                    .is_some_and(|file| file.download_left() > room)
+            })
+            .map(FileId)
+            .collect();
+        for file_id in over {
+            self.pause_download(file_id)?;
+        }
+        Ok(())
     }
 
     /// Pause a user-initiated (listed) download (`toggleDownloadIsPaused`).

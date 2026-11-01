@@ -288,6 +288,37 @@ impl X11ClientStatePtr {
         state.cursor_styles.remove(&x_window);
     }
 
+    /// Quill: run `f` on `x_window` from the event loop at `at`, outside the
+    /// draw that asked for it (a GPU recovery step).
+    pub(crate) fn run_for_window_at(
+        &self,
+        x_window: xproto::Window,
+        at: Instant,
+        f: impl FnOnce(X11WindowStatePtr) + 'static,
+    ) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        let Ok(state) = client.0.try_borrow() else {
+            log::error!("cannot schedule a GPU recovery step: the X11 client is busy");
+            return;
+        };
+        let this = self.clone();
+        let mut f = Some(f);
+        let timer = calloop::timer::Timer::from_deadline(at);
+        if let Err(err) = state.loop_handle.insert_source(timer, move |_, _, _| {
+            let window = this
+                .get_client()
+                .and_then(|client| client.get_window(x_window));
+            if let (Some(window), Some(f)) = (window, f.take()) {
+                f(window);
+            }
+            calloop::timer::TimeoutAction::Drop
+        }) {
+            log::error!("cannot schedule a GPU recovery step: {err}");
+        }
+    }
+
     pub fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let Some(client) = self.get_client() else {
             return;
