@@ -66,6 +66,12 @@ impl Tdlib for ChannelTdlib {
             }
         }
     }
+
+    fn post(&mut self, request: Value) {
+        if self.requests.send(request).is_ok() {
+            crate::wake::UPDATES.poke();
+        }
+    }
 }
 
 /// The session's end of a worker: its next request, the one the driver
@@ -96,6 +102,12 @@ impl WorkerLink {
             cancelled,
         };
         (link, worker)
+    }
+
+    /// Whether the worker's next request may go out: requests wait for the
+    /// one before, but a cancelled worker's last one stops that one.
+    pub fn may_send(&self) -> bool {
+        self.pending.is_none() || self.cancelled.load(Ordering::Acquire)
     }
 
     /// The next request for TDLib, if the worker has one waiting.

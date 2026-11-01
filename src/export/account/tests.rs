@@ -340,6 +340,8 @@ impl Tdlib for Account {
                 {"domain_name": "example.org", "bot_user_id": 3, "browser": "Firefox",
                     "platform": "Linux", "ip_address": "198.51.100.7", "location": "Elsewhere",
                     "log_in_date": 1_680_000_000, "last_active_date": 1_690_000_000}]}),
+            "getFile" => json!({"@type": "file", "id": request["file_id"],
+                "local": {"is_downloading_completed": true}}),
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
                 match self.files.get(&id) {

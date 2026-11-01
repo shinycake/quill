@@ -435,7 +435,9 @@ fn the_worker_completes_the_page_and_copies_its_media() {
         [
             "getMessage",
             "getFullRichMessage",
+            "getFile",
             "downloadFile",
+            "getFile",
             "downloadFile"
         ]
     );

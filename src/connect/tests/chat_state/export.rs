@@ -56,6 +56,40 @@ fn an_account_off_screen_still_forwards_its_exports_requests() {
 }
 
 #[test]
+fn a_cancelled_exports_last_request_passes_the_download_it_stops() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    let stop_sent = |recorder: &RecordingSender| {
+        let mut sent = recorder.snapshot().into_iter();
+        sent.any(|json| json.contains("cancelDownloadFile"))
+    };
+
+    worker
+        .send(serde_json::json!({"@type": "downloadFile"}))
+        .unwrap();
+    driver.pump_chat_export();
+    worker
+        .send(serde_json::json!({"@type": "cancelDownloadFile"}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert!(
+        !stop_sent(&recorder),
+        "one request at a time until cancelled"
+    );
+
+    let export = driver.session.settings.chat_export.as_ref().unwrap();
+    export.cancel();
+    driver.pump_chat_export();
+    assert!(stop_sent(&recorder));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn chat_export_worker_requests_flow_through_the_driver() {
     // `parity:data-chat-export-html`: the worker's TDLib requests go out
     // tagged for the export, the answer is routed back to the worker, and an

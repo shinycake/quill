@@ -47,6 +47,7 @@ struct Fake {
     messages: Vec<Value>,
     /// file id -> local path TDLib reports after "downloading".
     files: HashMap<i64, PathBuf>,
+    local: HashMap<i64, Value>,
     /// 0 pages whole; n returns at most n messages per page.
     page_size: usize,
     calls: Vec<String>,
@@ -60,6 +61,7 @@ impl Fake {
         Self {
             messages,
             files: HashMap::new(),
+            local: HashMap::new(),
             page_size: 0,
             calls: Vec::new(),
             cancel_after: None,
@@ -117,6 +119,19 @@ impl Tdlib for Fake {
                 json!({"@type": "user", "id": id, "first_name": format!("User{id}"), "last_name": "<x>"})
             }
             "getChat" => json!({"@type": "chat", "title": "Some Channel"}),
+            "getFile" => {
+                let id = request["file_id"].as_i64().unwrap();
+                let cached = json!({"is_downloading_completed": true});
+                let local = self.local.get(&id).cloned().unwrap_or(cached);
+                json!({"@type": "file", "id": id, "local": local})
+            }
+            "deleteFile" => {
+                let id = request["file_id"].as_i64().unwrap();
+                if let Some(path) = self.files.get(&id) {
+                    std::fs::remove_file(path).unwrap();
+                }
+                json!({"@type": "ok"})
+            }
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
                 match self.files.get(&id) {
@@ -541,4 +556,110 @@ fn a_worker_ending_wakes_the_poll_loop_after_it_published() {
     crate::export::handle::publish_end(&progress, |stage| *stage = Stage::Cancelled, &wake);
     assert_ne!(wake.epoch(), seen);
     assert_eq!(*progress.lock().unwrap(), Stage::Cancelled);
+}
+
+fn not_local() -> Value {
+    json!({"is_downloading_completed": false, "is_downloading_active": false,
+        "downloaded_size": 0})
+}
+
+fn one_photo(dir: &Path) -> (Fake, ExportSettings, PathBuf) {
+    let td = dir.join("td");
+    std::fs::create_dir_all(&td).unwrap();
+    std::fs::write(td.join("p.jpg"), b"jpeg").unwrap();
+    let mut fake = Fake::new(vec![photo_message(1, 1_700_000_100, 10, 4)]);
+    fake.files.insert(10, td.join("p.jpg"));
+    let mut s = settings(dir);
+    s.media = MediaTypes::none().with(MediaKind::Photo, true);
+    (fake, s, td)
+}
+
+const PHOTO: &str = "photos/photo_1@14-11-2023_22-15-00.jpg";
+
+#[test]
+fn a_file_only_the_export_wanted_leaves_the_cache_and_stays_in_the_export() {
+    let dir = scratch("moved");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 1);
+    assert!(!td.join("p.jpg").exists());
+    assert_eq!(std::fs::read(run.out.join(PHOTO)).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_cached_before_the_export_stays_cached_and_apart_from_the_export() {
+    let dir = scratch("kept");
+    let (mut fake, s, td) = one_photo(&dir);
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 0);
+    std::fs::write(run.out.join(PHOTO), b"edited").unwrap();
+    assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_something_else_is_fetching_stays_cached() {
+    for local in [
+        json!({"is_downloading_completed": false, "is_downloading_active": true,
+            "downloaded_size": 0}),
+        json!({"is_downloading_completed": false, "is_downloading_active": false,
+            "downloaded_size": 1024}),
+    ] {
+        let dir = scratch("shared");
+        let (mut fake, s, td) = one_photo(&dir);
+        fake.local.insert(10, local);
+        let run = export(&mut fake, &s, &td);
+        assert_eq!(run.result.unwrap().files, 1);
+        assert_eq!(fake.count("deleteFile"), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn a_file_found_too_large_after_its_download_leaves_the_cache() {
+    let dir = scratch("too-large");
+    let (mut fake, mut s, td) = one_photo(&dir);
+    fake.messages = vec![photo_message(1, 1_700_000_100, 10, 0)];
+    fake.local.insert(10, not_local());
+    s.size_limit = 1;
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().skipped, 1);
+    assert_eq!(fake.count("deleteFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn cancelled_download(fake: &mut Fake, td: &Path) {
+    fake.cancel_after = Some(1);
+    assert!(matches!(
+        super::worker::fetch_file(fake, td, 10, None),
+        Err(ExportError::Cancelled)
+    ));
+}
+
+#[test]
+fn cancelling_during_a_download_stops_the_download() {
+    let dir = scratch("cancel-download");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    cancelled_download(&mut fake, &td);
+    assert_eq!(fake.count("cancelDownloadFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancelling_leaves_a_download_something_else_asked_for() {
+    let dir = scratch("cancel-shared");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(
+        10,
+        json!({"is_downloading_completed": false, "is_downloading_active": true,
+            "downloaded_size": 0}),
+    );
+    cancelled_download(&mut fake, &td);
+    assert_eq!(fake.count("cancelDownloadFile"), 0);
+    let _ = std::fs::remove_dir_all(&dir);
 }

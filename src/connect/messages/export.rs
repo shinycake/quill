@@ -87,7 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Send a worker's waiting request tagged for `purpose`; the answer
-    /// comes back through `apply_common_payload`. One request at a time.
+    /// comes back through `apply_common_payload`.
     /// `link` finds the worker's link in the session (each "Save as HTML"
     /// export passes its own index).
     pub(super) fn pump_export(
@@ -96,7 +96,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         link: impl Fn(&mut Session) -> Option<&mut WorkerLink>,
     ) {
         let Some(mut request) = link(&mut self.session)
-            .filter(|link| link.pending.is_none())
+            .filter(|link| link.may_send())
             .and_then(|link| link.next_request())
         else {
             return;

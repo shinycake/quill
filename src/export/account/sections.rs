@@ -10,7 +10,7 @@ use crate::export::html::Outcome;
 use crate::export::model::{Entity, file_of, formatted, int, thumb_of};
 use crate::export::names::{Namer, date_part, sanitize};
 use crate::export::settings::{MediaKind, Skip};
-use crate::export::worker::{ExportError, Tdlib, copy_into, fetch_file, query};
+use crate::export::worker::{ExportError, Tdlib, fetch_file, place_into, query};
 use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -39,7 +39,8 @@ impl Files<'_> {
     ) -> Result<Outcome, ExportError> {
         match fetch_file(tdlib, self.files_root, file_id, limit)? {
             Ok(source) => {
-                copy_into(self.root, relative, &source)?;
+                place_into(self.root, relative, &source)?;
+                source.release(tdlib)?;
                 Ok(Outcome::Saved {
                     path: relative.to_string(),
                     thumb: None,
