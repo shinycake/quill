@@ -2,7 +2,13 @@
 //! (colour-managed with moxcms), jxl-oxide for JPEG XL, resvg for SVG.
 
 use super::{DecodeError, DecodeSize, area_allowed, contained, unpremultiply};
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, metadata::Orientation};
+use fast_image_resize::{
+    FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer,
+    images::{Image, ImageRef},
+};
+use image::{
+    DynamicImage, ImageBuffer, ImageDecoder, ImageFormat, ImageReader, Pixel, metadata::Orientation,
+};
 use std::io::Cursor;
 
 fn failed(err: impl std::fmt::Display) -> DecodeError {
@@ -37,12 +43,11 @@ fn finish(
     orientation: Orientation,
     size: DecodeSize,
 ) -> image::RgbaImage {
-    let filter = image::imageops::FilterType::Triangle;
     let target = size.fit((image.width(), image.height()));
     let mut image = if image.color().has_alpha() {
         let mut rgba = image.into_rgba8();
         if target != rgba.dimensions() {
-            rgba = image::imageops::resize(&rgba, target.0, target.1, filter);
+            rgba = shrink(&rgba, target);
         }
         if let Some(icc) = icc {
             to_srgb(&mut rgba, moxcms::Layout::Rgba, icc);
@@ -53,7 +58,7 @@ fn finish(
         // RGBA copy of a 12 Mpx photo is 48 MB).
         let mut rgb = image.into_rgb8();
         if target != rgb.dimensions() {
-            rgb = image::imageops::resize(&rgb, target.0, target.1, filter);
+            rgb = shrink(&rgb, target);
         }
         if let Some(icc) = icc {
             to_srgb(&mut rgb, moxcms::Layout::Rgb, icc);
@@ -62,6 +67,32 @@ fn finish(
     };
     image.apply_orientation(orientation);
     image.into_rgba8()
+}
+
+fn shrink<P>(
+    image: &ImageBuffer<P, Vec<u8>>,
+    (width, height): (u32, u32),
+) -> ImageBuffer<P, Vec<u8>>
+where
+    P: Pixel<Subpixel = u8> + 'static,
+{
+    let kind = if P::CHANNEL_COUNT == 4 {
+        PixelType::U8x4
+    } else {
+        PixelType::U8x3
+    };
+    let simd = || {
+        let source = ImageRef::new(image.width(), image.height(), image.as_raw(), kind).ok()?;
+        let mut shrunk = Image::new(width, height, kind);
+        let options = ResizeOptions::new()
+            .resize_alg(ResizeAlg::Convolution(FilterType::Bilinear))
+            .use_alpha(false);
+        Resizer::new().resize(&source, &mut shrunk, &options).ok()?;
+        ImageBuffer::from_raw(width, height, shrunk.into_vec())
+    };
+    simd().unwrap_or_else(|| {
+        image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
+    })
 }
 
 /// Convert pixels in the colour space of `icc` to sRGB in place. A profile
