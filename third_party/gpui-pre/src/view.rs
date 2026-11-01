@@ -266,7 +266,10 @@ impl<T: Render> Entity<T> {
     /// included ([`Window::draw`]). So nothing around a live view may depend
     /// on its being rendered, and it can't change the window's layout, hit
     /// tests, focus or accessibility tree: those stay as the last whole frame
-    /// left them, and what it builds in such a frame only paints. A cached
+    /// left them, and what it builds in such a frame only paints. A live view
+    /// that builds hitboxes (a hover, a click, a tooltip) never redraws alone,
+    /// since only a whole frame's hit test answers for them: every notify of
+    /// it draws a whole frame. A cached
     /// view holding a live view that redrew on its own renders again in the
     /// next whole frame rather than replay. A live view inside another live
     /// view redraws with it, unless a cached view sits between them: that
@@ -453,6 +456,9 @@ impl<V: View> Element for ViewElement<V> {
                 cx,
                 &mut |window, cx| render_view(self.view.take().unwrap(), window, cx),
             );
+            if let Some(site) = self.live_site {
+                window.live_view_prepainted(site);
+            }
             #[cfg(feature = "profiler")]
             window.window_profiler.end_view(
                 start,

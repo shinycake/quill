@@ -463,8 +463,12 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
 - The whole frame after a patch marks every live view it drew dirty, so a cached
   view holding one renders again instead of replaying an older paint.
 
-What a live view builds takes no clicks and no hover, so it suits content that only
-shows. `Window::frame_number` counts these frames like any other.
+A hit test answers only for a whole frame's hitboxes, so a live view that builds
+any (a hover, a click, a tooltip) never patches: a notify of it draws a whole frame,
+a patch for another view leaves its last paint in place, and a patch that finds new
+hitboxes in a view asks for that whole frame. So a live view suits content that only
+shows; anything else about it stays correct and costs whole frames.
+`Window::frame_number` counts these frames like any other.
 
 `Window::element_opacity` and `Window::with_element_opacity` are public so that
 content painted away from its place in the tree keeps the opacity it was given there.

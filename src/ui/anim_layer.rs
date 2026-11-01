@@ -32,7 +32,9 @@
 //! On a tick the layers render, prepaint and paint on their own, and only
 //! their paint reaches the screen: what a layer builds takes no clicks, no
 //! hover and no part in the accessibility tree, as the slice under it has
-//! all of those.
+//! all of those. It must build no hitboxes either (GPUI draws a live view
+//! holding any in whole frames): a [`hover_tile`] that shows the pointer
+//! asks the slice's hit test instead.
 //!
 //! The layer paints after the whole slice, so something the slice paints
 //! over an item must be an [`Occluder`] (the item then falls back to the
@@ -86,8 +88,9 @@ fn next_seq() -> u64 {
 
 /// Paints time-driven content into the given bounds.
 pub(super) type PaintFn = Rc<dyn Fn(Bounds<Pixels>, &mut Window)>;
-/// Builds the element the layer draws, afresh each frame.
-pub(super) type BuildFn = Rc<dyn Fn() -> Option<AnyElement>>;
+/// Builds the element the layer draws, afresh each frame, told whether
+/// the pointer is on the item.
+pub(super) type BuildFn = Rc<dyn Fn(bool) -> Option<AnyElement>>;
 
 /// What a layered item draws.
 #[derive(Clone)]
@@ -146,6 +149,8 @@ struct Item {
     seq: Cell<u64>,
     /// The opacity it was painted at (a dimmed cell).
     opacity: Cell<f32>,
+    /// Its place in the slice's hit test (a [`hover_tile`]).
+    hitbox: Option<Hitbox>,
 }
 
 impl Item {
@@ -193,6 +198,7 @@ impl Layer {
         bounds: Bounds<Pixels>,
         mask: ContentMask<Pixels>,
         text: Option<TextStyleRefinement>,
+        hitbox: Option<Hitbox>,
     ) -> usize {
         let mut items = self.0.items.borrow_mut();
         items.push(Item {
@@ -203,6 +209,7 @@ impl Layer {
             inline: Cell::new(false),
             seq: Cell::new(0),
             opacity: Cell::new(1.),
+            hitbox,
         });
         items.len() - 1
     }
@@ -235,7 +242,7 @@ impl Layer {
         if inline {
             content.paint_inline(bounds, window);
         }
-        let index = self.register(content, bounds, mask, None);
+        let index = self.register(content, bounds, mask, None, None);
         let items = self.0.items.borrow();
         if let Some(item) = items.get(index) {
             item.inline.set(inline);
@@ -309,7 +316,11 @@ impl Layer {
                     Content::Tile { build: element, .. } | Content::Mirror { build: element }
                         if build =>
                     {
-                        element()
+                        let hovered = item
+                            .hitbox
+                            .as_ref()
+                            .is_some_and(|hitbox| hitbox.is_hovered(window));
+                        element(hovered)
                     }
                     _ => None,
                 };
@@ -371,6 +382,8 @@ pub(super) struct Layered {
     content: Content,
     child: Option<AnyElement>,
     style: StyleRefinement,
+    /// It shows the pointer (see [`hover_tile`]).
+    hover: bool,
 }
 
 /// An animated sticker or custom emoji, sized by its style.
@@ -396,13 +409,25 @@ pub(super) fn tile(
     fps: u32,
     build: impl Fn() -> Option<AnyElement> + 'static,
 ) -> Layered {
-    Layered::new(
+    hover_tile(child, fps, move |_| build())
+}
+
+/// A [`tile`] that `build` draws differently under the pointer. The hover
+/// shows from the tile's next frame.
+pub(super) fn hover_tile(
+    child: impl IntoElement,
+    fps: u32,
+    build: impl Fn(bool) -> Option<AnyElement> + 'static,
+) -> Layered {
+    let mut tile = Layered::new(
         Content::Tile {
             build: Rc::new(build),
             fps,
         },
         Some(child.into_any_element()),
-    )
+    );
+    tile.hover = true;
+    tile
 }
 
 /// `child`, which the slice paints over layered content: the layer redraws
@@ -410,7 +435,7 @@ pub(super) fn tile(
 pub(super) fn mirror(child: impl IntoElement, build: impl Fn() -> AnyElement + 'static) -> Layered {
     Layered::new(
         Content::Mirror {
-            build: Rc::new(move || Some(build())),
+            build: Rc::new(move |_| Some(build())),
         },
         Some(child.into_any_element()),
     )
@@ -423,6 +448,7 @@ impl Layered {
             content,
             child,
             style: StyleRefinement::default(),
+            hover: false,
         }
     }
 }
@@ -489,7 +515,16 @@ impl Element for Layered {
                     .text_style()
                     .subtract(&TextStyleRefinement::default())
             });
-        Some(layer.register(self.content.clone(), bounds, window.content_mask(), text))
+        let hitbox = self
+            .hover
+            .then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
+        Some(layer.register(
+            self.content.clone(),
+            bounds,
+            window.content_mask(),
+            text,
+            hitbox,
+        ))
     }
 
     fn paint(
@@ -749,14 +784,14 @@ mod tests {
 
     fn tile() -> Content {
         Content::Tile {
-            build: Rc::new(|| None),
+            build: Rc::new(|_| None),
             fps: 30,
         }
     }
 
     fn mirror() -> Content {
         Content::Mirror {
-            build: Rc::new(|| None),
+            build: Rc::new(|_| None),
         }
     }
 
@@ -773,8 +808,8 @@ mod tests {
         let layer = Layer::default();
         layer.begin_frame();
         layer.0.occluders.borrow_mut().push(rect(0., 0., 50., 50.));
-        layer.register(frames(), rect(40., 40., 20., 20.), mask(), None);
-        layer.register(frames(), rect(100., 100., 20., 20.), mask(), None);
+        layer.register(frames(), rect(40., 40., 20., 20.), mask(), None, None);
+        layer.register(frames(), rect(100., 100., 20., 20.), mask(), None, None);
         // Hidden by its mask: neither drawn nor ticking.
         layer.register(
             frames(),
@@ -782,6 +817,7 @@ mod tests {
             ContentMask {
                 bounds: rect(0., 0., 10., 10.),
             },
+            None,
             None,
         );
         layer.plan();
@@ -799,9 +835,9 @@ mod tests {
     fn mirrors_are_built_only_over_layered_tiles() {
         let layer = Layer::default();
         layer.begin_frame();
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
-        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None);
-        layer.register(mirror(), rect(500., 500., 10., 10.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
+        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None, None);
+        layer.register(mirror(), rect(500., 500., 10., 10.), mask(), None, None);
         assert_eq!(layer.plan(), vec![true, true, false]);
         {
             // The pill over the video is the layer's alone (the slice skips
@@ -814,8 +850,8 @@ mod tests {
         // Covered, the tile is the slice's: no copy of the pill either.
         layer.begin_frame();
         layer.0.occluders.borrow_mut().push(rect(0., 0., 10., 10.));
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
-        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
+        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None, None);
         assert_eq!(layer.plan(), vec![false, false]);
     }
 
@@ -823,11 +859,11 @@ mod tests {
     fn a_replay_keeps_what_the_slice_painted() {
         let layer = Layer::default();
         layer.begin_frame();
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
         layer.plan();
         paint_all(&layer);
         // A prepaint the slice discarded left an item it never painted.
-        layer.register(tile(), rect(200., 0., 100., 100.), mask(), None);
+        layer.register(tile(), rect(200., 0., 100., 100.), mask(), None, None);
         assert_eq!(layer.plan(), vec![true, false]);
         assert_eq!(layer.demand(), (30, 0));
         // Nothing animates once the slice prepaints an empty frame.

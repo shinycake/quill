@@ -12,6 +12,10 @@
 //! the key dispatch tree, the accessibility tree and the ranges cached views
 //! replay from all read it, and what a live view builds here reaches none of
 //! them. The next frame, patched or whole, starts over from it.
+//!
+//! A hit test answers only for the hitboxes of a whole frame, so a live view
+//! that builds any draws in whole frames alone: a patch leaves its last paint
+//! in place, which that frame painted.
 
 use super::{
     AnyImageCache, AnyView, App, Bounds, ContentMask, DrawPhase, ElementIdStack, EntityId, Pixels,
@@ -34,6 +38,10 @@ pub(crate) struct LiveView {
     /// Its operations in the frame's scene, once painted: a prepaint can be
     /// discarded.
     scene: Option<Range<usize>>,
+    /// The frame's hitboxes before it prepainted.
+    hitboxes: usize,
+    /// It built hitboxes.
+    interactive: bool,
 }
 
 impl LiveView {
@@ -43,7 +51,7 @@ impl LiveView {
 
     /// A patch draws it as a site of its own.
     fn draws_itself(&self) -> bool {
-        !self.nested && self.scene.is_some()
+        !self.nested && !self.interactive && self.scene.is_some()
     }
 
     /// A patch reaches it, as one of `sites` or inside one.
@@ -74,8 +82,18 @@ impl Window {
             rem_size: self.rem_size(),
             bounds,
             scene: None,
+            hitboxes: self.next_frame.hitboxes.len(),
+            interactive: false,
         });
         self.next_frame.live_views.len() - 1
+    }
+
+    /// The live view `site` finished prepainting.
+    pub(crate) fn live_view_prepainted(&mut self, site: usize) {
+        let hitboxes = self.next_frame.hitboxes.len();
+        if let Some(site) = self.next_frame.live_views.get_mut(site) {
+            site.interactive = hitboxes > site.hitboxes;
+        }
     }
 
     /// The live view `site` finished painting, from `start` in the scene.
@@ -155,13 +173,19 @@ impl Window {
         sites.sort_by_key(|site| site.scene.as_ref().map(|scene| scene.start));
 
         let mut elements: SmallVec<[AnyElement; 4]> = SmallVec::new();
-        for site in &sites {
+        let mut interactive: SmallVec<[EntityId; 1]> = SmallVec::new();
+        for site in &mut sites {
             let mut element = site.view.clone().into_any_element();
+            let hitboxes = self.next_frame.hitboxes.len();
             self.in_live_view(site, |window| {
                 element.layout_as_root(site.bounds.size.into(), window, cx);
                 element.prepaint_at(site.bounds.origin, window, cx);
             });
             elements.push(element);
+            if self.next_frame.hitboxes.len() > hitboxes {
+                site.interactive = true;
+                interactive.push(site.view.entity_id());
+            }
         }
 
         self.invalidator.set_phase(DrawPhase::Paint);
@@ -201,6 +225,9 @@ impl Window {
         cx.add_entities_accessed(self.handle, self.invalidator.clone(), &entities);
         self.invalidator.set_phase(DrawPhase::None);
         self.needs_present.set(true);
+        for view in interactive {
+            self.invalidator.invalidate_view(view, cx);
+        }
     }
 
     fn in_live_view(&mut self, site: &LiveView, f: impl FnOnce(&mut Self)) {

@@ -281,8 +281,10 @@ pub(in crate::ui) fn animation_attachment(
         // its own frame cadence while the row renders, the slice keeping
         // the picture it rendered with underneath. The badge and the Pause
         // disc (shown on hover; the row's own disc under it takes the
-        // click) ride with it, since the layer paints over the row.
-        let draw = move |frame: Arc<RenderImage>| {
+        // click) ride with it, since the layer paints over the row. The
+        // layer's copy takes no hover, so it is told; the slice's reads
+        // the group.
+        let draw = move |frame: Arc<RenderImage>, hovered: Option<bool>| {
             div()
                 .relative()
                 .w(frame_w)
@@ -302,21 +304,28 @@ pub(in crate::ui) fn animation_attachment(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(
-                            media_disc(("gif-disc-shown", row_id), MediaDisc::Pause)
-                                .invisible()
-                                .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
-                        ),
+                        .child({
+                            let disc = media_disc(("gif-disc-shown", row_id), MediaDisc::Pause);
+                            match hovered {
+                                Some(true) => disc,
+                                Some(false) => disc.invisible(),
+                                None => disc
+                                    .invisible()
+                                    .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
+                            }
+                        }),
                 )
                 .into_any_element()
         };
         let under = match gif.frame_now() {
-            Some(frame) => draw(frame),
+            Some(frame) => draw(frame, None),
             None => visual.map_or_else(|| div().into_any_element(), still),
         };
         let fps = gif.fps();
-        crate::ui::anim_layer::tile(under, fps, move || gif.frame_now().map(draw))
-            .into_any_element()
+        crate::ui::anim_layer::hover_tile(under, fps, move |hovered| {
+            gif.frame_now().map(|frame| draw(frame, Some(hovered)))
+        })
+        .into_any_element()
     } else if !blocked && let Some(path) = visual {
         still(path)
     } else {

@@ -799,3 +799,229 @@ fn a_layer_under_a_dimmed_ancestor_dims_its_items_once(cx: &mut TestAppContext) 
     vcx.run_until_parked();
     assert_eq!(painted_at.get(), 0.25, "half of a half, and no more");
 }
+
+/// The hues in the shown scene, from the bottom up.
+fn probe_hues(vcx: &mut VisualTestContext) -> Vec<f32> {
+    let mut quads = vcx.update(|window, _| window.painted_quads());
+    quads.sort_by_key(|quad| quad.order);
+    quads
+        .iter()
+        .filter_map(|quad| quad.background.as_solid())
+        .map(|color| color.h)
+        .collect()
+}
+
+/// A fill that takes a hover, once `hover` says so.
+struct Hoverable {
+    hue: f32,
+    hover: bool,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for Hoverable {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        let fill = div()
+            .id("hoverable")
+            .absolute()
+            .left_0()
+            .top_0()
+            .size(px(10.))
+            .bg(color(self.hue));
+        if self.hover {
+            fill.hover(|style| style.bg(color(OVER)))
+        } else {
+            fill
+        }
+    }
+}
+
+struct HoverPage {
+    live: Entity<Hoverable>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for HoverPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div().size_full().relative().child(self.live.clone().live())
+    }
+}
+
+/// A live view over a page, and what counts their renders.
+struct HoverScene {
+    live: Entity<Hoverable>,
+    page_renders: Rc<Cell<u32>>,
+    vcx: VisualTestContext,
+}
+
+impl HoverScene {
+    fn open(cx: &mut TestAppContext, hover: bool) -> Self {
+        cx.update(gpui_kit::init);
+        let page_renders = Rc::new(Cell::new(0));
+        let page_in = page_renders.clone();
+        let slot = Rc::new(RefCell::new(None));
+        let slot_in = slot.clone();
+        let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+            let live = cx.new(|_| Hoverable {
+                hue: FIRST,
+                hover,
+                renders: Rc::default(),
+            });
+            *slot_in.borrow_mut() = Some(live.clone());
+            HoverPage {
+                live,
+                renders: page_in,
+            }
+        });
+        let live = slot.borrow().clone().expect("the live view");
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        vcx.update(|window, cx| window.render_frame(cx));
+        vcx.run_until_parked();
+        Self {
+            live,
+            page_renders,
+            vcx,
+        }
+    }
+
+    fn tick(&mut self, hue: f32) {
+        self.live.update(&mut self.vcx, |live, cx| {
+            live.hue = hue;
+            cx.notify();
+        });
+        self.vcx.run_until_parked();
+    }
+
+    fn move_to(&mut self, at: Point<Pixels>) {
+        self.vcx.simulate_mouse_move(at, None, Default::default());
+        self.vcx.run_until_parked();
+    }
+
+    fn hues(&mut self) -> Vec<f32> {
+        probe_hues(&mut self.vcx)
+    }
+}
+
+/// Hover comes from the last whole frame's hit test, which a patch can't
+/// answer for what it built: such a view takes whole frames, so its hover
+/// holds through every tick and ends when the pointer leaves.
+#[gpui_kit::test]
+fn hover_in_a_live_view_holds_through_its_ticks(cx: &mut TestAppContext) {
+    let mut scene = HoverScene::open(cx, true);
+    scene.move_to(point(px(5.), px(5.)));
+    assert_eq!(scene.hues(), vec![OVER], "the pointer is on it");
+    for hue in [SECOND, THIRD] {
+        scene.tick(hue);
+        assert_eq!(scene.hues(), vec![OVER], "a tick keeps the hover");
+    }
+    scene.move_to(point(px(100.), px(100.)));
+    assert_eq!(scene.hues(), vec![THIRD], "and leaving ends it");
+    scene.tick(FIRST);
+    assert_eq!(scene.hues(), vec![FIRST]);
+}
+
+/// A view that only shows stays cheap: this is what a hit test costs.
+#[gpui_kit::test]
+fn a_live_view_with_nothing_to_hover_ticks_alone(cx: &mut TestAppContext) {
+    let mut scene = HoverScene::open(cx, false);
+    let page = scene.page_renders.get();
+    scene.tick(SECOND);
+    assert_eq!(scene.hues(), vec![SECOND]);
+    assert_eq!(scene.page_renders.get(), page, "its page stayed");
+}
+
+/// A patch that finds a hover the last whole frame never hit tested gets
+/// the whole frame that does, and the pointer is found on it.
+#[gpui_kit::test]
+fn a_hover_a_patch_built_gets_a_whole_frame(cx: &mut TestAppContext) {
+    let mut scene = HoverScene::open(cx, false);
+    scene.move_to(point(px(5.), px(5.)));
+    let page = scene.page_renders.get();
+    scene.live.update(&mut scene.vcx, |live, cx| {
+        live.hover = true;
+        cx.notify();
+    });
+    scene.vcx.run_until_parked();
+    assert!(scene.page_renders.get() > page, "a whole frame came");
+    assert_eq!(scene.hues(), vec![OVER]);
+}
+
+/// A layer's painter, as a slice's sibling.
+struct TilePainter {
+    layer: super::Layer,
+}
+
+impl Render for TilePainter {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let (prepaint, paint) = (self.layer.clone(), self.layer.clone());
+        canvas(
+            move |_, window, cx| prepaint.prepaint(window, cx),
+            move |_, mut built, window, cx| paint.paint(&mut built, window, cx),
+        )
+        .size_full()
+    }
+}
+
+/// A slice holding a tile, its layer over it.
+struct TilePage {
+    layer: super::Layer,
+    painter: Entity<TilePainter>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for TilePage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        self.layer.begin_frame();
+        let tile = super::with_layer(Some(&self.layer), || {
+            super::hover_tile(div().size(px(20.)), 0, |hovered| {
+                let hue = if hovered { OVER } else { FIRST };
+                Some(div().size(px(20.)).bg(color(hue)).into_any_element())
+            })
+        });
+        div()
+            .size_full()
+            .relative()
+            .child(tile)
+            .child(self.painter.clone().live())
+    }
+}
+
+/// What a layer draws takes no hover, and a tile shows one all the same:
+/// the slice's hit test answers it, in the patches a tick stays.
+#[gpui_kit::test]
+fn a_hover_tile_shows_the_pointer_in_patches(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let renders = Rc::new(Cell::new(0));
+    let renders_in = renders.clone();
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let layer = super::Layer::default();
+        let painter = cx.new(|_| TilePainter {
+            layer: layer.clone(),
+        });
+        *slot_in.borrow_mut() = Some(painter.clone());
+        TilePage {
+            layer,
+            painter,
+            renders: renders_in,
+        }
+    });
+    let painter = slot.borrow().clone().expect("the painter");
+    let vcx = &mut VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let page = renders.get();
+    for (at, hue) in [
+        (point(px(5.), px(5.)), OVER),
+        (point(px(100.), px(100.)), FIRST),
+    ] {
+        vcx.simulate_mouse_move(at, None, Default::default());
+        painter.update(vcx, |_, cx| cx.notify());
+        vcx.run_until_parked();
+        assert_eq!(probe_hues(vcx), vec![hue]);
+    }
+    assert_eq!(renders.get(), page, "its page stayed");
+}
