@@ -187,8 +187,13 @@ impl QuillApp {
                             ),
                             _visibility: cx.observe_window_visibility(
                                 window,
-                                move |_, visibility, _, cx| {
+                                move |_, visibility, window, cx| {
+                                    let from = window.window_handle();
                                     let _ = visibility_owner.update(cx, |app, _| {
+                                        // A replaced window still reports while it goes.
+                                        if app.group_call.window != Some(from) {
+                                            return;
+                                        }
                                         app.group_call.window_visible = visibility.is_visible();
                                         app.sync_group_call_large_tile();
                                     });
