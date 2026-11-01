@@ -10,6 +10,7 @@ use super::scheduled::picked_unix;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::DatePicker;
@@ -280,7 +281,7 @@ impl QuillApp {
         // A custom time is read from the picker and bounded like
         // tdesktop's `ChooseDateTimeBox` (30 seconds to 366 days ahead);
         // a bad pick keeps the dialog open with the reason.
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let until_date = match dialog.until {
             RestrictUntil::Custom(_) => match picked_unix(&dialog.custom, cx)
                 .ok_or(UntilError::Invalid)

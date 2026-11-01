@@ -5,6 +5,7 @@ use super::{AwayDraft, GreetingDraft, Leave, MessageKind, ScheduleChoice};
 use crate::ui::app::QuillApp;
 use crate::ui::quick_replies::View as QuickRepliesView;
 use crate::ui::scheduled::{TimePicker, picked_unix};
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -16,7 +17,6 @@ use quill::business_settings::{
     self as bs, AwaySchedule, AwaySettings, BusinessRecipients, GreetingSettings,
 };
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 use quill::quick_replies::count_label;
 
 fn greeting_about() -> &'static str {
@@ -82,8 +82,10 @@ impl QuillApp {
 
     pub(super) fn new_away_draft(&self, window: &mut Window, cx: &mut Context<Self>) -> AwayDraft {
         let saved = self.my_business().away;
-        let (start, end) =
-            bs::initial_custom_interval(saved.as_ref().map(|s| s.schedule), now_unix());
+        let (start, end) = bs::initial_custom_interval(
+            saved.as_ref().map(|s| s.schedule),
+            WallClock::of(cx).now(),
+        );
         let schedule = match saved.as_ref().map(|s| s.schedule) {
             Some(AwaySchedule::OutsideOpeningHours) => ScheduleChoice::OutsideHours,
             Some(AwaySchedule::Custom { .. }) => ScheduleChoice::Custom,

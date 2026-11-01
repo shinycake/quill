@@ -17,6 +17,7 @@ use super::super::app::QuillApp;
 use super::super::group_call_stream_layout::StreamJoinIntent;
 use super::super::scheduled::{TimePicker, new_date_time_picker, picked_unix};
 use super::super::shell::{DialogKind, QuillShell};
+use super::super::wall_clock::WallClock;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
@@ -31,7 +32,7 @@ use quill::calls::group_call_create::{
 };
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with, trn};
-use quill::local_time::{now_unix, utc_offset_at};
+use quill::local_time::now_unix;
 use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -160,9 +161,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let now = now_unix();
-        let initial = default_schedule_at(now, &utc_offset_at);
-        let max = schedule_max(now, &utc_offset_at);
+        let clock = WallClock::of(cx);
+        let now = clock.now();
+        let offset_at = |unix| clock.offset_at(unix);
+        let initial = default_schedule_at(now, &offset_at);
+        let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
         let refresh = cx.spawn(async move |this, cx| {
             loop {
@@ -219,10 +222,12 @@ impl QuillApp {
             return;
         };
         let chat_id = *chat_id;
-        let now = now_unix();
+        let clock = WallClock::of(cx);
+        let now = clock.now();
+        let max = schedule_max(now, &|unix| clock.offset_at(unix));
         let picked = picked_unix(&step.picker, cx)
             .ok_or(quill::schedule::ScheduleError::Invalid)
-            .and_then(|date| check_schedule(date, now, schedule_max(now, &utc_offset_at)));
+            .and_then(|date| check_schedule(date, now, max));
         match picked {
             Ok(date) => self.send_group_call_create(chat_id, date, None, window, cx),
             Err(err) => {

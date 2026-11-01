@@ -7,6 +7,7 @@ use super::CustomBox;
 use crate::ui::app::QuillApp;
 use crate::ui::scheduled::{new_date_time_picker, picked_unix};
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerEvent};
 use gpui_kit::component::dialog::Dialog;
@@ -17,7 +18,6 @@ use quill::invite_link_form::{
     CUSTOM_DATE_MAX_AHEAD, DAY, Expire, Usage, custom_date_ok, custom_limit,
 };
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 
 impl QuillApp {
     fn invite_link_custom(&self) -> Option<&CustomBox> {
@@ -41,7 +41,7 @@ impl QuillApp {
         let Some(link_box) = self.invite_link_box() else {
             return;
         };
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let initial = match link_box.form.expire {
             Expire::At(date) if i64::from(date) > now => i64::from(date),
             Expire::After(secs) => now.saturating_add(i64::from(secs)),
@@ -96,7 +96,7 @@ impl QuillApp {
     fn invite_link_custom_value(&self, cx: &App) -> Option<CustomValue> {
         match self.invite_link_custom()? {
             CustomBox::Date(picker) => picked_unix(picker, cx)
-                .filter(|date| custom_date_ok(*date, now_unix()))
+                .filter(|date| custom_date_ok(*date, WallClock::of(cx).now()))
                 .and_then(|date| i32::try_from(date).ok())
                 .map(CustomValue::Date),
             CustomBox::Limit(input) => {

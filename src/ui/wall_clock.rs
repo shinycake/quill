@@ -28,6 +28,11 @@ impl WallClock {
         (self.now)()
     }
 
+    /// The zone's UTC offset (seconds east) at `unix`.
+    pub(crate) fn offset_at(&self, unix: i64) -> i32 {
+        (self.offset_at)(unix)
+    }
+
     /// Local wall-clock time of `unix`.
     pub(crate) fn civil(&self, unix: i64) -> CivilTime {
         civil_at(unix, (self.offset_at)(unix))

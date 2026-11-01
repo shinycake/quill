@@ -6,6 +6,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
@@ -361,6 +362,7 @@ fn leaving_a_screen_saves_it(cx: &mut TestAppContext) {
 fn an_away_message_needs_messages_and_a_valid_range(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_global(WallClock::chicago_repeated_hour()));
     seed(&app, vcx, true);
     open(&app, vcx);
     go(&app, vcx, View::Away);

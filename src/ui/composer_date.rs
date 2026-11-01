@@ -15,6 +15,7 @@ use super::chat_theme::{accent, bg_canvas};
 use super::composer_field::field_doc;
 use super::scheduled::{TimePicker, picked_unix};
 use crate::ui::status_note::StatusNote;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::time_field::{HourCycle, TimePrecision};
@@ -23,7 +24,6 @@ use gpui_kit::{TestSupportExt, *};
 use quill::composer::{FormatAction, apply_format_markup, date_link, date_link_time};
 use quill::composer_doc::ComposerTag;
 use quill::lang::{keys, tr};
-use quill::local_time::{civil_local, now_unix};
 use std::ops::Range;
 
 super::screenshot_demo::register_demos![
@@ -45,8 +45,9 @@ pub(super) struct ComposerDateDialog {
 
 /// Midday today, local time: where a new date starts (tdesktop opens the
 /// calendar on today and takes the chosen day at 12:00).
-fn midday_today(now: i64) -> i64 {
-    let civil = civil_local(now);
+fn midday_today(clock: &WallClock) -> i64 {
+    let now = clock.now();
+    let civil = clock.civil(now);
     // Minutes only: the picker drops seconds.
     let since_midnight = i64::from(civil.hour) * 3600 + i64::from(civil.minute) * 60;
     now - now.rem_euclid(60) - since_midnight + 12 * 3600
@@ -93,7 +94,7 @@ impl QuillApp {
             return;
         };
         let selected = selected.to_string();
-        let initial = existing.map_or_else(|| midday_today(now_unix()), i64::from);
+        let initial = existing.map_or_else(|| midday_today(&WallClock::of(cx)), i64::from);
         let state = cx.new(|cx| {
             DatePickerState::new(window, cx)
                 .time_precision(TimePrecision::Minute)
@@ -244,13 +245,15 @@ mod ui_tests;
 #[cfg(test)]
 mod tests {
     use super::midday_today;
+    use crate::ui::wall_clock::WallClock;
 
     #[test]
     fn a_new_date_starts_at_midday() {
-        let now = quill::local_time::now_unix();
-        let civil = quill::local_time::civil_local(midday_today(now));
-        // 11 or 13 on a day the clocks change.
-        assert!((11..=13).contains(&civil.hour), "{}", civil.hour);
-        assert_eq!(civil.minute, 0);
+        let clock = WallClock::chicago_at(WallClock::CHICAGO_FALL_BACK - 4 * 3600 + 7);
+        let midday = midday_today(&clock);
+        // 12:00 CDT on 2026-10-31.
+        assert_eq!(midday, WallClock::CHICAGO_FALL_BACK - 14 * 3600);
+        let civil = clock.civil(midday);
+        assert_eq!((civil.day, civil.hour, civil.minute), (31, 12, 0));
     }
 }
