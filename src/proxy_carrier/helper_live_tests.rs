@@ -8,7 +8,7 @@ use super::helper::{Capability, HelperCarrierHost, HelperConfig};
 use super::*;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -43,20 +43,38 @@ fn serve() -> u16 {
     port
 }
 
-/// A relay that hands each request to the test.
+/// A relay that hands each request to the test and pokes
+/// [`crate::wake::UPDATES`], the signal a carrier failure pokes too.
 fn relay() -> (RelaySink, Receiver<serde_json::Value>) {
     let (tx, rx) = channel();
     let tx = Mutex::new(tx);
     let sink: RelaySink = Arc::new(move |request: &str| {
         let value = serde_json::from_str(request).unwrap();
-        tx.lock().unwrap().send(value).is_ok()
+        let sent = tx.lock().unwrap().send(value).is_ok();
+        crate::wake::UPDATES.poke();
+        sent
     });
     (sink, rx)
 }
 
-/// The next relayed message as `(carrier_id, message)`.
-fn next(relayed: &Receiver<serde_json::Value>) -> (i64, serde_json::Value) {
-    let request = relayed.recv().expect("a relayed message");
+/// The next relayed message as `(carrier_id, message)`. A helper that
+/// dies or goes quiet instead fails the test through `poll`: its watchdog
+/// reports it and pokes the same signal, so no wait here needs a bound.
+fn next(
+    host: &mut HelperCarrierHost,
+    relayed: &Receiver<serde_json::Value>,
+) -> (i64, serde_json::Value) {
+    let request = loop {
+        let seen = crate::wake::UPDATES.epoch();
+        match relayed.try_recv() {
+            Ok(request) => break request,
+            Err(TryRecvError::Disconnected) => panic!("the relay was dropped"),
+            Err(TryRecvError::Empty) => {}
+        }
+        let failures = host.poll();
+        assert!(failures.is_empty(), "carrier failed: {failures:?}");
+        futures_lite::future::block_on(crate::wake::UPDATES.wait_since(seen));
+    };
     assert_eq!(request["@type"], "processWebProxyCarrierMessage");
     assert_eq!(request["@extra"], CARRIER_RELAY_EXTRA.as_extra());
     (
@@ -92,18 +110,18 @@ fn helper_live_relay_round_trip() {
     host.open(&request).unwrap();
     // Sent before the page listens: held until it does.
     host.deliver(21, "AQID".into());
-    let (carrier, hello) = next(&relayed);
+    let (carrier, hello) = next(&mut host, &relayed);
     assert_eq!(carrier, 21);
     assert_eq!(hello["@type"], "webProxyCarrierMessageText");
     assert_eq!(hello["text"], r#"{"t":"hello"}"#);
-    let (_, early) = next(&relayed);
+    let (_, early) = next(&mut host, &relayed);
     assert_eq!(early["data"], "AwIB");
     // Relay latency through the pipe and the page, both ways.
     let mut rounds = Vec::new();
     for _ in 0..20 {
         let started = Instant::now();
         host.deliver(21, "AQID".into());
-        let (carrier, message) = next(&relayed);
+        let (carrier, message) = next(&mut host, &relayed);
         assert_eq!(carrier, 21);
         assert_eq!(message["@type"], "webProxyCarrierMessageBinary");
         assert_eq!(message["data"], "AwIB");

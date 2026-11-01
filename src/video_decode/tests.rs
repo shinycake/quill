@@ -470,6 +470,11 @@ fn decoder() -> bool {
         return true;
     }
     let reason = super::unavailable_reason().unwrap_or("unknown");
+    // A shim that is there but out of date would skip these on every run.
+    assert!(
+        !reason.contains(super::ffi::STALE_HINT),
+        "quillvideo is out of date ({reason})"
+    );
     assert!(
         !require_video_lib(std::env::var_os("QUILL_REQUIRE_VIDEO_LIB").as_deref()),
         "QUILL_REQUIRE_VIDEO_LIB=1 but quillvideo is not available ({reason})"

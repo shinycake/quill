@@ -12,6 +12,8 @@ use super::{AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotat
 
 /// `QV_ABI_VERSION` in `quillvideo.h`.
 const ABI_VERSION: i32 = 4;
+/// Ends the reason a shim of another ABI was passed over.
+pub(super) const STALE_HINT: &str = "rebuild it with scripts/build-ffmpeg.sh";
 const ITEM_VIDEO: i32 = 1;
 const ITEM_AUDIO: i32 = 2;
 /// `QV_PIXEL_*` in `quillvideo.h`.
@@ -279,14 +281,21 @@ impl Api {
             // SAFETY: the signatures match `quillvideo.h` at `ABI_VERSION`,
             // checked first; the library stays loaded for the process.
             unsafe {
-                let version = library
-                    .get::<unsafe extern "C" fn() -> i32>(b"qv_abi_version\0")
-                    .map_err(|_| "incompatible quillvideo library".to_string())?;
+                let Ok(version) = library.get::<unsafe extern "C" fn() -> i32>(b"qv_abi_version\0")
+                else {
+                    last = format!("{}: not a quillvideo library", path.display());
+                    continue;
+                };
+                // A shim built from older sources (a development build under
+                // vendor/ffmpeg/prefix) must not hide a current one later in
+                // the list.
                 if version() != ABI_VERSION {
-                    return Err(format!(
-                        "quillvideo ABI {} (expected {ABI_VERSION})",
+                    last = format!(
+                        "{}: quillvideo ABI {} (expected {ABI_VERSION}), {STALE_HINT}",
+                        path.display(),
                         version()
-                    ));
+                    );
+                    continue;
                 }
                 let incompatible = |_| "incompatible quillvideo library".to_string();
                 let open: OpenFn = *library.get(b"qv_open\0").map_err(incompatible)?;

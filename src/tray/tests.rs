@@ -450,6 +450,22 @@ fn badge_cache_sees_a_topic_read_locally() {
     assert_eq!(cache.get(&session, &prefs), 3);
 }
 
+/// The demo's folder "Mark as read" shows on the cached badge at once.
+#[test]
+fn badge_cache_sees_a_folder_read_locally() {
+    use super::badge_cache::BadgeCache;
+    let mut session = session_with(&[]);
+    let mut in_folder = chat(1, 3);
+    in_folder.folder_positions.insert(5, 1);
+    session.chats.insert(1, in_folder);
+    session.chats.insert(2, chat(2, 4));
+    let prefs = BadgePrefs::default();
+    let mut cache = BadgeCache::default();
+    assert_eq!(cache.get(&session, &prefs), 7);
+    session.mark_chats_read_locally(|chat| chat.folder_positions.contains_key(&5));
+    assert_eq!(cache.get(&session, &prefs), 4);
+}
+
 fn topic(id: i32, unread_count: i32) -> crate::telegram::envelope::ForumTopic {
     crate::telegram::envelope::ForumTopic {
         forum_topic_id: id,
