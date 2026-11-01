@@ -275,46 +275,38 @@ mod backend {
 
     /// Interface, address and route changes on IPv4 and IPv6 alike.
     /// `NotifyAddrChange` heard only IPv4 addresses.
-    pub(in crate::net_watch) fn subscribe(listener: &'static Listener) -> io::Result<Subscription> {
+    pub(in crate::net_watch) fn subscribe(listener: &'static Listener) -> Subscription {
+        let kinds = [Kind::Interface, Kind::Address, Kind::Route];
+        Subscription(super::keep_working(kinds, |kind| register(listener, *kind)))
+    }
+
+    fn register(listener: &'static Listener, kind: Kind) -> io::Result<HANDLE> {
         let initial = false;
         let context: *const c_void = std::ptr::from_ref(listener).cast();
-        let mut subscription = Subscription(Vec::with_capacity(3));
-        for kind in [Kind::Interface, Kind::Address, Kind::Route] {
-            let mut handle: HANDLE = std::ptr::null_mut();
-            let out = &raw mut handle;
-            // SAFETY: `context` points at a `'static` listener, each callback
-            // has the signature its call documents, and `out` is live.
-            let status = unsafe {
-                match kind {
-                    Kind::Interface => {
-                        NotifyIpInterfaceChange(AF_UNSPEC, Some(interface), context, initial, out)
-                    }
-                    Kind::Address => NotifyUnicastIpAddressChange(
-                        AF_UNSPEC,
-                        Some(address),
-                        context,
-                        initial,
-                        out,
-                    ),
-                    Kind::Route => {
-                        NotifyRouteChange2(AF_UNSPEC, Some(route), context, initial, out)
-                    }
+        let mut handle: HANDLE = std::ptr::null_mut();
+        let out = &raw mut handle;
+        // SAFETY: `context` points at a `'static` listener, each callback
+        // has the signature its call documents, and `out` is live.
+        let status = unsafe {
+            match kind {
+                Kind::Interface => {
+                    NotifyIpInterfaceChange(AF_UNSPEC, Some(interface), context, initial, out)
                 }
-            };
-            if status != NO_ERROR {
-                return Err(io::Error::from_raw_os_error(status as i32));
+                Kind::Address => {
+                    NotifyUnicastIpAddressChange(AF_UNSPEC, Some(address), context, initial, out)
+                }
+                Kind::Route => NotifyRouteChange2(AF_UNSPEC, Some(route), context, initial, out),
             }
-            subscription.0.push(handle);
+        };
+        if status != NO_ERROR {
+            return Err(io::Error::from_raw_os_error(status as i32));
         }
-        Ok(subscription)
+        Ok(handle)
     }
 
     /// The callbacks run on system threads for as long as Quill does.
     pub(in crate::net_watch) fn watch() {
-        match subscribe(&NETWORK) {
-            Ok(subscription) => std::mem::forget(subscription),
-            Err(error) => eprintln!("quill: no network notifications: {error}"),
-        }
+        std::mem::forget(subscribe(&NETWORK));
     }
 }
 
@@ -326,6 +318,24 @@ mod backend {
 }
 
 pub(super) use backend::{EVENTS_COVER_PROXY, watch};
+
+/// What `register` gives for each of `kinds`, leaving out and logging the
+/// ones it refuses: one refused notification must not leave Quill deaf to
+/// the others.
+#[cfg(any(windows, test))]
+fn keep_working<K: std::fmt::Debug, T>(
+    kinds: impl IntoIterator<Item = K>,
+    mut register: impl FnMut(&K) -> std::io::Result<T>,
+) -> Vec<T> {
+    kinds
+        .into_iter()
+        .filter_map(|kind| {
+            register(&kind)
+                .inspect_err(|error| eprintln!("quill: no {kind:?} notifications: {error}"))
+                .ok()
+        })
+        .collect()
+}
 
 #[cfg(test)]
 #[path = "watcher_tests.rs"]

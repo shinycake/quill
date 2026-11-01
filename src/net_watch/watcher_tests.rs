@@ -1,6 +1,18 @@
 //! The OS watchers against a real kernel. CI runs the Linux one in a
 //! fresh network namespace and the Windows one on a Windows runner.
 
+#[test]
+fn a_refused_notification_keeps_the_ones_that_registered() {
+    let kept = super::keep_working(["interface", "address", "route"], |kind| {
+        if *kind == "address" {
+            Err(std::io::Error::other("refused"))
+        } else {
+            Ok(*kind)
+        }
+    });
+    assert_eq!(kept, ["interface", "route"]);
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use super::super::backend::{heard, listen, subscribe};
@@ -384,7 +396,7 @@ mod windows {
     /// limit ends the wait if no notification comes.
     #[test]
     fn an_ipv6_address_added_on_loopback_wakes_the_watcher() {
-        let subscription = subscribe(&RECORDER).unwrap();
+        let subscription = subscribe(&RECORDER);
         let added = Change {
             kind: Kind::Address,
             family: AF_INET6,
