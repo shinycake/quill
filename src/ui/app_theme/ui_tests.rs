@@ -30,6 +30,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
+fn applied_id(app: &QuillApp) -> Option<&ThemeId> {
+    app.settings.app_theme.applied.as_ref().map(|(id, _)| id)
+}
+
 /// Apply the prefs as they are now, in memory only.
 fn reapply(app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>) {
     app.settings.appearance_applied = None;
@@ -198,5 +202,35 @@ fn omarchy_theme_is_followed_until_another_is_chosen(cx: &mut TestAppContext) {
                 .map(|(id, _)| id.clone()),
             Some(ThemeId::Omarchy)
         );
+    });
+}
+
+/// Switching to a custom theme reads its file (and decodes its picture)
+/// off the UI thread: the theme on screen stays until the read is in,
+/// then the appearance is applied again (here the file is missing, so
+/// the built-in default for the mode shows).
+#[gpui_kit::test]
+fn a_custom_theme_is_read_off_the_ui_thread(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let missing = ThemeId::Custom("quill-test-no-such-theme-b9".into());
+    app.update_in(vcx, |app, _, cx| {
+        app.appearance.theme = quill::settings::ThemeChoice::Light;
+        app.appearance.auto_night = quill::settings::AutoNight::Off;
+        app.appearance.day_theme = ThemeId::Builtin(BuiltinTheme::Night);
+        reapply(app, cx);
+        assert!(cx.theme().is_dark(), "Night shows");
+        app.appearance.day_theme = missing.clone();
+        reapply(app, cx);
+        assert!(cx.theme().is_dark(), "Night stays while the file is read");
+        assert_eq!(
+            applied_id(app),
+            Some(&ThemeId::Builtin(BuiltinTheme::Night))
+        );
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(!cx.theme().is_dark(), "the light default once it is read");
+        assert_eq!(applied_id(app), Some(&ThemeId::default_day()));
     });
 }

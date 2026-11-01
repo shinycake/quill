@@ -16,6 +16,7 @@ pub(crate) mod kit_colors;
 mod omarchy;
 #[cfg(feature = "demo-capture")]
 mod omarchy_demo;
+mod reads;
 
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
@@ -157,9 +158,13 @@ pub(crate) struct AppThemeUi {
     /// Custom themes in the themes folder, read when the chooser first
     /// shows and after every change.
     pub(super) custom: Option<Vec<CustomTheme>>,
+    /// The read of the themes folder running for `custom`.
+    custom_read: Option<Task<()>>,
     /// The last custom theme read: its name and palette (`None` when the
     /// file could not be read).
     custom_cache: Option<(String, Option<Palette>)>,
+    /// The custom theme being read off the UI thread, by name.
+    palette_read: Option<(String, Task<()>)>,
     /// The theme and palette applied last (outside high contrast).
     pub(super) applied: Option<(ThemeId, Palette)>,
     /// Defaults for chats without a theme; `None` under high contrast.
@@ -229,25 +234,14 @@ impl QuillApp {
         self.appearance.accent_for(theme)
     }
 
-    /// A custom theme's palette, read once per theme.
-    fn custom_theme_palette(&mut self, name: &str) -> Option<Palette> {
-        let cache = &mut self.settings.app_theme.custom_cache;
-        if let Some((cached, palette)) = cache
-            && cached == name
-        {
-            return palette.clone();
-        }
-        let palette = store::load(&Self::themes_dir(), name)
-            .ok()
-            .map(|file| file_palette(&file));
-        *cache = Some((name.to_string(), palette.clone()));
-        palette
-    }
-
     /// The theme to show and its palette: the editor's while it is open,
     /// else the day or night theme (a custom theme that cannot be read
     /// falls back to the built-in default for that mode).
-    pub(crate) fn resolve_app_theme(&mut self, night: bool) -> (ThemeId, Palette) {
+    pub(crate) fn resolve_app_theme(
+        &mut self,
+        night: bool,
+        cx: &mut Context<Self>,
+    ) -> (ThemeId, Palette) {
         if let Some(editor) = &self.settings.app_theme.editor {
             return (editor.preview_id(), editor.palette.clone());
         }
@@ -263,10 +257,12 @@ impl QuillApp {
                 (id.clone(), theme.palette_with_accent(accent))
             }
             ThemeId::Custom(_) | ThemeId::Omarchy => {
-                if let ThemeId::Custom(name) = &id
-                    && let Some(palette) = self.custom_theme_palette(name)
-                {
-                    return (id, palette);
+                if let ThemeId::Custom(name) = &id {
+                    match self.custom_theme_palette(name, cx) {
+                        reads::PaletteRead::Read(Some(palette)) => return (id, palette),
+                        reads::PaletteRead::Read(None) => {}
+                        reads::PaletteRead::Reading(shown) => return shown,
+                    }
                 }
                 let fallback = if night {
                     ThemeId::default_night()
@@ -322,32 +318,18 @@ impl QuillApp {
         })
     }
 
-    /// The custom themes (read from disk the first time). A file that
-    /// cannot be read is left out.
-    pub(crate) fn custom_themes(&mut self) -> &[CustomTheme] {
-        self.settings.app_theme.custom.get_or_insert_with(|| {
-            let dir = Self::themes_dir();
-            store::list(&dir)
-                .into_iter()
-                .filter_map(|name| {
-                    let file = store::load(&dir, &name).ok()?;
-                    Some(CustomTheme::of(name, &file_palette(&file)))
-                })
-                .collect()
-        })
-    }
-
-    pub(crate) fn custom_theme_names(&mut self) -> Vec<String> {
-        self.custom_themes()
-            .iter()
-            .map(|t| t.name.clone())
-            .collect()
+    /// The names in the themes folder, for picking a free one.
+    pub(crate) fn custom_theme_names(&self) -> Vec<String> {
+        store::list(&Self::themes_dir())
     }
 
     /// Forget what was read from the themes folder after a change there.
     fn refresh_custom_themes(&mut self) {
-        self.settings.app_theme.custom = None;
-        self.settings.app_theme.custom_cache = None;
+        let themes = &mut self.settings.app_theme;
+        themes.custom = None;
+        themes.custom_read = None;
+        themes.custom_cache = None;
+        themes.palette_read = None;
     }
 
     /// Show `id` (tdesktop `SetupDefaultThemes` `apply`): it becomes the
