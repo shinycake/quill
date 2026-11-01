@@ -565,7 +565,7 @@ impl QuillApp {
             .max()
             .unwrap_or(0)
             .max(OPENING_FPS);
-        self.request_animation_tick_for(None, fps, cx);
+        self.request_app_tick(fps, cx);
         Some(
             canvas(
                 |_, _, _| {},

@@ -258,6 +258,27 @@ impl<T: Render> Entity<T> {
     pub fn cached(self, style: StyleRefinement) -> ViewElement<Entity<T>> {
         ViewElement::with_type_name(self, type_name::<T>()).cached(style)
     }
+
+    /// Quill: embed this entity as a view that can redraw on its own.
+    ///
+    /// When only live views are notified, the next frame renders those alone
+    /// and takes everything else from the last whole frame, ancestors
+    /// included ([`Window::draw`]). So nothing around a live view may depend
+    /// on its being rendered, and it can't change the window's layout, hit
+    /// tests, focus or accessibility tree: those stay as the last whole frame
+    /// left them, and what it builds in such a frame only paints. A cached
+    /// view holding a live view that redrew on its own renders again in the
+    /// next whole frame rather than replay. A live view inside another live
+    /// view redraws with it, unless a cached view sits between them: that
+    /// view replays, so the inner one shows its old paint until a whole
+    /// frame.
+    #[track_caller]
+    pub fn live(self) -> ViewElement<Entity<T>> {
+        let live = AnyView::from(self.clone());
+        let mut element = ViewElement::with_type_name(self, type_name::<T>());
+        element.live = Some(live);
+        element
+    }
 }
 
 /// The element type for [`View`] implementations. Wraps a `View` and hooks it
@@ -267,6 +288,10 @@ pub struct ViewElement<V: View> {
     view: Option<V>,
     entity_id: Option<EntityId>,
     cached_style: Option<StyleRefinement>,
+    /// Quill: the view, when it is a live one ([`Entity::live`]).
+    live: Option<AnyView>,
+    /// Quill: its entry in the frame's live views, once prepainted.
+    live_site: Option<usize>,
     #[cfg(feature = "profiler")]
     view_type_name: &'static str,
     #[cfg(debug_assertions)]
@@ -289,6 +314,8 @@ impl<V: View> ViewElement<V> {
         ViewElement {
             entity_id,
             cached_style: None,
+            live: None,
+            live_site: None,
             #[cfg(feature = "profiler")]
             view_type_name,
             view: Some(view),
@@ -410,6 +437,9 @@ impl<V: View> Element for ViewElement<V> {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
+        if let Some(view) = self.live.take() {
+            self.live_site = Some(window.note_live_view(view, bounds));
+        }
         if let Some(entity_id) = self.entity_id {
             // Stateful path.
             #[cfg(feature = "profiler")]
@@ -450,6 +480,7 @@ impl<V: View> Element for ViewElement<V> {
             // Stateful path.
             #[cfg(feature = "profiler")]
             let start = window.window_profiler.begin_view();
+            let scene_start = window.next_frame.scene.len();
             paint_view(
                 entity_id,
                 self.cached_style.is_some(),
@@ -458,6 +489,9 @@ impl<V: View> Element for ViewElement<V> {
                 window,
                 cx,
             );
+            if let Some(site) = self.live_site {
+                window.live_view_painted(site, scene_start);
+            }
             #[cfg(feature = "profiler")]
             window.window_profiler.end_view(
                 start,
