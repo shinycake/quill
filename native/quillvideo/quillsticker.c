@@ -6,6 +6,7 @@
  * with libswscale, fit into the caller's box.
  */
 #include "quillsticker.h"
+#include "bgra_layout.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -372,7 +373,8 @@ int32_t qs_pixels(void *ctx, QsFrame *out) {
     c->sws_cs = cs;
     c->sws_range = range;
   }
-  size_t need = (size_t)ow * (size_t)oh * 4;
+  int stride = qv_bgra_stride(ow);
+  size_t need = qv_bgra_size(ow, oh);
   if (need > c->rgb_size) {
     av_free(c->rgb);
     c->rgb = av_malloc(need);
@@ -381,13 +383,13 @@ int32_t qs_pixels(void *ctx, QsFrame *out) {
       return AVERROR(ENOMEM);
   }
   uint8_t *dst[4] = {c->rgb, NULL, NULL, NULL};
-  int dst_stride[4] = {ow * 4, 0, 0, 0};
+  int dst_stride[4] = {stride, 0, 0, 0};
   int rows = sws_scale(c->sws, src, src_stride, 0, f->height, dst, dst_stride);
   if (rows <= 0)
     return AVERROR(EINVAL);
   out->pts = c->cur_pts;
   out->data = c->rgb;
-  out->stride = ow * 4;
+  out->stride = stride;
   out->width = ow;
   out->height = oh;
   return 0;

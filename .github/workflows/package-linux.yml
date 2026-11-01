@@ -97,6 +97,8 @@ jobs:
         with:
           path: vendor/ffmpeg/prefix
           key: ffmpeg-linux-${{ runner.arch }}-${{ hashFiles('scripts/build-ffmpeg.sh', 'native/quillvideo/*') }}
+      - name: BGRA picture layout against the built swscale
+        run: bash scripts/test-bgra-layout.sh
       - name: decoder tests against the built FFmpeg
         run: QUILL_REQUIRE_VIDEO_LIB=1 QUILL_VIDEO_LIB="$PWD/vendor/ffmpeg/prefix/lib/libquillvideo.so" cargo test --no-default-features --locked --lib video_decode -- --nocapture
       # The call library (docs/decisions/tgcalls-engine.md), built against
