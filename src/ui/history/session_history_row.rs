@@ -42,6 +42,7 @@ pub(in crate::ui) fn session_history_row(
     session: Option<&Session>,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
+    corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     // Stickers, dice, round video messages and emoji-only messages (the ones
@@ -151,8 +152,12 @@ pub(in crate::ui) fn session_history_row(
     let media_max = room.media(header.is_none());
     let chat_id = message.chat_id;
     let message_id = message.id;
-    let (more_btn, actions_span) =
-        message_corner_actions(chat_id, message_id, message, session, cx);
+    let mut actions_span = Pixels::default();
+    let mut more_btn = corner.mount(|| {
+        let (buttons, span) = message_corner_actions(chat_id, message_id, message, session, cx);
+        actions_span = span;
+        buttons
+    });
     // Broadcast posts (Phase 2.2): eye glyph + compact view count, like the
     // official clients' post footer. Renders whenever views exist; only
     // channel posts carry a view count in practice.
@@ -858,7 +863,6 @@ pub(in crate::ui) fn session_history_row(
         .flatten()
         .map(|width| media_content_width(width, info_width, media_max));
     let max_width = bubble_width::message_width_limit(cx, content, look.font, look.plain);
-    let mut more_btn = Some(more_btn);
     let mut avatar_link = avatar_link(&sender_avatar, message, cx);
     let mut sender_status = sender_status;
     let mut chrome = |footer_inline: bool| {

@@ -103,6 +103,7 @@ pub(crate) struct HistoryUi {
     /// Rows painted in the last frame with their window bounds, kept until
     /// the next paint: drag selection hit-tests the pointer against them.
     pub(super) hit_rows: std::rc::Rc<std::cell::RefCell<Vec<(usize, Bounds<Pixels>)>>>,
+    pub(super) row_hover: super::history::RowHover,
     /// The list's window bounds at the last paint (drag selection
     /// autoscrolls when the pointer leaves them).
     pub(super) viewport: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
@@ -158,6 +159,15 @@ pub(crate) struct HistoryUi {
 }
 
 impl HistoryUi {
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn painted_row_center(&self, id: MessageId) -> Point<Pixels> {
+        let rows = self.hit_rows.borrow();
+        let first_id = |ix: usize| self.rows.get(ix).and_then(|row| row.first_id());
+        let row = rows.iter().find(|(ix, _)| first_id(*ix) == Some(id));
+        row.expect("the row is painted").1.center()
+    }
+
     pub(super) fn new(cx: &mut App) -> Self {
         Self {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
@@ -194,6 +204,7 @@ impl HistoryUi {
             bar_anchor: Default::default(),
             bar_offsets: Default::default(),
             hit_rows: Default::default(),
+            row_hover: Default::default(),
             viewport: Default::default(),
             palette: Default::default(),
             pinned_cursor: HashMap::new(),

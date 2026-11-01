@@ -352,6 +352,7 @@ impl QuillApp {
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
         let hit_rows = self.history.hit_rows.clone();
+        let row_hover = self.history.row_hover.clone();
         let painted_ids = self.history.painted_ids.clone();
         let seen = self.history.seen.clone();
         let seen_app = cx.weak_entity();
@@ -420,7 +421,7 @@ impl QuillApp {
             .children(self.wallpaper_fade(&look, cx))
             .child(super::history_fx::reveal_viewport(
                 reveal,
-                MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
+                MessageScroller::new(id, self.history.scroller.clone(), move |ix, window, cx| {
                     let gif_view = weak.clone();
                     cx.defer(move |cx| {
                         let _ = gif_view.update(cx, |this, cx| {
@@ -451,7 +452,7 @@ impl QuillApp {
                             });
                         });
                     }
-                    weak.update(cx, |this, cx| this.render_history_row(ix, cx))
+                    weak.update(cx, |this, cx| this.render_history_row(ix, window, cx))
                         .unwrap_or_else(|_| div().into_any_element())
                 })
                 // The kit's default row wrapper pads every non-last row with
@@ -511,6 +512,7 @@ impl QuillApp {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, cx| {
+                        row_hover.rows_painted(window, cx);
                         // Take the rows out so no guard is held across the
                         // calls below; a re-entrant borrow skips one frame.
                         let Ok(mut slot) = probe.try_borrow_mut() else {
@@ -624,17 +626,25 @@ impl QuillApp {
     pub(in crate::ui) fn render_history_row(
         &self,
         ix: usize,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(row) = self.history.rows.get(ix) else {
             return div().into_any_element();
         };
         self.note_stale_chrome(ix, row, cx);
+        let first_id = row.first_id();
+        let hover = &self.history.row_hover;
+        let corner = hover.corner_actions(first_id, self.a11y_tree_wanted(window));
         let palette = self.history.palette.get();
         let outgoing = super::chat_palette::row_is_outgoing(row);
         let element = super::chat_palette::with_palette(palette, outgoing, || {
-            self.render_history_row_body(row, cx)
+            self.render_history_row_body(row, corner, cx)
         });
+        let element = match first_id {
+            Some(id) => hover.area(id, element),
+            None => element,
+        };
         let has_day = row.day_label().is_some();
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();

@@ -19,10 +19,10 @@ use quill::telegram::client::copy_and_parse;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-const A: ChatId = ChatId(11);
+pub(in crate::ui) const A: ChatId = ChatId(11);
 const B: ChatId = ChatId(12);
 
-fn frames(vcx: &mut VisualTestContext) {
+pub(in crate::ui) fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
     for _ in 0..3 {
         vcx.update(|window, cx| window.render_frame(cx));
@@ -30,7 +30,10 @@ fn frames(vcx: &mut VisualTestContext) {
 }
 
 /// The ready-chats demo with `messages` more messages in Demo chat A.
-fn open(cx: &mut TestAppContext, messages: usize) -> (Entity<QuillApp>, VisualTestContext) {
+pub(in crate::ui) fn open(
+    cx: &mut TestAppContext,
+    messages: usize,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
@@ -65,7 +68,7 @@ fn open(cx: &mut TestAppContext, messages: usize) -> (Entity<QuillApp>, VisualTe
     (app, vcx)
 }
 
-fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
+pub(in crate::ui) fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
     app.update_in(vcx, |app, window, cx| {
         app.select_listed_chat(chat, window, cx)
     });

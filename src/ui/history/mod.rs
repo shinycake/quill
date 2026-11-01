@@ -188,6 +188,7 @@ pub(super) fn album_history_row(
     session: Option<&Session>,
     // Revealed spoilers: tiles keep their cover until clicked.
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let Some(first) = messages.first() else {
@@ -295,7 +296,7 @@ pub(super) fn album_history_row(
     chrome.bubbleless = bubbleless;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
     chrome.footer_overlay = !has_caption;
-    chrome.actions = Some(message_actions_button(first.chat_id, first.id, cx));
+    chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
     let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
     let extra = div()
@@ -505,6 +506,8 @@ impl QuillApp {}
 
 pub(in crate::ui) mod bubble_width;
 mod reaction_chip_row;
+mod row_hover;
+pub(in crate::ui) use row_hover::{CornerActions, RowHover};
 pub(in crate::ui) mod text_measure;
 use reaction_chip_row::reaction_chip_row;
 mod album_tile;
