@@ -6,7 +6,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::ids::ChatId;
 use quill::telegram::envelope::{ChannelMemberStatus, SupergroupFullAdmin};
@@ -219,5 +219,42 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         app.composer_ui.send_box.prep.finish(job.unwrap());
         assert!(!app.tray_preparing());
         assert!(app.send_box_option_controls(cx).is_empty());
+    });
+}
+
+/// Paste the PNG fixture into the focused composer.
+fn paste_picture(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    let bytes = std::fs::read(fixture("demo-thumb.png")).expect("fixture");
+    vcx.write_to_clipboard(gpui_kit::ClipboardItem::new_image(
+        &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
+    ));
+    app.update_in(vcx, |app, window, cx| {
+        let focus = app.composer.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        assert!(app.paste_image_from_clipboard(window, cx));
+    });
+}
+
+#[gpui_kit::test]
+fn a_picture_pasted_over_a_file_joins_it_as_a_file(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        tray(app, &[("demo-notes.txt", AttachmentKind::Document)]);
+    });
+    paste_picture(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let kinds: Vec<AttachmentKind> = app.pending_attachments().iter().map(|a| a.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Document]);
+        assert_eq!(app.pending_attachments()[0].file_name, "demo-notes.txt");
+        assert!(app.connection.note().text().contains("quill-paste-"));
+    });
+    // Over a photo it is a photo.
+    app.update_in(&mut vcx, |app, _, _| {
+        tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
+    });
+    paste_picture(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let kinds: Vec<AttachmentKind> = app.pending_attachments().iter().map(|a| a.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Photo, AttachmentKind::Photo]);
     });
 }

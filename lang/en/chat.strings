@@ -130,7 +130,6 @@
 "qll_chat_ai_rewriting" = "AI rewriting…";
 "qll_chat_ai_rewriting_the_blocks" = "AI rewriting the blocks…";
 "qll_chat_ai_tools_unavailable_here" = "AI tools unavailable here";
-"qll_chat_album_is_full" = "album is full ({before})";
 "qll_chat_all" = "All {total}";
 "qll_chat_all_chats" = "✓ All chats";
 "qll_chat_also_delete_for" = "Also delete for {first_name}";

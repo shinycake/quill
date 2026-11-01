@@ -694,21 +694,21 @@ impl QuillApp {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }
+            // Joins the tray as a dropped file does: a photo next to media,
+            // a file next to files.
             Some(att) => {
-                let name = att.file_name.clone();
-                let before = self.pending_attachments().len();
-                self.update_pending_attachments(|tray| {
-                    ComposerAttachment::push_attachment(tray, att)
+                let added = self.update_pending_attachments(|tray| {
+                    ComposerAttachment::append_dropped_files(tray, std::slice::from_ref(&att.path))
                 });
-                self.connection
-                    .set_note(if self.pending_attachments().len() == before {
-                        StatusNote::silent(tr_with(
-                            keys::Q_CHAT_ALBUM_IS_FULL,
-                            &[("before", &before.to_string())],
-                        ))
-                    } else {
-                        StatusNote::silent(tr_with(keys::Q_CHAT_ATTACHED_NAME, &[("name", &name)]))
+                if let Some(added) = added {
+                    self.connection.set_note(match added {
+                        Ok(_) => StatusNote::silent(tr_with(
+                            keys::Q_CHAT_ATTACHED_NAME,
+                            &[("name", &att.file_name)],
+                        )),
+                        Err(note) => StatusNote::error(note),
                     });
+                }
             }
             None => {
                 self.connection
