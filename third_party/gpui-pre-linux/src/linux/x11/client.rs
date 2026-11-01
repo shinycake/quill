@@ -307,7 +307,9 @@ impl X11ClientStatePtr {
         let mut f = Some(f);
         let timer = calloop::timer::Timer::from_deadline(at);
         if let Err(err) = state.loop_handle.insert_source(timer, move |_, _, _| {
-            let window = this.get_client().and_then(|client| client.get_window(x_window));
+            let window = this
+                .get_client()
+                .and_then(|client| client.get_window(x_window));
             if let (Some(window), Some(f)) = (window, f.take()) {
                 f(window);
             }

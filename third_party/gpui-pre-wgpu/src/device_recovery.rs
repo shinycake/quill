@@ -310,7 +310,15 @@ mod tests {
     #[test]
     fn a_lost_software_device_accepts_software_at_once() {
         let start = Instant::now();
-        let attempts = attempt_times(&mut RecoveryPolicy::new(start, Target::Recreate { lost_was_software: true }), start);
+        let attempts = attempt_times(
+            &mut RecoveryPolicy::new(
+                start,
+                Target::Recreate {
+                    lost_was_software: true,
+                },
+            ),
+            start,
+        );
         assert!(attempts.iter().all(|(_, software)| *software));
     }
 
@@ -450,11 +458,20 @@ mod tests {
     #[test]
     fn only_a_fallback_from_a_lost_gpu_looks_for_it() {
         let now = Instant::now();
-        assert_eq!(HardwareProbe::after_recovery(now, Some(hardware()), false), None);
+        assert_eq!(
+            HardwareProbe::after_recovery(now, Some(hardware()), false),
+            None
+        );
         let lost_software = Target::Recreate {
             lost_was_software: true,
         };
-        assert_eq!(HardwareProbe::after_recovery(now, Some(lost_software), true), None);
-        assert_eq!(HardwareProbe::after_recovery(now, Some(Target::Adopt), true), None);
+        assert_eq!(
+            HardwareProbe::after_recovery(now, Some(lost_software), true),
+            None
+        );
+        assert_eq!(
+            HardwareProbe::after_recovery(now, Some(Target::Adopt), true),
+            None
+        );
     }
 }

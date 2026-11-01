@@ -1167,9 +1167,8 @@ impl X11Window {
 impl X11WindowStatePtr {
     fn raw_window(&self, state: &X11WindowState) -> RawWindow {
         RawWindow {
-            connection: as_raw_xcb_connection::AsRawXcbConnection::as_raw_xcb_connection(
-                &*self.xcb,
-            ) as *mut _,
+            connection: as_raw_xcb_connection::AsRawXcbConnection::as_raw_xcb_connection(&*self.xcb)
+                as *mut _,
             screen_id: state.x_screen_index,
             window_id: self.x_window,
             visual_id: state.visual_id,

@@ -2078,9 +2078,9 @@ impl PlatformWindow for WaylandWindow {
                     state.redraw_requested = true;
                     if let Some(at) = renderer.hardware_probe_at() {
                         let surface_id = state.surface.id();
-                        state.client.run_for_window_at(&surface_id, at, |window| {
-                            window.probe_hardware()
-                        });
+                        state
+                            .client
+                            .run_for_window_at(&surface_id, at, |window| window.probe_hardware());
                     }
                 }
                 Recovery::RetryAt(at) if state.recovery_retry_at != Some(at) => {
