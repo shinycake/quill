@@ -170,6 +170,10 @@ struct Run {
 
 fn export(fake: &mut Fake, settings: &ExportSettings, files_root: &Path) -> Run {
     let out = create_folder(&settings.dir, &settings.title, "2023-11-14").unwrap();
+    export_into(fake, settings, files_root, out)
+}
+
+fn export_into(fake: &mut Fake, settings: &ExportSettings, files_root: &Path, out: PathBuf) -> Run {
     let last = std::cell::RefCell::new(Progress::starting());
     let report = |p: Progress| *last.borrow_mut() = p;
     let loaded = super::loaded_files::LoadedFiles::default();
@@ -605,6 +609,34 @@ fn a_file_cached_before_the_export_stays_cached_and_apart_from_the_export() {
     assert_eq!(fake.count("deleteFile"), 0);
     std::fs::write(run.out.join(PHOTO), b"edited").unwrap();
     assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_left_in_the_cache_after_all_stays_apart_from_the_export() {
+    let dir = scratch("left");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    fake.touched_after_download = Some(json!({"is_downloading_completed": false,
+        "is_downloading_active": true, "downloaded_size": 1}));
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 0);
+    std::fs::write(run.out.join(PHOTO), b"edited").unwrap();
+    assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_that_could_not_be_saved_still_leaves_the_cache() {
+    let dir = scratch("unsaved");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let out = create_folder(&s.dir, &s.title, "2023-11-14").unwrap();
+    std::fs::write(out.join("photos"), b"a file where the folder goes").unwrap();
+    let run = export_into(&mut fake, &s, &td, out);
+    assert!(matches!(run.result, Err(ExportError::Io(_))));
+    assert_eq!(fake.count("deleteFile"), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

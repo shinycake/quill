@@ -297,9 +297,6 @@ pub(crate) fn place_into(out: &Path, relative: &str, file: &Fetched) -> io::Resu
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    if file.only_for_export && fs::hard_link(&file.path, &target).is_ok() {
-        return Ok(());
-    }
     fs::copy(&file.path, &target)?;
     Ok(())
 }
@@ -355,8 +352,9 @@ fn save_once<T: Tdlib>(
         Err(skip) => return Ok(Err(skip)),
     };
     let path = name(&source);
-    place_into(out.folder, &path, &source)?;
+    let placed = place_into(out.folder, &path, &source);
     source.release(tdlib)?;
+    placed?;
     job.loaded.save(file_id, out.root_path(&path));
     Ok(Ok(path))
 }
