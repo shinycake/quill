@@ -238,7 +238,9 @@ impl CallScreen {
         });
     }
 
-    fn finish_open(&mut self) -> Option<Result<(), String>> {
+    /// How the open went; `Ok` says whether events read while it ran
+    /// paused the share.
+    fn finish_open(&mut self) -> Option<Result<bool, String>> {
         let active = self
             .active
             .as_mut()
@@ -254,8 +256,9 @@ impl CallScreen {
         Some(match started {
             Ok(feeder) => {
                 active.feeder = Some(feeder);
+                let paused = active.paused;
                 self.error = None;
-                Ok(())
+                Ok(paused)
             }
             Err(err) => {
                 self.active = None;
@@ -435,7 +438,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.call_screen.open(target, source, sender);
         }
         match self.call_screen.finish_open() {
-            Some(Ok(())) => self.set_screen_paused(false),
+            Some(Ok(paused)) => self.set_screen_paused(paused),
             Some(Err(err)) => {
                 self.call_screen.chosen = None;
                 self.call_screen.error = Some(err);

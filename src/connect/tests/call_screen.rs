@@ -512,3 +512,31 @@ fn a_slow_screen_capture_does_not_hold_the_pump() {
     );
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn a_window_hidden_while_its_share_opens_stays_paused() {
+    let (dir, mut driver, _engine, _screens) = group_driver();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let (handed, sink) = std::sync::mpsc::channel::<FrameSink<VideoFrame>>();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let flag = stopped.clone();
+    driver.inject_call_screen(Arc::new(move |_source, _options, sink, _preview| {
+        let _ = handed.send(sink);
+        let _ = released.lock().unwrap().recv();
+        Ok(Box::new(FakeScreen(flag.clone())))
+    }));
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("window:42".into()), false);
+    driver.pump_call_screen();
+
+    sink.recv().unwrap().push_event(CaptureEvent::Paused);
+    release.send(()).unwrap();
+    pump_until_screen_answers(&mut driver);
+
+    assert!(driver.call_screen().paused(), "the share reads paused");
+    let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
+    let paused: Vec<_> = toggles.iter().map(|t| t["is_paused"].clone()).collect();
+    assert_eq!(paused, [Value::Bool(true)], "Telegram hears one pause");
+    std::fs::remove_dir_all(dir).ok();
+}
