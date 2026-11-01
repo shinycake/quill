@@ -21,6 +21,9 @@ upload progress, and `Media::Player::Instance` drops `WaitingForData` for audio.
 - `EngineState::Loading` shows as Pause at the offset and nothing else, however long the file
   takes to open, as in tdesktop.
 - A failed start fails when it lands. The failure note moved to the landing for that reason.
+  The build thread wakes the app from a drop guard, so a decoder that panics still brings the
+  landing and its note. Each new build clears the last start's failure, so a good start after a
+  failed one says nothing.
 - `OpusSource` keeps its packets in one block, so ending a track on the audio thread frees two
   allocations and not one per packet.
 

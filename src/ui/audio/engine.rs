@@ -247,6 +247,31 @@ struct Building {
     built: Receiver<Result<Built, AudioError>>,
 }
 
+/// The build thread's end. Dropped on a return and on a panic alike, it
+/// closes the channel before it wakes the app, so the landing the wake
+/// brings finds the result or the dead thread.
+struct BuildEnd {
+    done: Option<mpsc::Sender<Result<Built, AudioError>>>,
+    wake: Option<fn()>,
+}
+
+impl BuildEnd {
+    fn send(&self, result: Result<Built, AudioError>) {
+        if let Some(done) = &self.done {
+            let _ = done.send(result);
+        }
+    }
+}
+
+impl Drop for BuildEnd {
+    fn drop(&mut self) {
+        self.done = None;
+        if let Some(wake) = self.wake {
+            wake();
+        }
+    }
+}
+
 fn build_paused_player(
     outlet: &Outlet,
     path: &Path,
@@ -308,6 +333,11 @@ pub(in crate::ui) struct AudioEngine {
     sim_stalled_since: Option<Duration>,
     #[cfg(test)]
     build_gate: Option<Arc<std::sync::Mutex<Receiver<()>>>>,
+    /// Tests: the next builds panic, as a decoder can.
+    #[cfg(test)]
+    build_panics: bool,
+    #[cfg(test)]
+    build_threads: Vec<std::thread::JoinHandle<Option<()>>>,
 }
 
 impl AudioEngine {
@@ -334,6 +364,10 @@ impl AudioEngine {
             sim_stalled_since: None,
             #[cfg(test)]
             build_gate: None,
+            #[cfg(test)]
+            build_panics: false,
+            #[cfg(test)]
+            build_threads: Vec::new(),
         }
     }
 
@@ -476,6 +510,14 @@ impl AudioEngine {
         open
     }
 
+    /// Tests: wait until every build thread has ended.
+    #[cfg(test)]
+    fn join_builds(&mut self) {
+        for thread in self.build_threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+
     #[cfg(test)]
     pub(in crate::ui) fn await_build_done(&mut self) {
         if let Some(building) = self.building.as_mut() {
@@ -532,20 +574,28 @@ impl AudioEngine {
         let path = self.path.clone().ok_or(AudioError::Open)?;
         let outlet = self.output.outlet().ok_or(AudioError::NoOutput)?;
         let (done, built) = mpsc::channel();
-        let (speed, on_built) = (self.speed.clone(), self.on_built);
+        let end = BuildEnd {
+            done: Some(done),
+            wake: self.on_built,
+        };
+        let speed = self.speed.clone();
         #[cfg(test)]
-        let gate = self.build_gate.clone();
-        quill::thread_guard::spawn_guarded("quill-audio-build", move || {
+        let (gate, panics) = (self.build_gate.clone(), self.build_panics);
+        let thread = quill::thread_guard::spawn_guarded("quill-audio-build", move || {
             #[cfg(test)]
             if let Some(gate) = gate {
                 let _ = gate.lock().map(|gate| gate.recv());
             }
-            let _ = done.send(build_paused_player(&outlet, &path, target, &speed));
-            if let Some(wake) = on_built {
-                wake();
-            }
+            #[cfg(test)]
+            assert!(!panics, "test: the decoder panicked");
+            end.send(build_paused_player(&outlet, &path, target, &speed));
         })
         .map_err(|_| AudioError::Open)?;
+        #[cfg(test)]
+        self.build_threads.push(thread);
+        #[cfg(not(test))]
+        drop(thread);
+        self.start_failed = false;
         self.building = Some(Building {
             built_for: target,
             latest_target: target,
@@ -873,6 +923,7 @@ mod tests {
     use crate::ui::audio::SharedOutput;
     use rodio::mixer::MixerSource;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
 
     /// An engine on a fake output, plus the "device" that pulls from it.
@@ -1033,6 +1084,42 @@ mod tests {
         engine.settle();
         assert_eq!(engine.state(), EngineState::Failed);
         assert_eq!(engine.error(), Some(AudioError::Open));
+    }
+
+    static PANICKED_BUILD_WAKES: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn a_build_thread_that_panics_still_wakes_the_app_to_fail_the_start() {
+        let (mut engine, _device) = rig();
+        engine.set_on_built(|| {
+            PANICKED_BUILD_WAKES.fetch_add(1, Ordering::SeqCst);
+        });
+        engine.build_panics = true;
+        let path = track("loading-panics.wav", 4);
+        engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
+        engine.join_builds();
+        assert_eq!(PANICKED_BUILD_WAKES.load(Ordering::SeqCst), 1);
+        engine.settle();
+        assert_eq!(engine.state(), EngineState::Failed);
+        assert!(engine.take_start_failed(), "the user is told");
+    }
+
+    #[test]
+    fn a_good_start_after_a_failed_one_reports_no_failure() {
+        let (mut engine, _device) = rig();
+        let open = engine.gate_builds();
+        let path = track("loading-after-died.wav", 4);
+        engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
+        if let Some(building) = engine.building.as_mut() {
+            building.built = mpsc::channel().1;
+        }
+        engine.settle();
+        assert_eq!(engine.state(), EngineState::Failed);
+        engine.resume(1.0).unwrap();
+        drop(open);
+        engine.await_landing();
+        assert_eq!(engine.state(), EngineState::Playing);
+        assert!(!engine.take_start_failed());
     }
 
     #[test]
