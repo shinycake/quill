@@ -480,8 +480,10 @@ fn a_tick_draws_a_view_only_when_its_frame_changes() {
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, t0), 0);
     let draw = TickDraw::Within(refresh);
     assert!(!view.changes_in(draw), "frame 0 stays up");
+    assert!(view.plays_on(draw));
     player.skip(ms(20));
     assert!(view.changes_in(draw), "frame 1 is due by 28 ms");
+    assert!(!view.plays_on(draw));
     let at = player.now() + refresh;
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, at), 1);
     assert!(!view.changes_in(draw), "frame 1 is up");
@@ -490,4 +492,35 @@ fn a_tick_draws_a_view_only_when_its_frame_changes() {
     let frame_2 = t0 + frame * 2 - quarter_frame_slack;
     assert!(!view.changes_in(TickDraw::On(frame_2 - ms(1))));
     assert!(view.changes_in(TickDraw::On(frame_2 + ms(1))));
+}
+
+#[test]
+fn a_view_with_no_frame_up_never_lets_a_tick_pass() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![1; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let view = super::StickerView {
+        player: std::rc::Rc::new(player),
+        spec: std::rc::Rc::new(other.clone()),
+        head: head("opening"),
+        mode: PlayMode::Loop,
+        edge: EDGE,
+        max_fps: 120,
+        active: false,
+        window: None,
+    };
+    let draw = TickDraw::Within(ms(8));
+    assert!(!view.plays_on(draw), "not open");
+    view.player
+        .prepare(&other, EDGE, Place::of(view.head, None));
+    assert!(!view.plays_on(draw), "open, or opening, with no frame up");
 }

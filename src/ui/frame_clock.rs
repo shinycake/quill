@@ -180,6 +180,45 @@ impl QuillApp {
         self.request_animation_tick_for(target, fps, cx);
     }
 
+    /// [`Self::request_app_tick`] for content that can say what a draw
+    /// would show: a tick where `still` holds keeps ticking without a draw,
+    /// unless something else asked for the same tick. Content ticking
+    /// faster than its frames change (the tap effect beside other clips, a
+    /// clip held to its file's rate) would otherwise redraw the app for
+    /// nothing.
+    #[track_caller]
+    pub(super) fn request_app_tick_unless(
+        &self,
+        still: Rc<dyn Fn(TickDraw) -> bool>,
+        fps: u32,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self.frame.tick_view.get().or(self.slices.app_only_id());
+        let unasked = !self.frame.animation_targets.borrow().contains(&target);
+        let alone = unasked || target.is_some_and(|id| self.still_tick_of(id));
+        self.request_animation_tick_for(target, fps, cx);
+        if let Some(id) = target.filter(|_| alone) {
+            let tick = StillTick { fps, still };
+            self.frame.still_ticks.borrow_mut().insert(id, tick);
+        }
+    }
+
+    fn still_tick_of(&self, target: EntityId) -> bool {
+        self.frame.still_ticks.borrow().contains_key(&target)
+    }
+
+    /// Whether the tick of `target` draws nothing new
+    /// ([`Self::request_app_tick_unless`]): it then keeps ticking.
+    fn still_tick(&self, target: EntityId, draw: TickDraw, cx: &mut Context<Self>) -> bool {
+        let tick = self.frame.still_ticks.borrow_mut().remove(&target);
+        let Some(tick) = tick.filter(|tick| (tick.still)(draw)) else {
+            return false;
+        };
+        self.request_animation_tick_for(Some(target), tick.fps, cx);
+        self.frame.still_ticks.borrow_mut().insert(target, tick);
+        true
+    }
+
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
     /// the chat list's animation layer by entity id, `None` for the app.
     #[track_caller]
@@ -258,6 +297,9 @@ impl QuillApp {
                 .max(fps.clamp(1, MAX_TICK_FPS)),
         );
         self.frame.animation_targets.borrow_mut().insert(target);
+        if let Some(id) = target {
+            self.frame.still_ticks.borrow_mut().remove(&id);
+        }
         if plays_sound {
             self.frame.animation_sound.set(true);
         }
@@ -314,6 +356,9 @@ impl QuillApp {
                                     for id in views {
                                         if let Some(fps) = this.idle_layer_tick(id, draw) {
                                             this.request_animation_tick_for(Some(id), fps, cx);
+                                            continue;
+                                        }
+                                        if this.still_tick(id, draw, cx) {
                                             continue;
                                         }
                                         this.frame.layers_drawn.borrow_mut().ticked(id);
@@ -511,6 +556,13 @@ impl TickDraw {
             .or_else(next)
             .map_or(Self::Within(refresh), Self::On)
     }
+}
+
+/// An app tick that needs no draw while `still` holds, with the rate to
+/// keep ticking at ([`QuillApp::request_app_tick_unless`]).
+pub(super) struct StillTick {
+    fps: u32,
+    still: Rc<dyn Fn(TickDraw) -> bool>,
 }
 
 /// What a wake of the frame clock did.

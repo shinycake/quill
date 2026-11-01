@@ -172,6 +172,19 @@ impl StickerView {
         }
     }
 
+    /// Whether its clip is open and it shows the same frame in `draw`, the
+    /// one thing that lets a tick skip what is drawn with it: an opening
+    /// or gone view needs its draws for what comes next.
+    pub(in crate::ui) fn plays_on(&self, draw: TickDraw) -> bool {
+        let Ok(inner) = self.player.inner.try_borrow() else {
+            return false;
+        };
+        match self.state(&inner) {
+            ViewState::Open(open) => !self.open_changes(&open, draw),
+            _ => false,
+        }
+    }
+
     fn open_changes(&self, open: &Open, draw: TickDraw) -> bool {
         let at = match draw {
             TickDraw::On(at) => at,

@@ -190,9 +190,9 @@ and all seven restarts came in play. With the changes below, none of nine did.
   frame shows on (`frame_clock::content_at`), not the paint's wall time, in every
   window. So a late paint moves nothing, and any draw between ticks shows what
   the last tick showed. `grid_slack` stays for displays without vsync times.
-- **What a tick asks.** A tick that can skip its draw (`idle_layer_tick`) asks
-  about the vsync it draws on (`TickDraw::On`), so it draws only on the refresh
-  a frame changes.
+- **What a tick asks.** A tick that can skip its draw (`idle_layer_tick`, and
+  the tap effect through `request_app_tick_unless`) asks about the vsync it
+  draws on (`TickDraw::On`), so it draws only on the refresh a frame changes.
   Without vsync times it still asks about the whole next refresh
   (`TickDraw::Within`), and a frame costs one or two draws.
 
