@@ -3,7 +3,9 @@
 //! close hides on which platform: `quill::tray`'s tests. The test platform
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
-use super::{MainWindow, main_window_on_activation, note_main_window, raise_main_window_if};
+use super::{
+    MainWindow, answer_wakes, main_window_on_activation, note_main_window, raise_main_window_if,
+};
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -161,4 +163,32 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
         }
     });
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAppContext) {
+    static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
+    static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
+    UI.start();
+    let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = turns.clone();
+    cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            answer_wakes(cx, &SIGNAL, &UI, |_| {
+                counted.set(counted.get() + 1);
+                // A second launch marks the beat and pokes mid-turn.
+                if counted.get() == 1 {
+                    SIGNAL.poke();
+                }
+                true
+            })
+            .await;
+        })
+        .detach();
+    });
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 0, "asleep until a poke");
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 2, "the mid-turn poke woke the loop again");
 }
