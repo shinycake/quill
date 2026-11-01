@@ -398,11 +398,19 @@ mod windows {
         }
     }
 
-    /// N21: `NotifyAddrChange` never heard this. The CI step's own time
-    /// limit ends the wait if no notification comes.
+    /// N21: `NotifyAddrChange` never heard this. A refused registration,
+    /// the way the watcher can go deaf, fails here with its cause. A
+    /// registration the OS accepted and then never calls back cannot fail
+    /// any sooner: Windows has no point after which every callback for a
+    /// change has run, so only the CI step's time limit ends that wait.
     #[test]
     fn an_ipv6_address_added_on_loopback_wakes_the_watcher() {
         let subscription = subscribe(&RECORDER);
+        assert_eq!(
+            subscription.registered(),
+            3,
+            "interface, address and route notifications all registered"
+        );
         let added = Change {
             kind: Kind::Address,
             family: AF_INET6,

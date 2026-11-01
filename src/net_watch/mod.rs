@@ -11,6 +11,8 @@
 #[cfg(any(windows, test))]
 mod coalesce;
 mod link;
+#[cfg(any(target_os = "macos", test))]
+mod llinfo;
 #[cfg(target_os = "linux")]
 mod netlink;
 mod platform;
@@ -71,6 +73,20 @@ impl Path {
                 Self::Via(now)
             }
             _ => self,
+        }
+    }
+
+    /// The gateway whose link-layer address [`Self::settled`] carries over
+    /// from `before`: until the system resolves it, a new router on the
+    /// same address is not seen.
+    fn carried(self, before: Self) -> Option<IpAddr> {
+        match (self, before) {
+            (Self::Via(now), Self::Via(then))
+                if now.link.gateway_hardware.is_none() && then.link.gateway_hardware.is_some() =>
+            {
+                now.link.gateway.filter(|_| self.settled(before) != self)
+            }
+            _ => None,
         }
     }
 
@@ -156,11 +172,35 @@ pub struct NetworkState {
 struct Tracker {
     route: Route,
     epoch: u64,
+    /// The gateways [`Self::to_resolve`] last named, so each is asked once
+    /// until it resolves: a router that never answers would otherwise turn
+    /// every failed lookup's event into another lookup.
+    resolving: [Option<IpAddr>; 2],
 }
 
 impl Tracker {
     fn new(route: Route) -> Self {
-        Self { route, epoch: 0 }
+        Self {
+            route,
+            epoch: 0,
+            resolving: [None; 2],
+        }
+    }
+
+    /// The gateways to resolve now, before `route` is observed: those whose
+    /// link-layer address would be carried over, each named once.
+    fn to_resolve(&mut self, route: Route) -> Vec<IpAddr> {
+        let carried = [
+            route.v4.carried(self.route.v4),
+            route.v6.carried(self.route.v6),
+        ];
+        let fresh = carried
+            .iter()
+            .zip(self.resolving)
+            .filter_map(|(now, asked)| now.filter(|gateway| asked != Some(*gateway)))
+            .collect();
+        self.resolving = carried;
+        fresh
     }
 
     fn observe(&mut self, route: Route) -> bool {
@@ -223,7 +263,13 @@ fn is_gateway(ip: IpAddr) -> bool {
 
 fn network_changed() {
     let route = route_now();
-    let moved = lock_or_recover(tracker()).observe(route);
+    let mut tracker = lock_or_recover(tracker());
+    let resolve = tracker.to_resolve(route);
+    let moved = tracker.observe(route);
+    drop(tracker);
+    // The answer comes back as a neighbour change (Linux), or from the
+    // background resolve `link::of` starts (Windows).
+    resolve.into_iter().for_each(link::resolve);
     if moved {
         crate::wake::UPDATES.poke();
     }

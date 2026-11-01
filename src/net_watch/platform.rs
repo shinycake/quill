@@ -265,6 +265,13 @@ mod backend {
     /// The registrations of one [`subscribe`] call.
     pub(in crate::net_watch) struct Subscription(Vec<HANDLE>);
 
+    #[cfg(test)]
+    impl Subscription {
+        pub(in crate::net_watch) fn registered(&self) -> usize {
+            self.0.len()
+        }
+    }
+
     impl Drop for Subscription {
         fn drop(&mut self) {
             for handle in self.0.drain(..) {
