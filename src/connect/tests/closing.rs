@@ -607,6 +607,32 @@ fn a_call_whose_answer_failed_is_left_to_ring() {
 }
 
 #[test]
+fn a_late_answer_failure_for_an_earlier_call_still_hangs_up_the_answered_one() {
+    let ringing = CallState::Pending {
+        is_created: true,
+        is_received: true,
+    };
+    let mut client = calling_driver().with_call(false, ringing.clone());
+    client
+        .driver
+        .set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
+    let first = client.driver.accept_call().expect("accept");
+    let mut next = active_call(false, ringing);
+    next.id = CALL_ID + 1;
+    client.driver.session.calls.active_call = Some(next);
+    client.driver.accept_call().expect("accept");
+    client.feed(&format!(
+        r#"{{"@type":"error","code":400,"message":"CALL_ALREADY_DECLINED","@extra":"{}","@client_id":{CLIENT_ID}}}"#,
+        first.0
+    ));
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(
+        client.sent(),
+        ["acceptCall", "acceptCall", "discardCall", "setOption"]
+    );
+}
+
+#[test]
 fn an_outgoing_call_still_ringing_is_hung_up() {
     let mut client = calling_driver().with_call(
         true,

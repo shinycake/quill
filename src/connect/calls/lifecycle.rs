@@ -61,7 +61,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        let extra = self
+            .session
+            .request(CallsPurpose::AcceptCall { call_id }.into(), None);
         let protocol = self.engine_protocol_json();
         if let Err(err) = self
             .sender
@@ -222,7 +224,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some((call_id, _is_video)) = self.session.calls.swap_accept_queued.take() else {
             return Ok(());
         };
-        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        let extra = self
+            .session
+            .request(CallsPurpose::AcceptCall { call_id }.into(), None);
         let protocol = self.engine_protocol_json();
         if let Err(err) = self
             .sender
