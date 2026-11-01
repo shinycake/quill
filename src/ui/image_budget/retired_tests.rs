@@ -127,8 +127,8 @@ fn a_window_that_stops_drawing_keeps_only_what_its_last_frame_may_show() {
 
 #[cfg(feature = "demo-capture")]
 mod windows {
-    use super::super::super::{BoundedImageCache, slice_rendered, slice_shown};
-    use super::super::{begin_main_frame, retire_all, start_sweeper};
+    use super::super::super::{BoundedImageCache, begin_frame, slice_rendered, slice_shown};
+    use super::super::{begin_main_frame, retire_all, start_sweeper, sweep};
     use super::picture;
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
@@ -343,6 +343,32 @@ mod windows {
         draw(cx, chat.into());
         assert_eq!(kept.strong_count(), 0, "drawn without it: gone");
         assert!(!in_atlas(cx, chat.into(), &shown_probe));
+    }
+
+    /// A sweep runs on the UI thread at the start of a frame, and freeing a
+    /// picture's pixels is a system call per picture on macOS: the sweep
+    /// takes the picture out of the atlas and a background task frees it.
+    #[gpui_kit::test]
+    fn a_sweep_frees_pixels_off_the_ui_thread(cx: &mut TestAppContext) {
+        cx.update(|cx| gpui_kit::init(cx));
+        let main = cx.open_window(size(px(200.), px(200.)), |_, _| MainWindow {
+            own: Some(picture()),
+            in_slice: None,
+            slice_renders: true,
+        });
+        let view = main.root(cx).expect("the main view");
+        let own = view.update(cx, |main, _| main.own.take().expect("shown"));
+        let (pixels, own_probe) = (Arc::downgrade(&own), probe(&own));
+        assert!(in_atlas(cx, main.into(), &own_probe));
+        retire_all([own]);
+        begin_frame();
+        begin_frame();
+
+        cx.update(|cx| sweep(None, cx));
+        assert!(!in_atlas(cx, main.into(), &own_probe), "out of the atlas");
+        assert_eq!(pixels.strong_count(), 1, "not freed on the UI thread");
+        cx.run_until_parked();
+        assert_eq!(pixels.strong_count(), 0, "freed in the background");
     }
 
     /// The main window closed while a chat window played stickers grew as

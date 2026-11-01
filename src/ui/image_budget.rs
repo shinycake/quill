@@ -54,7 +54,7 @@ mod gif_still_tests;
 mod retired;
 #[cfg(test)]
 pub(in crate::ui) use retired::take_unshowable;
-pub(in crate::ui) use retired::{begin_main_frame, retire_all, start_sweeper};
+pub(in crate::ui) use retired::{begin_main_frame, drop_images, retire_all, start_sweeper};
 
 /// What the cache keeps beyond the screen: while the user scrolls (the
 /// next rows are probably the ones just seen), and once idle.
@@ -708,9 +708,7 @@ impl BoundedImageCache {
             .filter(|e| e.may_be_visible(clock))
             .count();
         note_departures(&mut self.shown, shown);
-        for image in self.evict(ACTIVE_BUDGET) {
-            cx.drop_image(image, Some(&mut *window));
-        }
+        drop_images(self.evict(ACTIVE_BUDGET), Some(window), cx);
     }
 
     /// Nothing new showed for `IDLE_AFTER`: evict down to the idle budget,
