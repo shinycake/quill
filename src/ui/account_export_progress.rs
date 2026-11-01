@@ -12,6 +12,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::export::account::{AccountProgress, AccountStage};
 use quill::lang::{keys, tr, tr_with};
+use quill::state::RedrawNeed;
 
 /// The status note for an export that ended while its box was hidden.
 fn ended_note(progress: &AccountProgress) -> String {
@@ -27,26 +28,30 @@ fn ended_note(progress: &AccountProgress) -> String {
 impl QuillApp {
     /// Poll-loop step: keep the box fresh while the export advances, and
     /// when it ended with the box hidden, say how it went and clear it.
-    pub(super) fn poll_account_export_progress(&mut self) -> bool {
-        let Some(live) = self.live.as_mut() else {
-            return false;
-        };
-        let Some(export) = live.driver.session.settings.account_export.as_ref() else {
+    pub(super) fn poll_account_export_progress(&mut self) -> RedrawNeed {
+        let Some(export) = self
+            .session()
+            .and_then(|s| s.settings.account_export.as_ref())
+        else {
             self.dialogs.account_export_seen = None;
-            return false;
+            return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        if progress.is_settled() && self.dialogs.account_export_progress_hidden {
-            live.driver.session.settings.account_export = None;
+        let hidden = self.dialogs.account_export_progress_hidden;
+        if progress.is_settled() && hidden {
+            if let Some(session) = self.session_mut() {
+                session.settings.account_export = None;
+            }
             self.dialogs.account_export_seen = None;
             self.dialogs.account_export_progress_hidden = false;
             self.connection
                 .set_note(StatusNote::info(ended_note(&progress)));
-            return true;
+            return RedrawNeed::Now;
         }
         let changed = self.dialogs.account_export_seen.as_ref() != Some(&progress);
+        let need = super::export_progress::progress_redraw(changed, progress.is_settled(), hidden);
         self.dialogs.account_export_seen = Some(progress);
-        changed
+        need
     }
 
     /// Body and footer of the dialog while an export exists.

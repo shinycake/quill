@@ -6,12 +6,18 @@ use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
 use crate::locks::LockExt;
+use crate::wake::Signal;
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
+
+pub(crate) fn publish_end<P>(progress: &Mutex<P>, end: impl FnOnce(&mut P), wake: &Signal) {
+    end(&mut progress.lock_or_recover());
+    wake.poke();
+}
 
 /// The worker's end: blocks on channels the driver services from the poll
 /// loop.
@@ -155,9 +161,11 @@ impl ChatExport {
                 Err(ExportError::Cancelled) => Stage::Cancelled,
                 Err(err) => Stage::Failed(err.to_string()),
             };
-            if let Ok(mut slot) = worker_progress.lock() {
-                slot.stage = last;
-            }
+            publish_end(
+                &worker_progress,
+                |slot| slot.stage = last,
+                &crate::wake::UPDATES,
+            );
         })?;
         Ok(Self {
             link,

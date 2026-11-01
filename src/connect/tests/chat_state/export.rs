@@ -114,7 +114,7 @@ fn account_export_worker_requests_flow_through_the_driver() {
         assert!(std::time::Instant::now() < deadline, "export never settled");
         driver.pump_account_export();
         let export = driver.session.settings.account_export.as_ref().unwrap();
-        if export.finished.load(std::sync::atomic::Ordering::Acquire) {
+        if export.progress().is_settled() {
             break;
         }
         let sent: Vec<String> = recorder

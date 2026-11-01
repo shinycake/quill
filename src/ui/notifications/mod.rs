@@ -481,26 +481,12 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
-        // `parity:data-chat-export-html` — forward the export worker's
-        // requests, keep its progress box fresh, and report how it ended.
         if let Some(live) = self.live.as_mut() {
             live.driver.pump_chat_export();
             live.driver.pump_psa_labels();
             live.driver.pump_account_export();
-            if live
-                .driver
-                .session
-                .settings
-                .account_export
-                .as_ref()
-                .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
-            {
-                progressed = true;
-            }
         }
-        if self.poll_chat_export_progress() {
-            progressed = true;
-        }
+        need = need.max(self.poll_chat_export_progress());
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
         // Message Link".

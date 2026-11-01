@@ -532,3 +532,13 @@ fn replies_on_the_same_page_jump_with_the_script() {
     ));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_worker_ending_wakes_the_poll_loop_after_it_published() {
+    let progress = std::sync::Mutex::new(Stage::Starting);
+    let wake = crate::wake::Signal::new();
+    let seen = wake.epoch();
+    crate::export::handle::publish_end(&progress, |stage| *stage = Stage::Cancelled, &wake);
+    assert_ne!(wake.epoch(), seen);
+    assert_eq!(*progress.lock().unwrap(), Stage::Cancelled);
+}
