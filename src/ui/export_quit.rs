@@ -93,17 +93,6 @@ pub(crate) fn quit_app(window: &mut Window, cx: &mut App) {
     cx.quit();
 }
 
-/// Closing the main window, where that ends the app: macOS keeps a
-/// windowless app alive for its menu bar; elsewhere closing the only
-/// window quits.
-pub(crate) fn close_main_window(window: &mut Window, cx: &mut App) {
-    window.remove_window();
-    #[cfg(not(target_os = "macos"))]
-    cx.quit();
-    #[cfg(target_os = "macos")]
-    let _ = cx;
-}
-
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 #[path = "export_quit_tests.rs"]

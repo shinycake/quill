@@ -858,13 +858,13 @@ pub(in crate::ui) fn follow_app<V: 'static>(
 
 /// The app's animation gate as `QuillApp::follow_windows` last set it, for
 /// the clips' frame requests, which only have their own window at hand.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct AppGate {
     /// A Quill window is active (`FrameState::window_active`).
     pub(super) active: bool,
-    /// The window whose own content holds still meanwhile: the main window
-    /// while the active chat window hides it whole (`chat_window::cover`).
-    pub(super) held: Option<WindowId>,
+    /// The windows whose own content holds still meanwhile: those the
+    /// active window hides whole (`chat_window::cover`).
+    pub(super) held: Vec<WindowId>,
 }
 
 impl Global for AppGate {}
@@ -872,8 +872,36 @@ impl Global for AppGate {}
 impl AppGate {
     /// Whether content in `window` animates under this gate.
     fn animates(&self, window: WindowId) -> bool {
-        self.active && self.held != Some(window)
+        self.active && !self.held.contains(&window)
     }
+
+    /// Whether `window` is hidden whole behind the active window.
+    fn holds(cx: &App, window: WindowId) -> bool {
+        cx.try_global::<AppGate>()
+            .is_some_and(|gate| gate.held.contains(&window))
+    }
+}
+
+/// [`follow_app`] for a chat window in `window`, which skips the redraws
+/// while the active window hides it whole: nobody sees them.
+/// `QuillApp::follow_windows` redraws it once it shows again.
+pub(in crate::ui) fn follow_app_unless_held<V: 'static>(
+    app: &Entity<QuillApp>,
+    window: WindowId,
+    cx: &mut Context<V>,
+) -> Subscription {
+    Subscription::join(
+        cx.observe(app, move |_, _, cx| {
+            if !AppGate::holds(cx, window) {
+                cx.notify();
+            }
+        }),
+        cx.subscribe(app, move |_, _, _: &AppTick, cx| {
+            if !AppGate::holds(cx, window) {
+                cx.notify();
+            }
+        }),
+    )
 }
 
 /// What lets a tick request through while no main or chat window is active.

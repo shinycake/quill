@@ -11,6 +11,9 @@
 //! display, and start again once any part of it shows (`frame_clock`).
 //! Ticks for the whole app, which any window's content may ask for, redraw
 //! every other window that follows the app then ([`QuillApp::tick_app`]).
+//! A chat window the active window (the main one or another chat window)
+//! hides whole holds still the same way: no redraws for the app's changes
+//! or ticks, no clip frames, until it shows again.
 //! Background: `docs/decisions/covered-main-window.md`.
 //!
 //! This rests on the active window being in front of the app's others; a
@@ -92,6 +95,34 @@ impl ChatWindows {
             let slot = open.slot.borrow();
             slot.active && slot.place.is_some_and(|place| place.covers(&main))
         }) && !hover_activates()
+    }
+
+    /// The chat windows the active window, the main one or a chat window,
+    /// hides whole, as of their last places: their own content holds still
+    /// too, as the main window's does ([`Self::main_covered`]).
+    fn covered_chat_windows(&self, main_active: bool) -> Vec<WindowId> {
+        if hover_activates() {
+            return Vec::new();
+        }
+        let front = if main_active {
+            self.main_place
+        } else {
+            self.open.iter().find_map(|open| {
+                let slot = open.slot.borrow();
+                slot.place.filter(|_| slot.active)
+            })
+        };
+        let Some(front) = front else {
+            return Vec::new();
+        };
+        self.open
+            .iter()
+            .filter(|open| {
+                let slot = open.slot.borrow();
+                !slot.active && slot.place.is_some_and(|place| front.covers(&place))
+            })
+            .map(|open| open.handle.window_id())
+            .collect()
     }
 
     /// `chat_id`'s window is active or not and stands at `place`. Returns
@@ -197,19 +228,41 @@ impl QuillApp {
             videos.set_window_active(active);
         }
         videos.set_main_covered(covered, cx);
-        // For the clips' frame requests (`request_video_frame`).
-        let gate = AppGate {
-            active,
-            held: self
-                .windows
-                .main
-                .filter(|_| covered)
-                .map(|main| main.window_id()),
-        };
-        if cx.try_global::<AppGate>() != Some(&gate) {
+        let chats = self
+            .windows
+            .covered_chat_windows(self.frame.main_active.get());
+        // For the clips' frame requests (`request_video_frame`) and the
+        // chat windows' redraws (`follow_app_unless_held`).
+        let held: Vec<WindowId> = self
+            .windows
+            .main
+            .filter(|_| covered)
+            .map(|main| main.window_id())
+            .into_iter()
+            .chain(chats.iter().copied())
+            .collect();
+        let before = cx.try_global::<AppGate>().cloned();
+        let gate = AppGate { active, held };
+        if before.as_ref() != Some(&gate) {
             cx.set_global(gate);
+            // A chat window that shows again draws what it skipped.
+            let was_held = before.map(|gate| gate.held).unwrap_or_default();
+            for open in self.windows.open.iter() {
+                let id = open.handle.window_id();
+                if was_held.contains(&id) && !chats.contains(&id) {
+                    let _ = open.view.update(cx, |_, cx| cx.notify());
+                }
+            }
         }
         active
+    }
+
+    /// The main window moved or was resized: a chat window it hides, or no
+    /// longer hides, while it is the active one follows at once.
+    pub(in crate::ui) fn main_window_placed(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let main_active = window.is_window_active() || assume_active();
+        self.note_main_place(window, main_active);
+        self.follow_windows(cx);
     }
 
     /// A frame-clock tick for the whole app redraws every window that

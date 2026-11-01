@@ -596,7 +596,10 @@ fn a_chat_windows_clips_keep_their_frames_while_the_main_window_has_focus(cx: &m
     let vcx = &mut vcx;
     vcx.update(|window, _| window.activate_window());
     settle(vcx);
-    let chat_window = open_window(&app, vcx, CHAT);
+    // Past the main window's right edge, so it shows beside the main
+    // window in front (one inside it is hidden, and holds still).
+    let beside = Bounds::new(point(px(900.), px(100.)), size(px(600.), px(900.)));
+    let chat_window = open_window_at(&app, vcx, CHAT, Some(beside));
     app.update_in(vcx, |app, window, cx| {
         app.select_listed_chat(OTHER, window, cx)
     });

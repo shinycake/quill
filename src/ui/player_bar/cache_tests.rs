@@ -52,7 +52,7 @@ fn apply(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &str) {
 }
 
 /// Apply `json` as the poll does an update for a chat not on screen:
-/// it redraws the chat list and nothing else.
+/// it redraws the chat list and nothing else, and pokes `wake::CHROME`.
 fn apply_off_screen(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &str) {
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
@@ -64,6 +64,8 @@ fn apply_off_screen(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, json: &
         assert_eq!(need, RedrawNeed::ChatList, "only the chat list redraws");
         session.apply(owned);
         app.notify_chat_list(cx);
+        // The poll pokes the chrome after what it applied.
+        quill::wake::CHROME.poke();
     });
 }
 

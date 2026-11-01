@@ -1832,9 +1832,10 @@ impl App {
         subscription
     }
 
-    /// Observes mobile application lifecycle changes. Desktop platforms do not
-    /// emit these events. On iOS these currently describe the single connected
-    /// scene, not individual windows.
+    /// Observes application lifecycle changes. Of the desktop platforms only
+    /// macOS emits any: `Active` when the application becomes active. On iOS
+    /// these currently describe the single connected scene, not individual
+    /// windows.
     ///
     /// Save important changes incrementally: neither disconnection nor quit is
     /// guaranteed before the system terminates a backgrounded application.

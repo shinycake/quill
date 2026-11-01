@@ -134,3 +134,37 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
         assert!(app.notify.windows.hide_all.is_none());
     });
 }
+
+/// A poll hands out what it queued itself: a hidden or minimized main
+/// window does not draw, so nothing may wait for its render.
+#[gpui_kit::test]
+fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.notify.windows.platform = NotifyPlatform::Windows;
+        let drain = quill::notify_accounts::NotifyDrain {
+            notifications: vec![quill::notify::QueuedNotification {
+                chat_id: ChatId(5),
+                message_id: None,
+                title: "Chat 5".into(),
+                body: "Hello".into(),
+                count: 1,
+                sound: None,
+                photo: None,
+            }],
+            attention: true,
+            ..Default::default()
+        };
+        app.hand_out_notifications(drain, None, cx);
+        // Still inside one update: no window has drawn since.
+        assert_eq!(app.notify.windows.live(), 1);
+        assert!(
+            app.notify
+                .windows
+                .shown
+                .iter()
+                .any(|s| s.key == (None, ChatId(5)))
+        );
+    });
+}
