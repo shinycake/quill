@@ -343,7 +343,9 @@ impl QuillApp {
                     }
                     // Phase A1: slow-mode gate (centralized in
                     // `slow_mode_blocked`).
-                    if self.slow_mode_blocked(chat_id, cx) {
+                    if self.slow_mode_refuses(chat_id, snaps.len(), cx)
+                        || self.slow_mode_blocked(chat_id, cx)
+                    {
                         return;
                     }
                     // MED1: ungrouped sends go out one message at a time.
@@ -391,6 +393,16 @@ impl QuillApp {
                         && attachments.iter().all(|att| {
                             matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
                         });
+                    let messages = if albumable && self.composer_group_media_effective() {
+                        ComposerAttachment::split_for_send(&attachments, true).len()
+                    } else {
+                        attachments.len().max(1)
+                    };
+                    if demo_chat
+                        .is_some_and(|chat_id| self.slow_mode_refuses(chat_id, messages, cx))
+                    {
+                        return;
+                    }
                     if albumable && self.composer_group_media_effective() {
                         self.apply_demo_album(&text, &attachments, reply.as_ref());
                     } else if attachments.len() >= 2 {

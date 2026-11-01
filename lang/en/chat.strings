@@ -106,6 +106,7 @@
 "lng_send_silent_message" = "Send without sound";
 "lng_settings_save" = "Save";
 "lng_shortcuts_archive_chat" = "Archive chat";
+"lng_slowmode_no_many" = "Slow mode is enabled. You can't send more than one message at a time.";
 "lng_sr_chat_column_message" = "Message";
 "lng_sr_message_column_dice" = "Dice";
 "lng_sure_delete_and_exit" = "Are you sure you want to delete all message history and leave «{group}»?\n\nThis action cannot be undone.";
