@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 pub(crate) struct SizedFonts<K, V> {
-    built: HashMap<K, V>,
+    /// Each font with the lookup that last asked for it.
+    built: HashMap<K, (V, u64)>,
     limit: usize,
+    lookups: u64,
 }
 
 impl<K: Eq + Hash, V> SizedFonts<K, V> {
@@ -13,14 +15,19 @@ impl<K: Eq + Hash, V> SizedFonts<K, V> {
         Self {
             built: HashMap::new(),
             limit,
+            lookups: 0,
         }
     }
 
     pub(crate) fn get_or_build(&mut self, key: K, build: impl FnOnce() -> V) -> &V {
+        self.lookups += 1;
         if self.built.len() >= self.limit && !self.built.contains_key(&key) {
-            self.built.clear();
+            let oldest = self.built.values().map(|(_, used)| *used).min();
+            self.built.retain(|_, (_, used)| Some(*used) != oldest);
         }
-        self.built.entry(key).or_insert_with(build)
+        let (font, used) = self.built.entry(key).or_insert_with(|| (build(), 0));
+        *used = self.lookups;
+        font
     }
 }
 
@@ -64,6 +71,26 @@ mod tests {
             assert_eq!(*fonts.get_or_build(size, || size * 2), size * 2);
             assert!(fonts.built.len() <= 8, "{} fonts", fonts.built.len());
         }
+    }
+
+    #[test]
+    fn a_full_cache_drops_the_font_unused_longest() {
+        let builds = Cell::new(0);
+        let mut fonts = SizedFonts::new(2);
+        let mut ask = |fonts: &mut SizedFonts<i32, i32>, key| {
+            *fonts.get_or_build(key, || {
+                builds.set(builds.get() + 1);
+                key
+            })
+        };
+        ask(&mut fonts, 1);
+        ask(&mut fonts, 2);
+        ask(&mut fonts, 1);
+        ask(&mut fonts, 3);
+        ask(&mut fonts, 1);
+        assert_eq!(builds.get(), 3, "the font in use survives the limit");
+        ask(&mut fonts, 2);
+        assert_eq!(builds.get(), 4, "the idle font went");
     }
 
     #[test]
