@@ -63,7 +63,7 @@ static LAST: Mutex<Option<(NowPlaying, Instant)>> = Mutex::new(None);
 
 /// Queue a command (called by backends from any thread).
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
-pub(crate) fn push_command(command: Command) {
+pub fn push_command(command: Command) {
     COMMANDS.lock_or_recover().push(command);
     // The player's progress tick, asleep while a track is paused.
     crate::wake::CHROME.poke();

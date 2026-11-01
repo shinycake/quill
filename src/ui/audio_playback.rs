@@ -19,6 +19,11 @@ const PLAYBACK_TICK: Duration = Duration::from_millis(250);
 thread_local! {
     /// Passes of the progress tick on this thread, for tests.
     pub(super) static TICK_PASSES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Runs once right after a pass drained the media commands, for tests:
+    /// stands in for an OS thread that pushes a key at that moment.
+    #[cfg(test)]
+    pub(super) static AFTER_DRAIN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
@@ -318,8 +323,8 @@ impl QuillApp {
         self.playback.tick_shown = None;
         Self::spawn_main(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
+            let mut seen = quill::wake::CHROME.epoch();
             loop {
-                let seen = quill::wake::CHROME.epoch();
                 match wait {
                     Some(wait) => {
                         super::wake_wait::sleep_or_wake(
@@ -334,6 +339,9 @@ impl QuillApp {
                         let _ = quill::wake::CHROME.wait_since(seen).await;
                     }
                 }
+                // Read before the pass drains the media commands, so a key
+                // pushed after the drain still ends the next wait.
+                seen = quill::wake::CHROME.epoch();
                 let next = this
                     .update(cx, |this, cx| {
                         #[cfg(test)]
@@ -345,6 +353,10 @@ impl QuillApp {
                         }
                         // Media keys and the OS Now Playing widget.
                         this.drain_media_commands(cx);
+                        #[cfg(test)]
+                        if let Some(hook) = AFTER_DRAIN.with(|hook| hook.borrow_mut().take()) {
+                            hook();
+                        }
                         if this.active_playback_id().is_none() {
                             quill::media_session::publish(None);
                             return None;

@@ -1,7 +1,7 @@
 //! The player's progress tick over the `ready-audio` demo (a song playing
 //! in chat 11): four passes a second while it plays, none while it is
 //! paused until something could change what the player shows.
-use super::TICK_PASSES;
+use super::{AFTER_DRAIN, TICK_PASSES};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -64,7 +64,19 @@ fn a_paused_track_ticks_only_when_something_could_change(cx: &mut TestAppContext
     quill::wake::CHROME.poke();
     assert_eq!(passes_over(vcx, 1), 1);
 
-    app.update(vcx, |app, cx| app.resume_active_playback(cx));
+    // The OS thread queues Play just after a pass took the queue: it
+    // plays without waiting for another wake-up.
+    AFTER_DRAIN.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(|| {
+            quill::media_session::push_command(quill::media_session::Command::Play);
+        }));
+    });
+    quill::wake::CHROME.poke();
+    let _ = passes_over(vcx, 1);
+    assert!(
+        app.read_with(vcx, |app, _| app.playback.is_playing()),
+        "the Play key plays"
+    );
     let resumed = passes_over(vcx, 2);
     assert!(
         (7..=10).contains(&resumed),
