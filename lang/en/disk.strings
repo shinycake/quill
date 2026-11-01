@@ -1,6 +1,6 @@
 "qll_disk_almost_full" = "Disk is almost full. Automatic downloads are paused.";
 "qll_disk_full_title" = "Disk is full";
-"qll_disk_manage_storage" = "Manage storage";
+"lng_settings_manage_local_storage" = "Manage local storage";
 "qll_disk_full_body" = "Quill closed its connection to keep your data safe, and will reconnect when enough space is free.\n\nQuill can't clear its cached files while it's disconnected, so free up space outside Quill first. Once it reconnects, you can clear them in Settings › Data and Storage.";
 "qll_disk_full_sizes" = "Available: {free}\nNeeded: {needed}";
 "qll_disk_full_needed" = "Needed: {needed}";

@@ -1,12 +1,13 @@
 #![deny(clippy::indexing_slicing)]
 
-use super::app::QuillApp;
+use super::app::{PaneMode, QuillApp};
 use super::message_media::format_bytes;
 use super::status_note::StatusNote;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::{Sizable as _, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, Context, IntoElement as _, ParentElement as _, Styled as _, Window,
     transparent_black,
@@ -145,9 +146,10 @@ impl QuillApp {
     }
 
     /// The kit's banner has no action slot, so the row around it carries the
-    /// tint and the button.
+    /// tint and the button. Sign-in has no Settings for the button to open.
     pub(super) fn disk_low_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
         (self.disk.state == DiskState::Low).then(|| {
+            let settings_can_show = self.pane_mode() != PaneMode::Connecting;
             h_flex()
                 .w_full()
                 .flex_none()
@@ -164,13 +166,15 @@ impl QuillApp {
                         .bg(transparent_black())
                         .border_0(),
                 )
-                .child(
-                    Button::new("disk-low-storage")
-                        .label(tr(keys::Q_DISK_MANAGE_STORAGE))
-                        .outline()
-                        .small()
-                        .on_click(cx.listener(|this, _, _, cx| this.open_local_storage(cx))),
-                )
+                .when(settings_can_show, |this| {
+                    this.child(
+                        Button::new("disk-low-storage")
+                            .label(tr(keys::SETTINGS_MANAGE_LOCAL_STORAGE))
+                            .outline()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.open_local_storage(cx))),
+                    )
+                })
                 .into_any_element()
         })
     }

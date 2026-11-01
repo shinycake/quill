@@ -11,11 +11,12 @@ use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
-    new_app_of_height(cx, 800.)
+    new_demo_app(cx, "ready-chats", 800.)
 }
 
-fn new_app_of_height(
+fn new_demo_app(
     cx: &mut TestAppContext,
+    demo: &'static str,
     height: f32,
 ) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -23,7 +24,7 @@ fn new_app_of_height(
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(height)), move |window, cx| {
         let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
+            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo)))
         });
         let shell = cx.new(|_| QuillShell::new(view.clone()));
         *slot_in.borrow_mut() = Some(view);
@@ -86,7 +87,7 @@ fn a_refusal_before_the_first_reading_says_only_what_is_needed(cx: &mut TestAppC
 
 #[gpui_kit::test]
 fn the_low_bar_opens_the_storage_usage_list(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_of_height(cx, 320.);
+    let (app, mut vcx) = new_demo_app(cx, "ready-chats", 320.);
     vcx.run_until_parked();
     read(&app, &mut vcx, Some(FLOORS.warn - 1));
     vcx.update(|window, cx| window.render_frame(cx));
@@ -104,6 +105,16 @@ fn the_low_bar_opens_the_storage_usage_list(cx: &mut TestAppContext) {
             "the storage usage list is below the fold at this height"
         );
     });
+}
+
+#[gpui_kit::test]
+fn the_low_bar_has_no_button_on_the_sign_in_screen(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_demo_app(cx, "wait-phone", 800.);
+    vcx.run_until_parked();
+    read(&app, &mut vcx, Some(FLOORS.warn - 1));
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(shown(&app, &mut vcx).0);
+    assert!(vcx.update(|window, _| window.try_find("disk-low-storage").is_none()));
 }
 
 #[gpui_kit::test]
