@@ -225,6 +225,7 @@ impl super::app::QuillApp {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
                 live.driver.set_stream_volume(self.playback.volume);
+                self.disk.seed(&mut live.driver);
                 self.live = Some(live);
             }
             Err(ConnectBlocker::DiskFull) => {

@@ -324,7 +324,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let (live, status) = match started {
-            Ok(live) => {
+            Ok(mut live) => {
+                self.disk.seed(&mut live.driver);
                 live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
                 (Some(live), BackgroundStatus::Connecting)
             }

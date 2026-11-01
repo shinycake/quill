@@ -50,6 +50,15 @@ impl DiskUi {
         self.state != DiskState::Healthy
     }
 
+    /// A client made after the last reading starts out knowing it, so a
+    /// low disk holds its automatic downloads from its first file.
+    pub(super) fn seed<S: quill::connect::JsonSender>(
+        &self,
+        driver: &mut quill::connect::ConnectDriver<S>,
+    ) {
+        let _ = driver.note_disk(self.state, self.free, &FLOORS);
+    }
+
     pub(super) fn refused_start(&mut self) {
         self.start_refused = true;
     }

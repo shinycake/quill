@@ -208,3 +208,39 @@ fn recovering_while_locked_connects_at_the_unlock(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, &mut vcx), (false, false, start));
     assert!(app.update_in(&mut vcx, |app, _, _| app.account.passcode.deferred_connect));
 }
+
+#[gpui_kit::test]
+fn a_client_opened_on_a_low_disk_holds_automatic_downloads_at_once(cx: &mut TestAppContext) {
+    use quill::connect::{ConnectDriver, RecordingSender, prepare_connect};
+    use quill::credentials::TelegramCredentials;
+    use quill::ids::AccountKey;
+    use quill::platform::MemorySecretStore;
+    use quill::state::Session;
+    let (app, mut vcx) = new_app(cx);
+    read(&app, &mut vcx, Some(FLOORS.warn - 1));
+    let credentials = TelegramCredentials {
+        api_id: 99,
+        api_hash: "unit-test-hash-not-for-network".into(),
+    };
+    let dir = quill::scratch::unique_dir("quill-disk-seed");
+    let prepared = prepare_connect(
+        &dir,
+        AccountKey::primary(),
+        &MemorySecretStore::new(),
+        &credentials,
+    )
+    .expect("prepare");
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+        std::sync::Arc::new(quill::diagnostics::MemorySink::new());
+    let session = Session::new(AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        std::sync::Arc::new(RecordingSender::new()),
+        credentials,
+        prepared,
+    );
+    assert!(!driver.session.media.disk_holds_auto_downloads);
+    app.read_with(&vcx, |app, _| app.disk.seed(&mut driver));
+    assert!(driver.session.media.disk_holds_auto_downloads);
+    let _ = std::fs::remove_dir_all(&dir);
+}
