@@ -625,14 +625,15 @@ fn a_group_call_only_looked_at_is_not_left() {
 
 #[test]
 fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
-    let (hub, tx) = channel_hub();
+    let (hub, tx) = dying_hub();
     let (mut client, handle) = test_client(hub, tx);
     client.driver.session.calls.active_call = Some(active_call(true, CallState::Ready));
     let mut set = ClosingSet::new();
     set.push(key(1), Box::new(client), false);
+    let recorder = handle.recorder.clone();
     let sent_close = || {
-        handle
-            .sent()
+        recorder
+            .snapshot()
             .iter()
             .any(|json| json.contains("\"@type\":\"close\""))
     };
@@ -640,7 +641,8 @@ fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
     assert!(!sent_close(), "close waits for the hang-up");
 
     handle.tx.send(call_discarded_json()).expect("send");
-    handle.answer("authorizationStateClosed");
-    assert_eq!(set.close_all_within(Instant::now() + Duration::from_secs(60)), 0);
-    assert!(sent_close(), "the poll sent close: {:?}", handle.sent());
+    drop(handle.tx);
+    let finished = set.close_all_within(Instant::now() + Duration::from_secs(60));
+    assert_eq!(finished, 1, "the test's receive loop ends with no Closed");
+    assert!(sent_close(), "the poll sent close: {:?}", recorder.snapshot());
 }

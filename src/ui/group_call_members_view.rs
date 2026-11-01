@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn the_list_above_the_window_builds_only_the_overscan_end() {
+    fn a_list_scrolled_past_builds_nothing() {
         let rows = visible_rows(ROW_HEIGHT * 200., ROW_HEIGHT * 5., 0., 100);
         assert!(rows.is_empty());
     }
