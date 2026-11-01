@@ -188,7 +188,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // so without this they waited for an unrelated update.
                 | EnvelopePayload::Bots(BotsPayload::InlineQueryResults(_))
             );
-        let emoji_neutral = batch::adds_no_custom_emoji(&owned.envelope.payload);
+        let emoji_neutral = batch::adds_no_custom_emoji(&owned.envelope.payload)
+            && !self.stops_waiting_emoji_file(&owned.envelope.payload);
         // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
             owned.envelope.payload,

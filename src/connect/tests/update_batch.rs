@@ -204,3 +204,66 @@ fn a_batch_of_file_updates_looks_at_shown_media_once() {
     assert_eq!(downloads(), vec![1, 2]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn emoji_file(id: i32, active: bool) -> String {
+    format!(
+        r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":100,"expected_size":100,"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":{active},"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":10}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":100}}}}}}"#
+    )
+}
+
+/// A reaction's custom emoji whose file TDLib was already fetching (a
+/// resume this session never asked for) is downloaded once that transfer
+/// stops without completing, with nothing else arriving after it.
+#[test]
+fn a_refused_custom_emoji_file_downloads_once_its_transfer_stops() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let emoji_downloads = || {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|request| serde_json::from_str::<serde_json::Value>(request).ok())
+            .filter(|request| request["@type"] == "downloadFile" && request["file_id"] == 88)
+            .count()
+    };
+    driver.session.stickers.emoji.custom_emoji_stickers.push(
+        crate::telegram::envelope::StickerItem {
+            custom_emoji_id: Some(777),
+            id: 88,
+            set_id: 1,
+            emoji: String::new(),
+            width: 100,
+            height: 100,
+            format: crate::telegram::envelope::StickerFormat::Webp,
+            file_id: crate::ids::FileId(88),
+            thumb_file_id: None,
+            thumb_width: 0,
+            thumb_height: 0,
+            requires_premium: false,
+            premium_animation: None,
+        },
+    );
+    driver.session.open_chat = Some(ChatId(4));
+    ingest(&mut driver, &emoji_file(88, true));
+    driver.begin_batch();
+    ingest(&mut driver, &text_with_emoji(9, 12345).to_string());
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateMessageInteractionInfo","chat_id":4,"message_id":9,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"777"},"total_count":2,"is_chosen":false,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
+    );
+    driver.end_batch().unwrap();
+    assert_eq!(emoji_downloads(), 0);
+    driver.begin_batch();
+    ingest(&mut driver, &emoji_file(88, false));
+    driver.end_batch().unwrap();
+    assert_eq!(emoji_downloads(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}

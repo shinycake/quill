@@ -13,6 +13,11 @@ pub(crate) struct BatchState {
     /// An envelope was applied since the open chat's custom emoji were
     /// last looked at.
     emoji_dirty: bool,
+    /// Display files of the open chat's custom emoji that the last emoji
+    /// pass left undownloaded. One that stops without completing (a
+    /// refused resume ends, a cancel settles, our request fails) needs the
+    /// pass again, or nothing asks for it until an unrelated update.
+    emoji_waiting_files: std::collections::HashSet<crate::ids::FileId>,
     /// The shown chats' messages changed: mark them viewed and fetch the
     /// messages they reply to.
     views_dirty: bool,
@@ -122,17 +127,39 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn resolve_open_chat_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
         let ids = self.session.open_chat_custom_emoji_ids();
         self.maybe_resolve_message_custom_emoji(&ids)?;
-        if !self.session.stickers.emoji.custom_emoji_stickers.is_empty() {
+        let stickers = &self.session.stickers.emoji.custom_emoji_stickers;
+        self.batch.emoji_waiting_files = ids
+            .iter()
+            .filter_map(|id| stickers.lookup(*id)?.display_file_id())
+            .filter(|file| {
+                self.session
+                    .file(*file)
+                    .is_none_or(|parsed| parsed.usable_path().is_none())
+            })
+            .collect();
+        if !stickers.is_empty() {
             let files = self.session.custom_emoji_files_for(&ids);
             self.ensure_media_files(&files)?;
         }
         Ok(())
     }
+
+    /// `payload` reports a file the open chat's custom emoji wait on that
+    /// stopped without completing.
+    pub(super) fn stops_waiting_emoji_file(&self, payload: &EnvelopePayload) -> bool {
+        matches!(
+            payload,
+            EnvelopePayload::Media(MediaPayload::UpdateFile(file) | MediaPayload::File(file))
+                if file.local.is_idle_incomplete()
+                    && self.batch.emoji_waiting_files.contains(&file.id)
+        )
+    }
 }
 
 /// Frequent payloads that never bring a custom emoji id into view, so the
 /// open chat's custom emoji need no second look. Anything not listed still
-/// counts: a missed kind costs time, not a missing emoji.
+/// counts: a missed kind costs time, not a missing emoji. A file update
+/// still counts when `stops_waiting_emoji_file` says the emoji wait on it.
 pub(super) fn adds_no_custom_emoji(payload: &EnvelopePayload) -> bool {
     matches!(
         payload,
