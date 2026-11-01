@@ -588,8 +588,14 @@ impl HistoryState {
             .map_or(0, |message| message.id.0);
     }
 
+    /// Oldest server message in the window. Like [`Self::newest_id`], local
+    /// sends are left out: a trim can leave a failed send past the server
+    /// rows, and older pages must not start from its temporary id.
     pub fn oldest_id(&self) -> Option<MessageId> {
-        self.messages.keys().next().copied().map(MessageId)
+        self.messages
+            .values()
+            .find(|message| !message.pending && !message.failed)
+            .map(|message| message.id)
     }
 
     /// Newest server message in the window (pending sends excluded: their

@@ -33,6 +33,25 @@ struct LiveTrimSpan {
     newest: usize,
 }
 
+fn is_local(message: &HistoryMessage) -> bool {
+    message.pending || message.failed
+}
+
+/// Up to `count` server ids from the `end` of `messages`, local sends
+/// skipped.
+fn end_excess(messages: &HistoryMessages, end: WindowEnd, count: usize) -> Vec<i64> {
+    let server = |(id, message): (&i64, &HistoryMessage)| (!is_local(message)).then_some(*id);
+    match end {
+        WindowEnd::Oldest => messages.iter().filter_map(server).take(count).collect(),
+        WindowEnd::Newest => messages
+            .iter()
+            .rev()
+            .filter_map(server)
+            .take(count)
+            .collect(),
+    }
+}
+
 fn rows_above(messages: &HistoryMessages, reader: ReaderPosition) -> Option<usize> {
     match reader {
         ReaderPosition::Tail => None,
@@ -58,27 +77,15 @@ impl HistoryState {
     /// Drop the `end` of the window when it holds more than `cap`
     /// messages, shrinking it to `keep`. Returns how many were removed.
     ///
-    /// Nothing is trimmed when the doomed run holds a pending or failed
-    /// local send (its temporary id is not a server position; it must
-    /// stay visible until `updateMessageSendSucceeded`); the trim happens
-    /// on a later page instead.
+    /// Pending and failed local sends stay and the server rows around them
+    /// go: a temporary id is not a server position, so it never pages back
+    /// in, and a failed send can sit in the window for as long as it is open.
     pub(crate) fn trim_window_end(&mut self, end: WindowEnd, cap: usize, keep: usize) -> usize {
         let len = self.messages.len();
         if len <= cap || keep >= len {
             return 0;
         }
-        let excess = len - keep;
-        let doomed: Vec<i64> = match end {
-            WindowEnd::Oldest => self.messages.keys().take(excess).copied().collect(),
-            WindowEnd::Newest => self.messages.keys().rev().take(excess).copied().collect(),
-        };
-        if doomed.iter().any(|id| {
-            self.messages
-                .get(id)
-                .is_some_and(|message| message.pending || message.failed)
-        }) {
-            return 0;
-        }
+        let doomed = end_excess(&self.messages, end, len - keep);
         match end {
             WindowEnd::Newest => {
                 // Remember where the chat's tail is even if no incoming
@@ -125,19 +132,12 @@ impl ThreadView {
             .keys()
             .copied()
             .filter(|id| *id > 0 && !roots.contains(id));
+        let messages = &self.history.messages;
+        let server = |id: &i64| messages.get(id).is_some_and(|message| !is_local(message));
         let doomed: Vec<i64> = match end {
-            WindowEnd::Oldest => replies.take(count).collect(),
-            WindowEnd::Newest => replies.rev().take(count).collect(),
+            WindowEnd::Oldest => replies.filter(server).take(count).collect(),
+            WindowEnd::Newest => replies.rev().filter(server).take(count).collect(),
         };
-        let unsent = |id: &i64| {
-            self.history
-                .messages
-                .get(id)
-                .is_some_and(|message| message.pending || message.failed)
-        };
-        if doomed.iter().any(unsent) {
-            return 0;
-        }
         for id in &doomed {
             self.history.messages.remove(id);
         }
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn a_trim_never_drops_a_pending_or_failed_send() {
+    fn a_trim_keeps_a_pending_send_and_drops_the_server_rows_around_it() {
         let mut state = window(1..=1600);
         let mut sending = message(1_700);
         sending.pending = true;
@@ -406,18 +406,10 @@ mod tests {
                 HISTORY_WINDOW_CAP,
                 HISTORY_WINDOW_TRIM_TO
             ),
-            0
+            401,
+            "the server rows around it go"
         );
-        assert!(!state.stops_short_of(0));
-        assert!(state.contains(MessageId(1_700)));
-        // The oldest end has no pending rows, so that trim goes ahead.
-        assert!(
-            state.trim_window_end(
-                WindowEnd::Oldest,
-                HISTORY_WINDOW_CAP,
-                HISTORY_WINDOW_TRIM_TO
-            ) > 0
-        );
+        assert_eq!(state.newest_id(), Some(MessageId(1_199)));
         assert!(state.contains(MessageId(1_700)));
     }
 

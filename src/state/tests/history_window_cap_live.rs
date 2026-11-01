@@ -138,20 +138,58 @@ fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_tail_waits() {
     assert_eq!(history.latest_seen, cap + 500);
 }
 
+fn outgoing(chat: i64, id: i64) -> ParsedMessage {
+    let mut message = live(chat, id, Vec::new());
+    message.is_outgoing = true;
+    message
+}
+
 #[test]
-fn a_trim_at_the_tail_never_takes_a_send_in_flight() {
+fn a_trim_away_from_the_tail_keeps_a_send_in_flight_at_the_newest_end() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(7));
     let cap = HISTORY_WINDOW_CAP as i64;
     feed_live(&mut session, 7, 1..=cap);
-    let mut sending = live(7, cap + 1, Vec::new());
-    sending.is_outgoing = true;
-    session.upsert_message(sending, true);
+    session.upsert_message(outgoing(7, cap + 1), true);
     session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(1) });
     feed_live(&mut session, 7, cap + 2..=cap + 2);
     let history = &session.histories[&7];
-    assert!(history.contains(MessageId(cap + 1)));
-    assert_eq!(history.messages.len() as i64, cap + 2, "tried again later");
+    assert!(history.contains(MessageId(cap + 1)), "the send stays");
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert_eq!(history.oldest_id(), Some(MessageId(1)), "the reader's rows");
+}
+
+#[test]
+fn a_trim_at_the_tail_keeps_a_send_in_flight_while_the_oldest_rows_go() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let cap = HISTORY_WINDOW_CAP as i64;
+    feed_live(&mut session, 7, 1..=cap - 1);
+    session.upsert_message(outgoing(7, cap), true);
+    feed_live(&mut session, 7, cap + 1..=cap + 2);
+    let history = &session.histories[&7];
+    assert!(history.contains(MessageId(cap)), "the send stays");
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert_eq!(history.newest_id(), Some(MessageId(cap + 2)));
+}
+
+#[test]
+fn a_failed_send_left_in_an_open_chat_does_not_turn_the_cap_off() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    feed_live(&mut session, 7, 1..=10);
+    let mut failed = history_message(outgoing(7, 11), true);
+    failed.failed = true;
+    session.history_entry(ChatId(7)).upsert(failed);
+    feed_live(&mut session, 7, 12..=4_000);
+    let history = &session.histories[&7];
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert!(history.contains(MessageId(11)), "the failed send stays");
+    assert_eq!(history.newest_id(), Some(MessageId(4_000)));
+    assert!(
+        history.oldest_id() > Some(MessageId(11)),
+        "older pages start from a server row"
+    );
 }
 
 #[test]
