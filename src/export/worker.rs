@@ -181,15 +181,39 @@ pub(crate) struct Fetched {
 impl Fetched {
     pub(crate) fn release<T: Tdlib>(&self, tdlib: &mut T) -> Result<(), ExportError> {
         if self.only_for_export {
-            ask_to_delete_cached(tdlib, self.file_id)?;
+            release_if_untouched(tdlib, self.file_id, &self.path)?;
         }
         Ok(())
     }
 }
 
-fn ask_to_delete_cached<T: Tdlib>(tdlib: &mut T, file_id: i32) -> Result<(), ExportError> {
-    let request = json!({"@type": "deleteFile", "file_id": file_id});
-    tdlib.call(request, QUERY_TIMEOUT).map(drop)
+/// Delete the export's download from TDLib's cache, unless something else
+/// started using the file since `getFile` said nothing held it: the view
+/// can ask for it while the export downloads, and TDLib merges the two.
+fn release_if_untouched<T: Tdlib>(
+    tdlib: &mut T,
+    file_id: i32,
+    downloaded: &Path,
+) -> Result<(), ExportError> {
+    let now = tdlib.call(
+        json!({"@type": "getFile", "file_id": file_id}),
+        QUERY_TIMEOUT,
+    )?;
+    let local = now.at("local");
+    let same_copy = local
+        .at("path")
+        .as_str()
+        .and_then(|path| Path::new(path).canonicalize().ok())
+        .is_some_and(|path| path == downloaded);
+    let untouched = now.at("@type") == "file"
+        && local.at("is_downloading_completed") == true
+        && local.at("is_downloading_active") == false
+        && same_copy;
+    if untouched {
+        let request = json!({"@type": "deleteFile", "file_id": file_id});
+        tdlib.call(request, QUERY_TIMEOUT)?;
+    }
+    Ok(())
 }
 
 fn nothing_held(file: &Value) -> bool {
@@ -234,8 +258,13 @@ pub(crate) fn fetch_file<T: Tdlib>(
     if let Some(limit) = limit
         && answer.at("size").as_i64().unwrap_or(0) > limit
     {
-        if only_for_export {
-            ask_to_delete_cached(tdlib, file_id)?;
+        if only_for_export
+            && let Some(path) = local
+                .at("path")
+                .as_str()
+                .and_then(|path| Path::new(path).canonicalize().ok())
+        {
+            release_if_untouched(tdlib, file_id, &path)?;
         }
         return Ok(Err(Skip::TooLarge));
     }

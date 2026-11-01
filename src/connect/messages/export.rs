@@ -80,6 +80,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
     }
 
+    /// The view asked for `file_id`: a running export must not delete it
+    /// from TDLib's cache after copying it.
+    pub(crate) fn note_view_file(&mut self, file_id: crate::ids::FileId) {
+        let settings = &mut self.session.settings;
+        if let Some(export) = settings.chat_export.as_mut() {
+            export.link.note_view_file(file_id.0);
+        }
+        if let Some(export) = settings.account_export.as_mut() {
+            export.link.note_view_file(file_id.0);
+        }
+    }
+
     pub(crate) fn pump_exports(&mut self) {
         self.pump_chat_export();
         self.pump_account_export();
@@ -97,6 +109,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
+        if link(&mut self.session).is_some_and(|link| link.keep_view_file(&request)) {
+            return;
+        }
         let extra = self.session.request(purpose, None);
         crate::json_access::set(
             &mut request,

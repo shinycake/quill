@@ -6,9 +6,11 @@ use super::loaded_files::LoadedFiles;
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
+use crate::json_access::JsonExt;
 use crate::locks::LockExt;
 use crate::wake::Signal;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -78,6 +80,9 @@ pub struct WorkerLink {
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
     cancelled: Arc<AtomicBool>,
+    /// Files the view asked for while the export ran. The export leaves
+    /// them in TDLib's cache even when it downloaded them first.
+    view_files: HashSet<i32>,
 }
 
 impl WorkerLink {
@@ -96,6 +101,7 @@ impl WorkerLink {
             replies,
             pending: None,
             cancelled,
+            view_files: HashSet::new(),
         };
         (link, worker)
     }
@@ -107,6 +113,25 @@ impl WorkerLink {
     /// The next request for TDLib, if the worker has one waiting.
     pub fn next_request(&self) -> Option<Value> {
         self.requests.try_recv().ok()
+    }
+
+    pub fn note_view_file(&mut self, file_id: i32) {
+        self.view_files.insert(file_id);
+    }
+
+    /// Answer the worker's `deleteFile` for a file the view asked for
+    /// without sending it. Returns whether `request` was one.
+    pub fn keep_view_file(&mut self, request: &Value) -> bool {
+        let kept = request.at("@type") == "deleteFile"
+            && request
+                .at("file_id")
+                .as_i64()
+                .and_then(|id| i32::try_from(id).ok())
+                .is_some_and(|id| self.view_files.contains(&id));
+        if kept {
+            let _ = self.replies.send(serde_json::json!({"@type": "ok"}));
+        }
+        kept
     }
 
     /// Hand TDLib's answer to the worker.

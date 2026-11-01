@@ -53,6 +53,9 @@ struct Fake {
     calls: Vec<String>,
     /// Cancel once this many requests were made.
     cancel_after: Option<usize>,
+    /// What `getFile` reports once a download ends, when something else
+    /// started using the file meanwhile.
+    touched_after_download: Option<Value>,
     fail_history: bool,
 }
 
@@ -65,6 +68,7 @@ impl Fake {
             page_size: 0,
             calls: Vec::new(),
             cancel_after: None,
+            touched_after_download: None,
             fail_history: false,
         }
     }
@@ -134,14 +138,21 @@ impl Tdlib for Fake {
                 if let Some(path) = self.files.get(&id) {
                     std::fs::remove_file(path).unwrap();
                 }
+                self.local.insert(id, not_local());
                 json!({"@type": "ok"})
             }
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
                 match self.files.get(&id) {
-                    Some(path) => json!({"@type": "file", "id": id,
-                        "size": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
-                        "local": {"path": path.to_string_lossy(), "is_downloading_completed": true}}),
+                    Some(path) => {
+                        let local = json!({"path": path.to_string_lossy(),
+                            "is_downloading_completed": true, "is_downloading_active": false});
+                        let now = self.touched_after_download.clone();
+                        self.local.insert(id, now.unwrap_or_else(|| local.clone()));
+                        json!({"@type": "file", "id": id,
+                            "size": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+                            "local": local})
+                    }
                     None => json!({"@type": "file", "id": id, "size": 1,
                         "local": {"path": "", "is_downloading_completed": false}}),
                 }
@@ -691,5 +702,19 @@ fn a_file_that_occurs_again_is_saved_once_and_linked_from_both_messages() {
     let html = read(&run.out.join("messages.html"));
     assert!(html.matches(PHOTO).count() >= 2, "both messages show it");
     assert!(!html.contains("photo_2@"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_something_else_started_using_during_the_export_stays_cached() {
+    let dir = scratch("touched");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    fake.touched_after_download = Some(json!({"path": td.join("p.jpg").to_string_lossy(),
+        "is_downloading_completed": true, "is_downloading_active": true}));
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 0);
+    assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
     let _ = std::fs::remove_dir_all(&dir);
 }

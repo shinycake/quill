@@ -312,3 +312,32 @@ fn clear_call_history_empties_the_list_only_on_ok() {
     assert!(!driver.session.calls.recent_calls_clearing);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_export_leaves_a_file_the_view_asked_for_in_the_cache() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    let deletes = |recorder: &RecordingSender| {
+        let sent = recorder.snapshot().into_iter();
+        sent.filter(|json| json.contains("deleteFile")).count()
+    };
+
+    let _ = driver.download_file(crate::ids::FileId(10), 1);
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 10}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(deletes(&recorder), 0, "the view's photo stays");
+
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 11}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(deletes(&recorder), 1, "a file only the export wanted goes");
+    let _ = std::fs::remove_dir_all(&dir);
+}
