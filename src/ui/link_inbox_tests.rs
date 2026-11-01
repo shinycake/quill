@@ -3,7 +3,10 @@
 //! close hides on which platform: `quill::tray`'s tests. The test platform
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
-use super::{MainWindow, main_window_on_activation, note_main_window, raise_main_window_if};
+use super::{
+    MainWindow, main_window_on_activation, note_main_window, raise_main_window_if,
+    take_hide_after_full_screen,
+};
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -71,6 +74,63 @@ fn quill_coming_forward_raises_the_closed_main_window(cx: &mut TestAppContext) {
     close_main_window(vcx);
     come_forward(&app, vcx);
     assert!(vcx.update(|window, _| window.is_window_active()));
+}
+
+fn close_in_full_screen(vcx: &mut VisualTestContext) {
+    close_main_window(vcx);
+    vcx.cx
+        .update(|cx| cx.global_mut::<MainWindow>().hide_after_full_screen = true);
+}
+
+#[gpui_kit::test]
+fn a_dock_click_during_the_full_screen_wait_undoes_the_close(cx: &mut TestAppContext) {
+    let (_app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_in_full_screen(vcx);
+    vcx.cx.update(|cx| raise_main_window_if(|_| false, cx));
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        !vcx.cx.update(take_hide_after_full_screen),
+        "the wait hides nothing"
+    );
+}
+
+#[gpui_kit::test]
+fn quill_coming_forward_during_the_full_screen_wait_undoes_the_close(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    close_in_full_screen(vcx);
+    let view = app.downgrade();
+    vcx.cx
+        .update(|cx| main_window_on_activation(&view, |_| false, cx));
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        !vcx.cx.update(take_hide_after_full_screen),
+        "the wait hides nothing"
+    );
+}
+
+#[gpui_kit::test]
+fn a_chat_window_coming_forward_leaves_the_full_screen_wait_running(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_window_at(ChatId(11), None, window, cx);
+    });
+    vcx.run_until_parked();
+    close_in_full_screen(vcx);
+    let view = app.downgrade();
+    vcx.cx
+        .update(|cx| main_window_on_activation(&view, |_| false, cx));
+    vcx.run_until_parked();
+    assert!(!vcx.update(|window, _| window.is_window_active()));
+    assert!(
+        vcx.cx.update(take_hide_after_full_screen),
+        "the close stands"
+    );
 }
 
 #[gpui_kit::test]
