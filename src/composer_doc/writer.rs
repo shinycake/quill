@@ -417,9 +417,8 @@ impl<'a> Markup<'a> {
         }
     }
 
-    /// `_` where the italic text shares text with bold, whose `**` an italic
-    /// `*` would be read into, unless an underline starts or ends inside it,
-    /// whose `__` an italic `_` would be.
+    /// `_` where the italic text shares text with bold, unless an underline
+    /// starts or ends inside it.
     fn italic_marker(&self, ix: usize) -> &'static str {
         let Some(range) = self.inline.get(ix).map(|span| &span.range) else {
             return "*";

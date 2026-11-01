@@ -8,7 +8,7 @@
 
 use crate::composer::ComposerEntity;
 use crate::telegram::envelope::{InlineKeyboardButton, parse_inline_keyboard_button};
-use crate::text::{TextEntity, TextEntityKind, utf16_to_utf8_offset};
+use crate::text::{TextEntity, TextEntityKind};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 

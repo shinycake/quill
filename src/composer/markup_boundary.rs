@@ -99,11 +99,15 @@ pub(crate) fn opener_ok(text: &str, at: usize, marker: &str) -> bool {
 pub(crate) fn closer_ok(text: &str, at: usize, marker: &str) -> bool {
     let own = marker.chars().next();
     let before = char_before(text, at);
-    before.is_none_or(|ch| {
-        Some(ch) != own && ch != ESCAPE && !(marker == "`" && matches!(ch, '\n' | '\r'))
-    })
+    let after = char_at(text, at + marker.len());
+    // An italic marker that touches its own kind is half of `**` or `__`.
+    let half_of_a_pair = matches!(marker, "*" | "_") && after.is_some() && after == own;
+    !half_of_a_pair
+        && before.is_none_or(|ch| {
+            Some(ch) != own && ch != ESCAPE && !(marker == "`" && matches!(ch, '\n' | '\r'))
+        })
         // lib_ui gives `~~` no "good after" characters: it may touch a word.
-        && (marker == "~~" || char_at(text, at + marker.len()).is_none_or(is_separator))
+        && (marker == "~~" || after.is_none_or(is_separator))
 }
 
 /// The byte offset of the first closing `marker` in `text[from..to]` that
@@ -154,6 +158,8 @@ mod tests {
         assert!(!opener_ok("***x**", 0, "**"));
         assert!(!closer_ok("**x***", 4, "**"));
         assert!(!opener_ok("`\nx`", 0, "`"));
+        assert!(!closer_ok("*a **b** c*", 3, "*"));
+        assert!(!closer_ok("_a __b__ c_", 3, "_"));
     }
 
     #[test]

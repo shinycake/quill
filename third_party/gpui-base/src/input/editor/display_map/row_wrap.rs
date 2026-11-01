@@ -9,8 +9,9 @@
 //!
 //! Each row looks at a window of text around its expected end, seeded by the
 //! summed widths of its characters, and shapes only to settle the last few
-//! characters. A line of [`LONG_LINE`] bytes or more trusts the sum and shapes
-//! nothing, so even a tail that never settles costs a table lookup per character.
+//! characters. A line of [`LONG_LINE`] bytes or more, or any line of a text of
+//! [`LONG_TEXT`] bytes or more, trusts the sum and shapes nothing, so even a tail
+//! that never settles costs a table lookup per character.
 
 use std::ops::Range;
 use std::rc::Rc;
@@ -29,6 +30,15 @@ use crate::input::{
 
 /// The line length, in bytes, from which wrapping stops shaping text.
 pub(crate) const LONG_LINE: usize = 16 * 1024;
+
+/// The text length, in bytes, from which wrapping stops shaping any line. Many
+/// short lines cost a shaped measure each, however few of them are on screen.
+pub(crate) const LONG_TEXT: usize = 256 * 1024;
+
+/// Whether a text of `len` bytes wraps without shaping.
+pub(crate) fn is_long_text(len: usize) -> bool {
+    len >= LONG_TEXT
+}
 
 /// Text this close before an edit can still decide a row: a grapheme or a line
 /// break opportunity looks a few characters ahead.
@@ -116,6 +126,7 @@ pub(crate) fn wrap_rows(
     atoms: &[Range<usize>],
     resume: Option<&Resume>,
     widths: &mut impl LineWidths,
+    long_text: bool,
 ) -> Vec<Boundary> {
     let indent = match wrapping_indent {
         WrappingIndent::Same => text
@@ -144,7 +155,7 @@ pub(crate) fn wrap_rows(
         indent,
         indent_width,
         atoms,
-        long: text.len() >= LONG_LINE,
+        long: long_text || text.len() >= LONG_LINE,
         widths,
         ends: Vec::new(),
     };
@@ -501,7 +512,7 @@ pub(crate) mod tests {
         measure: impl FnMut(&str) -> Pixels,
     ) -> Vec<Boundary> {
         let mut widths = Measured { text, measure };
-        wrap_rows(text, width, wrapping_indent, &[], None, &mut widths)
+        wrap_rows(text, width, wrapping_indent, &[], None, &mut widths, false)
     }
 
     fn char_width(c: char) -> f32 {
@@ -566,7 +577,7 @@ pub(crate) mod tests {
     }
 
     fn fresh(text: &str, width: f32, indent: WrappingIndent) -> Vec<Boundary> {
-        wrap_rows(text, px(width), indent, &[], None, &mut Counted::new(text))
+        wrap_rows(text, px(width), indent, &[], None, &mut Counted::new(text), false)
     }
 
     /// A small deterministic generator, so a failure names a seed.
@@ -669,7 +680,7 @@ pub(crate) mod tests {
         next.replace_range(start..start, "x");
         let resume = Resume::of(&rows, 0, start..start, 1, next.len());
         let mut widths = Counted::new(&next);
-        wrap_rows(&next, px(width), mode, &[], resume.as_ref(), &mut widths);
+        wrap_rows(&next, px(width), mode, &[], resume.as_ref(), &mut widths, false);
         (widths.measured, widths.walked)
     }
 
@@ -699,7 +710,7 @@ pub(crate) mod tests {
     fn a_row_of_a_long_line_ends_at_the_summed_width() {
         let text = "wrapping a line ".repeat(LONG_LINE / 16);
         let mut widths = Counted::new(&text);
-        let boundaries = wrap_rows(&text, px(200.), WrappingIndent::None, &[], None, &mut widths);
+        let boundaries = wrap_rows(&text, px(200.), WrappingIndent::None, &[], None, &mut widths, false);
         assert_eq!(widths.measured, 0);
         for row in rows_of(&boundaries, text.len()) {
             let sum: f32 = text[row.clone()].chars().map(char_width).sum();
@@ -733,6 +744,14 @@ pub(crate) mod tests {
         assert!(Resume::of(&rows, 0, 5..5, 0, LONG_LINE - 1).is_some());
         let rows = [0..LONG_LINE];
         assert!(Resume::of(&rows, 0, 5..6, 0, LONG_LINE - 1).is_none());
+    }
+
+    #[test]
+    fn a_short_line_of_a_long_text_never_shapes() {
+        let text = "a word and another word and yet another word";
+        let mut widths = Counted::new(text);
+        wrap_rows(text, px(100.), WrappingIndent::None, &[], None, &mut widths, true);
+        assert_eq!(widths.measured, 0);
     }
 
     #[test]

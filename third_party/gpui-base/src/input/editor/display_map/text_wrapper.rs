@@ -2,7 +2,7 @@
 // bidirectional text support and formatting spans in the input engine. See
 // third_party/gpui-base/QUILL-CHANGES.md.
 use super::inline_line::InputLine;
-use super::row_wrap::{LONG_LINE, Resume, TextMetrics, wrap_rows};
+use super::row_wrap::{LONG_LINE, Resume, TextMetrics, is_long_text, wrap_rows};
 use gpui::Half;
 use std::borrow::Cow;
 use std::ops::Range;
@@ -396,16 +396,20 @@ impl TextWrapper {
             system,
         );
         let wrapping_indent = self.wrapping_indent;
-        self._update(
-            changed_text,
-            range,
-            new_text,
-            &mut |line, wrap_width, line_start, resume| {
-                let mut widths = metrics.line(line, line_start);
-                let atoms = widths.atoms();
-                wrap_rows(line, wrap_width, wrapping_indent, &atoms, resume, &mut widths)
-            },
-        );
+        let long_text = is_long_text(changed_text.len());
+        let mut wrap_line = |line: &str, wrap_width, line_start, resume: Option<&Resume>| {
+            let mut widths = metrics.line(line, line_start);
+            let atoms = widths.atoms();
+            let (widths, indent) = (&mut widths, wrapping_indent);
+            wrap_rows(line, wrap_width, indent, &atoms, resume, widths, long_text)
+        };
+        if is_long_text(self.text.len()) == long_text {
+            self._update(changed_text, range, new_text, &mut wrap_line);
+        } else {
+            // Across the mark every line changes how it measures.
+            let all = 0..self.text.len();
+            self._update(changed_text, &all, changed_text, &mut wrap_line);
+        }
     }
 
     pub(crate) fn adjust_inline_metrics(&mut self, range: &Range<usize>, new_len: usize) {

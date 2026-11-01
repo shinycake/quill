@@ -178,3 +178,20 @@ fn sending_without_premium_offers_the_text_without_formatting(cx: &mut TestAppCo
     assert_eq!(choice.as_deref(), Some("Plan\n**ship it**"));
     assert!(shown(vcx, "rich-choice-plain"));
 }
+
+#[gpui_kit::test]
+fn the_rich_editor_shows_the_blocks_of_a_long_draft(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let markup = crate::ui::demos::composer::rich_editor_markup(32 * 1024);
+    app.update_in(vcx, |app, window, cx| {
+        app.composer_ui.rich_editor_open = true;
+        app.set_composer_markup(&markup, window, cx);
+    });
+    frames(vcx);
+    assert!(shown(vcx, "rich-editor-close"));
+    let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(text, markup);
+    let blocks = quill::rich::preview_blocks(&text);
+    assert!(blocks.len() > 1_000, "{} blocks", blocks.len());
+}

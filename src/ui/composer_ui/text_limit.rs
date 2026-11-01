@@ -8,7 +8,13 @@ enum TextLimitNote {
     Fits,
     UnitsOver(usize),
     Parts(usize),
+    /// Over the limit by bytes, and the count of this text is not back yet.
+    Counting,
 }
+
+/// Bytes of text counted in the frame, a few milliseconds of work. Longer text
+/// is counted off the UI thread.
+const COUNTED_IN_THE_FRAME: usize = 16 * 1024;
 
 impl TextLimitNote {
     fn of(markup: &str, limit: i32, editing: bool) -> Self {
@@ -33,10 +39,8 @@ struct TextLimitKey {
     editing: bool,
 }
 
-/// The note of the text at the last counted revision. Counting takes time in
-/// proportion to the text, so a text that may be over the limit is counted off
-/// the UI thread, and the note on screen stays until the count of the latest
-/// revision comes back.
+/// The note of the text at the last counted revision, which only ever answers
+/// for that revision of that field.
 #[derive(Default)]
 struct TextLimitCount {
     known: Cell<Option<(TextLimitKey, TextLimitNote)>>,
@@ -75,8 +79,7 @@ impl QuillApp {
             editing,
         };
         let memo = &self.composer_ui.text_limit;
-        let shown = memo.known();
-        if let Some((known, note)) = shown
+        if let Some((known, note)) = memo.known()
             && known == key
         {
             return note;
@@ -86,6 +89,11 @@ impl QuillApp {
         if fits {
             memo.set(key, TextLimitNote::Fits);
             return TextLimitNote::Fits;
+        }
+        if composer.text().len() <= COUNTED_IN_THE_FRAME {
+            let note = TextLimitNote::of(&self.composer_markup(cx), key.limit, editing);
+            memo.set(key, note);
+            return note;
         }
         if !memo.is_counting(key) {
             let markup = self.composer_markup(cx);
@@ -101,7 +109,7 @@ impl QuillApp {
             });
             memo.0.running.set(Some((key, task)));
         }
-        shown.map_or(TextLimitNote::Fits, |(_, note)| note)
+        TextLimitNote::Counting
     }
 
     /// R8: tdesktop `CharactersLimitLabel` — only shown once the text is
@@ -117,18 +125,19 @@ impl QuillApp {
         {
             return None;
         }
+        let parts_label = |parts: &str| {
+            tr_with(keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES, &[("parts", parts)])
+        };
         let (label, color) = match self.text_limit_note(editing.is_some(), cx) {
             TextLimitNote::Fits => return None,
+            TextLimitNote::Counting if editing.is_some() => {
+                ("\u{2212}\u{2026}".to_string(), danger_bright())
+            }
+            TextLimitNote::Counting => (parts_label("\u{2026}"), text_muted()),
             TextLimitNote::UnitsOver(over) => {
                 (format!("\u{2212}{}", over.min(999)), danger_bright())
             }
-            TextLimitNote::Parts(parts) => (
-                tr_with(
-                    keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES,
-                    &[("parts", &parts.to_string())],
-                ),
-                text_muted(),
-            ),
+            TextLimitNote::Parts(parts) => (parts_label(&parts.to_string()), text_muted()),
         };
         Some(
             div()

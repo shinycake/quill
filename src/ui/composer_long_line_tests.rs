@@ -148,6 +148,53 @@ fn edits_on_a_long_line_wrap_like_a_fresh_field() {
     edits_wrap_like_a_fresh_field(mixed_line(LONG));
 }
 
+/// A text of this many bytes of short lines wraps without shaping.
+const LONG_TEXT: usize = 256 * 1024;
+
+fn log_lines(len: usize) -> String {
+    repeated("12:00:01 [INFO] [worker-3] a request came in from the proxy\n", len)
+}
+
+#[test]
+fn a_paste_of_many_short_lines_shapes_the_rows_on_screen() {
+    with_field(|cx, handle, input| {
+        cx.update_window(handle, |_, window, cx| {
+            prepare(&input, window, cx);
+            let text = log_lines(4 * LONG_TEXT);
+            take_shaped();
+            load_text(&input, &text, window, cx);
+            window.render_frame(cx);
+            let shaped: usize = take_shaped().iter().map(String::len).sum();
+            assert!(shaped < LONG, "{shaped} bytes shaped");
+        })
+        .unwrap();
+    });
+}
+
+#[test]
+fn crossing_the_long_text_mark_wraps_like_a_fresh_field() {
+    with_field(|cx, handle, input| {
+        cx.update_window(handle, |_, window, cx| {
+            prepare(&input, window, cx);
+            let wide = format!("{}\n", repeated("many words on a line of text ", 2_000));
+            let text = format!("{wide}{}", log_lines(LONG_TEXT - wide.len() - 2));
+            load_text(&input, &text, window, cx);
+            let end = text.len();
+            for (selected, typed) in [(end..end, "word "), (0..wide.len() + 16, "")] {
+                input.update(cx, |state, cx| state.set_selected_range(selected, cx));
+                window.input(typed, cx);
+                window.render_frame(cx);
+                let incremental = row_starts(&input, cx);
+                let value = input.read(cx).value().to_string();
+                load_text(&input, &value, window, cx);
+                assert_eq!(incremental, row_starts(&input, cx));
+                load_text(&input, &format!("{text}word "), window, cx);
+            }
+        })
+        .unwrap();
+    });
+}
+
 #[test]
 fn a_jump_to_the_far_end_shows_it_in_the_same_frame() {
     with_field(|cx, handle, input| {
