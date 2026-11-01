@@ -8,6 +8,8 @@
 //! MTProto on `availableChanges` (`mtp_instance.cpp`).
 #![deny(clippy::indexing_slicing)]
 
+#[cfg(any(windows, test))]
+mod coalesce;
 mod link;
 #[cfg(target_os = "linux")]
 mod netlink;

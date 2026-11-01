@@ -193,7 +193,8 @@ mod backend {
     /// Who hears the notifications; the OS gets a pointer to it.
     pub(in crate::net_watch) struct Listener(pub(in crate::net_watch) fn(Change));
 
-    static NETWORK: Listener = Listener(|_| super::super::network_changed());
+    static CHANGES: super::super::coalesce::Coalesce = super::super::coalesce::Coalesce::new();
+    static NETWORK: Listener = Listener(|_| CHANGES.run(super::super::network_changed));
 
     fn notify(context: *const c_void, change: Change) {
         // SAFETY: every registration below passes a `&'static Listener`.
