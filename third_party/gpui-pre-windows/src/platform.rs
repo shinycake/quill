@@ -114,6 +114,9 @@ pub(crate) struct WindowsPlatformState {
     /// Quill: why the platform has no GPU (DirectX failed at launch, or a lost device could not
     /// be recreated), reported by `open_window` so the app can show it.
     gpu_error: RefCell<Option<String>>,
+    /// Quill: which vsync thread is current. Each start and stop moves it on, and the platform
+    /// ignores device messages from a thread it has stopped (see `VsyncGeneration`).
+    vsync_generation: Cell<VsyncGeneration>,
 }
 
 #[derive(Default)]
@@ -143,9 +146,18 @@ impl WindowsPlatformState {
             cursor_visible: Arc::new(AtomicBool::new(true)),
             draw_coordinator: Rc::new(DrawCoordinator::new()),
             gpu_error: RefCell::new(None),
+            vsync_generation: Cell::new(VsyncGeneration::default()),
             directx_devices: RefCell::new(directx_devices),
             menus: RefCell::new(Vec::new()),
         }
+    }
+}
+
+impl WindowsPlatformState {
+    fn next_vsync_generation(&self) -> VsyncGeneration {
+        let next = self.vsync_generation.get().next();
+        self.vsync_generation.set(next);
+        next
     }
 }
 
@@ -459,6 +471,7 @@ impl WindowsPlatform {
 
     /// Stops vsync and releases the DirectX devices. No window may be open.
     fn detach_gpu(&self) {
+        self.inner.state.next_vsync_generation();
         if let Some(stop) = self.vsync_stop.borrow_mut().take() {
             // Not joined: the thread can be sending this thread a message. It exits after its
             // next vsync, and drops its reference to the devices then.
@@ -480,6 +493,7 @@ impl WindowsPlatform {
         let Some(direct_write_text_system) = &self.direct_write_text_system else {
             return Ok(());
         };
+        let generation = self.inner.state.next_vsync_generation();
         let stop = Arc::new(AtomicBool::new(false));
         *self.vsync_stop.borrow_mut() = Some(stop.clone());
         let mut directx_device = directx_devices;
@@ -521,13 +535,18 @@ impl WindowsPlatform {
                         {
                             // Quill: retry with backoff, then close the windows and stop
                             // vsync instead of panicking (upstream panics here).
-                            if let Err(err) = recover_from_gpu_device_lost(
+                            let recovery = recover_from_gpu_device_lost(
+                                generation,
                                 &mut directx_device,
                                 platform_window.as_raw(),
                                 validation_number,
                                 &all_windows,
                                 &text_system,
-                            ) {
+                            );
+                            if let Ok(Recovery::Superseded) = recovery {
+                                break;
+                            }
+                            if let Err(err) = recovery {
                                 log::error!(
                                     "DirectX device lost and could not be recreated, closing all \
                                  windows: {err:#}"
@@ -538,7 +557,7 @@ impl WindowsPlatform {
                                 // SAFETY: PostMessageW only queues the message.
                                 unsafe {
                                     validation_number
-                                        .message(WM_GPUI_GPU_DEVICE_GONE, 0)
+                                        .message(WM_GPUI_GPU_DEVICE_GONE, generation.raw())
                                         .post(platform_window.as_raw())
                                         .log_err();
                                 }
@@ -578,7 +597,7 @@ impl WindowsPlatform {
                     // SAFETY: PostMessageW only queues the message.
                     unsafe {
                         validation_number
-                            .message(WM_GPUI_GPU_DEVICE_GONE, 0)
+                            .message(WM_GPUI_GPU_DEVICE_GONE, generation.raw())
                             .post(platform_window.as_raw())
                             .log_err();
                     }
@@ -1325,7 +1344,7 @@ impl WindowsPlatformInner {
             WM_GPUI_KEYBOARD_LAYOUT_CHANGED => self.handle_keyboard_layout_change(),
             WM_GPUI_DISPLAYS_CHANGED => self.handle_displays_changed(),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
-            WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(),
+            WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(lparam),
             _ => None,
         }
     }
@@ -1493,7 +1512,10 @@ impl WindowsPlatformInner {
     /// `request_windowing(Windowed)` attaches fresh devices. The broadcast runs here because no
     /// window can open past this point and each window's `WM_DESTROY` runs on this thread, so
     /// the list can't change under it.
-    fn handle_device_gone(&self) -> Option<isize> {
+    fn handle_device_gone(&self, lparam: LPARAM) -> Option<isize> {
+        if !self.is_current_vsync(VsyncGeneration::from_raw(lparam.0)) {
+            return Some(0);
+        }
         self.state.directx_devices.borrow_mut().take();
         *self.state.gpu_error.borrow_mut() =
             Some("the GPU device was lost and could not be recreated".to_owned());
@@ -1501,16 +1523,33 @@ impl WindowsPlatformInner {
         Some(0)
     }
 
+    /// Quill: answers `HANDED_OVER` only when the devices come from the current vsync thread, which
+    /// then hands them to the windows.
     fn handle_device_lost(&self, lparam: LPARAM) -> Option<isize> {
-        let directx_devices = lparam.0 as *const DirectXDevices;
-        let directx_devices = unsafe { &*directx_devices };
+        // SAFETY: only `handle_gpu_device_lost` sends this message to the platform window, with
+        // `SendMessageW` and a pointer to a `RecoveredDevices` it keeps alive until the call returns.
+        let recovered = unsafe { &*(lparam.0 as *const RecoveredDevices) };
+        if !self.is_current_vsync(recovered.generation) {
+            return Some(0);
+        }
         let mut current = self.state.directx_devices.borrow_mut();
         // The platform may have switched to headless while the device was being recovered.
-        if current.is_some() {
-            *current = Some(directx_devices.clone());
+        if current.is_none() {
+            return Some(0);
         }
+        *current = Some(recovered.devices.clone());
+        Some(HANDED_OVER)
+    }
 
-        Some(0)
+    /// Quill: a stopped vsync thread can still post `WM_GPUI_GPU_DEVICE_GONE` or send recovered
+    /// devices, because `detach_gpu` does not join it. Those must not touch the devices of the
+    /// thread started since.
+    fn is_current_vsync(&self, generation: VsyncGeneration) -> bool {
+        let current = generation == self.state.vsync_generation.get();
+        if !current {
+            log::info!("ignoring a device message from a stopped vsync thread");
+        }
+        current
     }
 }
 
@@ -1846,13 +1885,15 @@ const DEVICE_LOST_RETRY_BACKOFF: [std::time::Duration; 3] = [
 /// Quill: `handle_gpu_device_lost`, retried with `DEVICE_LOST_RETRY_BACKOFF`. Returns the last
 /// error when every round failed.
 fn recover_from_gpu_device_lost(
+    generation: VsyncGeneration,
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: ValidationNumber,
     all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
-) -> Result<()> {
+) -> Result<Recovery> {
     let mut result = handle_gpu_device_lost(
+        generation,
         directx_devices,
         platform_window,
         validation_number,
@@ -1866,6 +1907,7 @@ fn recover_from_gpu_device_lost(
         log::warn!("DirectX device recovery failed, retrying in {delay:?}: {err:#}");
         std::thread::sleep(delay);
         result = handle_gpu_device_lost(
+            generation,
             directx_devices,
             platform_window,
             validation_number,
@@ -1901,12 +1943,13 @@ fn destroy_all_windows_after_device_lost(
 }
 
 fn handle_gpu_device_lost(
+    generation: VsyncGeneration,
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: ValidationNumber,
     all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
-) -> Result<()> {
+) -> Result<Recovery> {
     // Here we wait a bit to ensure the system has time to recover from the device lost state.
     // If we don't wait, the final drawing result will be blank.
     std::thread::sleep(std::time::Duration::from_millis(350));
@@ -1916,18 +1959,28 @@ fn handle_gpu_device_lost(
     })?;
     log::info!("DirectX devices successfully recreated.");
 
+    let recovered = RecoveredDevices {
+        generation,
+        devices: &*directx_devices,
+    };
     let device_lost = validation_number.message(
         WM_GPUI_GPU_DEVICE_LOST,
-        directx_devices as *const DirectXDevices as isize,
+        &recovered as *const RecoveredDevices as isize,
     );
-    unsafe {
-        device_lost.send(platform_window);
+    // SAFETY: the message points at `recovered`, which outlives this synchronous call.
+    if unsafe { device_lost.send(platform_window) }.0 != HANDED_OVER {
+        log::info!("the platform took no devices from this vsync thread, stopping it");
+        return Ok(Recovery::Superseded);
     }
 
     if let Some(text_system) = text_system.upgrade() {
         text_system.handle_gpu_lost(&directx_devices)?;
     }
     if let Some(all_windows) = all_windows.upgrade() {
+        let device_lost = validation_number.message(
+            WM_GPUI_GPU_DEVICE_LOST,
+            &*directx_devices as *const DirectXDevices as isize,
+        );
         for window in all_windows.snapshot() {
             // SAFETY: the message points at `directx_devices`, which outlives this synchronous
             // call. A handle that is gone only makes the call fail.
@@ -1945,7 +1998,45 @@ fn handle_gpu_device_lost(
             }
         }
     }
-    Ok(())
+    Ok(Recovery::HandedOver)
+}
+
+/// Quill: the platform window's answer to `WM_GPUI_GPU_DEVICE_LOST` when it took the devices.
+const HANDED_OVER: isize = 1;
+
+/// Quill: what the vsync thread sends the platform window with `WM_GPUI_GPU_DEVICE_LOST`.
+struct RecoveredDevices<'a> {
+    generation: VsyncGeneration,
+    devices: &'a DirectXDevices,
+}
+
+/// Quill: how a device-loss recovery that recreated the devices ended.
+enum Recovery {
+    /// The platform and the windows have the new devices.
+    HandedOver,
+    /// The platform has stopped this vsync thread since it started; it ends without touching
+    /// the windows.
+    Superseded,
+}
+
+/// Quill: which vsync thread a device message comes from. Carried in `lparam` of
+/// `WM_GPUI_GPU_DEVICE_GONE` and in `RecoveredDevices`, because `wparam` holds the
+/// validation number.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct VsyncGeneration(usize);
+
+impl VsyncGeneration {
+    fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+
+    fn raw(self) -> isize {
+        self.0 as isize
+    }
+
+    fn from_raw(raw: isize) -> Self {
+        Self(raw as usize)
+    }
 }
 
 const PLATFORM_WINDOW_CLASS_NAME: PCWSTR = w!("Zed::PlatformWindow");
