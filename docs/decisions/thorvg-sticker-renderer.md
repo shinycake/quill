@@ -117,6 +117,11 @@ A property's largest value counts how far its easing handles overshoot, so it ca
 sit above the number the file states. Zigzags share the star limit; the real set
 has none.
 
+A wider set of 479 Lottie documents from app bundles on a Mac, 349 of them from
+Telegram's macOS app, stays under every limit too. Its closest are 6.7x under the
+work budget and 2.5x under the precomp depth limit, and the most in a Telegram file
+is 10.8x under the work budget.
+
 Work is a rough cost of one frame once precomps, repeaters and modifiers are
 expanded: 16 per vertex, 64 per layer or shape in a paint, and 1,024 per mask,
 matte or drawn effect, since those copy the canvas. Everything before a repeater
@@ -124,7 +129,7 @@ or path modifier in a list multiplies with it, nine times for an offset, whose
 curve splitting ThorVG holds to eight times its input, and twice for the others.
 A list's total multiplies with its fills and strokes. A precomp is walked once
 and counted at each use. The check
-itself took at most 2.2 ms on the costliest real document.
+itself took at most 2.4 ms on the costliest real document.
 
 ## Skin tones
 
