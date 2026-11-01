@@ -132,6 +132,8 @@ jobs:
       # std-only and tested standalone.
       - name: tests (vendored opus-decoder FFT)
         run: bash scripts/test-opus-fft.sh
+      - name: tests (vendored blocking pool)
+        run: bash scripts/test-blocking-pool.sh
       - name: secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v3
         env:
