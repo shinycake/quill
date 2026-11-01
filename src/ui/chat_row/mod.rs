@@ -740,7 +740,8 @@ pub(super) fn session_chat_row(
                                     .child(if announced {
                                         String::new()
                                     } else {
-                                        chat.last_preview_sender.clone()
+                                        quill::display_text::filtered(&chat.last_preview_sender)
+                                            .into_owned()
                                     }),
                             )
                         })
@@ -777,7 +778,10 @@ pub(super) fn session_chat_row(
                                                         } else {
                                                             accent().into()
                                                         })
-                                                        .child(format!("{sender}: ")),
+                                                        .child(format!(
+                                                            "{}: ",
+                                                            quill::display_text::filtered(&sender)
+                                                        )),
                                                 )
                                             },
                                         )
@@ -820,7 +824,10 @@ pub(super) fn session_chat_row(
                                                         format!("row-activity-{}", id.0).into(),
                                                     ),
                                                 )
-                                                .child(div().min_w_0().truncate().child(line.text))
+                                                .child(div().min_w_0().truncate().child(
+                                                    quill::display_text::filtered(&line.text)
+                                                        .into_owned(),
+                                                ))
                                                 .into_any_element(),
                                             None => div()
                                                 .min_w_0()

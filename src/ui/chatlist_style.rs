@@ -53,15 +53,17 @@ pub(crate) fn chat_list_preview_line_layered(
     // One line, as in Telegram Desktop: line breaks read as spaces (same
     // byte length, so entity offsets still hold).
     let preview = preview.replace(['\n', '\r'], " ");
+    let prefix = prefix.map(|prefix| quill::display_text::filtered(&prefix).into_owned());
     // Emoji the active set draws need the run-by-run row below; the
     // system font keeps the single text node.
     let sprites =
         !quill::text::has_rtl_text(&preview) && super::emoji_sprites::pieces(&preview).is_some();
     if entities.is_empty() && !sprites {
         // A single text node, so an overlong preview ends in an ellipsis.
+        let preview = quill::display_text::filtered(&preview);
         let text = match icon {
             Some(glyph) => format!("{glyph} {preview}"),
-            None => preview,
+            None => preview.into_owned(),
         };
         let mut highlights = Vec::new();
         let text = match &prefix {
@@ -87,7 +89,7 @@ pub(crate) fn chat_list_preview_line_layered(
     // Right-to-left text without pictures to place: one bidi-correct line (typing-order
     // elision, right-aligned like Telegram Desktop's one-line text).
     if quill::text::has_rtl_text(&preview) {
-        let runs = styled_runs(&preview, entities);
+        let runs = shown_runs(&preview, entities);
         let pictures = runs.iter().any(|run| {
             run.custom_emoji_id
                 .is_some_and(|id| layered.contains_key(&id) || emoji.contains_key(&id))
@@ -161,7 +163,7 @@ pub(crate) fn chat_list_preview_line_layered(
         parts.push((false, div().child(format!("{glyph} "))));
     }
     let key = line_key(&preview);
-    for (index, run) in styled_runs(&preview, entities).into_iter().enumerate() {
+    for (index, run) in shown_runs(&preview, entities).into_iter().enumerate() {
         if run.text.is_empty() {
             continue;
         }
@@ -266,4 +268,38 @@ fn line_key(preview: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     preview.hash(&mut hasher);
     hasher.finish()
+}
+
+/// The preview's runs without what message text drops before shaping
+/// (`quill::display_text`), counted across runs as a paragraph counts them.
+fn shown_runs(preview: &str, entities: &[TextEntity]) -> Vec<quill::text::TextRun> {
+    let mut state = quill::display_text::FilterState::default();
+    let mut map = quill::display_text::SourceMap::default();
+    let mut runs = styled_runs(preview, entities);
+    for run in &mut runs {
+        let mut shown = String::with_capacity(run.text.len());
+        quill::display_text::push_filtered(&mut shown, &run.text, &mut state, &mut map);
+        run.text = shown;
+    }
+    runs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shown_runs;
+
+    #[test]
+    fn a_formatted_preview_loses_zalgo_marks_counted_across_its_runs() {
+        let bold = quill::text::TextEntity {
+            utf8_start: 0,
+            utf8_end: 5,
+            kind: quill::text::TextEntityKind::Bold,
+        };
+        let text = format!("e\u{0301}\u{0301}{}x\u{E0069}", "\u{0301}".repeat(30));
+        let shown: String = shown_runs(&text, &[bold])
+            .into_iter()
+            .map(|run| run.text)
+            .collect();
+        assert_eq!(shown, "e\u{0301}\u{0301}x");
+    }
 }

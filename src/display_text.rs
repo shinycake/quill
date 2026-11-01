@@ -130,6 +130,22 @@ pub fn push_filtered(out: &mut String, text: &str, state: &mut FilterState, map:
     out.push_str(text.get(kept_from..).unwrap_or_default());
 }
 
+/// `text` without what [`push_filtered`] drops, for a label nobody copies
+/// from: a chat title, a name, a preview line, a notification.
+pub fn filtered(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.chars().all(|ch| ch < '\u{300}' && !is_bad(ch)) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut map = SourceMap::default();
+    push_filtered(&mut out, text, &mut FilterState::default(), &mut map);
+    if map.is_empty() {
+        std::borrow::Cow::Borrowed(text)
+    } else {
+        std::borrow::Cow::Owned(out)
+    }
+}
+
 /// The combining marks of no one script (Combining Diacritical Marks, its
 /// Extended and Supplement blocks, marks for symbols, half marks).
 fn is_generic_mark(ch: char) -> bool {
@@ -297,6 +313,18 @@ mod tests {
         );
         assert_eq!(map.source_of(&out, 1..2).as_deref(), Some("b"));
         assert_eq!(map.source_of(&out, 0..3), None, "inside a mark");
+    }
+
+    #[test]
+    fn a_label_loses_what_message_text_loses_and_clean_text_is_not_copied() {
+        let zalgo = format!("Bob{}\u{E0069}\u{2028}", "\u{0300}".repeat(50));
+        assert_eq!(super::filtered(&zalgo), "Bob\u{0300}\u{0300}");
+        for clean in ["Alice", "Привет", "\u{1F468}\u{200D}\u{1F469}"] {
+            assert!(matches!(
+                super::filtered(clean),
+                std::borrow::Cow::Borrowed(_)
+            ));
+        }
     }
 
     #[test]

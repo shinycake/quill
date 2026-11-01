@@ -243,6 +243,7 @@ impl QuillApp {
         locked: bool,
         cx: &mut Context<Self>,
     ) {
+        let notification = notification.shown();
         let chat_id = notification.chat_id;
         let reply_field = account.is_none() && !locked;
         // An inline reply answers the newest notified message.

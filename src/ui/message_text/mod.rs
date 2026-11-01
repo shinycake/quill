@@ -472,7 +472,9 @@ pub(super) fn message_chrome(
             .and_then(|label| label.accent)
             .map(super::chat_theme::peer_name_color),
         sender_status: None,
-        sender: sender.map(|label| SharedString::from(label.name)),
+        sender: sender.map(|label| {
+            SharedString::from(quill::display_text::filtered(&label.name).into_owned())
+        }),
         // An empty name is a spacer: a row inside a sender run keeps the
         // avatar column so bubbles stay aligned.
         avatar: sender_avatar.map(|avatar| {
