@@ -1,8 +1,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{
-    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Demuxer, Item, PixelOutput,
-    SYNC_TOLERANCE, Shared, State, VideoFrame, idle_wait, lock,
+    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Demuxer, IDLE_WAIT, Item,
+    PixelOutput, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -138,7 +138,7 @@ impl Decoder {
         let audio_buffered = audio.as_ref().map(|audio| audio.buffered_secs());
         let step = next_step(video_queued, audio_buffered);
         if state.eof || step == Step::Wait {
-            return Turn::Idle(state, idle_wait(audio.is_some()));
+            return Turn::Idle(state, IDLE_WAIT);
         }
         let epoch = state.epoch;
         let output = state.output;
@@ -171,7 +171,7 @@ impl Decoder {
                     audio.push(chunk);
                 }
             }
-            Ok(None) if reaching => return Turn::Idle(state, idle_wait(true)),
+            Ok(None) if reaching => return Turn::Idle(state, IDLE_WAIT),
             Ok(None) => {
                 if self.has_video && !self.decoded_a_picture {
                     state.error = Some("The video has no pictures".to_string());

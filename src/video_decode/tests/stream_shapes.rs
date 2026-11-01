@@ -229,10 +229,15 @@ impl Rig {
     }
 
     fn settle(&mut self) {
+        self.settle_until_idle();
+    }
+
+    /// Run turns until the thread would sleep; how long it would.
+    fn settle_until_idle(&mut self) -> Duration {
         loop {
             match self.decoder.turn(&self.shared) {
                 Turn::Worked => {}
-                Turn::Idle(..) => return,
+                Turn::Idle(_, wait) => return wait,
                 Turn::Stop => panic!("the player is alive"),
             }
         }
@@ -346,6 +351,15 @@ impl Run {
             .windows(2)
             .any(|pair| pair[1] - pair[0] > 1.5 * FRAME_SECS)
     }
+}
+
+#[test]
+fn a_paused_clip_with_sound_wakes_its_decoder_at_most_once_a_second() {
+    let mut rig = Rig::open(Shape::clip(60.0, 60.0));
+    rig.start();
+    rig.player.pause();
+    let wait = rig.settle_until_idle();
+    assert!(wait >= Duration::from_secs(1), "wakes every {wait:?}");
 }
 
 #[test]
