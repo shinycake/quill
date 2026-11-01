@@ -298,3 +298,8 @@ mod tests {
         assert!(!is_vulkan_failure("display connection refused"));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "quit_flush_tests.rs"]
+mod quit_flush_tests;

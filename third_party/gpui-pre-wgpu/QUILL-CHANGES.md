@@ -163,3 +163,8 @@ fewer copies and textures (sweep finding media-7,
   of creating one per picture. Test: `video_pictures_take_turns_in_two_textures`;
   the upstream `before_frame_skips_uploads_for_removed_texture` is now
   `a_tile_removed_before_the_frame_is_safe`.
+
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

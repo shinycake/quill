@@ -30,7 +30,11 @@ pub use settings_search::*;
 pub use video_pip::*;
 pub use window_save::*;
 
+#[cfg(not(debug_assertions))]
 pub const APP_DIR_NAME: &str = "Quill";
+/// A stray debug run gets a folder of its own, so it never opens real accounts.
+#[cfg(debug_assertions)]
+pub const APP_DIR_NAME: &str = "Quill Debug";
 pub const PREFS_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -348,12 +348,15 @@ jobs:
           toolchain: 1.99.1
       - uses: Swatinem/rust-cache@v2
         if: steps.changed.outputs.run == 'true'
+      - name: Metal toolchain
+        if: steps.changed.outputs.run == 'true'
+        run: bash scripts/ensure-metal-toolchain.sh
       # The guard keeps the metallib test from dropping out of the run unnoticed.
       - name: tests (Metal renderer)
         if: steps.changed.outputs.run == 'true'
         env:
           QUILL_REQUIRE_METALLIB: '1'
-        run: cargo test -p gpui-pre-apple --lib --locked -- metal_renderer::tests
+        run: cargo test -p gpui-pre-apple --lib --locked -- metal_renderer::tests text_system::tests::test_kept_fonts text_system::tests::test_adjacent_runs
 
   # Packaging runs on pushes to main only; PRs get the Linux check. The macOS UI
   # build runs after merge through quill-ui-build.yml (push to main). Public PR

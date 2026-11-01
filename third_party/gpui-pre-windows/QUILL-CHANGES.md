@@ -511,3 +511,7 @@ so its `test-support` feature comes through Quill's `demo-capture`).
 - `src/window.rs`: `set_shutdown_block_reason` calls
   `ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy` (the
   `Win32_System_Shutdown` feature in `Cargo.toml`).
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

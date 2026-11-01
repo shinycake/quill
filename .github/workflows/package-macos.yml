@@ -121,6 +121,8 @@ jobs:
         with:
           name: quill-calls-macos-arm64
           path: vendor/quill-calls
+      - name: Metal toolchain
+        run: bash scripts/ensure-metal-toolchain.sh
       # The secrets reach only this step, as compile-time env read by
       # option_env! (src/credentials.rs).
       - name: build release ui
