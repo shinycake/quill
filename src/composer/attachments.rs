@@ -102,10 +102,12 @@ impl ComposerAttachment {
         self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
     }
 
-    /// The messages the tray is sent as. One album (or one file) normally;
-    /// when `grouped` is false every file is its own message, and a video
-    /// turned into a GIF leaves the album and goes alone (tdesktop
-    /// `GroupRanges`). Each inner list of two or more is an album.
+    /// The messages the tray is sent as: albums of at most
+    /// [`ALBUM_MAX_ITEMS`](crate::album::ALBUM_MAX_ITEMS) in order (tdesktop
+    /// `DivideByGroups`); when `grouped` is false every file is its own
+    /// message, and a video turned into a GIF leaves the album and goes
+    /// alone (tdesktop `GroupRanges`). Each inner list of two or more is an
+    /// album.
     pub fn split_for_send(list: &[Self], grouped: bool) -> Vec<Vec<Self>> {
         if !grouped {
             return list.iter().map(|att| vec![att.clone()]).collect();
@@ -114,9 +116,11 @@ impl ComposerAttachment {
             .iter()
             .partition(|att| att.extras.gif && att.extras.sound_removed);
         let mut groups = Vec::new();
-        if !together.is_empty() {
-            groups.push(together.into_iter().cloned().collect());
-        }
+        groups.extend(
+            together
+                .chunks(crate::album::ALBUM_MAX_ITEMS)
+                .map(|chunk| chunk.iter().map(|att| (*att).clone()).collect()),
+        );
         groups.extend(alone.into_iter().map(|att| vec![att.clone()]));
         groups
     }
@@ -131,9 +135,6 @@ impl ComposerAttachment {
     ) -> Result<usize, &'static str> {
         if paths.is_empty() {
             return Ok(0);
-        }
-        if paths.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
-            return Err("Attach at most 10 files at a time.");
         }
         let media: Option<Vec<AttachmentKind>> = paths.iter().map(|p| media_kind_for(p)).collect();
         let media = media.filter(|_| {
@@ -189,9 +190,6 @@ impl ComposerAttachment {
         if planned.is_empty() {
             return Ok(0);
         }
-        if planned.len() > crate::album::ALBUM_MAX_ITEMS.saturating_sub(list.len()) {
-            return Err("Attach at most 10 files at a time.");
-        }
         let picked = planned
             .iter()
             .map(|(path, kind)| Self::pick(path, *kind))
@@ -221,7 +219,7 @@ impl ComposerAttachment {
     }
 
     /// Add a picked file. A document replaces the list (documents are not mixed
-    /// into a photo/video album). Photos and videos accumulate up to 10.
+    /// into a photo/video album). Photos and videos accumulate.
     pub fn push_attachment(list: &mut Vec<Self>, next: Self) {
         match next.kind {
             AttachmentKind::Document | AttachmentKind::VideoNote => {
@@ -234,9 +232,6 @@ impl ComposerAttachment {
                     .any(|att| !matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
                 {
                     list.clear();
-                }
-                if list.len() >= crate::album::ALBUM_MAX_ITEMS {
-                    return;
                 }
                 list.push(next);
             }
@@ -385,6 +380,38 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_of_23_media_files_goes_out_as_albums_of_10_10_and_3() {
+        let root = scratch("many");
+        let paths: Vec<PathBuf> = (0..23)
+            .map(|ix| {
+                let path = root.join(if ix % 3 == 0 {
+                    format!("{ix:02}.mp4")
+                } else {
+                    format!("{ix:02}.jpg")
+                });
+                fs::write(&path, b"x").unwrap();
+                path
+            })
+            .collect();
+        let mut list = Vec::new();
+        assert_eq!(
+            ComposerAttachment::append_dropped_files(&mut list, &paths),
+            Ok(23)
+        );
+        let groups = ComposerAttachment::split_for_send(&list, true);
+        let sizes: Vec<usize> = groups.iter().map(Vec::len).collect();
+        assert_eq!(sizes, [10, 10, 3]);
+        let order: Vec<&str> = groups
+            .iter()
+            .flatten()
+            .map(|att| att.file_name.as_str())
+            .collect();
+        let dropped: Vec<&str> = list.iter().map(|att| att.file_name.as_str()).collect();
+        assert_eq!(order, dropped);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn an_mp4_without_a_sound_track_is_marked_as_a_gif() {
         let root = scratch("silent-gif");
         let make = |name: &str, with_sound: bool| {
@@ -530,10 +557,6 @@ mod tests {
             );
             assert_eq!(list, before);
         }
-        assert!(
-            ComposerAttachment::append_dropped_files(&mut list, &vec![file.clone(); 10]).is_err()
-        );
-        assert_eq!(list, before);
         assert_eq!(
             ComposerAttachment::append_dropped_files(&mut list, &[file.clone(), photo.clone()]),
             Ok(2)

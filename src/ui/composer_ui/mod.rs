@@ -574,7 +574,11 @@ impl QuillApp {
             let file_thumbnail = (attachment.kind == AttachmentKind::Document)
                 .then_some(attachment.extras.file_thumbnail.as_ref())
                 .flatten();
+            // Like tdesktop, only the first album's worth of files decode
+            // a preview; the rest show their kind.
+            let previewed = index < quill::album::ALBUM_MAX_ITEMS;
             let media = match (attachment.kind, file_thumbnail) {
+                _ if !previewed => AttachmentMedia::new().child(Icon::new(icon)),
                 (AttachmentKind::Photo, _) => AttachmentMedia::new().src(attachment.path.clone()),
                 (_, Some(thumb)) => AttachmentMedia::new().src(thumb.path.clone()),
                 _ if image_file => AttachmentMedia::new().src(attachment.path.clone()),
