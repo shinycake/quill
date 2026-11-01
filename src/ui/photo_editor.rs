@@ -388,86 +388,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Render the edit at full resolution into a new PNG and send that
-    /// instead of the original. The render and the encode run off the UI
-    /// thread; the editor closes at once.
-    pub(super) fn save_photo_editor(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = self.viewer.photo_editor.take() else {
-            return;
-        };
-        cx.notify();
-        match editor.purpose.clone() {
-            EditorPurpose::Attachment(item) => {
-                let job = editor.into_render_job();
-                // window-scope: the tray item names its own account and draft
-                self.run_off_ui_then(
-                    move || super::edit_media_tools::write_edited_png(&job.render()),
-                    move |this, saved, cx| this.finish_attachment_edit(&item, saved, cx),
-                    cx,
-                );
-            }
-            EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
-            EditorPurpose::MessageEdit => {
-                let edit_of = self.edited_message();
-                let job = editor.into_render_job();
-                self.run_off_ui_scoped_then(
-                    move || super::edit_media_tools::write_edited_png(&job.render()),
-                    move |this, saved, cx| {
-                        if this.edited_message() == edit_of {
-                            this.finish_edit_image(saved, cx);
-                        } else if let Some(saved) = saved {
-                            let _ = std::fs::remove_file(saved);
-                        }
-                    },
-                    cx,
-                );
-            }
-            EditorPurpose::Set { set_id, kind } => {
-                // The canvas render and the fit run off the UI thread.
-                let job = editor.set_render_job();
-                self.finish_set_image(set_id, kind, job, editor.corners, cx);
-            }
-        }
-    }
-
-    /// The message whose media is being edited, if any.
-    fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
-        let edit = self.composer_ui.pending_edit.as_ref()?;
-        Some((edit.chat_id, edit.message_id))
-    }
-
-    /// The edit replaces the photo in the chat it was opened from, as long
-    /// as that photo is still in its tray.
-    fn finish_attachment_edit(
-        &mut self,
-        item: &TrayItem,
-        saved: Option<std::path::PathBuf>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(saved) = saved else {
-            self.connection.set_note(StatusNote::error(tr(
-                keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
-            )));
-            cx.notify();
-            return;
-        };
-        let replaced = self.composer_sends.update_item(item, |attachment| {
-            let stem = attachment
-                .path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("photo")
-                .to_string();
-            attachment.path = saved.clone();
-            attachment.file_name = format!("{stem}.png");
-            attachment.kind = quill::composer::AttachmentKind::Photo;
-        });
-        if replaced.is_none() {
-            let _ = std::fs::remove_file(&saved);
-        }
-        cx.notify();
-    }
-
     pub(super) fn photo_editor_mut(
         &mut self,
         edit: impl FnOnce(&mut PhotoEditor),
@@ -891,7 +811,9 @@ impl QuillApp {
                                     tr(keys::BOX_DONE)
                                 })
                                 .primary()
-                                .on_click(cx.listener(|this, _, _, cx| this.save_photo_editor(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.save_photo_editor(window, cx)
+                                })),
                         ),
                 )
                 .child(div().flex_1().min_h_0().p_6().child(surface))

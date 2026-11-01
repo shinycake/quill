@@ -423,7 +423,7 @@ fn a_photo_edit_saved_after_a_chat_switch_replaces_the_photo_it_was_opened_on(
         app.update_pending_attachments(|tray| {
             tray.push(attachment_at(photo_b.clone(), AttachmentKind::Photo))
         });
-        app.save_photo_editor(cx);
+        app.save_photo_editor(window, cx);
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, window, cx| {

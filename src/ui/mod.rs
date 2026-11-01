@@ -117,6 +117,7 @@ mod photo_edit;
 mod photo_editor;
 mod photo_editor_items;
 mod photo_editor_profile;
+mod photo_editor_save;
 mod photo_editor_set;
 mod pickers_state;
 mod pin_box;

@@ -102,6 +102,15 @@ impl QuillApp {
                 if self.submit_suggested_change(&text, window, cx) {
                     return;
                 }
+                // A photo's edit is still rendering: the Send waits for it,
+                // so the unedited file never goes out.
+                if self.tray_renders_an_edit() {
+                    self.update_pending_send(|send| send.held_send = Some(text));
+                    self.connection
+                        .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
+                    cx.notify();
+                    return;
+                }
                 // B4: the forward bar sends the comment, then the forward.
                 if self.forward_bar_here() {
                     self.submit_forward_bar(text, window, cx);

@@ -89,9 +89,9 @@ fn done_returns_before_the_render_and_the_tray_gets_the_png(cx: &mut TestAppCont
     let (app, mut vcx) = new_app(cx);
     let original = picture("done.png", 37, 21);
     open_on(&app, &mut vcx, &original);
-    app.update_in(&mut vcx, |app, _, cx| {
+    app.update_in(&mut vcx, |app, window, cx| {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
-        app.save_photo_editor(cx);
+        app.save_photo_editor(window, cx);
         assert!(app.viewer.photo_editor.is_none());
     });
     // Nothing rendered on the calling stack.
@@ -112,8 +112,8 @@ fn a_photo_gone_from_the_tray_leaves_no_png(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let original = picture("gone.png", 41, 23);
     open_on(&app, &mut vcx, &original);
-    app.update_in(&mut vcx, |app, _, cx| {
-        app.save_photo_editor(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.save_photo_editor(window, cx);
         app.update_pending_attachments(|tray| tray.clear())
             .expect("an open chat");
     });
@@ -169,4 +169,73 @@ fn pending_turns_render_the_same_pixels_and_preview() {
     assert_eq!(editor.preview.as_bytes(0), Some(shown.as_raw().as_slice()));
     assert_eq!(editor.dimensions(), (18, 30));
     assert_eq!(editor.into_render_job().render(), expected);
+}
+
+/// The demo's open chat, and the path of the photo its newest message sent.
+fn newest_sent_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
+    app.update_in(vcx, |app, _, _| {
+        let session = app.demo_session.as_ref()?;
+        let chat = session.open_chat?;
+        let newest = session.histories.get(&chat.0)?.ordered().last().copied()?;
+        let quill::telegram::envelope::MessageContent::Photo(photo) = &newest.content else {
+            return None;
+        };
+        let size = photo.sizes.first()?;
+        Some(session.file(size.file_id)?.usable_path()?.to_string())
+    })
+}
+
+/// The editor opened again on tray item 0 as it is now, without waiting
+/// for a decode, so the next Done starts while the last one renders.
+fn reopen_now(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, original: &Path) {
+    let pixels = image::open(original).expect("decodes").to_rgba8();
+    app.update_in(vcx, |app, _, _| {
+        let item = app.tray_item(0).expect("a tray item");
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+    });
+}
+
+#[gpui_kit::test]
+fn a_send_during_the_render_waits_and_sends_the_edited_photo(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("held.png", 43, 19);
+    open_on(&app, &mut vcx, &original);
+    let sent_before = newest_sent_photo(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.submit_composer(String::new(), window, cx);
+        // Held: nothing went, and the tray still has the photo.
+        assert_eq!(app.pending_attachments().len(), 1);
+    });
+    assert_eq!(newest_sent_photo(&app, &mut vcx), sent_before);
+    vcx.run_until_parked();
+    let sent = newest_sent_photo(&app, &mut vcx).expect("the photo went");
+    assert_ne!(Path::new(&sent), original.as_path());
+    assert_eq!(image::image_dimensions(&sent).ok(), Some((19, 43)));
+    assert_eq!(tray_path(&app, &mut vcx), None, "the send cleared the tray");
+    let _ = std::fs::remove_file(sent);
+}
+
+#[gpui_kit::test]
+fn the_latest_done_wins_and_the_other_png_is_deleted(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("twice.png", 47, 17);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+    });
+    reopen_now(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.save_photo_editor(window, cx)
+    });
+    vcx.run_until_parked();
+    let edited = tray_path(&app, &mut vcx).expect("still in the tray");
+    assert_eq!(image::image_dimensions(&edited).ok(), Some((47, 17)));
+    assert!(
+        edited_of_size((17, 47)).is_empty(),
+        "the first Done's PNG went"
+    );
+    let _ = std::fs::remove_file(edited);
 }
