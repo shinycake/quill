@@ -421,3 +421,84 @@ fn badge_cache_follows_revision_and_prefs() {
     };
     assert_eq!(cache.get(&session, &no_messages), 2);
 }
+
+/// Reading a forum topic locally shows on the cached badge at once, before
+/// the server's `updateForumTopic` confirms it.
+#[test]
+fn badge_cache_sees_a_topic_read_locally() {
+    use super::badge_cache::BadgeCache;
+    let mut session = session_with(&[]);
+    let mut forum = chat(1, 0);
+    forum.is_forum = Some(true);
+    session.chats.insert(1, forum);
+    session
+        .threads
+        .forum_topics
+        .insert(1, vec![topic(1, 3), topic(2, 4)]);
+    let prefs = BadgePrefs::default();
+    let mut cache = BadgeCache::default();
+    assert_eq!(cache.get(&session, &prefs), 7);
+    session.mark_forum_topic_read_locally(crate::ids::ChatId(1), 2);
+    assert_eq!(cache.get(&session, &prefs), 3);
+}
+
+fn topic(id: i32, unread_count: i32) -> crate::telegram::envelope::ForumTopic {
+    crate::telegram::envelope::ForumTopic {
+        forum_topic_id: id,
+        name: format!("topic {id}"),
+        is_general: false,
+        is_closed: false,
+        is_pinned: false,
+        is_hidden: false,
+        unread_count,
+        order: i64::from(id),
+        last_message_preview: String::new(),
+        icon_color: 0,
+        icon_custom_emoji_id: 0,
+        last_message_id: 100,
+        last_read_inbox_message_id: 50,
+        notification_settings: ChatNotificationSettings::default(),
+        unread_mention_count: 0,
+        unread_reaction_count: 0,
+        creation_date: 0,
+        creator: None,
+        is_outgoing: false,
+        draft: None,
+    }
+}
+
+/// A forum's topics count on top of the list, minus what the chat itself
+/// counts; muted and archived forums follow the same rules as chats, and
+/// topics of a chat that is no forum count nothing.
+#[test]
+fn badge_count_adds_forum_topics() {
+    let mut session = session_with(&[]);
+    let forum = |mut chat: ChatSummary| {
+        chat.is_forum = Some(true);
+        chat
+    };
+    session.chats.insert(1, forum(chat(1, 2)));
+    session.chats.insert(2, forum(muted_chat(2, 0)));
+    session.chats.insert(3, forum(archived_chat(3, 0)));
+    session.chats.insert(4, chat(4, 0));
+    session.chats.insert(5, chat(5, 3));
+    let topics = &mut session.threads.forum_topics;
+    topics.insert(1, vec![topic(1, 3), topic(2, 4)]);
+    topics.insert(2, vec![topic(1, 5)]);
+    topics.insert(3, vec![topic(1, 1)]);
+    topics.insert(4, vec![topic(1, 9)]);
+    let prefs = BadgePrefs::default();
+    assert_eq!(badge_count(&session, &prefs), 16);
+    let unmuted = BadgePrefs {
+        include_muted: false,
+        ..prefs
+    };
+    assert_eq!(badge_count(&session, &unmuted), 10);
+    let chats = BadgePrefs {
+        count_messages: false,
+        ..prefs
+    };
+    assert_eq!(badge_count(&session, &chats), 4);
+    with_totals(&mut session);
+    assert_eq!(badge_count(&session, &prefs), 44 + 30 + 11);
+}

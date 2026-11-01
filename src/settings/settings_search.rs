@@ -8,9 +8,6 @@ pub fn load_settings_search_recent(paths: &AccountPaths) -> RecentSearches {
     load_json_prefs(paths, "settings_search_recent.json")
 }
 
-pub fn save_settings_search_recent(
-    paths: &AccountPaths,
-    recent: &RecentSearches,
-) -> std::io::Result<()> {
+pub fn save_settings_search_recent(paths: &AccountPaths, recent: &RecentSearches) {
     save_json_prefs(paths, "settings_search_recent.json", recent)
 }

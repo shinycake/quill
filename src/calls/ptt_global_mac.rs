@@ -241,9 +241,12 @@ pub fn open_permission_settings() {
     if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open System Settings") {
         return;
     }
-    let _ = std::process::Command::new("open")
+    if let Ok(child) = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .spawn();
+        .spawn()
+    {
+        crate::child_reap::wait_in_background(child);
+    }
 }
 
 #[cfg(test)]

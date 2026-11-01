@@ -10,6 +10,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::ScheduleTarget;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -423,7 +424,10 @@ fn a_photo_edit_saved_after_a_chat_switch_replaces_the_photo_it_was_opened_on(
         app.update_pending_attachments(|tray| {
             tray.push(attachment_at(photo_b.clone(), AttachmentKind::Photo))
         });
-        app.save_photo_editor(cx);
+        app.save_photo_editor(window, cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, window, cx| {
         assert_eq!(app.pending_attachments()[0].path, photo_b, "B untouched");
         app.select_listed_chat(A, window, cx);
         let edited = &app.pending_attachments()[0];
@@ -439,6 +443,8 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
 ) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
+        // The picker opens at 01:15, which went by once already as CDT.
+        cx.set_global(WallClock::chicago_repeated_hour());
         app.select_listed_chat(A, window, cx);
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
@@ -456,10 +462,33 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
         ));
         assert_eq!(history_len(app, B), before, "B's text was not sent");
         app.select_listed_chat(A, window, cx);
-        assert!(matches!(
+        assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(_)
+            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 900)
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_schedule_in_the_repeated_hour_confirmed_unchanged_keeps_its_pass(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        // The evening before, a message is set for 01:20 CST, the second
+        // showing of 01:20.
+        let second_pass = WallClock::CHICAGO_FALL_BACK + 1200;
+        cx.set_global(WallClock::chicago_at(
+            WallClock::CHICAGO_FALL_BACK - 6 * 3600,
         ));
+        app.select_listed_chat(A, window, cx);
+        app.update_pending_send(|send| {
+            send.scheduling = ComposerScheduling::SendAtDate(second_pass)
+        });
+        app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+        app.confirm_schedule_picker(window, cx);
+        assert_eq!(
+            app.pending_send().scheduling,
+            ComposerScheduling::SendAtDate(second_pass)
+        );
     });
 }
 
@@ -676,5 +705,78 @@ fn a_session_closing_over_two_polls_ends_like_one_that_closed_at_once(cx: &mut T
         choose_everything(app);
         app.forget_sends_after_auth(&Auth::Ready, false);
         assert_eq!(app.composer_sends.slot_count(), 0);
+    });
+}
+
+/// Apply a TDLib update to the demo session.
+fn apply_json(app: &mut QuillApp, json: &str) {
+    // Numbered after the seed's updates, which would drop it as old.
+    let last = app
+        .demo_session
+        .as_ref()
+        .map_or(0, |session| session.last_seq);
+    app.demo_ui
+        .seq
+        .fetch_max(last, std::sync::atomic::Ordering::Relaxed);
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+    let owned = quill::telegram::client::copy_and_parse(json, &app.demo_ui.seq, &sink)
+        .expect("a valid update");
+    app.demo_session
+        .as_mut()
+        .expect("a demo session")
+        .apply(owned);
+}
+
+/// A group where the viewer is a plain member under a 30 s slow mode,
+/// with no wait running yet.
+fn slow_group(app: &mut QuillApp) -> ChatId {
+    const ID: i64 = 7701;
+    for json in [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{ID},"title":"Slow Club","type":{{"@type":"chatTypeSupergroup","supergroup_id":{ID},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{ID},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{ID},"is_forum":false,"member_count":3,"status":{{"@type":"chatMemberStatusMember"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{ID},"supergroup_full_info":{{"@type":"supergroupFullInfo","description":"","member_count":3,"slow_mode_delay":30,"slow_mode_delay_expires_in":0,"linked_chat_id":0}}}}"#
+        ),
+    ] {
+        apply_json(app, &json);
+    }
+    ChatId(ID)
+}
+
+#[gpui_kit::test]
+fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let group = slow_group(app);
+        app.select_listed_chat(group, window, cx);
+        assert_eq!(app.open_chat_id(), Some(group));
+        assert!(app.session().is_some_and(|s| s.slow_mode_applies(group)));
+        // Eleven photos make two albums.
+        app.update_pending_attachments(|tray| {
+            tray.extend(
+                (0..11).map(|i| {
+                    attachment_at(picture(&format!("slow-{i}.png")), AttachmentKind::Photo)
+                }),
+            )
+        });
+        let before = history_len(app, group);
+        app.submit_composer("caption".into(), window, cx);
+        assert_eq!(history_len(app, group), before, "nothing went");
+        assert_eq!(app.pending_attachments().len(), 11, "the tray stays");
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::SLOWMODE_NO_MANY)
+        );
+        // One album is one message, which slow mode lets through.
+        app.update_pending_attachments(|tray| tray.truncate(10));
+        app.submit_composer("caption".into(), window, cx);
+        assert!(app.pending_attachments().is_empty(), "the album went");
     });
 }

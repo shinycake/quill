@@ -44,6 +44,7 @@ ui = [
     "dep:objc2-app-kit",
     "dep:raw-window-handle",
     "dep:image",
+    "dep:fast_image_resize",
     "dep:moxcms",
     "dep:smallvec",
     "dep:qrcode",
@@ -96,6 +97,7 @@ flate2 = "1"
 # (core/mime_type.cpp DetectNameType). HEIC/HEIF/AVIF/JPEG XL decode through
 # the platform (src/ui/image_decode/).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif", "ico", "tiff", "qoi", "tga"], optional = true }
+fast_image_resize = { version = "6", optional = true }
 # ICC colour management for decoded image files (already in the tree via `image`).
 moxcms = { version = "0.8", optional = true }
 # JPEG XL image files on Windows and Linux, and on macOS before ImageIO reads
@@ -103,6 +105,7 @@ moxcms = { version = "0.8", optional = true }
 jxl-oxide = { version = "0.12", optional = true, default-features = false, features = ["rayon", "moxcms"] }
 libloading = "0.9"
 libc = "0.2"
+log = "0.4"
 quill-calls-sys = { path = "crates/quill-calls-sys" }
 qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
 rand = "0.10"
@@ -160,6 +163,8 @@ lz4_flex = { version = "0.14", default-features = false, features = ["std", "che
 thiserror = "2"
 unicode-segmentation = "1.13"
 unicode-bidi = "0.3"
+# Combining-mark limit in message text (`display_text`).
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 spellbook = "0.4"
 encoding_rs = "0.8"
 zeroize = { version = "1", features = ["zeroize_derive"] }

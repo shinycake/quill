@@ -20,8 +20,23 @@ mod apple_build {
 
         #[cfg(feature = "runtime_shaders")]
         emit_stitched_shaders(&header_path);
-        #[cfg(not(feature = "runtime_shaders"))]
-        compile_metal_shaders(&header_path);
+        // Quill: gpui-kit turns `runtime_shaders` on for every build, which
+        // cost a new user half a second of main thread at first launch. So
+        // the metallib is tried whatever the feature says. A machine without
+        // the Metal toolchain falls back to compiling the source at run time,
+        // and the release build sets QUILL_REQUIRE_METALLIB to rule that out.
+        println!("cargo:rerun-if-env-changed=QUILL_REQUIRE_METALLIB");
+        println!("cargo::rustc-check-cfg=cfg(quill_metallib)");
+        let required = cfg!(not(feature = "runtime_shaders"))
+            || env::var_os("QUILL_REQUIRE_METALLIB").is_some();
+        match compile_metal_shaders(&header_path) {
+            Ok(()) => println!("cargo:rustc-cfg=quill_metallib"),
+            Err(error) if required => {
+                println!("cargo::error={error}");
+                std::process::exit(1);
+            }
+            Err(_) => {}
+        }
     }
 
     fn generate_shader_bindings() -> PathBuf {
@@ -123,9 +138,8 @@ mod apple_build {
         println!("cargo:rerun-if-changed={shader_source_path}");
     }
 
-    #[cfg(not(feature = "runtime_shaders"))]
-    fn compile_metal_shaders(header_path: &Path) {
-        use std::process::{self, Command};
+    fn compile_metal_shaders(header_path: &Path) -> Result<(), String> {
+        use std::process::Command;
 
         // Build scripts run on the host, so the target platform must come from
         // Cargo's environment rather than `cfg!`. The target environment, not the
@@ -139,10 +153,9 @@ mod apple_build {
             ("ios", "sim") => ("iphonesimulator", "-mios-simulator-version-min=15.0"),
             ("ios", "") => ("iphoneos", "-mios-version-min=15.0"),
             _ => {
-                println!(
-                    "cargo::error=unsupported Metal shader target: target_os={target_os}, target_env={target_env}"
-                );
-                process::exit(1);
+                return Err(format!(
+                    "unsupported Metal shader target: target_os={target_os}, target_env={target_env}"
+                ));
             }
         };
 
@@ -173,14 +186,13 @@ mod apple_build {
             .args(["-include", header_path.to_str().unwrap(), "-o"])
             .arg(&air_output_path)
             .output()
-            .unwrap();
+            .map_err(|error| format!("could not run xcrun metal: {error}"))?;
 
         if !output.status.success() {
-            println!(
-                "cargo::error=metal shader compilation failed:\n{}",
+            return Err(format!(
+                "metal shader compilation failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
-            );
-            process::exit(1);
+            ));
         }
 
         let output = Command::new("xcrun")
@@ -189,14 +201,13 @@ mod apple_build {
             .arg("-o")
             .arg(metallib_output_path)
             .output()
-            .unwrap();
+            .map_err(|error| format!("could not run xcrun metallib: {error}"))?;
 
         if !output.status.success() {
-            println!(
-                "cargo::error=metallib compilation failed:\n{}",
+            return Err(format!(
+                "metallib compilation failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
-            );
-            process::exit(1);
+            ));
         }
 
         // The .air intermediate records the compiler's working directory in
@@ -204,5 +215,6 @@ mod apple_build {
         // the .air after this point, so drop it rather than leave a
         // checkout-path-bearing file in OUT_DIR.
         std::fs::remove_file(&air_output_path).unwrap();
+        Ok(())
     }
 }

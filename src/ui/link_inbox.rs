@@ -88,8 +88,8 @@ pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
 }
 
 /// macOS calls this for a Dock click, with windows showing or not: a main
-/// window hidden by [`close_main_window`] comes back. AppKit restores a
-/// minimized one itself.
+/// window hidden by [`super::QuillApp::close_main_window`] comes back.
+/// AppKit restores a minimized one itself.
 pub fn reopen_main_window(cx: &mut gpui_kit::App) {
     raise_main_window_if(super::window_control::is_hidden_on_mac, cx);
 }
@@ -179,43 +179,45 @@ fn hide_or_minimize(window: &mut gpui_kit::Window) {
     }
 }
 
-/// What the main window's close button and Close Window do
-/// (`quill::tray::close_outcome`). Returns whether the window closes.
-pub fn close_main_window(
-    run_in_background: bool,
-    signed_in: bool,
-    window: &mut gpui_kit::Window,
-    cx: &mut gpui_kit::App,
-) -> bool {
-    use quill::tray::{CloseOutcome, close_outcome};
-    match close_outcome(
-        run_in_background,
-        quill::tray::tray_available(),
-        cfg!(target_os = "macos"),
-        super::window_control::hide_supported(window),
-        signed_in,
-    ) {
-        CloseOutcome::Quit => {
-            // No account to keep running for; a Mac app would stay alive
-            // with no window otherwise.
-            #[cfg(target_os = "macos")]
-            cx.quit();
-            true
-        }
-        CloseOutcome::Hide => {
-            hide_main_window(window, cx);
-            false
-        }
-        CloseOutcome::Minimize => {
-            window.minimize_window();
-            false
+impl super::QuillApp {
+    /// What the main window's close button and Close Window do
+    /// (`quill::tray::close_outcome`). Returns whether the window closes.
+    pub fn close_main_window(
+        &mut self,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> bool {
+        use quill::tray::{CloseOutcome, close_outcome};
+        match close_outcome(
+            self.minimize_to_tray(),
+            quill::tray::tray_available(),
+            cfg!(target_os = "macos"),
+            super::window_control::hide_supported(window),
+            self.signed_in(),
+        ) {
+            CloseOutcome::Quit => {
+                if self.exit_held_by_export(super::export_quit::quit_app, window, cx) {
+                    return false;
+                }
+                // No account to keep running for; a Mac app would stay
+                // alive with no window otherwise.
+                #[cfg(target_os = "macos")]
+                cx.quit();
+                true
+            }
+            CloseOutcome::Hide => {
+                hide_main_window(window, cx);
+                false
+            }
+            CloseOutcome::Minimize => {
+                window.minimize_window();
+                false
+            }
         }
     }
-}
 
-impl super::QuillApp {
     /// An account is signed in, on screen or in the background: closing
-    /// the window on a Mac hides it ([`close_main_window`]).
+    /// the window on a Mac hides it ([`Self::close_main_window`]).
     pub fn signed_in(&self) -> bool {
         self.session().is_some_and(|session| {
             matches!(

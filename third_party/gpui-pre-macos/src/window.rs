@@ -1006,8 +1006,16 @@ impl MacWindow {
         background_executor: BackgroundExecutor,
         renderer_context: renderer::Context,
         marker: MainThreadMarker,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         autoreleasepool(|_| unsafe {
+            // Quill: before any AppKit object exists, so a renderer that can't
+            // be built leaves no half-made window behind.
+            let renderer = renderer::new_renderer(
+                renderer_context,
+                bounds.size.map(|pixels| pixels.as_f32()),
+                false,
+                use_display_p3,
+            )?;
             let allows_automatic_window_tabbing = tabbing_identifier.is_some();
             if allows_automatic_window_tabbing {
                 let () = msg_send![class!(NSWindow), setAllowsAutomaticWindowTabbing: Bool::YES];
@@ -1122,14 +1130,7 @@ impl MacWindow {
                 frame_source: None,
                 frame_idle: frame_idle.clone(),
                 last_frame_activity: Instant::now(),
-                renderer: renderer::new_renderer(
-                    renderer_context,
-                    native_window as *mut _,
-                    native_view as *mut _,
-                    bounds.size.map(|pixels| pixels.as_f32()),
-                    false,
-                    use_display_p3,
-                ),
+                renderer,
                 request_frame_callback: None,
                 event_callback: None,
                 activate_callback: None,
@@ -1340,7 +1341,7 @@ impl MacWindow {
                 window_state.sheet_parent = sheet_parent;
             }
 
-            window
+            Ok(window)
         })
     }
 

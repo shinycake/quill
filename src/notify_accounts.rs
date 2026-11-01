@@ -17,6 +17,7 @@ use crate::notify::{NotificationAction, QueuedNotification};
 use crate::settings::BadgePrefs;
 use crate::state::Session;
 use crate::telegram::envelope::AuthorizationState;
+use crate::tray::badge_cache::SessionCountKey;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -169,9 +170,35 @@ pub fn other_accounts_unread() -> AccountUnread {
 /// The app-wide badge: the account on screen plus every background one.
 pub fn total_unread(active: Option<&Session>) -> AccountUnread {
     active
-        .map(AccountUnread::of)
+        .map(|session| ACTIVE_UNREAD.with_borrow_mut(|memo| memo.get(session)))
         .unwrap_or_default()
         .combine(other_accounts_unread())
+}
+
+thread_local! {
+    /// The tray and the icon badge both ask on every wake of their loop.
+    static ACTIVE_UNREAD: std::cell::RefCell<UnreadMemo> = Default::default();
+}
+
+/// Memo for [`AccountUnread::of`]: the count walks every chat and forum
+/// topic, and only changes when the session applies an update
+/// (`Session::revision`), the badge preferences change, or another account
+/// is asked about.
+#[derive(Debug, Default)]
+pub struct UnreadMemo {
+    key: Option<SessionCountKey>,
+    unread: AccountUnread,
+}
+
+impl UnreadMemo {
+    pub fn get(&mut self, session: &Session) -> AccountUnread {
+        let prefs = &session.settings.badge_prefs;
+        if !SessionCountKey::holds(self.key.as_ref(), session, prefs) {
+            self.unread = AccountUnread::of(session);
+            self.key = Some(SessionCountKey::of(session, prefs));
+        }
+        self.unread
+    }
 }
 
 /// What one poll of an account hands the UI.

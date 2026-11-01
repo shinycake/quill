@@ -172,12 +172,11 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
             }))
-            .on_action(cx.listener(|_, _: &QuitApp, window, cx| {
+            .on_action(cx.listener(|this, _: &QuitApp, window, cx| {
                 if guard::refuse_hard_if_injecting(HardSurface::Window) {
                     return;
                 }
-                window.remove_window();
-                cx.quit();
+                this.exit_after_exports(super::export_quit::quit_app, window, cx);
             }))
             // kit Phase 7: window-chrome actions behind the File / Window /
             // View / Help menus (same dispatch path as the key bindings).
@@ -185,8 +184,7 @@ impl Render for QuillApp {
                 if guard::refuse_hard_if_injecting(HardSurface::Window) {
                     return;
                 }
-                let (background, signed_in) = (this.minimize_to_tray(), this.signed_in());
-                if super::link_inbox::close_main_window(background, signed_in, window, cx) {
+                if this.close_main_window(window, cx) {
                     window.remove_window();
                     // Elsewhere closing the only window quits.
                     #[cfg(not(target_os = "macos"))]

@@ -65,6 +65,7 @@ pub(crate) struct DialogUi {
     pub(super) account_export_progress_hidden: bool,
     /// Last account export progress drawn.
     pub(super) account_export_seen: Option<quill::export::account::AccountProgress>,
+    pub(super) export_stop_open: bool,
     /// Saved Messages: "Add Name" / "Edit Name" for a tag.
     pub(super) saved_tag_dialog: Option<super::saved_sublists::SavedTagDialog>,
     /// The Saved Messages sublist list, which pages near its end
@@ -117,6 +118,7 @@ impl DialogUi {
             account_export_dialog: None,
             account_export_progress_hidden: false,
             account_export_seen: None,
+            export_stop_open: false,
             saved_tag_dialog: None,
             saved_scroll: ScrollHandle::new(),
             saved_asked: Default::default(),

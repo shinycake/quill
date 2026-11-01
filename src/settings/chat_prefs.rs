@@ -34,8 +34,8 @@ pub fn load_contact_prefs(paths: &AccountPaths) -> ContactPrefs {
         .unwrap_or_default()
 }
 
-/// Persist contacts prefs; failures are returned to the caller to surface
-/// in the status note.
+/// Persist contacts prefs; a failure reaches the status note through
+/// [`take_deferred_write_failure`].
 pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io::Result<()> {
     write_json_atomic(&contact_prefs_path(paths), prefs)
 }
@@ -115,9 +115,9 @@ pub fn load_chat_prefs(paths: &AccountPaths) -> ChatPrefs {
     load_json_prefs(paths, "chat_prefs.json")
 }
 
-/// Persist chat prefs; failures are returned to the caller to surface
-/// in the status note.
-pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) -> std::io::Result<()> {
+/// Persist chat prefs; a failure reaches the status note through
+/// [`take_deferred_write_failure`].
+pub fn save_chat_prefs(paths: &AccountPaths, prefs: &ChatPrefs) {
     save_json_prefs(paths, "chat_prefs.json", prefs)
 }
 
@@ -127,11 +127,8 @@ pub fn load_recent_hashtags(paths: &AccountPaths) -> crate::suggest::RecentHasht
     load_json_prefs(paths, "recent_hashtags.json")
 }
 
-/// Persist the recent hashtags; failures are returned to the caller.
-pub fn save_recent_hashtags(
-    paths: &AccountPaths,
-    recent: &crate::suggest::RecentHashtags,
-) -> std::io::Result<()> {
+/// Persist the recent hashtags.
+pub fn save_recent_hashtags(paths: &AccountPaths, recent: &crate::suggest::RecentHashtags) {
     save_json_prefs(paths, "recent_hashtags.json", recent)
 }
 
@@ -151,8 +148,8 @@ pub fn load_spellcheck_words(paths: &AccountPaths) -> SpellcheckWords {
     load_json_prefs(paths, "spellcheck_words.json")
 }
 
-/// Persist custom words; failures are returned to the caller.
-pub fn save_spellcheck_words(paths: &AccountPaths, prefs: &SpellcheckWords) -> std::io::Result<()> {
+/// Persist custom words.
+pub fn save_spellcheck_words(paths: &AccountPaths, prefs: &SpellcheckWords) {
     save_json_prefs(paths, "spellcheck_words.json", prefs)
 }
 
@@ -172,11 +169,8 @@ pub fn load_spellcheck_languages(paths: &AccountPaths) -> SpellcheckLanguages {
     load_json_prefs(paths, "spellcheck_languages.json")
 }
 
-/// Persist the picked spelling languages; failures are returned.
-pub fn save_spellcheck_languages(
-    paths: &AccountPaths,
-    prefs: &SpellcheckLanguages,
-) -> std::io::Result<()> {
+/// Persist the picked spelling languages.
+pub fn save_spellcheck_languages(paths: &AccountPaths, prefs: &SpellcheckLanguages) {
     save_json_prefs(paths, "spellcheck_languages.json", prefs)
 }
 
@@ -253,9 +247,8 @@ pub fn load_language_prefs(paths: &AccountPaths) -> LanguagePrefs {
     }
 }
 
-/// Persist language prefs; failures are returned to the caller to
-/// surface in the status note.
-pub fn save_language_prefs(paths: &AccountPaths, prefs: &LanguagePrefs) -> std::io::Result<()> {
+/// Persist language prefs.
+pub fn save_language_prefs(paths: &AccountPaths, prefs: &LanguagePrefs) {
     save_json_prefs(paths, "language_prefs.json", prefs)
 }
 
@@ -298,8 +291,8 @@ pub fn load_device_prefs(paths: &AccountPaths) -> DevicePrefs {
     load_json_prefs(paths, "device_prefs.json")
 }
 
-/// Persist the device prefs; failures are returned to the caller.
-pub fn save_device_prefs(paths: &AccountPaths, prefs: &DevicePrefs) -> std::io::Result<()> {
+/// Persist the device prefs.
+pub fn save_device_prefs(paths: &AccountPaths, prefs: &DevicePrefs) {
     save_json_prefs(paths, "device_prefs.json", prefs)
 }
 
@@ -309,11 +302,8 @@ pub fn load_translate_prefs(paths: &AccountPaths) -> crate::translate::Translate
     load_json_prefs(paths, "translate_prefs.json")
 }
 
-/// Persist the translation prefs; failures are returned to the caller.
-pub fn save_translate_prefs(
-    paths: &AccountPaths,
-    prefs: &crate::translate::TranslatePrefs,
-) -> std::io::Result<()> {
+/// Persist the translation prefs.
+pub fn save_translate_prefs(paths: &AccountPaths, prefs: &crate::translate::TranslatePrefs) {
     save_json_prefs(paths, "translate_prefs.json", prefs)
 }
 
@@ -365,8 +355,9 @@ mod tests {
         let prefs = LanguagePrefs {
             system_language_code: "de".to_string(),
         };
-        save_language_prefs(&paths, &prefs).unwrap();
+        save_language_prefs(&paths, &prefs);
         assert_eq!(load_language_prefs(&paths), prefs);
+        crate::settings::flush_deferred_writes();
         // Unsupported tag → default, never an error.
         fs::write(
             paths.root.join("language_prefs.json"),
@@ -389,8 +380,9 @@ mod tests {
         let prefs = DevicePrefs {
             custom_device_model: "Work laptop".into(),
         };
-        save_device_prefs(&paths, &prefs).unwrap();
+        save_device_prefs(&paths, &prefs);
         assert_eq!(load_device_prefs(&paths), prefs);
+        crate::settings::flush_deferred_writes();
         fs::write(paths.root.join("device_prefs.json"), b"not json").unwrap();
         assert_eq!(load_device_prefs(&paths), DevicePrefs::default());
         let _ = fs::remove_dir_all(&dir);

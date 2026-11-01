@@ -117,6 +117,14 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   `MetalRenderer::capture_scene`. No screen-recording permission is
   involved: the window renders its own frame.
 
+The Quill project also changed it in 2026 so a failed Metal setup costs one
+window, not the app:
+
+- `src/window.rs`: `MacWindow::open` returns `Result` and builds the renderer
+  before any AppKit object, so a renderer error leaves no half-made window.
+  gpui-pre-apple's `new_renderer` no longer takes the window and view.
+  `src/platform.rs` passes the error on from `open_window`.
+
 The Quill project also changed it in 2026 so a main window hidden by its
 close button comes back the way Telegram Desktop's does:
 

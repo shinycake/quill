@@ -84,12 +84,7 @@ impl QuillApp {
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.prefs = prefs;
-            if let Err(err) = live.driver.save_call_prefs() {
-                self.connection.set_note(StatusNote::silent(tr_with(
-                    keys::Q_OPS_COULDN_T_SAVE_CALL_SETTINGS,
-                    &[("err", &err.to_string())],
-                )));
-            }
+            live.driver.save_call_prefs();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.calls.prefs = prefs;
             self.connection.set_note(StatusNote::silent(tr(

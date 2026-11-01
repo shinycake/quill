@@ -125,7 +125,7 @@ impl ChatWindows {
     }
 
     /// Every open chat window, as its chat and window.
-    fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
+    pub(super) fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
         self.open.iter().map(|open| (open.chat_id, open.handle))
     }
 
@@ -606,7 +606,8 @@ impl QuillApp {
             return window_title(None, 0, None);
         }
         // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
-        let total = quill::tray::badge_count(session, &session.settings.badge_prefs)
+        let total = (self.frame.title_badge.borrow_mut())
+            .get(session, &session.settings.badge_prefs)
             .saturating_add(quill::notify_accounts::other_accounts_unread().count);
         let chat = session.chats.get(&chat_id.0).map(|chat| TitleChat {
             name: &chat.title,

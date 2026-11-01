@@ -574,32 +574,17 @@ impl Session {
     }
 
     /// `ids` minus the resolved and already attempted ones, capped at 200.
-    pub fn unresolved_custom_emoji_ids(&self, ids: Vec<i64>) -> Vec<i64> {
-        self.unresolved_custom_emoji_ids_in(ids, &self.resolved_custom_emoji_ids())
-    }
-
-    /// [`Self::unresolved_custom_emoji_ids`] with the resolved set already
-    /// built by the caller.
-    pub fn unresolved_custom_emoji_ids_in(
-        &self,
-        mut ids: Vec<i64>,
-        resolved: &HashSet<i64>,
-    ) -> Vec<i64> {
-        ids.retain(|id| {
-            !self.stickers.emoji.status_resolution_attempted.contains(id) && !resolved.contains(id)
-        });
+    pub fn unresolved_custom_emoji_ids(&self, mut ids: Vec<i64>) -> Vec<i64> {
+        ids.retain(|id| self.custom_emoji_needs_resolving(*id));
         ids.truncate(200);
         ids
     }
 
-    /// Custom emoji ids `custom_emoji_stickers` already holds.
-    pub fn resolved_custom_emoji_ids(&self) -> HashSet<i64> {
-        self.stickers
-            .emoji
-            .custom_emoji_stickers
-            .iter()
-            .filter_map(|s| s.custom_emoji_id)
-            .collect()
+    /// Neither resolved nor already asked for.
+    pub fn custom_emoji_needs_resolving(&self, id: i64) -> bool {
+        let emoji = &self.stickers.emoji;
+        !emoji.status_resolution_attempted.contains(&id)
+            && emoji.custom_emoji_stickers.lookup(id).is_none()
     }
 
     /// Image files of the open chat's resolved custom emoji that still need
@@ -608,18 +593,11 @@ impl Session {
         self.custom_emoji_files_for(&self.open_chat_custom_emoji_ids())
     }
 
-    /// [`Self::open_chat_custom_emoji_files`] for `ids` (sorted ascending,
-    /// as [`Self::open_chat_custom_emoji_ids`] returns them).
+    /// [`Self::open_chat_custom_emoji_files`] for `ids`.
     pub fn custom_emoji_files_for(&self, ids: &[i64]) -> Vec<crate::ids::FileId> {
-        self.stickers
-            .emoji
-            .custom_emoji_stickers
-            .iter()
-            .filter(|s| {
-                s.custom_emoji_id
-                    .is_some_and(|id| ids.binary_search(&id).is_ok())
-            })
-            .filter_map(|s| s.display_file_id())
+        let stickers = &self.stickers.emoji.custom_emoji_stickers;
+        ids.iter()
+            .filter_map(|id| stickers.lookup(*id)?.display_file_id())
             .filter(|file| self.should_download(*file))
             .collect()
     }

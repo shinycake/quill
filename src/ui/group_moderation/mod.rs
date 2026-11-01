@@ -10,6 +10,7 @@ use super::scheduled::picked_unix;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::date_picker::DatePicker;
@@ -21,7 +22,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::local_time::now_unix;
 use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
 use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
@@ -242,7 +242,7 @@ impl QuillApp {
             self.restricted_member_entry(chat_id, user_id)
         };
         let current = existing.map_or(defaults, |r| r.permissions);
-        let until = existing.map(|r| initial_until(r.until_date, now_unix()));
+        let until = existing.map(|r| initial_until(r.until_date, WallClock::of(cx).now()));
         self.admin.restrict_dialog = Some(RestrictDialog::new(
             window, cx, chat_id, user_id, ban, current, until,
         ));
@@ -280,7 +280,7 @@ impl QuillApp {
         // A custom time is read from the picker and bounded like
         // tdesktop's `ChooseDateTimeBox` (30 seconds to 366 days ahead);
         // a bad pick keeps the dialog open with the reason.
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let until_date = match dialog.until {
             RestrictUntil::Custom(_) => match picked_unix(&dialog.custom, cx)
                 .ok_or(UntilError::Invalid)
@@ -446,7 +446,7 @@ impl QuillApp {
                 );
             if matches!(until, RestrictUntil::Custom(_)) {
                 body = body.child(
-                    DatePicker::new(&dialog_state.custom)
+                    DatePicker::new(&dialog_state.custom.state)
                         .placeholder(tr(keys::Q_PEOPLE_PICK_A_DATE_AND_TIME)),
                 );
             }

@@ -472,6 +472,15 @@ impl std::ops::Deref for HistoryMessages {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReaderPosition {
+    #[default]
+    Tail,
+    Away {
+        top: MessageId,
+    },
+}
+
 #[derive(Debug, Default)]
 pub struct HistoryState {
     pub messages: HistoryMessages,
@@ -529,6 +538,7 @@ pub struct HistoryState {
     /// resets): a lower bound for the chat's latest message when the chat
     /// summary doesn't carry one.
     pub latest_seen: i64,
+    pub reader: ReaderPosition,
 }
 
 impl HistoryState {
@@ -578,8 +588,14 @@ impl HistoryState {
             .map_or(0, |message| message.id.0);
     }
 
+    /// Oldest server message in the window. Like [`Self::newest_id`], local
+    /// sends are left out: a trim can leave a failed send past the server
+    /// rows, and older pages must not start from its temporary id.
     pub fn oldest_id(&self) -> Option<MessageId> {
-        self.messages.keys().next().copied().map(MessageId)
+        self.messages
+            .values()
+            .find(|message| !message.pending && !message.failed)
+            .map(|message| message.id)
     }
 
     /// Newest server message in the window (pending sends excluded: their
@@ -600,6 +616,7 @@ impl HistoryState {
         self.newer_failed = false;
         self.load_failed = false;
         self.saved_open = None;
+        self.reader = ReaderPosition::Tail;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 

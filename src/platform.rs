@@ -626,7 +626,13 @@ fn os_open_now(_target: &std::ffi::OsStr) -> OsOpen {
 /// Start a helper program (`open`, `xdg-open`, `explorer`) without a shell.
 #[cfg(not(any(test, feature = "test-support")))]
 fn os_spawn(mut command: std::process::Command) -> bool {
-    command.spawn().is_ok()
+    match command.spawn() {
+        Ok(child) => {
+            crate::child_reap::wait_in_background(child);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// Test builds launch nothing: they count the attempt instead, so a test

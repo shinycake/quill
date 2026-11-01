@@ -140,7 +140,7 @@ impl PhotoEditor {
         let mut items = self.placed.iter().map(|(item, _)| item.clone());
         let base = self.base_item.then(|| items.next()).flatten();
         SetRenderJob {
-            canvas: self.working.clone(),
+            canvas: self.orientation.apply(self.working.clone()),
             base,
             rest: items.collect(),
             strokes: self.strokes.clone(),

@@ -13,6 +13,7 @@ use super::assets;
 use super::collect::{collect, read_chunk};
 use super::html::{self, Item, MESSAGES_PER_FILE, Outcome, PageSpec};
 use super::json::{self, JsonWriter, MessageSink};
+use super::loaded_files::LoadedFiles;
 use super::model::{Body, ExportMessage, MediaRef};
 use super::names::Namer;
 use super::settings::{ExportSettings, Skip};
@@ -62,6 +63,8 @@ impl From<serde_json::Error> for ExportError {
 /// may be a TDLib `error`; it fails only on cancel or timeout.
 pub trait Tdlib {
     fn call(&mut self, request: Value, timeout: Duration) -> Result<Value, ExportError>;
+
+    fn post_unanswered(&mut self, request: Value);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +152,9 @@ pub struct Job<'a> {
     /// The viewer's user id, when known: "only my messages" then searches
     /// by sender instead of paging the whole history.
     pub me: Option<i64>,
+    /// Files this export already saved, shared by every chat of an
+    /// account export.
+    pub loaded: &'a LoadedFiles,
 }
 
 /// A TDLib answer, or its error as an [`ExportError`].
@@ -166,23 +172,91 @@ pub(crate) fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, Ex
     Ok(answer)
 }
 
-/// Download a file through TDLib and return its local path, or why it is
-/// left out. Only TDLib's own files are ever returned: a path outside its
-/// directory is refused. `limit` applies to the real size once known.
+pub(crate) struct Fetched {
+    file_id: i32,
+    path: PathBuf,
+    only_for_export: bool,
+}
+
+impl Fetched {
+    pub(crate) fn release<T: Tdlib>(&self, tdlib: &mut T) -> Result<(), ExportError> {
+        if self.only_for_export {
+            release_if_untouched(tdlib, self.file_id, &self.path)?;
+        }
+        Ok(())
+    }
+}
+
+/// Delete the export's download from TDLib's cache, unless something else
+/// started using the file since `getFile` said nothing held it: the view
+/// can ask for it while the export downloads, and TDLib merges the two.
+fn release_if_untouched<T: Tdlib>(
+    tdlib: &mut T,
+    file_id: i32,
+    downloaded: &Path,
+) -> Result<(), ExportError> {
+    let delete = json!({"@type": "deleteFile", "file_id": file_id});
+    // After a cancel the worker's calls send nothing, and the copy would
+    // stay in the cache for good; the driver still keeps the view's files.
+    let call = |tdlib: &mut T, request: Value| match tdlib.call(request, QUERY_TIMEOUT) {
+        Err(ExportError::Cancelled) => {
+            tdlib.post_unanswered(delete.clone());
+            Err(ExportError::Cancelled)
+        }
+        answer => answer,
+    };
+    let now = call(tdlib, json!({"@type": "getFile", "file_id": file_id}))?;
+    let local = now.at("local");
+    let same_copy = local
+        .at("path")
+        .as_str()
+        .and_then(|path| Path::new(path).canonicalize().ok())
+        .is_some_and(|path| path == downloaded);
+    let untouched = now.at("@type") == "file"
+        && local.at("is_downloading_completed") == true
+        && local.at("is_downloading_active") == false
+        && same_copy;
+    if untouched {
+        call(tdlib, delete.clone())?;
+    }
+    Ok(())
+}
+
+fn nothing_held(file: &Value) -> bool {
+    let local = file.at("local");
+    file.at("@type") == "file"
+        && local.at("is_downloading_completed") == false
+        && local.at("is_downloading_active") == false
+        && local.at("downloaded_size").as_i64() == Some(0)
+}
+
 pub(crate) fn fetch_file<T: Tdlib>(
     tdlib: &mut T,
     files_root: &Path,
     file_id: i32,
     limit: Option<i64>,
-) -> Result<Result<PathBuf, Skip>, ExportError> {
+) -> Result<Result<Fetched, Skip>, ExportError> {
     if file_id == 0 {
         return Ok(Err(Skip::Unavailable));
     }
-    let answer = tdlib.call(
+    let before = tdlib.call(
+        json!({"@type": "getFile", "file_id": file_id}),
+        QUERY_TIMEOUT,
+    )?;
+    let only_for_export = nothing_held(&before);
+    let download = tdlib.call(
         json!({"@type": "downloadFile", "file_id": file_id, "priority": 1,
             "offset": 0, "limit": 0, "synchronous": true}),
         DOWNLOAD_TIMEOUT,
-    )?;
+    );
+    let answer = match download {
+        Err(ExportError::Cancelled) if only_for_export => {
+            tdlib.post_unanswered(json!({"@type": "cancelDownloadFile", "file_id": file_id,
+                "only_if_pending": false}));
+            return Err(ExportError::Cancelled);
+        }
+        answer => answer?,
+    };
     let local = &answer.at("local");
     if answer.at("@type") == "error" || local.at("is_downloading_completed") != true {
         return Ok(Err(Skip::Unavailable));
@@ -190,9 +264,17 @@ pub(crate) fn fetch_file<T: Tdlib>(
     if let Some(limit) = limit
         && answer.at("size").as_i64().unwrap_or(0) > limit
     {
+        if only_for_export
+            && let Some(path) = local
+                .at("path")
+                .as_str()
+                .and_then(|path| Path::new(path).canonicalize().ok())
+        {
+            release_if_untouched(tdlib, file_id, &path)?;
+        }
         return Ok(Err(Skip::TooLarge));
     }
-    let Some(source) = local
+    let Some(path) = local
         .at("path")
         .as_str()
         .and_then(|path| Path::new(path).canonicalize().ok())
@@ -200,19 +282,25 @@ pub(crate) fn fetch_file<T: Tdlib>(
         return Ok(Err(Skip::Unavailable));
     };
     let root = files_root.canonicalize()?;
-    if !source.starts_with(&root) || !source.is_file() {
+    if !path.starts_with(&root) || !path.is_file() {
         return Ok(Err(Skip::Unavailable));
     }
-    Ok(Ok(source))
+    Ok(Ok(Fetched {
+        file_id,
+        path,
+        only_for_export,
+    }))
 }
 
-/// Copy `source` to `relative` under `out`, creating folders as needed.
-pub(crate) fn copy_into(out: &Path, relative: &str, source: &Path) -> io::Result<()> {
+pub(crate) fn place_into(out: &Path, relative: &str, file: &Fetched) -> io::Result<()> {
     let target = out.join(relative);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(source, &target)?;
+    if file.only_for_export && fs::hard_link(&file.path, &target).is_ok() {
+        return Ok(());
+    }
+    fs::copy(&file.path, &target)?;
     Ok(())
 }
 
@@ -223,38 +311,54 @@ fn save_file<T: Tdlib>(
     job: &Job<'_>,
     tdlib: &mut T,
     namer: &mut Namer,
-    out: &Path,
+    out: &ChatOut<'_>,
     media: &MediaRef,
     date: i32,
 ) -> Result<Outcome, ExportError> {
     if let Some(skip) = job.settings.skip_reason(media.kind, media.size) {
         return Ok(Outcome::Skipped(skip));
     }
-    let source = match fetch_file(
-        tdlib,
-        job.files_root,
-        media.file_id,
-        Some(job.settings.size_limit),
-    )? {
-        Ok(source) => source,
+    let limit = Some(job.settings.size_limit);
+    let offset = (job.offset_at)(i64::from(date));
+    let path = match save_once(job, tdlib, out, media.file_id, limit, |source| {
+        namer.path(media, date, offset, &source.path.to_string_lossy())
+    })? {
+        Ok(path) => path,
         Err(skip) => return Ok(Outcome::Skipped(skip)),
     };
-    let path = namer.path(
-        media,
-        date,
-        (job.offset_at)(i64::from(date)),
-        &source.to_string_lossy(),
-    );
-    copy_into(out, &path, &source)?;
-    let mut thumb = None;
-    if let Some(preview) = media.thumb
-        && let Ok(source) = fetch_file(tdlib, job.files_root, preview.file_id, None)?
-    {
-        let relative = namer.thumb_path(&path);
-        copy_into(out, &relative, &source)?;
-        thumb = Some(relative);
-    }
+    let thumb = match media.thumb {
+        Some(preview) => save_once(job, tdlib, out, preview.file_id, None, |_| {
+            namer.thumb_path(media.kind.folder(), &path)
+        })?
+        .ok(),
+        None => None,
+    };
     Ok(Outcome::Saved { path, thumb })
+}
+
+/// Save TDLib file `file_id` into `out` under the name `name` picks, or
+/// point at the copy this export already saved. The path is relative to
+/// the chat's folder.
+fn save_once<T: Tdlib>(
+    job: &Job<'_>,
+    tdlib: &mut T,
+    out: &ChatOut<'_>,
+    file_id: i32,
+    limit: Option<i64>,
+    name: impl FnOnce(&Fetched) -> String,
+) -> Result<Result<String, Skip>, ExportError> {
+    if let Some(saved) = job.loaded.find(file_id) {
+        return Ok(Ok(out.folder_path(&saved)));
+    }
+    let source = match fetch_file(tdlib, job.files_root, file_id, limit)? {
+        Ok(source) => source,
+        Err(skip) => return Ok(Err(skip)),
+    };
+    let path = name(&source);
+    place_into(out.folder, &path, &source)?;
+    source.release(tdlib)?;
+    job.loaded.save(file_id, out.root_path(&path));
+    Ok(Ok(path))
 }
 
 /// Where one chat's files go and how its pages link out.
@@ -275,6 +379,25 @@ pub struct ChatOut<'a> {
     /// (tdesktop does for a chat export, and leaves empty chats of an
     /// account export without pages).
     pub page_when_empty: bool,
+}
+
+impl ChatOut<'_> {
+    /// `root_relative`, a path from the export root, as a path from this
+    /// chat's folder.
+    fn folder_path(&self, root_relative: &str) -> String {
+        match root_relative.strip_prefix(self.json_prefix) {
+            Some(inside) => inside.to_string(),
+            None => format!("{}{root_relative}", self.base),
+        }
+    }
+
+    /// A path from this chat's folder as a path from the export root.
+    fn root_path(&self, folder_relative: &str) -> String {
+        match folder_relative.strip_prefix(self.base) {
+            Some(outside) if !self.base.is_empty() => outside.to_string(),
+            _ => format!("{}{folder_relative}", self.json_prefix),
+        }
+    }
 }
 
 /// What one chat's export wrote.
@@ -324,11 +447,11 @@ fn flush_page(
 }
 
 /// The outcome with its paths made relative to the export root.
-fn rooted_outcome(outcome: Option<&Outcome>, prefix: &str) -> Option<Outcome> {
+fn rooted_outcome(outcome: Option<&Outcome>, out: &ChatOut<'_>) -> Option<Outcome> {
     match outcome {
-        Some(Outcome::Saved { path, thumb }) if !prefix.is_empty() => Some(Outcome::Saved {
-            path: format!("{prefix}{path}"),
-            thumb: thumb.as_ref().map(|t| format!("{prefix}{t}")),
+        Some(Outcome::Saved { path, thumb }) => Some(Outcome::Saved {
+            path: out.root_path(path),
+            thumb: thumb.as_deref().map(|t| out.root_path(t)),
         }),
         other => other.cloned(),
     }
@@ -376,7 +499,7 @@ fn write_chat<T: Tdlib>(
         for msg in read_chunk(out.spool, chunk)? {
             let outcome = match &msg.body {
                 Body::Media(media) => {
-                    let outcome = save_file(job, tdlib, &mut namer, out.folder, media, msg.date)?;
+                    let outcome = save_file(job, tdlib, &mut namer, out, media, msg.date)?;
                     match outcome {
                         Outcome::Saved { .. } => result.files += 1,
                         Outcome::Skipped(_) => result.skipped += 1,
@@ -387,7 +510,7 @@ fn write_chat<T: Tdlib>(
             };
             if let Some(sink) = json.as_mut() {
                 let offset = (job.offset_at)(i64::from(msg.date));
-                let rooted = rooted_outcome(outcome.as_ref(), out.json_prefix);
+                let rooted = rooted_outcome(outcome.as_ref(), out);
                 sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
             }
             buffer.push((msg, outcome));

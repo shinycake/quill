@@ -2,7 +2,7 @@
 //! (`docs/decisions/sweep-scroll-restore.md`).
 
 use super::*;
-use quill::state::{HistoryOpen, SavedScroll, ScrollKey, ScrollOpen};
+use quill::state::{HistoryOpen, ReaderPosition, SavedScroll, ScrollKey, ScrollOpen};
 
 impl QuillApp {
     /// Where `chat_id` opens from the chat list, search or a link. An
@@ -53,6 +53,12 @@ impl QuillApp {
                 Some(SavedScroll { anchor, offset })
             });
         self.history.scroll_memory.record(key, saved);
+        if let Some(session) = self.session_mut() {
+            let reader = saved.map_or(ReaderPosition::Tail, |scroll| ReaderPosition::Away {
+                top: scroll.anchor,
+            });
+            session.note_history_reader(key, reader);
+        }
     }
 
     /// The first rows of a new or replaced window are in: start at the

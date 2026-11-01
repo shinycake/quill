@@ -295,6 +295,13 @@ impl QuillApp {
         // the login-review box, the folder tab): any change redraws at once.
         let shown_before = self.polled_chrome();
         self.sync_presence();
+        if let Some(err) = quill::settings::take_deferred_write_failure() {
+            self.connection
+                .set_note(StatusNote::error(quill::lang::tr_with(
+                    keys::Q_PREFS_COULDNT_SAVE_SETTINGS,
+                    &[("err", &err.to_string())],
+                )));
+        }
         self.apply_pending_keybindings(cx);
         // Notification clicks from the Linux listener thread: replies and
         // read receipts run here, chat opens wake the window.
@@ -447,7 +454,6 @@ impl QuillApp {
         // From here on, `progressed` marks results the UI drains (status
         // notes, finished exports, links): those redraw at once.
         let ingested = std::mem::take(&mut progressed);
-        let mut work_left = budget_hit;
         // Picture-in-Picture: its account logging out, or its message
         // deleted (tdesktop `sessionChanges`, `itemRemoved`), handled here
         // too because the root render does not run while the main window
@@ -476,27 +482,10 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
-        // `parity:data-chat-export-html` — forward the export worker's
-        // requests, keep its progress box fresh, and report how it ended.
         if let Some(live) = self.live.as_mut() {
-            live.driver.pump_chat_export();
             live.driver.pump_psa_labels();
-            live.driver.pump_account_export();
-            if live
-                .driver
-                .session
-                .settings
-                .account_export
-                .as_ref()
-                .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
-            {
-                progressed = true;
-                work_left = true;
-            }
         }
-        if self.poll_chat_export_progress() {
-            progressed = true;
-        }
+        need = need.max(self.poll_chat_export_progress());
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
         // Message Link".
@@ -757,7 +746,7 @@ impl QuillApp {
         if logged_out {
             self.restart_live_connection(cx);
         }
-        work_left
+        budget_hit
     }
 
     /// Slice auth-logout-warning: drop the logged-out client and start a
@@ -776,6 +765,7 @@ impl QuillApp {
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup.
         quill::local_path::sweep_media_caches();
+        avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }
 
@@ -835,6 +825,7 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
 
 mod account_notifications;
 mod avatar_icon;
+pub(in crate::ui) use avatar_icon::forget_cached_icons;
 mod debug_notification;
 mod deliver;
 mod inline_reply;

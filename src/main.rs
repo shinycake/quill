@@ -78,6 +78,7 @@ fn refuse_test_build() {
 fn main() {
     quill::startup_trace::mark("main");
     quill::crash_log::install_panic_hook();
+    quill::fd_limit::raise_open_file_limit();
     #[cfg(windows)]
     attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
@@ -208,6 +209,7 @@ fn ui_main(args: &[String]) {
 
     // Demo windows can run beside the live app without touching its private caches.
     quill::local_path::sweep_media_caches();
+    quill::notify::avatar::sweep_old_icons();
     // Old editor working files go once per run, here and nowhere else.
     quill::scratch::sweep_work_dirs_once();
 
@@ -260,6 +262,7 @@ fn ui_main(args: &[String]) {
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
         ui::setup_app_menus(cx);
+        ui::flush_settings_on_quit(cx);
         let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
         cx.spawn(async move |cx| {
             cx.open_window(
@@ -332,6 +335,7 @@ fn ui_main(args: &[String]) {
         })
         .detach();
     });
+    log::logger().flush();
 }
 
 #[cfg(feature = "ui")]
@@ -370,14 +374,12 @@ fn install_main_window_tray(
     quill::notify_focus::warm();
     // "Show taskbar icon" off: the window starts out of the taskbar.
     view.update(cx, |this, _| this.apply_taskbar_icon(window));
-    // The title-bar close button (`ui::link_inbox::close_main_window`).
+    // The title-bar close button (`QuillApp::close_main_window`).
     window.on_window_should_close(cx, {
         let view = view.downgrade();
         move |window, cx| {
-            let (background, signed_in) = view
-                .update(cx, |this, _| (this.minimize_to_tray(), this.signed_in()))
-                .unwrap_or((false, false));
-            ui::link_inbox::close_main_window(background, signed_in, window, cx)
+            view.update(cx, |this, cx| this.close_main_window(window, cx))
+                .unwrap_or(true)
         }
     });
     // parity:platform-tray-icon — system tray icon with
@@ -456,7 +458,11 @@ fn install_main_window_tray(
                                 this.set_inapp_sounds_enabled(!on, cx);
                             });
                         }
-                        quill::tray::TrayAction::Quit => cx.quit(),
+                        quill::tray::TrayAction::Quit => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                this.exit_after_exports(|_, cx| cx.quit(), window, cx);
+                            });
+                        }
                     });
                 }
             }
