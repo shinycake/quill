@@ -415,6 +415,15 @@ impl Engine {
         }
     }
 
+    /// Moves `key`'s last showing back past [`ON_SCREEN`], as if it left
+    /// the screen that long ago.
+    #[cfg(test)]
+    pub(super) fn left_screen(&self, key: &ClipKey) {
+        if let Some(clip) = lock_or_recover(&self.shared.state).clips.get_mut(key) {
+            clip.used = clip.used.checked_sub(ON_SCREEN).unwrap_or(clip.used);
+        }
+    }
+
     /// The frames drawn since the last call.
     pub fn take_rendered(&self) -> Vec<Rendered> {
         std::mem::take(&mut lock_or_recover(&self.shared.state).rendered)
