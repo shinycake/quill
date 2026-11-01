@@ -551,10 +551,18 @@ mod tests {
             let run: HashSet<u32> = live_text_particles(now)
                 .map(|particle| particle.start.to_bits())
                 .collect();
-            assert!(run.len() as f32 <= lifetime_count + 4., "{now}: {}", run.len());
+            assert!(
+                run.len() as f32 <= lifetime_count + 4.,
+                "{now}: {}",
+                run.len()
+            );
             for particle in TEXT_FIELD.iter() {
                 if place(&TEXT, particle, now).is_some() {
-                    assert!(run.contains(&particle.start.to_bits()), "{now}: {}", particle.start);
+                    assert!(
+                        run.contains(&particle.start.to_bits()),
+                        "{now}: {}",
+                        particle.start
+                    );
                 }
             }
         }
@@ -563,7 +571,10 @@ mod tests {
     type XyOpacity = [f32; 3];
 
     fn sorted_bits(specks: Vec<XyOpacity>) -> Vec<[u32; 3]> {
-        let mut bits: Vec<_> = specks.into_iter().map(|speck| speck.map(f32::to_bits)).collect();
+        let mut bits: Vec<_> = specks
+            .into_iter()
+            .map(|speck| speck.map(f32::to_bits))
+            .collect();
         bits.sort_unstable();
         bits
     }
