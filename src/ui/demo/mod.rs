@@ -354,9 +354,6 @@ pub(super) enum HistoryAnim {
     Stickers60,
 }
 
-/// `QUILL_DEMO_HISTORY_ANIM=stickers,emoji,video,note,spoiler,spoiler12,stickers60`
-/// (any subset; `all` for the first four): the ready-chats fixture's open
-/// chat ends with that content, to measure what history animations cost.
 pub(super) fn demo_history_anim() -> Vec<HistoryAnim> {
     let Ok(value) = std::env::var("QUILL_DEMO_HISTORY_ANIM") else {
         return Vec::new();

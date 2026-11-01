@@ -359,6 +359,8 @@ fn draw_text_specks(rect: Bounds<Pixels>, origin: Point<Pixels>, color: Hsla, wi
     let now = loop_ms();
     let field_area = Bounds::new(rect.origin - origin, rect.size);
     let speck_reach = px(TEXT.size_max / 2.);
+    // A layer's doc asks for no overlap, and specks overlap. They are all
+    // quads, and `Scene::finish` sorts quads stably, so paint order holds.
     window.paint_layer(rect.dilate(speck_reach), |window| {
         text_specks(field_area, now, |speck| {
             let bounds = Bounds::new(
