@@ -1,7 +1,8 @@
 use super::decode_loop::{Step, next_step};
 use super::{
-    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, BgraPool, Clock, Demuxer,
-    Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame, rotate_bgra, take_due,
+    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, BGRA_KEPT, BgraPool, Clock,
+    Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame, YuvColor, lock,
+    rotate_bgra, take_due,
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -106,6 +107,35 @@ fn a_bgra_buffer_handed_back_is_turned_into_again() {
     let (small, ..) = rotate_bgra(&src, 1, 2, 8, 0, &pool);
     assert_eq!(small.len(), 8);
     assert_eq!(pool.take(16).capacity(), 16);
+}
+
+/// A pool keeps a few idle buffers, and none once the clip shows NV12
+/// pictures, until it decodes BGRA again.
+#[test]
+fn a_pool_lets_its_buffers_go_once_nv12_pictures_show() {
+    // A clip with no pictures of its own: only the NV12 one below shows.
+    let (mut player, _) = scripted_player(Some(0), false, 2);
+    let pool = player.bgra_pool().clone();
+    for _ in 0..8 {
+        pool.give(vec![0; 16]);
+    }
+    assert_eq!(pool.held_bytes(), BGRA_KEPT * 16);
+    lock(&player.shared.state).video.push_front(VideoFrame {
+        pixels: Pixels::Nv12 {
+            bytes: Arc::from(vec![16u8; 6]),
+            color: YuvColor::default(),
+        },
+        ..VideoFrame::bgra(0.0, 2, 2, Vec::new())
+    });
+    player.play();
+    assert!(player.take_frame().is_some());
+    assert_eq!(pool.held_bytes(), 0);
+    // An image of an earlier BGRA picture leaves the screen.
+    pool.give(vec![0; 16]);
+    assert_eq!(pool.held_bytes(), 0);
+    drop(pool.take(16));
+    pool.give(vec![0; 16]);
+    assert_eq!(pool.held_bytes(), 16);
 }
 
 #[test]

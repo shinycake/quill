@@ -3,33 +3,55 @@
 use super::{lock, nv12};
 use std::sync::{Arc, Mutex};
 
-/// Buffers kept at most: as for NV12, the decoder's queue, the picture
-/// being decoded, the one on screen and the ones waiting to leave the atlas.
-const KEPT: usize = 8;
+/// Idle buffers kept at most. A playing clip hands one back for each one
+/// it takes, so few wait at any time; more would only sit idle once it
+/// pauses or moves to NV12 (budgets count these, `INLINE_DECODE_BUDGET`).
+pub const BGRA_KEPT: usize = 3;
 
 /// A player's BGRA picture buffers. The images they become hand them back
 /// when they are dropped (`RenderImage::with_recycler`), so a playing clip
 /// fills the same few buffers instead of allocating one per picture. Clones
 /// share the buffers.
 #[derive(Clone, Default)]
-pub struct BgraPool(Arc<Mutex<Vec<Vec<u8>>>>);
+pub struct BgraPool(Arc<Mutex<Kept>>);
+
+#[derive(Default)]
+struct Kept {
+    buffers: Vec<Vec<u8>>,
+    /// The clip shows NV12 pictures: buffers handed back would sit idle.
+    released: bool,
+}
 
 impl BgraPool {
     /// A `len`-byte buffer to overwrite whole: a kept one, else a new one.
     /// Kept buffers of other sizes go.
     pub fn take(&self, len: usize) -> Vec<u8> {
         let mut kept = lock(&self.0);
-        kept.retain(|buffer| buffer.len() == len);
+        kept.released = false;
+        kept.buffers.retain(|buffer| buffer.len() == len);
         // Zeroed memory this large is fresh pages, not a memset.
-        kept.pop().unwrap_or_else(|| vec![0; len])
+        kept.buffers.pop().unwrap_or_else(|| vec![0; len])
     }
 
     /// Keep `buffer` for a later picture.
     pub fn give(&self, buffer: Vec<u8>) {
         let mut kept = lock(&self.0);
-        if kept.len() < KEPT {
-            kept.push(buffer);
+        if !kept.released && kept.buffers.len() < BGRA_KEPT {
+            kept.buffers.push(buffer);
         }
+    }
+
+    /// A picture that needs no buffer of ours was shown: let the kept ones
+    /// go, and the ones handed back until a BGRA picture is decoded again.
+    pub(super) fn release(&self) {
+        let mut kept = lock(&self.0);
+        kept.released = true;
+        kept.buffers = Vec::new();
+    }
+
+    /// Bytes of the buffers kept.
+    pub fn held_bytes(&self) -> usize {
+        lock(&self.0).buffers.iter().map(Vec::len).sum()
     }
 }
 

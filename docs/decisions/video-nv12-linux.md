@@ -73,7 +73,8 @@ With pictures on the GPU path, what each one still cost:
   picture and copies once in Rust. Windows gains the same.
 - `rotate_bgra` (pictures that stay BGRA: 10-bit, 4:2:2, odd sides,
   BT.2020, and the pause after a refused surface) writes into a buffer
-  from the player's `BgraPool` (8 at most), and so does the CPU NV12
+  from the player's `BgraPool` (3 idle at most, none while NV12 pictures
+  show, and counted in the inline decode budget), and so does the CPU NV12
   conversion of `VideoFrame::into_bgra`. The `RenderImage` a picture
   becomes owns its buffer, so the vendored GPUI core gained
   `RenderImage::with_recycler`: the image hands its frames back when it is

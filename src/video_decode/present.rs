@@ -6,7 +6,7 @@
 //! "starved" (buffering) state live here too.
 #![deny(clippy::indexing_slicing)]
 
-use super::{DUE_SLACK, Player, VideoFrame, lock, synced_position, take_due};
+use super::{DUE_SLACK, Pixels, Player, VideoFrame, lock, synced_position, take_due};
 use std::time::{Duration, Instant};
 
 /// The longest the UI is told to sleep before the next picture, so a wrong
@@ -43,6 +43,7 @@ impl Player {
             take_due(&mut state.video, position, self.first)
         };
         if let Some(frame) = &picked {
+            self.note_handed_out(frame);
             self.shared.wake.notify_all();
             if self.first {
                 self.first = false;
@@ -51,6 +52,12 @@ impl Player {
             self.last_pts = Some(frame.pts);
         }
         picked
+    }
+
+    fn note_handed_out(&self, frame: &VideoFrame) {
+        if matches!(frame.pixels, Pixels::Nv12 { .. }) {
+            self.bgra.release();
+        }
     }
 
     /// When the front queued picture becomes due on the wall clock, while
@@ -93,6 +100,7 @@ impl Player {
             return None;
         }
         let frame = lock(&self.shared.state).video.pop_front()?;
+        self.note_handed_out(&frame);
         self.shared.wake.notify_all();
         let now = Instant::now();
         self.with_clock(|clock| {

@@ -25,7 +25,7 @@ mod ffi;
 mod nv12;
 mod present;
 
-pub use bgra::{BgraPool, rotate_bgra};
+pub use bgra::{BGRA_KEPT, BgraPool, rotate_bgra};
 pub use nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12};
 
 use std::collections::VecDeque;

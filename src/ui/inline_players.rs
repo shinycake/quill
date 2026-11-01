@@ -1030,11 +1030,11 @@ mod tests {
         // Players at 1x 720p-GIF size: dozens fit.
         let each = InlineTile::media(Gif, 1280, 720, 0).decode_bytes(360, 3);
         let fit = (1..).take_while(|n| admits(each * n, each)).count();
-        assert!(fit >= 40, "{fit}");
-        // At 2x they cost four times as much, still a dozen.
+        assert!(fit >= 24, "{fit}");
+        // At 2x they cost four times as much, still more than a few.
         let each = InlineTile::media(Gif, 1280, 720, 0).decode_bytes(720, 3);
         let fit = (1..).take_while(|n| admits(each * n, each)).count();
-        assert!((12..40).contains(&fit), "{fit}");
+        assert!((6..24).contains(&fit), "{fit}");
         // AVPlayer players hold nothing of ours.
         assert!(admits(INLINE_DECODE_BUDGET, 0));
         assert!(!admits(INLINE_DECODE_BUDGET, 1));
@@ -1042,10 +1042,11 @@ mod tests {
 
     #[test]
     fn the_budget_counts_the_queue_the_inline_decoder_keeps() {
-        // `OpenOptions::inline` keeps three pictures ahead of the one shown.
+        // `OpenOptions::inline` keeps three pictures ahead of the one shown,
+        // and its BGRA pool up to three idle buffers.
         let queued = quill::video_decode::OpenOptions::inline(320).video_frames;
         assert_eq!(queued, 3);
         let gif = InlineTile::media(crate::ui::message_media::MediaFrameKind::Gif, 1280, 720, 0);
-        assert_eq!(gif.decode_bytes(320, queued), 320 * 180 * 4 * 4);
+        assert_eq!(gif.decode_bytes(320, queued), 320 * 180 * 4 * 7);
     }
 }
