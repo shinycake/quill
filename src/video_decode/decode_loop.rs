@@ -1,13 +1,13 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::{
-    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Demuxer, IDLE_WAIT, Item,
-    PixelOutput, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
+    AUDIO_HIGH_SECS, AUDIO_LOW_SECS, AudioQueue, AudioShared, AudioTap, Clock, Demuxer, IDLE_WAIT,
+    Item, PixelOutput, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
 };
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Step {
@@ -40,6 +40,35 @@ fn drop_passed_pictures(queue: &mut VecDeque<VideoFrame>, floor: f64) {
     }
 }
 
+/// The lowest position paint can reach: what is heard while the sound
+/// drives the clock, else the running clock itself, as `Player` paces.
+/// `None` while the clock stands still.
+fn paint_floor(clock: &Clock, sound: Option<f64>, now: Instant) -> Option<f64> {
+    let position = match sound {
+        Some(heard) => heard,
+        None if clock.is_playing() && !clock.held => clock.position(now),
+        None => return None,
+    };
+    Some(position - SYNC_TOLERANCE)
+}
+
+/// How long the thread may sleep. With no sound to wake it as it plays,
+/// until the clock passes the second queued picture, which it then drops.
+fn idle_wait(state: &State, sound: Option<f64>, now: Instant) -> Duration {
+    let clock = &state.clock;
+    if sound.is_some() || !clock.is_playing() || clock.held {
+        return IDLE_WAIT;
+    }
+    let Some(next) = state.video.get(1) else {
+        return IDLE_WAIT;
+    };
+    let ahead = (next.pts + SYNC_TOLERANCE - clock.position(now)) / clock.rate.max(0.01);
+    // A whole millisecond past it, so the wake finds the picture passed.
+    Duration::try_from_secs_f64(ahead.max(0.0))
+        .map_or(IDLE_WAIT, |wait| wait.min(IDLE_WAIT))
+        .saturating_add(Duration::from_millis(1))
+}
+
 pub(super) enum Turn<'s> {
     Stop,
     Worked,
@@ -56,7 +85,7 @@ pub(super) struct Decoder {
 pub(super) fn run(demuxer: Box<dyn Demuxer>, shared: Arc<Shared>, want_audio: bool) {
     let mut decoder = Decoder::start(demuxer, &shared, want_audio);
     loop {
-        match decoder.turn(&shared) {
+        match decoder.turn(&shared, Instant::now()) {
             Turn::Stop => return,
             Turn::Worked => {}
             Turn::Idle(state, wait) => {
@@ -107,7 +136,7 @@ impl Decoder {
         }
     }
 
-    pub(super) fn turn<'s>(&mut self, shared: &'s Shared) -> Turn<'s> {
+    pub(super) fn turn<'s>(&mut self, shared: &'s Shared, now: Instant) -> Turn<'s> {
         let mut state = lock(&shared.state);
         if state.stop {
             return Turn::Stop;
@@ -129,8 +158,12 @@ impl Decoder {
             .audio
             .clone()
             .filter(|audio| !audio.detached.load(Ordering::Relaxed));
-        if let Some(heard) = audio.as_ref().and_then(|audio| audio.heard()) {
-            drop_passed_pictures(&mut state.video, heard - SYNC_TOLERANCE);
+        let sound = audio
+            .as_ref()
+            .filter(|audio| !audio.starved.load(Ordering::Acquire))
+            .and_then(|audio| audio.heard());
+        if let Some(floor) = paint_floor(&state.clock, sound, now) {
+            drop_passed_pictures(&mut state.video, floor);
         }
         let video_queued = self
             .has_video
@@ -138,7 +171,8 @@ impl Decoder {
         let audio_buffered = audio.as_ref().map(|audio| audio.buffered_secs());
         let step = next_step(video_queued, audio_buffered);
         if state.eof || step == Step::Wait {
-            return Turn::Idle(state, IDLE_WAIT);
+            let wait = idle_wait(&state, sound, now);
+            return Turn::Idle(state, wait);
         }
         let epoch = state.epoch;
         let output = state.output;

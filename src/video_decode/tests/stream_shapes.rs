@@ -1,8 +1,8 @@
 use super::super::decode_loop::{Decoder, Turn};
 use super::super::ffi::FfiDemuxer;
 use super::super::{
-    AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Clock, Demuxer, Item, MediaInfo,
-    OpenOptions, Pixels, Player, Shared, State, VideoFrame, lock,
+    AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Demuxer, Item, MediaInfo,
+    OpenOptions, Pixels, Player, SYNC_TOLERANCE, Shared, State, VideoFrame, lock,
 };
 use super::{decode_all, decoder, fixture, frame};
 use std::collections::VecDeque;
@@ -210,7 +210,6 @@ impl Rig {
         let decoder = Decoder::start(demuxer, &shared, want_audio);
         let mut player = Player {
             shared: shared.clone(),
-            clock: Clock::new(),
             first: true,
             last_pts: None,
             ended: false,
@@ -234,8 +233,13 @@ impl Rig {
 
     /// Run turns until the thread would sleep; how long it would.
     fn settle_until_idle(&mut self) -> Duration {
+        self.settle_at(Instant::now())
+    }
+
+    /// Run turns at `now` until the thread would sleep; how long it would.
+    fn settle_at(&mut self, now: Instant) -> Duration {
         loop {
-            match self.decoder.turn(&self.shared) {
+            match self.decoder.turn(&self.shared, now) {
                 Turn::Worked => {}
                 Turn::Idle(_, wait) => return wait,
                 Turn::Stop => panic!("the player is alive"),
@@ -505,6 +509,30 @@ fn a_clip_nobody_paints_ends_when_its_time_runs_out() {
         rig.pictures_queued()
     );
     assert!(rig.player.error().is_none());
+}
+
+#[test]
+fn a_silent_clip_nobody_paints_keeps_its_picture_current() {
+    let mut rig = Rig::open(Shape::clip(10.0, 0.0));
+    let t0 = rig.start();
+    let mut now = t0;
+    let mut wakes = 0;
+    while now < t0 + Duration::from_secs(5) {
+        now += rig.settle_at(now);
+        wakes += 1;
+        assert!(rig.pictures_queued() <= QUEUE);
+    }
+    assert!(wakes <= 5 * FPS as usize + 2, "{wakes} wakes in 5 s");
+    let shown = rig
+        .player
+        .take_frame_for(now, now)
+        .expect("a picture is due");
+    let position = rig.player.position_at(now);
+    assert!(
+        (position - shown.pts).abs() <= FRAME_SECS + SYNC_TOLERANCE,
+        "{} at {position}",
+        shown.pts
+    );
 }
 
 #[test]

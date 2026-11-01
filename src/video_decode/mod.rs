@@ -602,6 +602,9 @@ struct State {
     /// The picture layout asked for; the decode thread passes it on.
     output: PixelOutput,
     seek: Option<f64>,
+    /// The player's clock. It lives here so the decode thread can pace
+    /// pictures nobody paints on it.
+    clock: Clock,
     /// Bumped by every seek: items decoded for an older one are dropped.
     epoch: u64,
     eof: bool,
@@ -612,7 +615,6 @@ struct State {
 /// One clip: a decode thread plus the clock and the picture queue.
 pub struct Player {
     shared: Arc<Shared>,
-    clock: Clock,
     /// No picture shown since the last seek (or open).
     first: bool,
     /// The newest picture handed out, for the end position.
@@ -706,7 +708,6 @@ impl Player {
         .map_err(|err| err.to_string())?;
         Ok(Self {
             shared,
-            clock: Clock::new(),
             first: true,
             last_pts: None,
             ended: false,
@@ -721,6 +722,16 @@ impl Player {
     fn join_thread(&mut self) -> Option<bool> {
         let handle = self.thread.take()?;
         Some(matches!(handle.join(), Ok(Some(()))))
+    }
+
+    fn clock(&self) -> Clock {
+        lock(&self.shared.state).clock
+    }
+
+    /// Change the clock, and wake the decode thread, which paces on it.
+    fn with_clock(&self, change: impl FnOnce(&mut Clock)) {
+        change(&mut lock(&self.shared.state).clock);
+        self.shared.wake.notify_all();
     }
 
     /// What the file holds, once the decode thread has opened it.
@@ -777,22 +788,22 @@ impl Player {
         if self.ended {
             self.seek(0.0);
         }
-        self.clock.play(Instant::now());
+        self.with_clock(|clock| clock.play(Instant::now()));
     }
 
     pub fn pause(&mut self) {
         let now = Instant::now();
-        if !self.clock.held {
+        if !self.clock().held {
             let position = self.position_at(now);
-            self.clock.follow(position, now);
+            self.with_clock(|clock| clock.follow(position, now));
         }
-        self.clock.pause(now);
+        self.with_clock(|clock| clock.pause(now));
     }
 
     /// Playing, and not run out.
     pub fn is_playing(&mut self) -> bool {
         self.update_ended(Instant::now());
-        self.clock.is_playing() && !self.ended
+        self.clock().is_playing() && !self.ended
     }
 
     /// Ran out at the end (until the next seek).
@@ -802,7 +813,7 @@ impl Player {
     }
 
     pub fn set_rate(&mut self, rate: f64) {
-        self.clock.set_rate(rate, Instant::now());
+        self.with_clock(|clock| clock.set_rate(rate, Instant::now()));
     }
 
     /// Show `secs` next: pictures and sound restart there.
@@ -824,7 +835,7 @@ impl Player {
             }
         }
         self.shared.wake.notify_all();
-        self.clock.seek(secs, Instant::now());
+        self.with_clock(|clock| clock.seek(secs, Instant::now()));
         self.first = true;
         self.ended = false;
         self.last_pts = None;
@@ -839,8 +850,9 @@ impl Player {
     }
 
     fn position_at(&self, now: Instant) -> f64 {
-        let wall = self.clock.position(now);
-        let position = if self.clock.held || !self.clock.is_playing() {
+        let clock = self.clock();
+        let wall = clock.position(now);
+        let position = if clock.held || !clock.is_playing() {
             wall
         } else {
             synced_position(wall, self.heard())
@@ -873,7 +885,7 @@ impl Player {
         }
         let no_picture_coming = self.first;
         if no_picture_coming {
-            self.clock.release(now);
+            self.with_clock(|clock| clock.release(now));
         }
         let sound_done = self.audio().is_none_or(|audio| audio.drained());
         let end = self.duration().or(self.last_pts);
@@ -882,8 +894,10 @@ impl Player {
         if sound_done && reached {
             // Settle the clock on the end so the position reads full.
             let end = end.unwrap_or_else(|| self.position_at(now));
-            self.clock.follow(end, now);
-            self.clock.pause(now);
+            self.with_clock(|clock| {
+                clock.follow(end, now);
+                clock.pause(now);
+            });
             self.ended = true;
         }
     }
