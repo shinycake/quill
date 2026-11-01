@@ -139,7 +139,7 @@ fn a_proxy_known_after_the_first_poll_gets_tdlib_going_again() {
 }
 
 #[test]
-fn only_a_client_opening_a_connection_has_the_os_proxy_read_again() {
+fn only_a_client_opening_a_connection_or_waiting_for_a_network_has_the_os_proxy_read_again() {
     let (mut driver, _recorder) = driver();
     let scope = TickScope::OnScreen {
         settings_open: false,
@@ -159,6 +159,11 @@ fn only_a_client_opening_a_connection_has_the_os_proxy_read_again() {
     let later = start + Duration::from_secs(15);
     driver.poll_ticks(scope, later, network(0, true));
     assert_eq!(driver.system_proxy_asked, Some(later));
+
+    driver.session.connection = ConnectionState::WaitingForNetwork;
+    let offline = later + Duration::from_secs(15);
+    driver.poll_ticks(scope, offline, network(0, false));
+    assert_eq!(driver.system_proxy_asked, Some(offline));
 }
 
 #[test]

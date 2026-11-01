@@ -45,7 +45,7 @@ impl Path {
             Ok(local) if local.ip().is_unspecified() => Self::NoRoute,
             Ok(local) => Self::Via(local.ip()),
             Err(error)
-                error.raw_os_error() == Some(NO_SUCH_IP_VERSION)
+                if error.raw_os_error() == Some(NO_SUCH_IP_VERSION)
                     || matches!(
                         error.kind(),
                         io::ErrorKind::NetworkUnreachable

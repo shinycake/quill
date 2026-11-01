@@ -104,7 +104,7 @@ fn a_burst_of_requests_reads_once() {
 }
 
 #[test]
-fn only_a_connection_being_opened_asks_again_and_not_too_often() {
+fn only_a_connection_being_opened_or_a_lost_network_asks_again_and_not_too_often() {
     let start = Instant::now();
     for quiet in [
         ConnectionState::Ready,
