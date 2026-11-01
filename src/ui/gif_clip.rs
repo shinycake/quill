@@ -76,6 +76,9 @@ struct Decoded {
     frames: Vec<Held>,
     /// Every frame is in, so the clip loops.
     complete: bool,
+    /// How long the play that started at this instant waited at the last
+    /// decoded picture for more: its loop runs that much behind its clock.
+    waited: Option<(Instant, Duration)>,
 }
 
 /// The distinct pictures of a looping GIF and how long each shows. The
@@ -327,15 +330,36 @@ impl GifClip {
             .map_or(Duration::ZERO, |held| held.ends)
     }
 
-    /// The picture showing `elapsed` into the (looping) clip. Past the
-    /// pictures decoded so far, the last one holds until more come.
+    /// The picture showing `elapsed` into the (looping) clip.
+    #[cfg(test)]
     pub(super) fn frame_at(&self, elapsed: Duration) -> Option<Arc<RenderImage>> {
-        let decoded = lock(&self.decoded);
-        let total = Self::loop_length(&decoded).as_nanos();
+        self.frame_for(None, elapsed)
+    }
+
+    /// The picture showing `elapsed` into the play that started at
+    /// `started`. Past the pictures decoded so far, the last one holds and
+    /// the play waits there, so it goes on with the next picture once it
+    /// comes instead of skipping ahead (or jumping back once the clip is
+    /// whole and loops).
+    fn frame_for(&self, started: Option<Instant>, elapsed: Duration) -> Option<Arc<RenderImage>> {
+        let mut decoded = lock(&self.decoded);
+        let length = Self::loop_length(&decoded);
+        let waited = match (decoded.waited, started) {
+            (Some((at, waited)), Some(started)) if at == started => waited,
+            _ => Duration::ZERO,
+        };
+        let mut played = elapsed.saturating_sub(waited);
+        if !decoded.complete && played > length {
+            if let Some(started) = started {
+                decoded.waited = Some((started, waited.saturating_add(played - length)));
+            }
+            played = length;
+        }
+        let total = length.as_nanos();
         let at = if decoded.complete {
-            elapsed.as_nanos().checked_rem(total).unwrap_or(0)
+            played.as_nanos().checked_rem(total).unwrap_or(0)
         } else {
-            elapsed.as_nanos()
+            played.as_nanos()
         };
         decoded
             .frames
@@ -394,7 +418,7 @@ impl GifPlay {
         } else {
             self.started.elapsed()
         };
-        self.clip.frame_at(elapsed)
+        self.clip.frame_for(Some(self.started), elapsed)
     }
 
     /// The redraw rate the GIF's own frame cadence asks for (0 while it

@@ -353,3 +353,34 @@ fn a_gif_plays_from_its_first_picture_while_the_rest_decodes() {
         &clip.frame_at(ms(400)).expect("looped")
     ));
 }
+
+/// Decoding ran slower than playback: the row waits at the last decoded
+/// picture and goes on with the next one, instead of jumping back into the
+/// loop once the clip is whole.
+#[test]
+fn a_gif_that_decodes_slower_than_it_plays_goes_on_where_it_waited() {
+    const GREEN: [u8; 4] = [0, 255, 0, 255];
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    let mut builder = ClipBuilder::default();
+    for color in [RED, BLUE, GREEN] {
+        assert!(builder.push(solid(color), ms(100)));
+    }
+    let clip = builder.started().expect("playing");
+    let started = std::time::Instant::now();
+    let third = clip.frame_for(Some(started), ms(250)).expect("third");
+    // 500 ms in, only 300 ms have decoded: the third picture holds.
+    let held = clip.frame_for(Some(started), ms(500)).expect("held");
+    assert!(Arc::ptr_eq(&third, &held));
+    assert!(builder.push(solid(WHITE), ms(100)));
+    let clip = builder.finish().expect("whole");
+    // The fourth picture follows, not the second.
+    let next = clip.frame_for(Some(started), ms(520)).expect("next");
+    let fourth = clip.frame_at(ms(350)).expect("fourth");
+    assert!(Arc::ptr_eq(&next, &fourth));
+    // A new play starts from the first picture.
+    let first = clip.frame_at(ms(0)).expect("first");
+    let replay = clip
+        .frame_for(Some(started + ms(1)), ms(0))
+        .expect("replay");
+    assert!(Arc::ptr_eq(&replay, &first));
+}
