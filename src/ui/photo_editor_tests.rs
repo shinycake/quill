@@ -275,3 +275,42 @@ fn an_edit_lands_on_its_photo_after_an_earlier_card_is_removed(cx: &mut TestAppC
     assert_eq!(tray_path(&app, &mut vcx), None, "nothing left held");
     let _ = std::fs::remove_file(sent);
 }
+
+#[gpui_kit::test]
+fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("left.png", 71, 17);
+    open_on(&app, &mut vcx, &original);
+    let first_chat = app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.submit_composer(String::new(), window, cx);
+        let session = app.demo_session.as_mut().expect("demo session");
+        let open = session.open_chat.expect("an open chat");
+        let other = session
+            .chats
+            .keys()
+            .map(|&chat| quill::ids::ChatId(chat))
+            .find(|&chat| chat != open)
+            .expect("another chat");
+        session.open_chat(other);
+        cx.notify();
+        open
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO)
+        );
+    });
+    app.update_in(&mut vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open_chat(first_chat);
+        }
+        cx.notify();
+    });
+    let edited = tray_path(&app, &mut vcx).expect("the photo waits in its tray");
+    assert_eq!(image::image_dimensions(&edited).ok(), Some((17, 71)));
+    let _ = std::fs::remove_file(edited);
+}

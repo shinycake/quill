@@ -660,3 +660,4 @@
 "lng_share_message_to_chat" = "Message forwarded to **{chat}**.";
 "lng_share_messages_to_chat" = "Messages forwarded to **{chat}**.";
 "qll_forward_failed" = "Could not forward to {chat}.";
+"qll_misc_not_sent_the_chat_closed_before_the_photo" = "Not sent: the chat was closed before the edited photo was ready.";

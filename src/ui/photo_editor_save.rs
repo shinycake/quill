@@ -86,10 +86,11 @@ impl QuillApp {
             let kept = saved.clone();
             let landed = app.update_in(cx, |this, window, cx| {
                 let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
-                if let Some(text) = landed.held
-                    && this.send_slot().as_ref() == Some(&item.slot)
-                {
-                    this.submit_composer(text, window, cx);
+                let here = this.send_slot().as_ref() == Some(&item.slot);
+                match landed.held {
+                    Some(text) if here => this.submit_composer(text, window, cx),
+                    Some(_) => this.note_held_send_dropped(),
+                    None => {}
                 }
             });
             // The window closed: the tray outlives it, so the edit still
@@ -98,7 +99,11 @@ impl QuillApp {
                 && app
                     .main()
                     .update(cx, |this, cx| {
-                        this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
+                        let landed =
+                            this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
+                        if landed.held.is_some() {
+                            this.note_held_send_dropped();
+                        }
                     })
                     .is_err()
                 && let Some(kept) = kept
@@ -107,6 +112,14 @@ impl QuillApp {
             }
         })
         .detach();
+    }
+
+    /// A held Send can go only from its own chat: when that chat is no
+    /// longer open as the render lands, the user is told nothing went.
+    fn note_held_send_dropped(&mut self) {
+        self.connection.set_note(StatusNote::error(tr(
+            keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO,
+        )));
     }
 
     /// The message whose media is being edited, if any.
