@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host"]
+members = [".", "crates/quill-calls-sys", "crates/webview-protocol", "crates/webview-host", "crates/panic-guard"]
 resolver = "2"
 
 # Never crash (docs/contributing/panic-safety.md, phases A and B). Test code is
@@ -153,6 +153,9 @@ futures-channel = "0.3"
 # Mini apps (docs/decisions/codex-miniapp-webview.md): the wire types shared
 # with the quill-webview helper process.
 quill-webview-protocol = { path = "crates/webview-protocol" }
+# The panic-guard count, shared with the vendored Windows platform crate so a
+# panic it catches is not filed as a crash (docs/decisions/gpui-fork-panics.md).
+quill-panic-guard = { path = "crates/panic-guard" }
 # Screenshot demos and kit dialogs register themselves next to their code
 # (docs/decisions/codex-refactor-1.md, codex-refactor-2.md). Already in the
 # lockfile via GPUI.

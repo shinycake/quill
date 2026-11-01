@@ -497,8 +497,9 @@ impl WindowsPlatform {
             .name("VSyncProvider".to_owned())
             .spawn(move || {
                 // Quill: a panic would end vsync and leave every window frozen. Handle it like
-                // a device that can't be recreated: the platform closes the windows.
-                let vsync = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // a device that can't be recreated: the platform closes the windows. The guard
+                // tells Quill's panic hook the panic is caught, so it is not filed as a crash.
+                let vsync = panic_guard::guarded(|| {
                     let vsync_provider = VSyncProvider::new();
                     loop {
                         // Quill: sleep while every window's frames are parked
@@ -571,7 +572,7 @@ impl WindowsPlatform {
                             }
                         }
                     }
-                }));
+                });
                 if vsync.is_err() {
                     log::error!("the vsync thread panicked, closing all windows");
                     // SAFETY: PostMessageW only queues the message.

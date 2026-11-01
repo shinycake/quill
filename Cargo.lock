@@ -3823,6 +3823,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "parking_lot",
+ "quill-panic-guard",
  "rand 0.9.5",
  "raw-window-handle",
  "smallvec",
@@ -7092,6 +7093,7 @@ dependencies = [
  "qrcode",
  "quill",
  "quill-calls-sys",
+ "quill-panic-guard",
  "quill-webview-protocol",
  "rand 0.10.3",
  "raw-window-handle",
@@ -7133,6 +7135,10 @@ dependencies = [
  "libloading 0.9.0",
  "serde_json",
 ]
+
+[[package]]
+name = "quill-panic-guard"
+version = "0.1.0"
 
 [[package]]
 name = "quill-webview"
