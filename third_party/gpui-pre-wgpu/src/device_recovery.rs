@@ -15,8 +15,9 @@
 //!
 //! A GPU that keeps dying is not recovered onto forever ([`SharedRecovery`]):
 //! from the [`SOFTWARE_AFTER_LOSSES`]th loss within [`LOSS_WINDOW`] recovery
-//! goes straight to a CPU adapter and stops looking for the GPU, and at the
-//! [`GIVE_UP_AFTER_LOSSES`]th it gives up.
+//! makes the new context on a CPU adapter only ([`Adapters::SoftwareOnly`])
+//! and stops looking for the GPU. It gives up when no CPU adapter works, or
+//! when that CPU context is lost too.
 //!
 //! A real GPU can take a while to return after a resume or driver reset,
 //! so attempts stay hardware-only for about 27 s. When recovery still had
@@ -49,23 +50,45 @@ const PROBE_MAX: Duration = Duration::from_secs(120);
 /// recovery stay on a CPU adapter or give up.
 const LOSS_WINDOW: Duration = Duration::from_secs(600);
 const SOFTWARE_AFTER_LOSSES: usize = 3;
-const GIVE_UP_AFTER_LOSSES: usize = 6;
 /// While a look runs on its thread: how often a window checks for its answer.
 const PROBE_POLL: Duration = Duration::from_millis(250);
+
+/// Which adapters a new context may be made on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Adapters {
+    /// Not a CPU adapter: a lost GPU may come back.
+    HardwareOnly,
+    /// The best that works, which is a GPU when there is one.
+    Any,
+    /// A CPU adapter only: the GPU keeps dying.
+    SoftwareOnly,
+}
+
+impl Adapters {
+    /// Whether an adapter, a CPU one or not, may be tried.
+    pub(crate) fn admits(self, cpu: bool) -> bool {
+        match self {
+            Self::HardwareOnly => !cpu,
+            Self::Any => true,
+            Self::SoftwareOnly => cpu,
+        }
+    }
+}
 
 /// What a recovery is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
-    /// Make a new shared context: no window has one. `software_at_once`:
-    /// the lost device was a CPU adapter, or the GPU keeps dying.
-    Recreate { software_at_once: bool },
+    /// Make a new shared context: no window has one. `adapters`: what the
+    /// first attempts may use; hardware only widens to any after
+    /// [`SOFTWARE_AFTER`] failures.
+    Recreate { adapters: Adapters },
     /// Use the shared context another window recreated.
     Adopt,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Attempt {
-    Recreate { allow_software: bool },
+    Recreate { adapters: Adapters },
     Adopt,
 }
 
@@ -107,9 +130,12 @@ impl RecoveryPolicy {
             return RecoveryStep::Wait(due);
         }
         RecoveryStep::Attempt(match self.target {
-            Target::Recreate { software_at_once } => Attempt::Recreate {
-                allow_software: software_at_once || self.failures >= SOFTWARE_AFTER,
+            Target::Recreate {
+                adapters: Adapters::HardwareOnly,
+            } if self.failures >= SOFTWARE_AFTER => Attempt::Recreate {
+                adapters: Adapters::Any,
             },
+            Target::Recreate { adapters } => Attempt::Recreate { adapters },
             Target::Adopt => Attempt::Adopt,
         })
     }
@@ -134,9 +160,9 @@ impl RecoveryPolicy {
 pub(crate) enum Shared {
     /// Another window recreated it.
     Healthy,
-    /// Lost or already dropped; whether it was a CPU adapter, as far as
-    /// known, or the GPU keeps dying: either way no GPU is worth waiting for.
-    Lost { was_software: bool },
+    /// Lost or already dropped; what a new context may be made on (see
+    /// [`Losses::adapters`]).
+    Lost { adapters: Adapters },
 }
 
 /// What one `WgpuRenderer::recover` call does next.
@@ -165,16 +191,11 @@ impl Recovering {
                 }
                 false
             }
-            Shared::Lost { was_software } => {
+            Shared::Lost { adapters } => {
                 if matches!(current, Some(Target::Recreate { .. })) {
                     return false;
                 }
-                self.0 = Some(RecoveryPolicy::new(
-                    now,
-                    Target::Recreate {
-                        software_at_once: was_software,
-                    },
-                ));
+                self.0 = Some(RecoveryPolicy::new(now, Target::Recreate { adapters }));
                 true
             }
         }
@@ -250,7 +271,7 @@ impl HardwareProbe {
     ) -> Option<Self> {
         let from_gpu = target
             == Some(Target::Recreate {
-                software_at_once: false,
+                adapters: Adapters::HardwareOnly,
             });
         (from_gpu && landed_on_software).then_some(Self {
             looks: 0,
@@ -295,15 +316,32 @@ pub(crate) struct SharedRecovery {
     probe: Option<HardwareProbe>,
     /// When the shared context was lost, within [`LOSS_WINDOW`] of the last.
     losses: Vec<Instant>,
+    /// The context is the CPU one a GPU that kept dying forced.
+    forced_software: bool,
+    /// That forced CPU context was lost too.
+    gave_up: bool,
 }
 
 /// How a loss of the shared context counts against the GPU.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Losses {
     Few,
-    /// Recover onto a CPU adapter, and do not look for the GPU again.
+    /// Recover onto a CPU adapter only, and do not look for the GPU again.
     KeepsDying,
     GiveUp,
+}
+
+impl Losses {
+    /// What a recreation after this loss may use, given whether the lost
+    /// context was on a CPU adapter, as far as known.
+    pub(crate) fn adapters(self, was_software: Option<bool>) -> Adapters {
+        match (self, was_software) {
+            (Self::KeepsDying | Self::GiveUp, _) => Adapters::SoftwareOnly,
+            // No GPU to wait for.
+            (Self::Few, Some(true)) => Adapters::Any,
+            (Self::Few, _) => Adapters::HardwareOnly,
+        }
+    }
 }
 
 impl SharedRecovery {
@@ -311,6 +349,7 @@ impl SharedRecovery {
     /// once per context, by the window that releases it.
     pub(crate) fn lost(&mut self, now: Instant) -> Losses {
         self.probe = None;
+        self.gave_up |= self.forced_software;
         self.losses
             .retain(|at| now.saturating_duration_since(*at) < LOSS_WINDOW);
         self.losses.push(now);
@@ -319,10 +358,12 @@ impl SharedRecovery {
 
     /// The count as of the last loss.
     pub(crate) fn losses_now(&self) -> Losses {
-        match self.losses.len() {
-            n if n >= GIVE_UP_AFTER_LOSSES => Losses::GiveUp,
-            n if n >= SOFTWARE_AFTER_LOSSES => Losses::KeepsDying,
-            _ => Losses::Few,
+        if self.gave_up {
+            Losses::GiveUp
+        } else if self.losses.len() >= SOFTWARE_AFTER_LOSSES {
+            Losses::KeepsDying
+        } else {
+            Losses::Few
         }
     }
 
@@ -335,8 +376,9 @@ impl SharedRecovery {
         target: Option<Target>,
         landed_on_software: bool,
     ) {
-        if matches!(target, Some(Target::Recreate { .. })) {
+        if let Some(Target::Recreate { adapters }) = target {
             self.probe = HardwareProbe::after_recovery(now, target, landed_on_software);
+            self.forced_software = adapters == Adapters::SoftwareOnly;
         }
     }
 
@@ -352,8 +394,8 @@ impl SharedRecovery {
 #[cfg(test)]
 mod tests {
     use super::{
-        Attempt, FIRST_DELAY, GIVE_UP_AFTER, GIVE_UP_AFTER_LOSSES, HardwareProbe, LOSS_WINDOW,
-        Losses, MAX_DELAY, Next, PROBE_FIRST, PROBE_MAX, PROBE_POLL, ProbeStep, Recovering,
+        Adapters, Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, LOSS_WINDOW, Losses,
+        MAX_DELAY, Next, PROBE_FIRST, PROBE_MAX, PROBE_POLL, ProbeStep, Recovering,
         RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, SOFTWARE_AFTER_LOSSES, Shared,
         SharedRecovery, Target,
     };
@@ -361,11 +403,11 @@ mod tests {
 
     fn hardware() -> Target {
         Target::Recreate {
-            software_at_once: false,
+            adapters: Adapters::HardwareOnly,
         }
     }
 
-    fn attempt_times(policy: &mut RecoveryPolicy, start: Instant) -> Vec<(Duration, bool)> {
+    fn attempt_times(policy: &mut RecoveryPolicy, start: Instant) -> Vec<(Duration, Adapters)> {
         let mut now = start;
         let mut out = Vec::new();
         loop {
@@ -375,11 +417,11 @@ mod tests {
                     now = at;
                 }
                 RecoveryStep::Attempt(attempt) => {
-                    let allow_software = match attempt {
-                        Attempt::Recreate { allow_software } => allow_software,
-                        Attempt::Adopt => false,
+                    let adapters = match attempt {
+                        Attempt::Recreate { adapters } => adapters,
+                        Attempt::Adopt => Adapters::HardwareOnly,
                     };
-                    out.push((now - start, allow_software));
+                    out.push((now - start, adapters));
                     policy.failed(now);
                 }
                 RecoveryStep::GiveUp => return out,
@@ -395,7 +437,7 @@ mod tests {
         assert_eq!(
             policy.step(start + FIRST_DELAY),
             RecoveryStep::Attempt(Attempt::Recreate {
-                allow_software: false
+                adapters: Adapters::HardwareOnly
             })
         );
     }
@@ -419,10 +461,14 @@ mod tests {
     fn software_is_accepted_only_after_hardware_failed() {
         let start = Instant::now();
         let attempts = attempt_times(&mut RecoveryPolicy::new(start, hardware()), start);
-        let software: Vec<bool> = attempts.iter().map(|(_, software)| *software).collect();
+        let adapters: Vec<Adapters> = attempts.iter().map(|(_, adapters)| *adapters).collect();
         let hardware_only = SOFTWARE_AFTER as usize;
-        assert!(software[..hardware_only].iter().all(|s| !s));
-        assert!(software[hardware_only..].iter().all(|s| *s));
+        assert!(
+            adapters[..hardware_only]
+                .iter()
+                .all(|a| *a == Adapters::HardwareOnly)
+        );
+        assert!(adapters[hardware_only..].iter().all(|a| *a == Adapters::Any));
     }
 
     #[test]
@@ -432,12 +478,12 @@ mod tests {
             &mut RecoveryPolicy::new(
                 start,
                 Target::Recreate {
-                    software_at_once: true,
+                    adapters: Losses::Few.adapters(Some(true)),
                 },
             ),
             start,
         );
-        assert!(attempts.iter().all(|(_, software)| *software));
+        assert!(attempts.iter().all(|(_, a)| *a == Adapters::Any));
     }
 
     #[test]
@@ -449,11 +495,11 @@ mod tests {
         assert!(matches!(policy.step(start), RecoveryStep::Wait(at) if at > start));
         let attempts = attempt_times(&mut RecoveryPolicy::new(start, Target::Adopt), start);
         assert_eq!(attempts.len(), GIVE_UP_AFTER as usize);
-        assert!(attempts.iter().all(|(_, software)| !software));
+        assert!(attempts.iter().all(|(_, a)| *a == Adapters::HardwareOnly));
     }
 
     const HARDWARE_LOST: Shared = Shared::Lost {
-        was_software: false,
+        adapters: Adapters::HardwareOnly,
     };
 
     #[test]
@@ -517,7 +563,10 @@ mod tests {
         let mut recovering = Recovering::default();
         assert!(recovering.begin(start, HARDWARE_LOST));
         assert!(!recovering.begin(start, HARDWARE_LOST));
-        assert!(!recovering.begin(start, Shared::Lost { was_software: true }));
+        let software = Shared::Lost {
+            adapters: Adapters::Any,
+        };
+        assert!(!recovering.begin(start, software));
     }
 
     #[test]
@@ -538,7 +587,7 @@ mod tests {
         let attempts = attempt_times(&mut RecoveryPolicy::new(start, hardware()), start);
         let millis: Vec<(u128, bool)> = attempts
             .iter()
-            .map(|(at, software)| (at.as_millis(), *software))
+            .map(|(at, adapters)| (at.as_millis(), *adapters == Adapters::Any))
             .collect();
         assert_eq!(
             millis,
@@ -581,7 +630,7 @@ mod tests {
             None
         );
         let lost_software = Target::Recreate {
-            software_at_once: true,
+            adapters: Adapters::Any,
         };
         assert_eq!(
             HardwareProbe::after_recovery(now, Some(lost_software), true),
@@ -631,27 +680,76 @@ mod tests {
     }
 
     /// A GPU that dies again after every recovery (a failing card, a driver
-    /// that resets in a loop): recovery moves to a CPU adapter and stays
-    /// there, then gives up, instead of flashing the windows forever.
+    /// that resets in a loop): from the third loss recovery makes the new
+    /// context on a CPU adapter only, stays there, and gives up only when
+    /// that CPU context is lost too.
     #[test]
-    fn a_gpu_that_keeps_dying_is_left_and_then_given_up_on() {
+    fn a_gpu_that_keeps_dying_is_left_for_a_cpu_adapter() {
         let start = Instant::now();
         let mut shared = SharedRecovery::default();
         let minute = Duration::from_secs(60);
         let mut counted = Vec::new();
-        for n in 0..GIVE_UP_AFTER_LOSSES {
+        for n in 0..SOFTWARE_AFTER_LOSSES {
             counted.push(shared.lost(start + minute * n as u32));
         }
         let mut expected = vec![Losses::Few; SOFTWARE_AFTER_LOSSES - 1];
-        expected.resize(GIVE_UP_AFTER_LOSSES - 1, Losses::KeepsDying);
-        expected.push(Losses::GiveUp);
+        expected.push(Losses::KeepsDying);
         assert_eq!(counted, expected);
-        // The fallback a dying GPU forced does not look for it again.
-        let forced = Target::Recreate {
-            software_at_once: true,
+
+        // Every attempt of this recovery is on a CPU adapter, the first too.
+        let keeps_dying = Shared::Lost {
+            adapters: Losses::KeepsDying.adapters(Some(false)),
         };
-        shared.recovered(start, Some(forced), true);
+        let mut recovering = Recovering::default();
+        let lost_at = start + minute * 2;
+        assert!(recovering.begin(lost_at, keeps_dying));
+        let mut now = lost_at;
+        let mut attempts = Vec::new();
+        loop {
+            match recovering.next(now) {
+                Next::Wait(at) => now = at,
+                Next::Attempt(attempt) => {
+                    attempts.push(attempt);
+                    recovering.failed(now);
+                }
+                Next::GiveUp(_) => break,
+            }
+        }
+        let software_only = Attempt::Recreate {
+            adapters: Adapters::SoftwareOnly,
+        };
+        assert_eq!(attempts, vec![software_only; GIVE_UP_AFTER as usize]);
+
+        // The forced CPU context does not look for the GPU, and a loss of it
+        // gives up.
+        let forced = Target::Recreate {
+            adapters: Adapters::SoftwareOnly,
+        };
+        shared.recovered(lost_at, Some(forced), true);
         assert_eq!(shared.probe(), None);
+        assert_eq!(shared.losses_now(), Losses::KeepsDying);
+        assert_eq!(shared.lost(lost_at + minute), Losses::GiveUp);
+        assert_eq!(shared.losses_now(), Losses::GiveUp);
+    }
+
+    /// The adapters come sorted best first, a GPU before a CPU one; a
+    /// recreation takes the first its attempt admits.
+    #[test]
+    fn a_keeps_dying_attempt_takes_the_cpu_adapter_listed_after_the_gpu() {
+        let sorted = [("discrete GPU", false), ("lavapipe", true)];
+        let first = |adapters: Adapters| {
+            sorted
+                .iter()
+                .find(|(_, cpu)| adapters.admits(*cpu))
+                .map(|(name, _)| *name)
+        };
+        assert_eq!(
+            first(Losses::KeepsDying.adapters(Some(false))),
+            Some("lavapipe")
+        );
+        assert_eq!(first(Losses::Few.adapters(Some(true))), Some("discrete GPU"));
+        assert_eq!(first(Losses::Few.adapters(None)), Some("discrete GPU"));
+        assert_eq!(first(Adapters::HardwareOnly), Some("discrete GPU"));
     }
 
     #[test]

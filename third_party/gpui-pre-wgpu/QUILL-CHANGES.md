@@ -123,11 +123,18 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
 - A GPU that keeps dying is not recovered onto forever (sweep bundle B13,
   L10): `SharedRecovery` counts the shared context's losses (once per
   context, by the window that sees it lost first) over 10 minutes. From the
-  3rd, recovery accepts a CPU adapter at once and does not look for the GPU
-  again; at the 6th it gives up (`on_device_gone`: Quill's alert and exit).
-  Before, each successful recovery started afresh, so a card or driver that
-  failed again after every recovery flashed the windows through recoveries
-  for the rest of the session, and the probe moved them back onto it.
-  `Target::Recreate`'s field is now `software_at_once`. Tests:
-  `a_gpu_that_keeps_dying_is_left_and_then_given_up_on`,
+  3rd, recovery makes the new context on a CPU adapter only
+  (`Adapters::SoftwareOnly`, which `select_adapter_and_device` applies the
+  way it applies hardware-only) and does not look for the GPU again. It
+  gives up (`on_device_gone`: Quill's alert and exit) when no CPU adapter
+  configures, or when that forced CPU context is lost too. Before, each
+  successful recovery started afresh, so a card or driver that failed again
+  after every recovery flashed the windows through recoveries for the rest
+  of the session, and the probe moved them back onto it. A first version of
+  this fix only allowed a CPU adapter, so the sort still put the dying GPU
+  first. `Target::Recreate` and `Attempt::Recreate` now carry `Adapters`
+  (hardware only, any, software only), and `new_rejecting_software` became
+  `WgpuContext::new_on`. Tests:
+  `a_gpu_that_keeps_dying_is_left_for_a_cpu_adapter`,
+  `a_keeps_dying_attempt_takes_the_cpu_adapter_listed_after_the_gpu`,
   `losses_far_apart_are_each_recovered_from_afresh`.

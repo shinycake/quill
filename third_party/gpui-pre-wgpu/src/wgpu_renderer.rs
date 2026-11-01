@@ -2,7 +2,7 @@
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
-    Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+    Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
@@ -2405,7 +2405,7 @@ impl WgpuRenderer {
         let shared = match lost {
             None => Shared::Healthy,
             Some(was_software) => Shared::Lost {
-                was_software: was_software == Some(true) || losses == Losses::KeepsDying,
+                adapters: losses.adapters(was_software),
             },
         };
         if self.recovering.begin(now, shared) {
@@ -2523,7 +2523,7 @@ impl WgpuRenderer {
         let software = gpu_context.borrow_mut().take();
         self.state = RendererState::Released;
         let hardware = Attempt::Recreate {
-            allow_software: false,
+            adapters: Adapters::HardwareOnly,
         };
         match self.try_recover(window, &gpu_context, hardware) {
             Ok(()) => {
@@ -2581,14 +2581,10 @@ impl WgpuRenderer {
             preferred_present_mode: Some(self.surface_config.present_mode),
         };
 
-        if let Attempt::Recreate { allow_software } = attempt {
+        if let Attempt::Recreate { adapters } = attempt {
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
-            let context = if allow_software {
-                WgpuContext::new(instance, &surface, self.compositor_gpu)?
-            } else {
-                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?
-            };
+            let context = WgpuContext::new_on(instance, &surface, self.compositor_gpu, adapters)?;
             self.rebuild(gpu_context, &context, surface, config)?;
             *gpu_context.borrow_mut() = Some(context);
             return Ok(());
