@@ -126,9 +126,10 @@ impl PresentEstimator {
         self.cadence.on_grid(due, grid)
     }
 
-    /// Whether the picture asked for last draws on the grid.
-    pub(crate) fn draws_on_grid(&self) -> bool {
-        self.on_grid
+    /// How far apart its pictures come, once they come a whole number of
+    /// grid vsyncs apart (`Cadence::even`).
+    pub(crate) fn even_spacing(&self) -> Option<Duration> {
+        self.cadence.even_spacing()
     }
 
     /// How long before a picture is shown to have asked for its frame

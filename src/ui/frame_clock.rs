@@ -17,7 +17,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::frame_grid::{self, Source, Vsync};
+use super::frame_grid::{self, Lattice, Source, Vsync};
 use super::video_player::FrameRequested;
 use super::video_player::pacing::{FrameRequest, request_policy};
 use gpui_kit::*;
@@ -72,6 +72,8 @@ pub(super) struct ClockRun {
     pub(super) fps: u32,
     last: LastDraw,
     later: Option<(Duration, Option<Instant>)>,
+    /// The grid vsyncs it ticks on, while it ticks on the grid.
+    lattice: Option<Lattice>,
 }
 
 /// The vsync the frame clock's content last drew on.
@@ -92,7 +94,13 @@ impl ClockRun {
             fps: 30,
             last: LastDraw::Start,
             later: None,
+            lattice: None,
         }
+    }
+
+    /// The grid vsyncs it ticks content on, while it ticks on the grid.
+    pub(super) fn lattice(&self) -> Option<Lattice> {
+        self.lattice
     }
 
     /// How long to sleep for the next tick at `now`, and the grid vsync it
@@ -117,11 +125,25 @@ impl ClockRun {
     /// The wake for `planned` did `woke`. `false`: the clock stops.
     pub(super) fn woke(&mut self, planned: Option<Instant>, woke: Woke) -> bool {
         match woke {
-            Woke::Later(plan) => self.later = Some(plan),
-            Woke::Ticked(0) => return false,
+            Woke::Later(plan) => {
+                // Put off after a clip's picture showed content: the clip's
+                // frames carry it until then, so their vsyncs are its ticks.
+                if let (Some(at), Some(lattice)) = (plan.1, self.lattice.as_mut()) {
+                    lattice.at = at;
+                }
+                self.later = Some(plan);
+            }
+            Woke::Ticked(0) => {
+                self.lattice = None;
+                return false;
+            }
             Woke::Ticked(fps) => {
                 self.fps = fps;
                 self.last = planned.map_or(LastDraw::OffGrid, LastDraw::On);
+                self.lattice = planned.map(|at| Lattice {
+                    at,
+                    every: content_frame(fps),
+                });
             }
         }
         true
@@ -286,7 +308,13 @@ impl QuillApp {
                         Woke::Ticked(demand)
                     })
                     .unwrap_or(Woke::Ticked(0));
-                if !run.woke(vsync, woke) {
+                let runs = run.woke(vsync, woke);
+                let lattice = run.lattice();
+                let _ = this.update(cx, |this, _| {
+                    let display = this.frame.clock_timing.get().map(|timing| timing.display);
+                    CONTENT_LATTICE.with(|cell| cell.set(display.zip(lattice)));
+                });
+                if !runs {
                     break;
                 }
             }
@@ -336,11 +364,12 @@ impl QuillApp {
         false
     }
 
-    /// Note that animation layer `painter` drew on this frame of the main
-    /// window (`tick_animation_layer`), for [`Self::tick_after_draws`].
-    pub(super) fn note_layer_drawn(&self, painter: EntityId) {
+    /// Note that animation layer `painter`, with content at `fps`, drew on
+    /// this frame of the main window (`tick_animation_layer`), for
+    /// [`Self::tick_after_draws`].
+    pub(super) fn note_layer_drawn(&self, painter: EntityId, fps: u32) {
         if let Some((_, vsync)) = self.clock_display() {
-            let counts = !clip_redraws_off_grid(painter, Instant::now());
+            let counts = clip_frame_keeps_time(Some(painter), vsync, content_frame(fps));
             self.frame
                 .layers_drawn
                 .borrow_mut()
@@ -438,6 +467,39 @@ pub(super) fn later_tick(
     Some((wake.saturating_duration_since(now), Some(at)))
 }
 
+thread_local! {
+    /// The main window's display and the grid vsyncs the clock ticks its
+    /// content on, while it ticks on the grid.
+    static CONTENT_LATTICE: Cell<Option<(u64, Lattice)>> = const { Cell::new(None) };
+}
+
+/// The time content the main window paints at `now` plays at: on the
+/// clock's last tick vsync while it ticks on the grid
+/// (`frame_grid::content_time`), else `now`.
+pub(in crate::ui) fn content_now(now: Instant) -> Instant {
+    let Some((display, lattice)) = CONTENT_LATTICE.with(Cell::get) else {
+        return now;
+    };
+    display_vsync(display).map_or(now, |vsync| content_at(now, vsync, lattice))
+}
+
+/// The time content painted at `now` for the frame shown on `vsync` plays
+/// at, while the clock ticks on `lattice`: its own on a frame that draws a
+/// picture of a clip keeping time with it, else the last tick's
+/// (`frame_grid::content_time`).
+pub(super) fn content_at(now: Instant, vsync: Vsync, lattice: Lattice) -> Instant {
+    if clip_frame_keeps_time(None, vsync, lattice.every) {
+        now
+    } else {
+        frame_grid::content_time(now, vsync, lattice)
+    }
+}
+
+/// One frame of content at `fps`.
+fn content_frame(fps: u32) -> Duration {
+    Duration::from_secs_f64(1.0 / f64::from(fps.max(1)))
+}
+
 /// `display`'s latest vsync as its display link reported it (macOS).
 #[cfg(target_os = "macos")]
 fn display_vsync(display: u64) -> Option<Vsync> {
@@ -477,8 +539,9 @@ pub(crate) struct VideoFrameAsk {
     pub(crate) interval: Duration,
     /// How long before it is shown a frame starts drawing.
     pub(crate) lead: Duration,
-    /// Its pictures draw on the content grid (`frame_grid`).
-    pub(crate) on_grid: bool,
+    /// Its pictures' spacing, once they come a whole number of grid
+    /// vsyncs apart (`frame_grid::Cadence::even`).
+    pub(crate) even_spacing: Option<Duration>,
     /// The clip plays with sound (keeps drawing behind another app).
     pub(crate) plays_sound: bool,
     /// Keep drawing while the window is inactive (a Picture-in-Picture
@@ -517,7 +580,7 @@ pub(super) fn video_request(
     next_due: Option<Instant>,
     interval: Duration,
     lead: Duration,
-    on_grid: bool,
+    even_spacing: Option<Duration>,
 ) -> Option<FrameRequest> {
     if video_request_in_flight(requested.get(), target, now) {
         return None;
@@ -544,7 +607,7 @@ pub(super) fn video_request(
         asks.push(VideoAsk {
             requested: Rc::downgrade(requested),
             due: next_due.unwrap_or(now),
-            on_grid,
+            even_spacing,
         });
     });
     Some(request)
@@ -559,8 +622,9 @@ struct VideoAsk {
     requested: Weak<Cell<Option<(EntityId, Instant)>>>,
     /// When the picture it asked for is due.
     due: Instant,
-    /// The clip draws on the content grid (`PresentEstimator::on_grid`).
-    on_grid: bool,
+    /// Its pictures' spacing, once they come a whole number of grid
+    /// vsyncs apart.
+    even_spacing: Option<Duration>,
 }
 
 impl VideoAsk {
@@ -571,24 +635,67 @@ impl VideoAsk {
     }
 }
 
-/// Whether a clip off the content grid asks frames for `target` at `now`.
-/// Its pictures land between the grid vsyncs content ticks on, so a draw
-/// of the layer for one shows no new frame of the content beside it.
-pub(super) fn clip_redraws_off_grid(target: EntityId, now: Instant) -> bool {
-    VIDEO_ASKS.with(|asks| {
-        asks.borrow()
-            .iter()
-            .any(|ask| !ask.on_grid && ask.in_flight(target, now))
+/// Whether a clip whose pictures come `spacing` apart keeps time with
+/// content whose frames come `frame` apart: one is a whole number of the
+/// other. Only then does each of its pictures that shows content's next
+/// frame come one content frame after the last. A 12 fps clip's, ten
+/// refreshes apart at 120 Hz, would show 30 fps content's frames on every
+/// other grid vsync, one refresh early or late.
+fn keeps_time(spacing: Option<Duration>, frame: Duration) -> bool {
+    let whole = |a: f64, b: f64| {
+        let ratio = a / b;
+        ratio.is_finite() && ratio.round() >= 1.0 && (ratio - ratio.round()).abs() <= 0.05
+    };
+    spacing.is_some_and(|spacing| {
+        let (spacing, frame) = (spacing.as_secs_f64(), frame.as_secs_f64());
+        whole(spacing, frame) || whole(frame, spacing)
+    })
+}
+
+/// A clip picture whose frame request was answered: the view it redraws,
+/// when it is due, and its clip's [`VideoAsk::even_spacing`].
+#[derive(Clone, Copy)]
+struct Answered {
+    target: EntityId,
+    due: Instant,
+    even_spacing: Option<Duration>,
+}
+
+thread_local! {
+    static ANSWERED: RefCell<Vec<Answered>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Whether the frame shown on `vsync` draws a picture of a clip that keeps
+/// time with content whose frames come `frame` apart ([`keeps_time`]), in
+/// `target` (`None`: any view). Content shows its own time on that frame
+/// ([`content_now`]), and a layer it redraws needs no tick until a content
+/// frame later (`LayerDraws`).
+pub(super) fn clip_frame_keeps_time(
+    target: Option<EntityId>,
+    vsync: Vsync,
+    frame: Duration,
+) -> bool {
+    let shows_now =
+        |due: Instant| due <= vsync.at + vsync.period / 4 && vsync.at < due + vsync.period;
+    ANSWERED.with(|answered| {
+        answered.borrow().iter().any(|picture| {
+            target.is_none_or(|target| target == picture.target)
+                && shows_now(picture.due)
+                && keeps_time(picture.even_spacing, frame)
+        })
     })
 }
 
 /// Whether a clip frame asked for `target` and still in flight at `now`
-/// shows a picture by `by`: its draw redraws `target` by then.
-fn video_redraws(target: EntityId, by: Instant, now: Instant) -> bool {
+/// shows a picture by `by` and keeps time with content at `fps`: its draw
+/// redraws `target` with that content's next frame.
+fn video_redraws(target: EntityId, fps: u32, by: Instant, now: Instant) -> bool {
     VIDEO_ASKS.with(|asks| {
-        asks.borrow()
-            .iter()
-            .any(|ask| ask.due <= by && ask.in_flight(target, now))
+        asks.borrow().iter().any(|ask| {
+            ask.due <= by
+                && keeps_time(ask.even_spacing, content_frame(fps))
+                && ask.in_flight(target, now)
+        })
     })
 }
 
@@ -616,14 +723,37 @@ pub(super) fn layer_redrawn_by_clip(
         .at
         .checked_add(frame)
         .and_then(|next| next.checked_sub(vsync.period));
-    by.is_some_and(|by| video_redraws(painter, by, now))
+    by.is_some_and(|by| video_redraws(painter, fps, by, now))
 }
 
 /// The request for `target` was answered: forget it, unless another view's
-/// replaced it meanwhile.
+/// replaced it meanwhile, and note the picture it asked for
+/// ([`clip_frame_keeps_time`]).
 pub(super) fn video_request_done(requested: &FrameRequested, target: EntityId) {
-    if requested.get().is_some_and(|(view, _)| view == target) {
-        requested.set(None);
+    if !requested.get().is_some_and(|(view, _)| view == target) {
+        return;
+    }
+    requested.set(None);
+    let ask = VIDEO_ASKS.with(|asks| {
+        asks.borrow()
+            .iter()
+            .find(|ask| {
+                ask.requested
+                    .upgrade()
+                    .is_some_and(|other| Rc::ptr_eq(&other, requested))
+            })
+            .map(|ask| Answered {
+                target,
+                due: ask.due,
+                even_spacing: ask.even_spacing,
+            })
+    });
+    if let Some(ask) = ask {
+        ANSWERED.with(|answered| {
+            let mut answered = answered.borrow_mut();
+            answered.retain(|old| old.due + VIDEO_REQUEST_LOST > ask.due);
+            answered.push(ask);
+        });
     }
 }
 
@@ -672,7 +802,7 @@ pub(crate) fn request_video_frame(
         ask.next_due,
         ask.interval,
         ask.lead,
-        ask.on_grid,
+        ask.even_spacing,
     ) else {
         return;
     };
@@ -906,7 +1036,7 @@ mod tests {
             next_due: None,
             interval: Duration::from_millis(8),
             lead: Duration::from_millis(8),
-            on_grid: false,
+            even_spacing: None,
             plays_sound: true,
             keep_alive: false,
             requested: requested.clone(),

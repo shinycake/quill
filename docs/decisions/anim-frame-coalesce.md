@@ -62,11 +62,25 @@ the others (`shared`).
 - **Layer redraws.** When a clip's picture redraws an animation layer, its emoji
   draw with it. The clock's next tick then counts one content frame from that
   draw (`later_tick`, `LayerDraws`). A tick's own draw never counts, and the
-  due time is not clamped to now, so a late wake is never put off. Nor does
-  a draw for a clip off the grid (24 or 25 fps): its pictures land between
-  the grid vsyncs the emoji tick on, so the redraw shows no new emoji frame,
-  and counting it held an emoji frame for 6 vsyncs in place of 4
-  (`frame_clock::clip_redraws_off_grid`, from the estimator's `on_grid`).
+  due time is not clamped to now, so a late wake is never put off. Only a
+  picture of a clip that keeps time with the emoji counts: its pictures come
+  a whole number of emoji frames apart, or the other way round, and steadily
+  (`frame_clock::clip_frame_keeps_time`, from `Cadence::even_spacing`). A
+  24 or 25 fps clip's land between the emoji's grid ticks, and a 12 fps
+  clip's on every other one, ten refreshes apart at 120 Hz. Counting those
+  held an emoji frame for 6 vsyncs in place of 4.
+- **Content time.** While the clock ticks on the grid, the main window's
+  play heads read the time of its last tick vsync at or before the frame
+  they paint for (`frame_grid::content_time`), not the paint's own time. A
+  head starts on whatever paint first shows its frame, so its frame
+  boundaries fall on any refresh. Read at paint time, a draw for an
+  off-grid clip or a scroll one or two refreshes after a boundary showed
+  the next frame early, and the next tick held it again: holds of 1 and 5
+  refreshes, or 3 and 5, in place of 4, at three of the four phases a head
+  can start on. Now a frame changes only on a tick, so each is held alike
+  at any phase. A frame that shows a picture of a clip keeping time with
+  the content counts as a tick (`content_at`): the tick it puts off moves
+  there, and reading the last tick's time on it would skip a frame.
 - **Layers a clip keeps drawing.** When a layer's inline clip has already asked
   for a picture due a display frame or more before the layer's content needs
   its next frame (a 60 fps clip beside 30 fps emoji), the layer asks for no tick

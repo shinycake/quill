@@ -33,8 +33,10 @@ impl LayerDraws {
     }
 
     /// `painter` drew a frame shown on the vsync at `at`. Only a draw that
-    /// `counts` as a redraw puts its next tick off: one by a clip off the
-    /// grid shows no new emoji frame (`frame_clock::clip_redraws_off_grid`).
+    /// `counts` as a redraw puts its next tick off: one for a picture of a
+    /// clip that keeps time with the emoji
+    /// (`frame_clock::clip_frame_keeps_time`). Any other draw shows no new
+    /// emoji frame (`frame_clock::content_now`).
     pub(super) fn drawn(&mut self, painter: EntityId, at: Instant, counts: bool) {
         if let Some(draw) = self.0.iter_mut().find(|draw| draw.painter == painter) {
             if std::mem::take(&mut draw.ticked) {

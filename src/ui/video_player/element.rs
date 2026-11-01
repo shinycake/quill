@@ -179,7 +179,7 @@ impl RenderOnce for VideoFrame {
                             next_due: demand.next_due,
                             interval: demand.interval,
                             lead: demand.lead,
-                            on_grid: demand.on_grid,
+                            even_spacing: demand.even_spacing,
                             plays_sound: demand.plays_sound,
                             keep_alive,
                             requested: demand.requested,

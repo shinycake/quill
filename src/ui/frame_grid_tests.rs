@@ -1,11 +1,13 @@
 use super::super::frame_clock::{
-    ClockRun, ClockTiming, Woke, clip_redraws_off_grid, later_tick, layer_redrawn_by_clip,
-    note_clock_playing, video_request, video_request_done,
+    ClockRun, ClockTiming, Woke, clip_frame_keeps_time, content_at, later_tick,
+    layer_redrawn_by_clip, note_clock_playing, video_request, video_request_done,
 };
 use super::super::layer_draws::LayerDraws;
 use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, PresentEstimator};
-use super::{Cadence, ContentGrid, Source, Vsync, clock_tick, display_grid, note_playing, shared};
+use super::{
+    Cadence, ContentGrid, Lattice, Source, Vsync, clock_tick, display_grid, note_playing, shared,
+};
 use gpui_kit::EntityId;
 use quill::sticker_playback::player::head::pick;
 use quill::sticker_playback::player::{PlayMode, Timeline};
@@ -306,6 +308,8 @@ struct Sim {
     /// after that call each starts drawing.
     app_draws: Vec<(Instant, Duration)>,
     emoji_fps: u32,
+    /// How far the emoji's play head started after `t0`.
+    emoji_start: Duration,
     clip: Option<Clip>,
     clock: Option<ClockRun>,
     /// Times the frame clock started.
@@ -315,6 +319,8 @@ struct Sim {
     demand: u32,
     targets: HashSet<Option<EntityId>>,
     timing: Option<ClockTiming>,
+    /// The grid vsyncs the clock ticks on (`ClockRun::lattice`).
+    lattice: Option<Lattice>,
     layers: LayerDraws,
     estimator: PresentEstimator,
     requested: FrameRequested,
@@ -395,6 +401,7 @@ impl Sim {
             clip_started: false,
             app_draws: vec![(t0, DRAW_START)],
             emoji_fps: 0,
+            emoji_start: Duration::ZERO,
             clip: None,
             clock: None,
             clock_starts: 0,
@@ -402,6 +409,7 @@ impl Sim {
             demand: 0,
             targets: HashSet::new(),
             timing: None,
+            lattice: None,
             layers: LayerDraws::default(),
             estimator: PresentEstimator::default(),
             requested: FrameRequested::default(),
@@ -414,6 +422,13 @@ impl Sim {
     /// Custom emoji at `fps` on the layer.
     fn emoji(mut self, fps: u32) -> Self {
         self.emoji_fps = fps;
+        self
+    }
+
+    /// The emoji's play head started `refreshes` display frames after
+    /// `t0`, on a draw starting as long after its vsync's call as any.
+    fn emoji_phase(mut self, refreshes: u32) -> Self {
+        self.emoji_start = self.period * refreshes;
         self
     }
 
@@ -569,7 +584,9 @@ impl Sim {
                 Woke::Ticked(demand)
             }
         };
-        if run.woke(planned, woke) {
+        let runs = run.woke(planned, woke);
+        self.lattice = run.lattice();
+        if runs {
             self.clock = Some(run);
             self.plan_tick();
         }
@@ -634,7 +651,16 @@ impl Sim {
                     file_fps: f64::from(self.emoji_fps),
                     step: 1,
                 };
-                let along = self.now.duration_since(self.t0);
+                // `Player::frame`: `content_now`.
+                let painted = self
+                    .display()
+                    .zip(self.lattice)
+                    .map_or(self.now, |((_, vsync), lattice)| {
+                        content_at(self.now, vsync, lattice)
+                    });
+                let along = painted
+                    .duration_since(self.t0)
+                    .saturating_sub(self.emoji_start);
                 let display_hz = 1.0 / self.period.as_secs_f64();
                 let frame = pick(along, PlayMode::Loop, emoji, false, display_hz)
                     .map_or(0, |pick| u64::from(pick.index));
@@ -642,7 +668,8 @@ impl Sim {
             }
             // `tick_animation_layer`.
             if let Some((_, vsync)) = self.display() {
-                let counts = !clip_redraws_off_grid(painter, self.now);
+                let frame = Duration::from_secs_f64(1.0 / f64::from(self.emoji_fps.max(1)));
+                let counts = clip_frame_keeps_time(Some(painter), vsync, frame);
                 self.layers.drawn(painter, vsync.at, counts);
             }
             if self.emoji_fps > 0 {
@@ -710,7 +737,7 @@ impl Sim {
             note_playing(self.display, source, now, due);
         }
         let lead = self.estimator.request_lead();
-        let on_grid = self.estimator.draws_on_grid();
+        let even_spacing = self.estimator.even_spacing();
         let ask = video_request(
             &self.requested,
             target,
@@ -718,7 +745,7 @@ impl Sim {
             Some(due),
             interval,
             lead,
-            on_grid,
+            even_spacing,
         );
         if let Some(request) = ask {
             match request {
@@ -963,24 +990,31 @@ fn a_clip_the_grid_would_hold_unevenly_keeps_its_vsyncs_beside_emoji() {
 }
 
 #[test]
-fn a_clip_off_the_grid_on_the_emojis_layer_never_puts_their_tick_off() {
+fn emoji_beside_a_clip_on_their_layer_hold_each_frame_alike_at_any_head_phase() {
+    // A 24 or 25 fps clip draws the layer between the emoji's grid ticks,
+    // and a 12 fps one on grid vsyncs ten refreshes apart. Whichever
+    // refresh the emoji's head started on, none of those draws may show an
+    // emoji frame early or put its tick off.
     let mut display = 160;
-    for fps in [24.0, 25.0] {
-        for offset in [0, 5, 10, 20] {
-            display += 1;
-            let sim = Sim::new(display, 120.0, true)
-                .emoji(30)
-                .clip(fps)
-                .on_layer(Duration::from_millis(offset))
-                .run(2.0);
-            let holds = sim.emoji_holds();
-            let case = format!("{fps} fps, {offset} ms");
-            assert!(
-                holds.len() > 20 && holds.iter().all(|hold| *hold == 4),
-                "{case}: {holds:?}"
-            );
-            let draws = sim.draws_in_a_second();
-            assert!(draws <= 56, "{case}: {draws} window frames in a second");
+    for fps in [24.0, 25.0, 12.0] {
+        for phase in 0..4 {
+            for offset in [0, 5, 10, 20] {
+                display += 1;
+                let sim = Sim::new(display, 120.0, true)
+                    .emoji(30)
+                    .emoji_phase(phase)
+                    .clip(fps)
+                    .on_layer(Duration::from_millis(offset))
+                    .run(3.0);
+                let holds = sim.emoji_holds();
+                let case = format!("{fps} fps, head phase {phase}, {offset} ms");
+                assert!(
+                    holds.len() > 60 && holds.iter().all(|hold| *hold == 4),
+                    "{case}: {holds:?}"
+                );
+                let draws = sim.draws_in_a_second();
+                assert!(draws <= 56, "{case}: {draws} window frames in a second");
+            }
         }
     }
 }

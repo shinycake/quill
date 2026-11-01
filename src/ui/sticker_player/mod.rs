@@ -502,6 +502,10 @@ impl Player {
         now: Instant,
     ) -> Option<Arc<RenderImage>> {
         self.drain();
+        let now = match window {
+            None => super::frame_clock::content_now(now),
+            Some(_) => now,
+        };
         let key = spec.key(edge);
         let high_rate = high_rate && !self.engine.coarse(&key);
         let place = Place::of(head, window);
