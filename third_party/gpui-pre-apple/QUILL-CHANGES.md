@@ -152,3 +152,7 @@ caches for every line:
   so the fonts every line needs survive. `test_kept_fonts_shape_like_new_ones`
   and `test_adjacent_runs_shape_alike_past_the_font_limit` in `text_system.rs`
   compare a kept font's shaping with a new font's, and CI runs them on macOS.
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

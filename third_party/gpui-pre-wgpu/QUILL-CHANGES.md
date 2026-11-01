@@ -94,3 +94,7 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   one closes, as on Windows. A successful recovery clears the state, so a
   later loss starts afresh. `Recovering` holds this wiring and its tests
   run with the policy's.
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

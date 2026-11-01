@@ -1,5 +1,5 @@
-//! Color emoji glyphs a window no longer draws leave the GPU once Quill goes
-//! idle.
+//! Glyphs a window no longer draws leave the GPU once Quill goes idle: color
+//! emoji first, text glyphs only when many have piled up.
 //!
 //! GPUI rasterizes each emoji once per size and keeps the tile in the
 //! window's sprite atlas until the window closes. Color emoji are 4 bytes a
@@ -17,6 +17,11 @@
 //! screen keep their tiles.
 //! New emoji glyphs count as activity, so the idle trim comes after
 //! scrolling through emoji too.
+//!
+//! Text tiles are about a kilobyte, so a sweep costs more in glyphs drawn
+//! again than a few of them are worth, and going to the background leaves them
+//! alone. Past [`KEEP_TEXT`], which only many scripts, sizes or a long session
+//! reach, they go the same way, and their space goes back to the atlas.
 
 use gpui_kit::{AnyWindowHandle, App, Window, WindowId};
 use std::cell::RefCell;
@@ -25,14 +30,26 @@ use std::mem;
 
 /// Emoji glyphs kept without a sweep: about a screen of them.
 const KEEP: usize = 128;
+/// Text glyphs kept without a sweep: several screens of them.
+const KEEP_TEXT: usize = 8192;
+
+#[derive(Clone, Copy)]
+struct PendingSweep {
+    mark: u64,
+    text: bool,
+}
 
 #[derive(Default)]
 struct WindowSweep {
-    pending_mark: Option<u64>,
+    pending: Option<PendingSweep>,
     /// Emoji glyphs the last sweep kept (what was on screen then).
     kept: usize,
+    /// Text glyphs the last sweep of them kept.
+    kept_text: usize,
     /// Emoji glyphs the atlas held at the start of the last frame.
     seen: usize,
+    /// Text glyphs the atlas held at the start of the last frame.
+    seen_text: usize,
     /// The window went to the background since the last sweep began.
     sweep_when_idle: bool,
 }
@@ -50,6 +67,10 @@ fn with_sweep<R>(id: WindowId, action: impl FnOnce(&mut WindowSweep) -> R) -> R 
 /// after every scroll; or when the window went to the background.
 fn worth_a_sweep(count: usize, kept: usize, left: bool) -> bool {
     count > KEEP.max(kept * 2) || left && count > 0
+}
+
+fn text_worth_a_sweep(count: usize, kept: usize) -> bool {
+    count > KEEP_TEXT.max(kept * 2)
 }
 
 pub(super) fn window_activation(id: WindowId, active: bool) {
@@ -75,48 +96,69 @@ fn forget_closed_windows(open: &[AnyWindowHandle]) {
 fn begin(window: &mut Window) {
     let id = window.window_handle().window_id();
     let count = window.emoji_glyph_count();
-    let due = with_sweep(id, |sweep| {
-        sweep.pending_mark.is_none()
-            && worth_a_sweep(count, sweep.kept, mem::take(&mut sweep.sweep_when_idle))
+    let text_count = window.text_glyph_count();
+    let (emoji, text) = with_sweep(id, |sweep| {
+        (
+            sweep.pending.is_none()
+                && worth_a_sweep(count, sweep.kept, mem::take(&mut sweep.sweep_when_idle)),
+            sweep.pending.is_none() && text_worth_a_sweep(text_count, sweep.kept_text),
+        )
     });
-    if due {
+    if emoji || text {
         let mark = window.begin_emoji_glyph_sweep();
-        with_sweep(id, |sweep| sweep.pending_mark = Some(mark));
+        with_sweep(id, |sweep| {
+            sweep.pending = Some(PendingSweep { mark, text });
+        });
     }
 }
 
 pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
     finish_pending_sweep(window, cx);
-    note_new_emoji(window);
+    note_new_glyphs(window);
 }
 
 fn finish_pending_sweep(window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
-    if let Some(mark) = with_sweep(handle.window_id(), |sweep| sweep.pending_mark.take()) {
+    if let Some(pending) = with_sweep(handle.window_id(), |sweep| sweep.pending.take()) {
         // Deferred work runs once this frame is drawn.
         cx.defer(move |cx| {
-            let _ = handle.update(cx, |_, window, _| sweep(window, mark));
+            let _ = handle.update(cx, |_, window, _| sweep(window, pending));
         });
     }
 }
 
-fn note_new_emoji(window: &mut Window) {
+fn note_new_glyphs(window: &mut Window) {
     let id = window.window_handle().window_id();
     let count = window.emoji_glyph_count();
-    if count > with_sweep(id, |sweep| mem::replace(&mut sweep.seen, count)) {
+    let text_count = window.text_glyph_count();
+    let (seen, seen_text) = with_sweep(id, |sweep| {
+        (
+            mem::replace(&mut sweep.seen, count),
+            mem::replace(&mut sweep.seen_text, text_count),
+        )
+    });
+    if count > seen || text_count > seen_text && text_count > KEEP_TEXT {
         super::image_budget::note_activity();
     }
 }
 
-fn sweep(window: &mut Window, mark: u64) {
-    let gone = window.sweep_emoji_glyphs(mark);
+fn sweep(window: &mut Window, pending: PendingSweep) {
+    let gone = window.sweep_emoji_glyphs(pending.mark);
     let kept = window.emoji_glyph_count();
+    let text_gone = pending
+        .text
+        .then(|| window.sweep_text_glyphs(pending.mark));
+    let text_kept = window.text_glyph_count();
     with_sweep(window.window_handle().window_id(), |sweep| {
         sweep.kept = kept;
         sweep.seen = kept;
+        sweep.seen_text = text_kept;
+        if text_gone.is_some() {
+            sweep.kept_text = text_kept;
+        }
     });
     if super::frame_clock::trace_ticks() {
-        eprintln!("emoji glyph sweep: {gone} dropped, {kept} kept");
+        eprintln!("glyph sweep: {gone} emoji dropped, {kept} kept; {text_gone:?} text dropped");
     }
 }
 
@@ -187,6 +229,33 @@ mod tests {
         assert!(!ask(&atlas, glyph(1, true)));
         assert!(!ask(&atlas, glyph(5, true)));
         assert!(ask(&atlas, glyph(0, true)));
+    }
+
+    #[test]
+    fn a_text_sweep_drops_only_the_text_nothing_drew_since_it_began() {
+        let atlas = HeadlessAtlas::default();
+        ask(&atlas, glyph(1, true));
+        for id in 10..14 {
+            ask(&atlas, glyph(id, false));
+        }
+        assert_eq!(atlas.text_glyph_count(), 4);
+
+        let mark = atlas.next_use_mark();
+        assert!(!ask(&atlas, glyph(11, false)));
+
+        assert_eq!(atlas.remove_text_glyphs_unused_since(mark), 3);
+        assert_eq!(atlas.text_glyph_count(), 1);
+        assert_eq!(atlas.emoji_glyph_count(), 1, "emoji have their own sweep");
+        assert!(!ask(&atlas, glyph(11, false)));
+        assert!(ask(&atlas, glyph(10, false)));
+    }
+
+    #[test]
+    fn text_is_swept_only_past_the_limit_and_when_it_doubled() {
+        assert!(!text_worth_a_sweep(KEEP_TEXT, 0));
+        assert!(text_worth_a_sweep(KEEP_TEXT + 1, 0));
+        assert!(!text_worth_a_sweep(KEEP_TEXT * 2, KEEP_TEXT));
+        assert!(text_worth_a_sweep(KEEP_TEXT * 2 + 1, KEEP_TEXT));
     }
 
     #[test]

@@ -470,6 +470,13 @@ content painted away from its place in the tree keeps the opacity it was given t
 
 `src/ui/layer_tick_tests.rs` holds the tests.
 
+The Quill project also changed it in 2026 so text glyphs can be swept like color
+emoji, from a much higher count:
+
+- `src/platform.rs`: `AtlasState` counts text glyphs. `PlatformAtlas` gains
+  `text_glyph_count` and `remove_text_glyphs_unused_since`.
+- `src/window.rs`: `Window::text_glyph_count`, `Window::sweep_text_glyphs`.
+
 The Quill project also changed it in 2026 so `Scene::finish` stops allocating a
 sort buffer each frame:
 
