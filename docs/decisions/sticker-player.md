@@ -253,12 +253,18 @@ clip on that worker got no frames meanwhile. Queued opens ran back to back.
 
 Clips decoded up front now open on opener threads of their own
 (`opener.rs`), one per worker, as many decodes at once as before. An opener
-installs the frames in the clip's store, and the clip's
-worker only unpacks them; a decoded clip holds no canvas, so the worker
-needs no source for it. Workers still open TGS clips, which keep their
-canvas there, but a frame now goes before an open unless 8 frames in a row
-already did. A test with one worker holds a WebM decode open and gets
-another clip's frame meanwhile; before, the decode ran on the worker.
+installs the frames in the clip's store, and the clip's worker only unpacks
+them; a decoded clip holds no canvas, so the worker needs no source for it.
+Workers still open TGS clips, which keep their canvas there, but a frame now
+goes before an open unless 8 frames in a row already did. A test with one
+worker holds a WebM decode open and gets another clip's frame meanwhile;
+before, the decode ran on the worker.
+
+On a Mac with three workers, five 270 ms decodes started together: late
+paints on the clips playing beside them went from 19-22 to 0, and their
+longest hold from 448-518 ms to 67-83 ms. The last clip's first paint stayed
+at about 450 ms. A single opener took it to 390-1170 ms, which is why there
+is one per worker.
 
 Each open still holds all its raw frames at once (up to 58 MB at 448 px,
 inferred). Streaming WebM frame by frame through the shim, as tdesktop's
