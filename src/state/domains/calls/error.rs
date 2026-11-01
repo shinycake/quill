@@ -50,7 +50,12 @@ impl Session {
                 if self.calls.answered_call == Some(call_id) {
                     self.calls.answered_call = None;
                 }
-                self.calls.error = Some(call_request_error_line(err, "Could not answer the call"));
+                // An answer that fails after its call went must not land on
+                // the next one (tdesktop drops the request with its call).
+                if self.calls.active_call.as_ref().map(|call| call.id) == Some(call_id) {
+                    self.calls.error =
+                        Some(call_request_error_line(err, "Could not answer the call"));
+                }
             }
             Some(RequestPurpose::DiscardCall) => {
                 self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
