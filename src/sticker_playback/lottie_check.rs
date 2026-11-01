@@ -273,9 +273,6 @@ impl<'a> Walk<'a> {
             None => None,
         };
         let precomp = kind == Some(PRECOMP);
-        if precomp && layer.contains_key("shapes") {
-            return Err(Malformed::Layer);
-        }
         let mut cost = Cost::default();
         if let Some(masks) = layer.get("masksProperties") {
             let masks = masks.as_array().ok_or(Malformed::Layer)?;
@@ -298,8 +295,11 @@ impl<'a> Walk<'a> {
             .work
             .saturating_add(offscreen.saturating_mul(OFFSCREEN_WORK));
         if let Some(shapes) = layer.get("shapes") {
-            let shapes = shape_list(shapes.as_array().ok_or(Malformed::Layer)?, 0)?;
-            cost.work = cost.work.saturating_add(shapes);
+            let shapes = shapes.as_array().ok_or(Malformed::Layer)?;
+            if precomp && !shapes.is_empty() {
+                return Err(Malformed::Layer);
+            }
+            cost.work = cost.work.saturating_add(shape_list(shapes, 0)?);
         }
         if let Some(reference) = layer.get("refId") {
             let reference = reference.as_str().ok_or(Malformed::Layer)?;

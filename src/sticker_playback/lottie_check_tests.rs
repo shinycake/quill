@@ -77,19 +77,13 @@ fn punctuation_in_names_is_ordinary_text() {
 }
 
 #[test]
-fn a_null_in_an_array_is_refused() {
-    let doc = with_shapes(json!([{"ty": "rc", "s": {"k": [1, null]}}]));
-    assert_eq!(check(&doc), Err(Malformed::Array));
-}
-
-#[test]
-fn a_property_array_holds_numbers_or_keyframes_never_both() {
-    let mixed = with_shapes(json!([{"ty": "rc", "s": {"k": [1, {"t": 0}]}}]));
-    assert_eq!(check(&mixed), Err(Malformed::Array));
+fn property_arrays_hold_one_kind_of_value() {
+    for values in [json!([1, null]), json!([1, {"t": 0}]), json!([[1]])] {
+        let doc = with_shapes(json!([{"ty": "rc", "s": {"k": values}}]));
+        assert_eq!(check(&doc), Err(Malformed::Array), "{doc}");
+    }
     let keyframes = with_shapes(json!([{"ty": "rc", "s": {"k": [{"t": 0}, {"t": 1}]}}]));
     assert_eq!(check(&keyframes), Ok(()));
-    let nested = with_shapes(json!([{"ty": "rc", "s": {"k": [[1]]}}]));
-    assert_eq!(check(&nested), Err(Malformed::Array));
 }
 
 #[test]
@@ -102,13 +96,13 @@ fn a_layer_kind_is_a_small_whole_number() {
 }
 
 #[test]
-fn a_precomp_layer_holds_nothing_of_its_own() {
-    let own = with_layers(json!([{"ty": 0, "shapes": []}]));
-    assert_eq!(check(&own), Err(Malformed::Layer));
-    assert_eq!(
-        check(&with_layers(json!([{"ty": 4, "shapes": []}]))),
-        Ok(())
-    );
+fn shape_lists_fit_the_layer_kind() {
+    let listed = |kind: u64, shapes: Value| with_layers(json!([{"ty": kind, "shapes": shapes}]));
+    let rect = json!([{"ty": "rc"}]);
+    assert_eq!(check(&listed(0, rect.clone())), Err(Malformed::Layer));
+    assert_eq!(check(&listed(0, json!([]))), Ok(()));
+    assert_eq!(check(&listed(4, rect)), Ok(()));
+    assert_eq!(check(&listed(4, json!([]))), Ok(()));
 }
 
 #[test]
@@ -198,7 +192,7 @@ fn an_asset_without_layers_is_not_a_precomp() {
 }
 
 #[test]
-fn a_precomp_cannot_reach_itself() {
+fn asset_graphs_are_validated() {
     let direct = with_assets(
         json!([precomp("a")]),
         json!([{"id": "a", "layers": [precomp("a")]}]),
