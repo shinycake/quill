@@ -33,8 +33,9 @@ pub enum RedrawNeed {
     /// that are not open. Redrawn together, a few times a second, without
     /// the conversation.
     ChatList,
-    /// Only the conversation pane can change (progress of the open chat's
-    /// media downloads): redrawn now, without the chat list and composer.
+    /// Only the open chat can change (progress of its media downloads):
+    /// redrawn now in the conversation and composer slices and the chat
+    /// windows, without the chat list.
     Conversation,
     /// Anything may change but nothing is urgent (automatic downloads,
     /// user and group records): a coalesced full redraw.
