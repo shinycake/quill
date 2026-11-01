@@ -639,17 +639,19 @@ impl AudioEngine {
                 }
                 self.track = Some(Track::new(built, &self.workers));
                 self.stale = false;
+                self.failed = false;
                 self.error = (!playing).then_some(AudioError::NoOutput);
             }
         }
     }
 
     fn fail_build(&mut self, error: AudioError, target: f64) {
-        let silent = self.track.is_none() || self.stale;
+        let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
+        let silent = ended || self.stale;
         if silent {
             self.parked_secs = target;
         }
-        self.failed = self.track.is_none();
+        self.failed = ended;
         self.start_failed = silent;
         self.error = Some(error);
     }
@@ -1120,6 +1122,22 @@ mod tests {
         engine.await_landing();
         assert_eq!(engine.state(), EngineState::Playing);
         assert!(!engine.take_start_failed());
+    }
+
+    #[test]
+    fn a_replay_after_the_end_that_cannot_open_fails_and_does_not_end() {
+        let (mut engine, mut device) = rig();
+        let path = track("replay-missing.wav", 1);
+        start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
+        pull(&mut device, usize::try_from(RATE).unwrap() * 2);
+        assert_eq!(engine.state(), EngineState::Ended);
+        std::fs::remove_file(&path).unwrap();
+        engine.resume(0.0).unwrap();
+        engine.await_landing();
+        assert_eq!(engine.state(), EngineState::Failed);
+        assert!(!engine.is_ended(), "the tick must not take it for the end");
+        assert_eq!(engine.error(), Some(AudioError::Open));
+        assert!(engine.take_start_failed(), "the user is told");
     }
 
     #[test]

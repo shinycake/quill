@@ -23,7 +23,8 @@ upload progress, and `Media::Player::Instance` drops `WaitingForData` for audio.
 - A failed start fails when it lands. The failure note moved to the landing for that reason.
   The build thread wakes the app from a drop guard, so a decoder that panics still brings the
   landing and its note. Each new build clears the last start's failure, so a good start after a
-  failed one says nothing.
+  failed one says nothing. A replay after the end that can't open fails like a first start, so
+  the tick does not take it for the track finishing and play the next one.
 - `OpusSource` keeps its packets in one block, so ending a track on the audio thread frees two
   allocations and not one per packet.
 
