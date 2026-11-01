@@ -19,10 +19,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `saveSettingsDelayed` in Telegram Desktop).
     pub fn cycle_subsection_tabs_mode(&mut self, chat_id: ChatId) -> SubsectionTabsMode {
         let mode = self.session.cycle_subsection_tabs_mode(chat_id);
-        if self.save_media_prefs().is_err() {
-            self.session.chats_state.chat_action_error =
-                Some("Could not save the tab layout.".into());
-        }
+        self.save_media_prefs();
         mode
     }
 

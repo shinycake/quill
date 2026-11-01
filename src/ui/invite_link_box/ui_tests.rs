@@ -9,11 +9,11 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::picker_value;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::invite_link_form::{DAY, Expire, InviteLinkForm, InviteLinkRequest, Usage};
-use quill::local_time::now_unix;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -60,6 +60,7 @@ fn click_in(vcx: &mut VisualTestContext, group: &'static str, index: usize) {
 fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = open_demo(cx, "ready-invite-link-new");
     let vcx = &mut vcx;
+    vcx.update(|_, cx| cx.set_global(WallClock::chicago_repeated_hour()));
     assert_eq!(shown(&shell, vcx), Some(DialogKind::InviteLinkBox));
     click_in(vcx, "invite-link-expire", 2);
     assert_eq!(form(&app, vcx).map(|f| f.expire), Some(Expire::After(DAY)));
@@ -87,15 +88,18 @@ fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
 
     click_in(vcx, "invite-link-expire", 4);
     assert_eq!(shown(&shell, vcx), Some(DialogKind::InviteLinkExpire));
-    let date = now_unix() + 3 * 86_400;
+    let now = WallClock::CHICAGO_FALL_BACK + 300;
+    let date = now + 3 * 86_400;
     let date = date - date.rem_euclid(60);
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             if let Some(CustomBox::Date(picker)) =
                 app.invite_link_box().and_then(|b| b.custom.as_ref())
-                && let Some(value) = picker_value(date)
+                && let Some(value) = picker_value(date, cx)
             {
-                picker.update(cx, |state, cx| state.set_date_time(value, window, cx));
+                picker
+                    .state
+                    .update(cx, |state, cx| state.set_date_time(value, window, cx));
             }
         });
     });
@@ -106,7 +110,7 @@ fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
     let picked = form(&app, vcx).expect("box");
     assert_eq!(picked.expire, Expire::At(date as i32));
     assert_eq!(
-        picked.request("", 0, now_unix()),
+        picked.request("", 0, now),
         InviteLinkRequest::Create {
             name: String::new(),
             expiration_date: date as i32,

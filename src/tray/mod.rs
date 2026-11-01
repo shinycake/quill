@@ -126,9 +126,12 @@ fn trace_fallback(archive: bool, messages: bool) {
 /// for the chat itself (`unread_count`, marked unread) is subtracted so
 /// nothing is counted twice.
 fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u32 {
+    // Only chats with topics loaded have any (`forum_topics_unread`).
     session
-        .chats
-        .values()
+        .threads
+        .forum_topics
+        .keys()
+        .filter_map(|chat_id| session.chats.get(chat_id))
         .filter(|chat| chat.in_archive == archive)
         .filter(|chat| prefs.include_muted || !session.effective_muted(chat))
         .map(|chat| {

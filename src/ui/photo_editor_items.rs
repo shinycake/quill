@@ -62,7 +62,7 @@ impl PhotoEditor {
 
     /// An item's rectangle in normalized coordinates (left, top, w, h).
     pub(super) fn item_rect(&self, item: &Placed) -> (f32, f32, f32, f32) {
-        let (width, height) = self.working.dimensions();
+        let (width, height) = self.dimensions();
         let w = item.width;
         let h = item.width * item.aspect() * width as f32 / height.max(1) as f32;
         (item.center.0 - w / 2.0, item.center.1 - h / 2.0, w, h)
@@ -295,7 +295,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.run_off_ui_then(
+        self.run_off_ui_scoped_then(
             move || super::editor_art::sticker_pixels(std::path::Path::new(&path), format),
             |this, image, cx| match image {
                 Some(image) => this.photo_editor_mut(|editor| editor.place(image), cx),

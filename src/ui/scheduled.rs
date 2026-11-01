@@ -12,6 +12,7 @@ use super::composer_sends::SendSlot;
 use super::message_text::format_unix_date_time;
 use super::shell::DialogKind;
 use super::shell::QuillShell;
+use super::wall_clock::WallClock;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::calendar::Matcher;
@@ -25,10 +26,9 @@ use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerScheduling};
 use quill::ids::MessageId;
 use quill::lang::{keys, tr, tr_with};
-use quill::local_time::{civil_local, now_unix};
 use quill::schedule::{
-    MAX_SCHEDULE_SECS, ScheduleError, ScheduleKind, civil_to_unix, default_schedule_time,
-    parse_picker_stamp, repeat_period_text, validate_send_date,
+    MAX_SCHEDULE_SECS, ScheduleError, ScheduleKind, default_schedule_time, parse_picker_stamp,
+    repeat_period_text, validate_send_date,
 };
 use quill::telegram::envelope::{
     ChatKind, MessageSchedulingState, ParsedMessage, effective_content,
@@ -86,7 +86,7 @@ pub(super) enum ScheduleTarget {
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
 pub(super) struct SchedulePicker {
     pub target: ScheduleTarget,
-    pub date: Entity<DatePickerState>,
+    pub date: TimePicker,
     pub error: Option<&'static str>,
     /// The "Repeat" choice in seconds (zero: never), Premium only.
     pub repeat: i32,
@@ -112,22 +112,46 @@ pub(super) fn using_test_dc() -> bool {
 
 /// `YYYY-MM-DDTHH:MM:00` of a unix time in the local zone, the shape
 /// `NaiveDateTime` parses (the kit does not re-export chrono).
-fn local_stamp(unix: i64) -> String {
-    let c = civil_local(unix);
+fn local_stamp(unix: i64, clock: &WallClock) -> String {
+    let c = clock.civil(unix);
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:00",
         c.year, c.month, c.day, c.hour, c.minute
     )
 }
 
-pub(super) fn picker_value(unix: i64) -> Option<DateTime> {
-    Some(DateTime::Single(Some(local_stamp(unix).parse().ok()?)))
+pub(super) fn picker_value(unix: i64, cx: &App) -> Option<DateTime> {
+    let stamp = local_stamp(unix, &WallClock::of(cx));
+    Some(DateTime::Single(Some(stamp.parse().ok()?)))
 }
 
 /// Local calendar day of `unix` as `YYYY-MM-DD`; compares lexically.
-pub(super) fn local_day(unix: i64) -> String {
-    let c = civil_local(unix);
+fn local_day(unix: i64, clock: &WallClock) -> String {
+    let c = clock.civil(unix);
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
+}
+
+/// A date picker and the instant it opened at, so a time left as it was
+/// keeps its own pass of a repeated hour.
+#[derive(Clone)]
+pub(crate) struct TimePicker {
+    pub(crate) state: Entity<DatePickerState>,
+    initial: i64,
+}
+
+impl TimePicker {
+    /// Shows `initial` in `state`.
+    pub(crate) fn open(
+        state: Entity<DatePickerState>,
+        initial: i64,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) -> Self {
+        if let Some(value) = picker_value(initial, cx) {
+            state.update(cx, |state, cx| state.set_date_time(value, window, cx));
+        }
+        Self { state, initial }
+    }
 }
 
 /// A date+time picker that opens at `initial` and allows days from today
@@ -138,11 +162,12 @@ pub(super) fn new_date_time_picker(
     cx: &mut Context<QuillApp>,
     initial: i64,
     max_ahead_secs: i64,
-) -> Entity<DatePickerState> {
-    let now = now_unix();
+) -> TimePicker {
+    let clock = WallClock::of(cx);
+    let now = clock.now();
     // Days outside [today, today + max_ahead] cannot be picked.
-    let first_day = local_day(now);
-    let last_day = local_day(now + max_ahead_secs);
+    let first_day = local_day(now, &clock);
+    let last_day = local_day(now + max_ahead_secs, &clock);
     let date = cx.new(|cx| {
         DatePickerState::new(window, cx)
             .time_precision(TimePrecision::Minute)
@@ -152,20 +177,20 @@ pub(super) fn new_date_time_picker(
                 day < first_day || day > last_day
             }))
     });
-    if let Some(value) = picker_value(initial) {
-        date.update(cx, |state, cx| state.set_date_time(value, window, cx));
-    }
-    date
+    TimePicker::open(date, initial, window, cx)
 }
 
 /// The unix time a date picker currently shows (local zone), if it holds
 /// a complete date and time.
-pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i64> {
-    date.read(cx)
+pub(super) fn picked_unix(picker: &TimePicker, cx: &App) -> Option<i64> {
+    let clock = WallClock::of(cx);
+    picker
+        .state
+        .read(cx)
         .date_time()
         .start()
         .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
-        .map(|civil| civil_to_unix(&civil))
+        .map(|civil| clock.resolve(&civil, picker.initial))
 }
 
 impl QuillApp {
@@ -215,7 +240,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let existing = match target {
             ScheduleTarget::Composer => match self.pending_send().scheduling {
                 ComposerScheduling::SendAtDate(date) => Some(date),
@@ -286,7 +311,7 @@ impl QuillApp {
         let target = picker.target;
         let picked = picked_unix(&picker.date, cx)
             .ok_or(ScheduleError::Invalid)
-            .and_then(|unix| validate_send_date(unix, now_unix()));
+            .and_then(|unix| validate_send_date(unix, WallClock::of(cx).now()));
         match picked {
             Ok(send_date) => self.apply_schedule(
                 target,
@@ -440,7 +465,7 @@ impl QuillApp {
             return div().into_any_element();
         };
         let kind = self.schedule_kind();
-        let now = now_unix();
+        let now = WallClock::of(cx).now();
         let presets: Vec<DateRangePreset> = [
             (tr(keys::Q_OPS_IN_1_HOUR), 3600),
             (tr(keys::Q_OPS_IN_8_HOURS), 8 * 3600),
@@ -448,7 +473,7 @@ impl QuillApp {
         ]
         .into_iter()
         .filter_map(|(label, secs)| {
-            picker_value(now + secs).map(|value| DateRangePreset::date_time(label, value))
+            picker_value(now + secs, cx).map(|value| DateRangePreset::date_time(label, value))
         })
         .collect();
         let target = picker.target;
@@ -492,7 +517,7 @@ impl QuillApp {
             .bg(cx.theme().popover)
             .child(div().text_sm().font_semibold().child(kind.picker_title()))
             .child(
-                DatePicker::new(&picker.date)
+                DatePicker::new(&picker.date.state)
                     .presets(presets)
                     .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
             )

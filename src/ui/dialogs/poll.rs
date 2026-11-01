@@ -1,5 +1,5 @@
 use super::super::app::QuillApp;
-use gpui_kit::component::date_picker::DatePickerState;
+use crate::ui::scheduled::TimePicker;
 use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
@@ -88,7 +88,7 @@ pub(crate) struct PollToggles {
 
 /// The custom deadline box: a date and time picker under "Deadline".
 pub(crate) struct DeadlineBox {
-    pub(crate) picker: Entity<DatePickerState>,
+    pub(crate) picker: TimePicker,
 }
 
 /// Phase 4.2: poll creation dialog above the composer. Textarea entities are

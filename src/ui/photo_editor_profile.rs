@@ -9,7 +9,7 @@
 
 use super::app::QuillApp;
 use super::image_decode::{DecodeError, DecodeSize, decode_file, decode_image};
-use super::photo_edit::{CropRect, Placed, render};
+use super::photo_edit::CropRect;
 use super::photo_editor::{EditorPurpose, PhotoEditor, preview_of};
 use super::profile_photo_sources::{ChosenPhoto, PhotoPreview, PhotoTarget};
 use super::shell::{DialogKind, QuillShell};
@@ -137,7 +137,7 @@ impl PhotoEditor {
     /// The crop the editor opens with (and "Reset" goes back to).
     pub(super) fn initial_crop(&self) -> CropRect {
         if self.square_crop() {
-            let (width, height) = self.working.dimensions();
+            let (width, height) = self.dimensions();
             centered_square(width, height)
         } else {
             CropRect::FULL
@@ -145,7 +145,7 @@ impl PhotoEditor {
     }
 
     pub(super) fn square_corner_drag(&self, corner: usize, point: (f32, f32)) -> CropRect {
-        square_corner(self.crop, corner, point, self.working.dimensions())
+        square_corner(self.crop, corner, point, self.dimensions())
     }
 }
 
@@ -313,14 +313,11 @@ impl QuillApp {
         target: PhotoTarget,
         cx: &mut Context<Self>,
     ) {
-        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
-        let (working, crop, strokes) =
-            (editor.working.clone(), editor.crop, editor.strokes.clone());
-        drop(editor);
+        let job = editor.into_render_job();
         cx.notify();
         self.run_off_ui_then(
             move || {
-                let square = finish_square(render(&working, crop, &strokes, &placed));
+                let square = finish_square(job.render());
                 let saved = super::edit_media_tools::write_edited_png(&square)?;
                 Some((saved, preview_of(&square)))
             },

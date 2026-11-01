@@ -602,7 +602,8 @@ impl QuillApp {
             return window_title(None, 0, None);
         }
         // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
-        let total = quill::tray::badge_count(session, &session.settings.badge_prefs)
+        let total = (self.frame.title_badge.borrow_mut())
+            .get(session, &session.settings.badge_prefs)
             .saturating_add(quill::notify_accounts::other_accounts_unread().count);
         let chat = session.chats.get(&chat_id.0).map(|chat| TitleChat {
             name: &chat.title,

@@ -126,7 +126,7 @@ impl QuillApp {
                                             keystroke: String::new(),
                                         };
                                         if let Some(live) = this.live.as_mut() {
-                                            let _ = live.driver.save_custom_keybinding(custom);
+                                            live.driver.save_custom_keybinding(custom);
                                             let customs = live.driver.load_custom_keybindings();
                                             apply_custom_bindings(cx, &customs);
                                         }
@@ -233,27 +233,19 @@ impl QuillApp {
             keystroke: chord,
         };
         let saved = self.live.as_mut().map(|live| {
-            let ok = live.driver.save_custom_keybinding(custom).is_ok();
-            let customs = ok.then(|| live.driver.load_custom_keybindings());
-            (ok, customs)
+            live.driver.save_custom_keybinding(custom);
+            live.driver.load_custom_keybindings()
         });
-        match saved {
-            Some((true, Some(customs))) => {
-                apply_custom_bindings(cx, &customs);
-                if self
-                    .settings
-                    .keybinding_error
-                    .as_ref()
-                    .is_some_and(|(err_id, _)| err_id == &id)
-                {
-                    self.settings.keybinding_error = None;
-                }
+        if let Some(customs) = saved {
+            apply_custom_bindings(cx, &customs);
+            if self
+                .settings
+                .keybinding_error
+                .as_ref()
+                .is_some_and(|(err_id, _)| err_id == &id)
+            {
+                self.settings.keybinding_error = None;
             }
-            Some((false, _)) => {
-                self.settings.keybinding_error =
-                    Some((id, tr(keys::Q_PREFS_COULDNT_SAVE_THAT_SHORTCUT_THE).into()));
-            }
-            _ => {}
         }
         self.settings.keybinding_capture = None;
         cx.notify();

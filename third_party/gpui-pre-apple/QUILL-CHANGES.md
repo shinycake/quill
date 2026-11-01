@@ -139,3 +139,14 @@ compile the shaders on the main thread:
   `the_precompiled_shaders_build_every_pipeline`, which needs the toolchain.
   Redo this at each GPUI re-vendor. The metallib's minimum version stays the
   crate's `10.15.7`.
+
+The Quill project also changed it in 2026 to stop rebuilding CoreText's font
+caches for every line:
+
+- `src/text_system.rs`: `layout_line` shapes with one kept CTFont per font and
+  size, where upstream built a new one per run. A new CTFont starts with empty
+  shaping and fallback caches, which cost about a third of the CPU cycles of
+  scrolling the emoji panel.
+- `src/sized_fonts.rs`: the map, std-only and bounded, tested by
+  `scripts/test-sized-fonts.sh`. `test_kept_fonts_shape_like_new_ones` in
+  `text_system.rs` compares a kept font's shaping with a new font's.

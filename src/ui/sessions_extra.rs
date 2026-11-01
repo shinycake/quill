@@ -313,12 +313,7 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.device_prefs = prefs;
-            if let Err(err) = live.driver.save_device_prefs() {
-                self.connection.set_note(StatusNote::error(tr_with(
-                    keys::Q_PREFS_COULDNT_SAVE_DEVICE_NAME,
-                    &[("err", &err.to_string())],
-                )));
-            }
+            live.driver.save_device_prefs();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.device_prefs = prefs;
             self.connection.set_note(StatusNote::silent(tr(

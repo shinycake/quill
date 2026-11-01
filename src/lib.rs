@@ -68,6 +68,7 @@ pub mod deep_link_types;
 pub mod dev_cli;
 pub mod diagnostics;
 pub mod disk_guard;
+pub mod display_text;
 pub mod drop_modes;
 pub mod drop_topic;
 pub mod earn;

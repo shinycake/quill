@@ -13,13 +13,13 @@ use crate::ui::keybindings::{apply_custom_bindings, bind_keys};
 use crate::ui::scheduled::{ScheduleTarget, picker_value};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::ComposerScheduling;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 use quill::settings::CustomKeybinding;
 use quill::telegram::envelope::ChannelMemberStatus;
 
@@ -68,11 +68,13 @@ fn schedule_with_repeat(
     window: &mut gpui_kit::Window,
     cx: &mut gpui_kit::Context<QuillApp>,
 ) {
+    cx.set_global(WallClock::chicago_repeated_hour());
     app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+    // 01:20, which went by once already as CDT.
+    let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
     let picker = app.composer_ui.schedule_picker.as_mut().expect("picker");
     picker.repeat = repeat;
-    let value = picker_value(now_unix() + 3600).expect("a picker value");
-    let date = picker.date.clone();
+    let date = picker.date.state.clone();
     date.update(cx, |state, cx| state.set_date_time(value, window, cx));
     app.confirm_schedule_picker(window, cx);
 }
@@ -136,6 +138,7 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
+        cx.set_global(WallClock::chicago_repeated_hour());
         // Nothing to send: the command does not apply.
         assert!(!app.schedule_send_by_key(window, cx));
         app.composer
@@ -148,8 +151,9 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
             .expect("the picker");
         assert!(picker.send_after);
         // Confirming the time sends, as tdesktop's schedule box does.
-        let value = picker_value(now_unix() + 3600).expect("a picker value");
-        let date = picker.date.clone();
+        let date = picker.date.state.clone();
+        // 01:20, which went by once already as CDT.
+        let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));
         app.confirm_schedule_picker(window, cx);
         assert!(app.composer.read(cx).value().is_empty(), "the message went");

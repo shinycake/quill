@@ -709,14 +709,10 @@ pub(in crate::ui) fn sidebar_emoji_head(id: i64) -> HeadId {
 /// without waiting for a sweep of retired images. One still held
 /// elsewhere is retired.
 fn drop_frames(frames: Vec<Arc<RenderImage>>, cx: &mut App) {
-    let mut held = Vec::new();
-    for image in frames {
-        if Arc::strong_count(&image) == 1 {
-            cx.drop_image(image, None);
-        } else {
-            held.push(image);
-        }
-    }
+    let (alone, held) = frames
+        .into_iter()
+        .partition(|image| Arc::strong_count(image) == 1);
+    super::super::image_budget::drop_images_off_ui_thread(alone, None, cx);
     super::super::image_budget::retire_all(held);
 }
 

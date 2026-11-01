@@ -1,6 +1,6 @@
 //! The Business dialog's screens and the unsaved drafts they edit.
 
-use gpui_kit::component::date_picker::DatePickerState;
+use crate::ui::scheduled::TimePicker;
 use gpui_kit::component::input::{InputState, TextareaState};
 use gpui_kit::component::time_field::TimeFieldState;
 use gpui_kit::*;
@@ -122,8 +122,8 @@ pub(crate) struct AwayDraft {
     pub(super) enabled: bool,
     pub(super) recipients: BusinessRecipients,
     pub(super) schedule: ScheduleChoice,
-    pub(super) start: Entity<DatePickerState>,
-    pub(super) end: Entity<DatePickerState>,
+    pub(super) start: TimePicker,
+    pub(super) end: TimePicker,
     pub(super) offline_only: bool,
 }
 

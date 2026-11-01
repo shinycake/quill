@@ -228,7 +228,7 @@ fn arm() -> oneshot::Receiver<()> {
 /// Drop the retired images no window can show any more from every
 /// window's atlas. Call between frames: with no window drawing, or as the
 /// main window (`current`) starts a frame.
-fn sweep(mut current: Option<&mut Window>, cx: &mut App) {
+fn sweep(current: Option<&mut Window>, cx: &mut App) {
     let main = MAIN.get();
     let mut main_open = false;
     let mut windows = Vec::new();
@@ -244,9 +244,21 @@ fn sweep(mut current: Option<&mut Window>, cx: &mut App) {
         };
         windows.push((id, frame));
     }
-    for image in take_unshowable(main_open, &windows) {
-        cx.drop_image(image, current.as_deref_mut());
+    drop_images_off_ui_thread(take_unshowable(main_open, &windows), current, cx);
+}
+
+pub(in crate::ui) fn drop_images_off_ui_thread(
+    images: Vec<Arc<RenderImage>>,
+    mut current: Option<&mut Window>,
+    cx: &mut App,
+) {
+    if images.is_empty() {
+        return;
     }
+    for image in &images {
+        cx.drop_image(image.clone(), current.as_deref_mut());
+    }
+    cx.background_spawn(async move { drop(images) }).detach();
 }
 
 /// The retired images no window can show any more and nothing else holds,

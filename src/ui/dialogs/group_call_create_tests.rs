@@ -12,12 +12,12 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::picked_unix;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::{Root, WindowExt};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
-use quill::calls::group_call_create::{CreateKind, default_schedule_at};
+use quill::calls::group_call_create::CreateKind;
 use quill::ids::{ChatId, RequestId};
-use quill::local_time::{now_unix, utc_offset_at};
 use quill::state::{ActiveGroupCall, VideoChatInfo};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
 
@@ -310,6 +310,9 @@ fn only_yourself_is_the_question_and_none_is_the_server_error(cx: &mut TestAppCo
 #[gpui_kit::test]
 fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
+    // 22:40 CDT: the next whole hour at least half an hour away is 00:00.
+    let now = WallClock::CHICAGO_FALL_BACK - 4 * 3600 + 40 * 60;
+    main.update(|_, cx| cx.set_global(WallClock::chicago_at(now)));
     manager(&app, &mut main);
     begin(&app, &mut main, CreateKind::Now);
     click(&mut main, "group-call-create-schedule");
@@ -323,15 +326,7 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
             _ => None,
         }
     });
-    let now = now_unix();
-    let expected = default_schedule_at(now, &utc_offset_at);
-    // The hour may roll over between the two reads.
-    let picked = picked.expect("a default time");
-    assert!(
-        picked == expected || picked == default_schedule_at(now - 5, &utc_offset_at),
-        "{picked} vs {expected}"
-    );
-    assert!(picked - now >= 30 * 60 - 5, "at least half an hour away");
+    assert_eq!(picked, Some(WallClock::CHICAGO_FALL_BACK - 2 * 3600));
     assert!(
         main.debug_bounds("group-call-schedule-notified").is_some(),
         "members are told when it starts"
@@ -350,13 +345,16 @@ fn the_schedule_demo_refuses_a_time_in_the_past(cx: &mut TestAppContext) {
     let (app, mut main) = open(cx, "ready-group-call-schedule");
     assert!(main.debug_bounds("group-call-schedule-picker").is_some());
     app.update_in(&mut main, |app, window, cx| {
+        cx.set_global(WallClock::chicago_repeated_hour());
         if let Some(GroupCallCreate {
             step: CreateStep::Schedule(step),
             ..
         }) = app.group_call.start_dialog.as_ref()
-            && let Some(value) = crate::ui::scheduled::picker_value(now_unix() - 3600)
+            && let Some(value) =
+                crate::ui::scheduled::picker_value(WallClock::of(cx).now() - 3600, cx)
         {
             step.picker
+                .state
                 .update(cx, |state, cx| state.set_date_time(value, window, cx));
         }
     });

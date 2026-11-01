@@ -250,12 +250,12 @@ impl<S: JsonSender> ConnectDriver<S> {
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2i: persist the call preferences edited from the Calls
     /// tab (same account-scoped dir as the other settings files).
-    pub fn save_call_prefs(&mut self) -> std::io::Result<()> {
+    pub fn save_call_prefs(&mut self) {
         save_call_prefs(&self.paths, &self.session.calls.prefs)
     }
 
     /// MED1: persist media prefs (`media_prefs.json`) next to the account.
-    pub fn save_media_prefs(&mut self) -> std::io::Result<()> {
+    pub fn save_media_prefs(&mut self) {
         crate::settings::save_media_prefs(&self.paths, &self.session.settings.media_prefs)
     }
 
@@ -268,7 +268,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Parity slice: persist the in-app notification sounds toggle
     /// (`prefs.json`). Loads the existing prefs first so the other
     /// fields survive the write.
-    pub fn save_inapp_sounds_enabled(&mut self) -> std::io::Result<()> {
+    pub fn save_inapp_sounds_enabled(&mut self) {
         let mut prefs = load_preferences(&self.paths);
         prefs.inapp_sounds_enabled = self.session.settings.inapp_sounds_enabled;
         save_preferences(&self.paths, &prefs)
@@ -277,7 +277,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Persist the desktop-notifications switch (tdesktop `desktopNotify`).
     /// Persist the notification view (tdesktop "Name" / "Text") to
     /// `prefs.json`, keeping the other prefs.
-    pub fn save_notify_view(&mut self) -> std::io::Result<()> {
+    pub fn save_notify_view(&mut self) {
         let mut prefs = load_preferences(&self.paths);
         prefs.notify_view = self.session.settings.notify_view;
         save_preferences(&self.paths, &prefs)
@@ -285,13 +285,13 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Persist "Show photo previews" to `prefs.json`, keeping the other
     /// prefs.
-    pub fn save_notify_photo_previews(&mut self) -> std::io::Result<()> {
+    pub fn save_notify_photo_previews(&mut self) {
         let mut prefs = load_preferences(&self.paths);
         prefs.notify_photo_previews = self.session.settings.notify_photo_previews;
         save_preferences(&self.paths, &prefs)
     }
 
-    pub fn save_desktop_notifications(&mut self) -> std::io::Result<()> {
+    pub fn save_desktop_notifications(&mut self) {
         let mut prefs = load_preferences(&self.paths);
         prefs.desktop_notifications = self.session.settings.desktop_notifications;
         save_preferences(&self.paths, &prefs)
@@ -305,10 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Parity slice (platform-custom-keybindings): persist one shortcut
     /// override (`prefs.json`); an empty keystroke resets to the default.
-    pub fn save_custom_keybinding(
-        &mut self,
-        custom: crate::settings::CustomKeybinding,
-    ) -> std::io::Result<()> {
+    pub fn save_custom_keybinding(&mut self, custom: crate::settings::CustomKeybinding) {
         let mut prefs = load_preferences(&self.paths);
         if custom.keystroke.is_empty() {
             prefs.custom_keybindings.retain(|c| c.id != custom.id);
@@ -326,12 +323,12 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Slice parity:settings-language: persist the app language pref
     /// (`language_prefs.json`) next to the account.
-    pub fn save_language_prefs(&mut self) -> std::io::Result<()> {
+    pub fn save_language_prefs(&mut self) {
         save_language_prefs(&self.paths, &self.session.settings.language_prefs)
     }
 
     /// parity:settings-session-details: persist the custom device name.
-    pub fn save_device_prefs(&mut self) -> std::io::Result<()> {
+    pub fn save_device_prefs(&mut self) {
         save_device_prefs(&self.paths, &self.session.settings.device_prefs)
     }
 }

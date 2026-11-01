@@ -46,6 +46,9 @@ pub(crate) struct PendingSend {
     /// The link preview choice (tdesktop keeps it in the draft as
     /// `WebPageDraft`).
     pub(super) preview: LinkPreviewChoice,
+    /// The text of a Send pressed while a photo edit was rendering: it
+    /// goes out when the last one lands.
+    pub(super) held_send: Option<String>,
 }
 
 impl PendingSend {
@@ -63,6 +66,7 @@ impl PendingSend {
             media: PreviewMediaSize::Auto,
             link_index: 0,
         },
+        held_send: None,
     };
 
     /// Drop the tray and the choices that only make sense with it.
@@ -72,6 +76,21 @@ impl PendingSend {
         self.caption_above = false;
         self.hd_photos = false;
         self.paid_stars = 0;
+        self.held_send = None;
+    }
+
+    /// Some photo of the tray is still rendering its edit.
+    pub(super) fn renders_an_edit(&self) -> bool {
+        self.attachments
+            .iter()
+            .any(|attachment| attachment.extras.photo_render.is_some())
+    }
+
+    /// A held Send waits only on a render that will land.
+    fn release_idle_hold(&mut self) {
+        if !self.renders_an_edit() {
+            self.held_send = None;
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -146,6 +165,7 @@ impl ComposerSends {
         let account = self.accounts.entry(slot.account.clone()).or_default();
         let send = account.slots.entry(slot.draft).or_default();
         let result = f(send);
+        send.release_idle_hold();
         if send.is_empty() {
             account.slots.remove(&slot.draft);
         }
@@ -160,14 +180,26 @@ impl ComposerSends {
         item: &TrayItem,
         f: impl FnOnce(&mut ComposerAttachment) -> R,
     ) -> Option<R> {
-        self.accounts
+        let send = self
+            .accounts
             .get_mut(&item.slot.account)?
             .slots
-            .get_mut(&item.slot.draft)?
+            .get_mut(&item.slot.draft)?;
+        let result = send
             .attachments
             .get_mut(item.index)
             .filter(|attachment| attachment.path == item.path)
-            .map(f)
+            .map(f);
+        send.release_idle_hold();
+        result
+    }
+
+    /// Whether `item` is still in its tray, as the same file.
+    pub(super) fn holds_item(&self, item: &TrayItem) -> bool {
+        self.get(&item.slot)
+            .attachments
+            .get(item.index)
+            .is_some_and(|attachment| attachment.path == item.path)
     }
 
     /// The slot's send went: hand back what it held.
@@ -304,6 +336,11 @@ impl QuillApp {
             Some(slot) => self.composer_sends.get(&slot),
             None => &NOTHING_PENDING,
         }
+    }
+
+    /// A photo of the open slot's tray is still rendering its edit.
+    pub(super) fn tray_renders_an_edit(&self) -> bool {
+        self.pending_send().renders_an_edit()
     }
 
     /// Change the open slot's next send. `None` when no chat is open.

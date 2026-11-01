@@ -144,8 +144,7 @@ impl Session {
                 .stickers
                 .emoji
                 .custom_emoji_stickers
-                .iter()
-                .find(|s| s.custom_emoji_id == Some(custom_emoji_id));
+                .lookup(custom_emoji_id);
             if let Some(file_id) = resolved.and_then(|s| s.display_file_id())
                 && self.should_download(file_id)
             {
@@ -392,8 +391,7 @@ impl Session {
                             .stickers
                             .emoji
                             .custom_emoji_stickers
-                            .iter()
-                            .find(|s| s.custom_emoji_id == Some(custom_emoji_id));
+                            .lookup(custom_emoji_id);
                         if let Some(file_id) = resolved.and_then(|s| s.display_file_id())
                             && self.should_download(file_id)
                         {
