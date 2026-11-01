@@ -239,3 +239,39 @@ fn the_latest_done_wins_and_the_other_png_is_deleted(cx: &mut TestAppContext) {
     );
     let _ = std::fs::remove_file(edited);
 }
+
+fn attachment(path: &Path) -> ComposerAttachment {
+    ComposerAttachment {
+        file_name: "pic.png".into(),
+        path: path.to_path_buf(),
+        kind: AttachmentKind::Photo,
+        spoiler: false,
+        extras: AttachmentExtras::default(),
+    }
+}
+
+#[gpui_kit::test]
+fn an_edit_lands_on_its_photo_after_an_earlier_card_is_removed(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let first = picture("shift-a.png", 59, 11);
+    let second = picture("shift-b.png", 61, 13);
+    let sent_before = newest_sent_photo(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let tray = vec![attachment(&first), attachment(&second)];
+        app.update_pending_attachments(|items| *items = tray)
+            .expect("an open chat");
+        let item = app.tray_item(1).expect("the second card");
+        let pixels = image::open(&second).expect("decodes").to_rgba8();
+        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.remove_attachment(0, cx);
+        app.submit_composer(String::new(), window, cx);
+    });
+    assert_eq!(newest_sent_photo(&app, &mut vcx), sent_before, "held");
+    vcx.run_until_parked();
+    let sent = newest_sent_photo(&app, &mut vcx).expect("the held Send went");
+    assert_eq!(image::image_dimensions(&sent).ok(), Some((13, 61)));
+    assert_eq!(tray_path(&app, &mut vcx), None, "nothing left held");
+    let _ = std::fs::remove_file(sent);
+}

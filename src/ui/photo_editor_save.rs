@@ -3,11 +3,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::composer_sends::TrayItem;
+use super::composer_sends::{SendSlot, TrayItem};
 use super::photo_editor::{EditorPurpose, PhotoEditor};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Numbers each attachment render, so the latest Done of a photo wins.
@@ -82,10 +83,10 @@ impl QuillApp {
             );
         self.spawn_scoped_in(window, cx, async move |app, cx| {
             let saved = task.await;
-            let (kept, item_kept) = (saved.clone(), item.clone());
+            let kept = saved.clone();
             let landed = app.update_in(cx, |this, window, cx| {
-                let held = this.land_attachment_edit(&item, render, saved, cx);
-                if let Some(text) = held
+                let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
+                if let Some(text) = landed.held
                     && this.send_slot().as_ref() == Some(&item.slot)
                 {
                     this.submit_composer(text, window, cx);
@@ -97,7 +98,7 @@ impl QuillApp {
                 && app
                     .main()
                     .update(cx, |this, cx| {
-                        this.land_attachment_edit(&item_kept, render, kept.clone(), cx);
+                        this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
                     })
                     .is_err()
                 && let Some(kept) = kept
@@ -114,29 +115,29 @@ impl QuillApp {
         Some((edit.chat_id, edit.message_id))
     }
 
-    /// Render `render` of `item` finished. Its PNG replaces the photo in
-    /// the chat it was opened from while the photo is still in that tray
-    /// and no later Done started; otherwise the PNG goes. Hands back the
-    /// held Send once nothing in that tray renders.
+    /// Render `render` in the tray of `slot` finished. Its PNG replaces
+    /// the photo that render was started for while that photo is still in
+    /// the tray and no later Done started; otherwise the PNG goes. The
+    /// render number finds the photo, so cards removed or moved meanwhile
+    /// do not matter.
     fn land_attachment_edit(
         &mut self,
-        item: &TrayItem,
+        slot: &SendSlot,
         render: u64,
-        saved: Option<std::path::PathBuf>,
+        saved: Option<PathBuf>,
         cx: &mut Context<Self>,
-    ) -> Option<String> {
+    ) -> Landed {
         cx.notify();
-        let landed = self.composer_sends.update(&item.slot, |send| {
+        let found = self.composer_sends.update(slot, |send| {
             let attachment = send
                 .attachments
-                .get_mut(item.index)
-                .filter(|attachment| attachment.path == item.path)
-                .filter(|attachment| attachment.extras.photo_render == Some(render))?;
+                .iter_mut()
+                .find(|attachment| attachment.extras.photo_render == Some(render))?;
             attachment.extras.photo_render = None;
             let Some(saved) = &saved else {
                 // The held Send would carry the unedited photo.
                 send.held_send = None;
-                return Some(None);
+                return Some(Landed::default());
             };
             let stem = attachment
                 .path
@@ -147,24 +148,32 @@ impl QuillApp {
             attachment.path = saved.clone();
             attachment.file_name = format!("{stem}.png");
             attachment.kind = quill::composer::AttachmentKind::Photo;
-            Some(
-                (!send.renders_an_edit())
-                    .then(|| send.held_send.take())
-                    .flatten(),
-            )
+            let held = (!send.renders_an_edit())
+                .then(|| send.held_send.take())
+                .flatten();
+            Some(Landed { held })
         });
-        match (landed, saved) {
+        match (found, saved) {
             (None, Some(saved)) => {
                 let _ = std::fs::remove_file(saved);
-                None
+                Landed::default()
             }
-            (Some(_), None) => {
-                self.connection.set_note(StatusNote::error(tr(
-                    keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
-                )));
-                None
+            (found, None) => {
+                if found.is_some() {
+                    self.connection.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
+                    )));
+                }
+                found.unwrap_or_default()
             }
-            (landed, _) => landed.flatten(),
+            (found, Some(_)) => found.unwrap_or_default(),
         }
     }
+}
+
+/// What a finished render left in its tray.
+#[derive(Default)]
+struct Landed {
+    /// The held Send, once nothing in that tray renders.
+    held: Option<String>,
 }
