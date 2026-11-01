@@ -56,9 +56,9 @@ they become fixed point, the range the rasterizer's sums and differences can hol
 `src/renderer/cpu_engine/tvgSwRle.cpp`: lines and curves beside the visible cells
 skip the cell by cell walk, with the same coverage. The curve flatness tests use
 64-bit products, and a row's running area wraps as unsigned. A shape that fills
-the cell pool grows it, up to 64 MiB, before it splits into bands, and an outline
-of 1,024 points or more keeps a row's cells in lists by column range. Both only
-change how cells are found.
+the cell pool grows it, up to 64 MiB, before it splits into bands, and the pool
+goes back to 4 MiB after that shape. An outline of 1,024 points or more keeps a
+row's cells in lists by column range. Both only change how cells are found.
 
 `src/renderer/cpu_engine/tvgSwStroke.cpp`: a curve stops splitting at the step a
 float can resolve at its coordinates, which is the old step for anything under

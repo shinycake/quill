@@ -650,7 +650,7 @@ index 513e497f1..85b4727cf 100644
  
      //compute box kernel sizes
 diff --git a/src/renderer/cpu_engine/tvgSwRle.cpp b/src/renderer/cpu_engine/tvgSwRle.cpp
-index 3bc4b241c..29c40e55f 100644
+index 3bc4b241c..0ccdc6536 100644
 --- a/src/renderer/cpu_engine/tvgSwRle.cpp
 +++ b/src/renderer/cpu_engine/tvgSwRle.cpp
 @@ -198,6 +198,10 @@
@@ -728,11 +728,13 @@ index 3bc4b241c..29c40e55f 100644
  
      while(true) {
          auto cell = *pcell;
-@@ -417,6 +433,20 @@ static SwCell* _findCell(RleWorker& rw)
+@@ -417,6 +433,22 @@ static SwCell* _findCell(RleWorker& rw)
  }
  
  
 +//QUILL
++constexpr uint32_t KEPT_POOL_SIZE = DEFAULT_POOL_SIZE * 256;  //QUILL
++
 +static bool _growCells(RleWorker& rw, SwCellPool* pool)
 +{
 +    constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
@@ -749,7 +751,7 @@ index 3bc4b241c..29c40e55f 100644
  static bool _recordCell(RleWorker& rw)
  {
      if (rw.area | rw.cover) {
-@@ -491,6 +521,13 @@ static bool _moveTo(RleWorker& rw, const SwPoint& to)
+@@ -491,6 +523,13 @@ static bool _moveTo(RleWorker& rw, const SwPoint& to)
  }
  
  
@@ -763,7 +765,7 @@ index 3bc4b241c..29c40e55f 100644
  static bool _lineTo(RleWorker& rw, const SwPoint& to)
  {
      auto e1 = TRUNC(rw.pos);
-@@ -510,6 +547,22 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+@@ -510,6 +549,22 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
      while (line < end) {
          auto diff = line[0] - line[1];
  
@@ -786,7 +788,7 @@ index 3bc4b241c..29c40e55f 100644
          // avoid possible arithmetic overflow below by splitting
          if (HYPOT(diff) > SHRT_MAX) {
              _splitLine(line);
-@@ -517,9 +570,6 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+@@ -517,9 +572,6 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
              continue;
          }
  
@@ -796,7 +798,7 @@ index 3bc4b241c..29c40e55f 100644
          auto f1 = FRACT(line[1]);
          SwPoint f2;
  
-@@ -620,6 +670,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
+@@ -620,6 +672,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
  }
  
  
@@ -816,7 +818,7 @@ index 3bc4b241c..29c40e55f 100644
  static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, const SwPoint& to)
  {
      auto arc = rw.bezStack;
-@@ -640,7 +703,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+@@ -640,7 +705,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
          if (y > max) max = y;
      }
  
@@ -825,7 +827,7 @@ index 3bc4b241c..29c40e55f 100644
  
      /* Decide whether to split or draw. See `Rapid Termination          */
      /* Evaluation for Recursive Subdivision of Bezier Curves' by Thomas */
-@@ -653,23 +716,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
+@@ -653,23 +718,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2,
              auto L = HYPOT(diff);
  
              //avoid possible arithmetic overflow below by splitting
@@ -858,7 +860,7 @@ index 3bc4b241c..29c40e55f 100644
                  goto split;
  
              //no reason to split
-@@ -774,6 +841,13 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+@@ -774,6 +843,13 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
      rw.bandSize = rw.bufferSize / (sizeof(SwCell) * 2);
      rw.bandShoot = 0;
      rw.antiAlias = antiAlias;
@@ -872,7 +874,7 @@ index 3bc4b241c..29c40e55f 100644
  
      if (!rle) rw.rle = new SwRle;
      else rw.rle = rle;
-@@ -806,7 +880,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+@@ -806,7 +882,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
              rw.yCells = reinterpret_cast<SwCell**>(rw.buffer);
              rw.yCnt = band->max - band->min;
  
@@ -882,7 +884,7 @@ index 3bc4b241c..29c40e55f 100644
              int cellMod = cellStart % sizeof(SwCell);
  
              if (cellMod > 0) cellStart += sizeof(SwCell) - cellMod;
-@@ -819,7 +894,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+@@ -819,7 +896,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
              rw.maxCells = cellsMax - rw.cells;
              if (rw.maxCells < 2) goto reduce_bands;
  
@@ -891,7 +893,7 @@ index 3bc4b241c..29c40e55f 100644
                  rw.yCells[y] = nullptr;
  
              rw.cellsCnt = 0;
-@@ -835,6 +910,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+@@ -835,6 +912,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
              }
  
          reduce_bands:
@@ -900,6 +902,19 @@ index 3bc4b241c..29c40e55f 100644
              /* render pool overflow: we will reduce the render band by half */
              auto bottom = band->min;
              auto top = band->max;
+@@ -859,6 +938,12 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
+     if (rw.bandShoot > 8 && rw.bandSize > 16) {
+         rw.bandSize = (rw.bandSize >> 1);
+     }
++    //QUILL
++    if (cellPool->size > KEPT_POOL_SIZE) {
++        cellPool->size = KEPT_POOL_SIZE;
++        tvg::free(cellPool->buffer);
++        cellPool->buffer = tvg::malloc<SwCell>(cellPool->size);
++    }
+     return rw.rle;
+ }
+ 
 diff --git a/src/renderer/cpu_engine/tvgSwShape.cpp b/src/renderer/cpu_engine/tvgSwShape.cpp
 index 974d7e524..0cf1edf39 100644
 --- a/src/renderer/cpu_engine/tvgSwShape.cpp

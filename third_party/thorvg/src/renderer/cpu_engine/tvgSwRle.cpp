@@ -434,6 +434,8 @@ static SwCell* _findCell(RleWorker& rw)
 
 
 //QUILL
+constexpr uint32_t KEPT_POOL_SIZE = DEFAULT_POOL_SIZE * 256;  //QUILL
+
 static bool _growCells(RleWorker& rw, SwCellPool* pool)
 {
     constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
@@ -935,6 +937,12 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
     }
     if (rw.bandShoot > 8 && rw.bandSize > 16) {
         rw.bandSize = (rw.bandSize >> 1);
+    }
+    //QUILL
+    if (cellPool->size > KEPT_POOL_SIZE) {
+        cellPool->size = KEPT_POOL_SIZE;
+        tvg::free(cellPool->buffer);
+        cellPool->buffer = tvg::malloc<SwCell>(cellPool->size);
     }
     return rw.rle;
 }
