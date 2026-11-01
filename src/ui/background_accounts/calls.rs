@@ -113,13 +113,12 @@ impl QuillApp {
         }
         if new_ring.is_some() {
             self.background.ringing = new_ring;
-        }
-        self.notify_background_ring(cx);
-        if self.background.ringing.is_some() {
-            // Keeps the ringtone loop going (`sync_call_sounds` runs on
-            // render).
+            // The ringing prompt in the main window.
             cx.notify();
         }
+        self.notify_background_ring(cx);
+        // Starts, keeps looping or stops the ringtone.
+        self.sync_call_sounds();
     }
 
     /// The OS notification for the ringing call, once, when no Quill window

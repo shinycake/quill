@@ -133,8 +133,11 @@ impl Future for WaitSince<'_> {
     }
 }
 
-/// TDLib updates (or any other input the poll loop drains) arrived.
+/// TDLib updates for the account on screen (or any other input its poll
+/// loop drains) arrived.
 pub static UPDATES: Signal = Signal::new();
+/// TDLib updates for an account in the background arrived.
+pub static BACKGROUND_UPDATES: Signal = Signal::new();
 /// A link, activation or quit request arrived from outside the window.
 pub static LINKS: Signal = Signal::new();
 /// Something the tray, the dock/app menus or the badge show may have
@@ -153,6 +156,7 @@ pub static AGENT: Signal = Signal::new();
 /// system sleep and time-driven work (presence, auto-lock) may be overdue.
 pub fn poke_on_activation() {
     UPDATES.poke();
+    BACKGROUND_UPDATES.poke();
     PASSCODE.poke();
     crate::icon_badge::invalidate_icon_badge();
 }

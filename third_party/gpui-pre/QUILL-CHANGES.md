@@ -470,3 +470,9 @@ shows. `Window::frame_number` counts these frames like any other.
 content painted away from its place in the tree keeps the opacity it was given there.
 
 `src/ui/layer_tick_tests.rs` holds the tests.
+
+The Quill project also changed it in 2026 so the docs say what macOS now
+emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
+
+- `src/app.rs`, `src/platform.rs`: the docs of `App::on_app_lifecycle` and
+  `Platform::on_app_lifecycle` say macOS emits `AppLifecyclePhase::Active`.

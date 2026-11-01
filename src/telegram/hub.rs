@@ -50,10 +50,16 @@ pub enum Delivery {
     ReaderGone,
 }
 
+/// Where one client's envelopes go, and the poll loop to wake for them.
+struct Route {
+    tx: Sender<OwnedEnvelope>,
+    wake: &'static crate::wake::Signal,
+}
+
 /// Client id → the channel its envelopes go to.
 #[derive(Default)]
 pub struct Routes {
-    map: Mutex<HashMap<i32, Sender<OwnedEnvelope>>>,
+    map: Mutex<HashMap<i32, Route>>,
     /// Signalled when a route is added, so an idle receive thread wakes.
     changed: Condvar,
 }
@@ -63,13 +69,25 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Routes {
-    /// Start routing `client_id`'s envelopes to the returned receiver. A
-    /// second registration for the same id replaces the first.
+    /// Start routing `client_id`'s envelopes to the returned receiver,
+    /// waking the on-screen poll loop ([`crate::wake::UPDATES`]) until
+    /// [`Routes::wake_with`] says otherwise. A second registration for the
+    /// same id replaces the first.
     pub fn register(&self, client_id: i32) -> Receiver<OwnedEnvelope> {
         let (tx, rx) = mpsc::channel();
-        lock(&self.map).insert(client_id, tx);
+        let wake = &crate::wake::UPDATES;
+        lock(&self.map).insert(client_id, Route { tx, wake });
         self.changed.notify_all();
         rx
+    }
+
+    /// Wake `wake`'s poll loop for `client_id`'s envelopes from now on: an
+    /// account switch moves a client between the on-screen loop and the
+    /// background one, which then sleep through each other's updates.
+    pub fn wake_with(&self, client_id: i32, wake: &'static crate::wake::Signal) {
+        if let Some(route) = lock(&self.map).get_mut(&client_id) {
+            route.wake = wake;
+        }
     }
 
     pub fn unregister(&self, client_id: i32) {
@@ -86,12 +104,12 @@ impl Routes {
             return Delivery::Unrouted;
         };
         let mut map = lock(&self.map);
-        let Some(tx) = map.get(&client_id) else {
+        let Some(route) = map.get(&client_id) else {
             return Delivery::Unrouted;
         };
-        if tx.send(owned).is_ok() {
-            // Wake the UI's poll loop, which sleeps while nothing arrives.
-            crate::wake::UPDATES.poke();
+        if route.tx.send(owned).is_ok() {
+            // Wake the client's poll loop, which sleeps while nothing arrives.
+            route.wake.poke();
             Delivery::Delivered
         } else {
             map.remove(&client_id);

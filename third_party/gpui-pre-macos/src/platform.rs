@@ -10,11 +10,12 @@ use ctor::ctor;
 use dispatch2::DispatchQueue;
 use futures::channel::oneshot;
 use gpui::{
-    Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem,
-    CursorStyle, ForegroundExecutor, GraphicalEnvironment, KeyContext, Keymap, Menu, MenuItem,
-    OsMenu, OwnedMenu, PathPromptOptions, Platform, PlatformDisplay, PlatformKeyboardLayout,
-    PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Result, SystemMenuType, Task,
-    ThermalState, WindowAppearance, WindowKind, WindowParams, WindowingRequest,
+    Action, ActivationPolicy, ActivityGuard, AnyWindowHandle, AppLifecyclePhase,
+    BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, GraphicalEnvironment,
+    KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, Result, SystemMenuType, Task, ThermalState, WindowAppearance, WindowKind,
+    WindowParams, WindowingRequest,
     popup::PopupNotSupportedError,
 };
 use gpui_apple::{
@@ -86,6 +87,10 @@ unsafe fn build_classes() {
             decl.add_method(
                 sel!(applicationShouldHandleReopen:hasVisibleWindows:),
                 should_handle_reopen as extern "C-unwind" fn(_, Sel, *mut AnyObject, Bool) -> Bool,
+            );
+            decl.add_method(
+                sel!(applicationDidBecomeActive:),
+                did_become_active as extern "C-unwind" fn(_, Sel, *mut AnyObject),
             );
             decl.add_method(
                 sel!(applicationWillTerminate:),
@@ -175,6 +180,7 @@ pub(crate) struct MacPlatformState {
     general_pasteboard: Pasteboard,
     find_pasteboard: Pasteboard,
     reopen: Option<Box<dyn FnMut()>>,
+    app_lifecycle: Option<Box<dyn FnMut(AppLifecyclePhase)>>,
     on_keyboard_layout_change: Option<Box<dyn FnMut()>>,
     thermal_observer: Option<ThermalObserver>,
     on_displays_changed: Option<Box<dyn FnMut()>>,
@@ -244,6 +250,7 @@ impl MacPlatform {
             general_pasteboard: Pasteboard::general(),
             find_pasteboard: Pasteboard::find(),
             reopen: None,
+            app_lifecycle: None,
             quit: None,
             menu_command: None,
             validate_menu_command: None,
@@ -1042,6 +1049,10 @@ impl Platform for MacPlatform {
         self.0.lock().reopen = Some(callback);
     }
 
+    fn on_app_lifecycle(&self, callback: Box<dyn FnMut(AppLifecyclePhase)>) {
+        self.0.lock().app_lifecycle = Some(callback);
+    }
+
     fn on_keyboard_layout_change(&self, callback: Box<dyn FnMut()>) {
         self.0.lock().on_keyboard_layout_change = Some(callback);
     }
@@ -1363,18 +1374,35 @@ extern "C-unwind" fn should_handle_reopen(
     this: &AnyObject,
     _: Sel,
     _: *mut AnyObject,
-    has_open_windows: Bool,
+    _: Bool,
 ) -> Bool {
-    if !has_open_windows.as_bool() {
-        let platform = unsafe { get_mac_platform(this) };
-        let mut lock = platform.0.lock();
-        if let Some(mut callback) = lock.reopen.take() {
-            drop(lock);
-            callback();
-            platform.0.lock().reopen.get_or_insert(callback);
-        }
+    let platform = unsafe { get_mac_platform(this) };
+    let mut lock = platform.0.lock();
+    if let Some(mut callback) = lock.reopen.take() {
+        drop(lock);
+        callback();
+        platform.0.lock().reopen.get_or_insert(callback);
     }
     Bool::YES
+}
+
+extern "C-unwind" fn did_become_active(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    // Deferred like `on_screen_parameters_change`: the notification may fire
+    // while the App is already borrowed.
+    let platform = unsafe { get_mac_platform(this) };
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, did_become_active);
+    }
+
+    extern "C" fn did_become_active(context: *mut c_void) {
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        let callback = platform.0.lock().app_lifecycle.take();
+        if let Some(mut callback) = callback {
+            callback(AppLifecyclePhase::Active);
+            platform.0.lock().app_lifecycle.get_or_insert(callback);
+        }
+    }
 }
 
 extern "C-unwind" fn will_terminate(this: &AnyObject, _: Sel, _: *mut AnyObject) {
