@@ -105,9 +105,14 @@ impl QuillApp {
         failure: impl Into<String> + 'static,
         cx: &mut Context<Self>,
     ) {
+        // The window that asked, before the OS answers: by then the pointer
+        // may be over another one.
+        let host = self.connection.note_window;
         self.when_os_answers(open, cx, move |this, opened, cx| {
             if !opened {
-                this.connection.set_note(StatusNote::error(failure));
+                let host = host.filter(|chat| this.windows.has(*chat));
+                this.connection
+                    .set_note_in(host, StatusNote::error(failure));
                 cx.notify();
             }
         });

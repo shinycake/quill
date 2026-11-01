@@ -183,9 +183,7 @@ impl ChatWindows {
     }
 
     /// Whether `chat_id` has a window of its own.
-    #[cfg(test)]
-    #[cfg(feature = "demo-capture")]
-    pub(super) fn has(&self, chat_id: ChatId) -> bool {
+    pub(in crate::ui) fn has(&self, chat_id: ChatId) -> bool {
         self.window_for(chat_id).is_some()
     }
 
@@ -541,6 +539,12 @@ impl QuillApp {
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
         }
+        if self.connection.note_window == Some(chat_id) {
+            self.connection.note_window = None;
+        }
+        self.connection
+            .toasts
+            .window_closed(chat_id, std::time::Instant::now());
         self.windows.dialog_closed_in(Some(chat_id));
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);

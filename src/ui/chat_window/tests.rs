@@ -1230,13 +1230,55 @@ fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
     assert!(status_toast_drawn(chat_window, cx), "the window shows it");
     assert!(!status_toast_drawn(h.main, cx), "the main window does not");
 
-    // The next input in the main window brings the toast there.
+    // The pointer moving over the main window leaves the toast where it
+    // was asked for.
     h.app.update(cx, |app, cx| {
         app.note_window_input(None);
         cx.notify();
     });
-    assert!(status_toast_drawn(h.main, cx));
-    assert!(!status_toast_drawn(chat_window, cx));
+    assert!(status_toast_drawn(chat_window, cx));
+    assert!(!status_toast_drawn(h.main, cx));
+}
+
+#[gpui_kit::test]
+fn a_late_open_failure_toasts_in_the_window_that_asked(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let (answer, answered) = futures_channel::oneshot::channel();
+    quill::platform::script_next_os_open(quill::platform::OsOpen::Pending(answered));
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(OTHER));
+        app.open_link("https://example.com/a", cx);
+        // The pointer moves over the main window before the OS answers.
+        app.note_window_input(None);
+    });
+    answer.send(false).unwrap();
+    cx.run_until_parked();
+    assert!(status_toast_drawn(chat_window, cx), "the window that asked");
+    assert!(!status_toast_drawn(h.main, cx));
+}
+
+#[gpui_kit::test]
+fn closing_a_chat_window_moves_its_toast_to_the_main_window(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(OTHER));
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::error(
+                "Couldn't open the link",
+            ));
+        cx.notify();
+    });
+    assert!(status_toast_drawn(chat_window, cx));
+    cx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(status_toast_drawn(h.main, cx), "the toast is not lost");
 }
 
 #[gpui_kit::test]

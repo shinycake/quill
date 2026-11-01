@@ -232,6 +232,7 @@ impl QuillApp {
     /// event does belong to that window.
     pub(super) fn note_window_input(&mut self, chat: Option<ChatId>) {
         self.windows.last_input = chat;
+        self.connection.note_window = chat;
         self.set_window_scope(chat);
     }
 }

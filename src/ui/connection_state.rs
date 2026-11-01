@@ -18,6 +18,9 @@ pub(crate) struct ConnectionUi {
     note: StatusNote,
     /// The toasts on screen and waiting, with the visible one's timer.
     pub(super) toasts: ToastQueue,
+    /// The window a note set now toasts in (`None`: the main window): the
+    /// one the last input happened in (`QuillApp::note_window_input`).
+    pub(super) note_window: Option<quill::ids::ChatId>,
     /// The deadline a wake-up is already scheduled for.
     pub(super) toast_wake: Option<Instant>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
@@ -34,6 +37,7 @@ impl ConnectionUi {
             closed_noted_generation: None,
             note: StatusNote::new(NoteKind::Silent, status_note),
             toasts: ToastQueue::default(),
+            note_window: None,
             toast_wake: None,
             status_traced: String::new(),
             presence: Default::default(),
@@ -46,10 +50,16 @@ impl ConnectionUi {
     /// never replaces a note the toast still shows, so "pinned" or "sending"
     /// cannot wipe an unread failure; the toast's own timer clears that one.
     pub(super) fn set_note(&mut self, note: StatusNote) {
+        self.set_note_in(self.note_window, note);
+    }
+
+    /// [`Self::set_note`], toasting in the window `host` (`None`: the
+    /// main window) whichever window the last input happened in.
+    pub(super) fn set_note_in(&mut self, host: Option<quill::ids::ChatId>, note: StatusNote) {
         if note.kind() == NoteKind::Silent && self.note.is_toast() {
             return;
         }
-        self.toasts.push(note.clone(), Instant::now());
+        self.toasts.push_in(note.clone(), host, Instant::now());
         self.note = note;
     }
 

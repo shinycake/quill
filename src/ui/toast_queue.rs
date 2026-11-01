@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::status_note::{NoteKind, StatusNote};
+use quill::ids::ChatId;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -14,10 +15,18 @@ use std::time::{Duration, Instant};
 /// confirmation is dropped; when only failures wait, the oldest of them goes.
 const MAX_WAITING: usize = 8;
 
+/// A note and the window it toasts in (`None`: the main window), fixed
+/// when it was queued.
+#[derive(Clone, Debug, PartialEq)]
+struct Toast {
+    note: StatusNote,
+    host: Option<ChatId>,
+}
+
 /// The toast on screen and its remaining time.
 #[derive(Clone, Debug)]
 struct Showing {
-    note: StatusNote,
+    toast: Toast,
     /// Time left when the timer last stopped (or the full duration).
     remaining: Duration,
     /// Set while the timer runs; `None` while hovered.
@@ -38,54 +47,75 @@ impl Showing {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToastQueue {
     showing: Option<Showing>,
-    waiting: VecDeque<StatusNote>,
+    waiting: VecDeque<Toast>,
     /// The pointer is over the toast slot: the next toast starts paused too,
     /// since the pointer has not left.
     hovered: bool,
 }
 
 impl ToastQueue {
-    /// Queues a note. Silent and empty notes never toast. The note already
-    /// showing (or last in line) is not repeated: the visible one just gets
-    /// its full time back. A failure goes ahead of waiting confirmations.
+    /// Queues a note for the main window.
+    #[cfg(test)]
     pub(crate) fn push(&mut self, note: StatusNote, now: Instant) {
+        self.push_in(note, None, now);
+    }
+
+    /// Queues a note for the window `host` (`None`: the main window).
+    /// Silent and empty notes never toast. The note already showing (or
+    /// last in line) is not repeated: the visible one just gets its full
+    /// time back. A failure goes ahead of waiting confirmations.
+    pub(crate) fn push_in(&mut self, note: StatusNote, host: Option<ChatId>, now: Instant) {
         if !note.is_toast() {
             return;
         }
+        let toast = Toast { note, host };
         let Some(showing) = self.showing.as_mut() else {
-            self.show(note, now);
+            self.show(toast, now);
             return;
         };
-        if showing.note == note {
-            showing.remaining = note.toast_duration();
+        if showing.toast == toast {
+            showing.remaining = toast.note.toast_duration();
             if showing.running_since.is_some() {
                 showing.running_since = Some(now);
             }
             return;
         }
-        if self.waiting.back() == Some(&note) {
+        if self.waiting.back() == Some(&toast) {
             return;
         }
-        if note.kind() == NoteKind::Error {
+        if toast.note.kind() == NoteKind::Error {
             let at = self
                 .waiting
                 .iter()
-                .position(|queued| queued.kind() != NoteKind::Error)
+                .position(|queued| queued.note.kind() != NoteKind::Error)
                 .unwrap_or(self.waiting.len());
-            self.waiting.insert(at, note);
+            self.waiting.insert(at, toast);
         } else {
-            self.waiting.push_back(note);
+            self.waiting.push_back(toast);
         }
         while self.waiting.len() > MAX_WAITING {
             let Some(at) = self
                 .waiting
                 .iter()
-                .position(|queued| queued.kind() != NoteKind::Error)
+                .position(|queued| queued.note.kind() != NoteKind::Error)
             else {
                 self.waiting.pop_front();
                 continue;
             };
             self.waiting.remove(at);
+        }
+    }
+
+    /// The window `closed` went: its toasts move to the main window.
+    pub(crate) fn window_closed(&mut self, closed: ChatId, _now: Instant) {
+        for toast in self
+            .showing
+            .iter_mut()
+            .map(|showing| &mut showing.toast)
+            .chain(self.waiting.iter_mut())
+            .filter(|toast| toast.host == Some(closed))
+        {
+            toast.host = None;
         }
     }
 
@@ -130,7 +160,12 @@ impl ToastQueue {
 
     /// The note on screen.
     pub(crate) fn visible(&self) -> Option<&StatusNote> {
-        self.showing.as_ref().map(|showing| &showing.note)
+        self.showing.as_ref().map(|showing| &showing.toast.note)
+    }
+
+    /// The window the note on screen toasts in (`None`: the main window).
+    pub(crate) fn visible_host(&self) -> Option<Option<ChatId>> {
+        self.showing.as_ref().map(|showing| showing.toast.host)
     }
 
     /// When the visible toast ends, or `None` while paused or empty.
@@ -146,7 +181,7 @@ impl ToastQueue {
 
     /// Whether this note is on screen or still waiting.
     pub(crate) fn holds(&self, note: &StatusNote) -> bool {
-        self.visible() == Some(note) || self.waiting.contains(note)
+        self.visible() == Some(note) || self.waiting.iter().any(|toast| &toast.note == note)
     }
 
     /// Notes behind the visible one.
@@ -155,11 +190,11 @@ impl ToastQueue {
         self.waiting.len()
     }
 
-    fn show(&mut self, note: StatusNote, now: Instant) {
+    fn show(&mut self, toast: Toast, now: Instant) {
         self.showing = Some(Showing {
-            remaining: note.toast_duration(),
+            remaining: toast.note.toast_duration(),
             running_since: (!self.hovered).then_some(now),
-            note,
+            toast,
         });
     }
 }
@@ -299,6 +334,30 @@ mod tests {
         assert_eq!(text(&queue), None);
         queue.push(StatusNote::info("three"), secs(t0, 62));
         assert!(queue.deadline(secs(t0, 62)).is_some());
+    }
+
+    #[test]
+    fn a_closed_windows_toasts_move_to_the_main_window() {
+        let t0 = Instant::now();
+        let window = quill::ids::ChatId(12);
+        let mut queue = ToastQueue::default();
+        queue.push_in(StatusNote::error("one"), Some(window), t0);
+        queue.push_in(StatusNote::info("two"), Some(window), t0);
+        assert_eq!(queue.visible_host(), Some(Some(window)));
+        queue.window_closed(window, secs(t0, 2));
+        assert_eq!(queue.visible_host(), Some(None), "in the main window");
+        queue.dismiss(secs(t0, 3));
+        assert_eq!(text(&queue), Some("two"));
+        assert_eq!(queue.visible_host(), Some(None));
+    }
+
+    #[test]
+    fn the_same_note_for_two_windows_shows_in_each() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.push_in(StatusNote::error("boom"), Some(quill::ids::ChatId(12)), t0);
+        queue.push_in(StatusNote::error("boom"), None, t0);
+        assert_eq!(queue.waiting(), 1);
     }
 
     #[test]
