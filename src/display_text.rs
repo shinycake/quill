@@ -7,6 +7,10 @@
 //! the tags of a subdivision flag such as England's. Unlike tdesktop on
 //! macOS, U+FE0F stays everywhere, since Quill draws emoji with the system
 //! font, which needs it to pick the emoji form.
+//!
+//! The marks counted are nonspacing (Mn) and enclosing (Me) marks.
+//! tdesktop's `IsDiac` counts only Mn, so a run of enclosing marks such as
+//! U+0489 is unbounded there; Quill bounds it like any other mark.
 #![deny(clippy::indexing_slicing)]
 
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
