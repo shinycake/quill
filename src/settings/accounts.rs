@@ -531,6 +531,7 @@ mod account_registry_tests {
             2,
             "temp file cleaned up"
         );
+        assert_eq!(std::fs::read(&path).unwrap(), old);
         // Fail at the create step: read-only directory (Unix permissions).
         #[cfg(unix)]
         {
@@ -546,7 +547,6 @@ mod account_registry_tests {
                 assert_eq!(std::fs::read(&path).unwrap(), old);
             }
         }
-        assert_eq!(std::fs::read(&path).unwrap(), old);
         let _ = std::fs::remove_dir_all(&root);
     }
 
