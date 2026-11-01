@@ -61,7 +61,6 @@ pub(super) fn agent(https_only: bool, redirects: u32) -> ureq::Agent {
 }
 
 /// What a server's answer to a request for the bytes after `have` means.
-#[derive(Debug, PartialEq, Eq)]
 enum Answer {
     Continues,
     Whole,
@@ -127,7 +126,7 @@ pub(super) fn fetch(
     if have == size {
         return Ok(());
     }
-    let (mut response, continues) = loop {
+    let mut response = loop {
         let mut request = agent.get(url).header("User-Agent", "Quill-updater");
         if have > 0 {
             request = request.header("Range", format!("bytes={have}-"));
@@ -143,16 +142,16 @@ pub(super) fn fetch(
         let range = response.headers().get("content-range");
         let range = range.and_then(|value| value.to_str().ok());
         match read_answer(response.status().as_u16(), range, have) {
-            Answer::Continues => break (response, true),
-            Answer::Whole => break (response, false),
+            Answer::Continues => break response,
+            Answer::Whole => {
+                have = 0;
+                break response;
+            }
             Answer::Refused => have = 0,
         }
     };
-    if !continues {
-        have = 0;
-    }
     progress.set(have);
-    let mut file = open_partial(partial, continues).map_err(|_| NO_FILE)?;
+    let mut file = open_partial(partial, have > 0).map_err(|_| NO_FILE)?;
     let mut reader = Counted {
         inner: response
             .body_mut()
