@@ -1,0 +1,10 @@
+"qll_startup_failed_title" = "Couldn't open this account";
+"qll_startup_wrong_key" = "The saved key doesn't open your local data. If you restored this computer or moved your data, restore the key too, then try again.";
+"qll_startup_data_folder" = "Quill can't read or write its data folder. Check that the disk is connected and has free space, and that you have permission to use the folder.";
+"qll_startup_key_locked" = "Quill couldn't get the key that protects your local data. Allow access when your system asks, then try again.";
+"qll_startup_key_unreadable" = "Quill couldn't read the key that protects your local data.";
+"qll_startup_key_missing" = "The key that protects your local data is missing. If you restored this computer or moved your data, restore the key too, then try again.";
+"qll_startup_library" = "A part of Quill is missing or damaged. Install Quill again.";
+"qll_startup_no_thread" = "Your computer refused to start a background task Quill needs. Close some apps and try again.";
+"qll_startup_owner_stuck_title" = "Quill isn't responding";
+"qll_startup_owner_stuck_body" = "Quill is already running, but it didn't answer. Force it to quit, then open Quill again.";

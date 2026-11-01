@@ -115,6 +115,10 @@ impl DownloadProgress {
             .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
+    pub fn set(&self, bytes: u64) {
+        self.0.store(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn bytes(&self) -> u64 {
         self.0.load(std::sync::atomic::Ordering::Relaxed)
     }

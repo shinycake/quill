@@ -12,6 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{AccountKey, ChatId};
+use crate::lang::{keys, tr};
 use crate::notify::{NotificationAction, QueuedNotification};
 use crate::settings::BadgePrefs;
 use crate::state::Session;
@@ -52,8 +53,8 @@ pub enum BackgroundStatus {
     NeedsSignIn,
     /// The session ended (logged out here or from another device).
     SignedOut,
-    /// The client could not start (the message is the blocker's
-    /// user-facing text, never a secret).
+    /// The client could not start (the message is user-facing text, never
+    /// a secret).
     Failed(String),
 }
 
@@ -93,6 +94,9 @@ pub fn background_status(auth: &AuthorizationState) -> BackgroundStatus {
         AuthorizationState::LoggingOut
         | AuthorizationState::Closing
         | AuthorizationState::Closed => BackgroundStatus::SignedOut,
+        AuthorizationState::StartupFailed(_) => {
+            BackgroundStatus::Failed(tr(keys::Q_STARTUP_FAILED_TITLE).to_string())
+        }
     }
 }
 

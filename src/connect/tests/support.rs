@@ -18,6 +18,11 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) static TDJSON_ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
+pub(crate) const ONLINE: crate::net_watch::NetworkState = crate::net_watch::NetworkState {
+    epoch: 0,
+    available: true,
+};
+
 pub(crate) fn test_credentials() -> TelegramCredentials {
     TelegramCredentials {
         api_id: 99,
