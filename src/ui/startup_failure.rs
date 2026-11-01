@@ -2,7 +2,8 @@
 //! or a remote session without one): say so in a native alert where the
 //! platform has one, write the error to stderr, and exit with a failure code
 //! instead of panicking. On Linux, when nothing can draw the window, the
-//! alert says which Vulkan piece is missing and what to install.
+//! alert says which Vulkan piece is missing and what to install. A launch
+//! that a stuck Quill ignored says so through the same alert.
 #![deny(clippy::indexing_slicing)]
 
 #[cfg(any(test, target_os = "linux"))]
@@ -30,11 +31,10 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     std::process::exit(1)
 }
 
-/// A running Quill did not answer this launch, and nothing else tells the
-/// user: a bundled app has no stderr.
-pub(crate) fn owner_stuck() {
-    let detail = tr(keys::Q_STARTUP_OWNER_STUCK_BODY);
-    show_alert(tr(keys::Q_STARTUP_OWNER_STUCK_TITLE), detail, detail);
+/// Says why a launch that opens no window is exiting: a bundled app has no
+/// stderr.
+pub(crate) fn tell(title: &str, body: &str) {
+    show_alert(title, body, body);
 }
 
 /// The alert's body, and a short version for a desktop notification (which

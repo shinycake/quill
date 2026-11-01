@@ -23,6 +23,7 @@
 //! launches cannot both conclude they are the owner.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr};
 use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -152,6 +153,17 @@ impl Launch {
             Err(error) if error.kind() == io::ErrorKind::TimedOut => Self::OwnerStuck,
             Err(_) => Self::Unchecked,
         }
+    }
+
+    /// The title and body of what this launch must tell the user before it
+    /// exits, when `--quit` did not ask it to stay quiet.
+    pub fn alert(&self, quit: bool) -> Option<(&'static str, &'static str)> {
+        (*self == Self::OwnerStuck && !quit).then(|| {
+            (
+                tr(keys::Q_STARTUP_OWNER_STUCK_TITLE),
+                tr(keys::Q_STARTUP_OWNER_STUCK_BODY),
+            )
+        })
     }
 }
 
@@ -524,6 +536,17 @@ mod tests {
             after(Err(Error::from(ErrorKind::PermissionDenied))),
             Launch::Unchecked
         );
+    }
+
+    #[test]
+    fn a_stuck_owner_gets_an_alert_and_every_other_launch_stays_quiet() {
+        let (title, body) = Launch::OwnerStuck.alert(false).expect("an alert");
+        assert_eq!(title, "Quill isn't responding");
+        assert!(body.contains("Force it to quit"), "{body}");
+        assert_eq!(Launch::OwnerStuck.alert(true), None, "--quit");
+        for launch in [Launch::Forwarded, Launch::Primary, Launch::Unchecked] {
+            assert_eq!(launch.alert(false), None);
+        }
     }
 
     #[test]

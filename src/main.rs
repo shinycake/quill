@@ -190,8 +190,8 @@ fn ui_main(args: &[String]) {
     use quill::single_instance::Launch;
     let instance = single_instance(args);
     let quit = quill::start_files::quit_requested(args);
-    if instance == Launch::OwnerStuck && !quit {
-        ui::startup_failure::owner_stuck();
+    if let Some((title, body)) = instance.alert(quit) {
+        ui::startup_failure::tell(title, body);
     }
     if matches!(instance, Launch::Forwarded | Launch::OwnerStuck) || quit {
         return;
