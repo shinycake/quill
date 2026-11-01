@@ -111,6 +111,9 @@ QUILL-CHANGES.md):
   instant has passed, instead of forcing a full frame (and a 350 ms sleep)
   on every refresh. After `GaveUp` nothing is forced and the timer parks.
 - `src/linux/wayland/window.rs`, `src/linux/wayland/client.rs`: a calloop
-  timer (`schedule_recovery_retry`) redraws the window when the attempt is
+  timer (`run_for_window_at`) redraws the window when the attempt is
   due, instead of redrawing every refresh interval. The device-lost path no
   longer unwraps the surface's backend.
+- Both backends close a window on `Recovery::CloseWindow` from a calloop
+  timer (`run_for_window_at`, also in `src/linux/x11/client.rs`), outside
+  the draw, without asking `should_close`, as Windows destroys the window.

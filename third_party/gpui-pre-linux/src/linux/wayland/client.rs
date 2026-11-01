@@ -628,13 +628,19 @@ impl WaylandClientStatePtr {
         }
     }
 
-    /// Quill: redraw `surface_id` at `at`, when its renderer's next GPU
-    /// recovery attempt is due.
-    pub fn schedule_recovery_retry(&self, surface_id: &ObjectId, at: Instant) {
+    /// Quill: run `f` on `surface_id`'s window from the event loop at `at`,
+    /// outside the draw that asked for it (a GPU recovery step).
+    pub fn run_for_window_at(
+        &self,
+        surface_id: &ObjectId,
+        at: Instant,
+        f: impl FnOnce(WaylandWindowStatePtr) + 'static,
+    ) {
         let client = self.get_client();
         let state = client.borrow();
         let surface_id = surface_id.clone();
         let this = self.clone();
+        let mut f = Some(f);
         if let Err(err) =
             state
                 .loop_handle
@@ -643,13 +649,13 @@ impl WaylandClientStatePtr {
                         return TimeoutAction::Drop;
                     };
                     let window = get_window(&mut client.borrow_mut(), &surface_id);
-                    if let Some(window) = window {
-                        window.recovery_retry_due();
+                    if let (Some(window), Some(f)) = (window, f.take()) {
+                        f(window);
                     }
                     TimeoutAction::Drop
                 })
         {
-            log::error!("cannot schedule a GPU recovery attempt: {err}");
+            log::error!("cannot schedule a GPU recovery step: {err}");
         }
     }
 

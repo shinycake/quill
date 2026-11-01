@@ -1059,7 +1059,7 @@ impl WaylandWindowStatePtr {
         }
     }
 
-    /// Quill: a GPU recovery attempt is due (`schedule_recovery_retry`).
+    /// Quill: a GPU recovery attempt is due (`run_for_window_at`).
     pub fn recovery_retry_due(&self) {
         self.state.borrow_mut().recovery_retry_at = None;
         self.request_redraw();
@@ -2039,10 +2039,18 @@ impl PlatformWindow for WaylandWindow {
                 Recovery::RetryAt(at) if state.recovery_retry_at != Some(at) => {
                     state.recovery_retry_at = Some(at);
                     let surface_id = state.surface.id();
-                    state.client.schedule_recovery_retry(&surface_id, at);
+                    state
+                        .client
+                        .run_for_window_at(&surface_id, at, |window| window.recovery_retry_due());
                 }
                 Recovery::RetryAt(_) => {}
                 Recovery::GaveUp => {}
+                Recovery::CloseWindow => {
+                    let surface_id = state.surface.id();
+                    state
+                        .client
+                        .run_for_window_at(&surface_id, Instant::now(), |window| window.close());
+                }
             }
             return;
         }

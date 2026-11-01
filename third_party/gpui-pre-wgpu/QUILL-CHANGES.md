@@ -77,3 +77,11 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   renderer. Giving up calls the handler set with the new `on_device_gone`
   (Quill shows its launch failure alert and exits). Also drops the
   `expect`s in `recover`.
+- A window that only has to adopt the context another window recreated
+  goes through the same backoff (`Target::Adopt`, first attempt at once)
+  instead of retrying on every draw, and its failures start from zero
+  when the context comes back. Giving up there returns
+  `Recovery::CloseWindow`: the other windows keep drawing and only that
+  one closes, as on Windows. A successful recovery clears the state, so a
+  later loss starts afresh. `Recovering` holds this wiring and its tests
+  run with the policy's.

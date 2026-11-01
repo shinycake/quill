@@ -1925,6 +1925,13 @@ impl PlatformWindow for X11Window {
                     self.0.frame.demand();
                 }
                 Recovery::GaveUp => {}
+                Recovery::CloseWindow => {
+                    inner
+                        .client
+                        .run_for_window_at(self.0.x_window, Instant::now(), |window| {
+                            window.close()
+                        });
+                }
             }
             return;
         }
