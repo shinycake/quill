@@ -16,6 +16,7 @@ use crate::notify::{NotificationAction, QueuedNotification};
 use crate::settings::BadgePrefs;
 use crate::state::Session;
 use crate::telegram::envelope::AuthorizationState;
+use crate::tray::badge_cache::SessionCountKey;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -177,25 +178,20 @@ thread_local! {
 
 /// Memo for [`AccountUnread::of`]: the count walks every chat and forum
 /// topic, and only changes when the session applies an update
-/// (`Session::revision`), the badge preferences change, or another session
+/// (`Session::revision`), the badge preferences change, or another account
 /// is asked about.
 #[derive(Debug, Default)]
 pub struct UnreadMemo {
-    key: Option<(usize, u64, usize, BadgePrefs)>,
+    key: Option<SessionCountKey>,
     unread: AccountUnread,
 }
 
 impl UnreadMemo {
     pub fn get(&mut self, session: &Session) -> AccountUnread {
-        let key = (
-            std::ptr::from_ref(session) as usize,
-            session.revision,
-            session.chats.len(),
-            session.settings.badge_prefs,
-        );
-        if self.key.as_ref() != Some(&key) {
+        let prefs = &session.settings.badge_prefs;
+        if !SessionCountKey::holds(self.key.as_ref(), session, prefs) {
             self.unread = AccountUnread::of(session);
-            self.key = Some(key);
+            self.key = Some(SessionCountKey::of(session, prefs));
         }
         self.unread
     }

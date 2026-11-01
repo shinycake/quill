@@ -499,6 +499,8 @@ impl Session {
             topic.last_read_inbox_message_id =
                 topic.last_read_inbox_message_id.max(topic.last_message_id);
             trace_topic_unread("markRead(local)", chat_id.0, topic);
+            // The unread badges recount on a revision change.
+            self.revision = self.revision.wrapping_add(1);
         }
     }
 }

@@ -51,8 +51,13 @@ pays nothing. A chat window's title uses the window title's `BadgeCache`.
 
 `sync_tray` and `sync_icon_badge` each counted the account on screen on
 every `wake::CHROME`. `total_unread` now goes through `UnreadMemo`, keyed
-like `BadgeCache` on the session, its revision, its chat count and its
-badge preferences. The two syncs of one wake count once, and a wake with
+like `BadgeCache` (`SessionCountKey`) on the account key and generation,
+the session revision, its chat count and its badge preferences. The key
+names the account rather than the session's address: a switch moves the
+account brought forward into the same `QuillApp::live` slot. Optimistic
+local unread changes (marking a chat unread, reading a topic locally, the
+demo's "mark all read") bump `Session::revision` so the badges see them
+before TDLib confirms. The two syncs of one wake count once, and a wake with
 no applied update counts nothing. The count still lands on the first wake
 after an update. The throttle the finding suggested would sit in
 `main.rs`, a hotspot, and is not needed once an idle wake costs nothing.

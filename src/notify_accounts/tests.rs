@@ -391,3 +391,45 @@ fn the_unread_memo_recounts_only_after_an_applied_update() {
     account.driver.session.settings.badge_prefs.include_muted = false;
     assert_eq!(memo.get(&account.driver.session).count, 1);
 }
+
+/// A switch moves the shown account's session into the same slot: after it
+/// the badge shows the new account's count even when both accounts applied
+/// as many updates and have as many chats.
+#[test]
+fn the_unread_memo_recounts_after_an_account_switch() {
+    let unread = |count: u32| {
+        format!(
+            r#"{{"@type":"updateUnreadMessageCount","chat_list":{{"@type":"chatListMain"}},"unread_count":{count},"unread_unmuted_count":{count}}}"#
+        )
+    };
+    let mut first = Background::new("memo-first");
+    first.ready_with_chat(7, false);
+    first.ingest(&unread(5));
+    let mut second = Background::new("memo-second");
+    second.driver.session.account = AccountKey::new("account-2").unwrap();
+    second.ready_with_chat(7, false);
+    second.ingest(&unread(3));
+    assert_eq!(
+        first.driver.session.revision,
+        second.driver.session.revision
+    );
+    let mut memo = UnreadMemo::default();
+    assert_eq!(memo.get(&first.driver.session).count, 5);
+    std::mem::swap(&mut first.driver.session, &mut second.driver.session);
+    assert_eq!(memo.get(&first.driver.session).count, 3);
+}
+
+/// Marking a chat unread shows on the badge at once, before TDLib confirms
+/// it (a screenshot demo never does).
+#[test]
+fn the_unread_memo_sees_a_chat_marked_unread_before_tdlib_confirms() {
+    let mut account = Background::new("memo-marked");
+    account.ready_with_chat(7, false);
+    let mut memo = UnreadMemo::default();
+    let before = memo.get(&account.driver.session).count;
+    account
+        .driver
+        .toggle_chat_marked_as_unread(ChatId(7), true)
+        .unwrap();
+    assert_eq!(memo.get(&account.driver.session).count, before + 1);
+}

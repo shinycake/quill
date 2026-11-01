@@ -414,6 +414,26 @@ fn badge_cache_follows_revision_and_prefs() {
     assert_eq!(cache.get(&session, &no_messages), 2);
 }
 
+/// Reading a forum topic locally shows on the cached badge at once, before
+/// the server's `updateForumTopic` confirms it.
+#[test]
+fn badge_cache_sees_a_topic_read_locally() {
+    use super::badge_cache::BadgeCache;
+    let mut session = session_with(&[]);
+    let mut forum = chat(1, 0);
+    forum.is_forum = Some(true);
+    session.chats.insert(1, forum);
+    session
+        .threads
+        .forum_topics
+        .insert(1, vec![topic(1, 3), topic(2, 4)]);
+    let prefs = BadgePrefs::default();
+    let mut cache = BadgeCache::default();
+    assert_eq!(cache.get(&session, &prefs), 7);
+    session.mark_forum_topic_read_locally(crate::ids::ChatId(1), 2);
+    assert_eq!(cache.get(&session, &prefs), 3);
+}
+
 fn topic(id: i32, unread_count: i32) -> crate::telegram::envelope::ForumTopic {
     crate::telegram::envelope::ForumTopic {
         forum_topic_id: id,
