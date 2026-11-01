@@ -82,7 +82,7 @@ impl WindowSlices {
     }
 
     /// The window's views: its slices and layer painters.
-    pub(super) fn view_ids(&self) -> impl Iterator<Item = EntityId> {
+    pub(in crate::ui) fn view_ids(&self) -> impl Iterator<Item = EntityId> {
         let painters = [&self.conversation, &self.panel]
             .into_iter()
             .flatten()

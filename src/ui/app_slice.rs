@@ -261,7 +261,7 @@ impl QuillApp {
             .sidebar
             .iter()
             .map(|parts| parts.slice.entity_id())
-            .chain(self.conversation_slices())
+            .chain(self.conversation_slices(cx))
             .chain(self.slices.viewer.iter().map(Entity::entity_id))
             .chain(self.slices.viewer_chrome.iter().map(Entity::entity_id))
             .chain(self.slices.story.iter().map(Entity::entity_id))
@@ -274,12 +274,14 @@ impl QuillApp {
 
     /// Every window's conversation and composer slices: those in place,
     /// and those in the chat windows' slots, which hold the main window's
-    /// while a chat window's are in place.
-    fn conversation_slices(&self) -> Vec<EntityId> {
+    /// while a chat window's are in place. A held chat window's stay out:
+    /// it redraws them when it shows again (`follow_windows`).
+    fn conversation_slices(&self, cx: &App) -> Vec<EntityId> {
         self.slices
             .window
             .slice_ids()
             .chain(self.windows.slice_ids())
+            .filter(|id| !self.windows.holds_view(*id, cx))
             .collect()
     }
 
@@ -287,7 +289,7 @@ impl QuillApp {
     /// the whole app that leaves the main window out (`tick_app`).
     pub(super) fn notify_chat_window_slices(&self, cx: &mut Context<Self>) {
         let main = &self.slices.main_views;
-        let ids = self.conversation_slices();
+        let ids = self.conversation_slices(cx);
         let app: &mut App = cx;
         for id in ids.into_iter().filter(|id| !main.contains(id)) {
             app.notify(id);
@@ -375,25 +377,26 @@ impl QuillApp {
     /// Redraw only the conversation (state that nothing else shows
     /// changed); the whole app before the slices exist.
     pub(super) fn notify_conversation(&self, cx: &mut Context<Self>) {
-        match &self.slices.window.conversation {
-            Some(parts) => {
-                let id = parts.slice.entity_id();
-                let app: &mut App = cx;
-                app.notify(id);
-            }
-            None => cx.notify(),
-        }
+        let slice = self.slices.window.conversation.as_ref();
+        self.redraw_view(slice.map(|parts| parts.slice.entity_id()), cx);
     }
 
     /// Redraw only the composer (state that only it shows changed, such
     /// as suggestions following the typed text); the whole app before the
     /// slices exist.
     pub(super) fn notify_composer(&self, cx: &mut Context<Self>) {
-        match &self.slices.window.composer {
-            Some(slice) => {
-                let id = slice.entity_id();
+        let slice = self.slices.window.composer.as_ref();
+        self.redraw_view(slice.map(Entity::entity_id), cx);
+    }
+
+    /// Redraw `view` of the window in place, unless that window is held:
+    /// the whole app with no such view.
+    fn redraw_view(&self, view: Option<EntityId>, cx: &mut Context<Self>) {
+        match view {
+            Some(view) if self.windows.holds_view(view, cx) => {}
+            Some(view) => {
                 let app: &mut App = cx;
-                app.notify(id);
+                app.notify(view);
             }
             None => cx.notify(),
         }
@@ -409,13 +412,7 @@ impl QuillApp {
             SliceKind::Conversation if shown => self.notify_conversation(cx),
             SliceKind::Composer if shown => self.notify_composer(cx),
             SliceKind::Story if shown && !self.windows.in_window() => self.notify_story(cx),
-            _ => match self.windows.view_in_place() {
-                Some(view) => {
-                    let app: &mut App = cx;
-                    app.notify(view);
-                }
-                None => cx.notify(),
-            },
+            _ => self.redraw_view(self.windows.view_in_place(), cx),
         }
     }
 
@@ -439,7 +436,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let ids = self.conversation_slices();
+        let ids = self.conversation_slices(cx);
         let app: &mut App = cx;
         for id in ids {
             app.notify(id);

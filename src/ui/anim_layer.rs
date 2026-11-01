@@ -41,6 +41,10 @@
 //! slice) or a [`mirror`] (redrawn by the layer above the item). Anything
 //! painted after the slice (menus, dialogs, the media viewer, tooltips,
 //! deferred popovers) covers the layer as it covered the slice.
+//!
+//! A layer draws its own window: on a tick no window's state need be in
+//! place, so it enters its window's scope and image cache itself, and draws
+//! nothing when that window can't be entered.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;

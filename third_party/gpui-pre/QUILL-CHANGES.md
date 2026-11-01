@@ -475,7 +475,9 @@ any (a hover, a click, a tooltip) never patches: a notify of it draws a whole fr
 a patch for another view leaves its last paint in place, and a patch that finds new
 hitboxes in a view asks for that whole frame. So a live view suits content that only
 shows; anything else about it stays correct and costs whole frames.
-`Window::frame_number` counts these frames like any other.
+`Window::frame_number` counts these frames like any other. With `test-support`,
+`Window::interactive_live_views` counts the live views that drew in whole frames
+alone in the last one.
 
 `Window::element_opacity` and `Window::with_element_opacity` are public so that
 content painted away from its place in the tree keeps the opacity it was given there.

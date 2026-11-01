@@ -100,3 +100,57 @@ fn a_chat_window_that_lost_its_session_view_builds_no_history(cx: &mut TestAppCo
         "the window closed, as it must not show another window's chat"
     );
 }
+
+/// A chat window with stickers behind the active main window.
+fn held(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, AnyWindowHandle) {
+    let (app, mut vcx) = open(cx);
+    let under = open_chat_window(&app, &mut vcx, OPEN, inside());
+    for _ in 0..4 {
+        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.update(&mut vcx, |_, cx| cx.notify());
+        let _ = frames_over(&mut vcx, 1);
+    }
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    let _ = frames_of(under, &mut vcx);
+    let _ = take_slice_renders();
+    (app, vcx, under)
+}
+
+/// A held chat window draws nothing whatever the app does. Once it shows
+/// again it draws what changed, and its stickers play on.
+#[gpui_kit::test]
+fn a_held_chat_window_catches_up_when_it_shows_again(cx: &mut TestAppContext) {
+    let (app, mut vcx, under) = held(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |_, cx| cx.notify());
+    let drawn = frames_over(vcx, 1);
+    assert_eq!(frames_of(under, vcx), 0, "held: nothing drawn");
+    for part in ["chat window conversation", "chat window composer", "chat window layer"] {
+        assert_eq!(drawn.get(part), None, "{part} held: {drawn:?}");
+    }
+
+    let _ = take_slice_renders();
+    vcx.simulate_window_move(under, beside().origin);
+    vcx.run_until_parked();
+    let drawn = take_slice_renders();
+    assert!(drawn.contains_key("chat window conversation"), "it caught up: {drawn:?}");
+    let drawn = frames_over(vcx, 1);
+    assert!(
+        drawn.get("chat window layer").is_some_and(|n| *n > 5),
+        "its stickers play again: {drawn:?}"
+    );
+}
+
+/// Activating a held window, as Cmd-` or the Window menu do, shows it.
+#[gpui_kit::test]
+fn activating_a_held_chat_window_shows_it(cx: &mut TestAppContext) {
+    let (_app, mut vcx, under) = held(cx);
+    let vcx = &mut vcx;
+    let _ = take_slice_renders();
+    vcx.update_window(under, |_, window, _| window.activate_window())
+        .expect("the window");
+    vcx.run_until_parked();
+    let drawn = take_slice_renders();
+    assert!(drawn.contains_key("chat window conversation"), "it shows: {drawn:?}");
+}

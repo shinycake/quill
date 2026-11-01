@@ -18,8 +18,9 @@
 //! notifications, playback, dialogs and preferences). Each chat window is a
 //! [`view::ChatWindowView`] whose [`slot::WindowSlot`] owns what is per
 //! window: the history view state, the compose field and its state, the
-//! message menu and selection, the pickers, the media viewer, and the
-//! session's view of the chat. `QuillApp::set_window_scope` swaps a slot
+//! message menu and selection, the pickers, the media viewer, the slices
+//! and animation layers that draw them, its pictures, and the session's
+//! view of the chat. `QuillApp::set_window_scope` swaps a slot
 //! in while its window is drawn or handles input, so the app's own
 //! conversation, composer and overlay code serves every window; work that
 //! finishes later runs in the window it started in (`scoped`); kit
@@ -86,6 +87,8 @@ struct OpenChatWindow {
     handle: AnyWindowHandle,
     view: WeakEntity<ChatWindowView>,
     slot: slot::SharedSlot,
+    /// Its slices and layer painters, wherever the swap has them.
+    views: Vec<EntityId>,
 }
 
 impl ChatWindows {
@@ -414,11 +417,13 @@ impl QuillApp {
                 }
             };
             owner.update(cx, |app, cx| {
+                let views = slot.borrow().slices.view_ids().collect();
                 app.windows.open.push(OpenChatWindow {
                     chat_id,
                     handle,
                     view,
                     slot,
+                    views,
                 });
                 app.schedule_chat_windows_save(cx);
                 cx.notify();
