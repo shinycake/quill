@@ -1,9 +1,9 @@
 //! The main window brought back on a Mac, and Quit with no key window
 //! (needs the `demo-capture` feature for gpui-kit's test support). Which
 //! close hides on which platform: `quill::tray`'s tests. The test platform
-//! has no `NSWindow` to hide and drops `on_reopen` callbacks, so whether a
-//! window is hidden comes in by hand here.
-use super::{note_main_window, raise_main_window_if};
+//! has no `NSWindow` to hide, so whether a window is hidden comes in by
+//! hand here.
+use super::{MainWindow, main_window_on_activation, note_main_window, raise_main_window_if};
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -48,10 +48,41 @@ fn a_dock_click_raises_a_hidden_main_window_and_leaves_one_that_shows(cx: &mut T
     assert!(vcx.update(|window, _| window.is_window_active()));
 }
 
+/// The main window as a close left it: noted, closed, not active.
+fn close_main_window(vcx: &mut VisualTestContext) {
+    vcx.update(|window, cx| note_main_window(window, cx));
+    vcx.cx
+        .update(|cx| cx.global_mut::<MainWindow>().closed_by_user = true);
+    vcx.deactivate_window();
+}
+
+/// macOS reports Quill active, with the main window hidden.
+fn come_forward(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    let view = app.downgrade();
+    vcx.cx
+        .update(|cx| main_window_on_activation(&view, |_| true, cx));
+    vcx.run_until_parked();
+}
+
 #[gpui_kit::test]
-fn quill_coming_forward_wants_the_main_window_with_nothing_else_open(cx: &mut TestAppContext) {
+fn quill_coming_forward_raises_the_closed_main_window(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-privacy");
-    assert!(app.update(&mut vcx, |app, cx| app.main_window_wanted(cx)));
+    let vcx = &mut vcx;
+    close_main_window(vcx);
+    come_forward(&app, vcx);
+    assert!(vcx.update(|window, _| window.is_window_active()));
+}
+
+#[gpui_kit::test]
+fn a_main_window_the_user_did_not_close_stays_hidden_when_quill_comes_forward(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx, "ready-privacy");
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| note_main_window(window, cx));
+    vcx.deactivate_window();
+    come_forward(&app, vcx);
+    assert!(!vcx.update(|window, _| window.is_window_active()));
 }
 
 #[gpui_kit::test]
@@ -63,7 +94,9 @@ fn a_chat_window_keeps_the_main_window_closed_when_quill_comes_forward(cx: &mut 
         app.open_chat_window_at(ChatId(11), None, window, cx);
     });
     vcx.run_until_parked();
-    assert!(!app.update(vcx, |app, cx| app.main_window_wanted(cx)));
+    close_main_window(vcx);
+    come_forward(&app, vcx);
+    assert!(!vcx.update(|window, _| window.is_window_active()));
 }
 
 #[gpui_kit::test]
@@ -76,12 +109,8 @@ fn a_call_takes_the_focus_when_quill_comes_forward(cx: &mut TestAppContext) {
     let Some(call) = app.read_with(vcx, |app, _| app.calls.window) else {
         panic!("the call window did not open");
     };
-    let main = vcx.window_handle();
-    vcx.update(|window, _| window.activate_window());
-    vcx.run_until_parked();
-    assert_eq!(vcx.cx.update(|cx| cx.active_window()), Some(main));
-    assert!(!app.update(vcx, |app, cx| app.main_window_wanted(cx)));
-    vcx.run_until_parked();
+    close_main_window(vcx);
+    come_forward(&app, vcx);
     assert_eq!(vcx.cx.update(|cx| cx.active_window()), Some(call));
 }
 

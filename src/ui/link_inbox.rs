@@ -12,7 +12,7 @@ pub fn install_link_inbox(
     let activated = view.downgrade();
     cx.on_app_lifecycle(move |phase, cx| {
         if phase == gpui_kit::AppLifecyclePhase::Active {
-            main_window_on_activation(&activated, cx);
+            main_window_on_activation(&activated, super::window_control::is_hidden_on_mac, cx);
         }
     })
     .detach();
@@ -74,9 +74,7 @@ pub fn raise_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) 
 #[derive(Clone, Copy)]
 struct MainWindow {
     handle: gpui_kit::AnyWindowHandle,
-    /// The user closed it at some point. A window that starts in the tray
-    /// is hidden too, and the activation of a launch must not show it.
-    closed: bool,
+    closed_by_user: bool,
 }
 
 impl gpui_kit::Global for MainWindow {}
@@ -85,7 +83,7 @@ impl gpui_kit::Global for MainWindow {}
 pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
     cx.set_global(MainWindow {
         handle: window.window_handle(),
-        closed: false,
+        closed_by_user: false,
     });
 }
 
@@ -93,7 +91,7 @@ pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
 /// window hidden by [`close_main_window`] comes back. AppKit restores a
 /// minimized one itself.
 pub fn reopen_main_window(cx: &mut gpui_kit::App) {
-    raise_main_window_if(super::window_control::is_hidden, cx);
+    raise_main_window_if(super::window_control::is_hidden_on_mac, cx);
 }
 
 fn raise_main_window_if(hidden: impl FnOnce(&gpui_kit::Window) -> bool, cx: &mut gpui_kit::App) {
@@ -108,22 +106,38 @@ fn raise_main_window_if(hidden: impl FnOnce(&gpui_kit::Window) -> bool, cx: &mut
 
 /// Quill came forward by Cmd-Tab or a click on one of its windows, as in
 /// tdesktop's `applicationDidBecomeActive`: a main window the user closed
-/// comes back, unless a call or chat window is what came forward.
-fn main_window_on_activation(view: &gpui_kit::WeakEntity<super::QuillApp>, cx: &mut gpui_kit::App) {
+/// comes back, unless a call takes the focus (`activateCurrentCall`) or a
+/// chat window is the last active window.
+fn main_window_on_activation(
+    view: &gpui_kit::WeakEntity<super::QuillApp>,
+    hidden: impl FnOnce(&gpui_kit::Window) -> bool,
+    cx: &mut gpui_kit::App,
+) {
     let Some(main) = cx.try_global::<MainWindow>().copied() else {
         return;
     };
-    let closed = main.closed
+    let closed = main.closed_by_user
         && main
             .handle
-            .update(cx, |_, window, _| super::window_control::is_hidden(window))
+            .update(cx, |_, window, _| hidden(window))
             .unwrap_or(false);
-    if closed
-        && view
-            .update(cx, |app, cx| app.main_window_wanted(cx))
-            .unwrap_or(false)
-    {
-        reopen_main_window(cx);
+    if !closed {
+        return;
+    }
+    let Ok((call, chat_window)) = view.read_with(cx, |app, _| {
+        (
+            app.calls.window.or(app.group_call.window),
+            app.windows.any_open(),
+        )
+    }) else {
+        return;
+    };
+    if let Some(call) = call {
+        let _ = call.update(cx, |_, window, _| window.activate_window());
+    } else if !chat_window {
+        let _ = main
+            .handle
+            .update(cx, |_, window, cx| raise_main_window(window, cx));
     }
 }
 
@@ -136,7 +150,7 @@ const LEFT_FULLSCREEN_POLLS: u32 = 30;
 /// leaves full screen first, because hiding it there leaves a black Space.
 fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
     if cx.has_global::<MainWindow>() {
-        cx.global_mut::<MainWindow>().closed = true;
+        cx.global_mut::<MainWindow>().closed_by_user = true;
     }
     if !(cfg!(target_os = "macos") && window.is_fullscreen()) {
         hide_or_minimize(window);
@@ -200,18 +214,6 @@ pub fn close_main_window(
 }
 
 impl super::QuillApp {
-    /// Whether Quill coming forward should show the closed main window: not
-    /// over a call, which takes the focus instead (tdesktop's
-    /// `activateCurrentCall`), or over a chat window, which is the last
-    /// active window then.
-    fn main_window_wanted(&self, cx: &mut gpui_kit::App) -> bool {
-        if let Some(call) = self.calls.window.or(self.group_call.window) {
-            let _ = call.update(cx, |_, window, _| window.activate_window());
-            return false;
-        }
-        !self.windows.any_open()
-    }
-
     /// An account is signed in, on screen or in the background: closing
     /// the window on a Mac hides it ([`close_main_window`]).
     pub fn signed_in(&self) -> bool {

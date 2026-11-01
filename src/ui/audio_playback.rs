@@ -20,7 +20,7 @@ thread_local! {
     /// Passes of the progress tick on this thread, for tests.
     pub(super) static TICK_PASSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Runs once right after a pass drained the media commands, for tests:
-    /// stands in for an OS thread that pushes a key at that moment.
+    /// stands in for the poke of a key pushed at that moment.
     #[cfg(test)]
     pub(super) static AFTER_DRAIN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };

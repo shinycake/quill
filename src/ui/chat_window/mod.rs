@@ -206,7 +206,6 @@ impl ChatWindows {
         self.open.iter().any(|open| open.slot.borrow().active)
     }
 
-    /// A chat window is open.
     pub(super) fn any_open(&self) -> bool {
         !self.open.is_empty()
     }

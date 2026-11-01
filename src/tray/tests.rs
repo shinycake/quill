@@ -386,7 +386,6 @@ fn closing_runs_in_the_background_only_with_a_tray() {
     assert_eq!(close_outcome(true, false, false, true, true), Quit);
     assert_eq!(close_outcome(true, true, false, true, false), Hide);
     assert_eq!(close_outcome(true, true, true, true, false), Hide);
-    // Wayland cannot hide a GPUI window: minimize it.
     assert_eq!(close_outcome(true, true, false, false, true), Minimize);
 }
 

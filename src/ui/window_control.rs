@@ -78,14 +78,13 @@ pub(crate) fn is_minimised(window: &Window) -> bool {
     platform::is_minimised(window)
 }
 
-/// Whether the window is off screen because [`set_visible`] hid it, or
-/// because it never showed. Only a Mac asks: elsewhere the tray brings a
-/// hidden window back.
+/// Whether AppKit has the window off screen because [`set_visible`] hid it,
+/// or because it never showed.
 #[cfg(target_os = "macos")]
-pub(crate) use platform::is_hidden;
+pub(crate) use platform::is_hidden_on_mac;
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn is_hidden(_window: &Window) -> bool {
+pub(crate) fn is_hidden_on_mac(_window: &Window) -> bool {
     false
 }
 
@@ -459,7 +458,7 @@ mod platform {
         minimised
     }
 
-    pub(crate) fn is_hidden(window: &Window) -> bool {
+    pub(crate) fn is_hidden_on_mac(window: &Window) -> bool {
         let mut hidden = false;
         with_window(window, |native| {
             hidden = !native.isVisible() && !native.isMiniaturized();
