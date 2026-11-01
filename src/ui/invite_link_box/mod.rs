@@ -10,9 +10,9 @@ mod sections;
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::scheduled::TimePicker;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
-use gpui_kit::component::date_picker::DatePickerState;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
@@ -39,7 +39,7 @@ pub(crate) struct InviteLinkBox {
 /// tdesktop's boxes over the link box: the date and time picker, and the
 /// number of users.
 pub(crate) enum CustomBox {
-    Date(Entity<DatePickerState>),
+    Date(TimePicker),
     Limit(Entity<InputState>),
 }
 

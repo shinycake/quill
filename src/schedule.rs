@@ -7,7 +7,7 @@
 //! "schedule".
 #![deny(clippy::indexing_slicing)]
 
-use crate::local_time::{CivilTime, utc_offset_at};
+use crate::local_time::{CivilTime, civil_at};
 
 /// `kMinimalSchedule` in `choose_date_time.cpp`.
 pub const MIN_SCHEDULE_SECS: i64 = 10;
@@ -120,22 +120,50 @@ pub fn validate_send_date(send_date: i64, now: i64) -> Result<i64, ScheduleError
 }
 
 /// Unix time of a local wall-clock moment, given the zone as a function
-/// from a unix instant to its UTC offset. Two fixed-point steps settle
-/// every real zone (offsets differ by at most a couple of hours across a
-/// transition); a moment inside a DST gap lands just after the gap.
-pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32) -> i64 {
+/// from a unix instant to its UTC offset. A moment the clock shows twice,
+/// in the hour repeated when clocks go back, is the first showing after
+/// `now`: a time picked during the second pass of that hour means the one
+/// still ahead. When both showings are past it is the first, as in Qt's
+/// `QDateTime`. A moment the clock skips lands as far past
+/// the gap as it was into it, as Qt's `QDateTime` moves it.
+pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now: i64) -> i64 {
     let naive =
         civil.day_number() * 86_400 + i64::from(civil.hour) * 3600 + i64::from(civil.minute) * 60;
-    let mut guess = naive - i64::from(offset_at(naive));
-    for _ in 0..2 {
-        guess = naive - i64::from(offset_at(guess));
-    }
-    guess
+    // Offsets span less than a day each way and real zones change at most
+    // once in two days, so these are the offsets before and after the
+    // moment.
+    let early = naive - i64::from(offset_at(naive - 86_400));
+    let late = naive - i64::from(offset_at(naive + 86_400));
+    let shows_civil = |t: &i64| *t + i64::from(offset_at(*t)) == naive;
+    let mut showings: Vec<i64> = [early, late].into_iter().filter(shows_civil).collect();
+    showings.sort_unstable();
+    showings.dedup();
+    showings
+        .iter()
+        .copied()
+        .find(|t| *t > now)
+        .or(showings.first().copied())
+        .unwrap_or(early)
 }
 
-/// [`civil_to_unix_with`] in the OS zone.
-pub fn civil_to_unix(civil: &CivilTime) -> i64 {
-    civil_to_unix_with(civil, utc_offset_at)
+/// The instant a picker means once it shows `civil`, having opened at
+/// `initial`. A time left as it opened keeps its own pass of a repeated
+/// hour; any other is resolved by [`civil_to_unix_with`]. Either way it is
+/// the whole minute shown, as tdesktop builds it from the date and time.
+pub fn picked_instant(
+    civil: &CivilTime,
+    initial: i64,
+    offset_at: impl Fn(i64) -> i32,
+    now: i64,
+) -> i64 {
+    let shown = civil_at(initial, offset_at(initial));
+    let unchanged = (shown.year, shown.month, shown.day, shown.hour, shown.minute)
+        == (civil.year, civil.month, civil.day, civil.hour, civil.minute);
+    if unchanged {
+        initial - initial.rem_euclid(60)
+    } else {
+        civil_to_unix_with(civil, offset_at, now)
+    }
 }
 
 /// Parses the `%Y-%m-%d %H:%M` text the date picker formats.
@@ -223,7 +251,6 @@ impl ScheduleKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_time::civil_at;
 
     const NOW: i64 = 1_800_000_000;
 
@@ -293,22 +320,189 @@ mod tests {
     fn civil_round_trips_in_fixed_zones() {
         for offset in [0, 3600 * 5 + 1800, -3600 * 8] {
             let civil = civil_at(NOW, offset);
-            let unix = civil_to_unix_with(&civil, |_| offset);
+            let unix = civil_to_unix_with(&civil, |_| offset, NOW);
             assert_eq!(unix, NOW - NOW % 60);
         }
     }
 
+    /// A zone `before` hours east of UTC until `switch` and `after` from it.
+    fn switching_zone(switch: i64, before: i32, after: i32) -> impl Fn(i64) -> i32 {
+        move |t| {
+            if t < switch {
+                before * 3600
+            } else {
+                after * 3600
+            }
+        }
+    }
+
+    /// Chicago on the night clocks go back: at 02:00 CDT they show 01:00
+    /// CST again, so 01:00 to 02:00 shows twice.
+    fn chicago_fall_back(switch: i64) -> impl Fn(i64) -> i32 {
+        switching_zone(switch, -5, -6)
+    }
+
+    /// Chicago on the night clocks go forward: 02:00 CST becomes 03:00
+    /// CDT and 02:00 to 03:00 never shows.
+    fn chicago_spring_forward(switch: i64) -> impl Fn(i64) -> i32 {
+        switching_zone(switch, -6, -5)
+    }
+
+    /// 2026-11-01 07:00 UTC, when Chicago's clocks go back.
+    const FALL_BACK: i64 = 1_793_516_400;
+    /// 2027-03-14 08:00 UTC, when Chicago's clocks go forward.
+    const SPRING_FORWARD: i64 = 1_805_011_200;
+
+    fn civil(hour: u8, minute: u8, at: i64, offset: i32) -> CivilTime {
+        CivilTime {
+            hour,
+            minute,
+            ..civil_at(at, offset)
+        }
+    }
+
     #[test]
-    fn civil_resolves_across_a_dst_switch() {
-        // UTC+1 before `switch`, UTC+2 from it on.
-        let switch = NOW;
-        let zone = |t: i64| if t < switch { 3600 } else { 7200 };
-        let early = switch - 7200;
-        let before = civil_at(early, 3600);
-        assert_eq!(civil_to_unix_with(&before, zone), early - early % 60);
-        let late = switch + 7200;
-        let after = civil_at(late, 7200);
-        assert_eq!(civil_to_unix_with(&after, zone), late - late % 60);
+    fn a_repeated_hour_picked_before_it_starts_is_its_first_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        let now = FALL_BACK - 2 * 3600;
+        let one_thirty = civil(1, 30, FALL_BACK, -5 * 3600);
+        assert_eq!(
+            civil_to_unix_with(&one_thirty, &zone, now),
+            FALL_BACK - 1800
+        );
+    }
+
+    #[test]
+    fn a_repeated_hour_picked_during_its_second_pass_is_still_ahead() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // 01:05 CST: 01:15 already went by once, as CDT.
+        let now = FALL_BACK + 300;
+        let one_fifteen = civil(1, 15, FALL_BACK, -6 * 3600);
+        let picked = civil_to_unix_with(&one_fifteen, &zone, now);
+        assert_eq!(picked, FALL_BACK + 900);
+        assert_eq!(validate_send_date(picked, now), Ok(picked));
+    }
+
+    #[test]
+    fn a_repeated_hour_wholly_in_the_past_is_its_first_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // 01:05 CST: 01:00 already showed twice, as CDT and as CST.
+        let one = civil(1, 0, FALL_BACK, -6 * 3600);
+        assert_eq!(
+            civil_to_unix_with(&one, &zone, FALL_BACK + 300),
+            FALL_BACK - 3600
+        );
+        // A day later the whole hour is behind; 01:30 is 01:30 CDT.
+        let one_thirty = civil(1, 30, FALL_BACK, -6 * 3600);
+        assert_eq!(
+            civil_to_unix_with(&one_thirty, &zone, FALL_BACK + 86_400),
+            FALL_BACK - 1800
+        );
+    }
+
+    #[test]
+    fn a_second_pass_time_reopened_before_the_switch_keeps_its_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // Scheduled for 01:20 CST, reopened the evening before.
+        let scheduled = FALL_BACK + 1200;
+        let now = FALL_BACK - 6 * 3600;
+        let shown = civil_at(scheduled, zone(scheduled));
+        assert_eq!(picked_instant(&shown, scheduled, &zone, now), scheduled);
+        // Moved to 01:25, it means the first pass again.
+        let moved = CivilTime {
+            minute: 25,
+            ..shown
+        };
+        assert_eq!(
+            picked_instant(&moved, scheduled, &zone, now),
+            FALL_BACK - 3600 + 1500
+        );
+    }
+
+    #[test]
+    fn a_first_pass_time_reopened_during_the_second_pass_keeps_its_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // An away schedule starting 01:30 CDT, saved again at 01:05 CST.
+        let start = FALL_BACK - 1800;
+        let shown = civil_at(start, zone(start));
+        assert_eq!(picked_instant(&shown, start, &zone, FALL_BACK + 300), start);
+    }
+
+    #[test]
+    fn an_unchanged_picker_returns_the_minute_it_shows() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // Opened 37 s past the minute, as `now + 600` often is.
+        let opened = NOW + 37;
+        let shown = civil_at(opened, zone(opened));
+        assert_eq!(picked_instant(&shown, opened, &zone, NOW), NOW);
+        // 01:20:37 CST, the second pass, stays in that pass.
+        let second_pass = FALL_BACK + 1237;
+        let shown = civil_at(second_pass, zone(second_pass));
+        assert_eq!(
+            picked_instant(&shown, second_pass, &zone, FALL_BACK - 6 * 3600),
+            FALL_BACK + 1200
+        );
+    }
+
+    #[test]
+    fn a_skipped_hour_lands_as_far_past_the_gap() {
+        let zone = chicago_spring_forward(SPRING_FORWARD);
+        let two_thirty = civil(2, 30, SPRING_FORWARD, -6 * 3600);
+        // 02:30 CST would be 03:30 CDT.
+        let picked = civil_to_unix_with(&two_thirty, &zone, SPRING_FORWARD - 3600);
+        assert_eq!(picked, SPRING_FORWARD + 1800);
+        assert_eq!(civil_at(picked, -5 * 3600).hour, 3);
+    }
+
+    /// Lord Howe moves by half an hour: 02:00 +11 goes back to 01:30
+    /// +10:30 at 15:00 UTC, and 02:00 +10:30 jumps to 02:30 +11 at 15:30.
+    fn lord_howe(switch: i64, before: i32, after: i32) -> impl Fn(i64) -> i32 {
+        move |t| if t < switch { before } else { after }
+    }
+
+    /// 2026-04-04 15:00 UTC, when Lord Howe's clocks go back.
+    const LORD_HOWE_BACK: i64 = 1_775_314_800;
+    /// 2026-10-03 15:30 UTC, when Lord Howe's clocks go forward.
+    const LORD_HOWE_FORWARD: i64 = 1_791_041_400;
+
+    #[test]
+    fn a_repeated_half_hour_resolves_like_a_repeated_hour() {
+        let zone = lord_howe(LORD_HOWE_BACK, 39_600, 37_800);
+        let one_forty_five = civil(1, 45, LORD_HOWE_BACK, 37_800);
+        let (first, second) = (LORD_HOWE_BACK - 900, LORD_HOWE_BACK + 900);
+        // Before the switch, the first pass (+11).
+        let before = LORD_HOWE_BACK - 3600;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, before), first);
+        // At 01:35 +10:30, five minutes into the second pass, the one ahead.
+        let during = LORD_HOWE_BACK + 300;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, during), second);
+        // Once both are past, the first.
+        let after = LORD_HOWE_BACK + 3600;
+        assert_eq!(civil_to_unix_with(&one_forty_five, &zone, after), first);
+    }
+
+    #[test]
+    fn a_skipped_half_hour_lands_as_far_past_the_gap() {
+        let zone = lord_howe(LORD_HOWE_FORWARD, 37_800, 39_600);
+        let ten_past_two = civil(2, 10, LORD_HOWE_FORWARD, 37_800);
+        let picked = civil_to_unix_with(&ten_past_two, &zone, LORD_HOWE_FORWARD - 3600);
+        assert_eq!(picked, LORD_HOWE_FORWARD + 600);
+        let shown = civil_at(picked, 39_600);
+        assert_eq!((shown.hour, shown.minute), (2, 40));
+    }
+
+    #[test]
+    fn times_beside_a_switch_resolve_once() {
+        for (switch, before, after) in [(SPRING_FORWARD, -6, -5), (FALL_BACK, -5, -6)] {
+            let zone = switching_zone(switch, before, after);
+            let (early, late) = (switch - 2 * 3600, switch + 2 * 3600);
+            let civil_early = civil_at(early, before * 3600);
+            let civil_late = civil_at(late, after * 3600);
+            for now in [early - 86_400, late + 86_400] {
+                assert_eq!(civil_to_unix_with(&civil_early, &zone, now), early);
+                assert_eq!(civil_to_unix_with(&civil_late, &zone, now), late);
+            }
+        }
     }
 
     #[test]

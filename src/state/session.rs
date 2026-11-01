@@ -55,8 +55,8 @@ pub struct Session {
     /// replaced (`reset_history_window`): their answers are dropped so an
     /// old page can't land in the new window and fake contiguity.
     pub(crate) stale_history_requests: HashSet<u64>,
-    /// Bumped for every applied TDLib envelope: views that cache derived
-    /// state (history rows) rebuild after any server-driven change.
+    /// Bumped for every applied TDLib envelope and every optimistic unread
+    /// change: views that cache derived state (history rows, badges) rebuild.
     pub revision: u64,
     /// Messages: the menu, reports, links, AI drafts, limits, link previews, scheduling, forwarding, polls, drafts, sponsored rows, translation, export.
     /// Declared in `src/state/domains/messages/state.rs`.
