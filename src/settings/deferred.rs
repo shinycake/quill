@@ -14,8 +14,7 @@ use super::{json_bytes, write_bytes_atomic};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 type Sink = dyn Fn(&Path, &[u8]) -> std::io::Result<()> + Send + Sync;
 
@@ -163,16 +162,13 @@ impl DeferredWriter {
         }
     }
 
-    /// Wait until everything queued is written, or `timeout` passes.
-    pub(crate) fn flush(&self, timeout: Duration) {
-        let deadline = Instant::now() + timeout;
+    /// Wait until every queued write has been tried, failed ones once
+    /// more. Each try ends in a write or an error, so there is no deadline
+    /// to cut a slow disk off mid-queue and lose what was still queued.
+    pub(crate) fn flush(&self) {
         let mut state = self.shared.lock();
         state.retry_failed();
         while state.writer_running || state.has_work() {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return;
-            }
             if !state.writer_running {
                 // Queued with no writer (its thread never started): write
                 // here, the one place that is allowed to wait for the disk.
@@ -182,23 +178,29 @@ impl DeferredWriter {
                 state = self.shared.lock();
                 continue;
             }
-            state = match self.shared.idle.wait_timeout(state, left) {
-                Ok((guard, _)) => guard,
-                Err(poisoned) => poisoned.into_inner().0,
-            };
+            state = self
+                .shared
+                .idle
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
         }
     }
 }
 
+#[cfg(not(test))]
 fn global() -> &'static DeferredWriter {
-    static WRITER: OnceLock<DeferredWriter> = OnceLock::new();
-    WRITER.get_or_init(|| {
-        DeferredWriter::new(Box::new(|path, bytes| {
-            #[cfg(test)]
-            test_gate::wait(path);
-            write_bytes_atomic(path, bytes)
-        }))
-    })
+    static WRITER: std::sync::OnceLock<DeferredWriter> = std::sync::OnceLock::new();
+    WRITER.get_or_init(|| DeferredWriter::new(Box::new(write_bytes_atomic)))
+}
+
+/// Each test thread has its own writer, so one test's held or slow write
+/// never holds up another test's flush.
+#[cfg(test)]
+fn global() -> &'static DeferredWriter {
+    thread_local! {
+        static WRITER: &'static DeferredWriter = Box::leak(Box::new(test_gate::writer()));
+    }
+    WRITER.with(|writer| *writer)
 }
 
 /// A settings write that failed on the writer thread since the last call.
@@ -206,36 +208,44 @@ pub fn take_deferred_write_failure() -> Option<std::io::Error> {
     global().take_failure()
 }
 
-/// Holds the shared writer before it writes one path, so a test can look
-/// at the state while that write is still waiting.
+/// Holds the test thread's writer before it writes one path, so a test can
+/// look at the state while that write is still waiting.
 #[cfg(test)]
 pub(crate) mod test_gate {
+    use super::DeferredWriter;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
     use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::sync::{Arc, Mutex};
 
-    static GATES: Mutex<Option<HashMap<PathBuf, Receiver<()>>>> = Mutex::new(None);
+    type Gates = Arc<Mutex<HashMap<PathBuf, Receiver<()>>>>;
 
-    /// Block writes of `path` until the returned sender sends or drops.
-    pub(crate) fn hold(path: &Path) -> Sender<()> {
-        let (open, gate) = channel();
-        if let Ok(mut gates) = GATES.lock() {
-            gates
-                .get_or_insert_default()
-                .insert(path.to_path_buf(), gate);
-        }
-        open
+    thread_local! {
+        static GATES: Gates = Gates::default();
     }
 
-    pub(super) fn wait(path: &Path) {
-        let gate = GATES
-            .lock()
-            .ok()
-            .and_then(|mut gates| gates.as_mut()?.remove(path));
-        if let Some(gate) = gate {
-            let _ = gate.recv();
-        }
+    /// The writer of this thread, which waits at its gates.
+    pub(super) fn writer() -> DeferredWriter {
+        let gates = GATES.with(Gates::clone);
+        DeferredWriter::new(Box::new(move |path, bytes| {
+            let gate = gates.lock().ok().and_then(|mut gates| gates.remove(path));
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
+            super::write_bytes_atomic(path, bytes)
+        }))
+    }
+
+    /// Block this thread's writes of `path` until the returned sender
+    /// sends or drops.
+    pub(crate) fn hold(path: &Path) -> Sender<()> {
+        let (open, gate) = channel();
+        GATES.with(|gates| {
+            if let Ok(mut gates) = gates.lock() {
+                gates.insert(path.to_path_buf(), gate);
+            }
+        });
+        open
     }
 }
 
@@ -260,7 +270,7 @@ pub(crate) fn read_with_pending(path: &Path) -> std::io::Result<Vec<u8>> {
 
 /// Wait for every deferred write; call when the app quits.
 pub fn flush_deferred_writes() {
-    global().flush(Duration::from_secs(5));
+    global().flush();
 }
 
 #[cfg(test)]
@@ -269,7 +279,6 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
 
     type Log = Arc<Mutex<Vec<(PathBuf, Vec<u8>)>>>;
 
@@ -283,7 +292,7 @@ mod tests {
                 && let Some((gate, entered)) = gate.as_ref()
             {
                 let _ = entered.send(());
-                let _ = gate.recv_timeout(Duration::from_secs(5));
+                let _ = gate.recv();
             }
             if let Ok(mut log) = seen.lock() {
                 log.push((path.to_path_buf(), bytes.to_vec()));
@@ -300,7 +309,7 @@ mod tests {
         let (writer, log) = recording(Some((gate, entered_tx)));
         let path = PathBuf::from("/x/prefs.json");
         writer.submit(path.clone(), b"a".to_vec());
-        assert!(entered.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert!(entered.recv().is_ok());
         // The first write is stuck in the sink; these queue behind it.
         writer.submit(path.clone(), b"b".to_vec());
         writer.submit(path.clone(), b"c".to_vec());
@@ -308,7 +317,7 @@ mod tests {
         for _ in 0..3 {
             let _ = open.send(());
         }
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         let written: Vec<Vec<u8>> = log
             .lock()
             .map(|l| l.iter().map(|(_, b)| b.clone()).collect())
@@ -323,7 +332,7 @@ mod tests {
         for name in ["a.json", "b.json", "c.json"] {
             writer.submit(Path::new("/x").join(name), name.as_bytes().to_vec());
         }
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         let count = log.lock().map(|l| l.len()).unwrap_or(0);
         assert_eq!(count, 3);
     }
@@ -338,7 +347,7 @@ mod tests {
         }));
         writer.submit(path.clone(), b"{\"a\":1}".to_vec());
         writer.submit(path.clone(), b"{\"a\":2}".to_vec());
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         assert_eq!(std::fs::read(&path).ok(), Some(b"{\"a\":2}".to_vec()));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -357,7 +366,7 @@ mod tests {
         );
         assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
         assert_eq!(writer.pending(&path), None);
     }
@@ -367,7 +376,7 @@ mod tests {
         let writer = DeferredWriter::new(Box::new(|_, _| Err(std::io::Error::other("disk full"))));
         assert!(writer.take_failure().is_none());
         writer.submit(PathBuf::from("/x/a.json"), b"a".to_vec());
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         let failure = writer.take_failure().map(|err| err.to_string());
         assert_eq!(failure.as_deref(), Some("disk full"));
         assert!(writer.take_failure().is_none());
@@ -389,14 +398,14 @@ mod tests {
         }));
         let (prefs, other) = (PathBuf::from("/x/prefs.json"), PathBuf::from("/x/b.json"));
         writer.submit(prefs.clone(), b"kept".to_vec());
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         assert_eq!(writer.pending(&prefs), Some(b"kept".to_vec()));
         assert!(writer.take_failure().is_some());
         if let Ok(mut full) = full.lock() {
             *full = false;
         }
         writer.submit(other.clone(), b"b".to_vec());
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         assert_eq!(writer.pending(&prefs), None);
         let mut on_disk = seen.lock().map(|l| l.clone()).unwrap_or_default();
         on_disk.sort();
@@ -413,10 +422,10 @@ mod tests {
         let (writer, _log) = recording(Some((gate, entered_tx)));
         let path = PathBuf::from("/x/prefs.json");
         writer.submit(path.clone(), b"a".to_vec());
-        assert!(entered.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert!(entered.recv().is_ok());
         assert_eq!(writer.pending(&path), Some(b"a".to_vec()));
         let _ = open.send(());
-        writer.flush(Duration::from_secs(5));
+        writer.flush();
         assert_eq!(writer.pending(&path), None);
     }
 }
