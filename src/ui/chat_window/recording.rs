@@ -23,6 +23,13 @@ impl QuillApp {
         self.recording.origin() == Some(self.windows.scope)
     }
 
+    pub(in crate::ui) fn cancel_recording_here(&mut self, cx: &mut Context<Self>) {
+        let opening_here = self.recording.opening_origin() == Some(self.windows.scope);
+        if self.recording_here() || opening_here {
+            self.cancel_recording(cx);
+        }
+    }
+
     /// Send the finished recording to the chat of the window it was
     /// recorded in, whichever window asks.
     pub(in crate::ui) fn send_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {

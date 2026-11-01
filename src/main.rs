@@ -78,6 +78,7 @@ fn refuse_test_build() {
 fn main() {
     quill::startup_trace::mark("main");
     quill::crash_log::install_panic_hook();
+    quill::fd_limit::raise_open_file_limit();
     #[cfg(windows)]
     attach_parent_console();
     let args: Vec<String> = std::env::args().collect();
@@ -333,6 +334,7 @@ fn ui_main(args: &[String]) {
         })
         .detach();
     });
+    log::logger().flush();
 }
 
 #[cfg(feature = "ui")]

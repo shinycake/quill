@@ -27,8 +27,6 @@ pub(super) struct RoundPreview {
     stale: Vec<Arc<RenderImage>>,
 }
 
-/// The circle while the camera is being started (`recording.starting`):
-/// the same frame the preview fills, so tapping record answers at once.
 fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
     let theme = cx.theme();
     div()
@@ -64,7 +62,10 @@ impl QuillApp {
     /// The recording circle, while a video message records.
     pub(super) fn round_record_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let Some(capture) = self.recording.video() else {
-            return self.recording.starting.then(|| starting_camera_circle(cx));
+            return self
+                .recording
+                .opening_video()
+                .then(|| starting_camera_circle(cx));
         };
         self.request_animation_tick(30, cx);
         let progress = capture.progress();

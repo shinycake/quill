@@ -77,13 +77,19 @@ impl QuillApp {
     /// Keep drawing while any row's blobs show (levels move between
     /// batches and the blobs fade in and out); otherwise the window
     /// stays still.
-    pub(super) fn tick_group_member_speakers(&self, now: Instant, cx: &mut Context<Self>) {
+    pub(super) fn tick_group_member_speakers(
+        &self,
+        view: EntityId,
+        now: Instant,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         let sounding = self
             .live
             .as_ref()
             .is_some_and(|live| live.driver.group_call_levels_sounding(now));
         if sounding && !quill::power_saving::on(quill::power_saving::Flag::Calls) {
-            self.request_animation_tick(30, cx);
+            self.request_window_view_tick(view, window, 30, cx);
         }
     }
 }

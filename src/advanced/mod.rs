@@ -8,4 +8,5 @@ pub mod codes;
 pub mod debug_mode;
 pub mod experimental;
 pub mod hardware_video;
+pub mod platform_log;
 pub mod test_environment;

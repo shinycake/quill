@@ -274,9 +274,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
-        if self.recording_here() {
-            self.cancel_recording(cx);
-        }
+        self.cancel_recording_here(cx);
         self.pickers.media_panel.open = true;
         self.pickers.media_panel.category = None;
         self.set_media_panel_tab(tab, cx);

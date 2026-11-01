@@ -60,11 +60,11 @@ changed file has the "Modified by the Quill project" header, and each crate's
   `unimplemented!()`. Windows has no "hide others"; Quill doesn't call them
   today.
 
-- After the windows are told to close, the vsync thread also posts
-  `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the platform window. That
-  drops the dead devices, so `is_windowed()` reports false, and keeps a
-  reason that `open_window` returns ("the GPU device was lost and could not
-  be recreated"), the same way the launch failure does.
+- The vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 12`) to the
+  platform window. That drops the dead devices, so `is_windowed()` reports
+  false, keeps a reason that `open_window` returns ("the GPU device was lost
+  and could not be recreated"), the same way the launch failure does, and
+  then tells every open window to close.
   `request_windowing(Windowed)` can attach fresh devices later.
 - `close_one_window` logs a window that isn't in the list instead of
   `unwrap`ing its position, and `handle_gpui_events` returns `None` for an
@@ -81,7 +81,7 @@ What a user sees after an unrecoverable device loss: Quill uses GPUI's
 default `QuitMode`, which on Windows (and Linux) is `LastWindowClosed`. So
 once the main window is destroyed and no other window is open, GPUI quits
 and Quill exits. It does not stay in the tray, no message is shown, and
-nothing records the reason, because Quill installs no `log` backend. If a picture-in-picture window is still open
+the reason goes only to `logs/platform.log`. If a picture-in-picture window is still open
 and only the main window's renderer failed, the process keeps running with
 just that window until it is closed. If the vsync thread's recovery failed,
 it closes every window, PiP included, and Quill exits.

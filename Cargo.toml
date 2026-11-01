@@ -105,6 +105,7 @@ moxcms = { version = "0.8", optional = true }
 jxl-oxide = { version = "0.12", optional = true, default-features = false, features = ["rayon", "moxcms"] }
 libloading = "0.9"
 libc = "0.2"
+log = "0.4"
 quill-calls-sys = { path = "crates/quill-calls-sys" }
 qrcode = { version = "0.14", optional = true, default-features = false, features = ["image"] }
 rand = "0.10"

@@ -2,17 +2,8 @@
 //! made, joined, fed and left without waiting on the network or a clock
 //! (a join answer with no candidates connects to nothing).
 use super::*;
+use crate::calls::engine::tgcalls::tests::engine;
 use serde_json::Value;
-
-fn engine() -> Option<TgcallsEngine> {
-    match TgcallsEngine::load() {
-        Ok(engine) => Some(engine),
-        Err(_) => {
-            eprintln!("SKIP: libquill_calls not built; run scripts/build-tgcalls.sh");
-            None
-        }
-    }
-}
 
 /// An RTC join answer, as `joinVideoChat` returns it, with nothing to
 /// connect to.

@@ -405,3 +405,30 @@ went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.
 The crate's own tests do not build in Quill's tree, so `src/ui/scene_replay_tests.rs`
 holds the tests: random overlapping primitives with layers, replayed, replayed
 again through outer views, and compared with painting everything from scratch.
+
+The Quill project also changed it in 2026 so a drag doesn't turn every view
+cache off:
+
+- `src/window.rs`: a `MouseMoveEvent` during a drag called `refresh`, which
+  renders every cached view again, on each update, even with the file held
+  still. `dispatch_mouse_event` now refreshes only when the hit test changed,
+  since `drag_over` styles follow the hovered hitboxes. A move inside the same
+  hitboxes marks the window dirty, because the ghost is painted on every draw,
+  and an update at the position the ghost was last painted for
+  (`drag_painted_at`) does nothing. `FileDropEvent::Entered` refreshes by itself
+  now, since it can arrive with the hit test unchanged. Tests:
+  `src/ui/drag_redraw_tests.rs`.
+
+The Quill project also changed it in 2026 so the end of a scroll doesn't keep
+presenting:
+
+- `src/input_rate.rs`: `InputRateTracker`, moved out of `src/window.rs` with
+  injected instants so `scripts/test-input-rate.sh` can test it alone.
+  `sustain_duration` goes from 1 s to 150 ms: a gesture that stopped
+  re-presented the unchanged frame at display rate for a second, and held off
+  the macOS frame idle by as long. Gaps inside a gesture are far shorter.
+
+The Quill project also changed it in 2026 so tests can seed a window's atlas
+(`src/ui/glyph_sweep_tests.rs`):
+
+- `src/window.rs`: `Window::sprite_atlas`, in test support only.

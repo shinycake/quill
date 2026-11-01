@@ -17,11 +17,31 @@ use quill::calls::audio_level::{
 use quill::calls::level_tap::{LevelSource, LevelTap};
 use quill::lang::{keys, tr};
 use std::cell::Cell;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Settings > Calls' microphone test. While the device opens, a click
+/// cancels: the test shows as running from the click on, and an answer for
+/// a start that is no longer current is dropped, closing the device.
+#[derive(Default)]
+pub(crate) enum MicTestRun {
+    #[default]
+    Off,
+    Opening(u64),
+    On(MicTest),
+}
+
+/// Opens the microphone for the test, off the UI thread.
+pub(crate) type OpenMicTest =
+    Arc<dyn Fn() -> Result<Box<dyn LevelSource + Send>, String> + Send + Sync>;
+
+pub(super) fn open_default_mic_test() -> OpenMicTest {
+    Arc::new(|| LevelTap::open_default().map(|tap| Box::new(tap) as Box<dyn LevelSource + Send>))
+}
 
 /// A running microphone test: the open device and the meter's animation.
 pub(crate) struct MicTest {
-    source: Box<dyn LevelSource>,
+    source: Box<dyn LevelSource + Send>,
     clock: Instant,
     /// The meter value, animated between samples (tdesktop
     /// `kMicTestAnimationDuration`).
@@ -36,7 +56,7 @@ pub(crate) struct MicTest {
 const UNSEEN_STOP: Duration = Duration::from_secs(1);
 
 impl MicTest {
-    fn new(source: Box<dyn LevelSource>) -> Self {
+    fn new(source: Box<dyn LevelSource + Send>) -> Self {
         let now = Instant::now();
         Self {
             source,
@@ -74,7 +94,11 @@ impl QuillApp {
     /// The "Test microphone" row for Settings > Calls: a button, and the
     /// meter while the test runs.
     pub(super) fn mic_test_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let test = self.calls.mic_test.as_ref();
+        let testing = !matches!(self.calls.mic_test, MicTestRun::Off);
+        let test = match &self.calls.mic_test {
+            MicTestRun::On(test) => Some(test),
+            _ => None,
+        };
         let error = test.and_then(|test| test.source.error());
         let row = div()
             .id("call-mic-test")
@@ -90,7 +114,7 @@ impl QuillApp {
                     .gap_2()
                     .child(
                         Button::new("call-mic-test-toggle")
-                            .label(if test.is_some() {
+                            .label(if testing {
                                 tr(keys::Q_OPS_STOP_TEST)
                             } else {
                                 tr(keys::Q_OPS_TEST_MICROPHONE)
@@ -138,21 +162,46 @@ impl QuillApp {
         .into_any_element()
     }
 
-    /// Start or stop the microphone test.
+    /// Start or stop the microphone test; a click while it opens stops it.
     pub(super) fn toggle_mic_test(&mut self, cx: &mut Context<Self>) {
-        if self.calls.mic_test.is_some() {
-            self.calls.mic_test = None;
+        if matches!(self.calls.mic_test, MicTestRun::Off) {
+            self.open_mic_test(cx);
         } else {
-            match LevelTap::open_default() {
-                Ok(tap) => self.start_mic_test(Box::new(tap), cx),
-                Err(err) => self.connection.set_note(StatusNote::error(err)),
-            }
+            self.calls.mic_test = MicTestRun::Off;
         }
         cx.notify();
     }
 
-    fn start_mic_test(&mut self, source: Box<dyn LevelSource>, cx: &mut Context<Self>) {
-        self.calls.mic_test = Some(MicTest::new(source));
+    fn open_mic_test(&mut self, cx: &mut Context<Self>) {
+        self.calls.mic_test_starts = self.calls.mic_test_starts.wrapping_add(1);
+        let start = self.calls.mic_test_starts;
+        self.calls.mic_test = MicTestRun::Opening(start);
+        let open = self.calls.open_mic_test.clone();
+        let opening = cx.background_spawn(async move { open() });
+        Self::spawn_main(cx, async move |this, cx| {
+            let opened = opening.await;
+            let _ = this.update(cx, |this, cx| {
+                if !matches!(this.calls.mic_test, MicTestRun::Opening(s) if s == start) {
+                    if let Ok(stale) = opened {
+                        cx.background_spawn(async move { drop(stale) }).detach();
+                    }
+                    return;
+                }
+                match opened {
+                    Ok(tap) => this.start_mic_test(tap, cx),
+                    Err(err) => {
+                        this.calls.mic_test = MicTestRun::Off;
+                        this.connection.set_note(StatusNote::error(err));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn start_mic_test(&mut self, source: Box<dyn LevelSource + Send>, cx: &mut Context<Self>) {
+        self.calls.mic_test = MicTestRun::On(MicTest::new(source));
         // Stop the test, and close the microphone, once its meter stops
         // rendering: the Calls section is gone, so nobody is watching.
         cx.spawn(async move |this, cx| {
@@ -161,14 +210,16 @@ impl QuillApp {
                     .timer(Duration::from_millis(500))
                     .await;
                 let keep = this
-                    .update(cx, |this, cx| match this.calls.mic_test.as_ref() {
-                        Some(test) if test.last_render.get().elapsed() < UNSEEN_STOP => true,
-                        Some(_) => {
-                            this.calls.mic_test = None;
+                    .update(cx, |this, cx| match &this.calls.mic_test {
+                        MicTestRun::On(test) if test.last_render.get().elapsed() < UNSEEN_STOP => {
+                            true
+                        }
+                        MicTestRun::On(_) => {
+                            this.calls.mic_test = MicTestRun::Off;
                             cx.notify();
                             false
                         }
-                        None => false,
+                        _ => false,
                     })
                     .unwrap_or(false);
                 if !keep {
@@ -194,3 +245,8 @@ impl QuillApp {
         u64::try_from(self.group_call.ptt_clock.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "call_audio_ui_tests.rs"]
+mod tests;

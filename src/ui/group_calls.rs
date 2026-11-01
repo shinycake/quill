@@ -196,8 +196,7 @@ impl QuillApp {
             );
         } else if let Some(session) = self.demo_session.as_mut()
             && let Some(call) = session.calls.active_group_call.as_mut()
-            && let Some(p) = call
-                .participants
+            && let Some(p) = std::sync::Arc::make_mut(&mut call.participants)
                 .iter_mut()
                 .find(|p| p.participant_id == me)
         {

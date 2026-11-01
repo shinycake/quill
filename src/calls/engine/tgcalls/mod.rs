@@ -8,7 +8,6 @@
 //! and the call's sound comes out to a `StreamPlayer`.
 use super::*;
 use crate::calls::stream_audio::StreamPlayer;
-use arc_swap::ArcSwapOption;
 use quill_calls_sys::{Loader, qc_p2p, qc_video_capture};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
@@ -23,7 +22,10 @@ mod group;
 mod group_callbacks;
 mod group_conference;
 mod group_config;
+mod reaper;
 mod sender;
+
+pub use reaper::await_call_teardown;
 
 use callbacks::CallContext;
 
@@ -50,20 +52,44 @@ pub fn preload_tgcalls() {
     let _ = library();
 }
 
+struct Native<T>(NonNull<T>);
+
+// SAFETY: quill_calls.h lets every function be called from any thread, and
+// the destroy functions from anywhere but their own callbacks.
+unsafe impl<T> Send for Native<T> {}
+
+impl<T> Clone for Native<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Native<T> {}
+
+impl<T> Native<T> {
+    fn new(pointer: *mut T) -> Option<Self> {
+        NonNull::new(pointer).map(Self)
+    }
+
+    fn as_ptr(self) -> *mut T {
+        self.0.as_ptr()
+    }
+}
+
 /// One 1:1 call, by TDLib call id.
 struct P2pCall {
     context: Arc<CallContext>,
     /// TDLib signaling that arrived before `connect`, in order.
     pending_signaling: Vec<Vec<u8>>,
-    handle: Option<NonNull<qc_p2p>>,
+    handle: Option<Native<qc_p2p>>,
     /// Feeder threads' way in; cleared before the handle goes away.
     gate: Arc<sender::Gate>,
     media: CallMediaConfig,
     muted: bool,
-    camera: Option<NonNull<qc_video_capture>>,
+    camera: Option<Native<qc_video_capture>>,
     /// The external source a screen share pushes into, owned by Quill: the
     /// gate borrows it, so it's freed only after the gate lets go.
-    screen: Option<NonNull<qc_video_capture>>,
+    screen: Option<Native<qc_video_capture>>,
     sound: Option<StreamPlayer>,
 }
 
@@ -156,9 +182,9 @@ impl TgcallsEngine {
                 let device = text("qc_video_capture_camera", &device)?;
                 // SAFETY: a NUL-ended id; the library returns a new source.
                 let capture = unsafe { (api.qc_video_capture_camera)(device.as_ptr()) };
-                let capture = NonNull::new(capture).ok_or(EngineError::NoCamera)?;
+                let capture = Native::new(capture).ok_or(EngineError::NoCamera)?;
                 // SAFETY: the context outlives the preview: it is cleared
-                // before the capture is freed (`release_camera`).
+                // before the capture is freed (`stop_camera`).
                 unsafe {
                     (api.qc_video_capture_set_preview)(
                         capture.as_ptr(),
@@ -169,13 +195,7 @@ impl TgcallsEngine {
                 call.camera = Some(capture);
             }
             (None, Some(_)) => {
-                if let Some(handle) = call.handle {
-                    // SAFETY: a live call; NULL stops sending video.
-                    unsafe {
-                        (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut())
-                    };
-                }
-                release_camera(api, call);
+                stop_camera(api, call);
                 return Ok(());
             }
             (None, None) => return Ok(()),
@@ -188,8 +208,14 @@ impl TgcallsEngine {
     }
 }
 
-/// Clears the preview and drops Quill's reference to the call's camera.
-fn release_camera(api: &Loader, call: &mut P2pCall) {
+/// Stops sending the camera and frees Quill's reference, as turning the
+/// camera off does, so the next call can open the device without waiting
+/// for this one's destroy behind the reaper's backlog.
+fn stop_camera(api: &Loader, call: &mut P2pCall) {
+    if let (Some(handle), Some(_)) = (call.handle, call.camera) {
+        // SAFETY: a live call; NULL stops sending video.
+        unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
+    }
     if let Some(capture) = call.camera.take() {
         // SAFETY: Quill's live reference; once the preview is cleared no
         // picture reaches the context, then the reference goes.
@@ -210,33 +236,74 @@ fn release_screen(api: &Loader, call: &mut P2pCall) {
     }
 }
 
-/// Ends the call in the library: no callback or feeder reaches it after.
-fn destroy(api: &Loader, call: &mut P2pCall) {
+impl P2pCall {
+    fn retire_instance(&mut self, api: &'static Loader) {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+        let fresh = CallContext::new(self.context.call_id, &self.context.shared);
+        let old = std::mem::replace(&mut self.context, Arc::new(fresh));
+        old.retire();
+        self.gate.close();
+        old.sound.store(None);
+        if let Some(camera) = self.camera {
+            // SAFETY: Quill's live reference; the new context stays in the
+            // call until the preview is cleared (`stop_camera`).
+            unsafe {
+                (api.qc_video_capture_set_preview)(
+                    camera.as_ptr(),
+                    Some(callbacks::on_local_video),
+                    self.context.as_user(),
+                );
+            }
+        }
+        let sound = self.sound.take();
+        reaper::hand_off(move || {
+            drop(sound);
+            // SAFETY: a live call destroyed once, never from its own
+            // callback; its context outlives the destroy.
+            unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
+            drop(old);
+        });
+    }
+}
+
+fn retire(api: &'static Loader, mut call: P2pCall) {
+    call.context.retire();
     call.gate.close();
+    call.context.sound.store(None);
+    stop_camera(api, &mut call);
+    reaper::hand_off(move || destroy(api, &mut call));
+}
+
+fn destroy(api: &Loader, call: &mut P2pCall) {
+    call.sound = None;
     if let Some(handle) = call.handle.take() {
+        crate::advanced::debug_mode::call_log(&format!(
+            "[call] {} tgcalls end: {}",
+            call.context.call_id,
+            debug_info(api, handle)
+        ));
         // SAFETY: a live call destroyed once, never from its own callback
-        // (the engine runs on the connect driver).
+        // (this runs on the reaper).
         unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
     }
-    release_camera(api, call);
     release_screen(api, call);
-    call.context.sound.store(None);
-    call.sound = None;
 }
 
 impl Drop for TgcallsEngine {
     fn drop(&mut self) {
-        for call in self.calls.values_mut() {
-            destroy(self.api, call);
+        for (_, call) in self.calls.drain() {
+            retire(self.api, call);
         }
         for (_, call) in self.groups.drain() {
-            group::destroy_group(self.api, call);
+            group::retire_group(self.api, call);
         }
     }
 }
 
 /// The library's debug line for a call, for the call log.
-fn debug_info(api: &Loader, handle: NonNull<qc_p2p>) -> String {
+fn debug_info(api: &Loader, handle: Native<qc_p2p>) -> String {
     // SAFETY: a live call; the string is the caller's to free.
     let raw = unsafe { (api.qc_p2p_debug_info)(handle.as_ptr()) };
     take_string(api, raw).unwrap_or_default()
@@ -259,11 +326,7 @@ fn take_string(api: &Loader, raw: *mut std::ffi::c_char) -> Option<String> {
 
 fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
     P2pCall {
-        context: Arc::new(CallContext {
-            call_id,
-            shared: Arc::clone(shared),
-            sound: ArcSwapOption::empty(),
-        }),
+        context: Arc::new(CallContext::new(call_id, shared)),
         pending_signaling: Vec::new(),
         handle: None,
         gate: Arc::new(sender::Gate::default()),
@@ -286,9 +349,35 @@ fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
 mod tests {
     use super::*;
 
-    fn engine() -> Option<TgcallsEngine> {
+    /// The engine for one test. Dropping it waits for the teardowns it
+    /// handed off: the test binary must not exit while one runs.
+    pub(super) struct TestEngine(Option<TgcallsEngine>);
+
+    impl std::ops::Deref for TestEngine {
+        type Target = TgcallsEngine;
+
+        fn deref(&self) -> &TgcallsEngine {
+            self.0.as_ref().expect("the engine lives until drop")
+        }
+    }
+
+    impl std::ops::DerefMut for TestEngine {
+        fn deref_mut(&mut self) -> &mut TgcallsEngine {
+            self.0.as_mut().expect("the engine lives until drop")
+        }
+    }
+
+    impl Drop for TestEngine {
+        fn drop(&mut self) {
+            if self.0.take().is_some() {
+                reaper::wait_for_teardowns_so_far();
+            }
+        }
+    }
+
+    pub(super) fn engine() -> Option<TestEngine> {
         match TgcallsEngine::load() {
-            Ok(engine) => Some(engine),
+            Ok(engine) => Some(TestEngine(Some(engine))),
             Err(_) => {
                 eprintln!("SKIP: libquill_calls not built; run scripts/build-tgcalls.sh");
                 None
@@ -363,6 +452,41 @@ mod tests {
         );
         assert!(engine.hangup(1).is_ok());
         assert_eq!(engine.set_muted(1, false), Err(EngineError::NoSuchCall(1)));
+    }
+
+    /// A callback stuck inside tgcalls holds `qc_p2p_destroy` until it
+    /// returns, which is what a wedged teardown looks like from here.
+    #[test]
+    fn hanging_up_does_not_wait_for_the_library() {
+        let Some(mut engine) = engine() else { return };
+        let params = params(&engine);
+        let (entered, in_callback) = std::sync::mpsc::channel::<()>();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let held = std::sync::Mutex::new(held);
+        engine.set_signaling_emitted_callback(Arc::new(move |_, _| {
+            let _ = entered.send(());
+            let _ = held.lock().unwrap().recv();
+        }));
+        engine.start_call(9, 77, true).unwrap();
+        engine.connect(9, &params).unwrap();
+        let sender = engine
+            .external_frame_sender(CaptureTarget::Private(9))
+            .unwrap();
+        in_callback.recv().unwrap();
+
+        engine.hangup(9).unwrap();
+
+        let frame = vec![0u8; EXTERNAL_AUDIO_FRAME_BYTES];
+        assert_eq!(
+            sender.send(
+                ExternalDevice::Microphone,
+                &frame,
+                ExternalFrameMeta::default()
+            ),
+            Err(EngineError::Unavailable)
+        );
+        assert_eq!(engine.set_muted(9, false), Err(EngineError::NoSuchCall(9)));
+        drop(release);
     }
 
     #[test]

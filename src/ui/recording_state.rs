@@ -1,6 +1,8 @@
 //! Voice and round video recording.
 #![deny(clippy::indexing_slicing)]
 
+use std::sync::Arc;
+
 use quill::ids::ChatId;
 use quill::playback::PlaybackClock;
 use quill::video::VideoNoteCapture;
@@ -13,6 +15,35 @@ pub(crate) enum CaptureMedia {
     Voice(VoiceCapture),
     Video(VideoNoteCapture),
 }
+
+impl CaptureMedia {
+    pub(super) fn discard(self) {
+        match self {
+            Self::Voice(capture) => capture.discard(),
+            Self::Video(capture) => capture.discard(),
+        }
+    }
+}
+
+/// A capture on its way up, off the UI thread. It is not a recording yet
+/// (no bar, nothing to send), but no other one may start meanwhile.
+/// Cancelling it goes straight back to `Idle`: a device that never answers
+/// must not keep the next press of record from starting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CaptureStart {
+    Idle,
+    Opening {
+        start: StartId,
+        video: bool,
+        origin: Option<ChatId>,
+        purpose: CaptureFor,
+    },
+}
+
+/// Which start a device answer belongs to. An answer for any start but the
+/// one opening now is stale (cancelled, maybe replaced) and is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct StartId(u64);
 
 /// Where the recording goes once sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,10 +71,9 @@ pub(crate) struct RecordingUi {
     /// The voice or round video message being recorded, with the window it
     /// belongs to. One at a time, for the whole app.
     capture: Option<Capture>,
-    /// A round video capture is being started off the UI thread. It is
-    /// not a recording yet (no bar, nothing to send or cancel), but no
-    /// other one may start meanwhile.
-    pub(super) starting: bool,
+    pub(super) start: CaptureStart,
+    next_start: u64,
+    pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
@@ -65,7 +95,9 @@ impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {
             capture: None,
-            starting: false,
+            start: CaptureStart::Idle,
+            next_start: 0,
+            open_voice: Arc::new(VoiceCapture::start),
             locked: false,
             lock_next: false,
             discard_confirm: false,
@@ -84,7 +116,36 @@ impl RecordingUi {
 
     /// A recording runs or is about to: another one must not start.
     pub(super) fn busy(&self) -> bool {
-        self.capture.is_some() || self.starting
+        self.capture.is_some() || self.start != CaptureStart::Idle
+    }
+
+    pub(super) fn opening_video(&self) -> bool {
+        matches!(self.start, CaptureStart::Opening { video: true, .. })
+    }
+
+    pub(super) fn opening_origin(&self) -> Option<Option<ChatId>> {
+        match self.start {
+            CaptureStart::Opening { origin, .. } => Some(origin),
+            _ => None,
+        }
+    }
+
+    pub(super) fn opening_for(&self, wanted: CaptureFor) -> bool {
+        matches!(self.start, CaptureStart::Opening { purpose, .. } if purpose == wanted)
+    }
+
+    pub(super) fn cancel_start(&mut self) {
+        self.start = CaptureStart::Idle;
+    }
+
+    /// The device answered for `start`: true when that start is still the
+    /// one wanted, which then ends. A stale answer leaves a newer start be.
+    pub(super) fn finish_start(&mut self, start: StartId) -> bool {
+        let current = matches!(self.start, CaptureStart::Opening { start: s, .. } if s == start);
+        if current {
+            self.start = CaptureStart::Idle;
+        }
+        current
     }
 
     /// The window the recording belongs to (`Some(None)`: the main
@@ -162,6 +223,18 @@ impl RecordingUi {
 }
 
 impl QuillApp {
+    pub(super) fn begin_capture_start(&mut self, video: bool, purpose: CaptureFor) -> StartId {
+        let start = StartId(self.recording.next_start);
+        self.recording.next_start = self.recording.next_start.wrapping_add(1);
+        self.recording.start = CaptureStart::Opening {
+            start,
+            video,
+            origin: self.windows.scope,
+            purpose,
+        };
+        start
+    }
+
     /// Hold a recording that just started, as the window whose state is
     /// in place (the one whose composer or story viewer asked for it).
     pub(super) fn hold_capture(&mut self, media: CaptureMedia, purpose: CaptureFor) {

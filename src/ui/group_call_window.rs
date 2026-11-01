@@ -13,6 +13,7 @@
 use super::app::QuillApp;
 use super::calls::stream_view::StreamPictureView;
 use super::frame_clock::{follow_app, trace_slice_render};
+use super::group_call_members_view::GroupCallMembers;
 use super::group_call_panel::BG;
 use super::group_call_stream_layout::{
     leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
@@ -184,6 +185,7 @@ impl QuillApp {
                             ),
                             pinned_on_top: false,
                             title: None,
+                            members: cx.new(|cx| GroupCallMembers::new(&render_owner, cx)),
                         }
                     });
                     let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
@@ -293,6 +295,7 @@ pub(super) struct GroupCallPanel {
     pinned_on_top: bool,
     /// The title the window was given (a stream's follows its chat).
     title: Option<String>,
+    members: Entity<GroupCallMembers>,
 }
 
 impl Render for GroupCallPanel {
@@ -308,6 +311,8 @@ impl Render for GroupCallPanel {
         let fullscreen = window.is_fullscreen();
         // tdesktop treats a maximized stream window as full screen too.
         let stream_full = stream_full(window, owner.read(cx));
+        let panel = cx.entity_id();
+        let members = self.members.clone();
         let (body, animating, stream_title) = owner.update(cx, |app, cx| {
             if let Some(facts) = app.group_call_stream_facts() {
                 let body = app.group_call_stream_body(&facts, stream_full, window, cx);
@@ -315,10 +320,9 @@ impl Render for GroupCallPanel {
                 return (body.element, body.animating, Some(title));
             }
             let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let call = app
-                .session()
-                .and_then(|s| s.calls.active_group_call.clone())
-                .filter(|_| wants_stage);
+            let call = wants_stage
+                .then(|| app.session()?.calls.active_group_call.clone())
+                .flatten();
             let stage = call.and_then(|call| app.group_call_stage(&call, cx));
             // The stage closed: its volume slider goes with it.
             if stage.is_none() {
@@ -326,7 +330,7 @@ impl Render for GroupCallPanel {
             }
             let body = match stage {
                 Some(stage) => stage,
-                None => app.group_call_panel_body(cx),
+                None => app.group_call_panel_body(panel, &members, window, cx),
             };
             (body, false, None)
         });
