@@ -210,8 +210,8 @@ pub fn pick(
         _ => pos,
     };
     // A head starts on a paint, so later paints land near whole grid
-    // frames, a little early or late. Counting a paint up to a quarter
-    // frame early as on time keeps every frame up for the same number of
+    // frames, a little early or late. Counting a paint up to the grid slack
+    // early as on time keeps every frame up for the same number of
     // refreshes, instead of one, then three.
     let on_grid =
         (pos.as_secs_f64() * timeline.grid_fps() + grid_slack(timeline, display_hz)).floor();
