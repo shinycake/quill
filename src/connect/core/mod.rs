@@ -550,12 +550,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.last_seq != previous_seq {
             self.session.remember_emoji_pack_usage(&used_emoji);
         }
-        if (recent_packs != self.session.settings.media_prefs.recent_emoji_packs
-            || recent_emoji != self.session.settings.media_prefs.recent_custom_emoji_ids)
-            && self.save_media_prefs().is_err()
+        if recent_packs != self.session.settings.media_prefs.recent_emoji_packs
+            || recent_emoji != self.session.settings.media_prefs.recent_custom_emoji_ids
         {
-            self.session.chats_state.chat_action_error =
-                Some("Could not save emoji pack order. Retry in settings.".into());
+            self.save_media_prefs();
         }
         // Slice S4: persist per-network settings seeded from
         // `getAutoDownloadSettingsPresets` (the reducer cannot touch the

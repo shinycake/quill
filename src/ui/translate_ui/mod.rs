@@ -20,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::state::{HistoryMessage, Session, Translation};
 use quill::telegram::envelope::ChatKind;
 use quill::text::TextEntity;
@@ -161,15 +161,10 @@ impl QuillApp {
 
     fn set_translate_prefs(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut TranslatePrefs)) {
         f(&mut self.settings.translate.prefs);
-        if let Err(err) = quill::settings::save_translate_prefs(
+        quill::settings::save_translate_prefs(
             &Self::appearance_paths(),
             &self.settings.translate.prefs,
-        ) {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_MISC_COULDNT_SAVE_TRANSLATION_SETTINGS,
-                &[("err", &err.to_string())],
-            )));
-        }
+        );
         cx.notify();
     }
 

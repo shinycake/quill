@@ -222,10 +222,7 @@
 "qll_misc_couldnt_read_a_telegram_login" = "Couldn't read a Telegram login QR code. Please try again.";
 "qll_misc_couldnt_remove_the_dictionary" = "Couldn't remove the dictionary: {err}";
 "qll_misc_couldnt_request_transcription" = "couldn't request transcription";
-"qll_misc_couldnt_save_dictionary" = "Couldn't save dictionary: {err}";
-"qll_misc_couldnt_save_spelling_languages" = "Couldn't save spelling languages: {err}";
 "qll_misc_couldnt_save_the_edited_photo" = "Couldn't save the edited photo.";
-"qll_misc_couldnt_save_translation_settings" = "Couldn't save translation settings: {err}";
 "qll_misc_couldnt_use_that_sticker" = "Couldn't use that sticker.";
 "qll_misc_cover_cleared" = "cover cleared";
 "qll_misc_cover_will_be_saved_with" = "Cover {shown_name} will be saved with the edit";

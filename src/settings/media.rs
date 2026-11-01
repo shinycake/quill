@@ -179,9 +179,9 @@ pub fn load_media_prefs(paths: &AccountPaths) -> MediaPrefs {
     load_json_prefs(paths, "media_prefs.json")
 }
 
-/// Persist media prefs; failures are returned to the caller to surface
-/// in the status note.
-pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) -> std::io::Result<()> {
+/// Persist media prefs; a failure reaches the status note through
+/// [`take_deferred_write_failure`].
+pub fn save_media_prefs(paths: &AccountPaths, prefs: &MediaPrefs) {
     save_json_prefs(paths, "media_prefs.json", prefs)
 }
 
@@ -210,7 +210,7 @@ mod tests {
             quick_action: crate::quick_action::QuickAction::React,
             ..Default::default()
         };
-        save_media_prefs(&paths, &prefs).expect("save works");
+        save_media_prefs(&paths, &prefs);
         assert_eq!(load_media_prefs(&paths), prefs);
         assert!(!prefs.default_grouping());
         // Remember off → grouped regardless of the stored choice.
@@ -246,7 +246,7 @@ mod tests {
             autoplay_gifs: false,
             ..Default::default()
         };
-        save_media_prefs(&paths, &prefs).expect("save queues");
+        save_media_prefs(&paths, &prefs);
         // The writer is held before this file: the save already returned.
         assert!(!file.exists());
         assert_eq!(load_media_prefs(&paths), prefs);

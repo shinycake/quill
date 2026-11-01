@@ -200,9 +200,18 @@ pub(crate) mod test_gate {
 
 /// Save `value` as JSON at `path` without waiting for the disk. A newer
 /// call for the same path replaces one still waiting.
+/// A value that cannot be serialized is reported like a failed write.
 pub(crate) fn write_json_deferred<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    global().submit(path.to_path_buf(), json_bytes(value)?);
-    Ok(())
+    match json_bytes(value) {
+        Ok(bytes) => {
+            global().submit(path.to_path_buf(), bytes);
+            Ok(())
+        }
+        Err(err) => {
+            global().shared.lock().failure = Some(std::io::Error::new(err.kind(), err.to_string()));
+            Err(err)
+        }
+    }
 }
 
 /// The bytes of `path`, from the queue when a write is still waiting.

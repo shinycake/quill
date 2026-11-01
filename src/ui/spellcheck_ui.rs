@@ -22,7 +22,6 @@ use std::time::Duration;
 use super::actions::{SpellingIgnore, SpellingLearn, SpellingReplace, SpellingUnlearn};
 use super::app::QuillApp;
 use super::chat_theme::danger;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::input::{Copy, Cut, Paste, SelectAll, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::*;
@@ -221,14 +220,7 @@ impl QuillApp {
         let prefs = quill::settings::SpellcheckLanguages {
             languages: chosen.clone(),
         };
-        if let Err(err) =
-            quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs)
-        {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_MISC_COULDNT_SAVE_SPELLING_LANGUAGES,
-                &[("err", &err.to_string())],
-            )));
-        }
+        quill::settings::save_spellcheck_languages(&Self::appearance_paths(), &prefs);
         self.spell.info.chosen = chosen.clone();
         self.start_spell_engine(chosen, cx);
         cx.notify();
@@ -413,13 +405,7 @@ impl QuillApp {
         let prefs = quill::settings::SpellcheckWords {
             words: self.spell.checker.app_words(),
         };
-        if let Err(err) = quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs)
-        {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_MISC_COULDNT_SAVE_DICTIONARY,
-                &[("err", &err.to_string())],
-            )));
-        }
+        quill::settings::save_spellcheck_words(&Self::appearance_paths(), &prefs);
     }
 
     /// The red wavy underlines, as an overlay over the composer Textarea

@@ -185,6 +185,7 @@ pub(crate) use format_helpers::*;
 pub(crate) use history_row::*;
 pub(crate) use keybindings::*;
 pub(crate) use menu_states::*;
+pub(crate) use navigation::flush_settings_on_quit;
 pub(crate) use playback::*;
 mod story_page;
 

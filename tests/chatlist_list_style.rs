@@ -69,7 +69,7 @@ fn chat_list_style_prefs_roundtrip() {
         chat_list_rich_preview: true,
         ..AppearancePrefs::default()
     };
-    save_appearance_prefs(&paths, &prefs).unwrap();
+    save_appearance_prefs(&paths, &prefs);
     assert_eq!(load_appearance_prefs(&paths), prefs);
     let _ = std::fs::remove_dir_all(&dir);
 }

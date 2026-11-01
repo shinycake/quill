@@ -64,7 +64,7 @@ fn prefs_path() -> Option<PathBuf> {
 
 fn load_from_disk() -> FilePrefs {
     prefs_path()
-        .and_then(|path| crate::settings::read_with_pending(&path).ok())
+        .and_then(|path| std::fs::read(path).ok())
         .and_then(|bytes| serde_json::from_slice::<FilePrefs>(&bytes).ok())
         .unwrap_or_default()
 }
@@ -89,7 +89,7 @@ pub fn store(prefs: FilePrefs) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = prefs_path()
     {
-        let _ = crate::settings::write_json_deferred(&path, &prefs);
+        let _ = crate::settings::write_json_atomic(&path, &prefs);
     }
     if let Ok(mut guard) = PREFS.write() {
         *guard = Some(prefs);

@@ -252,6 +252,7 @@ fn ui_main(args: &[String]) {
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows.
         ui::setup_app_menus(cx);
+        ui::flush_settings_on_quit(cx);
         let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
         cx.spawn(async move |cx| {
             cx.open_window(

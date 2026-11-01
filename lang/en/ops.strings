@@ -505,7 +505,6 @@
 "qll_ops_could_not_upload_diagnostics" = "could not upload diagnostics";
 "qll_ops_could_not_upload_the_call" = "could not upload the call log";
 "qll_ops_couldn_t_load_call_history" = "Couldn’t load call history.";
-"qll_ops_couldn_t_save_call_settings" = "couldn’t save call settings: {err}";
 "qll_ops_couldn_t_save_the_notification" = "couldn’t save the notification setting: {err}";
 "qll_ops_couldnt_leave_the_call" = "Couldn't leave the call.";
 "qll_ops_couldnt_open_the_call_window" = "Couldn't open the call window";

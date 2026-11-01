@@ -455,12 +455,7 @@ impl QuillApp {
         update(&mut prefs);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.media_prefs = prefs;
-            if let Err(err) = live.driver.save_media_prefs() {
-                self.connection.set_note(StatusNote::error(tr_with(
-                    keys::Q_AV_COULDNT_SAVE_MEDIA_SETTINGS,
-                    &[("err", &err.to_string())],
-                )));
-            }
+            live.driver.save_media_prefs();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.media_prefs = prefs;
         }

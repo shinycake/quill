@@ -11,7 +11,6 @@
 use super::QuillApp;
 use super::chat_theme::{set_high_contrast, set_theme_mode};
 use super::synthetic::BubbleLook;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
@@ -21,7 +20,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::AccountKey;
-use quill::lang::{Key, keys, tr, tr_with};
+use quill::lang::{Key, keys, tr};
 use quill::settings::{
     AccountPaths, AppearancePrefs, AutoNight, ChatPrefs, ThemeChoice, clamp_font_size,
     load_appearance_prefs, load_chat_prefs, safe_app_root, save_appearance_prefs, save_chat_prefs,
@@ -229,12 +228,7 @@ impl QuillApp {
         quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
-        if let Err(err) = save_appearance_prefs(&Self::appearance_paths(), &self.appearance) {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_PREFS_COULDNT_SAVE_APPEARANCE_SETTINGS,
-                &[("err", &err.to_string())],
-            )));
-        }
+        save_appearance_prefs(&Self::appearance_paths(), &self.appearance);
         self.apply_appearance(cx);
         cx.notify();
     }
@@ -252,12 +246,7 @@ impl QuillApp {
         f: impl FnOnce(&mut ChatPrefs),
     ) {
         f(&mut self.chat_prefs);
-        if let Err(err) = save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs) {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_PREFS_COULDNT_SAVE_CHAT_SETTINGS,
-                &[("err", &err.to_string())],
-            )));
-        }
+        save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs);
         // Keep kit's newline-vs-submit behavior in sync with the mode on
         // the two chat composers (other inputs always submit on Enter).
         let submit = self.chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;

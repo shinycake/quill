@@ -328,9 +328,6 @@
 "qll_prefs_could_not_update_the_session" = "Could not update the session setting.";
 "qll_prefs_couldn_t_load_privacy_settings" = "Couldn’t load privacy settings.";
 "qll_prefs_couldn_t_save_badge_settings" = "couldn’t save badge settings: {err}";
-"qll_prefs_couldn_t_save_desktop_notifications" = "couldn’t save desktop notifications: {err}";
-"qll_prefs_couldn_t_save_notification_preview" = "couldn’t save notification preview settings: {err}";
-"qll_prefs_couldn_t_save_notification_sounds" = "couldn’t save notification sounds: {err}";
 "qll_prefs_couldn_t_update_wallpapers" = "Couldn’t update wallpapers: {error}";
 "qll_prefs_couldnt_add_the_proxy_try" = "Couldn't add the proxy. Try again.";
 "qll_prefs_couldnt_check_the_password_try" = "Couldn't check the password. Try again later.";
@@ -339,11 +336,7 @@
 "qll_prefs_couldnt_load_these_settings" = "Couldn't load these settings.";
 "qll_prefs_couldnt_reach_telegram_support_try" = "Couldn't reach Telegram Support; try again.";
 "qll_prefs_couldnt_save" = "couldn't save: {err}";
-"qll_prefs_couldnt_save_appearance_settings" = "Couldn't save appearance settings: {err}";
-"qll_prefs_couldnt_save_chat_settings" = "Couldn't save chat settings: {err}";
 "qll_prefs_couldnt_save_settings" = "Couldn't save settings: {err}";
-"qll_prefs_couldnt_save_device_name" = "couldn't save device name: {err}";
-"qll_prefs_couldnt_save_that_shortcut_the" = "Couldn't save that shortcut. The previous one is still active.";
 "qll_prefs_couldnt_save_the_proxy_try" = "Couldn't save the proxy. Try again.";
 "qll_prefs_couldnt_update_call_settings" = "Couldn't update call settings.";
 "qll_prefs_count_unread_messages_off_count" = "Count unread messages (off: count chats)";

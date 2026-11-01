@@ -229,7 +229,6 @@
 "qll_chat_couldnt_copy_this_image" = "couldn't copy this image";
 "qll_chat_couldnt_load_link_preview" = "couldn't load link preview";
 "qll_chat_couldnt_save" = "couldn't save: {err}";
-"qll_chat_couldnt_save_recent_hashtags" = "Couldn't save recent hashtags: {err}";
 "qll_chat_couldnt_stop_sharing_try_again" = "Couldn't stop sharing; try again.";
 "qll_chat_create" = "✨ Create";
 "qll_chat_create_link" = "Create link";
