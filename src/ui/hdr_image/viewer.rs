@@ -103,6 +103,16 @@ impl HdrViewer {
         matches!(self.slot, Slot::Hdr(_))
     }
 
+    /// Tests: the headroom the shown frame is tone-mapped into.
+    #[cfg(test)]
+    #[cfg(all(target_os = "macos", feature = "demo-capture"))]
+    pub(crate) fn frame_headroom(&self) -> Option<f32> {
+        match &self.slot {
+            Slot::Hdr(pixels) => Some(pixels.frame.headroom()),
+            _ => None,
+        }
+    }
+
     /// Recorded for tests: whether the window was last switched to EDR.
     #[cfg(test)]
     #[cfg(all(target_os = "macos", feature = "demo-capture"))]
@@ -161,7 +171,13 @@ impl QuillApp {
         let Slot::Hdr(pixels) = &hdr.slot else {
             return None;
         };
-        let display = headroom.effective();
+        // Back in 8-bit, the frame is tone-mapped into standard range
+        // instead of clipping its highlights.
+        let display = if hdr.edr_lost {
+            super::Headroom::SDR.effective()
+        } else {
+            headroom.effective()
+        };
         if hdr.headroom != display {
             let param = super::tone_map::shader_headroom(display, pixels.peak);
             pixels.frame.set_headroom(param);

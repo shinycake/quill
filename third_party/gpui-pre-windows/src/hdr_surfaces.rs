@@ -255,8 +255,9 @@ impl DirectXRenderer {
             self.switch_output(self.output).log_err();
         }
         let wanted = hdr_output::wanted(self.hwnd);
-        if !wanted {
+        if !wanted && self.hdr_failed {
             self.hdr_failed = false;
+            hdr_output::note_failed(self.hwnd, false);
         }
         let target = if wanted && !self.hdr_failed {
             let info = hdr_output::display_info(self.hwnd.0 as isize);
@@ -278,6 +279,7 @@ impl DirectXRenderer {
         if let Err(error) = self.switch_output(target) {
             log::warn!("switching HDR output failed: {error:#}");
             self.hdr_failed = true;
+            hdr_output::note_failed(self.hwnd, true);
             if self.output.hdr {
                 self.switch_output(OutputMode::SDR).log_err();
             }

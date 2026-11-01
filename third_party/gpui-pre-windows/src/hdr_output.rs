@@ -84,11 +84,36 @@ pub fn set_hdr_output(hwnd: isize, on: bool) {
     }
 }
 
+/// QUILL: windows whose switch to HDR output failed (the renderer stays in
+/// SDR until the window releases HDR output).
+static FAILED: LazyLock<Mutex<HashMap<isize, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// QUILL: the renderer records whether its switch to HDR output failed.
+pub(crate) fn note_failed(hwnd: HWND, failed: bool) {
+    if let Ok(mut map) = FAILED.lock() {
+        if failed {
+            map.insert(hwnd.0 as isize, true);
+        } else {
+            map.remove(&(hwnd.0 as isize));
+        }
+    }
+}
+
+/// QUILL: whether the window asked for HDR output and its renderer could
+/// not switch to it, so the window draws in SDR.
+pub fn hdr_failed(hwnd: isize) -> bool {
+    FAILED.lock().ok().is_some_and(|map| map.contains_key(&hwnd))
+}
+
 /// Drop what is recorded for a window that is going away.
 pub(crate) fn forget(hwnd: HWND) {
     let key = hwnd.0 as isize;
     if let Ok(mut wanted) = WANTED.lock() {
         wanted.remove(&key);
+    }
+    if let Ok(mut failed) = FAILED.lock() {
+        failed.remove(&key);
     }
     if let Ok(mut info) = INFO.lock() {
         info.remove(&key);

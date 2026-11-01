@@ -132,6 +132,8 @@ fn the_tag_says_standard_range_once_the_renderer_left_extended_range(cx: &mut Te
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert_eq!(app.viewer_hdr_badge(), Some(HdrBadge::StandardRange));
+        // Tone-mapped into the 8-bit layer, not clipped.
+        assert_eq!(app.viewer.hdr.frame_headroom(), Some(1.0));
     });
     set_test_renderer_left_edr(false);
     set_test_headroom(None);

@@ -71,6 +71,12 @@ pub(crate) fn set_window_edr(window: &gpui_kit::Window, on: bool) {
     }
 }
 
+/// Whether the renderer could not switch the window to the scRGB swap
+/// chain it asked for, so it draws in SDR.
+pub(crate) fn hdr_failed(window: &gpui_kit::Window) -> bool {
+    hwnd(window).is_some_and(gpui_windows::hdr_output::hdr_failed)
+}
+
 fn hwnd(window: &gpui_kit::Window) -> Option<isize> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {

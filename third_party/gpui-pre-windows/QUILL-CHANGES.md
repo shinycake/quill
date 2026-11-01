@@ -178,7 +178,8 @@ Windows HDR on (`docs/decisions/hdr-viewer-windows.md`):
   `DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709` (scRGB) while the window wants
   HDR output and its display is in HDR mode, and back to 8-bit sRGB
   otherwise. A failed switch is logged and not retried until the window
-  releases HDR output.
+  releases HDR output; `hdr_output::hdr_failed(hwnd)` reports it, so the
+  app can say the picture shows in standard range.
 - `src/directx_renderer.rs`: `draw_surfaces` draws through
   `hdr_surfaces`; `draw` syncs the output mode first; `GlobalParams` carries
   `hdr_output` and `output_scale` (SDR white in scRGB units); resizing keeps

@@ -189,7 +189,9 @@ fn renderer_left_edr(window: &gpui_kit::Window) -> bool {
     }
     #[cfg(target_os = "macos")]
     return macos::window_edr(window) == Some(false);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return windows::hdr_failed(window);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = window;
         false
