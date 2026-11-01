@@ -5,15 +5,15 @@
 use crate::ui::app::QuillApp;
 use crate::ui::connect_ui::ConnectUiStatus;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
-use quill::connect::ConnectBlocker;
+use quill::auth::StartupFailure;
 use quill::telegram::envelope::AuthorizationState;
 
 register_demos![
     DemoSpec::signed_out("need-tdjson", || {
         (
-            ConnectUiStatus::NeedTdjson,
-            ConnectBlocker::MissingTdjson.user_message().into(),
-            AuthorizationState::WaitPhoneNumber,
+            ConnectUiStatus::Blocked,
+            String::new(),
+            AuthorizationState::StartupFailed(StartupFailure::Library),
         )
     })
     .auth_inputs(false),

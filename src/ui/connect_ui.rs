@@ -19,8 +19,7 @@ use std::sync::Arc;
 #[derive(Clone, PartialEq, Eq)]
 pub enum ConnectUiStatus {
     NeedCredentials,
-    NeedTdjson,
-    RestoreBlocked(&'static str),
+    Blocked,
     /// Synthetic WaitPhoneNumber surface for screenshot proof (no live TDLib).
     DemoWaitPhone,
     /// Synthetic WaitCode surface for screenshot proof (no live TDLib).
@@ -51,14 +50,14 @@ pub(super) fn prepare_startup(
         return Err(blocker);
     }
     let credentials = credentials.ok_or(ConnectBlocker::MissingCredentials)?;
-    let root = root.ok_or(ConnectBlocker::LockedStore)?;
+    let root = root.ok_or(ConnectBlocker::DataFolder)?;
     let active = quill::settings::active_account(&root);
     // A folder that could not be deleted yet is never opened.
     if quill::settings::pending_deletes(&root)
         .iter()
         .any(|key| key == &active && !swept.contains(key))
     {
-        return Err(ConnectBlocker::StoreError);
+        return Err(ConnectBlocker::DataFolder);
     }
     let prepared = quill::connect::prepare_connect(&root, active, secrets, &credentials)?;
     Ok((credentials, prepared))
@@ -232,16 +231,20 @@ impl super::app::QuillApp {
                 self.enter_disk_state(quill::disk_guard::DiskState::Full, cx);
                 self.connection.set_note(StatusNote::silent(""));
             }
-            Err(blocker) => {
-                self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
-                self.connection.status = match blocker {
-                    ConnectBlocker::MissingCredentials => ConnectUiStatus::NeedCredentials,
-                    ConnectBlocker::MissingTdjson => ConnectUiStatus::NeedTdjson,
-                    _ => ConnectUiStatus::RestoreBlocked(blocker.user_message()),
-                };
-                self.connection
-                    .set_note(StatusNote::error(blocker.user_message()));
-            }
+            Err(blocker) => match blocker.startup_failure() {
+                Some(failure) => {
+                    eprintln!("quill: no client: {}", blocker.user_message());
+                    self.auth_ui.demo_state = AuthorizationState::StartupFailed(failure);
+                    self.connection.status = ConnectUiStatus::Blocked;
+                    self.connection.clear_note();
+                }
+                None => {
+                    self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
+                    self.connection.status = ConnectUiStatus::NeedCredentials;
+                    self.connection
+                        .set_note(StatusNote::error(blocker.user_message()));
+                }
+            },
         }
         self.reload_account_keybindings(cx);
         if self.live.is_some() {
@@ -266,3 +269,8 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "connect_ui_tests.rs"]
+mod failure_card_tests;
