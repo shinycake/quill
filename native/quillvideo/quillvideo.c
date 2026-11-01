@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* tdesktop's kMaxQueuedPackets. */
+/* Quill's limits. tdesktop's kMaxQueuedPackets is a flush batch, not a limit. */
 #define HELD_MAX_PACKETS 1024
 #define HELD_MAX_BYTES (64 * 1024 * 1024)
 /* tdesktop's kSkipInvalidDataPackets. */

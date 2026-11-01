@@ -109,11 +109,25 @@ FFmpeg-based player including Telegram Desktop; noted in `THIRD_PARTY.md`.
 - Sound sits behind pictures in a file, by up to a second in an ordinary
   MP4. When the picture queue is full and the sound buffer is below 0.5 s,
   `qv_next_sound` reads on and decodes only the sound. The video packets it
-  passes wait undecoded in the shim, at most 1024 of them (tdesktop's
-  `kMaxQueuedPackets`) or 64 MiB. Past that, or at the end of the sound, no
-  sound is in reach and the thread sleeps until a picture moves. A picture
-  queue that grew to reach the sound was 8.3 MB per 1080p picture, and with
-  no sound left it grew to the end of the file.
+  passes wait undecoded in the shim, at most 1024 of them or 64 MiB. Those
+  limits are Quill's: tdesktop's `kMaxQueuedPackets` is also 1024, but it is
+  a flush batch, and its packets go on to an unbounded queue until both
+  tracks have enough (`bothReceivedEnough`). Past the limits, or at the end
+  of the sound, no sound is in reach and the thread sleeps until a picture
+  moves. A picture queue that grew to reach the sound was 8.3 MB per 1080p
+  picture, and with no sound left it grew to the end of the file.
+- Pictures leave the queue in paint, and nothing paints a round clip with
+  sound scrolled off screen or a viewer in a hidden window. So the decode
+  thread drops queued pictures the sound has passed, as tdesktop's video
+  thread drops stale frames by track time (`dropStaleFrames`). The sound
+  behind them stays in reach, the hold stays small, and the picture is
+  current when paint returns. A picture goes only when a later queued one is
+  due at what is heard less `SYNC_TOLERANCE`, the lowest position paint reaches
+  while the clock runs, so paint would have skipped it. The clock holds until
+  the first picture of a clip or a seek shows, so a late first paint can show
+  a newer picture than the first one decoded, closer to the sound. Pictures
+  ahead of the sound stay, so a file with sound further behind than the hold
+  reaches waits for paint.
 - Pictures come out as upright, tightly packed BGRA (swscale with the
   stream's BT.601/709/2020 matrix and range; display-matrix rotation applied
   in Rust, `rotate_bgra`).
