@@ -97,7 +97,6 @@ the others (`shared`).
 Nothing else changes:
 
 - Clock content at other rates (24, 25 fps GIFs) keeps its own rate.
-- At 60 Hz every vsync is on the grid.
 - At 90, 144 and 165 Hz there is no grid.
 - Without the display link's timing (Linux, Windows), behavior is as before.
 
@@ -196,11 +195,17 @@ and all seven restarts came in play. With the changes below, none of nine did.
   Without vsync times it still asks about the whole next refresh
   (`TickDraw::Within`), and a frame costs one or two draws.
 
-The cost is at 60 Hz beside a clip. There is no grid to share there, and a
-clock on vsyncs no longer drifts into phase with a 30 fps clip: when they sit on
-opposite refreshes the window draws close to 60 frames a second where the free
-clock averaged 43. A chat with a clip, emoji and stickers took 16% more
-instructions. Its 30 fps stickers held two refreshes 99.7% of the time, up from
-93%, so this stays until a 60 Hz display shares vsyncs. A 24 fps sticker beside
+A clock on vsyncs no longer drifts into phase with a 30 fps clip, so at 60 Hz
+the two could sit on opposite refreshes and draw close to 60 frames a second.
+A 60 Hz display now has a grid too, with every vsync on it. There, and at any
+other grid rate, a clip that keeps time with the clock's content sets the phase:
+the clock moves its ticks onto the clip's pictures (`clip_beat`, `later_tick`).
+The clip keeps its own pacing, since a late picture costs lip sync and a sticker
+held one refresh longer once costs nothing anyone sees. The clock follows only
+clips on its own display, whose vsyncs it shares, and stays put once it is on any
+one clip's pictures, so two clips in opposite phases cannot pull it back and
+forth. That chat went from 54 frames a second to 30, and 23% fewer instructions.
+
+A 24 fps sticker beside
 30 fps content now holds two or four refreshes rather than two, three or four: a
 clip's draw between ticks no longer shows it early.

@@ -176,6 +176,7 @@ impl RenderOnce for VideoFrame {
                     request_video_frame(
                         target,
                         VideoFrameAsk {
+                            display,
                             next_due: demand.next_due,
                             interval: demand.interval,
                             lead: demand.lead,

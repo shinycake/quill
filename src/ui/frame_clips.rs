@@ -3,7 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::frame_grid;
-use super::super::frame_grid::Vsync;
+use super::super::frame_grid::{ContentGrid, Vsync};
 use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, request_policy};
 use super::{AppGate, ClockTiming, assume_active, content_frame, tick_wanted};
@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 /// What [`request_video_frame`] needs from the playing clip.
 pub(crate) struct VideoFrameAsk {
+    /// The display it shows on, while that reports vsync times.
+    pub(crate) display: Option<u64>,
     /// When the next picture becomes due (`None`: unknown, ask every frame).
     pub(crate) next_due: Option<Instant>,
     /// The display's frame interval as measured by the element.
@@ -58,6 +60,7 @@ pub(in crate::ui) fn video_request(
     requested: &FrameRequested,
     target: EntityId,
     now: Instant,
+    display: Option<u64>,
     next_due: Option<Instant>,
     interval: Duration,
     lead: Duration,
@@ -79,14 +82,10 @@ pub(in crate::ui) fn video_request(
     requested.set(Some((target, now.checked_add(lost_after).unwrap_or(now))));
     VIDEO_ASKS.with(|asks| {
         let mut asks = asks.borrow_mut();
-        asks.retain(|ask| {
-            ask.requested.upgrade().is_some_and(|other| {
-                !Rc::ptr_eq(&other, requested)
-                    && other.get().is_some_and(|(_, lost_at)| now < lost_at)
-            })
-        });
+        asks.retain(|ask| !ask.asked_by(requested) && ask.live(now));
         asks.push(VideoAsk {
             requested: Rc::downgrade(requested),
+            display,
             due: next_due.unwrap_or(now),
             even_spacing,
         });
@@ -101,6 +100,8 @@ thread_local! {
 /// A player's clip frame request ([`video_request`]).
 struct VideoAsk {
     requested: Weak<Cell<Option<(EntityId, Instant)>>>,
+    /// The display it shows on.
+    display: Option<u64>,
     /// When the picture it asked for is due.
     due: Instant,
     /// Its pictures' spacing, once they come a whole number of grid
@@ -109,6 +110,18 @@ struct VideoAsk {
 }
 
 impl VideoAsk {
+    fn asked_by(&self, requested: &FrameRequested) -> bool {
+        self.requested
+            .upgrade()
+            .is_some_and(|other| Rc::ptr_eq(&other, requested))
+    }
+
+    /// Still in flight for any view.
+    fn live(&self, now: Instant) -> bool {
+        let lost_at = self.requested.upgrade().and_then(|asked| asked.get());
+        lost_at.is_some_and(|(_, lost_at)| now < lost_at)
+    }
+
     fn in_flight(&self, target: EntityId, now: Instant) -> bool {
         self.requested
             .upgrade()
@@ -188,6 +201,36 @@ fn video_redraws(target: EntityId, fps: u32, by: Instant, now: Instant) -> bool 
     })
 }
 
+/// The vsync of the last picture before `tick`, a planned tick of content at
+/// `fps` on `display`, of a clip keeping time with it, when the tick shares
+/// no clip's window frame. On any one clip's pictures it stays there, so two
+/// clips in opposite phases never pull it back and forth.
+pub(super) fn clip_beat(
+    display: u64,
+    grid: &ContentGrid,
+    fps: u32,
+    tick: Instant,
+    now: Instant,
+) -> Option<Instant> {
+    let frame = content_frame(fps);
+    VIDEO_ASKS.with(|asks| {
+        let mut beat = None;
+        let asks = asks.borrow();
+        let clips = asks
+            .iter()
+            .filter(|ask| ask.display == Some(display) && ask.live(now))
+            .filter(|ask| keeps_time(ask.even_spacing, frame));
+        for ask in clips {
+            if ask.even_spacing? + grid.period() / 4 < frame {
+                return None;
+            }
+            let at = frame_grid::beat_before(grid, ask.due, frame, tick)?;
+            beat = beat.or(Some(at));
+        }
+        beat
+    })
+}
+
 /// Whether animation layer `painter`, drawn on the main window's latest
 /// vsync (`display`) with content at `fps`, is drawn again by a clip's
 /// picture (an inline tile's) at least a display frame before that content
@@ -226,11 +269,7 @@ pub(in crate::ui) fn video_request_done(requested: &FrameRequested, target: Enti
     let ask = VIDEO_ASKS.with(|asks| {
         asks.borrow()
             .iter()
-            .find(|ask| {
-                ask.requested
-                    .upgrade()
-                    .is_some_and(|other| Rc::ptr_eq(&other, requested))
-            })
+            .find(|ask| ask.asked_by(requested))
             .map(|ask| Answered {
                 target,
                 due: ask.due,
@@ -288,6 +327,7 @@ pub(crate) fn request_video_frame(
         &requested,
         target,
         now,
+        ask.display,
         ask.next_due,
         ask.interval,
         ask.lead,
