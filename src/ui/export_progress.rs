@@ -156,7 +156,9 @@ impl QuillApp {
                     Button::new("chat-export-show")
                         .label(tr(keys::Q_OPS_SHOW_FOLDER))
                         .outline()
-                        .on_click(move |_, _, cx| cx.reveal_path(&folder)),
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.reveal_in_folder(&folder, cx)),
+                        ),
                 );
             }
             footer = footer.child(

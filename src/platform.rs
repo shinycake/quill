@@ -713,11 +713,13 @@ pub fn open_local_file(path: &std::path::Path) -> OsOpen {
 /// MED3: reveal a file in the file manager — macOS `open -R` (selects the
 /// file in Finder), Windows `explorer /select,`, Linux opens the parent
 /// directory with `xdg-open` (no portable select-file equivalent). Never
-/// while the agent UI driver injects input, like [`os_open`].
-pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
-    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("reveal a file in its folder") {
-        return false;
-    }
+/// while the agent UI driver injects input, like [`os_open`]. The helper
+/// starts on the calling thread on every OS, so the answer comes at once.
+pub fn reveal_in_file_manager(path: &std::path::Path) -> OsOpen {
+    os_gate("reveal a file in its folder").unwrap_or_else(|| OsOpen::Answered(reveal_now(path)))
+}
+
+fn reveal_now(path: &std::path::Path) -> bool {
     if cfg!(target_os = "macos") {
         let mut command = std::process::Command::new("open");
         command.args(["-R"]).arg(path);

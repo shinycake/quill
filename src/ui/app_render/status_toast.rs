@@ -225,7 +225,7 @@ impl QuillApp {
             .visible()
             .and_then(|note| note.reveal().map(std::path::Path::to_path_buf));
         if let Some(path) = reveal {
-            quill::platform::reveal_in_file_manager(&path);
+            self.reveal_in_folder(&path, cx);
         }
         self.connection.toasts.dismiss(std::time::Instant::now());
         self.connection.toast_wake = None;

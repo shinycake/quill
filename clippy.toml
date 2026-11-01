@@ -8,4 +8,5 @@ allow-indexing-slicing-in-tests = true
 # (src/ui/os_open.rs), which tells the user when the OS could not open it.
 disallowed-methods = [
     { path = "gpui_kit::App::open_url", reason = "GPUI reports no failure: use QuillApp::open_link or os_open::open_link_in" },
+    { path = "gpui_kit::App::reveal_path", reason = "GPUI reports no failure: use QuillApp::reveal_in_folder" },
 ]

@@ -220,3 +220,28 @@ fn help_that_could_not_open_says_so(cx: &mut TestAppContext) {
         )
     );
 }
+
+#[gpui_kit::test]
+fn a_saved_toast_whose_folder_could_not_open_says_so(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.connection.set_note(
+            crate::ui::status_note::StatusNote::info("Saved to Downloads")
+                .with_reveal(std::path::PathBuf::from("/tmp/clip.mp4")),
+        );
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    script_next_os_open(OsOpen::Answered(false));
+    vcx.update(|window, cx| window.click("status-toast", cx));
+    vcx.run_until_parked();
+    assert_eq!(
+        note(&app, vcx),
+        (
+            tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER).to_string(),
+            NoteKind::Error
+        )
+    );
+}

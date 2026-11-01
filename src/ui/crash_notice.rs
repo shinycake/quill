@@ -16,6 +16,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::{App, AppContext as _, Window};
 use quill::crash_log::PendingCrash;
 use quill::lang::{keys, tr};
+use quill::platform::OsOpen;
 use std::path::{Path, PathBuf};
 
 /// Call once while the main window is built: arms the clean-exit marker and
@@ -120,8 +121,12 @@ fn notice(crash: &PendingCrash) -> Notification {
             Button::new("crash-notice-show-log")
                 .label(tr(keys::Q_MISC_SHOW_LOG))
                 .on_click(cx.listener(move |note, _, window, cx| {
-                    let _ = quill::platform::reveal_in_file_manager(&report);
+                    let open = quill::platform::reveal_in_file_manager(&report);
                     note.dismiss(window, cx);
+                    if matches!(open, OsOpen::Answered(false)) {
+                        let failure = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER);
+                        window.push_notification(Notification::new().message(failure), cx);
+                    }
                 }))
         })
 }

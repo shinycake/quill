@@ -246,10 +246,7 @@ impl QuillApp {
         let Some(toast) = self.viewer.extra.saved_toast.take() else {
             return;
         };
-        if !quill::platform::reveal_in_file_manager(&toast.dest) {
-            self.connection
-                .set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER)));
-        }
+        self.reveal_in_folder(&toast.dest, cx);
         cx.notify();
     }
 

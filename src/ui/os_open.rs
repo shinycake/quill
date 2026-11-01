@@ -27,6 +27,16 @@ impl QuillApp {
         self.report_failed_open(open, tr(failure), cx);
     }
 
+    /// Show `path` in the file manager, saying so when it could not.
+    pub(in crate::ui) fn reveal_in_folder(
+        &mut self,
+        path: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        let open = quill::platform::reveal_in_file_manager(path);
+        self.report_failed_open(open, tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER), cx);
+    }
+
     /// Show `failure` if the OS could not open what it was handed.
     pub(in crate::ui) fn report_failed_open(
         &mut self,
