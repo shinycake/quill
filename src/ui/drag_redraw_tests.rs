@@ -77,11 +77,15 @@ struct Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.counts.shell.set(self.counts.shell.get() + 1);
-        let cover = self
-            .counts
-            .covered
-            .get()
-            .then(|| div().id("cover").absolute().size_full().occlude());
+        let cover = self.counts.covered.get().then(|| {
+            div()
+                .id("cover")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+        });
         div()
             .size_full()
             .relative()
