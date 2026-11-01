@@ -125,10 +125,12 @@ impl ChatWindows {
             .collect()
     }
 
-    /// Whether `view` is the view of a chat window the app's gate holds.
+    /// Whether `view` is a chat window's, its slices and layers included,
+    /// that the app's gate holds.
     pub(in crate::ui) fn holds_view(&self, view: EntityId, cx: &App) -> bool {
         self.open.iter().any(|open| {
-            open.view.entity_id() == view && AppGate::holds(cx, open.handle.window_id())
+            (open.view.entity_id() == view || open.views.contains(&view))
+                && AppGate::holds(cx, open.handle.window_id())
         })
     }
 
@@ -257,7 +259,11 @@ impl QuillApp {
             for open in self.windows.open.iter() {
                 let id = open.handle.window_id();
                 if was_held.contains(&id) && !chats.contains(&id) {
-                    let _ = open.view.update(cx, |_, cx| cx.notify());
+                    // By id: this may run in that view's own observer.
+                    cx.notify(open.view.entity_id());
+                    for view in &open.views {
+                        cx.notify(*view);
+                    }
                 }
             }
         }
@@ -281,6 +287,7 @@ impl QuillApp {
     /// that does not follow the app keep their frame, as with the notify.
     pub(in crate::ui) fn tick_app(&self, cx: &mut Context<Self>) {
         if self.frame.main_covered.get() {
+            self.notify_chat_window_slices(cx);
             cx.emit(AppTick);
         } else {
             cx.notify();

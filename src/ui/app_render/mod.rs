@@ -40,14 +40,14 @@ impl QuillApp {
     pub(super) fn main_frame_starts(
         &mut self,
         window: &mut Window,
-        draw: super::image_budget::MainDraw,
+        draw: super::image_budget::WindowDraw,
         cx: &mut Context<Self>,
     ) {
         let frame = window.frame_number();
         if self.frame.frame_started.replace(frame) == frame {
             return;
         }
-        self.sticker_frame_starts(None, cx);
+        self.sticker_frame_starts(cx);
         // Bounded image memory: retired images no window can show any
         // more leave the atlas, then this frame counts (`image_budget`).
         super::image_budget::begin_main_frame(window, draw, cx);
@@ -75,7 +75,7 @@ impl Render for QuillApp {
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
-        self.main_frame_starts(window, super::image_budget::MainDraw::Whole, cx);
+        self.main_frame_starts(window, super::image_budget::WindowDraw::Whole, cx);
         self.sync_emoji_style(cx);
         let image_cache = self.slices.image_cache();
         self.sync_capture_block(window);
@@ -91,11 +91,7 @@ impl Render for QuillApp {
             cx,
         );
         self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
-        // A conversation replayed from its cache (`app_slice`) still shows
-        // its clips: only a conversation that rendered (or a frame without
-        // one) and swept no player orphans them.
-        let history_drawn = self.slices.conversation_rendered.replace(false)
-            || !self.slices.conversation_shown.replace(false);
+        let history_drawn = self.slices.window.history_drawn();
         self.playback.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.

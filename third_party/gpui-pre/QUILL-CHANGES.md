@@ -455,15 +455,28 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   and nothing is sent.
 - A live view whose element path runs through another live view's is drawn by
   that one, so a patch skips it as a site of its own. A cached view between the two
-  replays, so the inner one shows its old paint until a whole frame.
+  renders, since a patch refreshes: it has no frame to replay from but the last whole
+  one, and replaying would take the listeners that frame still needs. Its state stays
+  out of `rendered_frame`, as its ranges index the patch, so it renders in the next
+  whole frame too.
 - `Window::transact` drops the entries of a prepaint it rolls back, and a view
   prepainted twice is not nested in itself. A notified view no patch reaches draws a
   whole frame, since a tick that draws nothing would stop asking for the next.
 - The whole frame after a patch marks every live view it drew dirty, so a cached
   view holding one renders again instead of replaying an older paint.
+- A whole frame with no patch before it replays such a cached view: the live views
+  in that paint stay in the frame with it, their operations moved, so their next tick
+  is a patch too (`Window::replay_live_views`, in `paint_view` and for a replayed
+  deferred draw).
 
-What a live view builds takes no clicks and no hover, so it suits content that only
-shows. `Window::frame_number` counts these frames like any other.
+A hit test answers only for a whole frame's hitboxes, so a live view that builds
+any (a hover, a click, a tooltip) never patches: a notify of it draws a whole frame,
+a patch for another view leaves its last paint in place, and a patch that finds new
+hitboxes in a view asks for that whole frame. So a live view suits content that only
+shows; anything else about it stays correct and costs whole frames.
+`Window::frame_number` counts these frames like any other. With `test-support`,
+`Window::interactive_live_views` counts the live views that drew in whole frames
+alone in the last one.
 
 `Window::element_opacity` and `Window::with_element_opacity` are public so that
 content painted away from its place in the tree keeps the opacity it was given there.

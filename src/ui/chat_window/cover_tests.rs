@@ -360,6 +360,7 @@ fn a_covering_chat_window_keeps_its_own_stickers_animating(cx: &mut TestAppConte
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let shown = frames_of(chat, vcx);
@@ -380,6 +381,7 @@ fn a_chat_window_beside_the_main_window_ticks_alone(cx: &mut TestAppContext) {
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let frame = |vcx: &mut VisualTestContext| {
@@ -536,6 +538,7 @@ fn a_chat_window_hidden_behind_the_active_one_draws_nothing(cx: &mut TestAppCont
     let under = open_chat_window(&app, vcx, OPEN, inside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let front = open_chat_window(&app, vcx, OTHER, beside());
@@ -552,3 +555,6 @@ fn a_chat_window_hidden_behind_the_active_one_draws_nothing(cx: &mut TestAppCont
     vcx.run_until_parked();
     assert_eq!(frames_of(under, vcx), shown, "shown again");
 }
+
+#[path = "slices_tests.rs"]
+mod slices;

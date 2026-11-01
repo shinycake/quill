@@ -42,6 +42,18 @@ impl FooterMeta {
         self
     }
 
+    /// The footer as an animation layer draws it again over a picture
+    /// (`anim_layer::mirror`): it takes no hover and no press, which the
+    /// row's own under it has, and a layer holding a hitbox draws in whole
+    /// frames.
+    pub(in crate::ui) fn mirrored(&self) -> Self {
+        Self {
+            tooltip: None,
+            forward_drag: None,
+            ..self.clone()
+        }
+    }
+
     /// Width the whole footer needs: `base` (time and receipt) plus the
     /// extras that precede it.
     pub(in crate::ui) fn reserve(&self, base: Pixels) -> Pixels {
@@ -71,5 +83,65 @@ impl FooterMeta {
             && !self.imported
             && self.effect.is_none()
             && self.tooltip.is_none()
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{FooterMeta, OutboxReceipt, message_footer_meta};
+    use gpui_kit::test::TestWindowExt;
+    use gpui_kit::{
+        AppContext, Context, Entity, IntoElement, ParentElement, Render, TestAppContext,
+        VisualTestContext, Window, div, px, size,
+    };
+    use quill::forward_drag::ForwardDrag;
+    use quill::ids::{ChatId, MessageId};
+
+    struct Footer(FooterMeta);
+
+    impl Render for Footer {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().children(message_footer_meta(&self.0))
+        }
+    }
+
+    struct Host(Entity<Footer>);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().child(self.0.clone().live())
+        }
+    }
+
+    fn interactive_views(meta: FooterMeta, cx: &mut TestAppContext) -> usize {
+        let window = cx.open_window(size(px(200.), px(100.)), |_, cx| {
+            Host(cx.new(|_| Footer(meta)))
+        });
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.update(|window, cx| {
+            window.render_frame(cx);
+            window.interactive_live_views()
+        })
+    }
+
+    #[gpui_kit::test]
+    fn a_mirrored_footer_builds_no_hitboxes(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let meta = FooterMeta {
+            date: 1_790_000_000,
+            pending: false,
+            receipt: OutboxReceipt::None,
+            views: None,
+            signature: None,
+            edited: true,
+            pinned: false,
+            imported: false,
+            tooltip: Some("Sent".to_string()),
+            effect: None,
+            forward_drag: ForwardDrag::begin(ChatId(1), MessageId(2), &[], false, |_| true).ok(),
+        };
+        assert_eq!(interactive_views(meta.clone(), cx), 1, "the row's own");
+        assert_eq!(interactive_views(meta.mirrored(), cx), 0, "the layer's");
     }
 }

@@ -266,12 +266,13 @@ impl<T: Render> Entity<T> {
     /// included ([`Window::draw`]). So nothing around a live view may depend
     /// on its being rendered, and it can't change the window's layout, hit
     /// tests, focus or accessibility tree: those stay as the last whole frame
-    /// left them, and what it builds in such a frame only paints. A cached
-    /// view holding a live view that redrew on its own renders again in the
-    /// next whole frame rather than replay. A live view inside another live
-    /// view redraws with it, unless a cached view sits between them: that
-    /// view replays, so the inner one shows its old paint until a whole
-    /// frame.
+    /// left them, and what it builds in such a frame only paints. A live view
+    /// that builds hitboxes (a hover, a click, a tooltip) never redraws alone,
+    /// since only a whole frame's hit test answers for them: every notify of
+    /// it draws a whole frame. A cached view holding a live view that redrew
+    /// on its own renders again in the next whole frame rather than replay. A
+    /// live view inside another live view redraws with it, a cached view
+    /// between them included.
     #[track_caller]
     pub fn live(self) -> ViewElement<Entity<T>> {
         let live = AnyView::from(self.clone());
@@ -347,7 +348,7 @@ impl<V: View> IntoElement for ViewElement<V> {
     }
 }
 
-struct ViewElementState {
+pub(crate) struct ViewElementState {
     prepaint_range: Range<PrepaintStateIndex>,
     paint_range: Range<PaintIndex>,
     cache_key: ViewElementCacheKey,
@@ -453,6 +454,9 @@ impl<V: View> Element for ViewElement<V> {
                 cx,
                 &mut |window, cx| render_view(self.view.take().unwrap(), window, cx),
             );
+            if let Some(site) = self.live_site {
+                window.live_view_prepainted(site);
+            }
             #[cfg(feature = "profiler")]
             window.window_profiler.end_view(
                 start,
@@ -662,7 +666,9 @@ fn paint_view(
                         element.paint(window, cx);
                         window.refreshing = refreshing;
                     } else {
-                        window.reuse_paint(element_state.paint_range.clone());
+                        let replayed = element_state.paint_range.clone();
+                        window.reuse_paint(replayed.clone());
+                        window.replay_live_views(&global_id.unwrap()[..], &replayed, &paint_start);
                     }
 
                     let paint_end = window.paint_index();
