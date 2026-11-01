@@ -3,7 +3,7 @@
 
 use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
-use super::super::frame_clock::follow_app;
+use super::super::frame_clock::follow_app_unless_held;
 use super::super::glyph_sweep;
 use super::super::image_budget::{BoundedImageCache, CacheScope};
 use super::super::shell::QuillShell;
@@ -48,7 +48,7 @@ impl ChatWindowView {
     ) -> Self {
         let slot = owner.update(cx, |app, cx| WindowSlot::new(app, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
-        let observe = follow_app(&owner, cx);
+        let observe = follow_app_unless_held(&owner, window.window_handle().window_id(), cx);
         let placed = [
             cx.observe_window_activation(window, |this, window, cx| {
                 glyph_sweep::window_activation(
@@ -148,6 +148,7 @@ impl Render for ChatWindowView {
         let bounds = window.bounds();
         let moved = self.bounds_seen.replace(bounds) != Some(bounds);
         let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
+        let view_id = cx.entity_id();
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let outer = app.update(cx, |app, cx| {
@@ -163,6 +164,7 @@ impl Render for ChatWindowView {
             app.sticker_frame_starts(Some(chat_id), cx);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
+            app.frame.tick_view.set(Some(view_id));
             // Its body builds the history every frame (no cached slice):
             // a frame without a history pass shows none of its clips.
             app.inline_videos_frame_start(true, window, cx);
@@ -184,7 +186,10 @@ impl Render for ChatWindowView {
             app.schedule_idle_image_trim(cx);
             app.chat_window_body(chat_id, window, cx)
         });
-        app.update(cx, |app, _| app.set_window_scope(outer));
+        app.update(cx, |app, _| {
+            app.set_window_scope(outer);
+            app.frame.tick_view.set(None);
+        });
         let view = cx.weak_entity();
         super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
         let title_bar = super::super::window_frame::FrameTitleBar::new()
@@ -287,11 +292,16 @@ impl WindowScope {
             .update(cx, |app, _| {
                 let outer = app.windows.scope;
                 app.set_window_scope(target);
+                let view = target.and_then(|chat| app.windows.view_id_for(chat));
+                app.frame.tick_view.set(view);
                 outer
             })
             .unwrap_or(None);
         let result = f(cx);
-        let _ = self.app.update(cx, |app, _| app.set_window_scope(outer));
+        let _ = self.app.update(cx, |app, _| {
+            app.set_window_scope(outer);
+            app.frame.tick_view.set(None);
+        });
         result
     }
 }

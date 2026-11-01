@@ -516,6 +516,7 @@ impl QuillApp {
                             .session()
                             .is_some_and(|s| s.calls.active_call.is_some());
                         if still_active {
+                            this.sync_call_sounds();
                             this.notify_call_clock(cx);
                             true
                         } else {

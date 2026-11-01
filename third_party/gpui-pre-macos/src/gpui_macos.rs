@@ -46,6 +46,7 @@ pub(crate) use platform::*;
 pub(crate) use window::*;
 
 pub use platform::MacPlatform;
+pub use window::is_exiting_fullscreen;
 
 /// Quill: when the next frame drawn on display `display_id` (a
 /// `DisplayId` as `u64`) is shown, as an `Instant` and in Mach host ticks,

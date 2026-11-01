@@ -351,7 +351,24 @@ fn the_open_chats_media_downloads_show_live_progress() {
     let mut session = two_chats();
     session.begin_download(crate::ids::FileId(5));
     session.media.open_chat_media_downloads.insert(5);
+    // Progress shows in the conversation only; the update that finishes
+    // it can show the picture elsewhere too.
+    assert_eq!(need(&session, &file(5, false)), RedrawNeed::Conversation);
+    assert_eq!(need(&session, &file(5, true)), RedrawNeed::Now);
+    // One the user started also shows in the Downloads panel.
+    session.begin_user_download(crate::ids::FileId(5));
     assert_eq!(need(&session, &file(5, false)), RedrawNeed::Now);
+}
+
+#[test]
+fn a_batch_never_loses_a_conversation_or_a_chat_list_change() {
+    use RedrawNeed::*;
+    assert_eq!(Conversation.join(Nothing), Conversation);
+    assert_eq!(Conversation.join(Conversation), Conversation);
+    assert_eq!(ChatList.join(Conversation), Now);
+    assert_eq!(Conversation.join(Later), Now);
+    assert_eq!(ChatList.join(Later), Later);
+    assert_eq!(Now.join(Conversation), Now);
 }
 
 #[test]

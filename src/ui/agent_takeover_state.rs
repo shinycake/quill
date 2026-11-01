@@ -25,7 +25,7 @@ impl TakeoverUi {
         // (covered, minimised, on another Space); shown again, a redraw
         // lets it move on.
         cx.observe_window_visibility(window, |_, _, _, cx| {
-            if takeover::current() != takeover::Phase::Idle {
+            if super::agent_state::sees_agents() && takeover::current() != takeover::Phase::Idle {
                 cx.notify();
             }
         })

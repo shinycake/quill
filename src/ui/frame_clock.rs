@@ -200,7 +200,17 @@ impl QuillApp {
     /// which nothing asked.
     #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_animation_tick_for(self.slices.current(), fps, cx);
+        let target = self.frame.tick_view.get().or(self.slices.current());
+        self.request_animation_tick_for(target, fps, cx);
+    }
+
+    /// [`Self::request_animation_tick`] for what `QuillApp` builds itself
+    /// around the slices (the tap effect, the sent sticker's flight): it
+    /// renders, and every slice replays.
+    #[track_caller]
+    pub(super) fn request_app_tick(&self, fps: u32, cx: &mut Context<Self>) {
+        let target = self.frame.tick_view.get().or(self.slices.app_only_id());
+        self.request_animation_tick_for(target, fps, cx);
     }
 
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
@@ -258,9 +268,12 @@ impl QuillApp {
         // (`chat_window::cover`): its slices and their layers get no tick.
         // A tick for the whole app still comes, whichever window asks; it
         // redraws every window but that one then (`tick_app`).
-        let own_window =
-            target.is_some_and(|view| self.frame.window_views.borrow().contains(&view));
-        if target.is_some() && !own_window && self.frame.main_covered.get() {
+        if self.frame.main_covered.get() && target.is_some_and(|id| self.slices.owns(id)) {
+            return;
+        }
+        // Nor in a chat window the active window hides whole: it skips ticks
+        // as it skips the app's redraws (`follow_app_unless_held`).
+        if target.is_some_and(|id| self.windows.holds_view(id, cx)) {
             return;
         }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
@@ -322,13 +335,16 @@ impl QuillApp {
                                 }
                                 if targets.contains(&None) {
                                     this.tick_app(cx);
-                                } else if !this.frame.main_covered.get() {
-                                    // Only the slices with animated content
-                                    // redraw; none under a chat window
-                                    // covering the main window since they
-                                    // asked.
+                                } else {
+                                    let covered = this.frame.main_covered.get();
+                                    let views: Vec<_> = targets
+                                        .into_iter()
+                                        .flatten()
+                                        .filter(|id| !covered || !this.slices.owns(*id))
+                                        .filter(|id| !this.windows.holds_view(*id, cx))
+                                        .collect();
                                     let app: &mut App = cx;
-                                    for id in targets.into_iter().flatten() {
+                                    for id in views {
                                         app.notify(id);
                                     }
                                 }
@@ -757,13 +773,13 @@ pub(in crate::ui) fn follow_app<V: 'static>(
 
 /// The app's animation gate as `QuillApp::follow_windows` last set it, for
 /// the clips' frame requests, which only have their own window at hand.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct AppGate {
     /// A Quill window is active (`FrameState::window_active`).
     pub(super) active: bool,
-    /// The window whose own content holds still meanwhile: the main window
-    /// while the active chat window hides it whole (`chat_window::cover`).
-    pub(super) held: Option<WindowId>,
+    /// The windows whose own content holds still meanwhile: those the
+    /// active window hides whole (`chat_window::cover`).
+    pub(super) held: Vec<WindowId>,
 }
 
 impl Global for AppGate {}
@@ -771,8 +787,36 @@ impl Global for AppGate {}
 impl AppGate {
     /// Whether content in `window` animates under this gate.
     fn animates(&self, window: WindowId) -> bool {
-        self.active && self.held != Some(window)
+        self.active && !self.held.contains(&window)
     }
+
+    /// Whether `window` is hidden whole behind the active window.
+    pub(super) fn holds(cx: &App, window: WindowId) -> bool {
+        cx.try_global::<AppGate>()
+            .is_some_and(|gate| gate.held.contains(&window))
+    }
+}
+
+/// [`follow_app`] for a chat window in `window`, which skips the redraws
+/// while the active window hides it whole: nobody sees them.
+/// `QuillApp::follow_windows` redraws it once it shows again.
+pub(in crate::ui) fn follow_app_unless_held<V: 'static>(
+    app: &Entity<QuillApp>,
+    window: WindowId,
+    cx: &mut Context<V>,
+) -> Subscription {
+    Subscription::join(
+        cx.observe(app, move |_, _, cx| {
+            if !AppGate::holds(cx, window) {
+                cx.notify();
+            }
+        }),
+        cx.subscribe(app, move |_, _, _: &AppTick, cx| {
+            if !AppGate::holds(cx, window) {
+                cx.notify();
+            }
+        }),
+    )
 }
 
 /// What lets a tick request through while no main or chat window is active.

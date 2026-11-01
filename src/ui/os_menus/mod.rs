@@ -325,6 +325,26 @@ pub(crate) fn register_actions(handle: AnyWindowHandle, app: WeakEntity<QuillApp
     cx.on_action(move |_: &DockPlayerPlayPause, cx| play_pause(cx));
     let next = player(Some(Step::Next));
     cx.on_action(move |_: &DockPlayerNext, cx| next(cx));
+    // Quit with no window key: the main window hidden by its close button
+    // on a Mac (the window's own handler closes it first otherwise).
+    cx.on_action(move |_: &super::actions::QuitApp, cx| {
+        use quill::agent::ui_driver::guard::{self, HardSurface};
+        if guard::refuse_hard_if_injecting(HardSurface::Window) {
+            return;
+        }
+        let app = app.clone();
+        cx.defer(move |cx| {
+            let held = handle.update(cx, |_, window, cx| {
+                app.update(cx, |this, cx| {
+                    this.exit_after_exports(super::export_quit::quit_app, window, cx)
+                })
+            });
+            // No main window left to hold the quit in.
+            if !matches!(held, Ok(Ok(()))) {
+                cx.quit();
+            }
+        });
+    });
 }
 
 /// macOS: rebuild the Dock menu and the Window menu when what they show

@@ -328,6 +328,40 @@ pub(super) struct GroupCallPanel {
     members: Entity<GroupCallMembers>,
 }
 
+impl QuillApp {
+    /// The call window's content: a stream's, the video stage or the panel.
+    /// Returns it, whether it animates, and the stream's title.
+    fn group_call_window_body(
+        &mut self,
+        panel: EntityId,
+        members: &Entity<GroupCallMembers>,
+        fullscreen: bool,
+        stream_full: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (AnyElement, bool, Option<String>) {
+        if let Some(facts) = self.group_call_stream_facts() {
+            let body = self.group_call_stream_body(&facts, stream_full, window, cx);
+            let title = facts.chat.map(|(_, name)| name).unwrap_or_default();
+            return (body.element, body.animating, Some(title));
+        }
+        let wants_stage = fullscreen || self.demo_ui.group_stage;
+        let call = wants_stage
+            .then(|| self.session()?.calls.active_group_call.clone())
+            .flatten();
+        let stage = call.and_then(|call| self.group_call_stage(&call, cx));
+        // The stage closed: its volume slider goes with it.
+        if stage.is_none() {
+            self.group_call.stage_volume = None;
+        }
+        let body = match stage {
+            Some(stage) => stage,
+            None => self.group_call_panel_body(panel, members, window, cx),
+        };
+        (body, false, None)
+    }
+}
+
 impl Render for GroupCallPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         trace_slice_render("group-call-panel");
@@ -344,25 +378,11 @@ impl Render for GroupCallPanel {
         let panel = cx.entity_id();
         let members = self.members.clone();
         let (body, animating, stream_title) = owner.update(cx, |app, cx| {
-            if let Some(facts) = app.group_call_stream_facts() {
-                let body = app.group_call_stream_body(&facts, stream_full, window, cx);
-                let title = facts.chat.map(|(_, name)| name).unwrap_or_default();
-                return (body.element, body.animating, Some(title));
-            }
-            let wants_stage = fullscreen || app.demo_ui.group_stage;
-            let call = wants_stage
-                .then(|| app.session()?.calls.active_group_call.clone())
-                .flatten();
-            let stage = call.and_then(|call| app.group_call_stage(&call, cx));
-            // The stage closed: its volume slider goes with it.
-            if stage.is_none() {
-                app.group_call.stage_volume = None;
-            }
-            let body = match stage {
-                Some(stage) => stage,
-                None => app.group_call_panel_body(panel, &members, window, cx),
-            };
-            (body, false, None)
+            app.frame.tick_view.set(Some(panel));
+            let body =
+                app.group_call_window_body(panel, &members, fullscreen, stream_full, window, cx);
+            app.frame.tick_view.set(None);
+            body
         });
         owner.update(cx, |app, _| app.sync_group_call_large_tile());
         if animating {

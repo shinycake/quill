@@ -432,3 +432,47 @@ The Quill project also changed it in 2026 so tests can seed a window's atlas
 (`src/ui/glyph_sweep_tests.rs`):
 
 - `src/window.rs`: `Window::sprite_atlas`, in test support only.
+
+## Live views: a frame that redraws one view alone
+
+A notified view dirties every ancestor, and an ancestor that renders renders all
+it holds, so a view that only animates rebuilt the window root on every tick.
+`Entity::live` embeds a view that can redraw on its own. While only live views
+were notified, `Window::draw` renders those and nothing else, in `window/live_views.rs`:
+
+- Each live view's entry in the frame keeps what its place in the tree gave it
+  (element ids, text style, image caches, content mask, opacity, rem size, bounds)
+  and the paint operations it added to the scene.
+- The frame's scene is the last whole frame's, replayed, with those operations
+  swapped for new ones. Replay ranges balance, so a swap lands at the stack depth
+  the view painted at.
+- `rendered_frame` stays the last whole frame: hit tests, the key dispatch tree,
+  the accessibility tree and the ranges cached views replay from all read it, and
+  nothing a live view builds reaches them. `Window::shown_scene` is the scene last
+  drawn, for presenting and for tests.
+- Any notify of another view, `Window::refresh`, an inspector, a paint filter, an
+  open profiler overlay, or an accessibility tree not up to date draws a whole frame.
+- `window/a11y.rs` holds the tree still during a patch: live views add no nodes,
+  and nothing is sent.
+- A live view whose element path runs through another live view's is drawn by
+  that one, so a patch skips it as a site of its own. A cached view between the two
+  replays, so the inner one shows its old paint until a whole frame.
+- `Window::transact` drops the entries of a prepaint it rolls back, and a view
+  prepainted twice is not nested in itself. A notified view no patch reaches draws a
+  whole frame, since a tick that draws nothing would stop asking for the next.
+- The whole frame after a patch marks every live view it drew dirty, so a cached
+  view holding one renders again instead of replaying an older paint.
+
+What a live view builds takes no clicks and no hover, so it suits content that only
+shows. `Window::frame_number` counts these frames like any other.
+
+`Window::element_opacity` and `Window::with_element_opacity` are public so that
+content painted away from its place in the tree keeps the opacity it was given there.
+
+`src/ui/layer_tick_tests.rs` holds the tests.
+
+The Quill project also changed it in 2026 so the docs say what macOS now
+emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
+
+- `src/app.rs`, `src/platform.rs`: the docs of `App::on_app_lifecycle` and
+  `Platform::on_app_lifecycle` say macOS emits `AppLifecyclePhase::Active`.
