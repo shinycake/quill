@@ -506,6 +506,46 @@ fn a_held_delete_goes_when_the_export_stops_and_stays_for_a_file_the_view_asked_
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_held_delete_goes_when_its_own_export_stops_while_another_still_runs() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#;
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[chat]);
+    let _ = driver.select_chat(ChatId(7)).unwrap();
+    let (chat_export, chat_worker) = crate::export::ChatExport::scripted();
+    let (account_export, account_worker) = crate::export::AccountExport::scripted();
+    driver.session.settings.chat_export = Some(chat_export);
+    driver.session.settings.account_export = Some(account_export);
+    let deleted = |recorder: &RecordingSender| {
+        let sent = recorder.snapshot().into_iter();
+        sent.filter(|json| json.contains("deleteFile")).count()
+    };
+
+    chat_worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 1, "chat_id": 7}))
+        .unwrap();
+    driver.pump_exports();
+    assert_eq!(deleted(&recorder), 0, "held while the chat is open");
+    driver
+        .session
+        .settings
+        .chat_export
+        .as_ref()
+        .unwrap()
+        .cancel();
+    driver.pump_exports();
+    assert_eq!(
+        deleted(&recorder),
+        1,
+        "the chat export that held it stopped; the account export does not keep it"
+    );
+    drop((chat_worker, account_worker));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Answer the sent request of type `method` (the last one) with `body`.
 fn answer_export_request(
     driver: &mut ConnectDriver<Arc<RecordingSender>>,
