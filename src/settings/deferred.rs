@@ -15,6 +15,12 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+/// How long [`flush_deferred_writes`] waits for a write that does not
+/// finish. Each finished write starts the wait again, so a slow disk still
+/// writes the whole queue and only a stuck one is given up on.
+const STALL_BUDGET: Duration = Duration::from_secs(10);
 
 type Sink = dyn Fn(&Path, &[u8]) -> std::io::Result<()> + Send + Sync;
 
@@ -23,6 +29,11 @@ struct State {
     /// Kept until the bytes are on disk, so a read during the write sees them.
     pending: HashMap<PathBuf, Queued>,
     writer_running: bool,
+    /// The path the writer is writing now, so a discard can wait for it.
+    in_flight: Option<PathBuf>,
+    /// Writes the sink has finished, ok or not, so a wait can tell a slow
+    /// disk from a stuck one.
+    finished: u64,
     failure: Option<std::io::Error>,
 }
 
@@ -139,8 +150,23 @@ impl DeferredWriter {
                     .collect::<Vec<_>>()
             };
             for (path, bytes) in batch {
+                {
+                    let mut state = self.shared.lock();
+                    let current = state
+                        .pending
+                        .get(&path)
+                        .is_some_and(|queued| Arc::ptr_eq(&queued.bytes, &bytes));
+                    if !current {
+                        // Replaced or discarded since the batch was taken.
+                        continue;
+                    }
+                    state.in_flight = Some(path.clone());
+                }
                 let written = (self.shared.sink)(&path, &bytes);
                 let mut state = self.shared.lock();
+                state.in_flight = None;
+                state.finished += 1;
+                self.shared.idle.notify_all();
                 let current = state
                     .pending
                     .get_mut(&path)
@@ -163,11 +189,11 @@ impl DeferredWriter {
     }
 
     /// Wait until every queued write has been tried, failed ones once
-    /// more. Each try ends in a write or an error, so there is no deadline
-    /// to cut a slow disk off mid-queue and lose what was still queued.
-    pub(crate) fn flush(&self) {
+    /// more, or until `stall` passes with no write finishing.
+    pub(crate) fn flush(&self, stall: Duration) {
         let mut state = self.shared.lock();
         state.retry_failed();
+        let mut stalled = Stall::new(stall, state.finished);
         while state.writer_running || state.has_work() {
             if !state.writer_running {
                 // Queued with no writer (its thread never started): write
@@ -178,12 +204,66 @@ impl DeferredWriter {
                 state = self.shared.lock();
                 continue;
             }
-            state = self
-                .shared
-                .idle
-                .wait(state)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(left) = stalled.left(state.finished) else {
+                return;
+            };
+            state = self.wait(state, left);
         }
+    }
+
+    fn wait<'a>(&self, state: MutexGuard<'a, State>, left: Duration) -> MutexGuard<'a, State> {
+        match self.shared.idle.wait_timeout(state, left) {
+            Ok((state, _)) => state,
+            Err(poisoned) => poisoned.into_inner().0,
+        }
+    }
+
+    /// Drop every write queued under `folder` and wait for one already on
+    /// its way there, so nothing recreates the folder once it is removed.
+    /// `false`: that write was still stuck after `stall`.
+    pub(crate) fn discard_under(&self, folder: &Path, stall: Duration) -> bool {
+        let mut state = self.shared.lock();
+        state.pending.retain(|path, _| !path.starts_with(folder));
+        let mut stalled = Stall::new(stall, state.finished);
+        while state
+            .in_flight
+            .as_deref()
+            .is_some_and(|path| path.starts_with(folder))
+        {
+            let Some(left) = stalled.left(state.finished) else {
+                return false;
+            };
+            state = self.wait(state, left);
+        }
+        true
+    }
+}
+
+/// A wait that gives up once `budget` passes with no write finishing.
+struct Stall {
+    budget: Duration,
+    finished: u64,
+    since: Instant,
+}
+
+impl Stall {
+    fn new(budget: Duration, finished: u64) -> Self {
+        Self {
+            budget,
+            finished,
+            since: Instant::now(),
+        }
+    }
+
+    /// How long to wait more, or `None` once the budget is spent.
+    fn left(&mut self, finished: u64) -> Option<Duration> {
+        if finished != self.finished {
+            self.finished = finished;
+            self.since = Instant::now();
+        }
+        self.budget
+            .checked_sub(self.since.elapsed())
+            .filter(|left| !left.is_zero())
     }
 }
 
@@ -268,9 +348,16 @@ pub(crate) fn read_with_pending(path: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-/// Wait for every deferred write; call when the app quits.
+/// Drop the writes queued under `folder`, which is about to be deleted.
+/// `false`: a write into it is stuck on the disk.
+pub(crate) fn discard_deferred_writes_under(folder: &Path) -> bool {
+    global().discard_under(folder, STALL_BUDGET)
+}
+
+/// Wait for every deferred write, or until the disk stops finishing them;
+/// call when the app quits.
 pub fn flush_deferred_writes() {
-    global().flush();
+    global().flush(STALL_BUDGET);
 }
 
 #[cfg(test)]
@@ -317,7 +404,7 @@ mod tests {
         for _ in 0..3 {
             let _ = open.send(());
         }
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         let written: Vec<Vec<u8>> = log
             .lock()
             .map(|l| l.iter().map(|(_, b)| b.clone()).collect())
@@ -332,7 +419,7 @@ mod tests {
         for name in ["a.json", "b.json", "c.json"] {
             writer.submit(Path::new("/x").join(name), name.as_bytes().to_vec());
         }
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         let count = log.lock().map(|l| l.len()).unwrap_or(0);
         assert_eq!(count, 3);
     }
@@ -347,7 +434,7 @@ mod tests {
         }));
         writer.submit(path.clone(), b"{\"a\":1}".to_vec());
         writer.submit(path.clone(), b"{\"a\":2}".to_vec());
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         assert_eq!(std::fs::read(&path).ok(), Some(b"{\"a\":2}".to_vec()));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -366,7 +453,7 @@ mod tests {
         );
         assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
         assert_eq!(writer.pending(&path), None);
     }
@@ -376,7 +463,7 @@ mod tests {
         let writer = DeferredWriter::new(Box::new(|_, _| Err(std::io::Error::other("disk full"))));
         assert!(writer.take_failure().is_none());
         writer.submit(PathBuf::from("/x/a.json"), b"a".to_vec());
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         let failure = writer.take_failure().map(|err| err.to_string());
         assert_eq!(failure.as_deref(), Some("disk full"));
         assert!(writer.take_failure().is_none());
@@ -398,14 +485,14 @@ mod tests {
         }));
         let (prefs, other) = (PathBuf::from("/x/prefs.json"), PathBuf::from("/x/b.json"));
         writer.submit(prefs.clone(), b"kept".to_vec());
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         assert_eq!(writer.pending(&prefs), Some(b"kept".to_vec()));
         assert!(writer.take_failure().is_some());
         if let Ok(mut full) = full.lock() {
             *full = false;
         }
         writer.submit(other.clone(), b"b".to_vec());
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         assert_eq!(writer.pending(&prefs), None);
         let mut on_disk = seen.lock().map(|l| l.clone()).unwrap_or_default();
         on_disk.sort();
@@ -425,7 +512,48 @@ mod tests {
         assert!(entered.recv().is_ok());
         assert_eq!(writer.pending(&path), Some(b"a".to_vec()));
         let _ = open.send(());
-        writer.flush();
+        writer.flush(super::STALL_BUDGET);
         assert_eq!(writer.pending(&path), None);
+    }
+
+    #[test]
+    fn a_discard_drops_the_writes_under_a_folder_only() {
+        let (writer, log) = recording(None);
+        let (gone, kept) = (PathBuf::from("/x/acct/a.json"), PathBuf::from("/x/b.json"));
+        for path in [&gone, &kept] {
+            writer.shared.lock().pending.insert(
+                path.clone(),
+                super::Queued {
+                    bytes: Arc::new(b"q".to_vec()),
+                    failed: true,
+                },
+            );
+        }
+        assert!(writer.discard_under(Path::new("/x/acct"), super::STALL_BUDGET));
+        assert_eq!(writer.pending(&gone), None);
+        writer.flush(super::STALL_BUDGET);
+        let written: Vec<PathBuf> = log
+            .lock()
+            .map(|l| l.iter().map(|(path, _)| path.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(written, vec![kept]);
+    }
+
+    #[test]
+    fn a_flush_gives_up_on_a_stuck_write_and_keeps_it_queued() {
+        let (open, gate) = mpsc::channel();
+        let (entered_tx, entered) = mpsc::channel();
+        let (writer, log) = recording(Some((gate, entered_tx)));
+        let path = PathBuf::from("/x/prefs.json");
+        writer.submit(path.clone(), b"a".to_vec());
+        assert!(entered.recv().is_ok());
+        // The write never finishes while the gate is shut: quit goes on.
+        writer.flush(std::time::Duration::ZERO);
+        assert_eq!(writer.pending(&path), Some(b"a".to_vec()));
+        assert!(!writer.discard_under(Path::new("/x"), std::time::Duration::ZERO));
+        assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
+        let _ = open.send(());
+        writer.flush(super::STALL_BUDGET);
+        assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
     }
 }

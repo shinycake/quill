@@ -301,16 +301,8 @@ pub(crate) fn parse_first_active_username(value: Option<&Value>) -> String {
 /// object carries no id.
 pub(crate) fn parse_user(value: &Value) -> Option<ParsedUser> {
     let id = int53(value.get("id")).ok()?;
-    let first_name = value
-        .get("first_name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let last_name = value
-        .get("last_name")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let first_name = json_name_str(value, "first_name");
+    let last_name = json_name_str(value, "last_name");
     let (active_usernames, disabled_usernames, editable_username) =
         parse_username_lists(value.get("usernames"));
     let username = active_usernames.first().cloned().unwrap_or_default();

@@ -87,11 +87,7 @@ pub enum ChatJoinResult {
 pub(crate) fn parse_new_chat(chat: &Value) -> Result<EnvelopePayload, ParseError> {
     Ok(EnvelopePayload::Chats(ChatsPayload::UpdateNewChat {
         chat_id: ChatId(int53(chat.get("id"))?),
-        title: chat
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
+        title: json_name_str(chat, "title"),
         kind: parse_chat_kind(chat.get("type")),
         accent: ChatAccent::parse(chat),
         profile_look: ChatProfileLook::parse(chat),

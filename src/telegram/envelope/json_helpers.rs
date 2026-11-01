@@ -46,6 +46,15 @@ pub(crate) fn json_field_str(value: &Value, key: &str) -> String {
         .to_string()
 }
 
+/// A name or title as it is shown everywhere: without the marks and
+/// invisible characters [`crate::display_text::filtered`] drops, applied
+/// once here so every surface that draws it, the OS window title among
+/// them, gets the same text.
+pub(crate) fn json_name_str(value: &Value, key: &str) -> String {
+    let raw = value.get(key).and_then(Value::as_str).unwrap_or("");
+    crate::display_text::filtered(raw).into_owned()
+}
+
 pub(crate) fn int53(value: Option<&Value>) -> Result<i64, ParseError> {
     match value {
         Some(Value::Number(n)) => n.as_i64().ok_or(ParseError::BadInt),

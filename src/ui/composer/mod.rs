@@ -206,7 +206,6 @@ impl QuillApp {
                         .flatten();
                     // MED1: the grouping toggle decides album vs separate
                     // sends (TGX `RememberAlbumSetting`).
-                    let albumable = ComposerAttachment::albumable(&attachments);
                     let grouped = self.composer_group_media_effective();
                     let reply = self.reply_for_send(cx);
                     let mut snaps = Vec::new();
@@ -216,10 +215,10 @@ impl QuillApp {
                         self.pending_send().scheduling,
                         ComposerScheduling::SendAtDate(_)
                     ) && self.pending_send().schedule_repeat != 0;
-                    if albumable && grouped && !repeating {
-                        // A video turned into a GIF leaves the album and
-                        // goes alone (tdesktop `GroupRanges`); paid media
-                        // is one message.
+                    if attachments.len() >= 2 && grouped && !repeating {
+                        // One message per run of one album type, in tray
+                        // order (tdesktop `GroupRanges`); paid media is one
+                        // message.
                         let groups = if self.paid_stars_in_effect() > 0 {
                             vec![attachments]
                         } else {
@@ -389,9 +388,11 @@ impl QuillApp {
                     }
                     let reply = self.reply_for_send(cx);
                     // MED1: the grouping toggle applies to the demo too.
-                    let albumable = ComposerAttachment::albumable(&attachments);
-                    let messages = if albumable && self.composer_group_media_effective() {
-                        ComposerAttachment::split_for_send(&attachments, true).len()
+                    let grouped = self.composer_group_media_effective();
+                    let messages = if grouped {
+                        ComposerAttachment::split_for_send(&attachments, true)
+                            .len()
+                            .max(1)
                     } else {
                         attachments.len().max(1)
                     };
@@ -400,7 +401,7 @@ impl QuillApp {
                     {
                         return;
                     }
-                    if albumable && self.composer_group_media_effective() {
+                    if grouped && attachments.len() >= 2 {
                         let groups = ComposerAttachment::split_for_send(&attachments, true);
                         for (i, group) in groups.iter().enumerate() {
                             let text = if i == 0 { text.as_str() } else { "" };
