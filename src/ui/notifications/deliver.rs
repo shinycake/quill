@@ -31,7 +31,7 @@ impl QuillApp {
     }
 
     /// Show one drain of the account on screen (`deliver_notifications`).
-    pub(super) fn hand_out_notifications(
+    pub(in crate::ui) fn hand_out_notifications(
         &mut self,
         drain: quill::notify_accounts::NotifyDrain,
         window: Option<&mut Window>,
