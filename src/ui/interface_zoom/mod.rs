@@ -261,6 +261,7 @@ impl Platform for ZoomPlatform {
         super::startup_failure::report_gpu_gone();
     }
     fn quit(&self) {
+        super::startup_failure::note_quit_asked();
         self.inner.quit()
     }
     fn set_initial_windowing(&self, request: WindowingRequest) {
@@ -270,6 +271,7 @@ impl Platform for ZoomPlatform {
         self.inner.request_windowing(request)
     }
     fn restart(&self, binary_path: Option<PathBuf>, arguments: Vec<OsString>) {
+        super::startup_failure::note_quit_asked();
         self.inner.restart(binary_path, arguments)
     }
     fn set_activation_policy(&self, policy: ActivationPolicy) {

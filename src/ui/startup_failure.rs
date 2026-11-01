@@ -77,6 +77,20 @@ thread_local! {
 
 thread_local! {
     static GPU_GONE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Quill asked to quit or restart: a window closing from now on is part
+    /// of that, not a window the renderer gave up on.
+    static QUIT_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Every quit and restart goes through `interface_zoom::ZoomPlatform`, which
+/// notes it here.
+pub(crate) fn note_quit_asked() {
+    QUIT_ASKED.with(|asked| asked.set(true));
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn quit_asked() -> bool {
+    QUIT_ASKED.with(std::cell::Cell::get)
 }
 
 /// Keep why the GPU stopped working for [`report_gpu_gone`]. Whether this

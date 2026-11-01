@@ -94,6 +94,13 @@ pub fn note_main_window(window: &gpui_kit::Window, cx: &mut gpui_kit::App) {
     });
 }
 
+/// The main window's id, once it opened.
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+pub(crate) fn main_window_id(cx: &gpui_kit::App) -> Option<gpui_kit::WindowId> {
+    cx.try_global::<MainWindow>()
+        .map(|main| main.handle.window_id())
+}
+
 fn take_hide_after_full_screen(cx: &mut gpui_kit::App) -> bool {
     cx.has_global::<MainWindow>()
         && std::mem::take(&mut cx.global_mut::<MainWindow>().hide_after_full_screen)
@@ -227,9 +234,8 @@ impl super::QuillApp {
                 if self.exit_held_by_export(super::export_quit::quit_app, window, cx) {
                     return false;
                 }
-                // No account to keep running for; a Mac app would stay
-                // alive with no window otherwise.
-                #[cfg(target_os = "macos")]
+                // No account to keep running for: quit, as tdesktop does,
+                // even with a PiP or a chat window still open.
                 cx.quit();
                 true
             }
