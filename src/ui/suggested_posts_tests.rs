@@ -8,6 +8,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use crate::ui::suggested_posts_state::{SuggestTarget, TimeTarget};
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{ChatId, MessageId};
@@ -222,6 +223,24 @@ fn accepting_asks_for_the_terms_then_publishes(cx: &mut TestAppContext) {
         state_of(&app, vcx, COUNTER),
         Some(SuggestedPostState::Approved)
     );
+}
+
+#[gpui_kit::test]
+fn the_accept_terms_date_reads_the_pickers_clock(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        cx.set_global(WallClock::chicago_repeated_hour());
+        // 01:20 CST, fifteen minutes ahead on the Chicago clock.
+        let send_date = i32::try_from(WallClock::CHICAGO_FALL_BACK + 1200).unwrap_or(0);
+        app.open_suggest_accept(ChatId(CHAT), MessageId(COUNTER), send_date, window, cx);
+        let text = app
+            .suggested_posts
+            .accept
+            .as_ref()
+            .map(|accept| accept.text.clone())
+            .expect("the Accept Terms box");
+        assert!(text.contains("Nov 1 at 01:20"), "{text}");
+    });
 }
 
 #[gpui_kit::test]

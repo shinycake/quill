@@ -22,7 +22,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::moderation::{RestrictUntil, UntilError, validate_restrict_until};
+use quill::moderation::{MIN_RESTRICT_SECS, RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
 use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
@@ -282,7 +282,7 @@ impl QuillApp {
         // a bad pick keeps the dialog open with the reason.
         let now = WallClock::of(cx).now();
         let until_date = match dialog.until {
-            RestrictUntil::Custom(_) => match picked_unix(&dialog.custom, cx)
+            RestrictUntil::Custom(_) => match picked_unix(&dialog.custom, MIN_RESTRICT_SECS, cx)
                 .ok_or(UntilError::Invalid)
                 .and_then(|unix| validate_restrict_until(unix, now))
             {

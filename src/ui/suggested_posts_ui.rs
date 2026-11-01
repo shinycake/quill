@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::suggested_posts_state::{BalanceFor, SuggestTarget};
 use crate::ui::status_note::StatusNote;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -16,7 +17,6 @@ use gpui_kit::*;
 use quill::composer::SendOptions;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use quill::local_time::now_unix;
 use quill::state::Session;
 use quill::suggested_posts::{
     BAR_PRICED_TAIL, BAR_PROMPT, BarLine, DirectMessagesRole, SuggestBar, SuggestMode,
@@ -59,6 +59,12 @@ pub(super) fn channel_name(session: &Session, chat_id: ChatId) -> String {
 }
 
 /// The amount as tdesktop draws it: the currency icon, then the number.
+/// A post's time as the time row shows it, on the clock the pickers read.
+pub(super) fn time_label(send_date: i32, cx: &App) -> String {
+    let clock = WallClock::of(cx);
+    time_value(send_date, clock.now(), |unix| clock.civil(unix))
+}
+
 pub(super) fn price_amount(price: SuggestedPrice, size: f32, cx: &App) -> AnyElement {
     let icon = match price {
         SuggestedPrice::Stars(_) => super::earn::star_icon(size),
@@ -182,7 +188,7 @@ impl QuillApp {
         let admin = self.suggest_role(chat_id) == Some(DirectMessagesRole::Admin);
         let accent: Hsla = super::chat_theme::accent().into();
         let muted = cx.theme().muted_foreground;
-        let date = |send_date: i32| time_value(send_date, now_unix());
+        let date = |send_date: i32| time_label(send_date, cx);
         let line = match bar.terms.bar_line() {
             BarLine::Prompt => div().child(BAR_PROMPT),
             BarLine::Priced(price) => div()

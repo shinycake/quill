@@ -426,8 +426,8 @@ impl QuillApp {
             ScheduleChoice::Always => AwaySchedule::Always,
             ScheduleChoice::OutsideHours => AwaySchedule::OutsideOpeningHours,
             ScheduleChoice::Custom => {
-                let start = picked_unix(&draft.start, cx);
-                let end = picked_unix(&draft.end, cx);
+                let start = picked_unix(&draft.start, 0, cx);
+                let end = picked_unix(&draft.end, 0, cx);
                 match (start, end) {
                     (Some(start), Some(end)) if !bs::bad_custom_interval(start, end) => {
                         AwaySchedule::Custom { start, end }
