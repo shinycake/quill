@@ -167,6 +167,14 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
 {
     constexpr auto ROUNDED_POLYSTAR_MAGIC_NUMBER = 0.47829f;
 
+    //QUILL
+    if (in.pts.count < 3) {
+        if (next) return next->path(in, out, nullptr);
+        out.cmds.push(in.cmds);
+        out.pts.push(in.pts);
+        return;
+    }
+
     auto& path = (next) ? RenderPath::scratch() : out;
 
     auto len = length(in.pts[1] - in.pts[2]);
@@ -222,7 +230,8 @@ void LottieRoundnessModifier::polystar(const RenderPath& in, RenderPath& out, fl
     }
     path.cmds.push(PathCommand::Close);
 
-    if (next) return next->polystar(path, out, outerRoundness, hasRoundness);
+    //QUILL
+    if (next) return next->path(path, out, nullptr);
 }
 
 void LottieRoundnessModifier::rect(const RenderPath& in, RenderPath& out, const Point& pos, const Point& size, float r, bool clockwise)
@@ -286,7 +295,8 @@ void LottieOffsetModifier::corner(RenderPath& out, Line& line, Line& nextLine, u
     if (intersected(line, nextLine, intersect, inside)) {
         if (inside) {
             if (nextClose) {
-                if (tvg::zero(out.pts[movetoOutIndex] - out.pts[movetoOutIndex + 1])) out.pts[movetoOutIndex + 1] = intersect;
+                //QUILL
+                if (movetoOutIndex + 1 < out.pts.count && tvg::zero(out.pts[movetoOutIndex] - out.pts[movetoOutIndex + 1])) out.pts[movetoOutIndex + 1] = intersect;
                 out.pts[movetoOutIndex] = intersect;
             }
             _lineTo(out, intersect);
@@ -343,7 +353,7 @@ void LottieOffsetModifier::line(RenderPath& out, PathCommand* inCmds, uint32_t i
     ++curPt;
 }
 
-void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending)
+void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, float offset, float threshold, uint32_t& pending, uint32_t limit)
 {
     Point intersect{};
     Array<Bezier> stack{5};
@@ -356,7 +366,7 @@ void LottieOffsetModifier::cubic(RenderPath& path, Point* pts, State& state, flo
         auto& bezier = stack.last();
         auto len = tvg::length(bezier.start - bezier.ctrl1) + tvg::length(bezier.ctrl1 - bezier.ctrl2) + tvg::length(bezier.ctrl2 - bezier.end);
 
-        if (len > threshold * bezier.length() && len > 1.0f) {
+        if (path.pts.count + stack.count * 3 < limit && len > threshold * bezier.length() && len > 1.0f) {
             Bezier next;
             bezier.split(0.5f, next);
             stack.push(next);
@@ -424,6 +434,7 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out, 
     auto offset = clockwise(in.pts.data, in.pts.count) ? this->offset : -this->offset;
     auto threshold = 1.0f / fabsf(offset) + 1.0f;
     uint32_t pending{};
+    auto limit = path.pts.count + in.pts.count * 8;  //QUILL
 
     for (uint32_t iCmd = 0, iPt = 0; iCmd < in.cmds.count; ++iCmd) {
         switch (in.cmds[iCmd]) {
@@ -444,11 +455,12 @@ RenderPath& LottieOffsetModifier::modify(const RenderPath& in, RenderPath& out, 
                     ++iPt;
                     continue;
                 }
-                cubic(path, in.pts.data + iPt - 1, state, offset, threshold, pending);
+                cubic(path, in.pts.data + iPt - 1, state, offset, threshold, pending, limit);
                 iPt += 3;
                 break;
             }
             default: {
+                if (state.moveto) break;  //QUILL
                 if (!tvg::zero(in.pts[iPt - 1] - in.pts[state.movetoInIndex])) {
                     corner(path, state.line, state.firstLine, state.movetoOutIndex, true);
                 }

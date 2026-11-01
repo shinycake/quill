@@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
         //discard rest
         while (nextArrayValue()) getInt();
     } else {
-        val = (int8_t) getFloat();
+        val = (int8_t)tvg::clamp(getFloat(), -128.0f, 127.0f);  //QUILL
     }
     return false;
 }
@@ -255,11 +255,11 @@ bool LottieParser::getValue(uint8_t& val)
 {
     if (peekType() == kArrayType) {
         enterArray();
-        if (nextArrayValue()) val = (uint8_t)(getFloat() * 2.55f);
+        if (nextArrayValue()) val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);  //QUILL
         //discard rest
         while (nextArrayValue()) getFloat();
     } else {
-        val = (uint8_t)(getFloat() * 2.55f);
+        val = (uint8_t)tvg::clamp(getFloat() * 2.55f, 0.0f, 255.0f);
     }
     return false;
 }
@@ -337,6 +337,7 @@ void LottieParser::getInterpolatorPoint(Point& pt)
     while (auto key = nextObjectKey()) {
         if (KEY_AS("x")) getValue(pt.x);
         else if (KEY_AS("y")) getValue(pt.y);
+        else skip();  //QUILL
     }
 }
 
@@ -354,11 +355,11 @@ void LottieParser::parseSlotProperty(T& prop)
 template<typename T>
 bool LottieParser::parseTangent(const char *key, LottieVectorFrame<T>& value)
 {
-    if (KEY_AS("ti") && getValue(value.inTangent)) ;
-    else if (KEY_AS("to") && getValue(value.outTangent)) ;       
-    else return false;
-
-    value.hasTangent = true;
+    //QUILL
+    auto in = KEY_AS("ti");
+    if (!in && !KEY_AS("to")) return false;
+    if (peekType() == kNullType) getNull();
+    else if (getValue(in ? value.inTangent : value.outTangent)) value.hasTangent = true;
     return true;
 }
 
@@ -382,8 +383,15 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
     LottieInterpolator* interpolator = nullptr;
 
     //get a cached interpolator if it has any.
-    ARRAY_FOREACH(p, comp->interpolators) {
-        if (!strncmp((*p)->key, key, sizeof(buf))) interpolator = *p;
+    //QUILL
+    constexpr uint32_t MAX_SEARCH = 1024;
+    auto cached = comp->interpolators.count;
+    for (uint32_t i = 0; i < cached && i < MAX_SEARCH; ++i) {
+        auto p = comp->interpolators[cached - 1 - i];
+        if (!strncmp(p->key, key, sizeof(buf))) {
+            interpolator = p;
+            break;
+        }
     }
 
     //new interpolator
@@ -400,7 +408,7 @@ LottieInterpolator* LottieParser::getInterpolator(const char* key, Point& in, Po
 template<typename T>
 void LottieParser::parseKeyFrame(T& prop)
 {
-    Point inTangent, outTangent;
+    Point inTangent{}, outTangent{};  //QUILL
     const char* interpolatorKey = nullptr;
     auto& frame = prop.newFrame();
     auto interpolator = false;
@@ -455,6 +463,7 @@ void LottieParser::parsePropertyInternal(T& prop)
         enterArray();
         while (nextArrayValue()) {
             if (peekType() == kObjectType) parseKeyFrame(prop);  //keyframes value
+            else if (peekType() == kNullType) getNull();  //QUILL
             else if (getValue(prop.value)) break; //multi value property with no keyframes
         }
         prop.prepare();
@@ -503,12 +512,10 @@ bool LottieParser::parseCommon(LottieObject* obj, const char* key)
 
 bool LottieParser::parseCommon(LottieObject* obj, LottieProperty& prop, const char* key)
 {
-    if (KEY_AS("ix")) {
-        prop.ix = getInt();
-    } else if (KEY_AS("x") && expressions) {
+    if (KEY_AS("x") && expressions) {
         getExpression(getStringCopy(), comp, context.layer, context.parent, &prop);
-    } else if (KEY_AS("sid")) {
-        registerSlot(obj, getString(), prop);
+    } else if (KEY_AS("ix") || KEY_AS("sid")) {
+        skip();  //QUILL
     } else return false;
     return true;
 }
@@ -633,7 +640,8 @@ void LottieParser::parseStrokeDash(LottieStroke* stroke)
             if (KEY_AS("n")) style = getString();
             else if (KEY_AS("v")) {
                 if (style && !strcmp("o", style)) parseProperty(stroke->dashOffset());
-                else parseProperty(stroke->dashValue());
+                else if (!stroke->dashattr || stroke->dashattr->size < 64) parseProperty(stroke->dashValue());  //QUILL
+                else skip();
             } else skip();
         }
     }
@@ -918,25 +926,34 @@ LottieObject* LottieParser::parseObject(const char* type)
 //capture the type name if the upcoming type is irregularly addressed after the actual properties.
 char* LottieParser::captureType()
 {
-    if (!isPrimitive() || !strcmp(val.GetString(), "ty")) return nullptr;
+    if (state != kHasKey || !strcmp(val.GetString(), "ty")) return nullptr;  //QUILL
 
     auto level = 0;
     for (auto p = getPos(); *p != '\0'; ++p) {
         if (*p == '{') level++;
         else if (*p == '}') {
             if (--level < 0) break;
-        } else if (level == 0) {
-            if (!strncmp(p, "\"ty\"", 4)) {
-                p += 4;
-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
-                if (*p++ != ':') return nullptr;
-                while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
-                if (*p++ != '\"') return nullptr;
-                const char* start = p;
-                while (*p != '\0' && *p != '\"') ++p;
-                if (*p == '\"') return tvg::duplicate(start, p - start);
-                return nullptr;
+        } else if (*p == '\"') {
+            //QUILL
+            auto name = p + 1;
+            for (++p; *p != '\0' && *p != '\"'; ++p) {
+                if (*p == '\\' && p[1] != '\0') ++p;
             }
+            if (*p == '\0') return nullptr;
+            if (level != 0 || p - name != 2 || strncmp(name, "ty", 2)) continue;
+            ++p;
+            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+            if (*p != ':') {
+                --p;
+                continue;
+            }
+            ++p;
+            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
+            if (*p++ != '\"') return nullptr;
+            const char* start = p;
+            while (*p != '\0' && *p != '\"') ++p;
+            if (*p == '\"') return tvg::duplicate(start, p - start);
+            return nullptr;
         }
     }
     return nullptr;
@@ -1557,7 +1574,7 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
     context.layer = layer;
 
     auto ddd = false;
-    RGB32 color;
+    RGB32 color{};  //QUILL
 
     enterObject();
 
@@ -1593,10 +1610,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
         else if (KEY_AS("hd")) layer->hidden = getBool();
         else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
         else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
-        else if (KEY_AS("t")) parseText(layer->children);
         else if (KEY_AS("ef")) parseEffects(layer);
         else if (KEY_AS("au")) parseVolume(layer);
-        else skip();
+        else skip();  //QUILL
     }
 
     layer->prepare(&color);
@@ -1787,14 +1803,9 @@ bool LottieParser::parse()
         else if (KEY_AS("op")) outPoint = getFloat();
         else if (KEY_AS("w")) comp->w = getFloat();
         else if (KEY_AS("h")) comp->h = getFloat();
-        else if (KEY_AS("nm")) comp->name = getStringCopy();
         else if (KEY_AS("assets")) parseAssets();
         else if (KEY_AS("layers")) comp->root = parseLayers();
-        else if (KEY_AS("fonts")) parseFonts();
-        else if (KEY_AS("chars")) parseChars(glyphs);
-        else if (KEY_AS("markers")) parseMarkers();
-        else if (KEY_AS("slots")) captureSlots(key);
-        else skip();
+        else skip();  //QUILL
     }
 
     if (Invalid() || !comp->root) {
