@@ -298,11 +298,15 @@ impl Executor {
             let (lock, res) = self.cvar.wait_timeout(inner, timeout).unwrap();
             inner = lock;
 
-            // If there are too many threads active in the pool, stop this thread.
-            if (Some(inner.thread_count) > inner.thread_limit.map(NonZeroUsize::get))
-                // If there are no tasks after a while, stop this thread.
-                && (res.timed_out() && inner.queue.is_empty())
-            {
+            // QUILL: either reason stops the thread. With `&&` (1.7.0) an idle
+            // thread in a pool under its limit never stopped and woke every
+            // 500 ms for the rest of the process.
+            if should_stop(
+                inner.thread_count,
+                inner.thread_limit,
+                res.timed_out(),
+                inner.queue.is_empty(),
+            ) {
                 inner.idle_count -= 1;
                 inner.thread_count -= 1;
                 break;
@@ -388,6 +392,20 @@ impl Executor {
             }
         }
     }
+}
+
+/// QUILL: whether an idle pool thread stops: the pool has more threads than
+/// its limit, or no task came within the timeout.
+fn should_stop(
+    thread_count: usize,
+    thread_limit: Option<NonZeroUsize>,
+    timed_out: bool,
+    queue_empty: bool,
+) -> bool {
+    // If there are too many threads active in the pool, stop this thread.
+    Some(thread_count) > thread_limit.map(NonZeroUsize::get)
+        // If there are no tasks after a while, stop this thread.
+        || (timed_out && queue_empty)
 }
 
 /// Runs blocking code on a thread pool.
@@ -1036,6 +1054,16 @@ impl<T: Seek + Send + 'static> AsyncSeek for Unblock<T> {
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
+
+    // QUILL
+    #[test]
+    fn an_idle_thread_under_the_limit_stops_after_the_timeout() {
+        let limit = NonZeroUsize::new(500);
+        assert!(should_stop(1, limit, true, true));
+        assert!(!should_stop(1, limit, false, true));
+        assert!(!should_stop(1, limit, true, false));
+        assert!(should_stop(3, NonZeroUsize::new(2), false, false));
+    }
 
     #[test]
     fn test_max_threads() {
