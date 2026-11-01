@@ -1,6 +1,7 @@
 //! Driver tests: TDLib parameters, sign-in states, QR login, 2FA, close and logout.
 use super::*;
 use crate::auth::{AuthAction, StartupFailure};
+use crate::telegram::envelope::ConnectionState;
 
 #[test]
 fn driver_sends_parameters_then_reaches_wait_phone_via_injection() {
@@ -719,6 +720,38 @@ fn a_parameters_request_lost_at_close_is_no_database_failure() {
     let pending = driver.session.requests.take(RequestId(2)).unwrap();
     driver.session.settle_lost_request(pending);
     assert_eq!(driver.session.auth, AuthorizationState::WaitTdlibParameters);
+}
+
+/// N23: TDLib takes its time over the parameters on a slow disk. The 60 s
+/// sweep must leave the request alone, or the card would wait on an
+/// answer nobody listens for.
+#[test]
+fn the_request_sweep_leaves_the_parameters_request_waiting() {
+    for connection in [ConnectionState::Connecting, ConnectionState::Ready] {
+        let store = MemorySecretStore::new();
+        let (_dir, prepared) = prepared_tmp(&store);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let session = Session::new(AccountKey::primary(), sink);
+        let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+        driver.kickoff().unwrap();
+        driver.session.connection = connection;
+        let an_hour_later = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        let network = crate::net_watch::NetworkState {
+            epoch: 0,
+            available: true,
+        };
+        driver.poll_ticks(TickScope::Background, an_hour_later, network);
+        assert!(
+            driver
+                .session
+                .requests
+                .has_purpose(RequestPurpose::SetParameters),
+            "{connection:?}"
+        );
+        assert_eq!(driver.session.auth, AuthorizationState::WaitTdlibParameters);
+        assert_eq!(driver.session.auth_view.title, "Connecting");
+    }
 }
 
 #[test]
