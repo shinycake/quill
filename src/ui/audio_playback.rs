@@ -19,6 +19,10 @@ use quill::voice::{self, format_voice_duration};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
+
+/// A track finished building (`AudioEngine::set_on_built`).
+static AUDIO_BUILT: quill::wake::Signal = quill::wake::Signal::new();
+
 pub(super) fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let cover_path = demo_thumb_png_path();
@@ -134,7 +138,7 @@ impl QuillApp {
     /// `offset_secs`: builds the seek slider entity and starts the progress
     /// tick. The row becomes active even when the sound can't start; the
     /// engine then reports `Failed` and the UI shows exactly that. Returns
-    /// whether the sound is playing.
+    /// whether the sound is on its way.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn begin_track_playback(
         &mut self,
@@ -181,8 +185,9 @@ impl QuillApp {
     }
 
     /// Start the in-process player on `path` at `offset_secs` with the
-    /// current volume and speed. Returns true when it is playing; on false
-    /// the engine is `Failed` and `audio.error()` says why. The screenshot
+    /// current volume and speed. Returns true when the sound is on its way;
+    /// on false the engine is `Failed` and `audio.error()` says why. A file
+    /// that turns out unreadable says so when its build lands. The screenshot
     /// demos have no audio device and use the engine's explicit simulation,
     /// which keeps the app's time (the test clock in tests).
     pub(super) fn start_player(
@@ -198,7 +203,11 @@ impl QuillApp {
             .then(|| super::audio::Simulation {
                 fail: std::env::var_os("QUILL_DEMO_AUDIO_FAIL").is_some(),
                 stall: std::env::var_os("QUILL_DEMO_AUDIO_STALL").is_some(),
+                slow: std::env::var_os("QUILL_DEMO_AUDIO_SLOW").is_some(),
             });
+        if simulation.is_none() {
+            self.watch_audio_builds(cx);
+        }
         self.playback.audio.set_simulation(simulation);
         let executor = cx.background_executor().clone();
         self.playback.audio.set_sim_time(move || executor.now());
@@ -213,6 +222,45 @@ impl QuillApp {
             // The engine keeps the reason (`audio.error()`).
             Err(_) => false,
         }
+    }
+
+    /// Land each track as soon as its build is done, so its sound starts
+    /// then and not at the next tick.
+    fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.playback.builds_watched, true) {
+            return;
+        }
+        self.playback.audio.set_on_built(|| AUDIO_BUILT.poke());
+        let mut seen = AUDIO_BUILT.epoch();
+        Self::spawn_main(cx, async move |this, cx| {
+            loop {
+                AUDIO_BUILT.wait_since(seen).await;
+                seen = AUDIO_BUILT.epoch();
+                let landed = this.update(cx, |this, cx| this.land_audio_build(cx));
+                if landed.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn land_audio_build(&mut self, cx: &mut Context<Self>) {
+        self.playback.audio.settle();
+        if !self.playback.audio.take_start_failed() {
+            self.notify_playback_position(cx);
+            return;
+        }
+        let note = if self.recording.preview.take().is_some() {
+            keys::Q_MISC_COULDNT_PLAY_THE_RECORDING
+        } else {
+            match self.active_playback_kind() {
+                PlaybackKind::Voice => keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED,
+                PlaybackKind::Audio => keys::Q_AV_AUDIO_CANT_BE_PLAYED,
+            }
+        };
+        self.connection.set_note(StatusNote::error(tr(note)));
+        cx.notify();
     }
 
     /// Pause the active track: hold the sound, keep the row active so the
@@ -461,6 +509,7 @@ impl QuillApp {
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
                 is_playing: self.playback.is_playing(),
+                loading: self.playback.audio.loading_shown(),
                 // Speed, mute and the engine's error show on the active row.
                 speed: self.playback.speed,
                 muted: self.playback.volume < 0.01,
@@ -483,6 +532,7 @@ impl QuillApp {
                     .unwrap_or(0.0),
                 duration_secs,
                 is_playing: false,
+                loading: false,
                 speed: self.playback.speed,
                 muted: false,
                 error: None,
@@ -667,6 +717,11 @@ impl QuillApp {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "audio_playback_tests.rs"]
+mod tests;
 
 /// What the row says for an engine error (sentence case, localized).
 fn audio_error_text(error: super::audio::AudioError) -> String {

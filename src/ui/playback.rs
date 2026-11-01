@@ -22,8 +22,11 @@ pub(crate) struct SeekBarView {
     pub(crate) display_secs: f64,
     /// Total track length in seconds (TDLib `duration`).
     pub(crate) duration_secs: f64,
-    /// True while the active row's player is actually running (vs paused).
+    /// True while the active row's player is running or starting (vs
+    /// paused).
     pub(crate) is_playing: bool,
+    /// The active row's start has taken long enough to show.
+    pub(crate) loading: bool,
     /// MED1: current playback speed (for the speed button on active rows).
     pub(crate) speed: f64,
     /// MED1: true when the shared playback volume is muted.

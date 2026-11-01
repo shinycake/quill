@@ -66,17 +66,20 @@ pub(in crate::ui) fn action_disc(
         .tab_index(0)
         .cursor_pointer()
         .when_some(ring, |this, fraction| {
-            this.child(
-                div().absolute().inset(px(3.)).child(
-                    ProgressCircle::new(ElementId::NamedChild(Arc::new(id), "ring".into()))
-                        .size_full()
-                        .color(fg)
-                        .loading(fraction.is_none())
-                        .value(fraction.unwrap_or(0.) * 100.),
-                ),
-            )
+            this.child(disc_ring(id, fraction, fg))
         })
         .child(Icon::new(icon).size(px(20.)).text_color(fg))
+}
+
+/// The ring inside a 44 px play disc: `None` spins.
+pub(in crate::ui) fn disc_ring(id: ElementId, fraction: Option<f32>, color: Hsla) -> Div {
+    div().absolute().inset(px(3.)).child(
+        ProgressCircle::new(ElementId::NamedChild(Arc::new(id), "ring".into()))
+            .size_full()
+            .color(color)
+            .loading(fraction.is_none())
+            .value(fraction.unwrap_or(0.) * 100.),
+    )
 }
 
 /// Where a document row sits: a chat message (Open resolves like
