@@ -41,6 +41,12 @@ fn deep_link_step_redraws(
 /// Whether `link`, taken from `QuillApp::pending_deep_link`, is the one an
 /// agent's step queued. Taken once; a link written there any other way
 /// (the launch argument, the OS) is the user's.
+/// The note after a t.me link opened its chat: none when it did, as
+/// Telegram Desktop shows nothing then.
+fn chat_link_note(opened: bool) -> Option<StatusNote> {
+    (!opened).then(|| StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)))
+}
+
 fn queued_by_agent(agent_link: &mut Option<String>, link: &str) -> bool {
     agent_link.take().is_some_and(|queued| queued == link)
 }
@@ -258,15 +264,13 @@ impl QuillApp {
             open => open,
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
-                match live
-                    .driver
-                    .select_search_chat_open(chat_id, open, text, reply, now_ms)
-                {
-                    Ok(_) => StatusNote::info(tr(keys::Q_MISC_OPENED_LINK)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULDNT_OPEN_THE_CHAT)),
-                },
-            );
+            let opened = live
+                .driver
+                .select_search_chat_open(chat_id, open, text, reply, now_ms)
+                .is_ok();
+            if let Some(note) = chat_link_note(opened) {
+                self.connection.set_note(note);
+            }
             if let Some(message_id) = jump_to
                 && live
                     .driver
@@ -499,6 +503,13 @@ mod pump_tests {
         let mut agent = Some("https://t.me/agentpick".to_string());
         assert!(!queued_by_agent(&mut agent, "https://t.me/userpick"));
         assert_eq!(agent, None);
+    }
+
+    #[test]
+    fn a_link_that_opened_its_chat_shows_no_note() {
+        assert!(super::chat_link_note(true).is_none());
+        let failed = super::chat_link_note(false).unwrap();
+        assert_eq!(failed.kind(), crate::ui::status_note::NoteKind::Error);
     }
 
     #[test]
