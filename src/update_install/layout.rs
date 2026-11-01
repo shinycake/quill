@@ -98,13 +98,13 @@ pub(super) fn ensure_private_dir(dir: &Path) -> std::io::Result<()> {
             ))
         };
     }
-    let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
+        fs::DirBuilder::new().mode(0o700).create(dir)
     }
-    builder.create(dir)
+    #[cfg(not(unix))]
+    fs::DirBuilder::new().create(dir)
 }
 
 /// Where an install keeps its pieces.
