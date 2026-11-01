@@ -35,6 +35,7 @@ pub(crate) struct SettingsUi {
     /// applied to the keymap once the live driver is ready.
     pub(super) keybindings_applied: bool,
     pub(super) sticker_settings_open: bool,
+    pub(super) storage_scroll: super::dialogs::data_storage::StorageScroll,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
@@ -111,6 +112,7 @@ impl SettingsUi {
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             sticker_settings_open: false,
+            storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
             appearance_applied: None,
             app_theme: Default::default(),
             system_accent: None,

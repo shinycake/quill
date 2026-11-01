@@ -655,7 +655,7 @@ impl Session {
     /// bitfield (TGX `settings_autodownload` private/group/channel shifts).
     /// Secret chats use the private bucket.
     pub fn auto_download_allowed(&self, chat_id: ChatId, flag: u8) -> bool {
-        if self.settings.media_prefs.data_saver {
+        if self.settings.media_prefs.data_saver || self.media.disk_holds_auto_downloads {
             return false;
         }
         let bits = match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {

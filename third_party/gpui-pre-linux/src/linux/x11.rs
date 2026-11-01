@@ -5,6 +5,7 @@ mod clipboard;
 mod display;
 mod event;
 mod frame_idle;
+mod present_retry;
 mod window;
 mod xim_handler;
 

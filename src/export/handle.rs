@@ -6,6 +6,7 @@ use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
 use crate::locks::LockExt;
+use crate::wake::Signal;
 use serde_json::Value;
 use std::io;
 use std::path::PathBuf;
@@ -118,6 +119,15 @@ impl Drop for WorkerLink {
     }
 }
 
+/// Change the slot a poll pass reads, and wake that pass: stretches of the
+/// Writing stage send no request, so nothing else would.
+pub(super) fn publish(slot: &Mutex<Progress>, wake: &Signal, change: impl FnOnce(&mut Progress)) {
+    if let Ok(mut slot) = slot.lock() {
+        change(&mut slot);
+    }
+    wake.poke();
+}
+
 pub struct ChatExport {
     pub link: WorkerLink,
     progress: Arc<Mutex<Progress>>,
@@ -139,9 +149,9 @@ impl ChatExport {
         let worker_folder = folder.clone();
         crate::thread_guard::spawn_guarded("quill-export", move || {
             let report = |progress: Progress| {
-                if let Ok(mut slot) = worker_progress.lock() {
+                publish(&worker_progress, &crate::wake::UPDATES, |slot| {
                     *slot = progress;
-                }
+                });
             };
             let job = Job {
                 settings: &settings,
@@ -155,9 +165,9 @@ impl ChatExport {
                 Err(ExportError::Cancelled) => Stage::Cancelled,
                 Err(err) => Stage::Failed(err.to_string()),
             };
-            if let Ok(mut slot) = worker_progress.lock() {
+            publish(&worker_progress, &crate::wake::UPDATES, |slot| {
                 slot.stage = last;
-            }
+            });
         })?;
         Ok(Self {
             link,

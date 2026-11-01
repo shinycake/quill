@@ -44,8 +44,10 @@ const CLEAN_EXIT_FILE: &str = "clean-exit";
 
 /// Present while a Quill process runs: process id, version, start time.
 const RUNNING_FILE: &str = "running";
-/// Left by TDLib's fatal log callback: when, and which Quill.
 const NATIVE_FATAL_FILE: &str = "tdlib-fatal";
+/// A full disk refuses a new file (and a rename, on APFS) but not an overwrite.
+const NATIVE_FATAL_SLOT: usize = 128;
+const DISK_FULL_LINE: &str = "The disk was full.";
 /// A caught panic from one code location is filed at most this often, so a
 /// hot callback that panics on every call does not write a report per call.
 const CAUGHT_REPORT_INTERVAL_SECS: u64 = 10;
@@ -309,6 +311,7 @@ fn prune_report_files(dir: &Path, kind: ReportKind, keep: usize) {
 pub struct PendingCrash {
     pub unix_secs: u64,
     pub path: PathBuf,
+    pub disk_full: bool,
 }
 
 /// The newest crash report from before this run that was written after the
@@ -325,7 +328,11 @@ pub fn pending_crash_before(root: &Path, session_start: u64) -> Option<PendingCr
     let ((unix_secs, _), path) = crash_files(&dir)
         .into_iter()
         .find(|((unix_secs, _), _)| *unix_secs < session_start)?;
-    (unix_secs > since).then_some(PendingCrash { unix_secs, path })
+    (unix_secs > since).then(|| PendingCrash {
+        unix_secs,
+        disk_full: fs::read_to_string(&path).is_ok_and(|report| report.contains(DISK_FULL_LINE)),
+        path,
+    })
 }
 
 /// The previous run of Quill, as its `running` file recorded it.
@@ -452,10 +459,18 @@ fn format_unfinished_report(
         None => ("(unknown)", "(unknown)".to_owned(), "(unknown)".to_owned()),
     };
     let cause = match fatal {
-        Some(fatal) => format!(
-            "TDLib reported a fatal error at {} (unix seconds) in Quill {}, then the process ended.",
-            fatal.unix_secs, fatal.version
-        ),
+        Some(fatal) => {
+            use crate::disk_guard::{FLOORS, was_full};
+            let disk = if was_full(fatal.free_bytes, &FLOORS) {
+                format!("\n{DISK_FULL_LINE}")
+            } else {
+                String::new()
+            };
+            format!(
+                "TDLib reported a fatal error at {} (unix seconds) in Quill {}, then the process ended.{disk}",
+                fatal.unix_secs, fatal.version,
+            )
+        }
         None => "No panic report exists for that run: the process was killed, lost power, or \
                  failed in native code."
             .to_owned(),
@@ -477,6 +492,7 @@ fn format_unfinished_report(
 struct NativeFatal {
     unix_secs: u64,
     version: String,
+    free_bytes: Option<u64>,
 }
 
 fn take_native_fatal(dir: &Path) -> Option<NativeFatal> {
@@ -487,6 +503,7 @@ fn take_native_fatal(dir: &Path) -> Option<NativeFatal> {
     Some(NativeFatal {
         unix_secs: lines.next()?.trim().parse().ok()?,
         version: lines.next()?.trim().to_owned(),
+        free_bytes: lines.next().and_then(|free| free.trim().parse().ok()),
     })
 }
 
@@ -495,22 +512,30 @@ static NATIVE_FATAL_PATH: OnceLock<PathBuf> = OnceLock::new();
 /// Where TDLib's fatal log callback leaves its breadcrumb. Call before the
 /// first TDLib client is made.
 pub fn arm_native_fatal_breadcrumb(root: &Path) {
-    let _ = NATIVE_FATAL_PATH.set(log_dir(root).join(NATIVE_FATAL_FILE));
+    let path = log_dir(root).join(NATIVE_FATAL_FILE);
+    let _ = fs::create_dir_all(log_dir(root));
+    let _ = fs::write(&path, [b' '; NATIVE_FATAL_SLOT]);
+    let _ = NATIVE_FATAL_PATH.set(path);
 }
 
 /// TDLib logged at verbosity 0 (fatal): it aborts right after the callback
-/// returns. Leave a one-line breadcrumb for the next launch. The message
-/// text is never read: native logs can contain account data. Failures are
-/// ignored.
+/// returns.
 pub fn note_native_fatal() {
-    let Some(path) = NATIVE_FATAL_PATH.get() else {
-        return;
-    };
-    let line = format!("{}\n{}\n", unix_now(), crate::version::APP);
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
+    if let Some(path) = NATIVE_FATAL_PATH.get() {
+        let _ = write_native_fatal(path, unix_now());
     }
-    let _ = fs::write(path, line);
+}
+
+fn write_native_fatal(path: &Path, unix_secs: u64) -> io::Result<()> {
+    let free = path.parent().and_then(crate::disk_guard::available_bytes);
+    let free = free.map(|free| free.to_string()).unwrap_or_default();
+    let line = format!("{unix_secs}\n{}\n{free}\n", crate::version::APP);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.write_all(format!("{line:<NATIVE_FATAL_SLOT$}").as_bytes())
 }
 
 /// Record a normal quit, so the next launch shows no crash notice.
@@ -578,10 +603,11 @@ fn write_marker(dir: &Path, unix_secs: u64) -> io::Result<()> {
 mod tests {
     use super::{
         CAUGHT_REPORT_INTERVAL_SECS, CrashDetails, KEEP_CRASH_FILES, MAX_CAUGHT_SITES,
-        NATIVE_FATAL_FILE, RUNNING_FILE, ReportKind, acknowledge, begin_run_for_session,
-        caught_site_due, crash_files, format_report, log_dir, mark_clean_exit,
-        mark_clean_exit_for_session, parse_report_name, pending_crash, pending_crash_before,
-        report_files, write_crash_file, write_marker, write_report_file,
+        NATIVE_FATAL_FILE, NATIVE_FATAL_SLOT, RUNNING_FILE, ReportKind, acknowledge,
+        begin_run_for_session, caught_site_due, crash_files, format_report, log_dir,
+        mark_clean_exit, mark_clean_exit_for_session, parse_report_name, pending_crash,
+        pending_crash_before, report_files, take_native_fatal, write_crash_file, write_marker,
+        write_native_fatal, write_report_file,
     };
     use std::path::PathBuf;
 
@@ -806,6 +832,56 @@ mod tests {
         assert_eq!(crash_files(&dir).len(), 1, "no second report");
         assert_eq!(pending_crash_before(&root, 3_000).unwrap().unix_secs, 2_400);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_blank_slot_is_no_breadcrumb() {
+        let root = temp_root("blank-slot");
+        let dir = log_dir(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(NATIVE_FATAL_FILE), [b' '; NATIVE_FATAL_SLOT]).unwrap();
+        begin_run_for_session(&root, 3_000, 12);
+        assert!(crash_files(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_breadcrumb_stays_inside_its_slot() {
+        let root = temp_root("slot");
+        let dir = log_dir(&root);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(NATIVE_FATAL_FILE);
+        std::fs::write(&path, [b' '; NATIVE_FATAL_SLOT]).unwrap();
+        write_native_fatal(&path, 2_100).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            NATIVE_FATAL_SLOT as u64,
+            "the overwrite allocates nothing"
+        );
+        let fatal = take_native_fatal(&dir).unwrap();
+        assert_eq!(fatal.unix_secs, 2_100);
+        assert_eq!(fatal.version, crate::version::APP);
+        assert!(fatal.free_bytes.is_some());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_fatal_on_a_full_disk_names_the_disk_and_others_do_not() {
+        for (free, named) in [("1024", true), ("99999999999", false), ("", false)] {
+            let root = temp_root("fatal-disk");
+            let dir = log_dir(&root);
+            write_marker(&dir, 1_000).unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join(NATIVE_FATAL_FILE),
+                format!("2100\n1.2.3\n{free}\n"),
+            )
+            .unwrap();
+            begin_run_for_session(&root, 3_000, 12);
+            let crash = pending_crash_before(&root, 3_000).unwrap();
+            assert_eq!(crash.disk_full, named, "free: {free:?}");
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[test]
