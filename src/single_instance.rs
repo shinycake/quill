@@ -23,6 +23,7 @@
 //! launches cannot both conclude they are the owner.
 #![deny(clippy::indexing_slicing)]
 
+use crate::lang::{keys, tr};
 use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -128,6 +129,40 @@ pub enum Acquired {
     Primary,
     /// Another instance is running and now has this launch's arguments.
     Forwarded,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Launch {
+    /// Handed to the running Quill: exit.
+    Forwarded,
+    /// This process is the only Quill.
+    Primary,
+    /// A Quill is running and does not answer: say so and exit.
+    OwnerStuck,
+    /// The endpoint could not be used; Quill starts anyway.
+    Unchecked,
+}
+
+impl Launch {
+    pub fn after(acquired: &io::Result<Acquired>) -> Self {
+        match acquired {
+            Ok(Acquired::Forwarded) => Self::Forwarded,
+            Ok(Acquired::Primary) => Self::Primary,
+            Err(error) if error.kind() == io::ErrorKind::TimedOut => Self::OwnerStuck,
+            Err(_) => Self::Unchecked,
+        }
+    }
+
+    /// The title and body of what this launch must tell the user before it
+    /// exits, when `--quit` did not ask it to stay quiet.
+    pub fn alert(&self, quit: bool) -> Option<(&'static str, &'static str)> {
+        (*self == Self::OwnerStuck && !quit).then(|| {
+            (
+                tr(keys::Q_STARTUP_OWNER_STUCK_TITLE),
+                tr(keys::Q_STARTUP_OWNER_STUCK_BODY),
+            )
+        })
+    }
 }
 
 /// Serializes the connect / unlink-stale / bind sequence across processes.
@@ -486,6 +521,33 @@ pub fn acquire(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_silent_owner_is_stuck_and_any_other_failure_starts_quill() {
+        use std::io::{Error, ErrorKind};
+        let after = |result: std::io::Result<Acquired>| Launch::after(&result);
+        assert_eq!(
+            after(Err(Error::from(ErrorKind::TimedOut))),
+            Launch::OwnerStuck
+        );
+        assert_eq!(after(Ok(Acquired::Forwarded)), Launch::Forwarded);
+        assert_eq!(after(Ok(Acquired::Primary)), Launch::Primary);
+        assert_eq!(
+            after(Err(Error::from(ErrorKind::PermissionDenied))),
+            Launch::Unchecked
+        );
+    }
+
+    #[test]
+    fn a_stuck_owner_gets_an_alert_and_every_other_launch_stays_quiet() {
+        let (title, body) = Launch::OwnerStuck.alert(false).expect("an alert");
+        assert_eq!(title, "Quill isn't responding");
+        assert!(body.contains("Force it to quit"), "{body}");
+        assert_eq!(Launch::OwnerStuck.alert(true), None, "--quit");
+        for launch in [Launch::Forwarded, Launch::Primary, Launch::Unchecked] {
+            assert_eq!(launch.alert(false), None);
+        }
+    }
+
+    #[test]
     fn windows_root_keys_ignore_case_slashes_and_verbatim_prefix() {
         let a = super::windows_root_key(r"C:\Users\Me\AppData\Quill");
         assert_eq!(a, super::windows_root_key(r"c:\users\me\appdata\quill\"));
@@ -494,7 +556,7 @@ mod tests {
         assert_ne!(a, super::windows_root_key(r"C:\Users\Me\AppData\Other"));
     }
 
-    use super::{Acquired, ClientSlots, Endpoint, acquire, root_digest};
+    use super::{Acquired, ClientSlots, Endpoint, Launch, acquire, root_digest};
     use std::sync::mpsc;
     use std::time::Duration;
 

@@ -17,6 +17,8 @@
 #[cfg(not(target_os = "macos"))]
 mod bundle;
 mod claim;
+#[cfg(any(feature = "ui", test))]
+mod fetch;
 mod layout;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -591,50 +593,23 @@ pub fn download_and_stage(
             .as_nanos()
     );
     let staged = layout.stage_root.join(format!("{stamp}.new"));
-    let archive = layout.stage_root.join(format!("{stamp}.archive"));
+    let archive = fetch::partial_path(&layout.stage_root, &asset.sha256);
+    fetch::clear_other_partials(&layout.stage_root, &archive);
     let plan_path = layout.plans.join(format!("{stamp}.json"));
     let source = crate::updater::download_source(&asset.url);
     let result = (|| {
-        let agent = ureq::Agent::config_builder()
-            .https_only(source.https_only)
-            .max_redirects(source.redirects)
-            .timeout_global(Some(Duration::from_secs(300)))
-            .build()
-            .new_agent();
-        let mut response = agent
-            .get(&source.url)
-            .header("User-Agent", "Quill-updater")
-            .call()
-            .map_err(|_| "Download failed. Check your connection and retry.")?;
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
+        let agent = fetch::agent(source.https_only, source.redirects);
+        fetch::fetch(&agent, &source.url, &archive, asset.size, progress)?;
+        if digest_file(&archive).map_err(|_| "Could not verify the update.")?
+            != asset.sha256.to_ascii_lowercase()
         {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            let _ = fs::remove_file(&archive);
+            return Err(fetch::MISMATCH);
         }
-        let mut file = options.open(&archive).map_err(
-            |_| "Could not stage update beside the executable. Check folder permissions and retry.",
-        )?;
-        let mut reader = Counted {
-            inner: response.body_mut().as_reader().take(asset.size + 1),
-            progress,
-        };
-        let size = std::io::copy(&mut reader, &mut file)
-            .map_err(|_| "Download interrupted or disk full. Retry the update.")?;
-        file.sync_all()
-            .map_err(|_| "Could not save the update. Check disk space and retry.")?;
-        if size != asset.size
-            || digest_file(&archive).map_err(|_| "Could not verify the update.")?
-                != asset.sha256.to_ascii_lowercase()
-        {
-            return Err(
-                "Update checksum or size mismatch. Nothing was installed. Retry the release check.",
-            );
-        }
-        unpack_package(&archive, &staged)
-            .map_err(|_| "The downloaded package could not be unpacked. Nothing was installed.")?;
+        let unpacked = unpack_package(&archive, &staged);
         let _ = fs::remove_file(&archive);
+        unpacked
+            .map_err(|_| "The downloaded package could not be unpacked. Nothing was installed.")?;
         accept_staged(&layout, &staged, release).map_err(|refusal| {
             if refusal == Refusal::SignedDifferently {
                 remember_refused(&layout, &release.version);
@@ -662,25 +637,10 @@ pub fn download_and_stage(
         Ok(plan_path.clone())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&archive);
         let _ = swap::remove_any(&staged);
         let _ = fs::remove_file(&plan_path);
     }
     result
-}
-
-/// A reader that adds what it reads to the download's progress.
-struct Counted<'a, R> {
-    inner: R,
-    progress: &'a crate::updater::DownloadProgress,
-}
-
-impl<R: Read> Read for Counted<'_, R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let read = self.inner.read(buf)?;
-        self.progress.add(read as u64);
-        Ok(read)
-    }
 }
 
 /// Hands the staged update at `plan` (from [`download_and_stage`]) to the

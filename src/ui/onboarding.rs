@@ -37,7 +37,9 @@ impl QuillApp {
             && quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.auth_ui.demo_inputs);
         let live_or_demo = self.live.is_some() || self.auth_ui.demo_inputs;
-        let retry_available = self.live.is_some() || self.auth_ui.demo_inputs;
+        let show_retry = matches!(auth.action, AuthAction::StartupFailed)
+            || (matches!(auth.action, AuthAction::Closed)
+                && (self.live.is_some() || self.auth_ui.demo_inputs));
         let mut card = div()
             .id("onboarding-card")
             .w(px(CARD_WIDTH))
@@ -200,7 +202,7 @@ impl QuillApp {
                     .on_click(move |_, _, cx| cx.open_url(&mailto)),
             );
         }
-        if matches!(auth.action, AuthAction::Closed) && retry_available {
+        if show_retry {
             form = form.child(
                 Button::new("retry-connection")
                     .label(tr(keys::Q_MISC_RETRY))
@@ -223,7 +225,7 @@ impl QuillApp {
             || show_code
             || show_password
             || show_qr
-            || (matches!(auth.action, AuthAction::Closed) && retry_available)
+            || show_retry
             || matches!(
                 auth.action,
                 AuthAction::UnsupportedHalt { .. } | AuthAction::PremiumRequired
