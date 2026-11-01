@@ -94,3 +94,19 @@ textures (`docs/decisions/images-left-behind.md`):
   avatar left on screen kept the 4 MB texture larger pictures had come and
   gone in. Test: `test_small_pictures_get_small_textures`; the tile-reuse
   test's keeper tile is 200² so it shares the large tiles' texture.
+
+The Quill project also changed it in 2026 so a failed Metal setup costs one
+window, not the app:
+
+- `src/metal_renderer.rs`: `MetalRenderer::new`, `from_layer` and
+  `new_headless` return `Result`. Building the library, locating a shader
+  function, creating a pipeline and creating the CoreVideo texture cache report
+  errors where 0.3.10 used `expect` and `assert_eq!`, and a device-less Mac gets
+  an error where 0.3.10 called `process::exit`. `with_shaders` retries a failed
+  setup once, since `MTLCompilerService` can fail under load. The pipelines
+  built for an EDR drawable report errors through `render_frame`.
+  `MetalHeadlessRenderer::new` keeps its `expect`, because the registry crate
+  gpui-pre-platform calls it without a `Result`. It is test support only.
+  Tests: `shaders_that_do_not_compile_are_an_error`,
+  `a_library_without_our_functions_is_an_error`,
+  `one_failed_library_build_is_retried`.
