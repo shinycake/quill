@@ -1,3 +1,5 @@
+// Compiled by libxkbcommon from xkeyboard-config 2.41. Its notices are in
+// licenses/xkeyboard-config-COPYING.txt; see THIRD_PARTY.md.
 xkb_keymap {
 xkb_keycodes "(unnamed)" {
 	minimum = 8;

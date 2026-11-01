@@ -58,13 +58,13 @@ pub(super) fn channel_name(session: &Session, chat_id: ChatId) -> String {
         .unwrap_or_default()
 }
 
-/// The amount as tdesktop draws it: the currency icon, then the number.
 /// A post's time as the time row shows it, on the clock the pickers read.
 pub(super) fn time_label(send_date: i32, cx: &App) -> String {
     let clock = WallClock::of(cx);
     time_value(send_date, clock.now(), |unix| clock.civil(unix))
 }
 
+/// The amount as tdesktop draws it: the currency icon, then the number.
 pub(super) fn price_amount(price: SuggestedPrice, size: f32, cx: &App) -> AnyElement {
     let icon = match price {
         SuggestedPrice::Stars(_) => super::earn::star_icon(size),

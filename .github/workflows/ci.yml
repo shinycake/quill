@@ -72,7 +72,7 @@ jobs:
       - name: tests (UI library, vendored Linux backend)
         run: >-
           cargo test -p gpui-pre-linux -p quill --lib --features quill/demo-capture --locked --
-          battery_signal tray_sni present_retry wayland::client::tests wayland::clipboard::tests
+          battery_signal tray_sni present_retry recovery_timers wayland::client::tests wayland::clipboard::tests
       # Launch smoke (docs/decisions/ci-launch-smoke.md), pushes only so the
       # required PR check stays as it is: the real window under Xvfb with
       # Mesa lavapipe (software Vulkan). Reuses the target/ the tests just built.
