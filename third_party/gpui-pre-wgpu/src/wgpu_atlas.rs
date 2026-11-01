@@ -36,7 +36,8 @@ const DEFAULT_ATLAS_SIDE: i32 = 1024;
 const MAX_SPARES: usize = 2;
 
 /// QUILL: a spare not taken within this many frames is freed (the clip
-/// stopped or went away).
+/// stopped or went away). One sooner once no texture of its size and
+/// format is in use: no playing clip is left to take it.
 const SPARE_FRAMES: u64 = 8;
 
 /// QUILL: a freed texture larger than [`DEFAULT_ATLAS_SIDE`], kept so the
@@ -99,14 +100,16 @@ impl WgpuAtlas {
         )
     }
 
-    /// A frame starts: spares not taken lately are freed.
+    /// A frame starts: spares not taken lately, or that no playing clip
+    /// can take, are freed.
     pub fn before_frame(&self) {
         let mut lock = self.0.lock();
         let textures = &mut lock.backend;
         let frame = textures.frame;
-        textures
-            .spares
-            .retain(|spare| frame.saturating_sub(spare.freed) < SPARE_FRAMES);
+        let storage = &textures.storage;
+        textures.spares.retain(|spare| {
+            frame.saturating_sub(spare.freed) < SPARE_FRAMES && storage.has_texture_like(spare)
+        });
         textures.frame = frame.wrapping_add(1);
     }
 
@@ -427,6 +430,25 @@ struct WgpuAtlasStorage {
     monochrome_textures: AtlasTextureList<WgpuAtlasTexture>,
     subpixel_textures: AtlasTextureList<WgpuAtlasTexture>,
     polychrome_textures: AtlasTextureList<WgpuAtlasTexture>,
+}
+
+impl WgpuAtlasStorage {
+    /// QUILL: whether a texture in use has `spare`'s size and format (the
+    /// picture on screen of a clip whose next picture can take it).
+    fn has_texture_like(&self, spare: &SpareTexture) -> bool {
+        [
+            &self.monochrome_textures,
+            &self.subpixel_textures,
+            &self.polychrome_textures,
+        ]
+        .into_iter()
+        .flat_map(|list| list.textures.iter().flatten())
+        .any(|texture| {
+            texture.format == spare.format
+                && texture.texture.width() == spare.texture.width()
+                && texture.texture.height() == spare.texture.height()
+        })
+    }
 }
 
 impl ops::Index<AtlasTextureKind> for WgpuAtlasStorage {
@@ -848,12 +870,32 @@ mod tests {
             }
         }
         assert_eq!(created(&atlas), 2);
-        // Closed: both textures wait as spares, then go after a few frames.
-        atlas.remove(&image_key(29, 0));
-        assert_eq!(atlas.0.lock().backend.spares.len(), 2);
+        // Paused: the picture on screen stays, so its spare waits a few
+        // frames for the next one.
+        let spares = |atlas: &WgpuAtlas| atlas.0.lock().backend.spares.len();
         for _ in 0..SPARE_FRAMES {
             atlas.before_frame();
         }
+        assert_eq!(spares(&atlas), 1);
+        atlas.before_frame();
+        assert_eq!(spares(&atlas), 0);
+        Ok(())
+    }
+
+    /// QUILL: a closed viewer's textures went only after 8 more frames,
+    /// which an idle window never renders.
+    #[test]
+    fn a_closed_video_gives_back_its_spares_in_the_next_frame() -> anyhow::Result<()> {
+        let (device, queue) = test_device_and_queue()?;
+        let atlas = WgpuAtlas::new(device, queue, wgpu::TextureFormat::Bgra8Unorm);
+        for picture in 0..3 {
+            atlas.before_frame();
+            insert_image(&atlas, image_key(picture, 0), 1920, 1080);
+            if let Some(gone) = picture.checked_sub(1) {
+                atlas.remove(&image_key(gone, 0));
+            }
+        }
+        atlas.remove(&image_key(2, 0));
         assert_eq!(atlas.0.lock().backend.spares.len(), 2);
         atlas.before_frame();
         assert!(atlas.0.lock().backend.spares.is_empty());

@@ -157,8 +157,8 @@ on the GPU, as gpui-pre-windows does (`docs/decisions/video-nv12-linux.md`):
   and filled again in place while the size stays the same. A pair drawn in
   the current frame is never replaced, so the slot each draw recorded keeps
   naming its own textures; with none to replace, the frame is refused. A
-  pair not drawn for two frames, and every pair once no surface is on
-  screen, is freed. Each draw's
+  pair not drawn in a frame is freed at its end, since an idle window may
+  render no later frame to free it in. Each draw's
   bounds, mask and `YuvColor::rgb_rows` go into one uniform buffer at
   dynamic offsets (at most 64 draws a frame). Frames are marked drawn or
   refused (other formats, too large for a texture). Tests run on lavapipe.
@@ -177,7 +177,8 @@ fewer copies and textures (sweep finding media-7,
   instead of copying them into a pending list that `before_frame` flushed;
   `swizzle_upload_data` returns a `Cow` and copies only to swap BGRA into
   RGBA. A freed texture larger than 1024² (one picture's own) is kept as a
-  spare (at most two, for eight frames) and taken by the next picture of
+  spare (at most two, for eight frames, and only while a texture of its
+  size and format is still in use) and taken by the next picture of
   that size, so a playing 1080p clip alternates between two textures instead
   of creating one per picture. Test: `video_pictures_take_turns_in_two_textures`;
   the upstream `before_frame_skips_uploads_for_removed_texture` is now

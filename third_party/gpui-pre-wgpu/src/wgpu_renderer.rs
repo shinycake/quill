@@ -1773,9 +1773,7 @@ impl WgpuRendererCore {
             .resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
-        self.resources
-            .yuv_surfaces
-            .end_frame(!scene.surfaces.is_empty());
+        self.resources.yuv_surfaces.end_frame();
         Ok(submission)
     }
 

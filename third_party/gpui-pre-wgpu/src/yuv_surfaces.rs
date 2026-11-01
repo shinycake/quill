@@ -27,9 +27,6 @@ const MAX_DRAWS: usize = 64;
 /// of a frame can have its own.
 const MAX_SLOTS: usize = MAX_DRAWS;
 
-/// A slot not drawn for this many frames is freed (its clip went away).
-const IDLE_FRAMES: u64 = 2;
-
 /// `SurfaceParams` in `shaders.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -173,17 +170,12 @@ impl YuvSurfaces {
         }
     }
 
-    /// The renderer finished a frame: free the textures of clips that were
-    /// not drawn lately, and all of them once no surface is on screen (the
-    /// viewer closed).
-    pub(crate) fn end_frame(&mut self, any_surfaces: bool) {
+    /// The renderer finished a frame: free the textures of clips it did not
+    /// draw. Freed now, not some frames later, since a window that goes
+    /// idle renders no later frame to free them in.
+    pub(crate) fn end_frame(&mut self) {
         let frame = self.frame;
-        if any_surfaces {
-            self.slots
-                .retain(|slot| frame.saturating_sub(slot.drawn) < IDLE_FRAMES);
-        } else {
-            self.slots.clear();
-        }
+        self.slots.retain(|slot| slot.drawn == frame);
         self.frame = frame.wrapping_add(1);
     }
 
@@ -511,6 +503,21 @@ mod tests {
         for (clip, _) in &clips {
             assert_eq!(clip.draw_state(), SurfaceDrawState::Drawn);
         }
+        Ok(())
+    }
+
+    /// A clip that leaves the screen gives back its textures in that very
+    /// frame: the window may render nothing after it.
+    #[test]
+    fn a_clip_that_leaves_frees_its_textures_at_once() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let staying = frame(16, 8, (235, 235), (128, 128));
+        let leaving = frame(16, 8, (16, 16), (128, 128));
+        let both = scene_with(&[(staying.clone(), 0.0), (leaving, 32.0)]);
+        renderer.render_scene(&both, size(64, 16))?;
+        assert_eq!(renderer.yuv_slot_count(), 2);
+        renderer.render_scene(&scene_with(&[(staying, 0.0)]), size(64, 16))?;
+        assert_eq!(renderer.yuv_slot_count(), 1);
         Ok(())
     }
 
