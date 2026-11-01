@@ -57,6 +57,8 @@ pub struct WindowsWindowState {
 
     pub callbacks: Callbacks,
     pub frame_signal: Arc<PlatformFrameSignal>,
+    /// Quill: the window list reads this (see `TrackedWindow`).
+    pub destroyed: Arc<AtomicBool>,
     pub input_handler: Cell<Option<PlatformInputHandler>>,
     pub ime_enabled: Cell<bool>,
     pub pending_surrogate: Cell<Option<u16>>,
@@ -177,6 +179,7 @@ impl WindowsWindowState {
             min_size,
             callbacks,
             frame_signal: Arc::new(PlatformFrameSignal::new()),
+            destroyed: Arc::new(AtomicBool::new(false)),
             input_handler: Cell::new(input_handler),
             ime_enabled: Cell::new(true),
             pending_surrogate: Cell::new(pending_surrogate),

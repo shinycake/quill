@@ -43,17 +43,26 @@ use windows::{
     core::*,
 };
 
-use crate::{window_list::for_each_after_unlock, *};
+use crate::{
+    window_list::{for_each_after_unlock, for_each_open_after_unlock},
+    *,
+};
 use gpui::*;
 
 struct TrackedWindow {
     handle: SafeHwnd,
     frame_signal: Arc<PlatformFrameSignal>,
+    /// Quill: set by the window's `WM_DESTROY`.
+    destroyed: Arc<AtomicBool>,
 }
 
 impl TrackedWindow {
     fn as_raw(&self) -> HWND {
         self.handle.as_raw()
+    }
+
+    fn is_destroyed(&self) -> bool {
+        self.destroyed.load(Ordering::Relaxed)
     }
 }
 
@@ -501,9 +510,9 @@ impl WindowsPlatform {
                                 "DirectX device lost and could not be recreated, closing all \
                                  windows: {err:#}"
                             );
-                            destroy_all_windows_after_device_lost(&all_windows, validation_number);
                             // Quill: the platform drops the dead devices, so it reports
-                            // itself headless until it is windowed again.
+                            // itself headless until it is windowed again, then closes
+                            // the windows.
                             // SAFETY: PostMessageW only queues the message.
                             unsafe {
                                 validation_number
@@ -812,6 +821,7 @@ impl Platform for WindowsPlatform {
         self.raw_window_handles.write().push(TrackedWindow {
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
+            destroyed: window.state.destroyed.clone(),
         });
         // Quill: a new window starts with frames running; wake the vsync
         // thread if every other window is parked. One created hidden starts
@@ -1453,11 +1463,14 @@ impl WindowsPlatformInner {
 
     /// Quill: the vsync thread could not recreate the GPU device and has stopped. Drop the dead
     /// devices so `is_windowed` reports false and `open_window` says why; a later
-    /// `request_windowing(Windowed)` attaches fresh devices.
+    /// `request_windowing(Windowed)` attaches fresh devices. The broadcast runs here because no
+    /// window can open past this point and each window's `WM_DESTROY` runs on this thread, so
+    /// the list can't change under it.
     fn handle_device_gone(&self) -> Option<isize> {
         self.state.directx_devices.borrow_mut().take();
         *self.state.gpu_error.borrow_mut() =
             Some("the GPU device was lost and could not be recreated".to_owned());
+        destroy_all_windows_after_device_lost(&self.raw_window_handles, self.validation_number);
         Some(0)
     }
 
@@ -1847,13 +1860,17 @@ fn destroy_all_windows_after_device_lost(
         return;
     };
     let destroy = validation_number.message(WM_GPUI_DESTROY_AFTER_DEVICE_LOST, 0);
-    for window in all_windows.read().iter() {
-        // SAFETY: PostMessageW only queues the message; a handle that was destroyed in the
-        // meantime makes it fail, which is logged.
-        unsafe {
-            destroy.post(window.as_raw()).log_err();
-        }
-    }
+    for_each_open_after_unlock(
+        all_windows.read(),
+        TrackedWindow::as_raw,
+        TrackedWindow::is_destroyed,
+        |window| {
+            // SAFETY: PostMessageW only queues the message.
+            unsafe {
+                destroy.post(window).log_err();
+            }
+        },
+    );
 }
 
 fn handle_gpu_device_lost(
