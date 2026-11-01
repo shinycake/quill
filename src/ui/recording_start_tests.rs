@@ -78,14 +78,32 @@ fn a_start_cancelled_while_the_microphone_opens_leaves_nothing(cx: &mut TestAppC
     let opens = fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::Message, &mut vcx);
     app.update(&mut vcx, |app, cx| app.cancel_recording_here(cx));
-    app.read_with(&vcx, |app, _| {
-        assert!(app.recording_busy(), "the device is still on its way up");
-    });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert_eq!(opens.load(Ordering::SeqCst), 1);
         assert!(!app.recording_active(), "what arrived was dropped");
         assert!(!app.recording_busy(), "the next recording may start");
+    });
+}
+
+#[gpui_kit::test]
+fn record_works_again_while_a_cancelled_microphone_has_not_answered(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    app.update(&mut vcx, |app, cx| app.cancel_recording_here(cx));
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.recording_busy(), "the record button answers again");
+    });
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(
+            opens.load(Ordering::SeqCst),
+            2,
+            "the second press opened too"
+        );
+        assert!(app.recording_active(), "the second press records");
     });
 }
 

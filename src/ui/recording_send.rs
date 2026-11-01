@@ -10,7 +10,7 @@
 
 use super::app::QuillApp;
 use super::composer_state::DraftClear;
-use super::recording_state::{CaptureFor, CaptureMedia};
+use super::recording_state::{CaptureFor, CaptureMedia, StartId};
 use super::status_note::StatusNote;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, ComposerAttachment, ComposerReplyTo};
@@ -375,16 +375,16 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         let choice = self.capture_choice();
-        self.begin_capture_start(true, purpose);
+        let start = self.begin_capture_start(true, purpose);
         let starting = cx.background_spawn(async move { VideoNoteCapture::start(hq, &choice) });
         self.spawn_scoped(cx, async move |this, cx| {
             let result = starting.await;
             let held = this.update(cx, |this, cx| {
-                this.hold_started_video(result, purpose, lock, cx);
+                this.hold_started_video(result, start, purpose, lock, cx);
             });
             if held.is_err() {
                 let _ = this.main().update(cx, |this, _| {
-                    this.recording.finish_start();
+                    this.recording.finish_start(start);
                 });
             }
         })
@@ -394,11 +394,12 @@ impl QuillApp {
     fn hold_started_video(
         &mut self,
         result: Result<VideoNoteCapture, String>,
+        start: StartId,
         purpose: CaptureFor,
         lock: bool,
         cx: &mut Context<Self>,
     ) {
-        let wanted = self.recording.finish_start();
+        let wanted = self.recording.finish_start(start);
         match result {
             Ok(capture) if wanted && !self.recording_active() => {
                 self.hold_capture(CaptureMedia::Video(capture), purpose);
@@ -427,19 +428,19 @@ impl QuillApp {
         if self.recording_busy() {
             return;
         }
-        self.begin_capture_start(false, purpose);
+        let start = self.begin_capture_start(false, purpose);
         let open = self.recording.open_voice.clone();
         let opening = cx.background_spawn(async move { open() });
         self.spawn_scoped(cx, async move |this, cx| {
             let mut result = Some(opening.await);
             let held = this.update(cx, |this, cx| {
                 if let Some(result) = result.take() {
-                    this.hold_started_voice(result, purpose, cx);
+                    this.hold_started_voice(result, start, purpose, cx);
                 }
             });
             if held.is_err() {
                 let _ = this.main().update(cx, |this, _| {
-                    this.recording.finish_start();
+                    this.recording.finish_start(start);
                 });
                 if let Some(Ok(capture)) = result {
                     cx.background_spawn(async move { capture.discard() })
@@ -453,10 +454,11 @@ impl QuillApp {
     fn hold_started_voice(
         &mut self,
         result: Result<VoiceCapture, String>,
+        start: StartId,
         purpose: CaptureFor,
         cx: &mut Context<Self>,
     ) {
-        let wanted = self.recording.finish_start();
+        let wanted = self.recording.finish_start(start);
         match result {
             Ok(capture) if wanted => {
                 self.hold_capture(CaptureMedia::Voice(capture), purpose);
