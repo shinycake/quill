@@ -70,13 +70,13 @@ impl AccountExport {
     }
 
     #[cfg(test)]
-    pub(crate) fn scripted() -> (Self, std::sync::mpsc::Sender<serde_json::Value>) {
+    pub(crate) fn scripted() -> (Self, crate::export::handle::ScriptedWorker) {
         let (link, worker) = WorkerLink::pair(None);
         let export = Self {
             link,
             progress: Arc::new(Mutex::new(AccountProgress::starting())),
             folder: PathBuf::new(),
         };
-        (export, worker.into_requests())
+        (export, worker.into_scripted())
     }
 }

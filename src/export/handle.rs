@@ -25,12 +25,32 @@ pub(crate) struct ChannelTdlib {
     replies: mpsc::Receiver<Value>,
     cancelled: Arc<AtomicBool>,
     leftovers: Option<Leftovers>,
+    /// Dropped with the worker, which tells the link it ended.
+    _alive: mpsc::Sender<()>,
 }
 
 impl ChannelTdlib {
     #[cfg(test)]
-    pub(crate) fn into_requests(self) -> mpsc::Sender<Value> {
-        self.requests
+    pub(crate) fn into_scripted(self) -> ScriptedWorker {
+        ScriptedWorker {
+            requests: self.requests,
+            _alive: self._alive,
+        }
+    }
+}
+
+/// A test's stand-in for the worker thread: it sends the requests, and the
+/// worker counts as running until it is dropped.
+#[cfg(test)]
+pub(crate) struct ScriptedWorker {
+    requests: mpsc::Sender<Value>,
+    _alive: mpsc::Sender<()>,
+}
+
+#[cfg(test)]
+impl ScriptedWorker {
+    pub(crate) fn send(&self, request: Value) -> Result<(), mpsc::SendError<Value>> {
+        self.requests.send(request)
     }
 }
 
@@ -90,6 +110,8 @@ pub struct WorkerLink {
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
     cancelled: Arc<AtomicBool>,
+    /// Disconnected once the worker ended.
+    ended: mpsc::Receiver<()>,
     /// Files the view asked for while the export ran. The export leaves
     /// them in TDLib's cache even when it downloaded them first.
     view_files: HashSet<i32>,
@@ -102,17 +124,20 @@ impl WorkerLink {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
+        let (alive, ended) = mpsc::channel();
         let worker = ChannelTdlib {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
             leftovers,
+            _alive: alive,
         };
         let link = Self {
             requests,
             replies,
             pending: None,
             cancelled,
+            ended,
             view_files: HashSet::new(),
             held_file: None,
         };
@@ -176,6 +201,20 @@ impl WorkerLink {
     /// Ask the worker to stop. It does so at its next step.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn worker_ended(&self) -> bool {
+        matches!(self.ended.try_recv(), Err(mpsc::TryRecvError::Disconnected))
+    }
+
+    /// Block until the worker ended or `until` passed. Returns whether it
+    /// ended.
+    pub fn wait_ended(&self, until: Instant) -> bool {
+        let left = until.saturating_duration_since(Instant::now());
+        matches!(
+            self.ended.recv_timeout(left),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        )
     }
 }
 
@@ -261,7 +300,7 @@ impl ChatExport {
     }
 
     #[cfg(test)]
-    pub(crate) fn scripted() -> (Self, mpsc::Sender<Value>) {
+    pub(crate) fn scripted() -> (Self, ScriptedWorker) {
         let (link, worker) = WorkerLink::pair(None);
         let export = Self {
             link,
@@ -269,6 +308,6 @@ impl ChatExport {
             folder: PathBuf::new(),
             title: String::new(),
         };
-        (export, worker.into_requests())
+        (export, worker.into_scripted())
     }
 }

@@ -855,3 +855,13 @@ fn a_repeated_file_with_another_thumbnail_keeps_both_thumbnails() {
     assert_eq!(std::fs::read(run.out.join(second)).unwrap(), b"second");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_link_hears_its_worker_end_at_once() {
+    let (export, worker) = super::ChatExport::scripted();
+    assert!(!export.link.worker_ended());
+    drop(worker);
+    assert!(export.link.worker_ended());
+    let far_off = std::time::Instant::now() + Duration::from_secs(3600);
+    assert!(export.link.wait_ended(far_off), "no wait once it ended");
+}
