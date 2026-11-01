@@ -1,6 +1,7 @@
 //! Connect-driver tests: the shared screen Quill captures and feeds into
 //! the engine's external screen source (`connect::call_screen`).
 use super::super::*;
+use super::support::{pump_until_mic_answers, pump_until_screen_answers, until};
 use super::*;
 use crate::calls::capture::screen::{PreviewSlot, ScreenCapture, SourceId};
 use crate::calls::capture::system_audio::{SystemAudioCapture, SystemAudioMix};
@@ -38,7 +39,7 @@ impl ScreenCapture for FakeScreen {
 fn install_fake_screen(driver: &mut ConnectDriver<Arc<RecordingSender>>) -> Arc<FakeScreens> {
     let screens = Arc::new(FakeScreens::default());
     let handle = screens.clone();
-    driver.inject_call_screen(Box::new(move |source, _options, sink, preview| {
+    driver.inject_call_screen(Arc::new(move |source, _options, sink, preview| {
         if handle.fail.load(Ordering::SeqCst) {
             return Err(CaptureError::Permission("no access".into()));
         }
@@ -121,11 +122,11 @@ fn the_chosen_window_feeds_the_group_presentation() {
     let (dir, mut driver, engine, screens) = group_driver();
     // Sharing but nothing chosen: nothing starts.
     driver.session.calls.active_group_call = Some(sharing_group_call());
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(screens.started.lock().unwrap().is_empty());
 
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(*screens.started.lock().unwrap(), vec!["window:42"]);
     assert_eq!(
         driver.call_screen().target(),
@@ -145,7 +146,7 @@ fn the_chosen_window_feeds_the_group_presentation() {
 
     // Picking another source switches the running share.
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(
         *screens.started.lock().unwrap(),
         vec!["window:42", "display:1"]
@@ -159,8 +160,8 @@ fn the_chosen_window_feeds_the_group_presentation() {
         .as_mut()
         .unwrap()
         .screen_sharing = false;
-    driver.pump_call_screen();
-    assert!(screens.stopped.load(Ordering::SeqCst));
+    pump_until_screen_answers(&mut driver);
+    until(|| screens.stopped.load(Ordering::SeqCst));
     assert_eq!(driver.call_screen().target(), None);
     assert!(driver.call_screen().chosen().is_none());
     std::fs::remove_dir_all(dir).ok();
@@ -171,11 +172,11 @@ fn a_hidden_window_pauses_once_per_edge() {
     let (dir, mut driver, engine, screens) = group_driver();
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     let sink = sink_of(&screens);
 
     sink.push_event(CaptureEvent::Paused);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     let paused = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
     assert_eq!(paused.len(), 1);
     assert_eq!(paused[0]["group_call_id"], 77);
@@ -197,17 +198,17 @@ fn a_hidden_window_pauses_once_per_edge() {
 
     // A second Paused (and a Paused/Resumed/Paused burst) is no new edge.
     sink.push_event(CaptureEvent::Paused);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     sink.push_event(CaptureEvent::Resumed);
     sink.push_event(CaptureEvent::Paused);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(
         sent_of(&driver, "toggleGroupCallScreenSharingIsPaused").len(),
         1
     );
 
     sink.push_event(CaptureEvent::Resumed);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     let toggles = sent_of(&driver, "toggleGroupCallScreenSharingIsPaused");
     assert_eq!(toggles.len(), 2);
     assert_eq!(toggles[1]["is_paused"], false);
@@ -222,10 +223,13 @@ fn a_closed_window_ends_the_share() {
     let (dir, mut driver, _engine, screens) = group_driver();
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     sink_of(&screens).push_event(CaptureEvent::Ended);
-    assert!(driver.request_tick(Instant::now()), "no Telegram update needed");
-    assert!(screens.stopped.load(Ordering::SeqCst));
+    assert!(
+        driver.request_tick(Instant::now()),
+        "no Telegram update needed"
+    );
+    until(|| screens.stopped.load(Ordering::SeqCst));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     let call = driver.session.calls.active_group_call.as_ref().unwrap();
     assert!(!call.screen_sharing && !call.screen_share_paused);
@@ -239,7 +243,7 @@ fn a_refused_capture_ends_the_share_with_its_error() {
     screens.fail.store(true, Ordering::SeqCst);
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(driver.call_screen().error.as_deref(), Some("no access"));
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
     std::fs::remove_dir_all(dir).ok();
@@ -260,7 +264,7 @@ fn starting_needs_a_chosen_source_but_stopping_does_not() {
     assert_eq!(sent_of(&driver, "startGroupCallScreenSharing").len(), 1);
     // A share in flight stops even with no pick left.
     let mut forgot = crate::connect::CallScreen::default();
-    forgot.inject_opener(Box::new(|_, _, _, _| Err(CaptureError::NoDevice)));
+    forgot.inject_opener(Arc::new(|_, _, _, _| Err(CaptureError::NoDevice)));
     driver.call_screen = forgot;
     assert!(driver.toggle_group_call_screen_share().is_ok());
     assert_eq!(sent_of(&driver, "endGroupCallScreenSharing").len(), 1);
@@ -272,10 +276,10 @@ fn your_shared_screen_shows_in_your_tile() {
     let (dir, mut driver, _engine, screens) = group_driver();
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     let preview = screens.preview.lock().unwrap().clone().unwrap();
     preview.offer(&frame(128));
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     let tile = driver
         .live_sink(crate::calls::live_video::LiveKey::Video {
             call_id: 77,
@@ -286,7 +290,7 @@ fn your_shared_screen_shows_in_your_tile() {
     let shown = tile.take().unwrap();
     assert_eq!((shown.width, shown.height), (320, 240));
     // The same preview is not handed over twice.
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(tile.take().is_none());
     assert_eq!(tile.snapshot().pushed, 1);
     std::fs::remove_dir_all(dir).ok();
@@ -319,7 +323,7 @@ fn a_private_call_shares_without_pause_requests() {
         call.transport = Some(TransportState::Connected);
         call.screen_sharing = true;
     }
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(
         driver.call_screen().target(),
         Some(CaptureTarget::Private(77))
@@ -328,7 +332,7 @@ fn a_private_call_shares_without_pause_requests() {
     sink.push(frame(5));
     wait_for(|| handle.external_frames().len() == 1);
     sink.push_event(CaptureEvent::Paused);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().paused());
     assert!(sent_of(&driver, "toggleGroupCallScreenSharingIsPaused").is_empty());
     sink.push(frame(6));
@@ -376,7 +380,7 @@ fn audio_driver() -> (
     let (dir, mut driver, _engine, _screens) = group_driver();
     let loopbacks = Arc::new(FakeLoopbacks::default());
     let handle = loopbacks.clone();
-    driver.inject_call_system_audio(Box::new(move |mix| {
+    driver.inject_call_system_audio(Arc::new(move |mix| {
         if handle.fail.load(Ordering::SeqCst) {
             return Err(CaptureError::Device("no speakers".into()));
         }
@@ -386,7 +390,7 @@ fn audio_driver() -> (
     }));
     let controls: KeptControls = Arc::new(Mutex::new(None));
     let kept = controls.clone();
-    driver.inject_call_microphone(Box::new(move |_device, controls, _sink| {
+    driver.inject_call_microphone(Arc::new(move |_device, controls, _sink| {
         *kept.lock().unwrap() = Some(controls);
         Ok(Box::new(SilentMic))
     }));
@@ -401,9 +405,9 @@ fn mic_mix(controls: &Mutex<Option<Arc<MicControls>>>) -> Option<Arc<SystemAudio
 #[test]
 fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
-    driver.pump_call_capture(Instant::now());
+    pump_until_mic_answers(&mut driver);
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().with_audio() && driver.call_screen().sharing_audio());
     let started = loopbacks.started.lock().unwrap().clone();
     assert_eq!(started.len(), 1);
@@ -411,20 +415,20 @@ fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
     let mixed = mic_mix(&controls).expect("handed to the microphone");
     assert!(Arc::ptr_eq(&mixed, &started[0]));
     // Pumping again neither restarts it nor swaps the queue.
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert_eq!(loopbacks.started.lock().unwrap().len(), 1);
 
     // Picking the same screen without the box stops only the audio.
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
-    driver.pump_call_screen();
-    assert!(loopbacks.stopped.load(Ordering::SeqCst));
+    pump_until_screen_answers(&mut driver);
+    until(|| loopbacks.stopped.load(Ordering::SeqCst));
     assert!(!driver.call_screen().sharing_audio());
     assert!(driver.call_screen().target().is_some());
     assert!(mic_mix(&controls).is_none());
 
     // Back on, then the share stops: the audio goes with it.
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(mic_mix(&controls).is_some());
     driver
         .session
@@ -433,8 +437,8 @@ fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
         .as_mut()
         .unwrap()
         .screen_sharing = false;
-    driver.pump_call_screen();
-    assert!(loopbacks.stopped.load(Ordering::SeqCst));
+    pump_until_screen_answers(&mut driver);
+    until(|| loopbacks.stopped.load(Ordering::SeqCst));
     assert!(mic_mix(&controls).is_none());
     assert!(!driver.call_screen().with_audio());
     std::fs::remove_dir_all(dir).ok();
@@ -444,9 +448,9 @@ fn shared_system_audio_reaches_the_microphone_while_the_share_runs() {
 fn a_microphone_opened_later_still_gets_the_system_audio() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(mic_mix(&controls).is_none(), "no microphone yet");
-    driver.pump_call_capture(Instant::now());
+    pump_until_mic_answers(&mut driver);
     let started = loopbacks.started.lock().unwrap().clone();
     let mixed = mic_mix(&controls).expect("handed over on open");
     assert!(Arc::ptr_eq(&mixed, &started[0]));
@@ -457,9 +461,9 @@ fn a_microphone_opened_later_still_gets_the_system_audio() {
 fn failed_system_audio_keeps_the_screen_and_says_why() {
     let (dir, mut driver, loopbacks, controls) = audio_driver();
     loopbacks.fail.store(true, Ordering::SeqCst);
-    driver.pump_call_capture(Instant::now());
+    pump_until_mic_answers(&mut driver);
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().target().is_some());
     assert!(!driver.call_screen().with_audio(), "not retried every pump");
     assert_eq!(driver.call_screen().error.as_deref(), Some("no speakers"));
@@ -473,9 +477,38 @@ fn without_loopback_the_box_is_ignored() {
     assert!(!driver.call_screen().system_audio_enabled());
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), true);
-    driver.pump_call_screen();
+    pump_until_screen_answers(&mut driver);
     assert!(driver.call_screen().target().is_some());
     assert!(!driver.call_screen().with_audio());
     assert!(!driver.call_screen().sharing_audio());
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_slow_screen_capture_does_not_hold_the_pump() {
+    let (dir, mut driver, _engine, _screens) = group_driver();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let stopped = Arc::new(AtomicBool::new(false));
+    let flag = stopped.clone();
+    let pump_thread = std::thread::current().id();
+    driver.inject_call_screen(Arc::new(move |_source, _options, _sink, _preview| {
+        assert_ne!(std::thread::current().id(), pump_thread);
+        let _ = released.lock().unwrap().recv();
+        Ok(Box::new(FakeScreen(flag.clone())))
+    }));
+    driver.session.calls.active_group_call = Some(sharing_group_call());
+    driver.choose_call_screen_source(SourceId("display:1".into()), false);
+
+    driver.pump_call_screen();
+
+    assert!(driver.call_screen().opening());
+    assert_eq!(driver.call_screen().target(), None);
+    release.send(()).unwrap();
+    pump_until_screen_answers(&mut driver);
+    assert_eq!(
+        driver.call_screen().target(),
+        Some(CaptureTarget::Group(77))
+    );
     std::fs::remove_dir_all(dir).ok();
 }

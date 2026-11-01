@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub mod denoise;
+pub mod device_thread;
 pub mod feeder;
 #[cfg(feature = "ui")]
 pub mod mic_cpal;

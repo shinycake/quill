@@ -298,6 +298,7 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
+    pub(crate) call_devices_warmed: bool,
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
@@ -306,9 +307,7 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_camera_state: HashMap<i32, Option<String>>,
     /// Microphone mute state the group-call engine last applied, per call.
     pub(crate) group_mute_state: HashMap<i32, bool>,
-    /// What the pump last did per tracked group call (`group_calls`).
     pub(crate) group_seen: HashMap<i32, super::group_calls::GroupCallSeen>,
-    /// The tile the UI shows large in a window someone can see.
     pub(crate) group_large_tile: Option<crate::calls::tile_pin::TileKey>,
     /// The conference call's frame encryption and the engine key it is
     /// under (`group_calls::conference`).

@@ -57,8 +57,8 @@ struct MockInner {
     connected_chats: Vec<i64>,
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
-    /// Test-only failure injection for the next `sync_group_video`.
     fail_group_video_sync: bool,
+    device_warms: usize,
     engine_event_hook: Option<EngineEventCallback>,
     live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
@@ -231,7 +231,10 @@ impl MockEngine {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
     }
 
-    /// Test-only: the next `sync_group_video` fails.
+    pub fn device_warms(&self) -> usize {
+        self.inner.lock_or_recover().device_warms
+    }
+
     pub fn fail_next_group_video_sync(&self) {
         self.inner.lock_or_recover().fail_group_video_sync = true;
     }
@@ -860,6 +863,10 @@ impl CallEngine for MockEngine {
             return Err(EngineError::Unavailable);
         }
         Ok(inner.devices.clone())
+    }
+
+    fn warm_devices(&self) {
+        self.inner.lock_or_recover().device_warms += 1;
     }
 
     fn protocol(&self) -> EngineProtocol {

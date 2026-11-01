@@ -76,7 +76,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut changed = self.pump_group_call_streams(now);
         // 1:1 calls: what the engine reported between Telegram updates.
         changed |= self.pump_call_engine_reports();
-        // A lost microphone or an ended share.
         changed |= self.pump_call_media(now);
         // Group calls: the "You are on mute" hint.
         changed |= self.tick_muted_speech_hint(now);
@@ -120,8 +119,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// How long until the earliest time-driven work here and in the session
     /// is due (a flood retry, a pending bot message expiring, a Star reaction
-    /// toast, reopening a lost microphone), so the poll loop can cap its idle sleep. `None` when nothing
-    /// is scheduled.
+    /// toast, reopening a lost microphone), so the poll loop can cap its
+    /// idle sleep. `None` when nothing is scheduled.
     pub fn next_deadline(&self, now: Instant, now_ms: u64) -> Option<Duration> {
         let retry = self
             .flood_retries
@@ -136,8 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let levels = self.group_levels_deadline(now);
         // The muted-speech hint's next check while it listens.
         let hint = self.muted_hint_deadline(now);
-        // A lost microphone's next try.
-        let microphone = self.call_capture.reopen_deadline(now);
+        let microphone = self.call_capture.until_reopen(now);
         let paid = self
             .session
             .payments

@@ -28,6 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_audio: Default::default(),
             call_capture: Default::default(),
             call_screen: Default::default(),
+            call_devices_warmed: false,
             live_feeds: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
             group_mute_state: HashMap::new(),
