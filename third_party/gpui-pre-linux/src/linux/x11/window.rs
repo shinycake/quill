@@ -1996,13 +1996,18 @@ impl PlatformWindow for X11Window {
         }
 
         let presented = renderer.draw(scene);
+        let needs_redraw = renderer.needs_redraw();
+        // Quill: a window that opened on, or adopted, a software fallback
+        // looks for the GPU too, in case the one that recreated it closes.
+        let probe_at = renderer.hardware_probe_at();
+        schedule_hardware_probe(inner, self.0.x_window, probe_at);
         if inner.present_retry.after_draw(presented) {
             inner.force_render_after_recovery = true;
             // An expose can draw while the refresh timer is parked.
             self.0.frame.demand();
         }
 
-        if renderer.needs_redraw() {
+        if needs_redraw {
             inner.force_render_after_recovery = true;
         }
     }

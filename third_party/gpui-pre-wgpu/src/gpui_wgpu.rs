@@ -13,4 +13,4 @@ pub use wgpu_context::*;
     any(test, feature = "bench-support", feature = "test-support")
 ))]
 pub use wgpu_renderer::WgpuHeadlessRenderer;
-pub use wgpu_renderer::{GpuContext, Recovery, WgpuRenderer, WgpuSurfaceConfig, on_device_gone};
+pub use wgpu_renderer::{GpuContext, GpuSlot, Recovery, WgpuRenderer, WgpuSurfaceConfig, on_device_gone};

@@ -1058,7 +1058,7 @@ impl WaylandConnection {
         })?;
 
         let compositor_gpu = detect_compositor_gpu();
-        let gpu_context = Rc::new(RefCell::new(None));
+        let gpu_context = GpuContext::default();
 
         let (frame_ping, frame_ping_source) =
             calloop::ping::make_ping().context("failed to create Wayland frame ping")?;

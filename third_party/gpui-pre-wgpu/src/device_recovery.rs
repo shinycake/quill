@@ -14,9 +14,11 @@
 //! and after [`GIVE_UP_AFTER`] failures the renderer gives up.
 //!
 //! A real GPU can take a while to return after a resume or driver reset,
-//! so attempts stay hardware-only for about 27 s. A window that still had
-//! to fall back to a CPU adapter keeps looking for the GPU on a slow timer
-//! ([`HardwareProbe`]) and moves back onto it when it returns.
+//! so attempts stay hardware-only for about 27 s. When recovery still had
+//! to fall back to a CPU adapter the windows keep looking for the GPU on a
+//! slow timer ([`HardwareProbe`], held in [`SharedRecovery`] so that any
+//! window looks, not only the one that recreated the context and may have
+//! closed since) and move back onto it when it returns.
 //!
 //! A window whose context another window already recreated only adopts it
 //! ([`Target::Adopt`]): its first attempt is immediate, and failures back
@@ -233,11 +235,47 @@ impl HardwareProbe {
     }
 }
 
+/// What the windows sharing a GPU context know about its recovery.
+#[derive(Debug, Default)]
+pub(crate) struct SharedRecovery {
+    probe: Option<HardwareProbe>,
+}
+
+impl SharedRecovery {
+    /// The context was lost: whatever was looked for on it is moot.
+    pub(crate) fn lost(&mut self) {
+        self.probe = None;
+    }
+
+    /// A window's recovery that reached `target` succeeded. Only a
+    /// recreation decides whether to look for the GPU; a window adopting the
+    /// context afterwards keeps the look the recreation set.
+    pub(crate) fn recovered(
+        &mut self,
+        now: Instant,
+        target: Option<Target>,
+        landed_on_software: bool,
+    ) {
+        if matches!(target, Some(Target::Recreate { .. })) {
+            self.probe = HardwareProbe::after_recovery(now, target, landed_on_software);
+        }
+    }
+
+    pub(crate) fn probe(&self) -> Option<HardwareProbe> {
+        self.probe
+    }
+
+    pub(crate) fn set_probe(&mut self, probe: Option<HardwareProbe>) {
+        self.probe = probe;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, MAX_DELAY, Next, PROBE_FIRST,
-        PROBE_MAX, Recovering, RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, Shared, Target,
+        PROBE_MAX, Recovering, RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, Shared,
+        SharedRecovery, Target,
     };
     use std::time::{Duration, Instant};
 
@@ -473,5 +511,22 @@ mod tests {
             HardwareProbe::after_recovery(now, Some(Target::Adopt), true),
             None
         );
+    }
+
+    /// The window that recreated the context on a CPU adapter closed: the
+    /// look for the GPU is the context's, so the windows left still look.
+    #[test]
+    fn any_window_on_the_fallback_looks_for_the_gpu() {
+        let start = Instant::now();
+        let mut shared = SharedRecovery::default();
+        shared.recovered(start, Some(hardware()), true);
+        // A second window adopts the fallback context.
+        shared.recovered(start, Some(Target::Adopt), true);
+        assert_eq!(
+            shared.probe().map(|probe| probe.due()),
+            Some(start + PROBE_FIRST)
+        );
+        shared.lost();
+        assert_eq!(shared.probe(), None);
     }
 }

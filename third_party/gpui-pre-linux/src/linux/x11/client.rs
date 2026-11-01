@@ -567,7 +567,7 @@ impl X11Connection {
                 last_location: Point::new(px(0.0), px(0.0)),
                 current_count: 0,
                 pinch_scale: 1.0,
-                gpu_context: Rc::new(RefCell::new(None)),
+                gpu_context: GpuContext::default(),
                 compositor_gpu,
                 scale_factor,
 

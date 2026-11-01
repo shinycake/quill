@@ -1,7 +1,7 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
-use crate::device_recovery::{Attempt, HardwareProbe, Next, Recovering, Shared, Target};
+use crate::device_recovery::{Attempt, Next, Recovering, Shared, SharedRecovery, Target};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -169,7 +169,25 @@ struct WgpuBindGroupLayouts {
 }
 
 /// Shared GPU context reference, used to coordinate device recovery across multiple windows.
-pub type GpuContext = Rc<RefCell<Option<WgpuContext>>>;
+pub type GpuContext = Rc<GpuSlot>;
+
+/// Quill: the GPU context the windows share, and what they know about its
+/// recovery (see `device_recovery`).
+#[derive(Default)]
+pub struct GpuSlot {
+    context: RefCell<Option<WgpuContext>>,
+    recovery: RefCell<SharedRecovery>,
+}
+
+impl GpuSlot {
+    pub fn borrow(&self) -> std::cell::Ref<'_, Option<WgpuContext>> {
+        self.context.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, Option<WgpuContext>> {
+        self.context.borrow_mut()
+    }
+}
 
 enum InstanceData {
     Storage(wgpu::Buffer),
@@ -269,8 +287,6 @@ pub struct WgpuRenderer {
     needs_redraw: bool,
     // Quill: from the first `recover` after a device loss until it succeeds.
     recovering: Recovering,
-    // Quill: set while on a CPU adapter that recovery fell back to.
-    hardware_probe: Option<HardwareProbe>,
 }
 
 impl WgpuRenderer {
@@ -495,7 +511,6 @@ impl WgpuRenderer {
             last_surface_error: None,
             needs_redraw: false,
             recovering: Recovering::default(),
-            hardware_probe: None,
         })
     }
 }
@@ -2374,6 +2389,7 @@ impl WgpuRenderer {
             // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
             self.state = RendererState::Released;
             *gpu_context.borrow_mut() = None;
+            gpu_context.recovery.borrow_mut().lost();
         }
         let attempt = match self.recovering.next(now) {
             Next::Wait(at) => return Recovery::RetryAt(at),
@@ -2385,7 +2401,10 @@ impl WgpuRenderer {
             Ok(()) => {
                 self.recovering.succeeded();
                 let on_software = gpu_context.borrow().as_ref().is_some_and(is_software);
-                self.hardware_probe = HardwareProbe::after_recovery(now, target, on_software);
+                gpu_context
+                    .recovery
+                    .borrow_mut()
+                    .recovered(now, target, on_software);
                 log::info!("GPU recovery complete");
                 Recovery::Recovered
             }
@@ -2411,11 +2430,14 @@ impl WgpuRenderer {
     /// Quill: when to call [`Self::probe_hardware`], while on a CPU adapter
     /// that recovery fell back to from a lost GPU.
     pub fn hardware_probe_at(&self) -> Option<Instant> {
-        self.hardware_probe.map(|probe| probe.due())
+        let slot = self.context.as_ref()?;
+        let probe = slot.recovery.borrow().probe();
+        probe.map(|probe| probe.due())
     }
 
     /// Quill: on a CPU adapter that recovery fell back to, look for the GPU
-    /// and move this window onto it when it is back. The other windows
+    /// and move this window onto it when it is back. Any window on the
+    /// context may look; the look is the context's. The other windows
     /// follow on their next draw: the CPU context is retired, so they
     /// recover and adopt the new one. Returns when to look again, or `None`
     /// when there is no more looking to do. A frame is due afterwards when
@@ -2425,23 +2447,26 @@ impl WgpuRenderer {
     where
         W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
     {
-        let mut probe = self.hardware_probe?;
+        let gpu_context = self.context.clone()?;
+        let mut probe = gpu_context.recovery.borrow().probe()?;
         let now = Instant::now();
         if now < probe.due() {
             return Some(probe.due());
         }
-        let gpu_context = self.context.clone()?;
+        if self.device_lost() {
+            return None;
+        }
         let on_software = gpu_context
             .borrow()
             .as_ref()
             .is_some_and(|ctx| is_software(ctx) && !ctx.device_lost());
-        if !on_software || self.device_lost() {
-            self.hardware_probe = None;
+        if !on_software {
+            gpu_context.recovery.borrow_mut().set_probe(None);
             return None;
         }
         if !gpu_can_present(window) {
             probe.missed(now);
-            self.hardware_probe = Some(probe);
+            gpu_context.recovery.borrow_mut().set_probe(Some(probe));
             return Some(probe.due());
         }
         // A window holds one swapchain at a time: let go of the CPU one
@@ -2456,6 +2481,7 @@ impl WgpuRenderer {
                 if let Some(software) = software {
                     software.errors().retire();
                 }
+                gpu_context.recovery.borrow_mut().set_probe(None);
                 log::info!("GPU is back, leaving the software renderer");
                 self.needs_redraw = true;
                 None
@@ -2471,7 +2497,7 @@ impl WgpuRenderer {
                     self.device_errors.retire();
                 }
                 probe.missed(now);
-                self.hardware_probe = Some(probe);
+                gpu_context.recovery.borrow_mut().set_probe(Some(probe));
                 self.needs_redraw = true;
                 Some(probe.due())
             }

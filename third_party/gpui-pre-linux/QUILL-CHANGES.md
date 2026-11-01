@@ -164,3 +164,8 @@ once (sweep bundle B13, N42):
 - Both backends: a second recovery no longer starts a second hardware-probe
   chain, and every draw before a `CloseWindow` runs no longer arms another
   close. Tests: `recovery_timers::tests`.
+- Both backends arm the hardware-probe timer from every draw while the
+  shared context is a software fallback (`hardware_probe_at`, deduplicated
+  by `RecoveryTimers`), so a window that adopted the fallback or opened on
+  it looks for the GPU as well (sweep bundle B13, N45). The clients make the
+  shared context with `GpuContext::default()`.

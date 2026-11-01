@@ -2120,6 +2120,10 @@ impl PlatformWindow for WaylandWindow {
         if renderer.needs_redraw() {
             state.redraw_requested = true;
         }
+        // Quill: a window that opened on, or adopted, a software fallback
+        // looks for the GPU too, in case the one that recreated it closes.
+        let probe_at = renderer.hardware_probe_at();
+        schedule_hardware_probe(state, probe_at);
     }
 
     // Quill: `Window::capture_frame`, offscreen with this window's renderer.

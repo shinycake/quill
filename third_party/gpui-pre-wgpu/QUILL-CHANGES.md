@@ -103,3 +103,11 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   draw with. Now the slot stays empty and the recreation backs off and falls
   back as one sequence. Not run: there is no way to make the renderer build
   fail on a working device here, and no GPU loss to recover from.
+- The look for the GPU belongs to the shared context, not to the window
+  that recreated it (sweep bundle B13, N45): `GpuContext` is now
+  `Rc<GpuSlot>`, the context plus a `SharedRecovery` holding the
+  `HardwareProbe`. A recreation that lands on a CPU adapter sets it, an
+  adoption keeps it, a loss clears it, and `hardware_probe_at` and
+  `probe_hardware` read it from any window. Before, closing the window that
+  recreated the context left the others on the software renderer for the
+  rest of the session. Test: `any_window_on_the_fallback_looks_for_the_gpu`.
