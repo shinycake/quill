@@ -1021,6 +1021,24 @@ fn emoji_beside_a_clip_on_their_layer_hold_each_frame_alike_at_any_head_phase() 
 }
 
 #[test]
+fn an_animation_keeps_its_refreshes_and_the_clock() {
+    let mut display = 220;
+    for (rate, fps, hold) in [(60.0, 60, 1), (60.0, 30, 2), (120.0, 60, 2), (120.0, 30, 4)] {
+        for late in [Late::Little, Late::Realistic, Late::Always] {
+            display += 1;
+            let sim = Sim::new(display, rate, true).emoji(fps).late(late).run(3.0);
+            let holds = sim.emoji_holds();
+            let case = format!("{rate} Hz, {fps} fps, {late:?}");
+            assert!(
+                holds.len() > 40 && holds.iter().all(|at| *at == hold),
+                "{case}: {holds:?}"
+            );
+            assert_eq!(sim.clock_starts, 1, "{case}");
+        }
+    }
+}
+
+#[test]
 fn one_animation_alone_draws_exactly_as_before() {
     for fps in [24, 25, 30, 60] {
         for late in [Late::Little, Late::Realistic] {
