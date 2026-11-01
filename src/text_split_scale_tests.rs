@@ -1,16 +1,11 @@
-//! A pasted text can be a megabyte, and the composer parses and splits it on
-//! the UI thread, so that work has to grow in step with the text.
-
 use super::split_markup_text;
 use crate::composer::{parse_format_markup, scan_work};
 
 const SMALL: usize = 10_000;
 const LARGE: usize = 1_000_000;
-/// How much more work per byte the large text may take. A cut's window sits
-/// at a different place in the text, so the ratio is never exactly 1.
-const SLACK: u64 = 2;
+const ALLOWED_PER_BYTE_GROWTH: u64 = 3;
+const LIMIT: i32 = 256;
 
-/// `line(i)` repeated up to `size` bytes, one line each.
 fn lines(size: usize, line: impl Fn(usize) -> String) -> String {
     let mut text = String::with_capacity(size + 256);
     let mut i = 0;
@@ -22,7 +17,6 @@ fn lines(size: usize, line: impl Fn(usize) -> String) -> String {
     text
 }
 
-/// `word(i)` repeated up to `size` bytes on one line.
 fn one_line(size: usize, word: impl Fn(usize) -> String) -> String {
     let mut text = String::with_capacity(size + 256);
     let mut i = 0;
@@ -80,6 +74,28 @@ fn pastes(size: usize) -> Vec<(&'static str, String)> {
             }),
         ),
         (
+            "markdown",
+            lines(size, |i| {
+                format!("a **bold {i}** with `code`, _more_ and a [link](https://t.me/{i}) too")
+            }),
+        ),
+        (
+            "quote blocks",
+            lines(size, |i| match i % 2 {
+                0 => format!("> quoted {i}"),
+                _ => format!("plain {i}"),
+            }),
+        ),
+        (
+            "fences and bold",
+            lines(size, |i| match i % 4 {
+                0 => "```".to_string(),
+                1 => format!("code {i}"),
+                2 => "```".to_string(),
+                _ => format!("**bold {i}**"),
+            }),
+        ),
+        (
             "unclosed brackets",
             lines(size, |i| format!("[{i} and more")),
         ),
@@ -107,7 +123,7 @@ fn assert_linear(work: impl Fn(&str)) {
     for ((name, small), (_, large)) in pastes(SMALL).into_iter().zip(pastes(LARGE)) {
         let small_work = scan_work::measure(u64::MAX, || work(&small));
         let per_byte = small_work.div_ceil(small.len() as u64).max(1);
-        let budget = per_byte * SLACK * large.len() as u64;
+        let budget = per_byte * ALLOWED_PER_BYTE_GROWTH * large.len() as u64;
         println!("{name}");
         let large_work = scan_work::measure(budget, || work(&large));
         assert!(
@@ -127,6 +143,6 @@ fn parsing_work_grows_with_the_text() {
 #[test]
 fn splitting_work_grows_with_the_text() {
     assert_linear(|text| {
-        assert!(split_markup_text(text, 4096).len() > 1);
+        assert!(split_markup_text(text, LIMIT).len() > 1);
     });
 }

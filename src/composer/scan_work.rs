@@ -1,6 +1,3 @@
-//! How many bytes the markup code looks at, counted in tests so they can pin
-//! how that work grows with the text. Compiles to nothing elsewhere.
-
 #[cfg(test)]
 thread_local! {
     static SCANNED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -19,8 +16,6 @@ pub(crate) fn add(bytes: usize) {
     let _ = bytes;
 }
 
-/// The bytes `work` looked at. It panics as soon as they pass `budget`, so a
-/// runaway scan fails at once instead of running for minutes.
 #[cfg(test)]
 pub(crate) fn measure(budget: u64, work: impl FnOnce()) -> u64 {
     SCANNED.set(0);

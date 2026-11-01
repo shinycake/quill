@@ -22,12 +22,13 @@ pub(crate) mod markup_boundary;
 pub use markup_boundary::strip_barrier;
 #[cfg(test)]
 mod markup_boundary_tests;
-pub(crate) mod scan_work;
+mod markup_parser;
 mod media_options;
 mod media_prep;
 mod placeholder;
 mod reply;
 pub mod reply_item;
+pub(crate) mod scan_work;
 mod send;
 mod shortcuts;
 
@@ -58,8 +59,9 @@ pub use edit_media_tools::{
 pub use markup::{
     ComposerEntity, FormatAction, FormatKind, apply_format_markup, clear_format_markup,
     custom_emoji_markup, date_link, date_link_time, entities_to_markup, find_urls, mention_user_id,
-    parse_format_markup,
 };
+pub use markup_parser::parse_format_markup;
+pub(crate) use markup_parser::{MarkupScanner, Seam};
 pub use media_options::{
     AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, MediaSendOptions, PAID_MEDIA_MAX_STARS,
     PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoScaleTimedOut, PriceInput, can_use_high_quality,
