@@ -9,7 +9,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::{HistoryState, Session};
+use crate::state::{HistoryState, ReaderPosition, Session};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -249,9 +249,10 @@ impl Sim {
             .get(&chat.0)
             .and_then(HistoryState::oldest_id)
             .filter(|_| self.edge == Edge::Top);
-        self.driver
-            .session
-            .note_history_reader((chat.0, None, 0), top.map(|id| id.0));
+        self.driver.session.note_history_reader(
+            (chat.0, None, 0),
+            top.map_or(ReaderPosition::Tail, |top| ReaderPosition::Away { top }),
+        );
         if rows == 0 {
             // The empty pane asks for its first page (`conversation_part1`).
             if !self.driver.session.history_loading(chat) {

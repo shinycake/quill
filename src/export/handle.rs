@@ -62,7 +62,7 @@ impl Tdlib for ChannelTdlib {
         }
     }
 
-    fn post(&mut self, request: Value) {
+    fn post_unanswered(&mut self, request: Value) {
         if self.requests.send(request).is_ok() {
             crate::wake::UPDATES.poke();
         }
@@ -99,9 +99,7 @@ impl WorkerLink {
         (link, worker)
     }
 
-    /// Whether the worker's next request may go out: requests wait for the
-    /// one before, but a cancelled worker's last one stops that one.
-    pub fn may_send(&self) -> bool {
+    pub fn idle_or_cancelled(&self) -> bool {
         self.pending.is_none() || self.cancelled.load(Ordering::Acquire)
     }
 

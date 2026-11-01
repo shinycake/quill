@@ -208,6 +208,10 @@ fn user(id: i64) -> Value {
 }
 
 impl Tdlib for Account {
+    fn post_unanswered(&mut self, request: Value) {
+        let _ = self.call(request, Duration::ZERO);
+    }
+
     fn call(&mut self, request: Value, _timeout: Duration) -> Result<Value, ExportError> {
         let method = request["@type"].as_str().unwrap().to_string();
         self.calls.push(method.clone());

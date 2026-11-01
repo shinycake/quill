@@ -17,6 +17,12 @@ pub const ICON_SIZE: u32 = 128;
 
 pub const ICON_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
+#[derive(Debug, Clone, Copy)]
+pub enum IconSweep {
+    WrittenBefore(SystemTime),
+    Everything,
+}
+
 pub fn icon_cache_dir() -> Option<PathBuf> {
     directories::ProjectDirs::from("org", "shinycake", crate::settings::APP_DIR_NAME)
         .map(|dirs| dirs.cache_dir().join("notify-avatars"))
@@ -81,16 +87,17 @@ fn is_icon_name(name: &OsStr) -> bool {
         .is_some_and(|stem| stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Delete the icons in `dir` last written before `cutoff`, or all of them
-/// without one. Anything else in the folder stays.
-pub fn sweep_icons(dir: &Path, cutoff: Option<SystemTime>) {
+pub fn sweep_icons(dir: &Path, sweep: IconSweep) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
-        let expired = || {
-            let written = entry.metadata().and_then(|meta| meta.modified());
-            cutoff.is_none_or(|cutoff| written.is_ok_and(|written| written < cutoff))
+        let expired = || match sweep {
+            IconSweep::Everything => true,
+            IconSweep::WrittenBefore(cutoff) => entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|written| written < cutoff),
         };
         if is_icon_name(&entry.file_name()) && expired() {
             let _ = std::fs::remove_file(entry.path());
@@ -98,25 +105,22 @@ pub fn sweep_icons(dir: &Path, cutoff: Option<SystemTime>) {
     }
 }
 
-fn sweep_in_background(cutoff: Option<SystemTime>) {
+fn sweep_in_background(sweep: IconSweep) {
     if let Some(dir) = icon_cache_dir() {
         let _ = crate::thread_guard::spawn_guarded("quill-icon-sweep", move || {
-            sweep_icons(&dir, cutoff);
+            sweep_icons(&dir, sweep);
         });
     }
 }
 
-/// At startup, off the main thread: drop icons past [`ICON_MAX_AGE`].
 pub fn sweep_old_icons() {
     if let Some(cutoff) = SystemTime::now().checked_sub(ICON_MAX_AGE) {
-        sweep_in_background(Some(cutoff));
+        sweep_in_background(IconSweep::WrittenBefore(cutoff));
     }
 }
 
-/// An account left this device: the folder is shared, so every icon goes,
-/// and those of the other accounts are rendered again.
 pub fn clear_icons() {
-    sweep_in_background(None);
+    sweep_in_background(IconSweep::Everything);
 }
 
 #[cfg(test)]
@@ -142,12 +146,12 @@ mod tests {
         let folder = dir.join("0011223344556677.png");
         std::fs::create_dir_all(&folder).unwrap();
 
-        sweep_icons(&dir, now.checked_sub(ICON_MAX_AGE));
+        sweep_icons(&dir, IconSweep::WrittenBefore(now - ICON_MAX_AGE));
         assert!(!old.exists());
         assert!(fresh.exists());
         assert!(unrelated.exists());
 
-        sweep_icons(&dir, None);
+        sweep_icons(&dir, IconSweep::Everything);
         assert!(!fresh.exists(), "a clear takes every icon");
         assert!(unrelated.exists());
         assert!(folder.exists());
@@ -156,7 +160,7 @@ mod tests {
 
     #[test]
     fn a_missing_folder_is_nothing_to_sweep() {
-        sweep_icons(Path::new("/definitely/not/here"), None);
+        sweep_icons(Path::new("/definitely/not/here"), IconSweep::Everything);
     }
 
     #[test]

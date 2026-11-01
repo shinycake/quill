@@ -457,8 +457,7 @@ pub struct TopicHistory {
     /// stale page cannot bring them back, and the composer reads them as
     /// "the message is gone" (`Session::message_deleted`).
     pub tombstones: HashSet<i64>,
-    /// As [`HistoryState::reader_top`].
-    pub reader_top: Option<i64>,
+    pub reader: ReaderPosition,
 }
 
 impl Default for TopicHistory {
@@ -469,7 +468,7 @@ impl Default for TopicHistory {
             loaded_complete: false,
             total_count: 0,
             tombstones: HashSet::new(),
-            reader_top: None,
+            reader: ReaderPosition::Tail,
         }
     }
 }

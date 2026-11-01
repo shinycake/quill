@@ -385,6 +385,10 @@ impl Tdlib for FakeTdlib {
         self.seen.push(kind);
         Ok((self.answers)(&request))
     }
+
+    fn post_unanswered(&mut self, request: Value) {
+        let _ = self.call(request, Duration::ZERO);
+    }
 }
 
 fn request(base: &Path) -> RichHtmlRequest {
@@ -508,6 +512,8 @@ fn a_failed_or_cancelled_export_leaves_no_folder() {
                 _ => Err(ExportError::Cancelled),
             }
         }
+
+        fn post_unanswered(&mut self, _: Value) {}
     }
     let result = worker::run(&request(&base), &mut Cancelling, dir.path(), &date);
     assert!(matches!(result, Err(ExportError::Cancelled)));

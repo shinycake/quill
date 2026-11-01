@@ -63,10 +63,7 @@ impl From<serde_json::Error> for ExportError {
 pub trait Tdlib {
     fn call(&mut self, request: Value, timeout: Duration) -> Result<Value, ExportError>;
 
-    /// A cancelled worker's last request, which nothing waits on.
-    fn post(&mut self, request: Value) {
-        let _ = self.call(request, QUERY_TIMEOUT);
-    }
+    fn post_unanswered(&mut self, request: Value);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,9 +196,6 @@ fn nothing_held(file: &Value) -> bool {
         && local.at("downloaded_size").as_i64() == Some(0)
 }
 
-/// Download a file through TDLib and return where it is, or why it is left
-/// out. Only TDLib's own files are ever returned: a path outside its
-/// directory is refused. `limit` applies to the real size once known.
 pub(crate) fn fetch_file<T: Tdlib>(
     tdlib: &mut T,
     files_root: &Path,
@@ -223,7 +217,7 @@ pub(crate) fn fetch_file<T: Tdlib>(
     );
     let answer = match download {
         Err(ExportError::Cancelled) if only_for_export => {
-            tdlib.post(json!({"@type": "cancelDownloadFile", "file_id": file_id,
+            tdlib.post_unanswered(json!({"@type": "cancelDownloadFile", "file_id": file_id,
                 "only_if_pending": false}));
             return Err(ExportError::Cancelled);
         }

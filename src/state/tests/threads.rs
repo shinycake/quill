@@ -656,7 +656,7 @@ fn a_thread_reader_near_the_top_keeps_the_root_and_the_tail_waits() {
     let cap = crate::state::HISTORY_WINDOW_CAP as i64;
     let (mut session, sink, seq) = long_thread(40 + cap - 1);
     let key = (14, None, 40);
-    session.note_history_reader(key, Some(45));
+    session.note_history_reader(key, ReaderPosition::Away { top: MessageId(45) });
     apply_json(&mut session, &seq, &sink, &reply(40 + cap));
     let thread = session.thread_for_chat(ChatId(14)).unwrap();
     assert!(thread.history.loaded_complete, "the rows above stay");

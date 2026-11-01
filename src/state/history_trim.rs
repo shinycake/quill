@@ -11,11 +11,6 @@
 //! - a newer page landed (the viewport is at the newest end): the oldest
 //!   messages go and `loaded_complete` clears, so scrolling up pages them
 //!   in again.
-//!
-//! A trim never changes the end the viewport is on, so scroll anchoring
-//! needs no reset and `window_epoch` is deliberately not bumped (that would
-//! re-anchor to the bottom / unread divider and yank the reader); every
-//! path that really replaces the window (`reset_window`) still bumps it.
 use super::*;
 
 /// Messages kept in one chat's window before the far end is trimmed.
@@ -36,6 +31,13 @@ pub enum WindowEnd {
 struct LiveTrimSpan {
     oldest: usize,
     newest: usize,
+}
+
+fn rows_above(messages: &HistoryMessages, reader: ReaderPosition) -> Option<usize> {
+    match reader {
+        ReaderPosition::Tail => None,
+        ReaderPosition::Away { top } => Some(messages.range(..top.0).count()),
+    }
 }
 
 fn live_trim_span(len: usize, rows_above_reader: Option<usize>) -> LiveTrimSpan {
@@ -100,10 +102,7 @@ impl HistoryState {
 
     fn trim_live(&mut self) -> usize {
         let len = self.messages.len();
-        let above = self
-            .reader_top
-            .map(|top| self.messages.range(..top).count());
-        let span = live_trim_span(len, above);
+        let span = live_trim_span(len, rows_above(&self.messages, self.reader));
         let dropped = self.trim_window_end(WindowEnd::Oldest, 0, len - span.oldest);
         dropped + self.trim_window_end(WindowEnd::Newest, 0, len - dropped - span.newest)
     }
@@ -112,10 +111,8 @@ impl HistoryState {
 impl TopicHistory {
     fn trim_live(&mut self) -> usize {
         let len = self.messages.len();
-        let above = self
-            .reader_top
-            .map(|top| self.messages.range(..top).count());
-        self.trim_to_tail(len - live_trim_span(len, above).oldest)
+        let span = live_trim_span(len, rows_above(&self.messages, self.reader));
+        self.trim_to_tail(len - span.oldest)
     }
 }
 
@@ -181,13 +178,11 @@ impl ThreadView {
     }
 
     pub(crate) fn trim_live(&mut self) -> Vec<WindowEnd> {
-        let messages = &self.history.messages;
-        let len = messages.len();
-        let above = self
-            .history
-            .reader_top
-            .map(|top| messages.range(..top).count());
-        let span = live_trim_span(len, above);
+        let history = &self.history;
+        let span = live_trim_span(
+            history.messages.len(),
+            rows_above(&history.messages, history.reader),
+        );
         let mut moved = Vec::new();
         for (end, count) in [
             (WindowEnd::Oldest, span.oldest),
@@ -228,27 +223,29 @@ impl Session {
         }
     }
 
-    /// Where the reader of the history `key` is: `top`, the message at the
-    /// top of the screen, or `None` at the tail.
-    pub fn note_history_reader(&mut self, (chat, topic, thread): ScrollKey, top: Option<i64>) {
+    pub fn note_history_reader(
+        &mut self,
+        (chat, topic, thread): ScrollKey,
+        position: ReaderPosition,
+    ) {
         let reader = if thread != 0 {
             self.threads
                 .thread
                 .as_mut()
                 .filter(|view| view.chat_id.0 == chat && view.thread_id == thread)
-                .map(|view| &mut view.history.reader_top)
+                .map(|view| &mut view.history.reader)
         } else if let Some(topic) = topic {
             self.threads
                 .topic_histories
                 .get_mut(&(chat, topic))
-                .map(|history| &mut history.reader_top)
+                .map(|history| &mut history.reader)
         } else {
             self.histories
                 .get_mut(&chat)
-                .map(|history| &mut history.reader_top)
+                .map(|history| &mut history.reader)
         };
         if let Some(reader) = reader {
-            *reader = top;
+            *reader = position;
         }
     }
 }

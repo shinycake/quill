@@ -63,8 +63,7 @@ fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) 
 
 /// Collect `child` once it exits by itself, so it does not stay behind as a
 /// zombie until Quill quits. Never kills: whatever `open` or `xdg-open`
-/// started may stay in the foreground. The returned receiver hears (or
-/// disconnects) once the child is gone.
+/// started may stay in the foreground.
 pub fn wait_in_background(mut child: Child) -> Receiver<()> {
     let (done, notice) = sync_channel(1);
     let _ = crate::thread_guard::spawn_guarded("quill-child-wait", move || {

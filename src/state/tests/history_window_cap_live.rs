@@ -3,7 +3,8 @@
 use super::common::session;
 use super::{
     ChatId, FileId, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
-    MessageContent, MessageId, ParsedFile, ParsedMessage, Session, WindowEnd, history_message,
+    MessageContent, MessageId, ParsedFile, ParsedMessage, ReaderPosition, Session, WindowEnd,
+    history_message,
 };
 use crate::telegram::LocalFileState;
 
@@ -102,7 +103,12 @@ fn a_reader_in_the_middle_keeps_their_rows_while_old_ones_go() {
     session.open_chat(ChatId(7));
     let cap = HISTORY_WINDOW_CAP as i64;
     feed_live(&mut session, 7, 1..=cap);
-    session.note_history_reader((7, None, 0), Some(1_000));
+    session.note_history_reader(
+        (7, None, 0),
+        ReaderPosition::Away {
+            top: MessageId(1_000),
+        },
+    );
     feed_live(&mut session, 7, cap + 1..=cap + 1);
     let history = &session.histories[&7];
     assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
@@ -121,7 +127,7 @@ fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_tail_waits() {
     let cap = HISTORY_WINDOW_CAP as i64;
     feed_live(&mut session, 7, 1..=cap);
     session.histories.get_mut(&7).unwrap().loaded_complete = true;
-    session.note_history_reader((7, None, 0), Some(50));
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(50) });
     feed_live(&mut session, 7, cap + 1..=cap + 1);
     assert_eq!(session.histories[&7].oldest_id(), Some(MessageId(1)));
     assert!(session.histories[&7].loaded_complete);
@@ -141,7 +147,7 @@ fn a_trim_at_the_tail_never_takes_a_send_in_flight() {
     let mut sending = live(7, cap + 1, Vec::new());
     sending.is_outgoing = true;
     session.upsert_message(sending, true);
-    session.note_history_reader((7, None, 0), Some(1));
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(1) });
     feed_live(&mut session, 7, cap + 2..=cap + 2);
     let history = &session.histories[&7];
     assert!(history.contains(MessageId(cap + 1)));
@@ -208,10 +214,10 @@ fn reply_strips_of_a_loaded_topic_stay() {
 fn a_reopened_chat_starts_at_the_tail_again() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(7));
-    session.note_history_reader((7, None, 0), Some(5));
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(5) });
     session.open_chat(ChatId(8));
     session.open_chat(ChatId(7));
-    assert_eq!(session.histories[&7].reader_top, None);
+    assert_eq!(session.histories[&7].reader, ReaderPosition::Tail);
 }
 
 #[test]
@@ -229,7 +235,12 @@ fn a_forum_topic_on_screen_drops_only_rows_above_its_reader() {
     assert_eq!(topic.messages.keys().last(), Some(&(cap + 1)));
     assert_eq!(topic.next_from_message_id, MessageId(cap + 2 - 1200));
 
-    session.note_history_reader((7, Some(3), 0), Some(cap + 2 - 1200 + 5));
+    session.note_history_reader(
+        (7, Some(3), 0),
+        ReaderPosition::Away {
+            top: MessageId(cap + 2 - 1200 + 5),
+        },
+    );
     for id in cap + 2..=cap + 400 {
         let mut message = live(7, id, Vec::new());
         message.topic_id = Some(3);

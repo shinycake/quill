@@ -1,5 +1,3 @@
-//! macOS's Dock menu and an OS logout terminate the app without passing
-//! through here: GPUI offers no way to refuse them.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
