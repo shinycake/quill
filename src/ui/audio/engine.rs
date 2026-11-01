@@ -593,7 +593,6 @@ impl AudioEngine {
 
     /// A seek is waiting on the audio thread (or on `settle`); the position
     /// is its target until then.
-    #[cfg(test)]
     pub(in crate::ui) fn seek_pending(&self) -> bool {
         self.track
             .as_ref()
@@ -794,6 +793,8 @@ impl AudioEngine {
     /// no longer where the track is (seek while paused, failed start), or
     /// from the top when it ended. On an error the state is what it was.
     pub(in crate::ui) fn resume(&mut self, offset_secs: f64) -> Result<(), AudioError> {
+        // The progress tick sleeps while the track is paused.
+        quill::wake::CHROME.poke();
         self.settle();
         let now = self.sim_now();
         if let Some(clock) = self.sim_clock.as_mut() {
@@ -843,6 +844,7 @@ impl AudioEngine {
         offset_secs: f64,
         playing: bool,
     ) -> Result<(), AudioError> {
+        quill::wake::CHROME.poke();
         self.settle();
         let moved = self.seek_to(offset_secs, playing);
         self.note(&moved);

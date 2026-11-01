@@ -11,6 +11,15 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+
+/// How often the progress tick runs while a track plays.
+const PLAYBACK_TICK: Duration = Duration::from_millis(250);
+
+#[cfg(test)]
+thread_local! {
+    /// Passes of the progress tick on this thread, for tests.
+    pub(super) static TICK_PASSES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::Session;
@@ -291,31 +300,51 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// 250 ms progress tick while a track is active: re-renders so the seek
-    /// bar follows the sound, and ends the track when the sound ran out.
+    /// Progress tick while a track is active: every 250 ms while it plays,
+    /// so the seek bar follows the sound and the track ends when the sound
+    /// ran out. A paused track waits for `wake::CHROME` alone: a media key
+    /// (`media_session`), a change to the chat list that may move Previous
+    /// or Next, or a resume or seek (`AudioEngine`).
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
         if self.playback.tick {
+            // A new track on a paused tick: it plays now.
+            quill::wake::CHROME.poke();
             return;
         }
         self.playback.tick = true;
         self.playback.tick_shown = None;
         Self::spawn_main(cx, async move |this, cx| {
+            let mut wait = Some(PLAYBACK_TICK);
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-                let cont = this
+                let seen = quill::wake::CHROME.epoch();
+                match wait {
+                    Some(wait) => {
+                        super::wake_wait::sleep_or_wake(
+                            cx.background_executor(),
+                            &quill::wake::CHROME,
+                            seen,
+                            wait,
+                        )
+                        .await
+                    }
+                    None => {
+                        let _ = quill::wake::CHROME.wait_since(seen).await;
+                    }
+                }
+                let next = this
                     .update(cx, |this, cx| {
+                        #[cfg(test)]
+                        TICK_PASSES.with(|passes| passes.set(passes.get() + 1));
                         let active = this.active_playback_id().is_some();
                         if !active {
                             quill::media_session::publish(None);
-                            return false;
+                            return None;
                         }
                         // Media keys and the OS Now Playing widget.
                         this.drain_media_commands(cx);
                         if this.active_playback_id().is_none() {
                             quill::media_session::publish(None);
-                            return false;
+                            return None;
                         }
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
@@ -355,12 +384,14 @@ impl QuillApp {
                         } else if moved {
                             this.notify_playback_position(cx);
                         }
-                        true
+                        Some((!this.playback.held_paused()).then_some(PLAYBACK_TICK))
                     })
-                    .unwrap_or(false);
-                if !cont {
+                    .ok()
+                    .flatten();
+                let Some(next) = next else {
                     break;
-                }
+                };
+                wait = next;
             }
             let _ = this.update(cx, |this, _| {
                 this.playback.tick = false;
@@ -679,3 +710,8 @@ fn audio_error_text(error: super::audio::AudioError) -> String {
     }
     .to_string()
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "audio_playback_tick_tests.rs"]
+mod tick_tests;
