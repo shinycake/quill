@@ -157,7 +157,7 @@ struct LookaheadParserHandler
 
     bool Invalid()
     {
-        return state == kError;
+        return state == kError || !reader.IterativeParseComplete();  //QUILL
     }
 
     bool enterObject();

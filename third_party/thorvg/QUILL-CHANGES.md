@@ -9,9 +9,10 @@ Background: `docs/decisions/thorvg-sticker-renderer.md`.
 Sticker files come from any chat. `src/sticker_playback/lottie_check.rs` checks a
 document's structure before ThorVG reads it. These changes hold the same limits
 for what only exists once a frame is evaluated, make a value of the wrong type end
-the parse, as in rlottie, and define the loader's handling of optional fields and
-odd values. Real stickers stay far below every limit here. Their pixels do not
-change, apart from the text that the parser below no longer reads.
+the parse, as in rlottie, make a load read the document to its end, and define the
+loader's handling of optional fields and odd values. Real stickers stay far below
+every limit here. Their pixels do not change, apart from the text that the parser
+below no longer reads.
 
 ## Changes
 
@@ -26,7 +27,7 @@ clamped. A dash array keeps its first 64 entries.
 `src/loaders/lottie/tvgLottieParserHandler.cpp`, `tvgLottieParserHandler.h`: an
 integer written as a float reads as that number, and one past an `int` stops inside
 its limits, so a field read as a number minus one stays in range. The first value
-of the wrong type ends the parse.
+of the wrong type ends the parse, and a load has to read the document to its end.
 
 `src/loaders/lottie/tvgLottieBuilder.cpp`: a composition builds once and is used
 only when finished, and only a composition asset can back a precomp. A matte chain

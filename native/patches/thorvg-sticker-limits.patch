@@ -553,10 +553,10 @@ index e0933642f..41a9c7670 100644
          return result;
      }
 diff --git a/src/loaders/lottie/tvgLottieParserHandler.h b/src/loaders/lottie/tvgLottieParserHandler.h
-index 348f3ec81..899f10bb8 100644
+index 348f3ec81..1e3a21430 100644
 --- a/src/loaders/lottie/tvgLottieParserHandler.h
 +++ b/src/loaders/lottie/tvgLottieParserHandler.h
-@@ -152,8 +152,7 @@ struct LookaheadParserHandler
+@@ -152,13 +152,12 @@ struct LookaheadParserHandler
      void Error()
      {
          TVGERR("LOTTIE", "Invalid JSON: unexpected or misaligned data fields.");
@@ -566,6 +566,12 @@ index 348f3ec81..899f10bb8 100644
      }
  
      bool Invalid()
+     {
+-        return state == kError;
++        return state == kError || !reader.IterativeParseComplete();  //QUILL
+     }
+ 
+     bool enterObject();
 diff --git a/src/renderer/cpu_engine/tvgSwCommon.h b/src/renderer/cpu_engine/tvgSwCommon.h
 index 4cd4d9934..601bee93d 100644
 --- a/src/renderer/cpu_engine/tvgSwCommon.h

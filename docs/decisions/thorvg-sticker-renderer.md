@@ -72,16 +72,17 @@ premultiplied pixels; they are straight now too.
 cap, size 1 to 4096, frame rate 1 to 120, at most 30 s, no external image assets,
 then the structural limits in `src/sticker_playback/lottie_check.rs` over the
 parsed JSON. It always hands ThorVG the document serialized from the value it
-checked, and two rules keep their readings the same: the check refuses a document,
-from the root down, unless every key and string is plain text, and a value of the
-wrong type ends ThorVG's parse, as it does in rlottie. Metadata Quill never uses is
-skipped, as rlottie does, so an odd value there costs no sticker. Both load paths
-(the player and `decode_tgs_sized`) go through it. A refused file shows as a
-sticker that failed to load. The ThorVG side of the limits, for values only known
-while a frame is evaluated, is in `third_party/thorvg/QUILL-CHANGES.md`.
+checked, and three rules keep their readings the same. The check refuses a
+document, from the root down, unless every key and string is plain text. A value of
+the wrong type ends ThorVG's parse, as it does in rlottie. A load has to read the
+document to its end. Metadata Quill never uses is skipped, as rlottie does, so an
+odd value there costs no sticker. Both load paths (the player and
+`decode_tgs_sized`) go through it. A refused file shows as a sticker that failed to
+load. The ThorVG side of the limits, for values only known while a frame is
+evaluated, is in `third_party/thorvg/QUILL-CHANGES.md`.
 
-rlottie keeps what it read before that value and draws it, while Quill shows a
-sticker that failed to load.
+rlottie keeps what it read before a value of the wrong type and draws it, while
+Quill shows a sticker that failed to load.
 
 ThorVG reads no text layers, fonts, glyphs or slots. rlottie never drew text
 (`createLayerItem` has no case for it), so tdesktop shows nothing for those layers
