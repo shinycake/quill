@@ -173,15 +173,11 @@ pub(crate) fn parse_message_contact(value: &Value) -> (MessageContent, Vec<Parse
         .unwrap_or("")
         .to_string();
     let first_name = contact
-        .and_then(|v| v.get("first_name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .map(|v| json_name_str(v, "first_name"))
+        .unwrap_or_default();
     let last_name = contact
-        .and_then(|v| v.get("last_name"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+        .map(|v| json_name_str(v, "last_name"))
+        .unwrap_or_default();
     if contact.is_none_or(Value::is_null)
         || (phone_number.is_empty() && first_name.is_empty() && last_name.is_empty())
     {

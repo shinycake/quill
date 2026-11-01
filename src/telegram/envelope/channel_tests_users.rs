@@ -370,3 +370,30 @@ fn names_drop_stacked_marks_and_tag_characters_when_parsed() {
         _ => panic!("not a title update"),
     }
 }
+
+#[test]
+fn contact_call_and_invite_titles_drop_marks_and_tags_when_parsed() {
+    let zalgo = "Ada\u{301}\u{302}\u{303}\u{304}\u{305}";
+    let tagged = "Love\u{E0041}\u{E0042}lace";
+    let contact = serde_json::json!({"@type": "messageContact", "contact":
+        {"phone_number": "1", "first_name": zalgo, "last_name": tagged, "vcard": "", "user_id": 0}});
+    match parse_message_contact(&contact).0 {
+        MessageContent::Contact(card) => {
+            assert_eq!(card.first_name, "Ada\u{301}\u{302}");
+            assert_eq!(card.last_name, "Lovelace");
+        }
+        other => panic!("not a contact: {other:?}"),
+    }
+    let call = serde_json::json!({"@type": "groupCall", "id": 4, "title": tagged});
+    assert_eq!(
+        parse_group_call(Some(&call)).map(|call| call.title),
+        Some("Lovelace".to_string())
+    );
+    let invite = serde_json::json!({"@type": "chatInviteLinkInfo", "title": zalgo});
+    match parse_envelope(&invite.to_string()).unwrap().payload {
+        EnvelopePayload::Groups(GroupsPayload::ChatInviteLinkInfo { title, .. }) => {
+            assert_eq!(title, "Ada\u{301}\u{302}");
+        }
+        _ => panic!("not an invite preview"),
+    }
+}
