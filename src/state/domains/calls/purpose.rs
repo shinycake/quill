@@ -13,8 +13,9 @@ pub enum CallsPurpose {
     /// itself carries no `is_video` (schema 1.8.67, :7034).
     CreateCall { is_video: bool },
     /// Phase C1: `acceptCall`. Response is `ok`; the answered state
-    /// arrives as `updateCall`.
-    AcceptCall,
+    /// arrives as `updateCall`. `call_id` ties a failure to the call it
+    /// answered, which a later call may have replaced.
+    AcceptCall { call_id: i32 },
     /// Phase C2b: `sendCallSignalingData`. Response is `ok`; this is a
     /// fire-and-forget bridge from the call engine to TDLib.
     SendCallSignalingData,
@@ -166,7 +167,6 @@ pub enum CallsPurpose {
 }
 
 flat_purposes!(Calls(CallsPurpose) {
-    AcceptCall,
     SendCallSignalingData,
     DiscardCall,
     SendCallRating,

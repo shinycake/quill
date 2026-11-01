@@ -52,6 +52,18 @@ after the close is queued with `awaitClose` and runs when
   - `close_all_within(deadline)` is for quit. All clients share one
     deadline, with a 5 ms sleep between rounds. Clients still open at the
     deadline are finished and also marked unconfirmed.
+  - A client in a call ends it first. tdesktop's `Instance::isQuitPrevent`
+    hangs up unless the call is still ringing in, and holds quit up to
+    1500 ms. Here `begin_close` sends `discardCall` or `leaveGroupCall`,
+    and `close` follows once the terminal `updateCall` or the `ok` arrives,
+    or after `HANG_UP_HOLD` (500 ms), which leaves `close` the rest of
+    `QUIT_CLOSE_DEADLINE`. `discardCall` answers before the server has
+    heard it, so the hold waits for the state, not the answer. tdesktop's
+    group call has no leave on quit in practice: it destroys its sessions
+    first. Quill sends one anyway, so the voice chat does not list you
+    until the server drops you. An account switch closes a client in a
+    call the same way. tdesktop keeps that call going on the old session;
+    Quill's call UI reads the client on screen, so it hangs up instead.
 - `LiveConnect` implements `Closable` through `begin_close_bridged` and
   `drain_bridged`. Both are generic over the sender, so the tests run the
   same code on a routed `ReceiveBridge`.

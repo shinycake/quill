@@ -1,5 +1,6 @@
 //! Call state types: 1:1 and group calls.
 use super::*;
+use std::sync::Arc;
 
 /// Phase C1: the tracked live call (signaling only — no media
 /// transport; real audio/video is the C2 libtgvoip spike). States
@@ -149,7 +150,7 @@ pub struct ActiveGroupCall {
     /// Sorted: recent speakers first (in `recent_speakers` order),
     /// then by `order` descending (lexicographic — schema: "The
     /// bigger is order, the higher is user in the list").
-    pub participants: Vec<ParsedGroupCallParticipant>,
+    pub participants: Arc<Vec<ParsedGroupCallParticipant>>,
     /// Recent speakers as last reported by `updateGroupCall` (drives
     /// the participant ordering above).
     pub recent_speaker_order: Vec<MessageSender>,
@@ -304,7 +305,7 @@ impl ActiveGroupCall {
             is_owned: false,
             participant_count: 0,
             loaded_all_participants: false,
-            participants: Vec::new(),
+            participants: Arc::default(),
             recent_speaker_order: Vec::new(),
             is_muted_self: false,
             is_my_video_enabled: false,
@@ -350,7 +351,7 @@ impl ActiveGroupCall {
     /// order), then by `order` descending (lexicographic).
     pub(crate) fn sort_participants(&mut self) {
         let recent = self.recent_speaker_order.clone();
-        self.participants.sort_by(|a, b| {
+        Arc::make_mut(&mut self.participants).sort_by(|a, b| {
             let ra = recent.iter().position(|s| s == &a.participant_id);
             let rb = recent.iter().position(|s| s == &b.participant_id);
             match (ra, rb) {

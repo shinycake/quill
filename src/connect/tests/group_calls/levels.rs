@@ -16,7 +16,10 @@ fn participant(user_id: i64, me: bool, audio_source_id: i32) -> ParsedGroupCallP
 /// Joined call 77: you (ssrc 4242, muted) and user 9 (ssrc 99).
 fn joined(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
     let mut call = tracked_group_call(false, false, false);
-    call.participants = vec![participant(777, true, 4242), participant(9, false, 99)];
+    call.participants = Arc::new(vec![
+        participant(777, true, 4242),
+        participant(9, false, 99),
+    ]);
     driver.session.calls.active_group_call = Some(call);
 }
 

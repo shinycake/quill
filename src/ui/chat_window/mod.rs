@@ -562,9 +562,7 @@ impl QuillApp {
         self.message_ui.pending_delete = None;
         self.message_ui.pending_stop_poll = None;
         self.notify.ttl_picker_open = false;
-        if self.recording_here() {
-            self.cancel_recording(cx);
-        }
+        self.cancel_recording_here(cx);
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
         self.leave_sticker_chat(

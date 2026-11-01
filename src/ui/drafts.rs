@@ -155,9 +155,7 @@ impl QuillApp {
         self.composer_ui.inline_results_open = false;
         self.composer_ui.inline_results_selected = 0;
         self.composer_ui.inline_query_armed = None;
-        if self.recording_here() {
-            self.cancel_recording(cx);
-        }
+        self.cancel_recording_here(cx);
     }
 
     /// Save the composer before the view moves to another chat, topic or

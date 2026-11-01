@@ -9,6 +9,7 @@
 //!   stream keeps running; only the rest end it.
 //! - [`downmix_into`]: any sample format to mono `f32`.
 //! - [`requested_input`]: an engine device name as a cpal device choice.
+//! - [`MicThread`]: a microphone that lives on a thread of its own.
 //!
 //! Design: `docs/decisions/cpal-0-18-rodio-0-23.md`. The tests are in
 //! `src/ui/audio/cpal_stream_tests.rs`, in the app target: CI runs the
@@ -16,9 +17,58 @@
 #![cfg(feature = "ui")]
 #![deny(clippy::indexing_slicing)]
 
+use std::sync::mpsc::{Sender, channel};
 use std::time::{Duration, Instant};
 
 use cpal::{ErrorKind, FromSample, Sample};
+
+use crate::thread_guard::spawn_guarded;
+
+/// A microphone opened, commanded and closed on a thread of its own, as
+/// tdesktop's capture `Instance::Inner` runs on its own `QThread`: the
+/// audio system takes from milliseconds to hundreds of them to answer, and
+/// no window may wait that out. Dropping this handle ends the thread, and
+/// what `open` made closes there.
+pub struct MicThread<C> {
+    commands: Sender<C>,
+}
+
+impl<C: Send + 'static> MicThread<C> {
+    /// Run `open` on a new thread and wait for its answer, so call this
+    /// off the UI thread. The thread then hands what `open` made to
+    /// `command`, once for each [`Self::send`], in order.
+    pub fn open<D>(
+        name: &str,
+        open: impl FnOnce() -> Result<D, String> + Send + 'static,
+        mut command: impl FnMut(&mut D, C) + Send + 'static,
+    ) -> Result<Self, String> {
+        let (commands, inbox) = channel();
+        let (answer, opened) = channel();
+        spawn_guarded(name, move || {
+            let mut device = match open() {
+                Ok(device) => device,
+                Err(err) => {
+                    let _ = answer.send(Err(err));
+                    return;
+                }
+            };
+            let _ = answer.send(Ok(()));
+            for next in inbox {
+                command(&mut device, next);
+            }
+        })
+        .map_err(|err| err.to_string())?;
+        opened
+            .recv()
+            .unwrap_or_else(|_| Err("The microphone thread stopped.".into()))?;
+        Ok(Self { commands })
+    }
+
+    /// Queue `command`. Never waits.
+    pub fn send(&self, command: C) {
+        let _ = self.commands.send(command);
+    }
+}
 
 /// How a running stream takes one error-callback event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
