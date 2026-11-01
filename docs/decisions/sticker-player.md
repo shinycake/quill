@@ -188,8 +188,6 @@ frames a second for 30 pictures.
   draws until there are 8, then a running eighth, and it is tested only
   from the 8th on. The 672 px effect still drops by its 9th draw (75 ms
   at 120 Hz). One 14 ms draw among 0.8 ms ones never does.
-- A clip at its file's rate ticks at twice that rate, capped at the grid:
-  a 30 fps file ticks 60 times a second, a 60 fps file still 120.
 - `QUILL_TRACE_STICKERS` prints how many open clips play at their file's
   rate (`coarse`).
 
@@ -213,10 +211,15 @@ remove the jitter itself and is left for later.
 
 ### Follow-up: ticks that draw nothing new (2026-11-01)
 
-A clip at its file's rate still ticks faster than its frames change (now
-twice its rate, before the display's), so each frame stays up for the same
-number of refreshes. Every tick drew the whole window: 107 window frames a
-second for 30 pictures on a 120 Hz Mac.
+A clip at its file's rate still ticks at the display's rate, so each frame
+stays up for the same number of refreshes. Every tick drew the whole window:
+107 window frames a second for 30 pictures on a 120 Hz Mac.
+
+Ticking such a clip at twice its file's rate instead, which saves the wakes
+too, gave 86% of frames their 4 refreshes where the display's rate gave 100%,
+with 8 frames in 118 held 3 and 8 held 5. The clock runs free at 92% of a
+frame, so at that rate a tick and a frame's start beat against each other. A
+tick that draws nothing costs almost nothing, so the wakes were not worth it.
 
 The clock now asks an animation layer before it notifies it whether a
 draw before the next refresh would change anything: any clock-driven

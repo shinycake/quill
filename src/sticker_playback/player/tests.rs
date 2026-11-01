@@ -127,23 +127,29 @@ fn heads_painted_with_jitter_show_every_frame_once_at_any_phase() {
     }
 }
 
-/// A view of `tl` ticked on every refresh of a 120 Hz display for a
-/// second, painted only when its frame changes. Each tick comes up to a
-/// refresh before the paint it causes, so it asks about that refresh's end.
-/// The refreshes it painted on, and those it showed a new frame on.
-fn paints_when_changed(tl: Timeline, high_rate: bool) -> (Vec<u32>, Vec<u32>) {
+/// A view of `tl` painted for a second on a 120 Hz display, on the
+/// refreshes where a clock running free at `tick_fps` found its frame
+/// changing. A tick asks about the refresh after it, and at display rates
+/// the clock's wait is 92% of a frame (`frame_clock::tick_period`). The
+/// refreshes it painted on, and those it showed a new frame on.
+fn paints_when_changed(tl: Timeline, high_rate: bool, tick_fps: f64) -> (Vec<u32>, Vec<u32>) {
     let t0 = Instant::now();
     let refresh = Duration::from_secs_f64(1.0 / 120.0);
+    let tick_every = Duration::from_secs_f64(0.92 / tick_fps);
     let mut head = PlayHead::default();
     head.start(t0);
     let mut shown = Some(0);
+    let mut tick = t0 + tick_every;
     let (mut paints, mut changes) = (Vec::new(), Vec::new());
     for vsync in 1..=120u32 {
         let paint = t0 + refresh * vsync + Duration::from_micros(u64::from(vsync * 37 % 900));
-        let tick = paint
-            .checked_sub(refresh * (vsync * 53 % 97 + 1) / 98)
-            .unwrap();
-        if !head.changes_at(tick + refresh, shown, PlayMode::Loop, tl, high_rate, 120.0) {
+        let mut changing = false;
+        while tick <= paint {
+            changing |=
+                head.changes_at(tick + refresh, shown, PlayMode::Loop, tl, high_rate, 120.0);
+            tick += tick_every;
+        }
+        if !changing {
             continue;
         }
         paints.push(vsync);
@@ -169,16 +175,22 @@ fn gaps(at: &[u32]) -> Vec<u32> {
 
 #[test]
 fn a_clip_at_its_files_rate_paints_only_for_its_own_frames() {
-    // 30 fps on a 120 frame grid, shown at the file's rate.
-    let (paints, changes) = paints_when_changed(timeline(480, 30.0, 4), false);
-    assert_eq!(changes.len(), 30, "{changes:?}");
-    assert!(gaps(&changes).iter().all(|gap| *gap == 4), "{changes:?}");
-    assert!(paints.len() <= 60, "{} paints: {paints:?}", paints.len());
+    // A 30 fps sticker and a 60 fps tap effect, shown at the file's rate.
+    for (tl, frames, hold) in [
+        (timeline(480, 30.0, 4), 30, 4),
+        (timeline(480, 60.0, 2), 60, 2),
+    ] {
+        let (paints, changes) = paints_when_changed(tl, false, tl.tick_fps(true));
+        assert_eq!(changes.len(), frames, "{changes:?}");
+        assert!(gaps(&changes).iter().all(|gap| *gap == hold), "{changes:?}");
+        assert!(paints.len() < frames * 3 / 2, "{} paints", paints.len());
+    }
 }
 
 #[test]
 fn a_clip_on_the_fine_grid_paints_every_refresh() {
-    let (paints, changes) = paints_when_changed(timeline(240, 60.0, 2), true);
+    let tl = timeline(240, 60.0, 2);
+    let (paints, changes) = paints_when_changed(tl, true, tl.tick_fps(true));
     assert_eq!(changes.len(), 120);
     assert_eq!(paints.len(), 120);
 }
@@ -186,7 +198,7 @@ fn a_clip_on_the_fine_grid_paints_every_refresh() {
 #[test]
 fn a_slow_clip_paints_often_enough_to_keep_playing() {
     // 5 fps: a frame every 200 ms, as long as a pause.
-    let (paints, changes) = paints_when_changed(timeline(20, 5.0, 1), false);
+    let (paints, changes) = paints_when_changed(timeline(20, 5.0, 1), false, 120.0);
     assert!(gaps(&paints).iter().all(|gap| *gap <= 12), "{paints:?}");
     assert!(gaps(&changes).iter().all(|gap| *gap == 24), "{changes:?}");
 }
@@ -244,13 +256,6 @@ fn a_clip_slow_from_the_start_drops_to_its_files_rate_within_16_draws() {
 }
 
 #[test]
-fn a_coarse_clip_ticks_twice_per_file_frame() {
-    assert_eq!(timeline(120, 30.0, 4).tick_fps(true, true), 60.0);
-    assert_eq!(timeline(120, 60.0, 2).tick_fps(true, true), 120.0);
-    assert_eq!(timeline(120, 30.0, 4).tick_fps(false, true), 30.0);
-}
-
-#[test]
 fn a_low_rate_shows_only_the_files_own_frames() {
     // A 60 fps file on a 120 frame grid (step 2).
     let tl = timeline(120, 60.0, 2);
@@ -259,8 +264,8 @@ fn a_low_rate_shows_only_the_files_own_frames() {
     assert_eq!(high.index, 3, "120 fps: an in-between frame");
     assert_eq!(low.index, 2, "60 fps: whole file frames only");
     assert_eq!(low.ahead, [Some(4), Some(6), Some(8)]);
-    assert_eq!(tl.tick_fps(true, false), 120.0);
-    assert_eq!(tl.tick_fps(false, false), 60.0);
+    assert_eq!(tl.tick_fps(true), 120.0);
+    assert_eq!(tl.tick_fps(false), 60.0);
     assert_eq!(tl.duration(), Duration::from_secs(1));
 }
 

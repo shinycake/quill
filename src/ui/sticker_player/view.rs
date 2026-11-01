@@ -24,8 +24,6 @@ struct Open {
     timeline: quill::sticker_playback::player::Timeline,
     /// The display may play the fine grid.
     display_high: bool,
-    /// The clip plays at its file's rate.
-    coarse: bool,
     /// The view plays the fine grid.
     high: bool,
 }
@@ -117,15 +115,15 @@ impl StickerView {
             };
         };
         let head = inner.heads.get(&(self.head, key.file));
+        // A clip held to its file's rate still ticks at the display's, so
+        // each of its frames stays up for the same number of refreshes.
         let display_high = high_rate(self.active);
-        let coarse = self.player.engine.coarse(&key);
         ViewState::Open(Open {
             head: head.map(|head| head.state).unwrap_or_default(),
             shown: head.and_then(|head| head.shown),
             timeline,
             display_high,
-            coarse,
-            high: display_high && !coarse,
+            high: display_high && !self.player.engine.coarse(&key),
         })
     }
 
@@ -161,8 +159,7 @@ impl StickerView {
         };
         match pick {
             Some(pick) if pick.animating => {
-                (timeline.tick_fps(open.display_high, open.coarse).ceil() as u32)
-                    .clamp(1, self.max_fps.max(1))
+                (timeline.tick_fps(open.display_high).ceil() as u32).clamp(1, self.max_fps.max(1))
             }
             _ => 0,
         }

@@ -73,14 +73,12 @@ impl Timeline {
     }
 
     /// The tick rate a playing view needs: the grid's rate at a high
-    /// display rate, else the file's own. A `coarse` clip shows only its
-    /// file's frames, so twice that rate keeps each picture up for the same
-    /// number of ticks without waking for the grid frames it skips.
-    pub fn tick_fps(&self, high_rate: bool, coarse: bool) -> f64 {
-        match (high_rate, coarse) {
-            (false, _) => self.file_fps,
-            (true, false) => self.grid_fps(),
-            (true, true) => self.grid_fps().min(self.file_fps * 2.0),
+    /// display rate, else the file's own.
+    pub fn tick_fps(&self, high_rate: bool) -> f64 {
+        if high_rate {
+            self.grid_fps()
+        } else {
+            self.file_fps
         }
     }
 }
