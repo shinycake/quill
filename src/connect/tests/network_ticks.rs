@@ -1,16 +1,16 @@
-use super::super::ticks::network_step;
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::AccountKey;
 use crate::net_watch::NetworkState;
 use crate::platform::MemorySecretStore;
+use crate::proxy::{ProxyDraft, ProxyEntry};
 use crate::state::Session;
-use crate::telegram::requests::NetworkType;
+use crate::telegram::envelope::ConnectionState;
 use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 fn network(epoch: u64, available: bool) -> NetworkState {
     NetworkState { epoch, available }
@@ -96,18 +96,69 @@ fn a_closing_client_is_told_nothing() {
     assert!(told(&recorder).is_empty());
 }
 
+fn enabled_proxy() -> ProxyEntry {
+    ProxyEntry {
+        id: 1,
+        last_used_date: 0,
+        is_enabled: true,
+        comment: String::new(),
+        proxy: ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5),
+    }
+}
+
 #[test]
 fn a_proxy_keeps_tdlib_trying_with_no_route_out() {
+    let (mut driver, recorder) = driver();
+    let now = Instant::now();
+    driver.session.settings.proxy.list = Some(vec![enabled_proxy()]);
+    driver.ticks_on(TickScope::Background, now, network(0, false));
+    assert!(told(&recorder).is_empty(), "the start is not a change");
+    driver.ticks_on(TickScope::Background, now, network(1, false));
+    assert_eq!(told(&recorder), ["networkTypeOther"]);
+}
+
+#[test]
+fn a_proxy_known_after_the_first_poll_gets_tdlib_going_again() {
+    let (mut driver, recorder) = driver();
+    let now = Instant::now();
+    let background = TickScope::Background;
+    driver.ticks_on(background, now, network(0, false));
+    assert_eq!(told(&recorder), ["networkTypeNone"]);
+
+    driver.session.settings.proxy.system = vec![enabled_proxy()];
+    driver.ticks_on(background, now, network(0, false));
+    driver.ticks_on(background, now, network(0, false));
+    assert_eq!(told(&recorder), ["networkTypeNone", "networkTypeOther"]);
+
+    driver.session.settings.proxy.system.clear();
+    driver.ticks_on(background, now, network(0, false));
     assert_eq!(
-        network_step(Some(1), network(2, false), false),
-        Some(NetworkType::None)
+        told(&recorder),
+        ["networkTypeNone", "networkTypeOther", "networkTypeNone"]
     );
-    assert_eq!(
-        network_step(Some(1), network(2, false), true),
-        Some(NetworkType::Other)
-    );
-    assert_eq!(network_step(None, network(2, false), true), None);
-    assert_eq!(network_step(Some(2), network(2, false), false), None);
+}
+
+#[test]
+fn only_a_client_opening_a_connection_has_the_os_proxy_read_again() {
+    let (mut driver, _recorder) = driver();
+    let scope = TickScope::OnScreen {
+        settings_open: false,
+    };
+    let start = Instant::now();
+    driver.session.connection = ConnectionState::Ready;
+    driver.ticks_on(scope, start, network(0, true));
+    assert_eq!(driver.system_proxy_asked, None);
+
+    driver.session.connection = ConnectionState::Connecting;
+    driver.ticks_on(scope, start, network(0, true));
+    assert_eq!(driver.system_proxy_asked, Some(start));
+
+    driver.ticks_on(scope, start + Duration::from_secs(1), network(0, true));
+    assert_eq!(driver.system_proxy_asked, Some(start));
+
+    let later = start + Duration::from_secs(15);
+    driver.ticks_on(scope, later, network(0, true));
+    assert_eq!(driver.system_proxy_asked, Some(later));
 }
 
 #[test]

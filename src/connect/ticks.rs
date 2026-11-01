@@ -38,22 +38,6 @@ impl TickOutcome {
     }
 }
 
-/// What TDLib needs to hear after `seen`: nothing at the start, unless the
-/// machine is offline. A proxy on the local network works with no route out.
-pub(super) fn network_step(
-    seen: Option<u64>,
-    network: NetworkState,
-    through_proxy: bool,
-) -> Option<NetworkType> {
-    let offline = !network.available && !through_proxy;
-    match seen {
-        Some(epoch) if epoch == network.epoch => None,
-        None if !offline => None,
-        _ if offline => Some(NetworkType::None),
-        _ => Some(NetworkType::Other),
-    }
-}
-
 impl<S: JsonSender> ConnectDriver<S> {
     /// Run every tick that is due for `scope`.
     pub fn poll_ticks(&mut self, scope: TickScope, now: Instant) -> TickOutcome {
@@ -99,19 +83,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome
     }
 
+    /// TDLib hears nothing at the start unless it has no way out, then one
+    /// word per change. A proxy on the local network works with no route, and
+    /// the proxy list arrives after the first poll, so it counts as a change.
     fn network_tick(&mut self, network: NetworkState) -> bool {
-        if !self.parameters_sent
-            || self.network_seen == Some(network.epoch)
-            || !matches!(self.session.shutdown, ShutdownPhase::Running)
-        {
+        if !self.parameters_sent || !matches!(self.session.shutdown, ShutdownPhase::Running) {
             return false;
         }
-        let seen = self.network_seen.replace(network.epoch);
         let proxy = &self.session.settings.proxy;
         let through_proxy =
             proxy.enabled().is_some() || proxy.system.iter().any(|entry| entry.is_enabled);
-        let Some(kind) = network_step(seen, network, through_proxy) else {
+        let network = NetworkState {
+            available: network.available || through_proxy,
+            ..network
+        };
+        let seen = self.network_seen.replace(network);
+        if seen == Some(network) || (seen.is_none() && network.available) {
             return false;
+        }
+        let kind = if network.available {
+            NetworkType::Other
+        } else {
+            NetworkType::None
         };
         let extra = self.session.request(RequestPurpose::SetNetworkType, None);
         match self.sender.send_json(&set_network_type(extra, kind)) {

@@ -354,8 +354,9 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) system_proxy_sent: Option<crate::system_proxy::SentStep>,
     /// When this client last asked for the OS proxy to be read again.
     pub(crate) system_proxy_asked: Option<std::time::Instant>,
-    /// The `net_watch` epoch this client last acted on.
-    pub(crate) network_seen: Option<u64>,
+    /// The network this client last acted on, with a proxy counted as a
+    /// way out.
+    pub(crate) network_seen: Option<crate::net_watch::NetworkState>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
     /// `None` refuses them.
     pub(crate) carrier_host: Option<Box<dyn crate::proxy_carrier::CarrierHost>>,
