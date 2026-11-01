@@ -1,94 +1,62 @@
-CHANGES
+APPROVE
 
-# Review of PR 1306 (calls-media, head 66a4401) against main (5072e96)
+# Second review of PR 1306 (calls-media), commits 66a44011b..25f8bffec
 
-Scope: the PR diff and its description. Nothing on the PR branch was changed. The probe test below ran in a local worktree and was then removed.
+Scope: the five fix commits on top of the first review's head (66a4401), up to 25f8bff. Nothing on the PR branch was changed. The checks below ran in a separate local worktree. The revert probes were undone after they ran.
 
-## Findings
+## Findings 1 to 5
 
-### 1. A pause reported while a screen share is opening is lost (medium, confirmed)
+| # | Commit | Fixed |
+|---|--------|-------|
+| 1 | 580f548 | Yes |
+| 2 | 795a70b | Yes |
+| 3 | d9d87a8 | Yes |
+| 4 | ab3d72b | Yes (one nit below) |
+| 5 | 25f8bff | Yes |
 
-File: `src/connect/call_screen.rs`, lines 405 and 438 (`pump_shared_screen`).
+### 1. A pause lost while the share opens
 
-`pump_shared_screen` reads the capture's events (`screen_change`, line 405) before it reads the device thread's answer (`finish_open`, line 438). Events pushed while the capture is still opening are applied first. Then `finish_open` succeeds, `set_screen_paused(false)` runs, and the pause is overwritten. The event is already used up, so nothing restores it.
+`finish_open` now returns `Ok(active.paused)`, and `pump_shared_screen` calls `set_screen_paused(paused)` with that value instead of `false`. A `Paused` read by `screen_change` during the open sets `active.paused = true` and sends one toggle. After the open, `set_screen_paused(true)` turns off the new feeder's forwarding. It sends nothing more, because `changed` is false and `was == paused`. When nothing paused, the call is the same no-op as before. The new test `a_window_hidden_while_its_share_opens_stays_paused` asserts `paused()` and exactly one `is_paused: true` toggle. With the old `set_screen_paused(false)` put back, it fails at `call_screen.rs:537`.
 
-Before this PR the open was synchronous, so `set_screen_paused(false)` always ran before any event could be read, and a later pump applied the pause.
+### 2. Visibility from a replaced window
 
-Failure scenario: on X11 you share a minimised window. `screen_x11::run` checks `_NET_WM_STATE_HIDDEN` one frame interval after `start` returns and pushes `Paused`. If the UI thread is busy and reads the open answer after that event arrives, both are handled in the same pump. The same happens with the 500 ms window monitors on macOS and Windows when the answer takes longer than 500 ms to read. Result: TDLib gets `toggleGroupCallScreenSharingIsPaused(true)` and then `(false)`. The panel shows the share as live. The feeder forwards frames of a window that the OS reports as hidden. This stays wrong until the window's state changes again.
+The callback compares `window.window_handle()` with `app.group_call.window` and returns when they differ. The test `a_replaced_call_window_hiding_leaves_the_large_tile` swaps in another handle, hides the old window, and expects the pinned tile to stay large. With the guard disabled, it fails at `group_call_tiles_tests.rs:176`. The existing visible, hidden and closed test still passes, so the normal path still works.
 
-Proof: a local probe test made a fake opener that blocks, pushed `CaptureEvent::Paused` into its sink, released the open, and pumped. Output: `paused=false toggles=[true, false]`. The test asserted `paused()` and failed.
+### 3. Device thread failures wake the poll loop
 
-Fix: call `finish_open` before `screen_change`. Or keep the paused state that events produced, and have `finish_open` apply that state (`set_screen_paused(active.paused)`) instead of `false`.
+An `Answering` guard owns the sender. Its `Drop` drops the sender first and then pokes. So the answer, or the hang-up, can be read before the poke, on success, on error and on panic. The panic case works because the workspace sets `panic = "deny"` as a lint, not `panic = "abort"`, so unwinding runs `Drop`. The spawn-failure branch now pokes after it sends. `a_panicked_open_answers_and_wakes_the_poll_loop` uses its own `Signal`. With the poke removed from `Drop`, it fails at `device_thread.rs:166`.
 
-### 2. The visibility callback does not check which window reports (low, plausible)
+### 4. The lost-mic test depends on parallel tests
 
-File: `src/ui/group_call_window.rs`, line 188 to 192.
+`FrameSink::waking` gives each sink its own signal, and `new` keeps `UPDATES`. `CallCapture::inject_wake` passes the injected signal to the mic sink and to the mic `DeviceThread`. No other test pokes the test's static `WAKE`. With the poke removed from `push_event`, the test fails at `call_capture.rs:380`. Over 400 sequential runs and 200 runs with the CPU loaded, it never passed without the fix.
 
-The `observe_window_visibility` callback writes `app.group_call.window_visible` without checking that its window is still `app.group_call.window`. When the window is replaced (the layout-switch path at line ~107 removes the old window and opens a new one), the `Ok(handle)` branch sets `window_visible = true`. If the old window then reports "hidden" while it is removed, the new, visible window's pinned tile drops to Thumbnail. It stays there until the new window's visibility changes. I did not reproduce this, because there is no windowing system here. Comparing the callback's window handle with `group_call.window` removes the risk.
+Nit, not blocking: the mic device thread pokes the same `WAKE` right after it sends `Ok`. `pump_until_mic_answers` can return in the moment between that send and that poke. If the thread is then preempted until after the test reads `woken`, the late poke would satisfy `assert_ne!` without `push_event`'s poke. The window is a few instructions wide, and I could not make it happen. Giving the sink and the device thread different signals in the test would close it.
 
-### 3. A failed device thread does not wake the poll loop (low)
+### 5. Device warming for calls you are not in
 
-File: `src/calls/capture/device_thread.rs`, line 26 to 44.
+The gate is now `active_call.is_some()`, or a tracked group call with `is_joined`. The renamed test first tracks an unjoined chat and asserts no warm, then joins and asserts one warm. With the old gate put back, it fails at `call_capture.rs:472`. Warming for a group call now starts on join rather than when the call is tracked. That is fine, because the mic opens only after join anyway.
 
-The thread pokes `wake::UPDATES` after a successful or failed `open`. Two paths answer without a poke:
+## New bugs
 
-- `open` panics. `spawn_guarded` catches the panic, `answers` is dropped, and `opened()` reports "The capture thread stopped."
-- The spawn fails (line 42).
+None found. Things I checked:
 
-In both cases the error appears only on the next poll that something else causes, or when the poll pace ceiling runs out. This is the waiting that subsystems-7 removes for the other paths. Fix: poke in the spawn-failure branch, and send the answer plus poke from a drop guard inside the thread.
-
-### 4. A test passes without its fix in a parallel run (low, test quality)
-
-File: `src/connect/tests/call_capture.rs`, line 378 (`a_lost_microphone_needs_no_telegram_update`).
-
-`wake::UPDATES` is process-wide. Any other test that pokes it between line 376 and line 378 makes the `assert_ne!` pass even when `push_event` has no poke. The PR description says so and says the removal check ran on one thread. Under the default parallel `cargo test`, this assertion does not reliably fail without the fix, which the repo's test rules require. A per-sink wake hook, or a `Signal` the test can inject, would make the test deterministic.
-
-### 5. `warm_devices` runs for calls you are not in (nit)
-
-File: `src/connect/call_capture.rs`, line 308 (`warm_call_devices`).
-
-The gate is "`active_call` or `active_group_call` is tracked". A scheduled video chat, or one you have not joined, is tracked as soon as its `updateGroupCall` takes the slot (`session_calls.rs`, `accept_group_call_update`). So opening such a chat lists cameras and cpal devices on a worker. That costs about 226 ms of framework load on the Mac and is unmeasured on ALSA, and it happens with no call coming. This is harmless on macOS. Gating on `is_joined`, or on an outgoing or incoming 1:1 call, matches the doc comment ("A call is coming").
-
-## Checked and found sound
-
-- **Device threads outliving a call.** Dropping `ActiveCapture` or `ActiveScreen` drops the `DeviceThread` sender, and the thread closes the device after its open ends. The test `a_device_dropped_while_opening_closes_when_the_open_ends` covers this. A stale open cannot land: `finish_open` reads only the current `active.mic` or `active.capture`.
-- **Mic reopen.** One `active` slot. `failed_at` gates the 2 s reopen. `until_reopen` feeds `next_deadline`. The background account loop has a 2 s ceiling. I found no path that opens twice or never reopens.
-- **Share end and the UI.** The `shown` tuple in `pump_call_media` covers target, error and paused, so an Ended or failed open from `request_tick` redraws.
-- **Envelope skipping.** `ParticipantList::edit` is the only mutator, `From` gets a fresh revision, and `Clone` keeps the revision with the same contents. The inputs for feeds (revision, my video, sharing, left call), video sources (revision, story sources, large tile) and ssrc owners (revision, `loaded_all`) cover everything their functions read. The memo is cleared while the transport is down and on teardown, and it is set only after `sync_group_video` succeeds. The ssrc memo is set before the engine call, but the engine creates the instance in `create_group` before connect, and the memo is re-armed on every pump that is not connected.
-- **Quality.** The large tile is `pin.pinned()`. The panel lays out `layout.main` from the same pin after `retain_available`, so "pinned" and "shown large" agree, including on the full-screen stage. Stream mode forces `large: true` on the one chosen source, and RTMP uses unified. A live story is a stream, so its `large: false` is overridden.
-- **Rotation.** I checked the index math of `rotate_quarter` by hand for R90 and R270. Remainder columns `across..w` above `down`, and all rows below `down`, go through the pixel path. R180 reverses rows. Odd chroma sizes keep `div_ceil`. `every_size_turns_pixel_for_pixel` passes. No new `unwrap`, `expect` or indexing outside `#[cfg(test)]`.
-- **Platforms.** The Linux build compiles, including `screen_linux`, `screen_x11`, the `cfg(any(windows, test))` NV12 arm and both clippy configurations. Windows cannot be cross-checked here because there is no mingw or MSVC target. By reading: `open_loopback`, `native_backend` and `start_loopback` keep their signatures. The device is created and dropped on its own thread, so `D` needs no `Send`. The closures capture only `Arc`s, `String`s and `FrameSink`s.
+- `set_screen_paused` during the open still sends `toggleGroupCallScreenSharingIsPaused(true)` before the feeder exists. That is how the PR already behaved at 66a4401, not something these commits added. The fix only stops the later unpause.
+- Between `CaptureFeeder::start` and `set_forwarding(false)` in the same pump, the feeder can forward the few frames already in the sink. That is a gap of microseconds and not visible to the user.
+- `DeviceThread::open` has a new `wake` parameter. All callers pass one: the mic passes the injected or default signal, and screen and system audio pass `UPDATES`. All other `FrameSink::new` callers keep `UPDATES`.
+- No new `unwrap`, `expect`, `panic` or indexing in `src` outside tests. None of the touched files are in `scripts/hotspots.txt`. Each commit has the required trailer and one finding.
 
 ## What ran
 
-All of these ran on Linux x86_64 against the PR head in a separate worktree:
+Linux x86_64, at 25f8bff:
 
 - `cargo fmt --check`: clean.
 - `cargo clippy --features demo-capture --all-targets -- -D warnings`: clean.
 - `cargo clippy --no-default-features --all-targets -- -D warnings`: clean.
-- Library tests, filtered:
-  - `call_capture`: 11 passed.
-  - `call_screen`: 14 passed.
-  - `device_thread`: 4 passed.
-  - `group_calls`: 113 passed.
-  - `convert`: 26 passed, 2 ignored.
-  - `group_config`: 4 passed.
-  - `live_`: 123 passed.
-  - `call_audio`: 8 passed.
-  - `calls`: 450 passed.
-  - `pump_gates`: 4 passed.
-  - `screen`: 71 passed.
-  - `tile_pin`: 6 passed.
-  - `large_tile`: 1 passed.
-- Binary tests (`--features demo-capture`), filtered:
-  - `group_call`: 59 passed.
-  - `video_player`: 188 passed.
-  - `live_`: 99 passed.
-- Probe test for finding 1: failed as described, then removed.
+- Library tests: `call_capture` 11 passed, `call_screen` 15 passed, `device_thread` 5 passed, `feeder` 32 passed.
+- Binary tests (`--features demo-capture`): `group_call` 60 passed.
+- Revert probes: each of the five new or changed tests failed with its fix undone.
 
 ## Not verified
 
-- Windows compile.
-- Real ScreenCaptureKit, WASAPI or PipeWire on the new threads.
-- Real window occlusion events.
-- Bandwidth or decode savings from Thumbnail.
+- Windows and macOS compile. The changes are platform-neutral Rust.
+- Real window occlusion and real device panics.
