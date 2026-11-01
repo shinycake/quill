@@ -33,14 +33,23 @@ pub(crate) fn copy_stoppable(
     settle(&part, to, copied)
 }
 
-/// Give a complete part its final name, and remove any other.
+/// Give a complete part its final name, and remove any other. The part
+/// reaches the disk first: after a power loss the final name holds the
+/// whole file or nothing.
 fn settle(part: &Path, to: &Path, copied: io::Result<Copied>) -> io::Result<Copied> {
     match copied {
-        Ok(Copied::Done) => fs::rename(part, to)
+        Ok(Copied::Done) => fs::OpenOptions::new()
+            .write(true)
+            .open(part)
+            .and_then(|file| file.sync_all())
+            .and_then(|()| fs::rename(part, to))
             .inspect_err(|_| {
                 let _ = fs::remove_file(part);
             })
-            .map(|()| Copied::Done),
+            .map(|()| {
+                sync_folder(to);
+                Copied::Done
+            }),
         other => {
             let _ = fs::remove_file(part);
             other
@@ -48,7 +57,17 @@ fn settle(part: &Path, to: &Path, copied: io::Result<Copied>) -> io::Result<Copi
     }
 }
 
-fn part_path(to: &Path) -> PathBuf {
+/// Makes the rename itself durable, where the folder can be synced.
+fn sync_folder(file: &Path) {
+    #[cfg(unix)]
+    if let Some(folder) = file.parent() {
+        let _ = File::open(folder).and_then(|folder| folder.sync_all());
+    }
+    #[cfg(not(unix))]
+    let _ = file;
+}
+
+pub(crate) fn part_path(to: &Path) -> PathBuf {
     let mut name = to.as_os_str().to_os_string();
     name.push(".part");
     PathBuf::from(name)

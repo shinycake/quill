@@ -65,6 +65,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// On Ready: ask TDLib about each file an earlier run's export left in
     /// the cache. File ids change between runs, so the remote id finds it.
     pub(crate) fn check_export_leftovers(&mut self) {
+        if let Some(leftovers) = self.session.settings.export_files.leftovers() {
+            leftovers.sweep_parts();
+        }
         for earlier in self.session.settings.export_files.earlier() {
             let request = serde_json::json!({"@type": "getRemoteFile",
                 "remote_file_id": earlier.entry.remote_id});
