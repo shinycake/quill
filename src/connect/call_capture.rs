@@ -320,9 +320,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     fn warm_call_devices(&mut self) {
         let calls = &self.session.calls;
-        if self.call_devices_warmed
-            || (calls.active_call.is_none() && calls.active_group_call.is_none())
-        {
+        // A tracked video chat may be one you only look at or one that is
+        // scheduled; only a ringing, placed or joined call needs devices.
+        let coming = calls.active_call.is_some()
+            || calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.is_joined);
+        if self.call_devices_warmed || !coming {
             return;
         }
         if let Some(engine) = self.call_engine.as_deref() {

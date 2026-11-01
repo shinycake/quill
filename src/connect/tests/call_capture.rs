@@ -461,10 +461,15 @@ fn a_microphone_that_opens_after_you_left_closes() {
 }
 
 #[test]
-fn a_tracked_call_warms_the_devices_once() {
+fn a_call_you_are_in_warms_the_devices_once() {
     let (dir, mut driver, engine, _mics) = group_driver();
     driver.request_tick(Instant::now());
     assert_eq!(engine.device_warms(), 0, "no call, no frameworks loaded");
+    let mut call = joined_group_call(false);
+    call.is_joined = false;
+    driver.session.calls.active_group_call = Some(call);
+    driver.request_tick(Instant::now());
+    assert_eq!(engine.device_warms(), 0, "a chat you only look at");
     driver.session.calls.active_group_call = Some(joined_group_call(false));
     driver.request_tick(Instant::now());
     driver.request_tick(Instant::now());
