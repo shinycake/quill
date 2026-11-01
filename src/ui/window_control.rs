@@ -18,7 +18,7 @@
 //!   [`hide_supported`] says so and the close-to-tray setting minimizes
 //!   instead.
 //! - macOS: `orderOut` / `makeKeyAndOrderFront`, `setLevel`, and the
-//!   collection behavior for the Dock cycle, for symmetry.
+//!   collection behavior for the Dock cycle.
 //!
 //! The vendored Windows platform parks a hidden window's frames
 //! (`third_party/gpui-pre-windows/src/events.rs`); on X11 an unmapped
@@ -79,17 +79,24 @@ pub(crate) fn is_minimised(window: &Window) -> bool {
 }
 
 /// Whether the window is off screen because [`set_visible`] hid it, or
-/// because it never showed. macOS only: elsewhere the tray brings a hidden
-/// window back and nothing asks.
-pub(crate) fn is_hidden(window: &Window) -> bool {
-    #[cfg(target_os = "macos")]
-    let hidden = platform::is_hidden(window);
-    #[cfg(not(target_os = "macos"))]
-    let hidden = {
-        let _ = window;
-        false
-    };
-    hidden
+/// because it never showed. Only a Mac asks: elsewhere the tray brings a
+/// hidden window back.
+#[cfg(target_os = "macos")]
+pub(crate) use platform::is_hidden;
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn is_hidden(_window: &Window) -> bool {
+    false
+}
+
+/// Whether a Mac is still animating the window out of full screen, where
+/// [`Window::is_fullscreen`] already says no and a hide does not last.
+#[cfg(target_os = "macos")]
+pub(crate) use platform::is_exiting_fullscreen;
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn is_exiting_fullscreen(_window: &Window) -> bool {
+    false
 }
 
 /// Keep the window above every other window, or stop.
@@ -452,12 +459,22 @@ mod platform {
         minimised
     }
 
-    pub(super) fn is_hidden(window: &Window) -> bool {
+    pub(crate) fn is_hidden(window: &Window) -> bool {
         let mut hidden = false;
         with_window(window, |native| {
             hidden = !native.isVisible() && !native.isMiniaturized();
         });
         hidden
+    }
+
+    pub(crate) fn is_exiting_fullscreen(window: &Window) -> bool {
+        let mut exiting = false;
+        with_window(window, |native| {
+            let native = std::ptr::from_ref(native).cast_mut().cast();
+            // SAFETY: `with_window` holds the window alive for this call.
+            exiting = unsafe { gpui_macos::is_exiting_fullscreen(native) };
+        });
+        exiting
     }
 
     pub(super) fn set_always_on_top(window: &Window, on: bool) -> bool {

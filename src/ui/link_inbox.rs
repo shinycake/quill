@@ -147,7 +147,9 @@ fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
     cx.spawn(async move |cx| {
         for _ in 0..LEFT_FULLSCREEN_POLLS {
             cx.background_executor().timer(LEFT_FULLSCREEN_POLL).await;
-            let left = main.update(cx, |_, window, _| !window.is_fullscreen());
+            let left = main.update(cx, |_, window, _| {
+                !window.is_fullscreen() && !super::window_control::is_exiting_fullscreen(window)
+            });
             if left.unwrap_or(true) {
                 break;
             }

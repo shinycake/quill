@@ -127,3 +127,5 @@ close button comes back the way Telegram Desktop's does:
 - `src/platform.rs`: `applicationDidBecomeActive:` reaches
   `Platform::on_app_lifecycle` as `AppLifecyclePhase::Active`, deferred to
   the main queue. The other phases stay unused on macOS.
+- `src/window.rs`: public `is_exiting_fullscreen`, so Quill can wait out the
+  animation before it hides a full screen window.

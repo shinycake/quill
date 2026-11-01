@@ -79,10 +79,10 @@ fn a_call_takes_the_focus_when_quill_comes_forward(cx: &mut TestAppContext) {
     let main = vcx.window_handle();
     vcx.update(|window, _| window.activate_window());
     vcx.run_until_parked();
-    assert_eq!(vcx.cx.active_window(), Some(main));
+    assert_eq!(vcx.cx.update(|cx| cx.active_window()), Some(main));
     assert!(!app.update(vcx, |app, cx| app.main_window_wanted(cx)));
     vcx.run_until_parked();
-    assert_eq!(vcx.cx.active_window(), Some(call));
+    assert_eq!(vcx.cx.update(|cx| cx.active_window()), Some(call));
 }
 
 #[gpui_kit::test]
