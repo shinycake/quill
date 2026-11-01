@@ -493,3 +493,12 @@ started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
 - `src/platform.rs`, `src/window.rs`: `PlatformWindow::set_shutdown_block_reason`
   (a no-op by default) and `Window::set_shutdown_block_reason`, the text
   Windows shows while the window holds back the end of the session.
+
+The Quill project also changed it in 2026 so a video player can fill the
+same BGRA buffers again instead of allocating one per picture (sweep bundle
+B7, `docs/decisions/video-nv12-linux.md`):
+
+- `src/assets.rs`: `RenderImage::with_recycler` takes a callback that gets
+  the image's frames when the image is dropped. Images made without one drop
+  their frames as before. Tested from Quill
+  (`a_picture_hands_its_buffer_back_once_its_image_goes`).

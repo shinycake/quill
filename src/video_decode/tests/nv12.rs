@@ -6,8 +6,8 @@
 use super::super::ffi::{FfiDemuxer, PictureLayout, picture_layout};
 use super::super::nv12::BufferPool;
 use super::super::{
-    Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame, YuvColor,
-    YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12,
+    BgraPool, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Pixels, Player, VideoFrame,
+    YuvColor, YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12,
 };
 use super::{Scripted, decoder, fixture, wait_until};
 use std::path::Path;
@@ -214,7 +214,7 @@ fn nv12_converts_to_bgra_on_the_cpu() {
         },
         convert_us: 7,
     };
-    let converted = frame.into_bgra().expect("converts");
+    let converted = frame.into_bgra(&BgraPool::default()).expect("converts");
     assert_eq!((converted.pts, converted.convert_us), (1.5, 7));
     assert_eq!(converted.pixels, Pixels::Bgra(bgra));
     // A malformed NV12 frame doesn't.
@@ -228,7 +228,7 @@ fn nv12_converts_to_bgra_on_the_cpu() {
         },
         convert_us: 0,
     };
-    assert!(malformed.into_bgra().is_none());
+    assert!(malformed.into_bgra(&BgraPool::default()).is_none());
 }
 
 /// A scripted clip that records the layouts its player asks for.
@@ -344,7 +344,7 @@ fn ffmpeg_hands_over_nv12_that_matches_its_bgra() {
         let reference = bgra.pixels.bgra().expect("bgra");
         let wrong = nv12_to_bgra(bytes, 96, 64, limited_709()).expect("converts");
         let wrong_mean = mean_difference(&wrong, reference);
-        let converted = nv12.into_bgra().expect("converts");
+        let converted = nv12.into_bgra(&BgraPool::default()).expect("converts");
         let mean = mean_difference(converted.pixels.bgra().expect("bgra"), reference);
         // The same picture: the CPU conversion takes the nearest chroma
         // sample where swscale interpolates, so testsrc2's sharp colour

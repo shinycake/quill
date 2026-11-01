@@ -267,6 +267,17 @@ impl BufferPool {
 /// with the same matrix the GPU path uses. `None` when `bytes` doesn't
 /// hold a `width` x `height` NV12 picture.
 pub fn nv12_to_bgra(bytes: &[u8], width: u32, height: u32, color: YuvColor) -> Option<Vec<u8>> {
+    nv12_to_bgra_into(bytes, width, height, color, Vec::new())
+}
+
+/// [`nv12_to_bgra`] into `out`, whose old bytes are overwritten.
+pub fn nv12_to_bgra_into(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    color: YuvColor,
+    mut out: Vec<u8>,
+) -> Option<Vec<u8>> {
     let total = nv12_len(width, height)?;
     if bytes.len() != total {
         return None;
@@ -279,7 +290,8 @@ pub fn nv12_to_bgra(bytes: &[u8], width: u32, height: u32, color: YuvColor) -> O
         (value.clamp(0.0, 1.0) * 255.0).round() as u8
     };
     let [r_row, g_row, b_row] = &rows;
-    let mut out = Vec::with_capacity(w * h * 4);
+    out.clear();
+    out.reserve(w * h * 4);
     for (y, luma_row) in luma.chunks_exact(w).enumerate() {
         let chroma_row = chroma.get((y / 2) * w..(y / 2) * w + w).unwrap_or_default();
         for (x, &sample) in luma_row.iter().enumerate() {
