@@ -743,7 +743,6 @@ static int restart(Ctx *c, double target, double vskip, double askip) {
   c->vdone = 0;
   c->adone = 0;
   c->bad_packets_in_a_row = 0;
-  c->keep_skipped = 0;
   av_frame_unref(c->skipped);
   c->vskip = c->vdec ? vskip : -1.0;
   c->askip = c->adec ? askip : -1.0;
@@ -959,9 +958,8 @@ int32_t qv_seek(void *ctx, double seconds) {
     return AVERROR(EINVAL);
   if (seconds < 0)
     seconds = 0;
-  int r = restart(c, seconds, seconds, seconds);
   c->keep_skipped = 1;
-  return r;
+  return restart(c, seconds, seconds, seconds);
 }
 
 void qv_close(void *ctx) {

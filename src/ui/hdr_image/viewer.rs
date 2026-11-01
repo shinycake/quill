@@ -62,6 +62,8 @@ pub(crate) struct HdrViewer {
     slot: Slot,
     /// The window's layer is in extended-range mode.
     edr_on: bool,
+    /// The renderer could not draw in extended range and left it, for good.
+    edr_lost: bool,
     /// The headroom last attached to the frame.
     headroom: f32,
     polling: bool,
@@ -80,6 +82,7 @@ impl HdrViewer {
 
     pub(crate) fn badge(&self) -> Option<HdrBadge> {
         match self.slot {
+            Slot::Hdr(_) if self.edr_lost => Some(HdrBadge::StandardRange),
             Slot::Hdr(_) => Some(HdrBadge::Shown),
             Slot::StandardRange => Some(HdrBadge::StandardRange),
             Slot::Idle | Slot::Decoding | Slot::Sdr => None,
@@ -242,8 +245,10 @@ impl QuillApp {
                         hdr.polling = false;
                         return false;
                     }
-                    if app.viewer.orientation.is_identity()
-                        && super::headroom(window).effective() != hdr.headroom
+                    let left_edr = hdr.edr_on && !hdr.edr_lost && super::renderer_left_edr(window);
+                    if left_edr
+                        || app.viewer.orientation.is_identity()
+                            && super::headroom(window).effective() != hdr.headroom
                     {
                         cx.notify();
                     }
@@ -264,9 +269,13 @@ impl QuillApp {
         let want = self.viewer.state.current().is_some()
             && self.viewer.orientation.is_identity()
             && self.viewer.hdr.has_frame();
-        if want != self.viewer.hdr.edr_on {
+        let hdr = &mut self.viewer.hdr;
+        if hdr.edr_on && super::renderer_left_edr(window) {
+            hdr.edr_lost = true;
+        }
+        if want != hdr.edr_on {
             super::set_window_edr(window, want);
-            self.viewer.hdr.edr_on = want;
+            hdr.edr_on = want;
         }
     }
 }

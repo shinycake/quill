@@ -45,22 +45,17 @@ pub const AUDIO_OUTPUT_LATENCY: f64 = 0.07;
 /// bursts of ~20 ms, too coarse to pace pictures directly). Well inside the
 /// ±45 ms at which lip sync errors become noticeable.
 pub const SYNC_TOLERANCE: f64 = 0.04;
+/// A gap in the sound's timestamps longer than this plays as silence, so
+/// the sound after it plays at its time (shorter ones are rounding).
+const SOUND_GAP_MIN: f64 = 0.005;
 /// A picture is due this much before its time (half a 60 Hz refresh), so
 /// it isn't held a whole refresh for rounding.
 const DUE_SLACK: f64 = 0.008;
-/// The decode thread re-checks for room at least this often while it has
-/// sound (drained on the audio thread, whose wake can race the check).
-const IDLE_POLL: Duration = Duration::from_millis(40);
-/// Without sound every change to the decode thread's state (a picture
-/// taken, a seek, the player dropped) happens under its lock and wakes it,
-/// so an idle silent player (a paused or offscreen inline loop) only wakes
-/// this often, as a safety net, instead of 25 times a second.
-const IDLE_SILENT: Duration = Duration::from_secs(1);
-
-/// How long an idle decode thread sleeps before re-checking on its own.
-fn idle_wait(has_sound: bool) -> Duration {
-    if has_sound { IDLE_POLL } else { IDLE_SILENT }
-}
+/// Every change the decode thread waits for (a picture taken, sound
+/// drained, a seek, the player dropped) wakes it under its lock, so an idle
+/// one (a paused clip, an offscreen inline loop) re-checks on its own only
+/// this often, as a safety net.
+const IDLE_WAIT: Duration = Duration::from_secs(1);
 
 /// Whether the in-process decoder can run here: the `quillvideo` shim and
 /// its FFmpeg libraries are installed.
@@ -500,6 +495,11 @@ pub struct AudioTap {
     chunk: Vec<f32>,
     at: usize,
     chunk_pts: f64,
+    /// Where the sound played so far ends, since the last seek.
+    end_pts: Option<f64>,
+    /// Silent samples owed before `chunk`, for a gap in the sound.
+    gap: usize,
+    gap_at: usize,
     generation: u64,
     /// Whether the last sample was real sound (not underrun silence).
     sounding: bool,
@@ -526,6 +526,11 @@ impl AudioTap {
             self.generation = generation;
             self.chunk.clear();
             self.at = 0;
+            self.end_pts = None;
+            self.gap = 0;
+        }
+        if self.gap_at < self.gap {
+            return self.next_gap_sample();
         }
         if self.at >= self.chunk.len() {
             let next = {
@@ -543,10 +548,14 @@ impl AudioTap {
             };
             match next {
                 Some(chunk) => {
-                    self.chunk_pts = chunk.pts;
-                    self.chunk = chunk.samples;
-                    self.at = 0;
+                    self.start_chunk(chunk);
+                    // Through the state lock: the decode thread is then
+                    // either before its room check or waiting, never between.
+                    drop(lock(&self.wake.state));
                     self.wake.wake.notify_one();
+                    if self.gap > 0 {
+                        return self.next_gap_sample();
+                    }
                 }
                 None => {
                     self.set_sounding(false);
@@ -562,15 +571,50 @@ impl AudioTap {
         if self.at.is_multiple_of(channels) {
             let played =
                 self.chunk_pts + (self.at / channels) as f64 / f64::from(self.sample_rate());
-            self.shared
-                .played
-                .store(played.to_bits(), Ordering::Release);
-            self.shared
-                .played_generation
-                .store(self.generation, Ordering::Release);
+            self.publish_played(played);
         }
         self.set_sounding(true);
         sample
+    }
+
+    /// Take `chunk` as the next sound, after the silence of any gap
+    /// between where the sound played so far ends and where it starts.
+    fn start_chunk(&mut self, chunk: AudioChunk) {
+        let channels = usize::from(self.channels());
+        let rate = f64::from(self.sample_rate());
+        let gap = self.end_pts.map_or(0.0, |end| chunk.pts - end);
+        self.gap = if gap > SOUND_GAP_MIN {
+            (gap * rate).round() as usize * channels
+        } else {
+            0
+        };
+        self.gap_at = 0;
+        let frames = chunk.samples.len() / channels;
+        self.end_pts = Some(chunk.pts + frames as f64 / rate);
+        self.chunk_pts = chunk.pts;
+        self.chunk = chunk.samples;
+        self.at = 0;
+    }
+
+    fn next_gap_sample(&mut self) -> f32 {
+        self.gap_at += 1;
+        let channels = usize::from(self.channels());
+        if self.gap_at.is_multiple_of(channels) {
+            let left = (self.gap - self.gap_at) / channels;
+            let played = self.chunk_pts - left as f64 / f64::from(self.sample_rate());
+            self.publish_played(played);
+        }
+        self.set_sounding(true);
+        0.0
+    }
+
+    fn publish_played(&self, played: f64) {
+        self.shared
+            .played
+            .store(played.to_bits(), Ordering::Release);
+        self.shared
+            .played_generation
+            .store(self.generation, Ordering::Release);
     }
 
     fn set_sounding(&mut self, sounding: bool) {
@@ -607,6 +651,9 @@ struct State {
     /// The picture layout asked for; the decode thread passes it on.
     output: PixelOutput,
     seek: Option<f64>,
+    /// The player's clock. It lives here so the decode thread can pace
+    /// pictures nobody paints on it.
+    clock: Clock,
     /// Bumped by every seek: items decoded for an older one are dropped.
     epoch: u64,
     eof: bool,
@@ -617,7 +664,6 @@ struct State {
 /// One clip: a decode thread plus the clock and the picture queue.
 pub struct Player {
     shared: Arc<Shared>,
-    clock: Clock,
     /// No picture shown since the last seek (or open).
     first: bool,
     /// The newest picture handed out, for the end position.
@@ -711,7 +757,6 @@ impl Player {
         .map_err(|err| err.to_string())?;
         Ok(Self {
             shared,
-            clock: Clock::new(),
             first: true,
             last_pts: None,
             ended: false,
@@ -726,6 +771,16 @@ impl Player {
     fn join_thread(&mut self) -> Option<bool> {
         let handle = self.thread.take()?;
         Some(matches!(handle.join(), Ok(Some(()))))
+    }
+
+    fn clock(&self) -> Clock {
+        lock(&self.shared.state).clock
+    }
+
+    /// Change the clock, and wake the decode thread, which paces on it.
+    fn with_clock(&self, change: impl FnOnce(&mut Clock)) {
+        change(&mut lock(&self.shared.state).clock);
+        self.shared.wake.notify_all();
     }
 
     /// What the file holds, once the decode thread has opened it.
@@ -782,22 +837,22 @@ impl Player {
         if self.ended {
             self.seek(0.0);
         }
-        self.clock.play(Instant::now());
+        self.with_clock(|clock| clock.play(Instant::now()));
     }
 
     pub fn pause(&mut self) {
         let now = Instant::now();
-        if !self.clock.held {
+        if !self.clock().held {
             let position = self.position_at(now);
-            self.clock.follow(position, now);
+            self.with_clock(|clock| clock.follow(position, now));
         }
-        self.clock.pause(now);
+        self.with_clock(|clock| clock.pause(now));
     }
 
     /// Playing, and not run out.
     pub fn is_playing(&mut self) -> bool {
         self.update_ended(Instant::now());
-        self.clock.is_playing() && !self.ended
+        self.clock().is_playing() && !self.ended
     }
 
     /// Ran out at the end (until the next seek).
@@ -807,7 +862,7 @@ impl Player {
     }
 
     pub fn set_rate(&mut self, rate: f64) {
-        self.clock.set_rate(rate, Instant::now());
+        self.with_clock(|clock| clock.set_rate(rate, Instant::now()));
     }
 
     /// Show `secs` next: pictures and sound restart there.
@@ -829,7 +884,7 @@ impl Player {
             }
         }
         self.shared.wake.notify_all();
-        self.clock.seek(secs, Instant::now());
+        self.with_clock(|clock| clock.seek(secs, Instant::now()));
         self.first = true;
         self.ended = false;
         self.last_pts = None;
@@ -844,8 +899,9 @@ impl Player {
     }
 
     fn position_at(&self, now: Instant) -> f64 {
-        let wall = self.clock.position(now);
-        let position = if self.clock.held || !self.clock.is_playing() {
+        let clock = self.clock();
+        let wall = clock.position(now);
+        let position = if clock.held || !clock.is_playing() {
             wall
         } else {
             synced_position(wall, self.heard())
@@ -865,16 +921,20 @@ impl Player {
         if self.ended {
             return;
         }
+        // A clip nobody paints keeps its last picture queued; once the
+        // clock has passed it, it would only be shown late.
+        let position = self.position_at(now);
         let drained = {
             let state = lock(&self.shared.state);
-            state.eof && state.video.is_empty()
+            let passed = |last: &VideoFrame| !self.first && last.pts <= position + DUE_SLACK;
+            state.eof && state.video.back().is_none_or(passed)
         };
         if !drained {
             return;
         }
         let no_picture_coming = self.first;
         if no_picture_coming {
-            self.clock.release(now);
+            self.with_clock(|clock| clock.release(now));
         }
         let sound_done = self.audio().is_none_or(|audio| audio.drained());
         let end = self.duration().or(self.last_pts);
@@ -883,8 +943,10 @@ impl Player {
         if sound_done && reached {
             // Settle the clock on the end so the position reads full.
             let end = end.unwrap_or_else(|| self.position_at(now));
-            self.clock.follow(end, now);
-            self.clock.pause(now);
+            self.with_clock(|clock| {
+                clock.follow(end, now);
+                clock.pause(now);
+            });
             self.ended = true;
         }
     }

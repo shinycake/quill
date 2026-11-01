@@ -375,6 +375,22 @@ pub(crate) fn set_window_edr(window: &gpui_kit::Window, on: bool) {
     });
 }
 
+/// Whether the window's layer is in extended-range mode now. The renderer
+/// turns it off on its own when it can't draw in it.
+pub(crate) fn window_edr(window: &gpui_kit::Window) -> Option<bool> {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyObject, Bool};
+    with_view(window, |view| {
+        // SAFETY: as in `set_window_edr`.
+        let layer: *mut AnyObject = unsafe { msg_send![view, layer] };
+        // SAFETY: as above; a null layer is skipped.
+        let layer = unsafe { layer.as_ref() }?;
+        // SAFETY: CAMetalLayer's wantsExtendedDynamicRangeContent getter.
+        let on: Bool = unsafe { msg_send![layer, wantsExtendedDynamicRangeContent] };
+        Some(on.as_bool())
+    })
+}
+
 fn with_view<T>(
     window: &gpui_kit::Window,
     f: impl FnOnce(&objc2_app_kit::NSView) -> Option<T>,

@@ -14,7 +14,6 @@ mod cpal_stream_tests;
 pub(super) mod engine;
 mod opus;
 mod output;
-mod seek_board;
 mod tempo;
 
 use std::cell::RefCell;
@@ -110,11 +109,14 @@ impl fmt::Display for AudioError {
 
 /// Open `path` as a rodio source, stretched to the shared speed.
 fn open_source(path: &Path, speed: &SharedSpeed) -> Result<Box<dyn Source + Send>, AudioError> {
-    Ok(Box::new(Tempo::new(open_decoded(path)?, speed.clone())))
+    Ok(Box::new(Tempo::new(
+        open_decoded(path, &AtomicBool::new(false))?,
+        speed.clone(),
+    )))
 }
 
 /// Open `path` as the decoder's own source (no speed stretching).
-fn open_decoded(path: &Path) -> Result<Box<dyn Source + Send>, AudioError> {
+fn open_decoded(path: &Path, cancelled: &AtomicBool) -> Result<Box<dyn Source + Send>, AudioError> {
     let mut file = File::open(path).map_err(|_| AudioError::Open)?;
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
     let mut header = [0u8; 64];
@@ -124,7 +126,7 @@ fn open_decoded(path: &Path) -> Result<Box<dyn Source + Send>, AudioError> {
     let reader = BufReader::new(file);
     Ok(match choose_codec(header.get(..read).unwrap_or_default()) {
         Codec::Opus => {
-            Box::new(opus::OpusSource::new(reader).map_err(|_| AudioError::Unsupported)?)
+            Box::new(opus::OpusSource::new(reader, cancelled).map_err(|_| AudioError::Unsupported)?)
         }
         Codec::Generic => {
             let extension = path.extension().and_then(|e| e.to_str());
@@ -416,6 +418,7 @@ mod tests {
     use rodio::buffer::SamplesBuffer;
     use std::num::NonZero;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -505,7 +508,8 @@ mod tests {
 
     #[test]
     fn opus_fixture_decodes_to_its_duration() {
-        let source = OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE)).expect("opus");
+        let source = OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE), &AtomicBool::new(false))
+            .expect("opus");
         assert_eq!(source.channels().get(), 1);
         assert_eq!(source.sample_rate().get(), 48_000);
         let total = source.total_duration().expect("duration").as_secs_f64();
@@ -519,10 +523,12 @@ mod tests {
 
     #[test]
     fn opus_seek_lands_on_the_requested_position() {
-        let full: Vec<f32> = OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE))
-            .unwrap()
-            .collect();
-        let mut source = OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE)).unwrap();
+        let full: Vec<f32> =
+            OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE), &AtomicBool::new(false))
+                .unwrap()
+                .collect();
+        let mut source =
+            OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE), &AtomicBool::new(false)).unwrap();
         source.try_seek(Duration::from_millis(250)).unwrap();
         let tail: Vec<f32> = source.by_ref().collect();
         let expected = full.len() - 12_000;
@@ -539,9 +545,23 @@ mod tests {
     }
 
     #[test]
+    fn a_cancelled_opus_read_stops_without_a_source() {
+        let cancelled = AtomicBool::new(true);
+        assert!(OpusSource::new(std::io::Cursor::new(OPUS_FIXTURE), &cancelled).is_err());
+    }
+
+    #[test]
     fn opus_rejects_other_ogg_and_garbage() {
-        assert!(OpusSource::new(std::io::Cursor::new(b"not ogg at all".to_vec())).is_err());
-        assert!(OpusSource::new(std::io::Cursor::new(Vec::new())).is_err());
+        assert!(
+            OpusSource::new(
+                std::io::Cursor::new(b"not ogg at all".to_vec()),
+                &AtomicBool::new(false)
+            )
+            .is_err()
+        );
+        assert!(
+            OpusSource::new(std::io::Cursor::new(Vec::new()), &AtomicBool::new(false)).is_err()
+        );
     }
 
     #[test]

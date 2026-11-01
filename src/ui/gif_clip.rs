@@ -18,9 +18,8 @@ use image::{AnimationDecoder, ImageDecoder, ImageResult, RgbaImage};
 use smallvec::SmallVec;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 /// A GIF's canvas may not be larger than this on a side.
@@ -65,77 +64,104 @@ pub(super) enum GifError {
 
 struct Held {
     image: Arc<RenderImage>,
-    /// When this picture stops showing, from the start of the loop.
+    /// How long this picture shows.
+    shown: Duration,
+    /// When it stops showing, from the start of the loop.
     ends: Duration,
 }
 
-/// The distinct pictures of a looping GIF and how long each shows.
-pub(super) struct GifClip {
+/// What has decoded of a clip so far.
+#[derive(Default)]
+struct Decoded {
     frames: Vec<Held>,
-    /// The shortest time a held picture shows: the redraw cadence.
-    shortest: Duration,
+    /// Every frame is in, so the clip loops.
+    complete: bool,
+}
+
+/// The distinct pictures of a looping GIF and how long each shows. The
+/// decode thread adds them while the row already plays the first ones.
+pub(super) struct GifClip {
+    decoded: Mutex<Decoded>,
 }
 
 impl Drop for GifClip {
     fn drop(&mut self) {
         // Hand the pictures to the atlas sweeper, which keeps any still
         // held elsewhere (the frame being painted).
-        super::image_budget::retire_all(self.frames.drain(..).map(|held| held.image));
+        let frames = std::mem::take(&mut lock(&self.decoded).frames);
+        super::image_budget::retire_all(frames.into_iter().map(|held| held.image));
     }
 }
 
-/// Pictures collected for a clip, merging a picture equal to the one before.
-#[derive(Default)]
+fn lock(decoded: &Mutex<Decoded>) -> MutexGuard<'_, Decoded> {
+    decoded.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Pictures collected for a clip, merging a picture equal to the one
+/// before, and published to it as they come.
 struct ClipBuilder {
-    pictures: Vec<(RgbaImage, Duration)>,
+    clip: Arc<GifClip>,
+    held: usize,
     bytes: usize,
+}
+
+impl Default for ClipBuilder {
+    fn default() -> Self {
+        Self {
+            clip: Arc::new(GifClip {
+                decoded: Mutex::default(),
+            }),
+            held: 0,
+            bytes: 0,
+        }
+    }
 }
 
 impl ClipBuilder {
     /// Add a picture shown for `delay`; equal to the last, it extends that
     /// one instead. Returns whether more pictures fit.
-    fn push(&mut self, picture: RgbaImage, delay: Duration) -> bool {
-        if let Some((last, shown)) = self.pictures.last_mut()
-            && *last == picture
+    fn push(&mut self, mut picture: RgbaImage, delay: Duration) -> bool {
+        // RenderImage holds BGRA.
+        for pixel in picture.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        let mut decoded = lock(&self.clip.decoded);
+        if let Some(last) = decoded.frames.last_mut()
+            && last.image.as_bytes(0) == Some(picture.as_raw().as_slice())
         {
-            *shown = shown.saturating_add(delay);
+            last.shown = last.shown.saturating_add(delay);
+            last.ends = last.ends.saturating_add(delay);
             return true;
         }
         let size = picture.as_raw().len();
-        if self.pictures.len() >= MAX_HELD || self.bytes.saturating_add(size) > MAX_BYTES {
+        if self.held >= MAX_HELD || self.bytes.saturating_add(size) > MAX_BYTES {
             return false;
         }
+        self.held += 1;
         self.bytes = self.bytes.saturating_add(size);
-        self.pictures.push((picture, delay));
+        let ends = decoded
+            .frames
+            .last()
+            .map_or(Duration::ZERO, |last| last.ends)
+            .saturating_add(delay);
+        decoded.frames.push(Held {
+            image: Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
+                picture,
+            )]))),
+            shown: delay,
+            ends,
+        });
         true
     }
 
-    fn finish(self) -> Option<GifClip> {
-        let mut ends = Duration::ZERO;
-        let shortest = self
-            .pictures
-            .iter()
-            .map(|(_, shown)| *shown)
-            .min()
-            .unwrap_or(DEFAULT_DELAY);
-        let frames: Vec<Held> = self
-            .pictures
-            .into_iter()
-            .map(|(mut picture, shown)| {
-                ends = ends.saturating_add(shown);
-                // RenderImage holds BGRA.
-                for pixel in picture.as_chunks_mut::<4>().0 {
-                    pixel.swap(0, 2);
-                }
-                Held {
-                    image: Arc::new(RenderImage::new(SmallVec::from_buf([image::Frame::new(
-                        picture,
-                    )]))),
-                    ends,
-                }
-            })
-            .collect();
-        (!frames.is_empty()).then_some(GifClip { frames, shortest })
+    /// The clip so far, once it has a picture.
+    fn started(&self) -> Option<Arc<GifClip>> {
+        (self.held > 0).then(|| self.clip.clone())
+    }
+
+    fn finish(self) -> Option<Arc<GifClip>> {
+        lock(&self.clip.decoded).complete = true;
+        self.started()
     }
 }
 
@@ -190,8 +216,10 @@ fn collect(
     mut frames: impl Iterator<Item = ImageResult<image::Frame>>,
     max_edge: u32,
     cancel: &AtomicBool,
-) -> Result<GifClip, GifError> {
+    started: impl FnOnce(Arc<GifClip>),
+) -> Result<Arc<GifClip>, GifError> {
     let mut builder = ClipBuilder::default();
+    let mut started = Some(started);
     let mut read = 0usize;
     let mut total = Duration::ZERO;
     loop {
@@ -205,7 +233,13 @@ fn collect(
         read = read.saturating_add(1);
         let delay = frame_delay(&frame);
         total = total.saturating_add(delay);
-        if !builder.push(fitted(frame.into_buffer(), max_edge), delay) {
+        let more = builder.push(fitted(frame.into_buffer(), max_edge), delay);
+        if let Some(clip) = builder.started()
+            && let Some(started) = started.take()
+        {
+            started(clip);
+        }
+        if !more {
             break;
         }
         if read >= MAX_FRAMES || total >= MAX_TOTAL {
@@ -218,12 +252,14 @@ fn collect(
 impl GifClip {
     /// Decode the file at most `max_edge` px on its longer side (the tile
     /// in device pixels, capped at `INLINE_MAX_EDGE`). Runs off the UI
-    /// thread; returns early once `cancel` is set.
+    /// thread; returns early once `cancel` is set. `started` gets the clip
+    /// as soon as its first picture is in, to play while the rest decodes.
     pub(super) fn decode(
         path: &Path,
         max_edge: u32,
         cancel: &AtomicBool,
-    ) -> Result<Self, GifError> {
+        started: impl FnOnce(Arc<Self>),
+    ) -> Result<Arc<Self>, GifError> {
         let mut file = std::fs::File::open(path).map_err(|err| GifError::Open(err.to_string()))?;
         let mut head = [0u8; 6];
         if file.read_exact(&mut head).is_err() || !is_gif_header(&head) {
@@ -231,14 +267,15 @@ impl GifClip {
         }
         file.seek(SeekFrom::Start(0))
             .map_err(|err| GifError::Open(err.to_string()))?;
-        Self::decode_from(std::io::BufReader::new(file), max_edge, cancel)
+        Self::decode_from(std::io::BufReader::new(file), max_edge, cancel, started)
     }
 
     fn decode_from(
         reader: impl std::io::BufRead + Seek,
         max_edge: u32,
         cancel: &AtomicBool,
-    ) -> Result<Self, GifError> {
+        started: impl FnOnce(Arc<Self>),
+    ) -> Result<Arc<Self>, GifError> {
         let mut decoder = image::codecs::gif::GifDecoder::new(reader)
             .map_err(|err| GifError::Open(err.to_string()))?;
         let (width, height) = decoder.dimensions();
@@ -251,53 +288,76 @@ impl GifClip {
         limits.max_alloc = Some(MAX_ALLOC);
         decoder.set_limits(limits).map_err(|_| GifError::TooLarge)?;
         let max_edge = max_edge.clamp(MIN_EDGE, super::inline_video::INLINE_MAX_EDGE);
-        collect(decoder.into_frames(), max_edge, cancel)
+        collect(decoder.into_frames(), max_edge, cancel, started)
     }
 
     /// How many distinct pictures are held.
     #[cfg(test)]
     pub(super) fn held(&self) -> usize {
-        self.frames.len()
+        lock(&self.decoded).frames.len()
     }
 
     /// The longer side of the held pictures, in pixels.
     #[cfg(test)]
     fn edge(&self) -> u32 {
-        self.frames.first().map_or(0, |held| {
+        lock(&self.decoded).frames.first().map_or(0, |held| {
             let size = held.image.size(0);
             let side = |pixels: i32| u32::try_from(pixels).unwrap_or(0);
             side(size.width.0).max(side(size.height.0))
         })
     }
 
-    /// Whether the clip never changes (a single held picture).
+    /// Whether the clip never changes (fully read, one held picture).
+    #[cfg(test)]
     pub(super) fn is_still(&self) -> bool {
-        self.frames.len() < 2
+        let decoded = lock(&self.decoded);
+        decoded.complete && decoded.frames.len() < 2
     }
 
     /// The loop's length.
+    #[cfg(test)]
     fn total(&self) -> Duration {
-        self.frames.last().map_or(Duration::ZERO, |held| held.ends)
+        Self::loop_length(&lock(&self.decoded))
     }
 
-    /// The picture showing `elapsed` into the (looping) clip.
-    pub(super) fn frame_at(&self, elapsed: Duration) -> Option<&Arc<RenderImage>> {
-        let total = self.total().as_nanos();
-        let at = elapsed.as_nanos().checked_rem(total).unwrap_or(0);
-        self.frames
+    fn loop_length(decoded: &Decoded) -> Duration {
+        decoded
+            .frames
+            .last()
+            .map_or(Duration::ZERO, |held| held.ends)
+    }
+
+    /// The picture showing `elapsed` into the (looping) clip. Past the
+    /// pictures decoded so far, the last one holds until more come.
+    pub(super) fn frame_at(&self, elapsed: Duration) -> Option<Arc<RenderImage>> {
+        let decoded = lock(&self.decoded);
+        let total = Self::loop_length(&decoded).as_nanos();
+        let at = if decoded.complete {
+            elapsed.as_nanos().checked_rem(total).unwrap_or(0)
+        } else {
+            elapsed.as_nanos()
+        };
+        decoded
+            .frames
             .iter()
             .find(|held| held.ends.as_nanos() > at)
-            .or(self.frames.last())
-            .map(|held| &held.image)
+            .or(decoded.frames.last())
+            .map(|held| held.image.clone())
     }
 
     /// How often the picture can change: one redraw per shortest held
-    /// picture, at most [`MAX_FPS`]; 0 for a still clip.
+    /// picture, at most [`MAX_FPS`]; 0 for a still clip. While decoding,
+    /// at least the default delay's rate, for the pictures still to come.
     fn fps(&self) -> u32 {
-        if self.is_still() {
-            return 0;
-        }
-        let millis = self.shortest.as_millis().max(1);
+        let decoded = lock(&self.decoded);
+        let shortest = decoded.frames.iter().map(|held| held.shown).min();
+        let shortest = match (decoded.complete, shortest) {
+            (true, _) if decoded.frames.len() < 2 => return 0,
+            (true, Some(shortest)) => shortest,
+            (false, Some(shortest)) => shortest.min(DEFAULT_DELAY),
+            (_, None) => DEFAULT_DELAY,
+        };
+        let millis = shortest.as_millis().max(1);
         u32::try_from(1000u128.div_ceil(millis))
             .unwrap_or(MAX_FPS)
             .clamp(1, MAX_FPS)
@@ -308,12 +368,12 @@ impl GifClip {
 /// picture is picked when the row (or its animation layer) draws.
 #[derive(Clone)]
 pub(crate) struct GifPlay {
-    clip: Rc<GifClip>,
+    clip: Arc<GifClip>,
     started: Instant,
 }
 
 impl GifPlay {
-    pub(super) fn new(clip: Rc<GifClip>, started: Instant) -> Self {
+    pub(super) fn new(clip: Arc<GifClip>, started: Instant) -> Self {
         Self { clip, started }
     }
 
@@ -334,7 +394,7 @@ impl GifPlay {
         } else {
             self.started.elapsed()
         };
-        self.clip.frame_at(elapsed).cloned()
+        self.clip.frame_at(elapsed)
     }
 
     /// The redraw rate the GIF's own frame cadence asks for (0 while it

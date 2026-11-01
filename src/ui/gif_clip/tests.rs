@@ -79,7 +79,7 @@ fn a_repeated_picture_is_held_once_with_its_whole_duration() {
     let clip = builder.finish().expect("clip");
     assert_eq!(clip.held(), 3);
     assert_eq!(clip.total(), ms(550));
-    let at = |t| clip.frame_at(ms(t)).cloned().expect("frame");
+    let at = |t| clip.frame_at(ms(t)).expect("frame");
     // The first red shows for 250 ms, then blue until 450, then red.
     assert!(Arc::ptr_eq(&at(0), &at(249)));
     assert!(!Arc::ptr_eq(&at(249), &at(250)));
@@ -95,7 +95,7 @@ fn a_repeated_picture_is_held_once_with_its_whole_duration() {
 #[test]
 fn a_decoded_gif_holds_repeated_frames_once() {
     let file = TempFile::new("held.gif", &encode(&[RED, RED, RED, BLUE, BLUE]));
-    let clip = GifClip::decode(&file.0, 320, &GO).expect("decode");
+    let clip = GifClip::decode(&file.0, 320, &GO, |_| {}).expect("decode");
     assert_eq!(clip.held(), 2);
     assert!(!clip.is_still());
     assert_eq!(clip.total(), ms(500));
@@ -111,7 +111,7 @@ fn the_held_pictures_are_bounded_in_count() {
         fitted_all &= builder.push(solid([shade, tint, 7, 255]), ms(40));
     }
     assert!(!fitted_all);
-    assert_eq!(builder.pictures.len(), MAX_HELD);
+    assert_eq!(builder.held, MAX_HELD);
 }
 
 #[test]
@@ -137,8 +137,11 @@ fn the_held_pictures_are_bounded_in_bytes() {
     assert_eq!(pushed, MAX_BYTES / each);
     assert!(builder.bytes <= MAX_BYTES);
     // A picture equal to the last still extends it past the bound.
-    let last = builder.pictures.last().map(|(picture, _)| picture.clone());
-    assert!(builder.push(last.expect("a last picture"), ms(40)));
+    let n = pushed - 1;
+    let shade = u8::try_from(n % 250).unwrap_or(0);
+    let tint = u8::try_from(n / 250).unwrap_or(0);
+    let last = RgbaImage::from_pixel(side, side, Rgba([shade, tint, 1, 255]));
+    assert!(builder.push(last, ms(40)));
 }
 
 #[test]
@@ -167,10 +170,10 @@ fn pictures_are_fitted_down_never_up() {
 fn a_gif_decodes_at_the_size_asked_for() {
     let file = TempFile::new("sized.gif", &encode_sized(64, 32, &[RED, BLUE]));
     // The 64 x 32 picture at a 32 px edge is 32 x 16.
-    let small = GifClip::decode(&file.0, 32, &GO);
+    let small = GifClip::decode(&file.0, 32, &GO, |_| {});
     // Below the floor the floor applies; above the picture, no upscaling.
-    let floor = GifClip::decode(&file.0, 1, &GO);
-    let large = GifClip::decode(&file.0, 4000, &GO);
+    let floor = GifClip::decode(&file.0, 1, &GO, |_| {});
+    let large = GifClip::decode(&file.0, 4000, &GO, |_| {});
     assert_eq!(small.map(|clip| clip.edge()), Ok(32));
     assert_eq!(floor.map(|clip| clip.edge()), Ok(16));
     assert_eq!(large.map(|clip| clip.edge()), Ok(64));
@@ -202,12 +205,12 @@ fn malformed_bytes_do_not_panic() {
         let file = TempFile::new(name, &bytes);
         // Any outcome but a panic: an error, or the frames before the
         // damage.
-        let _ = GifClip::decode(&file.0, 320, &GO);
+        let _ = GifClip::decode(&file.0, 320, &GO, |_| {});
     }
     // An MP4 labelled `image/gif` is handed to the video player.
     let mp4 = TempFile::new("clip.gif", b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00");
     assert_eq!(
-        GifClip::decode(&mp4.0, 320, &GO).err(),
+        GifClip::decode(&mp4.0, 320, &GO, |_| {}).err(),
         Some(GifError::NotGif)
     );
 }
@@ -228,7 +231,7 @@ fn an_oversized_canvas_is_rejected() {
     width.copy_from_slice(&8192u16.to_le_bytes());
     let file = TempFile::new("wide.gif", &bytes);
     assert_eq!(
-        GifClip::decode(&file.0, 320, &GO).err(),
+        GifClip::decode(&file.0, 320, &GO, |_| {}).err(),
         Some(GifError::TooLarge)
     );
 }
@@ -271,19 +274,24 @@ fn frames<'a>(
 fn cancelling_stops_decoding_between_frames() {
     let cancel = AtomicBool::new(false);
     let handed = Cell::new(0);
-    let result = collect(frames(50, None, Some((&cancel, 3)), &handed), 320, &cancel);
+    let result = collect(
+        frames(50, None, Some((&cancel, 3)), &handed),
+        320,
+        &cancel,
+        |_| {},
+    );
     assert_eq!(result.err(), Some(GifError::Cancelled));
     // No frame was decoded after the flag was set.
     assert_eq!(handed.get(), 3);
     // Set before the start: nothing is read.
     let handed = Cell::new(0);
-    let result = collect(frames(50, None, None, &handed), 320, &cancel);
+    let result = collect(frames(50, None, None, &handed), 320, &cancel, |_| {});
     assert_eq!(result.err(), Some(GifError::Cancelled));
     assert_eq!(handed.get(), 0);
     // A real file too.
     let file = TempFile::new("cancel.gif", &encode(&[RED, BLUE]));
     assert_eq!(
-        GifClip::decode(&file.0, 320, &cancel).err(),
+        GifClip::decode(&file.0, 320, &cancel, |_| {}).err(),
         Some(GifError::Cancelled)
     );
 }
@@ -291,12 +299,13 @@ fn cancelling_stops_decoding_between_frames() {
 #[test]
 fn a_late_frame_that_fails_keeps_the_frames_before_it() {
     let handed = Cell::new(0);
-    let clip = collect(frames(10, Some(4), None, &handed), 320, &GO).expect("the first four");
+    let clip =
+        collect(frames(10, Some(4), None, &handed), 320, &GO, |_| {}).expect("the first four");
     assert_eq!(clip.held(), 4);
     assert_eq!(clip.total(), ms(160));
     // A first frame that fails leaves nothing to play.
     let handed = Cell::new(0);
-    let result = collect(frames(10, Some(0), None, &handed), 320, &GO);
+    let result = collect(frames(10, Some(0), None, &handed), 320, &GO, |_| {});
     assert_eq!(result.err(), Some(GifError::Empty));
 }
 
@@ -313,8 +322,34 @@ fn reading_stops_at_the_frame_bound() {
             Delay::from_numer_denom_ms(20, 1),
         )))
     });
-    let clip = collect(same, 320, &GO).expect("clip");
+    let clip = collect(same, 320, &GO, |_| {}).expect("clip");
     assert_eq!(clip.held(), 1);
     assert_eq!(handed.get(), super::MAX_FRAMES);
     assert!(clip.total() <= super::MAX_TOTAL);
+}
+
+#[test]
+fn a_gif_plays_from_its_first_picture_while_the_rest_decodes() {
+    let handed = Cell::new(0);
+    let read_at_start = Cell::new(None);
+    let playing = std::cell::RefCell::new(None);
+    let clip = collect(frames(10, None, None, &handed), 320, &GO, |clip| {
+        read_at_start.set(Some(handed.get()));
+        let first = clip.frame_at(ms(0)).expect("a picture");
+        // Past what has decoded, the last picture holds; it does not loop.
+        assert!(Arc::ptr_eq(&first, &clip.frame_at(ms(1000)).expect("held")));
+        assert!(clip.fps() > 0, "redrawn while more pictures come");
+        *playing.borrow_mut() = Some(clip);
+    })
+    .expect("clip");
+    assert_eq!(read_at_start.get(), Some(1), "started after one frame");
+    let playing = playing.borrow_mut().take().expect("started");
+    assert!(Arc::ptr_eq(&playing, &clip), "the same clip fills in");
+    assert_eq!(clip.held(), 10);
+    // Read whole, it loops.
+    let first = clip.frame_at(ms(0)).expect("a picture");
+    assert!(Arc::ptr_eq(
+        &first,
+        &clip.frame_at(ms(400)).expect("looped")
+    ));
 }

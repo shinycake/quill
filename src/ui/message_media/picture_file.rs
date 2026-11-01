@@ -23,6 +23,8 @@ pub(in crate::ui) fn picture_file_attachment(
     (chat_id, message_id): (ChatId, MessageId),
     (frame_w, frame_h): (Pixels, Pixels),
     corners: MediaCorners,
+    // The GIF looping in the row (`gif_clip`), for an `image/gif` file.
+    gif: Option<crate::ui::gif_clip::GifPlay>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let file_id = doc.file_id;
@@ -54,7 +56,7 @@ pub(in crate::ui) fn picture_file_attachment(
     } else {
         format_bytes(size)
     };
-    let fill = |element: Img| {
+    let fill = move |element: Img| {
         element
             .absolute()
             .inset_0()
@@ -76,10 +78,39 @@ pub(in crate::ui) fn picture_file_attachment(
     let hdr = full_path
         .as_deref()
         .is_some_and(|path| crate::ui::hdr_image::has_hdr(path, cx));
-    let picture = full_path.as_ref().map(|path| {
+    let format = quill::media_viewer::picture_format_label(doc);
+    let still = full_path.as_ref().map(|path| {
         fill(img(sized_media(path, (frame_w, frame_h), dims, Fit::Cover)))
             .with_fallback(|| div().into_any_element())
+            .into_any_element()
     });
+    let picture = match gif {
+        // Drawn by the conversation's animation layer, which paints over
+        // the row, so the pill and the name ride with the picture.
+        Some(gif) => {
+            let (format, name, status) = (format.clone(), name.clone(), status.clone());
+            let draw = move |frame: Arc<RenderImage>| {
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(fill(img(ImageSource::Render(frame))))
+                    .child(file_pill(format.clone(), hdr))
+                    .child(name_badge(name.clone(), status.clone(), frame_w))
+                    .into_any_element()
+            };
+            let under = gif.frame_now().map(&draw).or(still);
+            let fps = gif.fps();
+            Some(
+                crate::ui::anim_layer::tile(
+                    div().absolute().inset_0().children(under),
+                    fps,
+                    move || gif.frame_now().map(&draw),
+                )
+                .into_any_element(),
+            )
+        }
+        None => still,
+    };
     let disc = full_path.is_none().then(|| {
         let state = if downloading_now {
             MediaDisc::Progress(download_fraction(file_id, files))
@@ -112,10 +143,7 @@ pub(in crate::ui) fn picture_file_attachment(
         .children(preview)
         .children(picture)
         .children(disc)
-        .child(file_pill(
-            quill::media_viewer::picture_format_label(doc),
-            hdr,
-        ))
+        .child(file_pill(format, hdr))
         .child(name_badge(name, status, frame_w))
         .on_click(cx.listener(move |this, _, _, cx| {
             if !this.open_file_viewer(chat_id, message_id, cx) {
