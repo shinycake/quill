@@ -238,6 +238,7 @@ impl QuillApp {
         let to = (!model.translated).then_some(model.to);
         if let Some(live) = self.live.as_mut() {
             live.driver.session.set_chat_translated_to(chat_id, to);
+            quill::wake::UPDATES.poke();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.set_chat_translated_to(chat_id, to);
         }

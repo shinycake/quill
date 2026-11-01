@@ -85,8 +85,8 @@ impl QuillApp {
         let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
             && state.is_some();
         if !deep_link_step_redraws(state.as_ref(), self.links.deep_link_invite.as_ref()) {
-            // Nothing new (this runs on every poll, ~8×/s when idle): put
-            // the state back and don't redraw.
+            // Nothing new (this runs on every poll): put the state back and
+            // don't redraw.
             live.driver.session.chats_state.deep_link = state;
             live.driver.session.chats_state.deep_link_from_agent = from_agent;
             return;
@@ -161,6 +161,7 @@ impl QuillApp {
     pub(super) fn queue_deep_link(&mut self, link: String) {
         self.links.agent_pending_link = guard::injecting().then(|| link.clone());
         self.pending_deep_link = Some(link);
+        quill::wake::UPDATES.poke();
     }
 
     /// Render-time half: open the resolved chat (has the `Window` for

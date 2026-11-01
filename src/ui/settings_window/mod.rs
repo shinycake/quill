@@ -70,6 +70,8 @@ impl QuillApp {
         if let Some(page) = page {
             self.switch_settings_page(page);
         }
+        // The poll loop's ticks follow Settings being open (the grams probe).
+        quill::wake::UPDATES.poke();
     }
 
     pub(super) fn close_settings(&mut self) {
