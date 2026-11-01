@@ -20,6 +20,7 @@ impl QuillApp {
     pub(super) fn render_history_row_body(
         &self,
         row: &HistoryRow,
+        corner: crate::ui::history::CornerActions,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let shared = &self.history.shared;
@@ -65,6 +66,7 @@ impl QuillApp {
                     look,
                     session,
                     &self.message_ui.spoiler_revealed,
+                    corner,
                     cx,
                 )
             }
@@ -148,6 +150,7 @@ impl QuillApp {
                         joined_above: inputs.joined_above,
                         ..look
                     },
+                    corner,
                     cx,
                 );
                 let row = self.with_suggested_post_block(message, row, cx);

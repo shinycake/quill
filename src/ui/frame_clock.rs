@@ -264,11 +264,9 @@ impl QuillApp {
         if !tick_wanted(self.frame.window_active.get(), plays_sound) && !own_window_active {
             return;
         }
-        // Nor in a main window the active chat window hides whole
-        // (`chat_window::cover`): its slices and their layers get no tick.
         // A tick for the whole app still comes, whichever window asks; it
-        // redraws every window but that one then (`tick_app`).
-        if self.frame.main_covered.get() && target.is_some_and(|id| self.slices.owns(id)) {
+        // redraws every window but a covered one (`tick_app`).
+        if target.is_some_and(|id| self.tick_hidden(id, cx)) {
             return;
         }
         // Nor in a chat window the active window hides whole: it skips ticks
@@ -336,11 +334,10 @@ impl QuillApp {
                                 if targets.contains(&None) {
                                     this.tick_app(cx);
                                 } else {
-                                    let covered = this.frame.main_covered.get();
                                     let views: Vec<_> = targets
                                         .into_iter()
                                         .flatten()
-                                        .filter(|id| !covered || !this.slices.owns(*id))
+                                        .filter(|id| !this.tick_hidden(*id, cx))
                                         .filter(|id| !this.windows.holds_view(*id, cx))
                                         .collect();
                                     let app: &mut App = cx;
@@ -370,6 +367,12 @@ impl QuillApp {
             let _ = this.update(cx, |this, _| this.frame.frame_clock_running.set(false));
         })
         .detach();
+    }
+
+    fn tick_hidden(&self, view: EntityId, cx: &App) -> bool {
+        let now = cx.background_executor().now();
+        (self.frame.main_covered.get() && self.slices.owns(view))
+            || (self.slices.under_viewer(view) && self.frame.viewer_cover.get().is_opaque_at(now))
     }
 
     /// The main window's display timing and that display's latest vsync,

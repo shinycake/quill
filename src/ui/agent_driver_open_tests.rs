@@ -63,6 +63,12 @@ fn put_link_in_chat_11(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> u
 /// line first, until one click queues the link (taken back before it runs)
 /// or opens it (in test builds only counted).
 fn find_link(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: u64) -> Point<Pixels> {
+    let row = app.read_with(vcx, |app, _| {
+        app.history
+            .painted_row_center(quill::ids::MessageId(id as i64))
+    });
+    vcx.simulate_mouse_move(row, None, Modifiers::none());
+    settle(vcx);
     let (actions, chats) = vcx.update(|window, _| {
         (
             window.find(format!("message-reply-{id}")).bounds(),

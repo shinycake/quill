@@ -201,16 +201,13 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     // Right-click the window's one message (its bubble sits at the left
-    // of the row, level with the row's reaction button): the menu belongs
-    // to the window.
+    // of the row): the menu belongs to the window.
     let point = cx
         .update_window(chat_window, |_, window, cx| {
             window.render_frame(cx);
-            let react = window
-                .within(("row", OTHER_LAST.0 as u64))
-                .find(format!("message-react-{}", OTHER_LAST.0))
-                .bounds();
-            gpui_kit::point(px(70.), react.center().y)
+            let row = h.app.read(cx).windows.slot_for(OTHER).expect("slot");
+            let row = row.borrow().history.painted_row_center(OTHER_LAST);
+            gpui_kit::point(px(70.), row.y)
         })
         .unwrap();
     let mut vcx = VisualTestContext::from_window(chat_window, cx);

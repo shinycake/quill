@@ -34,6 +34,8 @@ pub(crate) struct FrameUi {
     /// render: the main window's own content asks for no ticks, as behind
     /// another app (`chat_window::cover`).
     pub(super) main_covered: std::cell::Cell<bool>,
+    /// The open viewer's fade: what it hides gets no ticks once it has ended.
+    pub(super) viewer_cover: std::cell::Cell<super::media_viewer::ViewerCover>,
     /// The title last handed to the platform window (`window_chrome`).
     pub(super) window_title_shown: std::cell::RefCell<String>,
     /// Unread badge memo for the title (`tray::badge_cache`).
@@ -94,6 +96,7 @@ impl FrameUi {
             window_active: std::cell::Cell::new(true),
             main_active: std::cell::Cell::new(true),
             main_covered: Default::default(),
+            viewer_cover: Default::default(),
             window_title_shown: Default::default(),
             title_badge: Default::default(),
             media_roots_frame: Default::default(),

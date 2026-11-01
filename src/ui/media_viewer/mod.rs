@@ -42,6 +42,7 @@ mod actions;
 mod caption;
 mod chrome;
 mod controller;
+mod cover;
 mod files;
 mod files_demo;
 mod fullscreen;
@@ -62,6 +63,7 @@ mod ttl_ui;
 mod video;
 mod video_extras;
 
+pub(in crate::ui) use cover::ViewerCover;
 pub(in crate::ui) use layer::ViewerVideoLayer;
 pub(in crate::ui) use pip::PipLink;
 
