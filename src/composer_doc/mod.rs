@@ -145,6 +145,9 @@ impl ComposerDoc {
         let (text, entities) = parse_format_markup(markup);
         let mut doc = Self::plain(text);
         for entity in entities {
+            crate::composer::scan_work::add(
+                usize::try_from(entity.offset + entity.length).unwrap_or(0),
+            );
             let (Ok(start), Ok(end)) = (
                 utf16_to_utf8_offset(&doc.text, entity.offset),
                 utf16_to_utf8_offset(&doc.text, entity.offset + entity.length),
@@ -328,6 +331,7 @@ fn carve(
     range: &Range<usize>,
     cut: impl Fn(&ComposerTag) -> bool,
 ) -> Vec<DocSpan> {
+    crate::composer::scan_work::add(spans.len());
     let mut out = Vec::with_capacity(spans.len() + 1);
     for span in spans {
         if !cut(&span.tag) || span.range.end <= range.start || span.range.start >= range.end {
@@ -709,6 +713,7 @@ impl<'a> Markup<'a> {
         let mut i = 0;
         while let (Some(&a), Some(&b)) = (cuts.get(i), cuts.get(i + 1)) {
             i += 1;
+            crate::composer::scan_work::add(self.pre.len() + self.inline.len());
             if let Some(block) = self.pre.iter().find(|p| p.range.start == a) {
                 self.close_all(&mut stack, &mut out);
                 self.quote_prefix(a, &mut out);
@@ -790,6 +795,7 @@ impl<'a> Markup<'a> {
     fn quote_prefix(&self, at: usize, out: &mut String) {
         let text = &self.doc.text;
         let line_start = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
+        crate::composer::scan_work::add(self.quote.len());
         if line_start && self.quote.iter().any(|q| q.start <= at && at < q.end) {
             out.push_str("> ");
         }
@@ -844,6 +850,7 @@ impl<'a> Markup<'a> {
         let touches_star = text.get(range.clone()).is_some_and(|t| t.contains('*'))
             || text.get(..range.start).is_some_and(|t| t.ends_with('*'))
             || text.get(range.end..).is_some_and(|t| t.starts_with('*'));
+        crate::composer::scan_work::add(self.inline.len());
         let with_bold = self.inline.iter().any(|span| {
             span.tag == ComposerTag::Bold
                 && span.range.start < range.end

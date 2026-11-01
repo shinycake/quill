@@ -1,5 +1,6 @@
 use super::split_markup_text;
 use crate::composer::{parse_format_markup, scan_work};
+use crate::composer_doc::ComposerDoc;
 
 const SMALL: usize = 10_000;
 const LARGE: usize = 1_000_000;
@@ -137,6 +138,13 @@ fn assert_linear(work: impl Fn(&str)) {
 fn parsing_work_grows_with_the_text() {
     assert_linear(|text| {
         parse_format_markup(text);
+    });
+}
+
+#[test]
+fn reading_and_writing_a_draft_grows_with_the_text() {
+    assert_linear(|text| {
+        ComposerDoc::from_markup(text).to_markup();
     });
 }
 
