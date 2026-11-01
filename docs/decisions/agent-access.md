@@ -34,7 +34,7 @@ The existing single-instance endpoint carries both protocols: a Unix domain
 socket in the app data folder (a short temp path when that is too long for
 `sun_path`) or a named pipe on Windows. The first line picks the protocol:
 
-- `quill-ipc 1`: launch forwarding, unchanged.
+- `quill-ipc 2` (and the older `quill-ipc 1`): launch forwarding.
 - `quill-agent 1`: an agent connection (`src/agent/server.rs`).
 
 The header is read a byte at a time, so nothing after it is consumed before
