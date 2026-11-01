@@ -482,6 +482,7 @@ pub mod keychain {
 
 /// The OS's answer to an open: true when the helper started (`open`,
 /// `xdg-open`) or the shell took the target (Windows).
+#[must_use]
 pub enum OsOpen {
     Answered(bool),
     /// Windows calls the shell on a thread of its own, since a cold browser
