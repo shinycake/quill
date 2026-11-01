@@ -556,6 +556,38 @@ fn the_later_pick_wins_when_the_earlier_decode_lands_last(cx: &mut TestAppContex
     assert_eq!(shown, Some((100, 100)));
 }
 
+/// Adapt a still sticker, then pick an animated one before the still is
+/// decoded: the animated one is what the user chose last, so the still's
+/// late decode opens no editor over it.
+#[gpui_kit::test]
+fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::PendingVideo;
+    use quill::telegram::envelope::StickerFormat;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let (items, pick) = adapt_pick(&app, vcx);
+    let (still, mut animated) = (&items[0], items[1].clone());
+    animated.format = StickerFormat::Tgs;
+    choose(&app, vcx, pick, still);
+    choose(&app, vcx, pick, &animated);
+    app.update(vcx, |app, cx| {
+        app.land_still_pick(pick, still.file_id, Some(image::RgbaImage::new(100, 100)), cx);
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_none()));
+
+    // A video still downloading gives way to a later pick in the same way.
+    app.update(vcx, |app, _| {
+        app.sticker_box.pending_video = Some(PendingVideo {
+            pick,
+            file_id: still.file_id,
+            emoji: None,
+        });
+    });
+    choose(&app, vcx, pick, &animated);
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pending_video.is_none()));
+}
+
 #[gpui_kit::test]
 fn a_video_the_editor_cannot_take_closes_it_with_the_bad_video_toast(cx: &mut TestAppContext) {
     use quill::sticker_set_box::SetKind;

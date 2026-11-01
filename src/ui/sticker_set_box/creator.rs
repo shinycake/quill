@@ -386,6 +386,9 @@ impl QuillApp {
         let Some(pick) = self.sticker_box.pick else {
             return;
         };
+        // This pick replaces any earlier one still decoding or downloading.
+        self.sticker_box.pending_still = None;
+        self.sticker_box.pending_video = None;
         if !pick.adapt {
             self.sticker_box.pick = None;
             self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
@@ -405,7 +408,6 @@ impl QuillApp {
             }
             StickerFormat::Webp | StickerFormat::Unknown => {
                 self.sticker_box.pick = None;
-                self.sticker_box.pending_video = None;
                 let file_id = item.file_id;
                 self.sticker_box.pending_still = Some((pick, file_id));
                 let path = self.local_media_path(file_id);
