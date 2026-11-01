@@ -62,6 +62,7 @@ mod account_notices;
 mod business_bot_bar;
 mod call_types;
 mod chat_activity;
+mod chat_order;
 mod chat_types;
 mod composer_targets;
 mod conference;

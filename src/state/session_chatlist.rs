@@ -2,12 +2,15 @@
 use super::*;
 
 /// Whether `Session::main_order` / `archive_order` are stale. While a poll
-/// batch is open (`deferred`), order changes only set `dirty`; closing the
-/// batch sorts once.
+/// batch is open (`deferred`), order changes are only recorded; closing the
+/// batch brings the lists up to date once.
 #[derive(Debug, Default)]
 pub(crate) struct ChatOrderSync {
+    /// The lists need a full sort (changes made outside the position updates).
     pub(crate) dirty: bool,
     pub(crate) deferred: bool,
+    /// Chats whose main or archive position changed since the last flush.
+    pub(crate) moved: HashSet<i64>,
     /// Stored folder tab orders, dropped whenever a folder position changes.
     pub(crate) folder_orders: super::folder_order_cache::FolderOrderCache,
 }
@@ -111,16 +114,29 @@ impl Session {
         self.chat_order_sync.deferred = true;
     }
 
-    /// Close a poll batch and sort the chat lists if anything moved.
+    /// Close a poll batch and update the chat lists if anything moved.
     pub fn end_update_batch(&mut self) {
         self.chat_order_sync.deferred = false;
-        if self.chat_order_sync.dirty {
+        self.flush_chat_order();
+    }
+
+    /// Bring the lists up to date with the positions recorded by
+    /// `apply_position_fields`, now or when the open batch closes.
+    pub(crate) fn sync_chat_order(&mut self) {
+        if !self.chat_order_sync.deferred {
             self.flush_chat_order();
         }
     }
 
     fn flush_chat_order(&mut self) {
+        if !self.chat_order_sync.dirty {
+            if !self.chat_order_sync.moved.is_empty() {
+                self.place_moved_chats();
+            }
+            return;
+        }
         self.chat_order_sync.dirty = false;
+        self.chat_order_sync.moved.clear();
         // Sort the `(order, chat_id)` keys TDLib orders by (descending,
         // schema 1.8.67 `chatPosition.order`), never clones of whole
         // summaries.

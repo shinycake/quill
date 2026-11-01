@@ -161,7 +161,7 @@ impl Session {
                     self.apply_position_fields(pos);
                 }
                 if placed {
-                    self.rebuild_main_order();
+                    self.sync_chat_order();
                 }
             }
             // Parity slice: `updateChatPhoto` — swap the cached small
