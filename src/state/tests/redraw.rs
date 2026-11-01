@@ -360,15 +360,58 @@ fn the_open_chats_media_downloads_show_live_progress() {
     assert_eq!(need(&session, &file(5, false)), RedrawNeed::Now);
 }
 
+fn chat_with_two_files() -> Session {
+    let mut session = two_chats();
+    let (_, sink) = super::common::session();
+    // `apply` ignores a sequence number older than those of `two_chats`.
+    let seq = AtomicU64::new(100);
+    for (id, file_id) in [(21, 5), (22, 6)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":false,"content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":"d.bin","mime_type":"application/octet-stream","document":{{"@type":"file","id":{file_id},"size":1,"expected_size":1,"local":{{"@type":"localFile","path":"","is_downloading_completed":false,"is_downloading_active":false}},"remote":{{"@type":"remoteFile","id":"x"}}}}}},"caption":{{"@type":"formattedText","text":"","entities":[]}}}}}}}}"#
+            ),
+        );
+        session.begin_download(crate::ids::FileId(file_id));
+        session.media.open_chat_media_downloads.insert(file_id);
+    }
+    session
+}
+
 #[test]
-fn a_batch_never_loses_a_conversation_or_a_chat_list_change() {
-    use RedrawNeed::*;
-    assert_eq!(Conversation.join(Nothing), Conversation);
-    assert_eq!(Conversation.join(Conversation), Conversation);
-    assert_eq!(ChatList.join(Conversation), Now);
-    assert_eq!(Conversation.join(Later), Now);
-    assert_eq!(ChatList.join(Later), Later);
-    assert_eq!(Now.join(Conversation), Now);
+fn progress_of_a_row_off_screen_waits_for_a_batched_redraw() {
+    let mut session = chat_with_two_files();
+    session.note_rows_on_screen(Some(&[MessageId(21)]));
+    assert_eq!(need(&session, &file(5, false)), RedrawNeed::Conversation);
+    assert_eq!(need(&session, &file(6, false)), RedrawNeed::Later);
+    assert_eq!(need(&session, &file(6, true)), RedrawNeed::Now);
+    session.note_rows_on_screen(None);
+    assert_eq!(need(&session, &file(6, false)), RedrawNeed::Conversation);
+}
+
+fn interaction(chat: i64, message: i64) -> String {
+    format!(
+        r#"{{"@type":"updateMessageInteractionInfo","chat_id":{chat},"message_id":{message},"interaction_info":{{"@type":"messageInteractionInfo","view_count":3,"forward_count":0,"reply_info":null,"reactions":null}}}}"#
+    )
+}
+
+#[test]
+fn views_and_reactions_redraw_only_the_row_that_shows_them() {
+    let mut session = chat_with_two_files();
+    session.note_rows_on_screen(Some(&[MessageId(21)]));
+    assert_eq!(
+        need(&session, &interaction(11, 21)),
+        RedrawNeed::Conversation
+    );
+    assert_eq!(need(&session, &interaction(11, 22)), RedrawNeed::Later);
+    assert_eq!(need(&session, &interaction(12, 21)), RedrawNeed::Later);
+    session.open_window_chat(ChatId(12));
+    assert_eq!(
+        need(&session, &interaction(12, 21)),
+        RedrawNeed::Conversation
+    );
 }
 
 #[test]

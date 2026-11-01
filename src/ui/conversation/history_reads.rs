@@ -1,5 +1,6 @@
 //! What the reader saw: the history rows whose bottom edge was on screen
-//! at the last paint, reported as `viewMessages`.
+//! at the last paint, reported as `viewMessages`, and the rows on screen at
+//! all, which the poll grades redraws by.
 
 use gpui_kit::{Bounds, Pixels};
 use quill::ids::{ChatId, MessageId};
@@ -12,6 +13,7 @@ use quill::ids::{ChatId, MessageId};
 pub(super) fn note_seen(
     painted: &std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>,
     seen: &std::cell::RefCell<Option<(ChatId, Vec<MessageId>)>>,
+    on_screen: &std::cell::RefCell<Vec<MessageId>>,
     chat: Option<ChatId>,
     viewport: Bounds<Pixels>,
     changed: impl FnOnce(),
@@ -19,12 +21,19 @@ pub(super) fn note_seen(
     let Ok(mut painted) = painted.try_borrow_mut() else {
         return;
     };
-    let mut ids: Vec<MessageId> = painted
-        .drain(..)
-        .filter(|(row, _)| row.bottom() >= viewport.top() && row.bottom() <= viewport.bottom())
-        .flat_map(|(_, ids)| ids)
-        .collect();
+    let (mut ids, mut shown) = (Vec::new(), Vec::new());
+    for (row, row_ids) in painted.drain(..) {
+        if row.bottom() > viewport.top() && row.top() < viewport.bottom() {
+            shown.extend_from_slice(&row_ids);
+        }
+        if row.bottom() >= viewport.top() && row.bottom() <= viewport.bottom() {
+            ids.extend(row_ids);
+        }
+    }
     drop(painted);
+    if let Ok(mut on_screen) = on_screen.try_borrow_mut() {
+        *on_screen = shown;
+    }
     ids.sort_unstable_by_key(|id| id.0);
     ids.dedup();
     let next = chat.map(|chat| (chat, ids));

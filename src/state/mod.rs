@@ -193,7 +193,7 @@ pub use media_library::{
 pub use member_list::*;
 pub use ownership_types::*;
 pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
-pub use redraw::{RedrawNeed, redraw_need};
+pub use redraw::{RedrawNeed, RowsOnScreen, redraw_need};
 pub(crate) use request_errors::*;
 pub use request_purpose::*;
 pub use request_rollback::*;

@@ -141,13 +141,10 @@ impl PolledRedraw {
         full.into_iter().chain(list).chain(conversation).min()
     }
 
-    /// Record `need` and say what to redraw now.
-    pub(super) fn decide(
-        &mut self,
-        need: RedrawNeed,
-        active: bool,
-        now: std::time::Instant,
-    ) -> PolledAction {
+    /// One poll's updates each record their own need, so conversation
+    /// progress never turns another update's batched redraw into an urgent
+    /// one.
+    pub(super) fn record(&mut self, need: RedrawNeed, active: bool) {
         match need {
             RedrawNeed::Nothing => {}
             RedrawNeed::ChatList => self.list = true,
@@ -155,6 +152,16 @@ impl PolledRedraw {
             RedrawNeed::Conversation => self.full = self.full.max(RedrawNeed::Now),
             RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
         }
+    }
+
+    /// Record `need` and say what to redraw now.
+    pub(super) fn decide(
+        &mut self,
+        need: RedrawNeed,
+        active: bool,
+        now: std::time::Instant,
+    ) -> PolledAction {
+        self.record(need, active);
         let since = |last: std::time::Instant| now.duration_since(last);
         if self
             .full_gap(active)
@@ -265,8 +272,13 @@ impl QuillApp {
             PolledAction::Wait => {}
             PolledAction::ChatList => self.notify_chat_list(cx),
             // The media viewer draws in the root render and shows the
-            // progress of the download it waits for.
-            PolledAction::Conversation if self.viewer.state.is_open() => cx.notify(),
+            // progress of the download it waits for; the message menu draws
+            // there too and shows the reply count.
+            PolledAction::Conversation
+                if self.viewer.state.is_open() || self.message_ui.menu.is_some() =>
+            {
+                cx.notify()
+            }
             PolledAction::Conversation => self.notify_conversations(cx),
             PolledAction::Full => cx.notify(),
         }
@@ -282,6 +294,16 @@ impl QuillApp {
             self.folders.tab,
             self.connection_lost(),
         )
+    }
+
+    fn sync_rows_on_screen(&mut self) {
+        let rows = self.history.on_screen.try_borrow().ok();
+        let rows = rows.as_ref().filter(|_| !self.viewer.state.is_open());
+        if let Some(live) = self.live.as_mut() {
+            live.driver
+                .session
+                .note_rows_on_screen(rows.map(|rows| rows.as_slice()));
+        }
     }
 
     /// Drain and apply what TDLib has queued, within the budget. Returns
@@ -308,6 +330,7 @@ impl QuillApp {
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
         let settings_open = self.settings.open;
+        self.sync_rows_on_screen();
         // Asked of the platform: a hidden or minimized main window does not
         // draw, so its last render may predate its deactivation.
         let main_active = self
@@ -325,8 +348,8 @@ impl QuillApp {
             .session
             .expire_pending_bot_messages(quill::state::unix_ms_now());
         let mut send_failed = false;
-        // How urgently what arrives needs a redraw; a bot message that
-        // expired above shows in the open chat.
+        // What needs a redraw apart from the updates, which record their
+        // own; a bot message that expired above shows in the open chat.
         let mut need = if progressed {
             RedrawNeed::Now
         } else {
@@ -355,10 +378,10 @@ impl QuillApp {
                     .unwrap_or_default();
                 super::frame_clock::trace_ingested(name);
             }
-            need = need.join(quill::state::redraw_need(
-                &live.driver.session,
-                &owned.envelope,
-            ));
+            self.notify.polled_redraw.record(
+                quill::state::redraw_need(&live.driver.session, &owned.envelope),
+                self.frame.window_active.get(),
+            );
             if live.driver.ingest(owned).is_err() {
                 send_failed = true;
             }
@@ -873,6 +896,32 @@ mod tests {
         // Behind another app it waits as long as an urgent redraw would.
         let _ = redraw.decide(RedrawNeed::Conversation, false, start + ms(4));
         assert!(redraw.next_due(false, start + ms(4)).is_some());
+    }
+
+    #[test]
+    fn progress_on_and_off_screen_in_one_poll_redraws_each_at_its_own_pace() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        redraw.record(RedrawNeed::Later, true);
+        redraw.record(RedrawNeed::ChatList, true);
+        redraw.record(RedrawNeed::Conversation, true);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, true, start + ms(1)),
+            PolledAction::Conversation
+        );
+        assert_eq!(
+            redraw.decide(RedrawNeed::Conversation, true, start + ms(2)),
+            PolledAction::Conversation
+        );
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, true, start + ms(400)),
+            PolledAction::ChatList
+        );
+        assert_eq!(
+            redraw.decide(RedrawNeed::Nothing, true, start + ms(1000)),
+            PolledAction::Full
+        );
+        assert_eq!(redraw.next_due(true, start + ms(1000)), None);
     }
 
     #[test]

@@ -594,51 +594,8 @@ impl Session {
             }
         };
         for message in history.messages.values() {
-            match &message.content {
-                MessageContent::Photo(photo) => {
-                    if photo.is_secret || photo.has_spoiler {
-                        continue;
-                    }
-                    if let Some(size) = photo.largest_size() {
-                        push(AUTO_DOWNLOAD_PHOTO, size.file_id, &mut ids);
-                    }
-                }
-                // A picture file that shows as a photo loads like one.
-                MessageContent::Document(doc)
-                    if crate::media_viewer::shows_as_photo(doc)
-                        && (1..=crate::media_viewer::PICTURE_FILE_AUTO_DOWNLOAD_MAX)
-                            .contains(&doc.size) =>
-                {
-                    push(AUTO_DOWNLOAD_PHOTO, doc.file_id, &mut ids);
-                }
-                MessageContent::Document(doc) => {
-                    push(AUTO_DOWNLOAD_FILE, doc.file_id, &mut ids);
-                }
-                MessageContent::Animation(animation) => {
-                    if animation.is_secret || animation.has_spoiler {
-                        continue;
-                    }
-                    push(AUTO_DOWNLOAD_GIF, animation.file_id, &mut ids);
-                }
-                MessageContent::Video(video) => {
-                    if video.is_secret || video.has_spoiler {
-                        continue;
-                    }
-                    push(AUTO_DOWNLOAD_VIDEO, video.file_id, &mut ids);
-                }
-                MessageContent::VideoNote(note) => {
-                    if note.is_secret {
-                        continue;
-                    }
-                    push(AUTO_DOWNLOAD_VIDEO_NOTE, note.file_id, &mut ids);
-                }
-                MessageContent::VoiceNote(voice) => {
-                    push(AUTO_DOWNLOAD_VOICE, voice.file_id, &mut ids);
-                }
-                MessageContent::Audio(audio) => {
-                    push(AUTO_DOWNLOAD_MUSIC, audio.file_id, &mut ids);
-                }
-                _ => {}
+            if let Some((flag, file_id)) = auto_download_target(&message.content) {
+                push(flag, file_id, &mut ids);
             }
         }
         ids.sort_by_key(|id| id.0);
@@ -666,5 +623,36 @@ impl Session {
             _ => self.settings.media_prefs.auto_download_private,
         };
         bits & flag != 0
+    }
+}
+
+/// The file automatic download fetches for `content`, with the media-type
+/// bit that allows it.
+pub(super) fn auto_download_target(content: &MessageContent) -> Option<(u8, FileId)> {
+    match content {
+        MessageContent::Photo(photo) if !photo.is_secret && !photo.has_spoiler => {
+            Some((AUTO_DOWNLOAD_PHOTO, photo.largest_size()?.file_id))
+        }
+        // A picture file that shows as a photo loads like one.
+        MessageContent::Document(doc)
+            if crate::media_viewer::shows_as_photo(doc)
+                && (1..=crate::media_viewer::PICTURE_FILE_AUTO_DOWNLOAD_MAX)
+                    .contains(&doc.size) =>
+        {
+            Some((AUTO_DOWNLOAD_PHOTO, doc.file_id))
+        }
+        MessageContent::Document(doc) => Some((AUTO_DOWNLOAD_FILE, doc.file_id)),
+        MessageContent::Animation(animation) if !animation.is_secret && !animation.has_spoiler => {
+            Some((AUTO_DOWNLOAD_GIF, animation.file_id))
+        }
+        MessageContent::Video(video) if !video.is_secret && !video.has_spoiler => {
+            Some((AUTO_DOWNLOAD_VIDEO, video.file_id))
+        }
+        MessageContent::VideoNote(note) if !note.is_secret => {
+            Some((AUTO_DOWNLOAD_VIDEO_NOTE, note.file_id))
+        }
+        MessageContent::VoiceNote(voice) => Some((AUTO_DOWNLOAD_VOICE, voice.file_id)),
+        MessageContent::Audio(audio) => Some((AUTO_DOWNLOAD_MUSIC, audio.file_id)),
+        _ => None,
     }
 }
