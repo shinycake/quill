@@ -288,7 +288,7 @@ impl QuillApp {
             frame: super::frame_state::FrameUi::new(cx),
             group_call: super::group_call_state::GroupCallUi::new(group_call_composer),
             screen_share: Default::default(),
-            composer_ui: super::composer_state::ComposerUi::new(),
+            composer_ui: Box::new(super::composer_state::ComposerUi::new()),
             composer_sends: Default::default(),
             pickers: super::pickers_state::PickerUi::new(
                 window,
