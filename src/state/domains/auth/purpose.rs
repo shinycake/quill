@@ -8,6 +8,7 @@ use crate::state::*;
 pub enum AuthPurpose {
     GetAuthorizationState,
     SetParameters,
+    SetNetworkType,
     SetPhoneNumber,
     CheckAuthenticationCode,
     SetAuthenticationEmail,
@@ -59,6 +60,7 @@ pub enum AuthPurpose {
 flat_purposes!(Auth(AuthPurpose) {
     GetAuthorizationState,
     SetParameters,
+    SetNetworkType,
     SetPhoneNumber,
     CheckAuthenticationCode,
     SetAuthenticationEmail,
