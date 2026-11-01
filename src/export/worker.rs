@@ -195,10 +195,17 @@ fn release_if_untouched<T: Tdlib>(
     file_id: i32,
     downloaded: &Path,
 ) -> Result<(), ExportError> {
-    let now = tdlib.call(
-        json!({"@type": "getFile", "file_id": file_id}),
-        QUERY_TIMEOUT,
-    )?;
+    let delete = json!({"@type": "deleteFile", "file_id": file_id});
+    // After a cancel the worker's calls send nothing, and the copy would
+    // stay in the cache for good; the driver still keeps the view's files.
+    let call = |tdlib: &mut T, request: Value| match tdlib.call(request, QUERY_TIMEOUT) {
+        Err(ExportError::Cancelled) => {
+            tdlib.post_unanswered(delete.clone());
+            Err(ExportError::Cancelled)
+        }
+        answer => answer,
+    };
+    let now = call(tdlib, json!({"@type": "getFile", "file_id": file_id}))?;
     let local = now.at("local");
     let same_copy = local
         .at("path")
@@ -210,8 +217,7 @@ fn release_if_untouched<T: Tdlib>(
         && local.at("is_downloading_active") == false
         && same_copy;
     if untouched {
-        let request = json!({"@type": "deleteFile", "file_id": file_id});
-        tdlib.call(request, QUERY_TIMEOUT)?;
+        call(tdlib, delete.clone())?;
     }
     Ok(())
 }

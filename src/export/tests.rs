@@ -718,3 +718,20 @@ fn a_file_something_else_started_using_during_the_export_stays_cached() {
     assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn cancelling_after_a_download_still_releases_the_cache_copy() {
+    let dir = scratch("cancel-release");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let fetched = super::worker::fetch_file(&mut fake, &td, 10, None)
+        .unwrap()
+        .unwrap();
+    fake.cancel_after = Some(fake.calls.len());
+    assert!(matches!(
+        fetched.release(&mut fake),
+        Err(ExportError::Cancelled)
+    ));
+    assert_eq!(fake.count("deleteFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
