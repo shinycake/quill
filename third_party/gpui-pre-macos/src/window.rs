@@ -2527,8 +2527,8 @@ unsafe fn is_gpui_window(window: *mut AnyObject) -> bool {
 }
 
 /// Quill: whether AppKit is still taking `ns_window` out of native full
-/// screen. Its style mask loses the full screen flag when the animation
-/// starts, and an `orderOut:` during the animation does not last.
+/// screen. Its style mask loses the full screen flag before the animation
+/// ends, and an `orderOut:` during the animation does not last.
 ///
 /// # Safety
 ///
