@@ -296,12 +296,8 @@ impl QuillApp {
             return;
         };
         self.run_off_ui_scoped_then(
-            move || {
-                quill::thread_guard::ffi_boundary(None, || {
-                    super::editor_art::sticker_pixels(std::path::Path::new(&path), format)
-                })
-            },
-            |this, pixels, cx| match pixels {
+            move || super::editor_art::sticker_pixels(std::path::Path::new(&path), format),
+            |this, image, cx| match image {
                 Some(image) => this.photo_editor_mut(|editor| editor.place(image), cx),
                 None => {
                     this.connection
