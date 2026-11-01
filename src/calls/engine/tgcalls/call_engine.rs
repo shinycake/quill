@@ -76,12 +76,10 @@ impl CallEngine for TgcallsEngine {
         let api = self.api;
         let max_layer = self.protocol.max_layer;
         let call = self.call_mut(call_id)?;
-        if let Some(handle) = call.handle.take() {
+        if call.handle.is_some() {
             // A retry: tgcalls can't connect a call twice, so start over
             // with a fresh instance and the same choices.
-            call.gate.close();
-            // SAFETY: a live call destroyed once, not from its callback.
-            unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
+            call.retire_instance(api);
         } else {
             // A share turned on before connect carries into the call.
             call.media = retained_call_media(params, Some(&call.media));
@@ -106,7 +104,7 @@ impl CallEngine for TgcallsEngine {
         let video = call
             .camera
             .or(call.screen)
-            .map_or(std::ptr::null_mut(), NonNull::as_ptr);
+            .map_or(std::ptr::null_mut(), Native::as_ptr);
         // SAFETY: NUL-ended config; the context behind `callbacks.user`
         // lives in `call` until `qc_p2p_destroy` returns; the call takes
         // its own reference to `video`, Quill keeps its own.
@@ -118,13 +116,13 @@ impl CallEngine for TgcallsEngine {
             params.p2p_allowed,
             if handle.is_null() { "failed" } else { "ok" }
         ));
-        let handle = NonNull::new(handle).ok_or(EngineError::Engine {
+        let handle = Native::new(handle).ok_or(EngineError::Engine {
             op: "qc_p2p_create",
             code: -1,
         })?;
         call.handle = Some(handle);
         call.gate.open(api, handle.as_ptr());
-        call.gate.set_screen(call.screen.map(NonNull::as_ptr));
+        call.gate.set_screen(call.screen.map(Native::as_ptr));
         // SAFETY: a live call.
         unsafe { (api.qc_p2p_set_muted)(handle.as_ptr(), i32::from(call.muted)) };
         for data in std::mem::take(&mut call.pending_signaling) {
@@ -152,14 +150,8 @@ impl CallEngine for TgcallsEngine {
     }
 
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError> {
-        if let Some(mut call) = self.calls.remove(&call_id) {
-            if let Some(handle) = call.handle {
-                crate::advanced::debug_mode::call_log(&format!(
-                    "[call] {call_id} tgcalls end: {}",
-                    debug_info(self.api, handle)
-                ));
-            }
-            destroy(self.api, &mut call);
+        if let Some(call) = self.calls.remove(&call_id) {
+            retire(self.api, call);
         }
         Ok(())
     }
@@ -213,7 +205,7 @@ impl CallEngine for TgcallsEngine {
         // SAFETY: returns a new external source; Quill keeps the reference
         // in `call.screen` until `release_screen`.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
-        let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
+        let screen = Native::new(screen).ok_or(EngineError::NoScreenSource)?;
         self.call_mut(call_id)?.screen = Some(screen);
         self.call_mut(call_id)?.media.camera = None;
         self.apply_camera(call_id)?;

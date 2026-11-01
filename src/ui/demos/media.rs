@@ -309,7 +309,7 @@ impl QuillApp {
     }
 
     fn demo_starting_camera(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        self.recording.starting = true;
+        self.begin_capture_start(true, CaptureFor::Message);
         cx.notify();
     }
 

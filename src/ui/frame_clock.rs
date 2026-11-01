@@ -222,7 +222,22 @@ impl QuillApp {
         fps: u32,
         cx: &mut Context<Self>,
     ) {
-        self.request_tick(target, fps, false, cx);
+        self.request_tick(target, fps, TickGate::App, cx);
+    }
+
+    #[track_caller]
+    pub(super) fn request_window_view_tick(
+        &self,
+        view: EntityId,
+        window: &Window,
+        fps: u32,
+        cx: &mut Context<Self>,
+    ) {
+        self.frame.window_views.borrow_mut().insert(view);
+        let gate = TickGate::OwnWindow {
+            active: window.is_window_active(),
+        };
+        self.request_tick(Some(view), fps, gate, cx);
     }
 
     /// [`Self::request_animation_tick`] for the whole app that keeps
@@ -230,7 +245,7 @@ impl QuillApp {
     /// watches from the app the agent runs in.
     #[track_caller]
     pub(super) fn request_background_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_tick(None, fps, true, cx);
+        self.request_tick(None, fps, TickGate::Sound, cx);
     }
 
     #[track_caller]
@@ -238,13 +253,15 @@ impl QuillApp {
         &self,
         target: Option<EntityId>,
         fps: u32,
-        plays_sound: bool,
+        gate: TickGate,
         cx: &mut Context<Self>,
     ) {
         // Like tdesktop (`isGifPausedAtLeastFor` → `!widget()->isActive()`),
         // nothing animates behind another app; activation redraws and the
         // content asks again (`observe_window_activation`).
-        if !tick_wanted(self.frame.window_active.get(), plays_sound) {
+        let own_window_active = gate == TickGate::OwnWindow { active: true };
+        let plays_sound = gate == TickGate::Sound;
+        if !tick_wanted(self.frame.window_active.get(), plays_sound) && !own_window_active {
             return;
         }
         // Nor in a main window the active chat window hides whole
@@ -274,6 +291,9 @@ impl QuillApp {
         if plays_sound {
             self.frame.animation_sound.set(true);
         }
+        if own_window_active {
+            self.frame.own_window_tick.set(true);
+        }
         if self.frame.frame_clock_running.get() {
             return;
         }
@@ -293,29 +313,45 @@ impl QuillApp {
                         let demand = this.frame.animation_demand.replace(0);
                         let targets =
                             std::mem::take(&mut *this.frame.animation_targets.borrow_mut());
+                        let window_views =
+                            std::mem::take(&mut *this.frame.window_views.borrow_mut());
                         let sound = this.frame.animation_sound.replace(false);
-                        if demand > 0 && tick_wanted(this.frame.window_active.get(), sound) {
+                        let own_window = this.frame.own_window_tick.replace(false);
+                        let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
+                        if demand > 0 && (app_ticks || own_window) {
                             note_clock_playing(
                                 this.frame.clock_timing.get(),
                                 Instant::now(),
                                 demand,
                             );
-                            for id in targets.iter().flatten() {
-                                this.frame.layers_drawn.borrow_mut().ticked(*id);
-                            }
-                            if targets.contains(&None) {
-                                this.tick_app(cx);
-                            } else {
-                                let covered = this.frame.main_covered.get();
-                                let views: Vec<_> = targets
-                                    .into_iter()
-                                    .flatten()
-                                    .filter(|id| !covered || !this.slices.owns(*id))
-                                    .collect();
-                                let app: &mut App = cx;
-                                for id in views {
-                                    app.notify(id);
+                            if app_ticks {
+                                for id in targets.iter().flatten() {
+                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
                                 }
+                                if targets.contains(&None) {
+                                    this.tick_app(cx);
+                                } else {
+                                    let covered = this.frame.main_covered.get();
+                                    let views: Vec<_> = targets
+                                        .into_iter()
+                                        .flatten()
+                                        .filter(|id| !covered || !this.slices.owns(*id))
+                                        .collect();
+                                    let app: &mut App = cx;
+                                    for id in views {
+                                        app.notify(id);
+                                    }
+                                }
+                            } else {
+                                // Only the window views' own window is
+                                // active: the rest holds still.
+                                for id in &window_views {
+                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
+                                }
+                            }
+                            let app: &mut App = cx;
+                            for id in window_views {
+                                app.notify(id);
                             }
                         }
                         Woke::Ticked(demand)
@@ -749,6 +785,18 @@ impl AppGate {
     }
 }
 
+/// What lets a tick request through while no main or chat window is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TickGate {
+    /// Nothing: content in the main or a chat window.
+    App,
+    /// Media playing with sound, or the agent takeover.
+    Sound,
+    /// A view in a window of its own (the voice chat window), which ticks
+    /// while that window is active.
+    OwnWindow { active: bool },
+}
+
 /// Whether a frame-clock tick may run: always while the window is active,
 /// and in the background only for media playing with sound.
 fn tick_wanted(window_active: bool, plays_sound: bool) -> bool {
@@ -819,166 +867,9 @@ pub(crate) fn frames_over(
     drawn
 }
 
-/// `QUILL_TRACE_TICKS=1` also counts slice renders (`app_slice`), logged
-/// once a second, to check that a tick redraws only what animates.
-pub(super) fn trace_slice_render(kind: &'static str) {
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
-    thread_local! {
-        static COUNTS: RefCell<(Option<Instant>, BTreeMap<&'static str, u32>)> =
-            const { RefCell::new((None, BTreeMap::new())) };
-    }
-    #[cfg(test)]
-    SLICE_RENDERS.with(|counts| {
-        if let Ok(mut counts) = counts.try_borrow_mut() {
-            *counts.entry(kind).or_default() += 1;
-        }
-    });
-    if !trace_ticks() {
-        return;
-    }
-    COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        *counts.1.entry(kind).or_default() += 1;
-        let since = *counts.0.get_or_insert_with(Instant::now);
-        if since.elapsed() >= Duration::from_secs(1) {
-            eprintln!("slice renders/s: {:?}", counts.1);
-            counts.1.clear();
-            counts.0 = Some(Instant::now());
-        }
-    });
-}
-
-/// `QUILL_TRACE_NOTIFY=1`: log where `QuillApp` notifies come from (the
-/// app code that ran the update), once a second per origin with a count.
-pub(super) fn trace_notify() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_NOTIFY").is_some())
-}
-
-/// Record one `QuillApp` notify. Runs in the notify observer, right after
-/// the update that notified; the backtrace still holds that update's
-/// caller (a timer task, an event listener, the TDLib poll…).
-pub(super) fn trace_notify_origin() {
-    if !trace_notify() {
-        return;
-    }
-    let trace = std::backtrace::Backtrace::force_capture().to_string();
-    let mut origin: Vec<String> = Vec::new();
-    for line in trace.lines().map(str::trim) {
-        if line.starts_with("at ") || !line.contains("quill") {
-            continue;
-        }
-        // The innermost Quill function named on this frame, e.g.
-        // `<…QuillApp>::spawn_poll_loop::{closure#0}` → `spawn_poll_loop`.
-        let name = line
-            .rsplit("QuillApp>::")
-            .next()
-            .filter(|_| line.contains("QuillApp>::"))
-            .or_else(|| line.rsplit("quill::").next())
-            .unwrap_or(line);
-        let name: String = name
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
-            .collect();
-        let name = name.trim_end_matches(':').to_string();
-        if name.is_empty()
-            || name.contains("trace_notify")
-            || name.contains("notify_slices")
-            || name.contains("init_slices")
-            || origin.last() == Some(&name)
-        {
-            continue;
-        }
-        origin.push(name);
-        if origin.len() == 3 {
-            break;
-        }
-    }
-    trace_count("notify", origin.join(" <- "));
-}
-
-/// `QUILL_TRACE_NOTIFY=1`: count what the TDLib poll applied, by update.
-pub(super) fn trace_ingested(update: &str) {
-    if trace_notify() {
-        trace_count("ingested", update.to_string());
-    }
-}
-
-/// `QUILL_TRACE_TICKS=1`: count history row rebuilds and chrome patches
-/// (`HistoryRow`), and the microseconds spent on them, per second.
-pub(super) fn trace_history_rows(what: &'static str, amount: usize) {
-    if trace_ticks() {
-        trace_count_by("history rows", what.to_string(), amount);
-    }
-}
-
-fn trace_count(what: &'static str, key: String) {
-    trace_count_by(what, key, 1);
-}
-
-fn trace_count_by(what: &'static str, key: String, amount: usize) {
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-    use std::time::Instant;
-    /// Per kind of trace: when counting started, and counts by key.
-    type Counts = BTreeMap<&'static str, (Instant, BTreeMap<String, u32>)>;
-    thread_local! {
-        static COUNTS: RefCell<Counts> = const { RefCell::new(BTreeMap::new()) };
-    }
-    COUNTS.with(|counts| {
-        let mut counts = counts.borrow_mut();
-        let (since, keys) = counts
-            .entry(what)
-            .or_insert_with(|| (Instant::now(), BTreeMap::new()));
-        let count = keys.entry(key).or_default();
-        *count = count.saturating_add(u32::try_from(amount).unwrap_or(u32::MAX));
-        if since.elapsed() >= Duration::from_secs(1) {
-            let secs = since.elapsed().as_secs_f32();
-            for (key, count) in keys.iter() {
-                eprintln!("{what}: {:.1}/s {key}", *count as f32 / secs);
-            }
-            keys.clear();
-            *since = Instant::now();
-        }
-    });
-}
-
-pub(super) fn trace_ticks() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TICKS").is_some())
-}
-
-fn trace_caller(
-    caller: &'static std::panic::Location<'static>,
-    fps: u32,
-    target: Option<EntityId>,
-    active: bool,
-) {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::time::Instant;
-    thread_local! {
-        static LAST: RefCell<HashMap<(&'static str, u32), Instant>> = RefCell::new(HashMap::new());
-    }
-    LAST.with(|last| {
-        let mut last = last.borrow_mut();
-        let key = (caller.file(), caller.line());
-        if last
-            .get(&key)
-            .is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
-        {
-            last.insert(key, Instant::now());
-            let target = target.map_or_else(|| "app".to_string(), |id| format!("slice {id:?}"));
-            eprintln!(
-                "tick: {}:{} @{fps}fps for {target} (window active: {active})",
-                caller.file(),
-                caller.line()
-            );
-        }
-    });
-}
+#[path = "frame_trace.rs"]
+mod trace;
+pub(super) use trace::*;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
@@ -1081,3 +972,8 @@ mod tests {
         assert!(requested.get().is_some_and(|(view, _)| view == target));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "frame_clock_window_view_tests.rs"]
+mod window_view_tests;

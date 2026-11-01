@@ -94,7 +94,7 @@ fn sharing_group_call() -> ActiveGroupCall {
     let json: Value =
         serde_json::from_str(&group_participant_json(777, true, "null", "null")).unwrap();
     let me = parse_group_call_participant(json.get("participant")).unwrap();
-    call.participants = vec![me];
+    call.participants = Arc::new(vec![me]);
     call
 }
 

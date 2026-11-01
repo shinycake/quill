@@ -14,6 +14,7 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/thread.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <future>
 #include <map>
@@ -23,6 +24,9 @@
 
 namespace quill_calls {
 namespace {
+
+// tgcalls answers in milliseconds; this only ends a wait that went wrong.
+constexpr auto kJoinPayloadTimeout = std::chrono::seconds(2);
 
 // The answers tgcalls waits for, by the request id Quill was given. A
 // request is answered, cancelled by tgcalls, or dropped at destroy, once.
@@ -399,16 +403,26 @@ char *qc_group_join_payload(qc_group *group, uint32_t *audio_ssrc) {
 		return nullptr;
 	}
 	// tgcalls makes the payload on its network thread; the promise outlives
-	// this call in case the completion is still unwinding there.
+	// this call in case the completion is still running there, or runs late.
 	const auto ready = std::make_shared<std::promise<tgcalls::GroupJoinPayload>>();
+	auto future = ready->get_future();
 	group->instance->emitJoinPayload([ready](const tgcalls::GroupJoinPayload &payload) {
 		ready->set_value(payload);
 	});
-	const auto payload = ready->get_future().get();
-	if (audio_ssrc) {
-		*audio_ssrc = payload.audioSsrc;
+	// The caller is the UI thread: a completion that never comes fails the
+	// join, and one tgcalls dropped must not throw across the C boundary.
+	if (future.wait_for(quill_calls::kJoinPayloadTimeout) != std::future_status::ready) {
+		return nullptr;
 	}
-	return quill_calls::CopyForCaller(payload.json);
+	try {
+		const auto payload = future.get();
+		if (audio_ssrc) {
+			*audio_ssrc = payload.audioSsrc;
+		}
+		return quill_calls::CopyForCaller(payload.json);
+	} catch (const std::future_error &) {
+		return nullptr;
+	}
 }
 
 void qc_group_set_join_response(qc_group *group, const char *payload_json) {

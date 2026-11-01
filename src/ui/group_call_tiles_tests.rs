@@ -3,15 +3,19 @@
 //! takes the live controller's paused overlay, and the full-screen stage
 //! shows a volume slider for anyone but you. Nothing reaches Telegram.
 use crate::ui::app::QuillApp;
-use crate::ui::frame_clock::frames_over;
+use crate::ui::frame_clock::{frames_over, take_slice_renders};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{
+    AppContext, Bounds, Entity, Modifiers, Pixels, ScrollDelta, ScrollEvent, TestAppContext,
+    VisualTestContext, point, px, size,
+};
 use quill::calls::tile_pin::TileKey;
 use quill::telegram::envelope::MessageSender;
+use std::sync::Arc;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -151,4 +155,94 @@ fn the_halo_redraws_the_call_window_alone(cx: &mut TestAppContext) {
     for slice in ["app", "sidebar", "conversation", "composer"] {
         assert_eq!(drawn.get(slice), None, "{drawn:?}");
     }
+}
+
+fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, cx| {
+        let session = app.demo_session.as_mut().expect("the demo session");
+        let call = session.calls.active_group_call.as_mut().expect("the call");
+        let participants = Arc::make_mut(&mut call.participants);
+        let listener = participants
+            .iter()
+            .find(|p| !p.is_current_user)
+            .cloned()
+            .expect("the other participant");
+        for person in 0..count {
+            participants.push(quill::telegram::envelope::ParsedGroupCallParticipant {
+                participant_id: MessageSender::User {
+                    user_id: 5_000 + person,
+                },
+                audio_source_id: 5_000 + person as i32,
+                video_enabled: false,
+                video_info: None,
+                screen_sharing_enabled: false,
+                screen_sharing_video_info: None,
+                ..listener.clone()
+            });
+        }
+        cx.notify();
+    });
+    frames(vcx);
+}
+
+#[gpui_kit::test]
+fn video_frames_redraw_the_panel_and_build_no_member_row(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    crowd(&app, 100, &mut call);
+    let drawn = frames_over(&mut call, 1);
+    let panel = drawn.get("group-call-panel").copied().unwrap_or(0);
+    assert!(panel > 5, "the camera keeps sending: {drawn:?}");
+    assert_eq!(drawn.get("group-member-row"), None, "{drawn:?}");
+}
+
+#[gpui_kit::test]
+fn a_change_to_the_call_builds_only_the_rows_on_screen(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    crowd(&app, 100, &mut call);
+    let _ = take_slice_renders();
+    app.update(&mut call, |_, cx| cx.notify());
+    frames(&mut call);
+    let rows = take_slice_renders()
+        .get("group-member-row")
+        .copied()
+        .unwrap_or(0);
+    assert!(rows > 0, "the rows follow the call");
+    assert!(rows < 30, "{rows} rows built");
+}
+
+#[gpui_kit::test]
+fn the_wheel_builds_the_rows_it_brings_in(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    crowd(&app, 100, &mut call);
+    assert!(find(&mut call, "group-member-row-5000").is_some());
+    assert!(find(&mut call, "group-member-row-5099").is_none());
+
+    let first_row = find(&mut call, "group-member-row-5000").unwrap_or_default();
+    let over_the_list = first_row.center();
+    call.simulate_mouse_move(over_the_list, None, Modifiers::none());
+    call.simulate_event(ScrollEvent {
+        position: over_the_list,
+        delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+        ..Default::default()
+    });
+    frames(&mut call);
+    assert!(find(&mut call, "group-member-row-5099").is_some());
+    assert!(find(&mut call, "group-member-row-5000").is_none());
+}
+
+#[gpui_kit::test]
+fn opening_the_chat_scrolls_past_a_long_list_to_it(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    crowd(&app, 100, &mut call);
+    let offset = |app: &QuillApp| app.group_call.panel_scroll.offset().y;
+    assert_eq!(app.read_with(&call, |app, _| offset(app)), px(0.));
+
+    app.update(&mut call, |app, cx| app.toggle_group_call_messages(cx));
+    frames(&mut call);
+
+    let (at, end) = app.read_with(&call, |app, _| {
+        (offset(app), app.group_call.panel_scroll.max_offset().y)
+    });
+    assert!(end > px(0.));
+    assert_eq!(at, -end);
 }

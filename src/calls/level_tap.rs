@@ -14,7 +14,9 @@ use crate::calls::capture::mic_cpal::CpalMic;
 use crate::calls::capture::{
     AudioFrame, CaptureError, FrameSink, LevelCell, MicCapture, MicControls,
 };
+use crate::cpal_stream::MicThread;
 use crate::locks::LockExt;
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
 /// Where level readers get their values from. The driver's call audio
@@ -27,27 +29,36 @@ pub trait LevelSource {
     fn error(&self) -> Option<String>;
 }
 
-/// An open microphone measured for levels. Dropping it closes the device.
+/// An open microphone measured for levels, on its own thread. Dropping it
+/// closes the device there.
 pub struct LevelTap {
-    mic: CpalMic,
+    _device: MicThread<Infallible>,
     controls: Arc<MicControls>,
-    /// Frames nobody sends anywhere: the sink keeps at most one.
-    _sink: FrameSink<AudioFrame>,
+    error: Arc<Mutex<Option<String>>>,
 }
 
 impl LevelTap {
     /// Open the default input device and start measuring the raw input,
     /// without noise suppression, as tdesktop's `AudioInputTester` does.
+    /// Waits for the device, so call it off the UI thread.
     pub fn open_default() -> Result<Self, String> {
         let controls = Arc::new(MicControls::new(false, Arc::new(LevelCell::default())));
         let mut mic = CpalMic::new(controls.clone());
-        let sink = FrameSink::new(1);
-        mic.start(None, sink.clone())
-            .map_err(|err: CaptureError| err.to_string())?;
+        let error = mic.error_slot();
+        let device = MicThread::open(
+            "quill-level-tap",
+            move || {
+                let sink: FrameSink<AudioFrame> = FrameSink::new(1);
+                mic.start(None, sink.clone())
+                    .map_err(|err: CaptureError| err.to_string())?;
+                Ok((mic, sink))
+            },
+            |_, never: Infallible| match never {},
+        )?;
         Ok(Self {
-            mic,
+            _device: device,
             controls,
-            _sink: sink,
+            error,
         })
     }
 }
@@ -58,13 +69,7 @@ impl LevelSource for LevelTap {
     }
 
     fn error(&self) -> Option<String> {
-        self.mic.error()
-    }
-}
-
-impl Drop for LevelTap {
-    fn drop(&mut self) {
-        self.mic.stop();
+        self.error.lock_or_recover().clone()
     }
 }
 

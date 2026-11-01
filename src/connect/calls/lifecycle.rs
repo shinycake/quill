@@ -1,5 +1,6 @@
 //! Connect driver: starting, accepting, swapping and ending one-to-one calls.
 use super::*;
+use crate::notify_accounts::ringing_incoming_call;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C1: `createCall` for a user. Gated on a known non-bot
@@ -60,7 +61,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        let extra = self
+            .session
+            .request(CallsPurpose::AcceptCall { call_id }.into(), None);
         let protocol = self.engine_protocol_json();
         if let Err(err) = self
             .sender
@@ -69,6 +72,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.answered_call = Some(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             // TDLib remains the call-state source of truth; this only marks
             // the already-tracked engine-side call accepted.
@@ -120,6 +124,46 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.hangup(call_id);
         }
         Ok(extra)
+    }
+
+    /// The account is closing (quit, account switch): end its calls, as
+    /// tdesktop's `Instance::isQuitPrevent` does. A call still ringing in
+    /// stays unanswered, so the caller's other devices can still take it;
+    /// one answered here is hung up even before TDLib moves it on, as
+    /// tdesktop's `Call::answer` leaves the waiting state at once.
+    pub(crate) fn hang_up_for_close(&mut self) {
+        let calls = &self.session.calls;
+        let call_running = calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        let joined = calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined);
+        let ringing = ringing_incoming_call(&self.session)
+            .is_some_and(|(id, _, _)| calls.answered_call != Some(id));
+        if call_running && !ringing {
+            let _ = self.discard_call();
+        }
+        if joined {
+            let _ = self.leave_group_call();
+        }
+    }
+
+    pub(crate) fn hang_up_pending(&self) -> bool {
+        let calls = &self.session.calls;
+        let hanging_up = calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| matches!(call.state, CallState::HangingUp));
+        let leaving = calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| calls.left_group_call == Some(call.id));
+        hanging_up || leaving
     }
 
     /// Swap prompt: decline the pending incoming call as busy.
@@ -180,7 +224,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some((call_id, _is_video)) = self.session.calls.swap_accept_queued.take() else {
             return Ok(());
         };
-        let extra = self.session.request(RequestPurpose::AcceptCall, None);
+        let extra = self
+            .session
+            .request(CallsPurpose::AcceptCall { call_id }.into(), None);
         let protocol = self.engine_protocol_json();
         if let Err(err) = self
             .sender
@@ -189,6 +235,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.answered_call = Some(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.accept_call(call_id);
         }

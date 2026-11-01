@@ -1,6 +1,8 @@
 //! Tests for `quill::cpal_stream` (see its module docs for why they live
 //! in the app target).
 
+use std::sync::mpsc::{Sender, channel};
+use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
 use cpal::ErrorKind;
@@ -192,4 +194,89 @@ fn device_names_match_exactly_or_ignoring_case() {
         "Microphone (Realtek(R) Audio)",
         "Microphone"
     ));
+}
+
+struct FakeMic {
+    events: Sender<(&'static str, ThreadId)>,
+}
+
+impl FakeMic {
+    fn note(&self, event: &'static str) {
+        let _ = self.events.send((event, std::thread::current().id()));
+    }
+}
+
+impl Drop for FakeMic {
+    fn drop(&mut self) {
+        self.note("closed");
+    }
+}
+
+#[test]
+fn a_mic_thread_opens_runs_and_closes_off_the_calling_thread_in_order() {
+    let (events, heard) = channel();
+    let device = MicThread::open(
+        "test-mic",
+        move || {
+            let mic = FakeMic { events };
+            mic.note("opened");
+            Ok(mic)
+        },
+        |mic: &mut FakeMic, command: &'static str| mic.note(command),
+    )
+    .expect("open");
+    device.send("pause");
+    device.send("play");
+    drop(device);
+
+    let order: Vec<_> = heard.iter().collect();
+    let names: Vec<_> = order.iter().map(|(event, _)| *event).collect();
+    assert_eq!(names, ["opened", "pause", "play", "closed"]);
+    let here = std::thread::current().id();
+    assert!(order.iter().all(|(_, thread)| *thread != here));
+}
+
+#[test]
+fn a_mic_thread_command_never_waits_for_the_device() {
+    let (gate, gated) = channel::<()>();
+    let (events, heard) = channel();
+    let device = MicThread::open(
+        "test-mic",
+        move || Ok(FakeMic { events }),
+        move |mic: &mut FakeMic, command: &'static str| {
+            let _ = gated.recv();
+            mic.note(command);
+        },
+    )
+    .expect("open");
+    device.send("pause");
+    device.send("play");
+    drop(device);
+    gate.send(()).expect("the first command waits");
+    gate.send(()).expect("the second command waits");
+    let names: Vec<_> = heard.iter().map(|(event, _)| event).collect();
+    assert_eq!(names, ["pause", "play", "closed"]);
+}
+
+#[test]
+fn a_mic_that_will_not_open_reports_why() {
+    let opened = MicThread::<()>::open(
+        "test-mic",
+        || Err::<(), String>("No microphone found.".into()),
+        |_, ()| {},
+    );
+    assert_eq!(opened.err().as_deref(), Some("No microphone found."));
+}
+
+#[test]
+fn a_mic_thread_that_panics_while_opening_reports_it() {
+    let opened = MicThread::<()>::open(
+        "test-mic",
+        || -> Result<(), String> { panic!("backend bug") },
+        |_, ()| {},
+    );
+    assert_eq!(
+        opened.err().as_deref(),
+        Some("The microphone thread stopped.")
+    );
 }
