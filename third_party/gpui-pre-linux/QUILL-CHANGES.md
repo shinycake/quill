@@ -150,3 +150,17 @@ compositor's first keymap is unusable (sweep bundle B13, N47):
 - `src/linux/wayland/default_keymap.xkb` (new): a US keymap compiled by
   libxkbcommon from xkeyboard-config 2.41 (MIT licence), for systems without
   xkeyboard-config. Test: `without_a_usable_first_keymap_keys_type_with_the_default`.
+
+The Quill project also changed it in 2026 so GPU recovery arms each timer
+once (sweep bundle B13, N42):
+
+- `src/linux/recovery_timers.rs` (new): the retry, hardware-probe and close
+  timers a window has armed, at most one of each. A timer carries the
+  instant it was armed for and does nothing once that is not the window's.
+- `src/linux/x11/window.rs`: a recovery attempt that is not due yet arms one
+  `run_for_window_at` timer for its instant (`recovery_retry_due`), as on
+  Wayland, instead of keeping the refresh timer running at the refresh rate
+  until then; the refresh timer parks while it waits.
+- Both backends: a second recovery no longer starts a second hardware-probe
+  chain, and every draw before a `CloseWindow` runs no longer arms another
+  close. Tests: `recovery_timers::tests`.

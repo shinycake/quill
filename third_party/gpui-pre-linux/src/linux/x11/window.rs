@@ -3,7 +3,7 @@
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
-use crate::linux::X11ClientStatePtr;
+use crate::linux::{RecoveryTimers, X11ClientStatePtr};
 use gpui::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, ForegroundExecutor, GpuSpecs, Modifiers,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
@@ -299,8 +299,8 @@ pub struct X11WindowState {
     force_render_after_recovery: bool,
     // Quill: forces another frame after the swapchain refused one.
     present_retry: PresentRetry,
-    // Quill: when the next GPU recovery attempt is due.
-    recovery_retry_at: Option<Instant>,
+    // Quill: the GPU recovery timers this window has armed.
+    recovery_timers: RecoveryTimers,
     fullscreen: bool,
     client_side_decorations_supported: bool,
     decorations: WindowDecorations,
@@ -958,7 +958,7 @@ impl X11WindowState {
                 hovered: false,
                 force_render_after_recovery: false,
                 present_retry: PresentRetry::default(),
-                recovery_retry_at: None,
+                recovery_timers: RecoveryTimers::default(),
                 fullscreen: false,
                 maximized_vertical: false,
                 maximized_horizontal: false,
@@ -1177,9 +1177,12 @@ impl X11WindowStatePtr {
 
     /// Quill: look for the GPU while on the software renderer recovery fell
     /// back to (`WgpuRenderer::probe_hardware`), and look again later.
-    pub(crate) fn probe_hardware(&self) {
+    pub(crate) fn probe_hardware(&self, armed_for: Instant) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
+        if !state.recovery_timers.probe_fired(armed_for) {
+            return;
+        }
         let raw_window = self.raw_window(state);
         let Some(renderer) = state.renderer.as_mut() else {
             return;
@@ -1189,9 +1192,19 @@ impl X11WindowStatePtr {
             state.force_render_after_recovery = true;
             self.frame.demand();
         }
-        if let Some(at) = next {
-            schedule_hardware_probe(&state.client, self.x_window, at);
+        schedule_hardware_probe(state, self.x_window, next);
+    }
+
+    /// Quill: the GPU recovery attempt armed for `at` is due: force the frame
+    /// whose draw makes it.
+    pub(crate) fn recovery_retry_due(&self, at: Instant) {
+        let mut state = self.state.borrow_mut();
+        if !state.recovery_timers.retry_fired(at) {
+            return;
         }
+        state.force_render_after_recovery = true;
+        drop(state);
+        self.frame.demand();
     }
 
     pub fn should_close(&self) -> bool {
@@ -1328,11 +1341,11 @@ impl X11WindowStatePtr {
 
     /// Quill: called by the refresh timer after `refresh`; returns whether
     /// the timer should park (stop until a frame demand). A pending forced render
-    /// after GPU recovery keeps it running.
+    /// after GPU recovery keeps it running; a recovery attempt that is not due
+    /// yet does not, as its own timer demands the frame
+    /// (`recovery_retry_due`).
     pub(crate) fn frame_idle_after_refresh(&self) -> bool {
-        let state = self.state.borrow();
-        let recovering = state.force_render_after_recovery || state.recovery_retry_at.is_some();
-        drop(state);
+        let recovering = self.state.borrow().force_render_after_recovery;
         self.frame.after_frame(recovering)
     }
 
@@ -1342,13 +1355,6 @@ impl X11WindowStatePtr {
             // Expose events can present a frame before the refresh timer runs,
             // so every frame request must rebuild stale atlas references after recovery.
             let mut state = self.state.borrow_mut();
-            if state
-                .recovery_retry_at
-                .is_some_and(|at| Instant::now() >= at)
-            {
-                state.recovery_retry_at = None;
-                state.force_render_after_recovery = true;
-            }
             request_frame_options.force_render |=
                 std::mem::take(&mut state.force_render_after_recovery);
             drop(state);
@@ -1548,8 +1554,17 @@ impl X11WindowStatePtr {
     }
 }
 
-fn schedule_hardware_probe(client: &X11ClientStatePtr, x_window: xproto::Window, at: Instant) {
-    client.run_for_window_at(x_window, at, |window| window.probe_hardware());
+/// Quill: arm the window's probe timer for `at` unless it already is.
+fn schedule_hardware_probe(
+    state: &mut X11WindowState,
+    x_window: xproto::Window,
+    at: Option<Instant>,
+) {
+    if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at))) {
+        state
+            .client
+            .run_for_window_at(x_window, at, move |window| window.probe_hardware(at));
+    }
 }
 
 impl PlatformWindow for X11Window {
@@ -1950,25 +1965,31 @@ impl PlatformWindow for X11Window {
                 window_id: self.0.x_window,
                 visual_id: inner.visual_id,
             };
-            inner.recovery_retry_at = None;
             match renderer.recover(&raw_window) {
                 Recovery::Recovered => {
+                    inner.recovery_timers.clear_retry();
                     inner.force_render_after_recovery = true;
-                    if let Some(at) = renderer.hardware_probe_at() {
-                        schedule_hardware_probe(&inner.client, self.0.x_window, at);
-                    }
+                    let at = renderer.hardware_probe_at();
+                    schedule_hardware_probe(inner, self.0.x_window, at);
                 }
                 Recovery::RetryAt(at) => {
-                    inner.recovery_retry_at = Some(at);
-                    self.0.frame.demand();
+                    if inner.recovery_timers.arm_retry(at) {
+                        inner
+                            .client
+                            .run_for_window_at(self.0.x_window, at, move |window| {
+                                window.recovery_retry_due(at)
+                            });
+                    }
                 }
-                Recovery::GaveUp => {}
+                Recovery::GaveUp => inner.recovery_timers.clear_retry(),
                 Recovery::CloseWindow => {
-                    inner
-                        .client
-                        .run_for_window_at(self.0.x_window, Instant::now(), |window| {
-                            window.close()
-                        });
+                    if inner.recovery_timers.arm_close() {
+                        inner
+                            .client
+                            .run_for_window_at(self.0.x_window, Instant::now(), |window| {
+                                window.close()
+                            });
+                    }
                 }
             }
             return;
