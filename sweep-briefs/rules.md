@@ -15,3 +15,5 @@
 - Commit trailer: `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. No model names anywhere else.
 
 Last step: push branch claude/prtext-<name> holding one file, PR.md. Line 1 is the PR title, a plain sentence naming what changes for the user. Then the body: what was wrong, what changed, what ran, what did not run, what stays open. No em-dashes, no attribution lines.
+
+Bundles in sweep-briefs/bundles come from a read-only audit of main at 5072e9662. Check each item against the code first, since line numbers can move. The owner's word: "100% of the defects found are fixed", so leave no item out and hold nothing for later. An item you show is not a defect gets its evidence in the PR text. Under "Owner decisions", apply the default. Work on macOS-only code as far as you can read it, name what you could not compile, and keep it small so a Mac check can finish it. Windows code: `cargo check --target x86_64-pc-windows-gnu` where it works. After your last push, delete nothing.
