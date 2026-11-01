@@ -759,13 +759,15 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.connection
-            .set_note(if quill::platform::open_external_url(url) {
+        let open = quill::platform::open_external_url(url);
+        self.when_os_answers(open, cx, |this, opened, cx| {
+            this.connection.set_note(if opened {
                 StatusNote::info(tr(keys::Q_CHAT_OPENED_LINK))
             } else {
                 StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK))
             });
-        cx.notify();
+            cx.notify();
+        });
     }
 
     /// MED4: open a link-preview card tap (TGX `TdlibUi` behavior).
