@@ -446,7 +446,7 @@ fn windows_swap_files_retries_while_a_file_is_briefly_held() {
     let probe = fs::rename(install.join("quill.exe"), install.join("probe"));
     assert_eq!(probe.unwrap_err().raw_os_error(), Some(32));
     let releaser = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(700));
+        std::thread::sleep(std::time::Duration::from_millis(700));
         drop(held);
     });
     swap_files(&install, &staged, || Ok(())).unwrap();

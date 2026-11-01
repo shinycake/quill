@@ -761,6 +761,7 @@ fn no_screenshot_while_the_user_drags(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     turn_on();
+    takeover::reset_for_test();
     grant(11, Scope::ReadWrite);
     let _presence = activity::connect("Test agent");
     settle(vcx);

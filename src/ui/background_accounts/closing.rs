@@ -88,13 +88,12 @@ impl QuillApp {
     }
 
     /// Drain the closing clients once. Accounts closed only for a call
-    /// start again in the background. Returns whether any finished.
-    pub(super) fn reap_closing(&mut self, cx: &mut Context<Self>) -> bool {
+    /// start again in the background.
+    pub(super) fn reap_closing(&mut self, cx: &mut Context<Self>) {
         let done = self.background.closing.poll(Instant::now());
         if done.iter().any(|closed| closed.restart && closed.confirmed) {
             self.ensure_background_accounts(cx);
         }
-        !done.is_empty()
     }
 
     /// Run `then` once `wait` says go (`then(.., true)`) or never

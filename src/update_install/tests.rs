@@ -553,3 +553,21 @@ fn the_update_receipt_is_read_once() {
     assert!(!path.exists());
     assert!(take_receipt(&path).is_none());
 }
+
+#[test]
+fn a_receipt_that_fails_leaves_no_temp_file_so_the_next_one_lands() {
+    let dir = crate::scratch::process_dir("quill-receipt-retry");
+    let path = dir.join("update-result.json");
+    fs::create_dir_all(&path).unwrap();
+    assert!(write_result(path.clone(), &release(), false).is_err());
+    let left: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["update-result.json"], "no temp file stays behind");
+
+    fs::remove_dir(&path).unwrap();
+    write_result(path.clone(), &release(), true).unwrap();
+    assert!(take_receipt(&path).is_some_and(|receipt| receipt.failed));
+    let _ = fs::remove_dir_all(&dir);
+}

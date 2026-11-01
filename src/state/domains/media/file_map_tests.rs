@@ -79,3 +79,18 @@ fn a_pass_that_frees_too_little_waits_for_more_writes() {
     }
     assert!(files.evict(|_| false) > 0, "tried again after more writes");
 }
+
+#[test]
+fn a_pass_with_every_file_held_is_not_due_again_until_enough_writes() {
+    let mut files = FileMap::default();
+    for id in 0..=FILES_MAX as i32 {
+        files.insert(file(id, "/tmp/f"));
+    }
+    assert!(files.evict_due());
+    assert_eq!(files.evict(|_| true), 0, "everything is held");
+    for id in 0..super::EVICT_RETRY_AFTER as i32 {
+        assert!(!files.evict_due(), "write {id}: the caller builds nothing");
+        files.insert(file(100_000 + id, "/tmp/f"));
+    }
+    assert!(files.evict_due());
+}

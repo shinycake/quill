@@ -62,7 +62,7 @@ fn removing_a_generation_leaves_nothing_behind() {
     let root = root("remove");
     let generation = Generation::claim(&root).unwrap();
     with_cookie(generation.dir());
-    generation.remove(RETRY_FOR);
+    generation.tear_down(RETRY_FOR);
     assert_eq!(names(&root), Vec::<String>::new());
 }
 
@@ -183,4 +183,31 @@ fn a_sweep_that_cannot_lock_keeps_folders() {
         names(&root),
         vec!["3-0".to_string(), "3-0.lock".to_string()]
     );
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "run by carrier-live-windows"]
+fn helper_live_a_teardown_ends_what_holds_the_folder() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let generation = Generation::claim(&root("held")).unwrap();
+    let dir = generation.dir().to_path_buf();
+    let held = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .share_mode(0)
+        .open(dir.join("held"))
+        .unwrap();
+    let mut holder = std::process::Command::new("cmd")
+        .args(["/c", "pause"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(held)
+        .spawn()
+        .unwrap();
+    generation.hold(&holder);
+    assert!(!remove_tree(&dir), "the folder should be in use");
+    generation.tear_down(RETRY_FOR);
+    assert!(!dir.exists(), "the teardown left a folder that was in use");
+    holder.wait().unwrap();
 }

@@ -306,7 +306,7 @@ fn a_join_in_flight_counts_as_being_in_the_call_and_leaving_sends_leave() {
         }
     ));
     // The UI's own join flag counts too.
-    driver.session.requests.pending.clear();
+    driver.session.requests.drain_all();
     assert!(driver.session.group_call_joined_or_joining(Some(77)));
     assert!(!driver.session.group_call_joined_or_joining(None));
     // Leaving it before creating sends `leaveGroupCall` for that call.

@@ -99,6 +99,8 @@ jobs:
         run: bash scripts/test-refresh-interval.sh
       - name: tests (vendored GPUI window list)
         run: bash scripts/test-window-list.sh
+      - name: tests (vendored GPUI timer queue)
+        run: bash scripts/test-timer-queue.sh
       - name: tests (vendored GPUI window messages)
         run: bash scripts/test-gpui-message.sh
       # Same for the notification extras shared by the macOS and Windows backends.
@@ -146,6 +148,7 @@ jobs:
           CARRIER_SOAK_SECS: "130"
         run: dbus-run-session -- xvfb-run -a cargo test -p quill-webview --locked --test carrier_live -- --ignored --test-threads=1 --nocapture
       - name: carrier live tests (Quill's host)
+        timeout-minutes: 30
         env:
           QUILL_CARRIER_HELPER: target/debug/quill-webview
           QUILL_WEBVIEW_CARRIER_LOOPBACK: "1"
@@ -192,6 +195,7 @@ jobs:
         run: cargo test -p quill-webview --locked --test carrier_live -- --ignored --test-threads=1 --nocapture
       - name: carrier live tests (Quill's host)
         if: steps.changed.outputs.run == 'true'
+        timeout-minutes: 30
         env:
           QUILL_CARRIER_HELPER: target/debug/quill-webview.exe
           QUILL_WEBVIEW_DEBUG: "1"

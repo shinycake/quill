@@ -15,6 +15,7 @@ use quill::call_device_prefs::{
     system_sound_target,
 };
 use quill::lang::{keys, tr};
+use quill::platform::OsOpen;
 
 impl QuillApp {
     pub(super) fn call_device_prefs_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -72,16 +73,22 @@ impl QuillApp {
                         .label(SYSTEM_PREFS_TITLE)
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if !open_system_sound_prefs() {
-                                this.connection.set_note(StatusNote::error(tr(
-                                    keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND,
-                                )));
-                                cx.notify();
-                            }
+                            this.sound_prefs_answer(open_system_sound_prefs(), cx);
                         })),
                 ),
             );
         }
         block.text_color(cx.theme().foreground).into_any_element()
+    }
+
+    pub(super) fn sound_prefs_answer(&mut self, open: OsOpen, cx: &mut Context<Self>) {
+        self.when_os_answers(open, cx, |this, opened, cx| {
+            if !opened {
+                this.connection.set_note(StatusNote::error(tr(
+                    keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND,
+                )));
+                cx.notify();
+            }
+        });
     }
 }

@@ -89,8 +89,8 @@ pub(crate) struct PlaybackUi {
     /// when playback stops; one decode per GIF at a time).
     pub(super) gif_decodes: HashMap<MessageId, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// A linked `?t=` media timestamp waiting for its message to load
-    /// (chat, message, seconds, polls waited).
-    pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, u32)>,
+    /// (chat, message, seconds, when to give up).
+    pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,
     /// Muted, looping inline players for visible videos and GIFs.
     /// Shared with the history's animation layer, which draws the clips'
     /// current frames (`inline_video::LiveSource`).
