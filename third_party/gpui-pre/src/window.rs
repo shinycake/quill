@@ -70,6 +70,7 @@ use std::{
 use uuid::Uuid;
 
 pub(crate) mod a11y;
+mod live_views;
 mod prompts;
 
 pub use a11y::{A11yNodeSnapshot, A11ySubtreeBuilder, A11yTreeSnapshot};
@@ -278,6 +279,16 @@ impl WindowInvalidator {
 
     pub fn replace_views(&self, views: FxHashSet<EntityId>) {
         self.inner.borrow_mut().dirty_views = views;
+    }
+
+    /// Quill: some view waits to be drawn, and `pred` holds for each one.
+    pub(crate) fn all_views(&self, pred: impl Fn(EntityId) -> bool) -> bool {
+        let inner = self.inner.borrow();
+        !inner.dirty_views.is_empty() && inner.dirty_views.iter().all(|view| pred(*view))
+    }
+
+    pub(crate) fn clear_views(&self) {
+        self.inner.borrow_mut().dirty_views.clear();
     }
 
     pub fn not_drawing(&self) -> bool {
@@ -1081,6 +1092,8 @@ pub(crate) struct Frame {
     pub(crate) focus_tags: Vec<Vec<SharedString>>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
+    /// Quill: the [`Entity::live`] views of this frame.
+    pub(crate) live_views: Vec<live_views::LiveView>,
     pub(crate) input_handlers: Vec<Option<PlatformInputHandler>>,
     pub(crate) tooltip_requests: Vec<Option<TooltipRequest>>,
     pub(crate) cursor_styles: Vec<CursorStyleRequest>,
@@ -1142,6 +1155,7 @@ impl Frame {
             focus_tags: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
+            live_views: Vec::new(),
             input_handlers: Vec::new(),
             tooltip_requests: Vec::new(),
             cursor_styles: Vec::new(),
@@ -1161,11 +1175,15 @@ impl Frame {
     }
 
     pub(crate) fn clear(&mut self) {
+        self.scene.clear();
+        self.clear_all_but_scene();
+    }
+
+    fn clear_all_but_scene(&mut self) {
         self.element_states.clear();
         self.accessed_element_states.clear();
         self.mouse_listeners.clear();
         self.dispatch_tree.clear();
-        self.scene.clear();
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
@@ -1174,6 +1192,7 @@ impl Frame {
         self.focus_tags.clear();
         self.window_control_hitboxes.clear();
         self.deferred_draws.clear();
+        self.live_views.clear();
         self.tab_stops.clear();
         self.focus = None;
 
@@ -1294,6 +1313,9 @@ pub struct Window {
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
+    /// QUILL: `next_frame`'s scene is `rendered_frame`'s with its live views
+    /// drawn again, and the one to show ([`Self::shown_scene`]).
+    scene_patched: bool,
     next_hitbox_id: HitboxId,
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
@@ -2211,6 +2233,7 @@ impl Window {
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
+            scene_patched: false,
             next_hitbox_id: HitboxId(0),
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
@@ -2976,8 +2999,7 @@ impl Window {
     /// to capture what would be rendered without displaying it or requiring the window to be visible.
     #[cfg(any(test, feature = "test-support"))]
     pub fn render_to_image(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window
-            .render_to_image(&self.rendered_frame.scene)
+        self.platform_window.render_to_image(self.shown_scene())
     }
 
     /// Returns the quads in the most recently rendered frame's scene, so tests can assert on
@@ -2986,13 +3008,13 @@ impl Window {
     /// whose bounds don't intersect their content mask are culled at paint time and won't appear.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_quads(&self) -> Vec<Quad> {
-        self.rendered_frame.scene.quads.clone()
+        self.shown_scene().quads.clone()
     }
 
     /// Returns the underlines in the most recently rendered frame's scene.
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_underlines(&self) -> Vec<Underline> {
-        self.rendered_frame.scene.underlines.clone()
+        self.shown_scene().underlines.clone()
     }
 
     /// Set the content size of the window.
@@ -3544,6 +3566,15 @@ impl Window {
         if self.platform_window.prepare_frame() {
             self.refresh();
         }
+        if mem::take(&mut self.scene_patched) {
+            self.next_frame.scene.clear();
+        }
+        if self.only_live_views_changed(cx) {
+            self.patch_live_views(cx);
+            #[cfg(feature = "profiler")]
+            self.end_draw_profile(cx, frame_dirty);
+            return arena_scope.exit(&cx.element_arena);
+        }
         self.invalidate_entities();
         cx.entities.clear_accessed();
         debug_assert!(self.rendered_entity_stack.is_empty());
@@ -3677,18 +3708,21 @@ impl Window {
         self.needs_present.set(true);
 
         #[cfg(feature = "profiler")]
-        {
-            self.window_profiler
-                .set_refresh_interval(self.refresh_interval(cx));
-            let draw_duration = self
-                .window_profiler
-                .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
-            self.debug_frame_overlay.record_frame(draw_duration);
-        }
+        self.end_draw_profile(cx, frame_dirty);
 
         // Exit the scope to obtain the arena-clear token this draw owes; the
         // scope's teardown itself happens in `ElementArenaScope::drop`.
         arena_scope.exit(&cx.element_arena)
+    }
+
+    #[cfg(feature = "profiler")]
+    fn end_draw_profile(&mut self, cx: &App, frame_dirty: FrameDirtyAccumulator) {
+        self.window_profiler
+            .set_refresh_interval(self.refresh_interval(cx));
+        let draw_duration = self
+            .window_profiler
+            .end_draw(frame_dirty.dirty_at, frame_dirty.invalidations);
+        self.debug_frame_overlay.record_frame(draw_duration);
     }
 
     fn record_entities_accessed(&mut self, cx: &mut App) {
@@ -3719,7 +3753,7 @@ impl Window {
         let _foreground_turn = profiler::journal::foreground_turn();
         #[cfg(feature = "profiler")]
         let present_start = Instant::now();
-        self.platform_window.draw(&self.rendered_frame.scene);
+        self.platform_window.draw(self.shown_scene());
         #[cfg(feature = "profiler")]
         self.window_profiler.record_present(
             present_start,

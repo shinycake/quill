@@ -405,3 +405,30 @@ went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.
 The crate's own tests do not build in Quill's tree, so `src/ui/scene_replay_tests.rs`
 holds the tests: random overlapping primitives with layers, replayed, replayed
 again through outer views, and compared with painting everything from scratch.
+
+## Live views: a frame that redraws one view alone
+
+A notified view dirties every ancestor, and an ancestor that renders renders all
+it holds, so a view that only animates rebuilt the window root on every tick.
+`Entity::live` embeds a view that can redraw on its own. While only live views
+were notified, `Window::draw` renders those and nothing else, in `window/live_views.rs`:
+
+- Each live view's entry in the frame keeps what its place in the tree gave it
+  (element ids, text style, image caches, content mask, opacity, rem size, bounds)
+  and the paint operations it added to the scene.
+- The frame's scene is the last whole frame's, replayed, with those operations
+  swapped for new ones. Replay ranges balance, so a swap lands at the stack depth
+  the view painted at.
+- `rendered_frame` stays the last whole frame: hit tests, the key dispatch tree,
+  the accessibility tree and the ranges cached views replay from all read it, and
+  nothing a live view builds reaches them. `Window::shown_scene` is the scene last
+  drawn, for presenting and for tests.
+- Any notify of another view, `Window::refresh`, an inspector, a paint filter, an
+  open profiler overlay, or an accessibility tree not up to date draws a whole frame.
+- `window/a11y.rs` holds the tree still during a patch: live views add no nodes,
+  and nothing is sent.
+
+What a live view builds takes no clicks and no hover, so it suits content that only
+shows. `Window::frame_number` counts these frames like any other.
+
+`src/ui/layer_tick_tests.rs` holds the tests.

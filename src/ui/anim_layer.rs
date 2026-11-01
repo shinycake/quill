@@ -6,8 +6,9 @@
 //! conversation would rebuild the whole slice on every frame. Instead, the
 //! slice only reports where its animated content sits, and a small layer
 //! view rendered right after the slice (its sibling) draws that content
-//! at the current time. A frame-clock tick notifies only the layer; the
-//! slice replays its cached frame (`app_slice`).
+//! at the current time. A frame-clock tick notifies only the layer, a live
+//! view (`Entity::live`): it renders alone, and all the rest of the window,
+//! `QuillApp` and the slices included, stays as the last whole frame drew it.
 //!
 //! How it fits GPUI's frame (`Window::draw_roots`): every element of the
 //! window is prepainted, then everything is painted, in tree order.
@@ -27,6 +28,11 @@
 //!
 //! When the slice replays, none of that runs: the items of its last real
 //! frame stay, which is exactly what the replay shows.
+//!
+//! On a tick the layers render, prepaint and paint on their own, and only
+//! their paint reaches the screen: what a layer builds takes no clicks, no
+//! hover and no part in the accessibility tree, as the slice under it has
+//! all of those.
 //!
 //! The layer paints after the whole slice, so something the slice paints
 //! over an item must be an [`Occluder`] (the item then falls back to the
@@ -597,13 +603,22 @@ impl AnimationLayer {
 }
 
 impl Render for AnimationLayer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::frame_clock::trace_slice_render("animation layer");
-        LayerPainter {
+        let id = cx.entity_id();
+        let painter = LayerPainter {
             layer: self.layer.clone(),
             app: self.app.clone(),
-            painter: cx.entity_id(),
-        }
+            painter: id,
+        };
+        let Some(app) = self.app.upgrade() else {
+            return painter.into_any_element();
+        };
+        app.update(cx, |app, cx| {
+            app.main_frame_starts(window, super::image_budget::MainDraw::Patch, cx);
+            super::image_budget::slice_rendered(id);
+            app.slices.painter_scope(id, painter)
+        })
     }
 }
 
@@ -682,6 +697,11 @@ impl Element for LayerPainter {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "layer_tick_tests.rs"]
+mod layer_tick_tests;
 
 #[cfg(test)]
 mod tests {

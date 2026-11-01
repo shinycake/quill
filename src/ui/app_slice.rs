@@ -23,8 +23,9 @@
 //! help: one animated emoji would still rebuild the list. Each slice
 //! therefore has an animation layer (`anim_layer`), drawn right after it:
 //! animated emoji, stickers, inline videos, spoiler specks and typing dots
-//! only report where they sit, and a tick redraws the layer while the slice
-//! replays its cached frame.
+//! only report where they sit, and a tick redraws the layer alone
+//! (`Entity::live`): `QuillApp` and every slice stay as the last whole frame
+//! drew them.
 #![deny(clippy::indexing_slicing)]
 
 use super::anim_layer::{AnimationLayer, Layer};
@@ -63,6 +64,16 @@ pub(super) struct AppSlice {
     kind: SliceKind,
 }
 
+/// Draws nothing: a notify of this view re-renders `QuillApp`, its parent,
+/// and no slice, as a `QuillApp` notify would.
+pub(super) struct AppOnly;
+
+impl Render for AppOnly {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
+
 /// A slice, its animation layer's content, and the view that draws it.
 struct SliceParts {
     slice: Entity<AppSlice>,
@@ -83,6 +94,7 @@ pub(super) struct Slices {
     viewer_chrome: Option<Entity<AppSlice>>,
     /// The story viewer overlay, while it is open.
     story: Option<Entity<AppSlice>>,
+    app_only: Option<Entity<AppOnly>>,
     /// The composer's height as laid out last time: a cached slice's
     /// box is sized before its content renders, so the slot takes the
     /// measured height (a change redraws the slot next frame).
@@ -150,6 +162,26 @@ impl Slices {
     pub(super) fn image_cache(&self) -> Option<Entity<super::image_budget::BoundedImageCache>> {
         self.image_cache.clone()
     }
+
+    /// A layer painter's content, drawn on its own on a tick: what it paints
+    /// counts as the render of `painter`, which replaces it at every frame.
+    pub(super) fn painter_scope(&self, painter: EntityId, content: impl IntoElement) -> AnyElement {
+        let content = SliceScope {
+            id: painter,
+            scope: self.scope.clone(),
+            layer: None,
+            child: content.into_any_element(),
+        };
+        match self.image_cache() {
+            Some(cache) => super::image_budget::CacheScope::new(cache, content).into_any_element(),
+            None => content.into_any_element(),
+        }
+    }
+
+    /// The view `QuillApp` embeds for [`AppOnly`] redraws.
+    pub(super) fn app_only(&self) -> Option<Entity<AppOnly>> {
+        self.app_only.clone()
+    }
 }
 
 impl QuillApp {
@@ -186,6 +218,7 @@ impl QuillApp {
             app: app.clone(),
             kind: SliceKind::Story,
         }));
+        self.slices.app_only = Some(cx.new(|_| AppOnly));
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
@@ -407,7 +440,7 @@ impl QuillApp {
                 super::image_budget::slice_shown(parts.slice.entity_id());
                 column
                     .child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone())
+                    .child(parts.painter.clone().live())
                     .into_any_element()
             }
             None => column.into_any_element(),
@@ -479,7 +512,7 @@ impl QuillApp {
                     .min_w_0()
                     .min_h_0()
                     .child(parts.slice.clone().cached(full()))
-                    .child(parts.painter.clone()),
+                    .child(parts.painter.clone().live()),
             )
             .child(
                 composer
@@ -601,11 +634,7 @@ impl QuillApp {
                 // Laid out at the bottom of its box: while the box still
                 // has last frame's height, a taller composer grows over
                 // the history (as its popups do) for that one frame.
-                let redraw = self
-                    .slices
-                    .conversation
-                    .as_ref()
-                    .map(|parts| parts.painter.entity_id());
+                let redraw = self.slices.app_only.as_ref().map(Entity::entity_id);
                 div()
                     .size_full()
                     .flex()
@@ -756,8 +785,7 @@ impl Element for SliceScope {
 }
 
 /// Records its child's laid-out height; when it changed, the slot that
-/// sizes the composer slice is redrawn (`redraw`: a view whose notify
-/// re-renders `QuillApp` without dirtying the other slices).
+/// sizes the composer slice is redrawn (`redraw`: [`AppOnly`]).
 struct MeasureHeight {
     height: Rc<Cell<Pixels>>,
     redraw: Option<EntityId>,

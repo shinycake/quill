@@ -1,4 +1,6 @@
-use super::super::{begin_frame, frame, next_image_id, slice_rendered, slice_shown};
+use super::super::{
+    begin_frame, begin_patch_frame, frame, next_image_id, slice_rendered, slice_shown,
+};
 use super::{MainFrame, retire_all, take_unshowable};
 use gpui_kit::{EntityId, RenderImage, WindowId};
 use smallvec::SmallVec;
@@ -74,6 +76,42 @@ fn frames_retired_while_a_slice_replays_leave_after_the_next_frame() {
     assert!(!MainFrame::now().may_show(painted_by_sidebar, frame() - 2));
 }
 
+/// Frames that redraw only an animation layer: what the layer drew leaves
+/// frame by frame, while what the whole frame drew still shows, however
+/// many such frames pass.
+#[test]
+fn a_patch_frame_lets_go_of_the_layer_alone() {
+    let slice = EntityId::from((1_u64 << 32) | 19);
+    let layer = EntityId::from((1_u64 << 32) | 21);
+    let in_slice = next_image_id();
+    let rendered = begin_frame();
+    slice_rendered(slice);
+    let in_app = next_image_id();
+    let whole = begin_frame();
+    slice_shown(slice);
+    slice_rendered(layer);
+    MainFrame::now();
+    let mut drawn = Vec::new();
+    for _ in 0..30 {
+        let picture = next_image_id();
+        begin_patch_frame();
+        slice_rendered(layer);
+        MainFrame::now();
+        drawn.push((picture, frame()));
+    }
+    let main = MainFrame::now();
+    assert!(main.may_show(in_slice, rendered), "the slice it replays");
+    assert!(main.may_show(in_app, whole), "the whole frame");
+    let (latest, retired) = drawn.pop().unwrap_or_default();
+    assert!(main.may_show(latest, retired), "the layer's latest frame");
+    for (picture, replaced) in &drawn {
+        assert!(
+            !main.may_show(*picture, *replaced),
+            "picture {picture}, replaced in frame {replaced}"
+        );
+    }
+}
+
 /// A slice render may paint whatever exists until its frame is done.
 #[test]
 fn a_slice_render_covers_what_was_made_until_its_frame_was_done() {
@@ -127,6 +165,7 @@ fn a_window_that_stops_drawing_keeps_only_what_its_last_frame_may_show() {
 
 #[cfg(feature = "demo-capture")]
 mod windows {
+    use super::super::super::MainDraw;
     use super::super::super::{BoundedImageCache, slice_rendered, slice_shown};
     use super::super::{begin_main_frame, retire_all, start_sweeper};
     use super::picture;
@@ -157,7 +196,7 @@ mod windows {
 
     impl Render for MainWindow {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            begin_main_frame(window, cx);
+            begin_main_frame(window, MainDraw::Whole, cx);
             if std::mem::take(&mut self.slice_renders) {
                 slice_rendered(slice());
             } else {

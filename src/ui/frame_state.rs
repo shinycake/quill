@@ -36,6 +36,8 @@ pub(crate) struct FrameUi {
     /// `media_display_roots`, computed once per frame (rows ask for it
     /// one by one, and it touches the file system).
     pub(super) media_roots_frame: std::cell::RefCell<Option<std::rc::Rc<[PathBuf]>>>,
+    /// The main window's last frame `QuillApp::main_frame_starts` ran for.
+    pub(super) frame_started: std::cell::Cell<u64>,
     pub(super) frame_clock_running: std::cell::Cell<bool>,
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
@@ -84,6 +86,7 @@ impl FrameUi {
             window_title_shown: Default::default(),
             title_badge: Default::default(),
             media_roots_frame: Default::default(),
+            frame_started: Default::default(),
             frame_clock_running: Default::default(),
             clock_timing: Default::default(),
             layers_drawn: Default::default(),

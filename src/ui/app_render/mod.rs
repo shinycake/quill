@@ -33,6 +33,35 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, connection_indicator};
+impl QuillApp {
+    /// What each frame of the main window starts with, whether it renders
+    /// the app or only redraws the animation layers. The first call of a
+    /// frame counts: `QuillApp` renders ahead of the layers.
+    pub(super) fn main_frame_starts(
+        &mut self,
+        window: &mut Window,
+        draw: super::image_budget::MainDraw,
+        cx: &mut Context<Self>,
+    ) {
+        let frame = window.frame_number();
+        if self.frame.frame_started.replace(frame) == frame {
+            return;
+        }
+        // Before this frame counts: what showed stayed until now.
+        self.sticker_frame_starts(None, cx);
+        // Bounded image memory: retired images no window can show any
+        // more leave the atlas, then this frame counts (`image_budget`).
+        super::image_budget::begin_main_frame(window, draw, cx);
+        self.note_frame_timing(window, cx);
+        super::glyph_sweep::start_frame(window, cx);
+        super::spoiler_fx::release_media_tile(Some(window), cx);
+        if let Some(cache) = self.slices.image_cache() {
+            cache.update(cx, |cache, cx| cache.trim(window, cx));
+        }
+        self.schedule_idle_image_trim(cx);
+    }
+}
+
 impl Render for QuillApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // The main window draws with its own view state in place; what was
@@ -40,26 +69,16 @@ impl Render for QuillApp {
         // restored once the root is built, and around its layout and paint
         // (`WindowScope`).
         quill::startup_trace::mark("first_render");
+        super::frame_clock::trace_slice_render("app");
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
         self.windows.main = Some(window.window_handle());
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
-        // Before this frame counts: what showed stayed until now.
-        self.sticker_frame_starts(None, cx);
-        // Bounded image memory: retired images no window can show any
-        // more leave the atlas, then this frame counts (`image_budget`).
-        super::image_budget::begin_main_frame(window, cx);
-        self.note_frame_timing(window, cx);
-        super::glyph_sweep::start_frame(window, cx);
+        self.main_frame_starts(window, super::image_budget::MainDraw::Whole, cx);
         self.sync_emoji_style(cx);
-        super::spoiler_fx::release_media_tile(Some(window), cx);
         let image_cache = self.slices.image_cache();
-        if let Some(cache) = &image_cache {
-            cache.update(cx, |cache, cx| cache.trim(window, cx));
-        }
-        self.schedule_idle_image_trim(cx);
         self.sync_capture_block(window);
         self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);
@@ -883,7 +902,9 @@ impl Render for QuillApp {
         });
         // An agent driving the window: the glow, the ghost cursor and the
         // pill, deferred above everything (`agent_takeover`).
-        let root = root.children(self.takeover_layer(window, cx));
+        let root = root
+            .children(self.takeover_layer(window, cx))
+            .children(self.slices.app_only());
         let root = match image_cache {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
