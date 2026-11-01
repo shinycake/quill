@@ -820,6 +820,7 @@ impl Render for QuillApp {
                 self.pickers.media_panel.selector_anchor(),
                 |this, position| {
                     let panel = self.media_panel(cx);
+                    let panel = self.selector_panel(panel);
                     this.child(
                         div()
                             .id("reaction-selector-layer")
@@ -840,7 +841,8 @@ impl Render for QuillApp {
                                     .position(position)
                                     .snap_to_window_with_margin(px(8.))
                                     .child(panel),
-                            ),
+                            )
+                            .children(self.panel_painter()),
                     )
                 },
             )

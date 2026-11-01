@@ -25,8 +25,26 @@ impl QuillApp {
         } else {
             quill::power_saving::Flag::EmojiPanel
         };
-        let animated = if quill::power_saving::on(flag) {
-            // Battery and animations: the emoji panel shows stills.
+        // Battery and animations: the emoji panel shows stills.
+        let saving = quill::power_saving::on(flag);
+        // On the panel's layer a new frame redraws nothing but the layer.
+        let layered = self
+            .panel_layer()
+            .filter(|_| on_screen && !saving)
+            .and_then(|layer| {
+                crate::ui::anim_layer::with_layer(Some(&layer), || {
+                    let view = self.custom_emoji_view(
+                        file_id,
+                        item.format,
+                        CUSTOM_EMOJI_SIZE,
+                        Part::Chrome,
+                        cx,
+                    )?;
+                    let frames = crate::ui::anim_layer::frames(view);
+                    Some(frames.size(px(CUSTOM_EMOJI_SIZE)).into_any_element())
+                })
+            });
+        let animated = if saving || layered.is_some() {
             None
         } else if on_screen {
             self.custom_emoji_image(file_id, item.format, CUSTOM_EMOJI_SIZE, Part::Chrome, cx)
@@ -58,19 +76,10 @@ impl QuillApp {
                 &[("emoji", &item.emoji.to_string())],
             ))
             .when(!premium, |this| this.opacity(0.55))
-            .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
-                let next = hovering.then_some(file_id);
-                if this.pickers.media_panel.hovered != next
-                    && (*hovering || this.pickers.media_panel.hovered == Some(file_id))
-                {
-                    this.pickers.media_panel.hovered = next;
-                    cx.notify();
-                }
-            }))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.insert_panel_custom_emoji(&item, window, cx)
             }))
-            .child(
+            .child(layered.unwrap_or_else(|| {
                 match animated
                     .map(ImageSource::from)
                     .or_else(|| still.map(ImageSource::from))
@@ -82,8 +91,8 @@ impl QuillApp {
                         .object_fit(ObjectFit::Contain)
                         .into_any_element(),
                     None => div().text_size(px(22.)).child(fallback).into_any_element(),
-                },
-            );
+                }
+            }));
         match status_id {
             Some(status_id) => self.with_status_duration_menu(cell, status_id, cx),
             None => cell.into_any_element(),
@@ -161,7 +170,7 @@ impl QuillApp {
                     && (*hovering || this.pickers.media_panel.hovered == Some(file_id))
                 {
                     this.pickers.media_panel.hovered = next;
-                    cx.notify();
+                    this.notify_panel(cx);
                 }
             }))
             .on_click(cx.listener(move |this, _, _, cx| {

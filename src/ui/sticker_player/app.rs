@@ -649,10 +649,23 @@ impl QuillApp {
         part: Part,
         cx: &mut Context<QuillApp>,
     ) -> Option<Arc<RenderImage>> {
+        self.custom_emoji_view(id, format, side, part, cx)?
+            .frame_now()
+    }
+
+    /// The view behind [`Self::custom_emoji_image`], for an animation layer
+    /// to draw.
+    pub(in crate::ui) fn custom_emoji_view(
+        &self,
+        id: FileId,
+        format: StickerFormat,
+        side: f32,
+        part: Part,
+        cx: &mut Context<QuillApp>,
+    ) -> Option<StickerView> {
         let head = HeadId::of(part, ("emoji-image", id.0));
         let mode = self.sticker_mode();
-        self.sticker_view(ViewAsk::emoji(id, format, head, mode, side), cx)?
-            .frame_now()
+        self.sticker_view(ViewAsk::emoji(id, format, head, mode, side), cx)
     }
 
     /// [`Self::custom_emoji_image`] for a cell that is built but not on

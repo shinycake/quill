@@ -335,3 +335,52 @@ fn a_sticker_tick_renders_the_layers_alone(cx: &mut TestAppContext) {
     }
     let _ = take_slice_renders();
 }
+
+/// Paints a layered item inside a half transparent box, and the layer after
+/// it, as the painter does.
+struct Dimmed {
+    layer: super::Layer,
+    painted_at: Rc<Cell<f32>>,
+}
+
+impl Render for Dimmed {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.layer.begin_frame();
+        let painted_at = self.painted_at.clone();
+        let item = super::with_layer(Some(&self.layer), || {
+            super::painter(10, move |_, window| {
+                painted_at.set(window.element_opacity());
+            })
+            .size(px(10.))
+        });
+        let (prepaint, paint) = (self.layer.clone(), self.layer.clone());
+        div()
+            .size_full()
+            .child(div().opacity(0.5).child(item))
+            .child(
+                canvas(
+                    move |_, window, cx| prepaint.prepaint(window, cx),
+                    move |_, mut built, window, cx| paint.paint(&mut built, window, cx),
+                )
+                .size_full(),
+            )
+    }
+}
+
+/// A layer draws a cell as dim as the slice painted it.
+#[gpui_kit::test]
+fn a_layer_keeps_the_opacity_of_what_it_draws(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let painted_at = Rc::new(Cell::new(1.));
+    let view_painted_at = painted_at.clone();
+    let handle = cx.open_window(size(px(100.), px(100.)), move |window, cx| {
+        let view = cx.new(|_| Dimmed {
+            layer: super::Layer::default(),
+            painted_at: view_painted_at,
+        });
+        Root::new(view, window, cx)
+    });
+    let vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    assert_eq!(painted_at.get(), 0.5);
+}

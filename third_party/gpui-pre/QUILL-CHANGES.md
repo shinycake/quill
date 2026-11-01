@@ -431,4 +431,7 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
 What a live view builds takes no clicks and no hover, so it suits content that only
 shows. `Window::frame_number` counts these frames like any other.
 
+`Window::element_opacity` and `Window::with_element_opacity` are public so that
+content painted away from its place in the tree keeps the opacity it was given there.
+
 `src/ui/layer_tick_tests.rs` holds the tests.

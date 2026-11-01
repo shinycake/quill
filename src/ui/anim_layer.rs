@@ -144,9 +144,17 @@ struct Item {
     /// Paint order once painted (0: registered by a prepaint that was
     /// discarded, or not painted yet).
     seq: Cell<u64>,
+    /// The opacity it was painted at (a dimmed cell).
+    opacity: Cell<f32>,
 }
 
 impl Item {
+    /// The slice paints it now.
+    fn painted(&self, window: &Window) {
+        self.seq.set(next_seq());
+        self.opacity.set(window.element_opacity());
+    }
+
     /// The part of it that can show.
     fn visible(&self) -> Option<Bounds<Pixels>> {
         let visible = self.bounds.intersect(&self.mask.bounds);
@@ -195,6 +203,7 @@ impl Layer {
             text,
             inline: Cell::new(false),
             seq: Cell::new(0),
+            opacity: Cell::new(1.),
         });
         items.len() - 1
     }
@@ -231,7 +240,7 @@ impl Layer {
         let items = self.0.items.borrow();
         if let Some(item) = items.get(index) {
             item.inline.set(inline);
-            item.seq.set(next_seq());
+            item.painted(window);
         }
     }
 
@@ -336,16 +345,19 @@ impl Layer {
             if item.visible().is_none() {
                 continue;
             }
-            window.with_content_mask(Some(item.mask), |window| match &item.content {
-                Content::Frames(view) => view.paint(item.bounds, window),
-                Content::Paint { paint, .. } => paint(item.bounds, window),
-                Content::Tile { .. } | Content::Mirror { .. } => {
-                    if let Some(element) = built.get_mut(ix).and_then(Option::as_mut) {
-                        window.with_text_style(item.text.clone(), |window| {
-                            element.paint(window, cx);
-                        });
+            let opacity = Some(item.opacity.get());
+            window.with_element_opacity(opacity, |window| {
+                window.with_content_mask(Some(item.mask), |window| match &item.content {
+                    Content::Frames(view) => view.paint(item.bounds, window),
+                    Content::Paint { paint, .. } => paint(item.bounds, window),
+                    Content::Tile { .. } | Content::Mirror { .. } => {
+                        if let Some(element) = built.get_mut(ix).and_then(Option::as_mut) {
+                            window.with_text_style(item.text.clone(), |window| {
+                                element.paint(window, cx);
+                            });
+                        }
                     }
-                }
+                });
             });
         }
     }
@@ -492,7 +504,7 @@ impl Element for Layered {
         let inline = self.layer.as_ref().zip(*index).and_then(|(layer, index)| {
             let items = layer.0.items.borrow();
             let item = items.get(index)?;
-            item.seq.set(next_seq());
+            item.painted(window);
             Some(item.inline.get())
         });
         // Without a layer, or covered: the slice draws it. A mirror the

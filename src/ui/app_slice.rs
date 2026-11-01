@@ -88,6 +88,9 @@ pub(super) struct Slices {
     conversation: Option<SliceParts>,
     /// The composer slice, below the conversation slice.
     composer: Option<Entity<AppSlice>>,
+    /// The media panel's layer: over the composer, whose slice draws the
+    /// panel, or the selector, which `QuillApp` draws.
+    panel: Option<SliceParts>,
     /// The media viewer's media box and its chrome, while the viewer is
     /// open.
     viewer: Option<Entity<AppSlice>>,
@@ -167,15 +170,20 @@ impl Slices {
     /// counts as the render of `painter`, which replaces it at every frame.
     pub(super) fn painter_scope(&self, painter: EntityId, content: impl IntoElement) -> AnyElement {
         let content = SliceScope {
-            id: painter,
+            id: Some(painter),
             scope: self.scope.clone(),
             layer: None,
+            frames: None,
             child: content.into_any_element(),
         };
         match self.image_cache() {
             Some(cache) => super::image_budget::CacheScope::new(cache, content).into_any_element(),
             None => content.into_any_element(),
         }
+    }
+
+    fn panel_layer(&self) -> Option<Layer> {
+        self.panel.as_ref().map(|parts| parts.layer.clone())
     }
 
     /// The view `QuillApp` embeds for [`AppOnly`] redraws.
@@ -190,7 +198,7 @@ impl Slices {
     /// Whether `id` is a view of the main window: a slice, a layer's
     /// painter, or [`AppOnly`].
     pub(super) fn owns(&self, id: EntityId) -> bool {
-        let layered = [&self.sidebar, &self.conversation]
+        let layered = [&self.sidebar, &self.conversation, &self.panel]
             .into_iter()
             .flatten()
             .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()]);
@@ -228,10 +236,17 @@ impl QuillApp {
         };
         self.slices.sidebar = Some(parts(SliceKind::Sidebar));
         self.slices.conversation = Some(parts(SliceKind::Conversation));
-        self.slices.composer = Some(cx.new(|_| AppSlice {
+        let composer = cx.new(|_| AppSlice {
             app: app.clone(),
             kind: SliceKind::Composer,
-        }));
+        });
+        let layer = Layer::default();
+        self.slices.panel = Some(SliceParts {
+            slice: composer.clone(),
+            painter: cx.new(|_| AnimationLayer::new(layer.clone(), app.clone())),
+            layer,
+        });
+        self.slices.composer = Some(composer);
         self.slices.viewer = Some(cx.new(|_| AppSlice {
             app: app.clone(),
             kind: SliceKind::Viewer,
@@ -426,6 +441,38 @@ impl QuillApp {
         }
     }
 
+    /// The layer that plays the media panel's custom emoji, where the main
+    /// window hosts it (as the composer's popover or as the selector).
+    pub(super) fn panel_layer(&self) -> Option<Layer> {
+        let hosted = self.pickers.media_panel.selector_anchor().is_some()
+            || self.media_panel_over_composer();
+        if self.windows.in_window() || !hosted {
+            return None;
+        }
+        self.slices.panel_layer()
+    }
+
+    /// The view that draws [`Self::panel_layer`], embedded right after what
+    /// hosts the panel.
+    pub(super) fn panel_painter(&self) -> Option<AnyElement> {
+        self.panel_layer()?;
+        let parts = self.slices.panel.as_ref()?;
+        Some(parts.painter.clone().live().into_any_element())
+    }
+
+    /// The selector's panel. No slice holds it, so its frame is the layer's
+    /// frame.
+    pub(super) fn selector_panel(&self, panel: AnyElement) -> AnyElement {
+        SliceScope {
+            id: self.slices.current(),
+            scope: self.slices.scope.clone(),
+            layer: None,
+            frames: self.slices.panel_layer(),
+            child: panel,
+        }
+        .into_any_element()
+    }
+
     /// Keep a layer's content playing: a tick redraws the layer while its
     /// slice replays, or the slice itself for content something covers
     /// (drawn inline). The layer (`painter`) calls this after it painted.
@@ -433,6 +480,7 @@ impl QuillApp {
         let Some(parts) = [
             self.slices.sidebar.as_ref(),
             self.slices.conversation.as_ref(),
+            self.slices.panel.as_ref(),
         ]
         .into_iter()
         .flatten()
@@ -544,6 +592,11 @@ impl QuillApp {
                 composer
                     .clone()
                     .cached(StyleRefinement::default().w_full().h(height).flex_none()),
+            )
+            .children(
+                self.media_panel_over_composer()
+                    .then(|| self.panel_painter())
+                    .flatten(),
             )
             .children(hint)
             .children(drop_overlay)
@@ -710,10 +763,15 @@ impl Render for AppSlice {
                 app.render_slice(kind, window, cx)
             });
             scope.set(outer);
+            let frames = match kind {
+                SliceKind::Composer => app.slices.panel_layer(),
+                _ => layer.clone(),
+            };
             SliceScope {
-                id,
+                id: Some(id),
                 scope,
                 layer,
+                frames,
                 child,
             }
             .into_any_element()
@@ -725,15 +783,18 @@ impl Render for AppSlice {
 /// content built lazily there (virtual list rows) asks the frame clock on
 /// behalf of the right slice, and reports to the slice's layer.
 struct SliceScope {
-    id: EntityId,
+    id: Option<EntityId>,
     scope: Rc<Cell<Option<EntityId>>>,
     layer: Option<Layer>,
+    /// The layer whose frame this is: the slice's, or the media panel's,
+    /// which only the panel's cells report to.
+    frames: Option<Layer>,
     child: AnyElement,
 }
 
 impl SliceScope {
     fn enter<R>(&self, f: impl FnOnce() -> R) -> R {
-        let outer = self.scope.replace(Some(self.id));
+        let outer = self.scope.replace(self.id);
         let result = super::anim_layer::with_layer(self.layer.as_ref(), f);
         self.scope.set(outer);
         result
@@ -783,7 +844,7 @@ impl Element for SliceScope {
         cx: &mut App,
     ) -> Self::PrepaintState {
         // The slice really draws: its layer gets this frame's content.
-        if let Some(layer) = &self.layer {
+        if let Some(layer) = &self.frames {
             layer.begin_frame();
         }
         let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
@@ -804,7 +865,7 @@ impl Element for SliceScope {
         let mut child = std::mem::replace(&mut self.child, Empty.into_any_element());
         self.enter(|| child.paint(window, cx));
         self.child = child;
-        if let Some(layer) = &self.layer {
+        if let Some(layer) = &self.frames {
             layer.end_frame();
         }
     }

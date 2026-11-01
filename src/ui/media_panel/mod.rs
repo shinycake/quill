@@ -265,6 +265,25 @@ impl QuillApp {
         self.pickers.media_panel.open
     }
 
+    /// Whether the panel floats over the composer: open, and neither a
+    /// selector nor hosted by the story viewer or a title box.
+    pub(super) fn media_panel_over_composer(&self) -> bool {
+        self.media_panel_open()
+            && self.pickers.media_panel.reaction.is_none()
+            && self.pickers.media_panel.status.is_none()
+            && !self.story_reply_panel_active()
+            && !self.group_title_emoji_active()
+    }
+
+    /// Redraw the panel's cells.
+    fn notify_panel(&self, cx: &mut Context<Self>) {
+        if self.media_panel_over_composer() {
+            self.notify_tick(crate::ui::app_slice::SliceKind::Composer, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
     pub(super) fn toggle_media_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.pickers.media_panel.open && self.pickers.media_panel.tab == tab {
             self.close_media_panel(cx);
@@ -955,6 +974,9 @@ mod status_demo;
 mod status_tests;
 mod status_time_box;
 pub(in crate::ui) use custom_emoji_cell::section_chip;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod layer_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod panel_tests;
