@@ -6,8 +6,10 @@
 use super::GROUP;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
+use crate::ui::scheduled::picked_unix;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::add_special::SpecialConfirm;
@@ -122,5 +124,23 @@ fn adding_an_exception_opens_the_restrict_box_after_the_admin_question(cx: &mut 
         assert_eq!(restrict.user_id, 5);
         assert!(!restrict.ban);
         assert!(app.admin.add_special.is_some());
+    });
+}
+
+#[gpui_kit::test]
+fn the_custom_end_opens_a_day_after_the_installed_clock(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "group-add-exception");
+    let vcx = &mut vcx;
+    let clock = WallClock::chicago_repeated_hour();
+    let tomorrow = clock.now() + 86_400;
+    vcx.update(|_, cx| cx.set_global(clock));
+    click(vcx, "add-special-5");
+    app.read_with(vcx, |app, cx| {
+        let restrict = app
+            .admin
+            .restrict_dialog
+            .as_ref()
+            .expect("the restrict box");
+        assert_eq!(picked_unix(&restrict.custom, cx), Some(tomorrow));
     });
 }
