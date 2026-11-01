@@ -21,7 +21,6 @@ use anyhow::{Context as _, Result, anyhow};
 use futures::channel::oneshot::Receiver;
 use gpui_util::{ResultExt, get_powershell, new_std_command};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use smallvec::SmallVec;
 use windows::{
     UI::ViewManagement::UISettings,
@@ -43,12 +42,10 @@ use windows::{
     core::*,
 };
 
-use crate::{
-    window_list::{for_each_after_unlock, for_each_open_after_unlock},
-    *,
-};
+use crate::{window_list::WindowList, *};
 use gpui::*;
 
+#[derive(Clone)]
 struct TrackedWindow {
     handle: SafeHwnd,
     frame_signal: Arc<PlatformFrameSignal>,
@@ -68,7 +65,7 @@ impl TrackedWindow {
 
 pub struct WindowsPlatform {
     inner: Rc<WindowsPlatformInner>,
-    raw_window_handles: Arc<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    raw_window_handles: Arc<WindowList<TrackedWindow>>,
     /// The windowing mode to start in, applied when `run` starts. Windowed when unset.
     initial_windowing: RefCell<Option<WindowingRequest>>,
     /// Set to stop the current `VSyncProvider` thread, which runs while windowed.
@@ -95,7 +92,7 @@ pub struct WindowsPlatform {
 
 struct WindowsPlatformInner {
     state: WindowsPlatformState,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    raw_window_handles: std::sync::Weak<WindowList<TrackedWindow>>,
     // The below members will never change throughout the entire lifecycle of the app.
     validation_number: ValidationNumber,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
@@ -225,7 +222,7 @@ impl WindowsPlatform {
         } else {
             rand::random::<u32>() as usize
         });
-        let raw_window_handles = Arc::new(RwLock::new(SmallVec::new()));
+        let raw_window_handles = Arc::new(WindowList::new());
 
         register_platform_window_class();
         let mut context = PlatformWindowCreateContext {
@@ -314,7 +311,7 @@ impl WindowsPlatform {
     #[inline]
     fn post_message(&self, message: GpuiMessage) {
         self.raw_window_handles
-            .read()
+            .snapshot()
             .iter()
             .for_each(|handle| unsafe {
                 message.post(handle.as_raw()).log_err();
@@ -393,8 +390,6 @@ impl WindowsPlatform {
             return None;
         }
         self.raw_window_handles
-            .read()
-            .iter()
             .find(|hwnd| hwnd.as_raw() == active_window_hwnd)
             .map(|hwnd| hwnd.as_raw())
     }
@@ -537,7 +532,7 @@ impl WindowsPlatform {
                         // Quill: skip parked windows. The parked set is read
                         // before the window list (lock order).
                         let parked = FRAME_GATE.parked_windows();
-                        for hwnd in all_windows.read().iter() {
+                        for hwnd in all_windows.snapshot() {
                             if parked.contains(hwnd.as_raw()) {
                                 continue;
                             }
@@ -838,7 +833,7 @@ impl Platform for WindowsPlatform {
         }
         let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
         let handle = window.get_raw_handle();
-        self.raw_window_handles.write().push(TrackedWindow {
+        self.raw_window_handles.push(TrackedWindow {
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
             destroyed: window.state.destroyed.clone(),
@@ -1078,7 +1073,7 @@ impl Platform for WindowsPlatform {
             return;
         }
 
-        for handle in self.raw_window_handles.read().iter() {
+        for handle in self.raw_window_handles.snapshot() {
             let Some(window) = window_from_hwnd(handle.as_raw()) else {
                 continue;
             };
@@ -1243,8 +1238,6 @@ impl WindowsPlatformInner {
     fn window_from_hwnd(&self, hwnd: HWND) -> Option<Rc<WindowsWindowInner>> {
         self.raw_window_handles
             .upgrade()?
-            .read()
-            .iter()
             .find(|window| window.as_raw() == hwnd)
             .and_then(|window| window_from_hwnd(window.as_raw()))
     }
@@ -1356,23 +1349,13 @@ impl WindowsPlatformInner {
             log::error!("Failed to upgrade raw window handles");
             return false;
         };
-        let mut lock = all_windows.write();
+        let removal = all_windows.remove(|handle| handle.as_raw() == target_window);
         // Quill: a window that isn't tracked is logged instead of upstream's `unwrap`.
-        match lock
-            .iter()
-            .position(|handle| handle.as_raw() == target_window)
-        {
-            Some(index) => {
-                lock.remove(index);
-            }
-            None => log::error!("closing a window that isn't in the window list"),
+        if !removal.was_listed {
+            log::error!("closing a window that isn't in the window list");
         }
-
-        let is_empty = lock.is_empty();
-        // Quill: never take the frame gate while holding the window list.
-        drop(lock);
         FRAME_GATE.forget(target_window);
-        is_empty
+        removal.now_empty
     }
 
     #[inline]
@@ -1547,7 +1530,7 @@ pub(crate) struct WindowCreationInfo {
 
 struct PlatformWindowCreateContext {
     inner: Option<Result<Rc<WindowsPlatformInner>>>,
-    raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    raw_window_handles: std::sync::Weak<WindowList<TrackedWindow>>,
     validation_number: ValidationNumber,
     main_sender: Option<PriorityQueueSender<RunnableVariant>>,
     main_receiver: Option<PriorityQueueReceiver<RunnableVariant>>,
@@ -1842,7 +1825,7 @@ fn recover_from_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: ValidationNumber,
-    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
     let mut result = handle_gpu_device_lost(
@@ -1873,31 +1856,31 @@ fn recover_from_gpu_device_lost(
 /// sent, so each window handles it on its own thread outside any draw, and `DestroyWindow`
 /// (not `WM_CLOSE`) so an app that hides windows on close still releases them.
 fn destroy_all_windows_after_device_lost(
-    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
     validation_number: ValidationNumber,
 ) {
     let Some(all_windows) = all_windows.upgrade() else {
         return;
     };
     let destroy = validation_number.message(WM_GPUI_DESTROY_AFTER_DEVICE_LOST, 0);
-    for_each_open_after_unlock(
-        all_windows.read(),
-        TrackedWindow::as_raw,
-        TrackedWindow::is_destroyed,
-        |window| {
-            // SAFETY: PostMessageW only queues the message.
-            unsafe {
-                destroy.post(window).log_err();
-            }
-        },
-    );
+    // A destroyed window stays listed until its posted `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a
+    // message posted to it fails.
+    for window in all_windows.snapshot() {
+        if window.is_destroyed() {
+            continue;
+        }
+        // SAFETY: PostMessageW only queues the message.
+        unsafe {
+            destroy.post(window.as_raw()).log_err();
+        }
+    }
 }
 
 fn handle_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
     validation_number: ValidationNumber,
-    all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    all_windows: &std::sync::Weak<WindowList<TrackedWindow>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
     // Here we wait a bit to ensure the system has time to recover from the device lost state.
@@ -1921,22 +1904,22 @@ fn handle_gpu_device_lost(
         text_system.handle_gpu_lost(&directx_devices)?;
     }
     if let Some(all_windows) = all_windows.upgrade() {
-        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+        for window in all_windows.snapshot() {
             // SAFETY: the message points at `directx_devices`, which outlives this synchronous
             // call. A handle that is gone only makes the call fail.
             unsafe {
-                device_lost.send(window);
+                device_lost.send(window.as_raw());
             }
-        });
+        }
         std::thread::sleep(std::time::Duration::from_millis(200));
         let force_update = validation_number.message(WM_GPUI_FORCE_UPDATE_WINDOW, 0);
-        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+        for window in all_windows.snapshot() {
             // SAFETY: the message carries no pointer. A handle that is gone only makes the call
             // fail.
             unsafe {
-                force_update.send(window);
+                force_update.send(window.as_raw());
             }
-        });
+        }
     }
     Ok(())
 }

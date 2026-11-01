@@ -442,3 +442,8 @@ Added in 2026, after an audit of the earlier panic pass
   panic it logs and posts `WM_GPUI_GPU_DEVICE_GONE` to the platform window,
   which drops the devices and destroys every window, instead of leaving them
   without frames.
+- `src/window_list.rs`: `WindowList` replaces the bare `RwLock` and the
+  `for_each_after_unlock` / `for_each_open_after_unlock` helpers. Callers get
+  copies only (`snapshot`, `find`) or change it under its own lock (`push`,
+  `remove`), so none can hold the lock across `SendMessageW`. `src/platform.rs`
+  and `src/vsync.rs` use it; `TrackedWindow` is `Clone`.

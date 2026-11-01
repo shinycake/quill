@@ -126,6 +126,15 @@ platform. Each is fixed in its own commit:
   recreated, so the platform drops its devices and closes the windows. The
   app crate's `spawn_guarded` can't be used here (the fork doesn't depend
   on Quill), so Quill's panic hook still files the report as a crash.
+- `window_list.rs`: the platform's window list was a bare
+  `Arc<RwLock<SmallVec<..>>>`, and the helpers that drop the guard before
+  sending were opt-in, so a new caller could hold the read lock across
+  `SendMessageW` and deadlock with `open_window` or `close_one_window`
+  again. It is now a `WindowList` that only hands out copies (`snapshot`,
+  `find`) and changes under its own lock (`push`, `remove`), so no caller
+  can hold the lock at all. It uses std's `RwLock` and recovers a poisoned
+  lock, so it stays std-only and `scripts/test-window-list.sh` still runs it
+  on any host.
 
 ### macOS (`gpui-pre-macos`)
 
