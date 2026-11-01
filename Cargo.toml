@@ -372,3 +372,6 @@ gpui-pre = { path = "third_party/gpui-pre" }
 # Opus voice-note CPU (docs/decisions/opus-decode-cpu.md): opus-decoder 0.1.1
 # with the CELT inverse MDCT on a mixed-radix FFT instead of a direct DFT.
 opus-decoder = { path = "third_party/opus-decoder" }
+# Linux idle wakeups (sweep bundle B13, N49): blocking 1.7.0, whose idle pool
+# threads woke every 500 ms forever instead of exiting.
+blocking = { path = "third_party/blocking" }
