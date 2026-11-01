@@ -212,7 +212,7 @@ impl QuillApp {
         fps: u32,
         cx: &mut Context<Self>,
     ) {
-        self.request_tick(target, fps, false, cx);
+        self.request_tick(target, fps, TickGate::App, cx);
     }
 
     #[track_caller]
@@ -224,7 +224,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.frame.window_views.borrow_mut().insert(view);
-        self.request_tick(Some(view), fps, window.is_window_active(), cx);
+        let gate = TickGate::OwnWindow {
+            active: window.is_window_active(),
+        };
+        self.request_tick(Some(view), fps, gate, cx);
     }
 
     /// [`Self::request_animation_tick`] for the whole app that keeps
@@ -232,7 +235,7 @@ impl QuillApp {
     /// watches from the app the agent runs in.
     #[track_caller]
     pub(super) fn request_background_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        self.request_tick(None, fps, true, cx);
+        self.request_tick(None, fps, TickGate::Sound, cx);
     }
 
     #[track_caller]
@@ -240,13 +243,15 @@ impl QuillApp {
         &self,
         target: Option<EntityId>,
         fps: u32,
-        plays_sound: bool,
+        gate: TickGate,
         cx: &mut Context<Self>,
     ) {
         // Like tdesktop (`isGifPausedAtLeastFor` → `!widget()->isActive()`),
         // nothing animates behind another app; activation redraws and the
         // content asks again (`observe_window_activation`).
-        if !tick_wanted(self.frame.window_active.get(), plays_sound) {
+        let own_window_active = gate == TickGate::OwnWindow { active: true };
+        let plays_sound = gate == TickGate::Sound;
+        if !tick_wanted(self.frame.window_active.get(), plays_sound) && !own_window_active {
             return;
         }
         // Nor in a main window the active chat window hides whole
@@ -278,6 +283,9 @@ impl QuillApp {
         if plays_sound {
             self.frame.animation_sound.set(true);
         }
+        if own_window_active {
+            self.frame.own_window_tick.set(true);
+        }
         if self.frame.frame_clock_running.get() {
             return;
         }
@@ -300,24 +308,35 @@ impl QuillApp {
                         let window_views =
                             std::mem::take(&mut *this.frame.window_views.borrow_mut());
                         let sound = this.frame.animation_sound.replace(false);
-                        if demand > 0 && tick_wanted(this.frame.window_active.get(), sound) {
+                        let own_window = this.frame.own_window_tick.replace(false);
+                        let app_ticks = tick_wanted(this.frame.window_active.get(), sound);
+                        if demand > 0 && (app_ticks || own_window) {
                             note_clock_playing(
                                 this.frame.clock_timing.get(),
                                 Instant::now(),
                                 demand,
                             );
-                            for id in targets.iter().flatten() {
-                                this.frame.layers_drawn.borrow_mut().ticked(*id);
-                            }
-                            if targets.contains(&None) {
-                                this.tick_app(cx);
-                            } else if !this.frame.main_covered.get() {
-                                // Only the slices with animated content
-                                // redraw; none under a chat window covering
-                                // the main window since they asked.
-                                let app: &mut App = cx;
-                                for id in targets.into_iter().flatten() {
-                                    app.notify(id);
+                            if app_ticks {
+                                for id in targets.iter().flatten() {
+                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
+                                }
+                                if targets.contains(&None) {
+                                    this.tick_app(cx);
+                                } else if !this.frame.main_covered.get() {
+                                    // Only the slices with animated content
+                                    // redraw; none under a chat window
+                                    // covering the main window since they
+                                    // asked.
+                                    let app: &mut App = cx;
+                                    for id in targets.into_iter().flatten() {
+                                        app.notify(id);
+                                    }
+                                }
+                            } else {
+                                // Only the window views' own window is
+                                // active: the rest holds still.
+                                for id in &window_views {
+                                    this.frame.layers_drawn.borrow_mut().ticked(*id);
                                 }
                             }
                             let app: &mut App = cx;
@@ -756,6 +775,18 @@ impl AppGate {
     }
 }
 
+/// What lets a tick request through while no main or chat window is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TickGate {
+    /// Nothing: content in the main or a chat window.
+    App,
+    /// Media playing with sound, or the agent takeover.
+    Sound,
+    /// A view in a window of its own (the voice chat window), which ticks
+    /// while that window is active.
+    OwnWindow { active: bool },
+}
+
 /// Whether a frame-clock tick may run: always while the window is active,
 /// and in the background only for media playing with sound.
 fn tick_wanted(window_active: bool, plays_sound: bool) -> bool {
@@ -931,3 +962,8 @@ mod tests {
         assert!(requested.get().is_some_and(|(view, _)| view == target));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "frame_clock_window_view_tests.rs"]
+mod window_view_tests;
