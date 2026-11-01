@@ -148,7 +148,8 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
 
 /// The instant a picker means once it shows `civil`, having opened at
 /// `initial`. A time left as it opened keeps its own pass of a repeated
-/// hour; any other is resolved by [`civil_to_unix_with`].
+/// hour; any other is resolved by [`civil_to_unix_with`]. Either way it is
+/// the whole minute shown, as tdesktop builds it from the date and time.
 pub fn picked_instant(
     civil: &CivilTime,
     initial: i64,
@@ -159,7 +160,7 @@ pub fn picked_instant(
     let unchanged = (shown.year, shown.month, shown.day, shown.hour, shown.minute)
         == (civil.year, civil.month, civil.day, civil.hour, civil.minute);
     if unchanged {
-        initial
+        initial - initial.rem_euclid(60)
     } else {
         civil_to_unix_with(civil, offset_at, now)
     }
@@ -425,6 +426,22 @@ mod tests {
         let start = FALL_BACK - 1800;
         let shown = civil_at(start, zone(start));
         assert_eq!(picked_instant(&shown, start, &zone, FALL_BACK + 300), start);
+    }
+
+    #[test]
+    fn an_unchanged_picker_returns_the_minute_it_shows() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // Opened 37 s past the minute, as `now + 600` often is.
+        let opened = NOW + 37;
+        let shown = civil_at(opened, zone(opened));
+        assert_eq!(picked_instant(&shown, opened, &zone, NOW), NOW);
+        // 01:20:37 CST, the second pass, stays in that pass.
+        let second_pass = FALL_BACK + 1237;
+        let shown = civil_at(second_pass, zone(second_pass));
+        assert_eq!(
+            picked_instant(&shown, second_pass, &zone, FALL_BACK - 6 * 3600),
+            FALL_BACK + 1200
+        );
     }
 
     #[test]
