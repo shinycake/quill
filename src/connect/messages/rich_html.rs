@@ -49,15 +49,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 labels: PageLabels::current(),
             },
             self.tdlib_files().to_path_buf(),
+            self.session.settings.export_files.leftovers().cloned(),
         )?;
         self.session.settings.rich_html_exports.push(export);
         Ok(())
     }
 
     /// Send each export's waiting TDLib request. Called from the poll loop.
-    pub fn pump_rich_html_exports(&mut self) {
+    pub fn pump_rich_html_exports(&mut self) -> bool {
+        let mut taken = false;
         for index in 0..self.session.settings.rich_html_exports.len() {
-            self.pump_export(RequestPurpose::ExportRichHtml, |session| {
+            taken |= self.pump_export(RequestPurpose::ExportRichHtml, |session| {
                 session
                     .settings
                     .rich_html_exports
@@ -65,6 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .map(|export| &mut export.link)
             });
         }
+        taken
     }
 
     /// The exports that ended since the last call, removed from the

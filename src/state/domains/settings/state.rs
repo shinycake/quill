@@ -216,6 +216,8 @@ pub struct SettingsState {
     /// (`parity:menu-save-selection-html`); the driver removes each one
     /// when the UI takes its outcome.
     pub rich_html_exports: Vec<crate::rich_html::RichHtmlExport>,
+    /// Cache copies the exports downloaded for themselves.
+    pub export_files: ExportFiles,
     /// The `setlanguage` link whose box is open.
     pub language_link: Option<LanguageLinkLookup>,
     /// Settings → Language: packs, the switch in flight, strings to install.
@@ -229,6 +231,26 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    pub fn export_links(&self) -> impl Iterator<Item = &crate::export::handle::WorkerLink> {
+        let chat = self.chat_export.iter().map(|export| &export.link);
+        let account = self.account_export.iter().map(|export| &export.link);
+        chat.chain(account)
+            .chain(self.rich_html_exports.iter().map(|export| &export.link))
+    }
+
+    pub(crate) fn export_links_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut crate::export::handle::WorkerLink> {
+        let chat = self.chat_export.iter_mut().map(|export| &mut export.link);
+        let account = self
+            .account_export
+            .iter_mut()
+            .map(|export| &mut export.link);
+        let rich_html = self.rich_html_exports.iter_mut();
+        chat.chain(account)
+            .chain(rich_html.map(|export| &mut export.link))
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),
@@ -302,6 +324,7 @@ impl SettingsState {
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),
+            export_files: ExportFiles::default(),
             language_link: None,
             language: LanguageState::default(),
         }

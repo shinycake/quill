@@ -7,7 +7,9 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::state::Session;
-use std::rc::Rc;
+use std::time::Instant;
+
+pub(crate) type ExitAfterStop = Box<dyn Fn(&mut Window, &mut App)>;
 
 fn exporting(session: &Session) -> bool {
     let settings = &session.settings;
@@ -27,16 +29,15 @@ impl QuillApp {
     }
 
     fn stop_exports(&self) {
-        for session in self.all_sessions() {
-            if let Some(export) = &session.settings.chat_export {
-                export.cancel();
-            }
-            if let Some(export) = &session.settings.account_export {
-                export.cancel();
-            }
-            for export in &session.settings.rich_html_exports {
-                export.link.cancel();
-            }
+        self.all_sessions()
+            .flat_map(|session| session.settings.export_links())
+            .for_each(|link| link.cancel());
+    }
+
+    pub(in crate::ui) fn stop_exports_and_wait(&self, until: Instant) {
+        self.stop_exports();
+        for link in self.all_sessions().flat_map(|s| s.settings.export_links()) {
+            link.wait_ended(until);
         }
     }
 
@@ -50,14 +51,12 @@ impl QuillApp {
             return false;
         }
         raise_main_window(window, cx);
-        if self.dialogs.export_stop_open {
+        if self.dialogs.export_stop.replace(Box::new(exit)).is_some() {
             return true;
         }
-        self.dialogs.export_stop_open = true;
         let app = cx.entity().downgrade();
-        let exit = Rc::new(exit);
         window.open_alert_dialog(cx, move |alert, _, _| {
-            let (stop, closed, exit) = (app.clone(), app.clone(), exit.clone());
+            let (stop, closed) = (app.clone(), app.clone());
             alert
                 .description(tr(keys::EXPORT_SURE_STOP))
                 .ok_text(tr(keys::EXPORT_STOP))
@@ -65,12 +64,17 @@ impl QuillApp {
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, window, cx| {
-                    let _ = stop.update(cx, |this, _| this.stop_exports());
-                    exit(window, cx);
+                    let exit = stop.update(cx, |this, _| {
+                        this.stop_exports();
+                        this.dialogs.export_stop.take()
+                    });
+                    if let Ok(Some(exit)) = exit {
+                        exit(window, cx);
+                    }
                     true
                 })
                 .on_close(move |_, _, cx| {
-                    let _ = closed.update(cx, |this, _| this.dialogs.export_stop_open = false);
+                    let _ = closed.update(cx, |this, _| this.dialogs.export_stop = None);
                 })
         });
         true

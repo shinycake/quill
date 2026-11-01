@@ -161,6 +161,13 @@ impl Session {
         if self.media.downloads.is_requested(file_id.0) || self.requests.has_download(file_id) {
             return false;
         }
+        if self
+            .settings
+            .export_links()
+            .any(|link| link.deletes_unless_asked(file_id.0))
+        {
+            return true;
+        }
         match self.media.files.get(&file_id.0) {
             // A transfer TDLib already runs with no request of ours (another
             // device, a resume) is not requested a second time. After our

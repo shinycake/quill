@@ -11,8 +11,10 @@
 //! same [`export_chat`] once per chat.
 use super::assets;
 use super::collect::{collect, read_chunk};
+use super::copy::{Copied, copy_stoppable};
 use super::html::{self, Item, MESSAGES_PER_FILE, Outcome, PageSpec};
 use super::json::{self, JsonWriter, MessageSink};
+use super::leftovers::{Entry, Leftovers};
 use super::loaded_files::LoadedFiles;
 use super::model::{Body, ExportMessage, MediaRef};
 use super::names::Namer;
@@ -65,6 +67,14 @@ pub trait Tdlib {
     fn call(&mut self, request: Value, timeout: Duration) -> Result<Value, ExportError>;
 
     fn post_unanswered(&mut self, request: Value);
+
+    /// Whether the export was stopped. A copy asks between chunks.
+    fn is_cancelled(&self) -> bool;
+
+    /// Where downloads made only for the export are listed until released.
+    fn leftovers(&self) -> Option<&Leftovers> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,8 +228,27 @@ fn release_if_untouched<T: Tdlib>(
         && same_copy;
     if untouched {
         call(tdlib, delete.clone())?;
+    } else {
+        unlist(tdlib, file_id);
     }
     Ok(())
+}
+
+fn list<T: Tdlib>(tdlib: &T, file_id: i32, remote_id: &str, path: Option<&Path>) {
+    if let Some(leftovers) = tdlib.leftovers() {
+        let entry = Entry {
+            remote_id: remote_id.to_string(),
+            path: path.map(Path::to_path_buf),
+        };
+        leftovers.record(file_id, &entry);
+    }
+}
+
+/// The export no longer owns `file_id`'s cache copy: nothing to delete.
+fn unlist<T: Tdlib>(tdlib: &T, file_id: i32) {
+    if let Some(leftovers) = tdlib.leftovers() {
+        leftovers.forget(&leftovers.name(file_id));
+    }
 }
 
 fn nothing_held(file: &Value) -> bool {
@@ -244,6 +273,10 @@ pub(crate) fn fetch_file<T: Tdlib>(
         QUERY_TIMEOUT,
     )?;
     let only_for_export = nothing_held(&before);
+    let remote_id = before.at("remote").at("id").as_str().unwrap_or_default();
+    if only_for_export {
+        list(tdlib, file_id, remote_id, None);
+    }
     let download = tdlib.call(
         json!({"@type": "downloadFile", "file_id": file_id, "priority": 1,
             "offset": 0, "limit": 0, "synchronous": true}),
@@ -258,31 +291,38 @@ pub(crate) fn fetch_file<T: Tdlib>(
         answer => answer?,
     };
     let local = &answer.at("local");
+    let drop_entry = |tdlib: &T| {
+        if only_for_export {
+            unlist(tdlib, file_id);
+        }
+    };
     if answer.at("@type") == "error" || local.at("is_downloading_completed") != true {
+        drop_entry(tdlib);
         return Ok(Err(Skip::Unavailable));
+    }
+    let path = local
+        .at("path")
+        .as_str()
+        .and_then(|path| Path::new(path).canonicalize().ok());
+    if only_for_export && let Some(path) = &path {
+        list(tdlib, file_id, remote_id, Some(path));
     }
     if let Some(limit) = limit
         && answer.at("size").as_i64().unwrap_or(0) > limit
     {
-        if only_for_export
-            && let Some(path) = local
-                .at("path")
-                .as_str()
-                .and_then(|path| Path::new(path).canonicalize().ok())
-        {
-            release_if_untouched(tdlib, file_id, &path)?;
+        match (only_for_export, &path) {
+            (true, Some(path)) => release_if_untouched(tdlib, file_id, path)?,
+            _ => drop_entry(tdlib),
         }
         return Ok(Err(Skip::TooLarge));
     }
-    let Some(path) = local
-        .at("path")
-        .as_str()
-        .and_then(|path| Path::new(path).canonicalize().ok())
-    else {
+    let Some(path) = path else {
+        drop_entry(tdlib);
         return Ok(Err(Skip::Unavailable));
     };
     let root = files_root.canonicalize()?;
     if !path.starts_with(&root) || !path.is_file() {
+        drop_entry(tdlib);
         return Ok(Err(Skip::Unavailable));
     }
     Ok(Ok(Fetched {
@@ -292,16 +332,20 @@ pub(crate) fn fetch_file<T: Tdlib>(
     }))
 }
 
-pub(crate) fn place_into(out: &Path, relative: &str, file: &Fetched) -> io::Result<()> {
+pub(crate) fn place_into<T: Tdlib>(
+    tdlib: &T,
+    out: &Path,
+    relative: &str,
+    file: &Fetched,
+) -> Result<(), ExportError> {
     let target = out.join(relative);
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
     }
-    if file.only_for_export && fs::hard_link(&file.path, &target).is_ok() {
-        return Ok(());
+    match copy_stoppable(&file.path, &target, &|| tdlib.is_cancelled())? {
+        Copied::Done => Ok(()),
+        Copied::Stopped => Err(ExportError::Cancelled),
     }
-    fs::copy(&file.path, &target)?;
-    Ok(())
 }
 
 /// Copy one message's file (and its thumbnail) into the chat's folder, or
@@ -355,8 +399,9 @@ fn save_once<T: Tdlib>(
         Err(skip) => return Ok(Err(skip)),
     };
     let path = name(&source);
-    place_into(out.folder, &path, &source)?;
+    let placed = place_into(tdlib, out.folder, &path, &source);
     source.release(tdlib)?;
+    placed?;
     job.loaded.save(file_id, out.root_path(&path));
     Ok(Ok(path))
 }

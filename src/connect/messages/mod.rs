@@ -28,6 +28,7 @@ mod deferred_caption;
 mod delete_forward;
 mod edit;
 mod export;
+mod export_files;
 mod media_options;
 mod media_send;
 mod rich_html;

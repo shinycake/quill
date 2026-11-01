@@ -545,6 +545,23 @@ fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() 
 }
 
 #[test]
+fn what_a_stopped_export_left_queued_goes_out_ahead_of_close() {
+    let mut client = calling_driver();
+    let (export, worker) = crate::export::ChatExport::scripted();
+    export.cancel();
+    client.driver.session.settings.chat_export = Some(export);
+    for request in ["cancelDownloadFile", "deleteFile"] {
+        let request = serde_json::json!({"@type": request, "file_id": 11});
+        worker.send(request).expect("queued");
+    }
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(
+        client.sent(),
+        ["cancelDownloadFile", "deleteFile", "setOption", "close"]
+    );
+}
+
+#[test]
 fn a_hang_up_nobody_answers_holds_close_back_only_so_long() {
     let mut client = calling_driver().with_call(false, CallState::Ready);
     crate::connect::closing::begin_close(&mut client.driver);

@@ -100,7 +100,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
     let mut settings = AccountSettings::new(dir.clone());
     settings.sections = Sections::of(&[Section::Sessions]);
     // A worker nobody answers: it stays at its first step.
-    let export = quill::export::AccountExport::start(settings, dir.clone()).unwrap();
+    let export = quill::export::AccountExport::start(settings, dir.clone(), None).unwrap();
     app.update_in(vcx, |app, _, cx| {
         app.demo_session.as_mut().unwrap().settings.account_export = Some(export);
         app.open_account_export(cx);

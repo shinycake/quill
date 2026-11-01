@@ -47,8 +47,9 @@ impl Files<'_> {
         }
         match fetch_file(tdlib, self.files_root, file_id, limit)? {
             Ok(source) => {
-                place_into(self.root, relative, &source)?;
+                let placed = place_into(tdlib, self.root, relative, &source);
                 source.release(tdlib)?;
+                placed?;
                 self.loaded.save(file_id, relative.to_string());
                 Ok(saved(relative.to_string()))
             }
