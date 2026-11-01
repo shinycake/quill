@@ -18,7 +18,7 @@ const PLAYBACK_TICK: Duration = Duration::from_millis(250);
 #[cfg(test)]
 thread_local! {
     /// Passes of the progress tick on this thread, for tests.
-    pub(super) static TICK_PASSES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    pub(super) static TICK_PASSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// Runs once right after a pass drained the media commands, for tests:
     /// stands in for an OS thread that pushes a key at that moment.
     #[cfg(test)]
