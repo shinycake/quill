@@ -97,7 +97,7 @@ impl FormatAction {
 /// Telegram. Kinds the markup can't express (URLs, mentions, …) stay plain
 /// text; TDLib detects those again on send.
 pub fn entities_to_markup(text: &str, entities: &[crate::text::TextEntity]) -> String {
-    crate::composer_doc::ComposerDoc::from_entities(text, entities).to_markup()
+    crate::composer_doc::ComposerDoc::from_entities(text, entities).to_final_markup()
 }
 
 /// M1: apply a formatting action to `range` (UTF-8 byte range; snapped to
