@@ -9,7 +9,7 @@
 //! kept an idle window at 6–8% CPU.
 //!
 //! [`redraw_need`] grades an envelope before it is applied; the poll loop
-//! keeps the most urgent grade of a batch and redraws accordingly (see
+//! joins the grades of a batch ([`RedrawNeed::join`]) and redraws accordingly (see
 //! `ui::notifications`). Anything not graded here is [`RedrawNeed::Now`],
 //! so an update type added later redraws at once until someone decides
 //! otherwise.
@@ -33,11 +33,29 @@ pub enum RedrawNeed {
     /// that are not open. Redrawn together, a few times a second, without
     /// the conversation.
     ChatList,
+    /// Only the conversation pane can change (progress of the open chat's
+    /// media downloads): redrawn now, without the chat list and composer.
+    Conversation,
     /// Anything may change but nothing is urgent (automatic downloads,
     /// user and group records): a coalesced full redraw.
     Later,
     /// The open chat or something the user is waiting for: redraw now.
     Now,
+}
+
+impl RedrawNeed {
+    /// The grade of a batch holding `self` and `other`. A conversation-only
+    /// change together with any other change asks for a full redraw now,
+    /// as it did before it had a grade of its own, so neither is lost.
+    pub fn join(self, other: Self) -> Self {
+        use RedrawNeed::*;
+        match (self, other) {
+            (Nothing, need) | (need, Nothing) => need,
+            (Conversation, Conversation) => Conversation,
+            (Conversation, _) | (_, Conversation) => Now,
+            (a, b) => a.max(b),
+        }
+    }
 }
 
 /// Grade `envelope` against `session` as it is before the envelope is
@@ -211,8 +229,9 @@ fn list_unless_shown(session: &Session, chat_id: ChatId) -> RedrawNeed {
     }
 }
 
-/// Downloads the user started, and the open chat's automatic media
-/// downloads, show live progress. Other automatic downloads (avatars,
+/// Downloads the user started show live progress everywhere (the Downloads
+/// panel too); the open chat's automatic media downloads show it only in
+/// the conversation. Other automatic downloads (avatars,
 /// thumbnails, stickers) draw nothing while in flight, so their progress
 /// redraws in batches; the update that completes one redraws at once, as
 /// the picture appears wherever it is shown. A file Quill is not
@@ -225,11 +244,10 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
             .files
             .get(&id)
             .is_some_and(|known| known.local.is_downloading_completed);
-    if completes
-        || session.media.downloads.is_user(id)
-        || session.media.open_chat_media_downloads.contains(&id)
-    {
+    if completes || session.media.downloads.is_user(id) {
         RedrawNeed::Now
+    } else if session.media.open_chat_media_downloads.contains(&id) {
+        RedrawNeed::Conversation
     } else if session.media.downloads.is_requested(id) || file.local.is_downloading_completed {
         RedrawNeed::Later
     } else {

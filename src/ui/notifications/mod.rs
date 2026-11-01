@@ -88,12 +88,16 @@ pub(super) struct PolledRedraw {
     full: RedrawNeed,
     /// A chat-list redraw is owed.
     list: bool,
+    /// A conversation redraw is owed, and the last one.
+    conversation: bool,
+    last_conversation: std::time::Instant,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PolledAction {
     Wait,
     ChatList,
+    Conversation,
     Full,
 }
 
@@ -108,6 +112,8 @@ impl PolledRedraw {
             last_list: now,
             full: RedrawNeed::Nothing,
             list: false,
+            conversation: false,
+            last_conversation: now,
         }
     }
 
@@ -117,8 +123,18 @@ impl PolledRedraw {
             RedrawNeed::Now if active => Some(Duration::ZERO),
             RedrawNeed::Now => Some(INACTIVE_REDRAW),
             RedrawNeed::Later => Some(gap_for(LATER_REDRAW, active)),
-            RedrawNeed::Nothing | RedrawNeed::ChatList => None,
+            RedrawNeed::Nothing | RedrawNeed::ChatList | RedrawNeed::Conversation => None,
         }
+    }
+
+    /// How long the owed conversation redraw may wait after the last one:
+    /// none in front, as for [`RedrawNeed::Now`].
+    fn conversation_gap(&self, active: bool) -> Option<Duration> {
+        self.conversation.then_some(if active {
+            Duration::ZERO
+        } else {
+            INACTIVE_REDRAW
+        })
     }
 
     /// How long the owed chat-list redraw may wait after the last one.
@@ -132,7 +148,10 @@ impl PolledRedraw {
             |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
         let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
         let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
-        full.into_iter().chain(list).min()
+        let conversation = self
+            .conversation_gap(active)
+            .map(|gap| left(gap, self.last_conversation));
+        full.into_iter().chain(list).chain(conversation).min()
     }
 
     /// Record `need` and say what to redraw now.
@@ -145,6 +164,7 @@ impl PolledRedraw {
         match need {
             RedrawNeed::Nothing => {}
             RedrawNeed::ChatList => self.list = true,
+            RedrawNeed::Conversation => self.conversation = true,
             RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
         }
         let since = |last: std::time::Instant| now.duration_since(last);
@@ -162,6 +182,14 @@ impl PolledRedraw {
             self.last_list = now;
             return PolledAction::ChatList;
         }
+        if self
+            .conversation_gap(active)
+            .is_some_and(|gap| since(self.last_conversation) >= gap)
+        {
+            self.conversation = false;
+            self.last_conversation = now;
+            return PolledAction::Conversation;
+        }
         PolledAction::Wait
     }
 
@@ -171,8 +199,10 @@ impl PolledRedraw {
     pub(super) fn drawn(&mut self, now: std::time::Instant) -> PolledAction {
         self.full = RedrawNeed::Nothing;
         self.list = false;
+        self.conversation = false;
         self.last_full = now;
         self.last_list = now;
+        self.last_conversation = now;
         PolledAction::Full
     }
 }
@@ -252,6 +282,7 @@ impl QuillApp {
         match action {
             PolledAction::Wait => {}
             PolledAction::ChatList => self.notify_chat_list(cx),
+            PolledAction::Conversation => self.notify_conversations(cx),
             PolledAction::Full => cx.notify(),
         }
     }
@@ -332,7 +363,7 @@ impl QuillApp {
                     .unwrap_or_default();
                 super::frame_clock::trace_ingested(name);
             }
-            need = need.max(quill::state::redraw_need(
+            need = need.join(quill::state::redraw_need(
                 &live.driver.session,
                 &owned.envelope,
             ));
@@ -988,6 +1019,27 @@ mod tests {
     }
 
     #[test]
+    fn conversation_progress_redraws_only_the_conversation_and_holds_nothing_back() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Conversation, true, start + ms(1)),
+            PolledAction::Conversation
+        );
+        assert_eq!(redraw.next_due(true, start + ms(1)), None);
+        // An urgent update in the same poll still redraws everything.
+        let _ = redraw.decide(RedrawNeed::Conversation, false, start + ms(2));
+        assert_eq!(
+            redraw.decide(RedrawNeed::Now, true, start + ms(3)),
+            PolledAction::Full
+        );
+        assert_eq!(redraw.next_due(true, start + ms(3)), None);
+        // Behind another app it waits as long as an urgent redraw would.
+        let _ = redraw.decide(RedrawNeed::Conversation, false, start + ms(4));
+        assert!(redraw.next_due(false, start + ms(4)).is_some());
+    }
+
+    #[test]
     fn a_pending_redraw_is_reported_until_it_is_drawn() {
         let start = Instant::now();
         let mut redraw = PolledRedraw::new(start);
@@ -1085,7 +1137,7 @@ mod tests {
             match redraw.decide(need, true, start + ms(tick * 10)) {
                 PolledAction::ChatList => lists += 1,
                 PolledAction::Full => fulls += 1,
-                PolledAction::Wait => {}
+                PolledAction::Conversation | PolledAction::Wait => {}
             }
         }
         assert_eq!(fulls, 0);
@@ -1266,7 +1318,7 @@ mod tests {
                     let owed = owed_full.get_or_insert((at, need));
                     owed.1 = owed.1.max(need);
                 }
-                RedrawNeed::Nothing => {}
+                RedrawNeed::Conversation | RedrawNeed::Nothing => {}
             }
             match redraw.decide(need, active, at) {
                 PolledAction::Full => {
@@ -1274,7 +1326,7 @@ mod tests {
                     owed_full = None;
                 }
                 PolledAction::ChatList => owed_list = None,
-                PolledAction::Wait => {}
+                PolledAction::Conversation | PolledAction::Wait => {}
             }
             // The longest an owed redraw may wait, plus one poll gap.
             let slack = POLL_PACE.gap;
