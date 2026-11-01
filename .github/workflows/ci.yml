@@ -237,6 +237,22 @@ jobs:
     needs: quill-calls
     uses: ./.github/workflows/package-linux.yml
 
+  # Every PR compiles the Windows build, so Windows-only code (the vendored
+  # GPUI platform under third_party/gpui-pre-windows, cfg(windows) code in
+  # src) can't break unseen until a push to main.
+  windows-check:
+    name: windows-check
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check (UI, all targets)
+        run: cargo check --features demo-capture --all-targets --locked
+
   # Launch smoke on Windows (docs/decisions/ci-launch-smoke.md): the real window
   # on a hosted runner without a GPU (WARP). Pushes only, not a required check.
   windows-launch-smoke:

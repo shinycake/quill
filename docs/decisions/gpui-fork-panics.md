@@ -153,6 +153,11 @@ platform. Each is fixed in its own commit:
   host, in CI's Linux job. `timer_thread.rs` keeps only the Win32 calls.
   Moving the timeout found one edge: a wait of exactly `u32::MAX` ms became
   `INFINITE`; it is now clamped below that.
+- CI: Windows was compiled on pushes only (`windows-launch-smoke`, the
+  package), so a PR could break the Windows build, this fork included,
+  without a red check. The new `windows-check` job runs on every PR on
+  `windows-latest` and runs `cargo check --features demo-capture
+  --all-targets --locked`.
 
 ### macOS (`gpui-pre-macos`)
 
