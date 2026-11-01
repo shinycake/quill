@@ -135,6 +135,14 @@ fn probe_file(path: &Path) -> Option<bool> {
 thread_local! {
     /// Test windows have no screen; tests set the headroom they want.
     static TEST_HEADROOM: std::cell::Cell<Option<Headroom>> = const { std::cell::Cell::new(None) };
+    static TEST_LEFT_EDR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Tests: the renderer reads as having left extended range.
+#[cfg(test)]
+#[cfg(all(target_os = "macos", feature = "demo-capture"))]
+pub(crate) fn set_test_renderer_left_edr(left: bool) {
+    TEST_LEFT_EDR.with(|cell| cell.set(left));
 }
 
 #[cfg(test)]
@@ -169,4 +177,21 @@ fn set_window_edr(window: &gpui_kit::Window, on: bool) {
     windows::set_window_edr(window, on);
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (window, on);
+}
+
+/// The renderer took `window` back to 8-bit after it asked for extended
+/// range (its float pipelines did not build), so an HDR picture shows
+/// clamped to standard range.
+fn renderer_left_edr(window: &gpui_kit::Window) -> bool {
+    #[cfg(test)]
+    if TEST_LEFT_EDR.with(std::cell::Cell::get) {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    return macos::window_edr(window) == Some(false);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        false
+    }
 }
