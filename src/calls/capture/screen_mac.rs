@@ -73,9 +73,12 @@ impl ScreenBackend for MacScreen {
         // Asking first adds Quill to the Screen Recording list, so the
         // switch is there when the settings open.
         let _ = CGRequestScreenCaptureAccess();
-        let _ = std::process::Command::new("open")
+        if let Ok(child) = std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            .spawn();
+            .spawn()
+        {
+            crate::child_reap::wait_in_background(child);
+        }
     }
 
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError> {

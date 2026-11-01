@@ -7,7 +7,7 @@ use super::media::{Collector, Saved, name_part};
 use super::page::{render, title_from_page};
 use crate::export::names::sanitize;
 use crate::export::worker::{
-    ExportError, Tdlib, copy_into, create_named_folder, fetch_file, query,
+    ExportError, Tdlib, create_named_folder, fetch_file, place_into, query,
 };
 use crate::json_access::JsonExt;
 use serde_json::{Value, json};
@@ -147,10 +147,12 @@ fn write_page<T: Tdlib>(
     for job in collector.jobs {
         // A file that cannot be fetched or copied shows as "Media
         // unavailable"; only a cancel stops the export.
-        if let Ok(source) = fetch_file(tdlib, env.files_root, job.file_id, None)?
-            && copy_into(folder, &job.relative, &source).is_ok()
-        {
-            saved.insert(job.file_id, job.relative);
+        if let Ok(source) = fetch_file(tdlib, env.files_root, job.file_id, None)? {
+            let copied = place_into(folder, &job.relative, &source).is_ok();
+            source.release(tdlib)?;
+            if copied {
+                saved.insert(job.file_id, job.relative);
+            }
         }
     }
     let text = render(page, title, labels, env.date, &mut Saved(saved));

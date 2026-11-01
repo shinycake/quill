@@ -61,6 +61,18 @@ fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) 
     }
 }
 
+/// Collect `child` once it exits by itself, so it does not stay behind as a
+/// zombie until Quill quits. Never kills: whatever `open` or `xdg-open`
+/// started may stay in the foreground.
+pub fn wait_in_background(mut child: Child) -> Receiver<()> {
+    let (done, notice) = sync_channel(1);
+    let _ = crate::thread_guard::spawn_guarded("quill-child-wait", move || {
+        let _ = child.wait();
+        let _ = done.try_send(());
+    });
+    notice
+}
+
 fn reap(mut child: Child, grace: Duration) {
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
@@ -76,8 +88,44 @@ fn reap(mut child: Child, grace: Duration) {
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use super::{Duration, Instant, kill_and_reap};
+    use super::{Duration, Instant, kill_and_reap, wait_in_background};
     use std::process::{Command, Stdio};
+    use std::sync::mpsc::TryRecvError;
+
+    fn process_state(pid: u32) -> String {
+        Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_child_left_to_exit_is_collected_and_never_killed() {
+        let Ok(child) = Command::new("true").stdin(Stdio::null()).spawn() else {
+            return;
+        };
+        let pid = child.id();
+        let _ = wait_in_background(child).recv();
+        assert_eq!(process_state(pid), "", "no zombie left behind");
+    }
+
+    #[test]
+    fn waiting_leaves_a_running_child_alone() {
+        let Ok(child) = Command::new("sleep").arg("30").stdin(Stdio::null()).spawn() else {
+            return;
+        };
+        let pid = child.id();
+        let notice = wait_in_background(child);
+        assert!(
+            matches!(notice.try_recv(), Err(TryRecvError::Empty)),
+            "the child is still running"
+        );
+        assert!(!process_state(pid).starts_with('Z'));
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+        let _ = notice.recv();
+        assert_eq!(process_state(pid), "");
+    }
 
     #[test]
     fn kill_and_reap_returns_at_once_and_ends_the_child() {

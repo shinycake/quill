@@ -11,6 +11,7 @@ use super::sections::{self, Files};
 use super::settings::{AccountSettings, Section};
 use crate::export::assets;
 use crate::export::json::MessageSink;
+use crate::export::loaded_files::LoadedFiles;
 use crate::export::settings::ExportSettings;
 use crate::export::worker::{
     ChatOut, ExportError, Job, Progress, Tdlib, create_named_folder, export_chat, query,
@@ -264,8 +265,10 @@ fn run_inner<T: Tdlib>(
     if writer.html {
         assets::write(root)?;
     }
+    let loaded = LoadedFiles::default();
     let files = Files {
         root,
+        loaded: &loaded,
         files_root: job.files_root,
         settings,
         offset_at,
@@ -367,6 +370,7 @@ fn run_inner<T: Tdlib>(
             dialogs: &dialogs,
             spool,
             me: me_id,
+            loaded: &loaded,
         };
         export_chats(job, tdlib, &mut writer, &chats, &mut progress, &mut summary)?;
     }
@@ -393,6 +397,7 @@ struct Chats<'a> {
     dialogs: &'a [Dialog],
     spool: &'a Path,
     me: i64,
+    loaded: &'a LoadedFiles,
 }
 
 fn export_chats<T: Tdlib>(
@@ -455,6 +460,7 @@ fn export_chats<T: Tdlib>(
             offset_at: job.offset_at,
             report: &report,
             me: Some(chats.me),
+            loaded: chats.loaded,
         };
         let folder = root.join(&dialog.folder);
         let out = ChatOut {

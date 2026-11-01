@@ -248,6 +248,13 @@ impl QuillApp {
             .or(self.demo_session.as_deref())
     }
 
+    pub(crate) fn session_mut(&mut self) -> Option<&mut Session> {
+        self.live
+            .as_mut()
+            .map(|live| &mut live.driver.session)
+            .or(self.demo_session.as_deref_mut())
+    }
+
     pub(super) fn media_display_roots(&self) -> std::rc::Rc<[PathBuf]> {
         if let Some(roots) = self.frame.media_roots_frame.borrow().as_ref() {
             return roots.clone();

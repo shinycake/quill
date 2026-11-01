@@ -28,10 +28,9 @@ pub(super) fn title_bar(
     // replacing the hand-rolled 44px bar. The caption + action buttons ride
     // as its children.
     super::window_frame::FrameTitleBar::new()
-        .on_close_window(|_, window, cx| {
-            window.remove_window();
-            cx.quit();
-        })
+        .on_close_window(cx.listener(|this, _, window, cx| {
+            this.exit_after_exports(super::export_quit::quit_app, window, cx);
+        }))
         .caption(div().font_semibold().text_sm().child(title))
         .when_some(menu_bar, |bar, menu| bar.menu(menu))
         .child(

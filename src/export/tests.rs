@@ -47,11 +47,15 @@ struct Fake {
     messages: Vec<Value>,
     /// file id -> local path TDLib reports after "downloading".
     files: HashMap<i64, PathBuf>,
+    local: HashMap<i64, Value>,
     /// 0 pages whole; n returns at most n messages per page.
     page_size: usize,
     calls: Vec<String>,
     /// Cancel once this many requests were made.
     cancel_after: Option<usize>,
+    /// What `getFile` reports once a download ends, when something else
+    /// started using the file meanwhile.
+    touched_after_download: Option<Value>,
     fail_history: bool,
 }
 
@@ -60,9 +64,11 @@ impl Fake {
         Self {
             messages,
             files: HashMap::new(),
+            local: HashMap::new(),
             page_size: 0,
             calls: Vec::new(),
             cancel_after: None,
+            touched_after_download: None,
             fail_history: false,
         }
     }
@@ -73,6 +79,10 @@ impl Fake {
 }
 
 impl Tdlib for Fake {
+    fn post_unanswered(&mut self, request: Value) {
+        let _ = self.call(request, Duration::ZERO);
+    }
+
     fn call(&mut self, request: Value, _timeout: Duration) -> Result<Value, ExportError> {
         let method = request["@type"].as_str().unwrap().to_string();
         self.calls.push(method.clone());
@@ -117,12 +127,32 @@ impl Tdlib for Fake {
                 json!({"@type": "user", "id": id, "first_name": format!("User{id}"), "last_name": "<x>"})
             }
             "getChat" => json!({"@type": "chat", "title": "Some Channel"}),
+            "getFile" => {
+                let id = request["file_id"].as_i64().unwrap();
+                let cached = json!({"is_downloading_completed": true});
+                let local = self.local.get(&id).cloned().unwrap_or(cached);
+                json!({"@type": "file", "id": id, "local": local})
+            }
+            "deleteFile" => {
+                let id = request["file_id"].as_i64().unwrap();
+                if let Some(path) = self.files.get(&id) {
+                    std::fs::remove_file(path).unwrap();
+                }
+                self.local.insert(id, not_local());
+                json!({"@type": "ok"})
+            }
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
                 match self.files.get(&id) {
-                    Some(path) => json!({"@type": "file", "id": id,
-                        "size": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
-                        "local": {"path": path.to_string_lossy(), "is_downloading_completed": true}}),
+                    Some(path) => {
+                        let local = json!({"path": path.to_string_lossy(),
+                            "is_downloading_completed": true, "is_downloading_active": false});
+                        let now = self.touched_after_download.clone();
+                        self.local.insert(id, now.unwrap_or_else(|| local.clone()));
+                        json!({"@type": "file", "id": id,
+                            "size": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+                            "local": local})
+                    }
                     None => json!({"@type": "file", "id": id, "size": 1,
                         "local": {"path": "", "is_downloading_completed": false}}),
                 }
@@ -142,12 +172,14 @@ fn export(fake: &mut Fake, settings: &ExportSettings, files_root: &Path) -> Run 
     let out = create_folder(&settings.dir, &settings.title, "2023-11-14").unwrap();
     let last = std::cell::RefCell::new(Progress::starting());
     let report = |p: Progress| *last.borrow_mut() = p;
+    let loaded = super::loaded_files::LoadedFiles::default();
     let job = Job {
         settings,
         files_root,
         offset_at: &|_| 0,
         report: &report,
         me: None,
+        loaded: &loaded,
     };
     let result = run(&job, fake, &out);
     Run {
@@ -533,6 +565,112 @@ fn replies_on_the_same_page_jump_with_the_script() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn not_local() -> Value {
+    json!({"is_downloading_completed": false, "is_downloading_active": false,
+        "downloaded_size": 0})
+}
+
+fn one_photo(dir: &Path) -> (Fake, ExportSettings, PathBuf) {
+    let td = dir.join("td");
+    std::fs::create_dir_all(&td).unwrap();
+    std::fs::write(td.join("p.jpg"), b"jpeg").unwrap();
+    let mut fake = Fake::new(vec![photo_message(1, 1_700_000_100, 10, 4)]);
+    fake.files.insert(10, td.join("p.jpg"));
+    let mut s = settings(dir);
+    s.media = MediaTypes::none().with(MediaKind::Photo, true);
+    (fake, s, td)
+}
+
+const PHOTO: &str = "photos/photo_1@14-11-2023_22-15-00.jpg";
+
+#[test]
+fn a_file_only_the_export_wanted_leaves_the_cache_and_stays_in_the_export() {
+    let dir = scratch("moved");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 1);
+    assert!(!td.join("p.jpg").exists());
+    assert_eq!(std::fs::read(run.out.join(PHOTO)).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_cached_before_the_export_stays_cached_and_apart_from_the_export() {
+    let dir = scratch("kept");
+    let (mut fake, s, td) = one_photo(&dir);
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 0);
+    std::fs::write(run.out.join(PHOTO), b"edited").unwrap();
+    assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_something_else_is_fetching_stays_cached() {
+    for local in [
+        json!({"is_downloading_completed": false, "is_downloading_active": true,
+            "downloaded_size": 0}),
+        json!({"is_downloading_completed": false, "is_downloading_active": false,
+            "downloaded_size": 1024}),
+    ] {
+        let dir = scratch("shared");
+        let (mut fake, s, td) = one_photo(&dir);
+        fake.local.insert(10, local);
+        let run = export(&mut fake, &s, &td);
+        assert_eq!(run.result.unwrap().files, 1);
+        assert_eq!(fake.count("deleteFile"), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn a_file_found_too_large_after_its_download_leaves_the_cache() {
+    let dir = scratch("too-large");
+    let (mut fake, mut s, td) = one_photo(&dir);
+    fake.messages = vec![photo_message(1, 1_700_000_100, 10, 0)];
+    fake.local.insert(10, not_local());
+    s.size_limit = 1;
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().skipped, 1);
+    assert_eq!(fake.count("deleteFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn cancelled_download(fake: &mut Fake, td: &Path) {
+    fake.cancel_after = Some(1);
+    assert!(matches!(
+        super::worker::fetch_file(fake, td, 10, None),
+        Err(ExportError::Cancelled)
+    ));
+}
+
+#[test]
+fn cancelling_during_a_download_stops_the_download() {
+    let dir = scratch("cancel-download");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    cancelled_download(&mut fake, &td);
+    assert_eq!(fake.count("cancelDownloadFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancelling_leaves_a_download_something_else_asked_for() {
+    let dir = scratch("cancel-shared");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(
+        10,
+        json!({"is_downloading_completed": false, "is_downloading_active": true,
+            "downloaded_size": 0}),
+    );
+    cancelled_download(&mut fake, &td);
+    assert_eq!(fake.count("cancelDownloadFile"), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn what_the_worker_publishes_wakes_the_poll_pass() {
     let wake = crate::wake::Signal::new();
@@ -543,4 +681,92 @@ fn what_the_worker_publishes_wakes_the_poll_pass() {
         slot.lock()
             .is_ok_and(|p| matches!(p.stage, Stage::Cancelled))
     );
+}
+
+#[test]
+fn a_file_that_occurs_again_is_saved_once_and_linked_from_both_messages() {
+    let dir = scratch("repeat");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.messages = vec![
+        photo_message(2, 1_700_000_160, 10, 4),
+        photo_message(1, 1_700_000_100, 10, 4),
+    ];
+    fake.local.insert(10, not_local());
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 2);
+    assert_eq!(fake.count("downloadFile"), 1);
+    assert_eq!(
+        std::fs::read_dir(run.out.join("photos")).unwrap().count(),
+        1
+    );
+    let html = read(&run.out.join("messages.html"));
+    assert!(html.matches(PHOTO).count() >= 2, "both messages show it");
+    assert!(!html.contains("photo_2@"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_something_else_started_using_during_the_export_stays_cached() {
+    let dir = scratch("touched");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    fake.touched_after_download = Some(json!({"path": td.join("p.jpg").to_string_lossy(),
+        "is_downloading_completed": true, "is_downloading_active": true}));
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 1);
+    assert_eq!(fake.count("deleteFile"), 0);
+    assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cancelling_after_a_download_still_releases_the_cache_copy() {
+    let dir = scratch("cancel-release");
+    let (mut fake, _, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let fetched = super::worker::fetch_file(&mut fake, &td, 10, None)
+        .unwrap()
+        .unwrap();
+    fake.cancel_after = Some(fake.calls.len());
+    assert!(matches!(
+        fetched.release(&mut fake),
+        Err(ExportError::Cancelled)
+    ));
+    assert_eq!(fake.count("deleteFile"), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_repeated_file_with_another_thumbnail_keeps_both_thumbnails() {
+    let dir = scratch("repeat-thumb");
+    let td = dir.join("td");
+    std::fs::create_dir_all(&td).unwrap();
+    std::fs::write(td.join("v.mp4"), b"video").unwrap();
+    std::fs::write(td.join("t1.jpg"), b"first").unwrap();
+    std::fs::write(td.join("t2.jpg"), b"second").unwrap();
+    let with_thumb = |id, date, thumb| {
+        let mut message = video_message(id, date, 20, 5);
+        message["content"]["video"]["thumbnail"] = json!({"format": {"@type": "thumbnailFormatJpeg"},
+            "width": 90, "height": 50, "file": {"id": thumb, "size": 5}});
+        message
+    };
+    let mut fake = Fake::new(vec![
+        with_thumb(2, 1_700_000_200, 22),
+        with_thumb(1, 1_700_000_100, 21),
+    ]);
+    fake.files.insert(20, td.join("v.mp4"));
+    fake.files.insert(21, td.join("t1.jpg"));
+    fake.files.insert(22, td.join("t2.jpg"));
+    let mut s = settings(&dir);
+    s.format = ExportFormat::Json;
+    s.media = MediaTypes::all();
+    let run = export(&mut fake, &s, &td);
+    run.result.unwrap();
+    let result: Value = serde_json::from_str(&read(&run.out.join("result.json"))).unwrap();
+    let first = result["messages"][0]["thumbnail"].as_str().unwrap();
+    let second = result["messages"][1]["thumbnail"].as_str().unwrap();
+    assert_eq!(result["messages"][1]["file"], result["messages"][0]["file"]);
+    assert_eq!(std::fs::read(run.out.join(first)).unwrap(), b"first");
+    assert_eq!(std::fs::read(run.out.join(second)).unwrap(), b"second");
+    let _ = std::fs::remove_dir_all(&dir);
 }

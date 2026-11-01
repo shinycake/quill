@@ -17,6 +17,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::export_progress::take_ended_exports;
+use super::selection_html::rich_html_note;
+use super::status_note::StatusNote;
 use super::wake_wait::{PassEnd, PollPace, run_poll_loop};
 use gpui_kit::*;
 use quill::connect::{ClosingSet, ConnectBlocker, LiveConnect, start_background_live_connect};
@@ -441,6 +444,7 @@ impl QuillApp {
         self.reap_closing(cx);
         let mut stopped: Vec<(AccountKey, LiveConnect)> = Vec::new();
         let mut signed_out: Vec<AccountKey> = Vec::new();
+        let mut export_notes: Vec<StatusNote> = Vec::new();
         for client in &mut self.background.clients {
             let Some(live) = client.live.as_mut() else {
                 continue;
@@ -472,6 +476,13 @@ impl QuillApp {
             if let Some((list, prefer_ipv6)) = &proxy_target {
                 ingested |= live.driver.sync_proxies_to(list, *prefer_ipv6);
             }
+            export_notes.extend(take_ended_exports(&mut live.driver.session));
+            export_notes.extend(
+                live.driver
+                    .take_finished_rich_html_exports()
+                    .iter()
+                    .filter_map(rich_html_note),
+            );
             let mut status = background_status(&live.driver.session.auth);
             if live.bridge.stopped_unexpectedly() {
                 status = BackgroundStatus::Failed(
@@ -516,12 +527,17 @@ impl QuillApp {
         // Logged out in the background: its next sends go with it.
         for key in signed_out {
             self.forget_account_sends(&key);
+            super::notifications::forget_cached_icons();
         }
         if changed {
             self.publish_background_unread();
         }
         for (key, drain) in drained {
             self.deliver_background(&key, drain, cx);
+        }
+        for note in export_notes {
+            self.connection.set_note(note);
+            changed = true;
         }
         self.drain_account_clicks(cx);
         self.sync_background_calls(cx);

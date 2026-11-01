@@ -10,54 +10,90 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::export::{Progress, Stage};
+use quill::export::{AccountExport, ChatExport, Progress, Stage};
 use quill::lang::{keys, tr, tr_with};
+use quill::state::{RedrawNeed, Session};
+
+pub(super) fn progress_redraw(changed: bool, settled: bool, hidden: bool) -> RedrawNeed {
+    match (changed && !hidden, settled) {
+        (false, _) => RedrawNeed::Nothing,
+        (true, false) => RedrawNeed::Later,
+        (true, true) => RedrawNeed::Now,
+    }
+}
+
+fn ended_note(progress: &Progress) -> String {
+    match &progress.stage {
+        Stage::Finished(summary) => tr_with(
+            keys::Q_OPS_EXPORTED_MESSAGES_TO,
+            &[
+                ("messages", &summary.messages.to_string()),
+                ("display", &(summary.folder.display()).to_string()),
+            ],
+        ),
+        _ => progress.label(),
+    }
+}
+
+pub(super) fn take_ended_exports(session: &mut Session) -> Vec<StatusNote> {
+    let settled = |progress: &Progress| progress.is_settled();
+    let chat = session.settings.chat_export.as_ref();
+    let chat = chat.map(ChatExport::progress).filter(settled);
+    let account = session.settings.account_export.as_ref();
+    let account = account
+        .map(AccountExport::progress)
+        .filter(|progress| progress.is_settled());
+    let mut notes = Vec::new();
+    if let Some(progress) = chat {
+        session.settings.chat_export = None;
+        notes.push(StatusNote::info(ended_note(&progress)));
+    }
+    if let Some(progress) = account {
+        session.settings.account_export = None;
+        notes.push(StatusNote::info(
+            super::account_export_progress::ended_note(&progress),
+        ));
+    }
+    notes
+}
 
 impl QuillApp {
     /// Poll-loop step: keep the box fresh while the export advances, and when
     /// it ended with the box hidden, say how it went and clear it.
-    pub(super) fn poll_chat_export_progress(&mut self) -> bool {
+    pub(super) fn poll_chat_export_progress(&mut self) -> RedrawNeed {
         // The poll loop calls this one hook for every export: the account,
         // the chat, and "Save as HTML" (`parity:menu-save-selection-html`).
         let account = self.poll_account_export_progress();
-        let rich_html = self.poll_rich_html_exports();
+        let rich_html = if self.poll_rich_html_exports() {
+            RedrawNeed::Now
+        } else {
+            RedrawNeed::Nothing
+        };
         let chat = self.poll_one_chat_export();
-        account || rich_html || chat
+        account.max(rich_html).max(chat)
     }
 
-    fn poll_one_chat_export(&mut self) -> bool {
-        let Some(live) = self.live.as_mut() else {
-            return false;
-        };
-        let Some(export) = live.driver.session.settings.chat_export.as_ref() else {
+    fn poll_one_chat_export(&mut self) -> RedrawNeed {
+        let Some(export) = self.session().and_then(|s| s.settings.chat_export.as_ref()) else {
             self.dialogs.chat_export_seen = None;
-            return false;
+            return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        if progress.is_settled() && self.dialogs.chat_export_progress_hidden {
-            let note = match &progress.stage {
-                Stage::Finished(summary) => tr_with(
-                    keys::Q_OPS_EXPORTED_MESSAGES_TO,
-                    &[
-                        ("messages", &summary.messages.to_string()),
-                        ("display", &(summary.folder.display()).to_string()),
-                    ],
-                ),
-                other => Progress {
-                    stage: other.clone(),
-                    ..progress.clone()
-                }
-                .label(),
-            };
-            live.driver.session.settings.chat_export = None;
+        let hidden = self.dialogs.chat_export_progress_hidden;
+        if progress.is_settled() && hidden {
+            if let Some(session) = self.session_mut() {
+                session.settings.chat_export = None;
+            }
             self.dialogs.chat_export_seen = None;
             self.dialogs.chat_export_progress_hidden = false;
-            self.connection.set_note(StatusNote::info(note));
-            return true;
+            self.connection
+                .set_note(StatusNote::info(ended_note(&progress)));
+            return RedrawNeed::Now;
         }
         let changed = self.dialogs.chat_export_seen.as_ref() != Some(&progress);
+        let need = progress_redraw(changed, progress.is_settled(), hidden);
         self.dialogs.chat_export_seen = Some(progress);
-        changed
+        need
     }
 
     /// Body and footer of the box while an export exists.
@@ -162,5 +198,23 @@ impl QuillApp {
                 );
         }
         (body.into_any_element(), footer.into_any_element())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RedrawNeed, progress_redraw};
+
+    #[test]
+    fn a_running_export_redraws_in_the_coalesced_batch_and_only_when_shown() {
+        assert_eq!(progress_redraw(true, false, false), RedrawNeed::Later);
+        assert_eq!(progress_redraw(false, false, false), RedrawNeed::Nothing);
+        assert_eq!(progress_redraw(true, false, true), RedrawNeed::Nothing);
+    }
+
+    #[test]
+    fn the_end_of_an_export_shows_at_once_in_its_box() {
+        assert_eq!(progress_redraw(true, true, false), RedrawNeed::Now);
+        assert_eq!(progress_redraw(false, true, false), RedrawNeed::Nothing);
     }
 }

@@ -286,6 +286,7 @@ impl ThreadView {
             .retain(|id, _| *id < 0 || root_ids.contains(id));
         self.history.loaded_complete = false;
         self.history.next_from_message_id = MessageId(0);
+        self.history.reader = ReaderPosition::Tail;
         self.has_newer = false;
         self.newer_failed = false;
         self.reload_needed = true;

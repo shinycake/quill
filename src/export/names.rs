@@ -202,12 +202,13 @@ impl Namer {
         self.unique(media.kind.folder(), &name)
     }
 
-    /// Where the preview image of the file saved at `main` goes: next to
-    /// it, as tdesktop's `<path>_thumb.jpg`.
-    pub fn thumb_path(&mut self, main: &str) -> String {
-        let path = format!("{main}_thumb.jpg");
-        self.used.insert(path.to_lowercase());
-        path
+    /// Where the preview image of the file at `main` goes: tdesktop's
+    /// `<name>_thumb.jpg` in this chat's `folder`. `main` may be another
+    /// chat's copy of a repeated file, and this thumbnail may differ from
+    /// the one saved with it, so the name is taken like any other.
+    pub fn thumb_path(&mut self, folder: &str, main: &str) -> String {
+        let name = main.rsplit('/').next().unwrap_or(main);
+        self.unique(folder, &format!("{name}_thumb.jpg"))
     }
 
     /// `folder/name`, or `folder/name (2)` style when taken.
@@ -264,7 +265,10 @@ mod tests {
         let mut namer = Namer::default();
         let video = media(MediaKind::Video, "clip.mp4", "video/mp4");
         let main = namer.path(&video, 0, 0, "");
-        assert_eq!(namer.thumb_path(&main), "video_files/clip.mp4_thumb.jpg");
+        assert_eq!(
+            namer.thumb_path(video.kind.folder(), &main),
+            "video_files/clip.mp4_thumb.jpg"
+        );
         // A file literally named like the thumbnail can't take its place.
         let clash = media(MediaKind::Video, "clip.mp4_thumb.jpg", "");
         assert_eq!(
