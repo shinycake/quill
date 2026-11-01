@@ -1225,6 +1225,16 @@ impl Frame {
             .into_inner()
     }
 
+    fn hitbox_bounds<'a>(
+        &'a self,
+        hit_test: &'a HitTest,
+    ) -> impl Iterator<Item = Bounds<Pixels>> + 'a {
+        self.hitboxes
+            .iter()
+            .filter(|hitbox| hit_test.ids.contains(&hitbox.id))
+            .map(|hitbox| hitbox.bounds)
+    }
+
     pub(crate) fn hit_test(&self, position: Point<Pixels>) -> HitTest {
         let mut set_hover_hitbox_count = false;
         let mut hit_test = HitTest::default();
@@ -1330,6 +1340,10 @@ pub struct Window {
     mouse_hit_test: HitTest,
     /// Quill: the mouse position the drag ghost was last painted for.
     drag_painted_at: Option<Point<Pixels>>,
+    /// QUILL: the boxes of the hitboxes under the pointer in the last frame
+    /// drawn during a drag.
+    drag_hovered: Option<SmallVec<[Bounds<Pixels>; 8]>>,
+    drag_target_moved: bool,
     /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
     /// outermost first (pushed and popped around each tagged element's
     /// paint), so the focused element can record the tags above it.
@@ -2203,6 +2217,8 @@ impl Window {
             mouse_position,
             mouse_hit_test: HitTest::default(),
             drag_painted_at: None,
+            drag_hovered: None,
+            drag_target_moved: false,
             a11y_tag_stack: Vec::new(),
             tooltip_tags: Vec::new(),
             paint_filter: None,
@@ -3665,7 +3681,7 @@ impl Window {
         // panel). `Window::focus` suppresses `refresh` while a draw is in progress, so
         // schedule another frame here to render the new focus state and dispatch the
         // resulting focus events.
-        if self.focus != focus_before_listeners {
+        if self.focus != focus_before_listeners || mem::take(&mut self.drag_target_moved) {
             self.refresh();
         }
         self.needs_present.set(true);
@@ -3855,6 +3871,7 @@ impl Window {
         }
 
         self.mouse_hit_test = self.next_frame.hit_test(self.mouse_position);
+        self.note_drag_hover(cx);
 
         // Now actually paint the elements.
         #[cfg(feature = "profiler")]
@@ -6350,6 +6367,20 @@ impl Window {
                 window.schedule_touch_momentum_tick();
             }
         });
+    }
+
+    /// QUILL: a cached view replays `drag_over` styles for the hitboxes it was
+    /// painted under, so when content moves under a still pointer the next
+    /// frame renders every view. Hitbox ids change with each render, so this
+    /// compares their boxes. A frame that refreshed needs no second one.
+    fn note_drag_hover(&mut self, cx: &App) {
+        let hovered = cx.active_drag.is_some().then(|| {
+            self.next_frame
+                .hitbox_bounds(&self.mouse_hit_test)
+                .collect::<SmallVec<_>>()
+        });
+        let previous = mem::replace(&mut self.drag_hovered, hovered);
+        self.drag_target_moved = !self.refreshing && previous.is_some() && previous != self.drag_hovered;
     }
 
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {

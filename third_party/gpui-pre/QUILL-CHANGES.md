@@ -413,7 +413,9 @@ cache off:
   hitboxes marks the window dirty, because the ghost is painted on every draw,
   and an update at the position the ghost was last painted for
   (`drag_painted_at`) does nothing. `FileDropEvent::Entered` refreshes by itself
-  now, since it can arrive with the hit test unchanged. Tests:
+  now, since it can arrive with the hit test unchanged. A drawn frame whose
+  hovered hitboxes moved under a still pointer (`note_drag_hover`) refreshes
+  once, so cached `drag_over` styles follow them. Tests:
   `src/ui/drag_redraw_tests.rs`.
 
 The Quill project also changed it in 2026 so the end of a scroll doesn't keep
