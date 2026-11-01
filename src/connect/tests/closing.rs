@@ -569,6 +569,23 @@ fn a_call_still_ringing_in_is_left_to_ring() {
 }
 
 #[test]
+fn a_call_answered_but_not_yet_moved_on_is_hung_up() {
+    let mut client = calling_driver().with_call(
+        false,
+        CallState::Pending {
+            is_created: true,
+            is_received: true,
+        },
+    );
+    client
+        .driver
+        .set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
+    client.driver.accept_call().expect("accept");
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["acceptCall", "discardCall", "setOption"]);
+}
+
+#[test]
 fn an_outgoing_call_still_ringing_is_hung_up() {
     let mut client = calling_driver().with_call(
         true,

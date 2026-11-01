@@ -34,6 +34,10 @@ pub struct CallsState {
     /// user_id, is_video)`. Further incoming calls while the prompt is
     /// open go to `call_busy_decline_queue` (auto-declined busy).
     pub swap_pending: Option<(i32, i64, bool)>,
+    /// The incoming call `acceptCall` went out for. Its state stays
+    /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
+    /// close hangs it up.
+    pub answered_call: Option<i32>,
     /// Swap prompt: the user chose "end current & answer" — the
     /// pending incoming call's `(call_id, is_video)`, accepted by the
     /// driver once the active call's terminal update lands (TDLib
@@ -172,6 +176,7 @@ impl CallsState {
             busy_decline_queue: Vec::new(),
             busy_declined: Vec::new(),
             swap_pending: None,
+            answered_call: None,
             swap_accept_queued: None,
             privacy_allow_calls: None,
             privacy_p2p: None,

@@ -70,6 +70,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.answered_call = Some(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             // TDLib remains the call-state source of truth; this only marks
             // the already-tracked engine-side call accepted.
@@ -125,7 +126,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The account is closing (quit, account switch): end its calls, as
     /// tdesktop's `Instance::isQuitPrevent` does. A call still ringing in
-    /// stays unanswered, so the caller's other devices can still take it.
+    /// stays unanswered, so the caller's other devices can still take it;
+    /// one answered here is hung up even before TDLib moves it on, as
+    /// tdesktop's `Call::answer` leaves the waiting state at once.
     pub(crate) fn hang_up_for_close(&mut self) {
         let calls = &self.session.calls;
         let call_running = calls.active_call.as_ref().is_some_and(|call| {
@@ -138,7 +141,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .active_group_call
             .as_ref()
             .is_some_and(|call| call.is_joined);
-        if call_running && ringing_incoming_call(&self.session).is_none() {
+        let ringing = ringing_incoming_call(&self.session)
+            .is_some_and(|(id, _, _)| calls.answered_call != Some(id));
+        if call_running && !ringing {
             let _ = self.discard_call();
         }
         if joined {
@@ -226,6 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.calls.answered_call = Some(call_id);
         if let Some(engine) = self.call_engine.as_deref_mut() {
             let _ = engine.accept_call(call_id);
         }
