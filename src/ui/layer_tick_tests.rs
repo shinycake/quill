@@ -448,3 +448,81 @@ fn a_layer_keeps_the_opacity_of_what_it_draws(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert_eq!(painted_at.get(), 0.5);
 }
+
+/// Paints only once shown, so a whole frame can leave it an empty range.
+struct Toggle {
+    shown: bool,
+}
+
+impl Render for Toggle {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let shown = self.shown;
+        div().size(px(10.)).child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    if shown {
+                        window.paint_quad(gpui_kit::fill(bounds, color(SECOND)));
+                    }
+                },
+            )
+            .size_full(),
+        )
+    }
+}
+
+/// A live fill whose last child is a live toggle.
+struct ToggleShell {
+    inner: Entity<Toggle>,
+}
+
+impl Render for ToggleShell {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size(px(20.))
+            .bg(color(FIRST))
+            .child(self.inner.clone().live())
+    }
+}
+
+struct ToggleNest {
+    shell: Entity<ToggleShell>,
+}
+
+impl Render for ToggleNest {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.shell.clone().live())
+    }
+}
+
+#[gpui_kit::test]
+fn a_live_view_that_painted_nothing_inside_another_shows_once(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Toggle { shown: false });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        ToggleNest {
+            shell: cx.new(|_| ToggleShell { inner }),
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+
+    inner.update(&mut vcx, |toggle, cx| {
+        toggle.shown = true;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+
+    let hues: Vec<_> = vcx
+        .update(|window, _| window.painted_quads())
+        .iter()
+        .filter_map(|quad| quad.background.as_solid())
+        .map(|color| color.h)
+        .collect();
+    assert_eq!(hues, vec![FIRST, SECOND], "the inner view paints once");
+}

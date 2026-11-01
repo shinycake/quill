@@ -454,6 +454,8 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   open profiler overlay, or an accessibility tree not up to date draws a whole frame.
 - `window/a11y.rs` holds the tree still during a patch: live views add no nodes,
   and nothing is sent.
+- A live view whose element path runs through another live view's is drawn by
+  that one, so a patch skips it as a site of its own.
 
 What a live view builds takes no clicks and no hover, so it suits content that only
 shows. `Window::frame_number` counts these frames like any other.
