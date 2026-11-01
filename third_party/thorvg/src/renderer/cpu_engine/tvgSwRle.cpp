@@ -198,6 +198,10 @@
 constexpr auto PIXEL_BITS = 8;   //must be at least 6 bits!
 constexpr auto ONE_PIXEL = (1 << PIXEL_BITS);
 
+//QUILL
+constexpr uint32_t BUSY_OUTLINE_PTS = 1024;
+constexpr auto ROW_BUCKETS = 64;
+
 struct Band
 {
     int32_t min, max;
@@ -239,6 +243,8 @@ struct RleWorker
 
     SwCell** yCells;
     int32_t yCnt;
+    int32_t rowBuckets;  //QUILL
+    int32_t xShift;      //QUILL
 
     bool invalid;
     bool antiAlias;
@@ -367,6 +373,13 @@ static void _horizLine(RleWorker& rw, int32_t x, int32_t y, int32_t area, int32_
 }
 
 
+//QUILL
+static inline int32_t _coverArea(int32_t cover, long area = 0)
+{
+    return static_cast<int32_t>(static_cast<uint32_t>(cover) * static_cast<uint32_t>(ONE_PIXEL * 2) - static_cast<uint32_t>(area));
+}
+
+
 static void _sweep(RleWorker& rw)
 {
     if (rw.cellsCnt == 0) return;
@@ -374,18 +387,21 @@ static void _sweep(RleWorker& rw)
     for (int y = 0; y < rw.yCnt; ++y) {
         auto cover = 0;
         auto x = 0;
-        auto cell = rw.yCells[y];
 
-        while (cell) {
-            if (cell->x > x && cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), cell->x - x);
-            cover += cell->cover;
-            auto area = cover * (ONE_PIXEL * 2) - cell->area;
-            if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
-            x = cell->x + 1;
-            cell = cell->next;
+        for (auto list = 0; list < rw.rowBuckets; ++list) {
+            auto cell = rw.yCells[y * rw.rowBuckets + list];
+
+            while (cell) {
+                if (cell->x > x && cover != 0) _horizLine(rw, x, y, _coverArea(cover), cell->x - x);  //QUILL
+                cover += cell->cover;
+                auto area = _coverArea(cover, cell->area);  //QUILL
+                if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
+                x = cell->x + 1;
+                cell = cell->next;
+            }
         }
 
-        if (cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), rw.cellXCnt - x);
+        if (cover != 0) _horizLine(rw, x, y, _coverArea(cover), rw.cellXCnt - x);  //QUILL
     }
 }
 
@@ -395,7 +411,7 @@ static SwCell* _findCell(RleWorker& rw)
     auto x = rw.cellPos.x;
     if (x > rw.cellXCnt) x = rw.cellXCnt;
 
-    auto pcell = &rw.yCells[rw.cellPos.y];
+    auto pcell = &rw.yCells[rw.cellPos.y * rw.rowBuckets + ((x + 1) >> rw.xShift)];
 
     while(true) {
         auto cell = *pcell;
@@ -414,6 +430,22 @@ static SwCell* _findCell(RleWorker& rw)
     *pcell = cell;
 
     return cell;
+}
+
+
+//QUILL
+constexpr uint32_t KEPT_POOL_SIZE = DEFAULT_POOL_SIZE * 256;  //QUILL
+
+static bool _growCells(RleWorker& rw, SwCellPool* pool)
+{
+    constexpr uint32_t MAX_POOL_SIZE = 1 << 26;
+    if (pool->size > MAX_POOL_SIZE / 4) return false;
+    pool->size *= 4;
+    tvg::free(pool->buffer);
+    pool->buffer = tvg::malloc<SwCell>(pool->size);
+    rw.buffer = pool->buffer;
+    rw.bufferSize = pool->size;
+    return true;
 }
 
 
@@ -491,6 +523,13 @@ static bool _moveTo(RleWorker& rw, const SwPoint& to)
 }
 
 
+//QUILL
+static bool _pastCells(const RleWorker& rw, const SwPoint& e1, const SwPoint& e2)
+{
+    return (e1.x >= rw.cellMax.x && e2.x >= rw.cellMax.x) || (e1.y >= rw.cellMax.y && e2.y >= rw.cellMax.y) || (e1.y < rw.cellMin.y && e2.y < rw.cellMin.y);
+}
+
+
 static bool _lineTo(RleWorker& rw, const SwPoint& to)
 {
     auto e1 = TRUNC(rw.pos);
@@ -510,15 +549,28 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
     while (line < end) {
         auto diff = line[0] - line[1];
 
+        e1 = TRUNC(line[1]);
+        e2 = TRUNC(line[0]);
+
+        if (_pastCells(rw, e1, e2)) {  //QUILL
+            if (!_setCell(rw, e2)) return false;
+            rw.pos = line[0];
+            if (line-- == rw.lineStack) return true;
+            continue;
+        }
+
+        //QUILL
+        if (e1.x < rw.cellMin.x && e2.x < rw.cellMin.x) {
+            diff.x = 0;
+            e2.x = e1.x;
+        }
+
         // avoid possible arithmetic overflow below by splitting
         if (HYPOT(diff) > SHRT_MAX) {
             _splitLine(line);
             ++line;
             continue;
         }
-
-        e1 = TRUNC(line[1]);
-        e2 = TRUNC(line[0]);
 
         auto f1 = FRACT(line[1]);
         SwPoint f2;
@@ -620,6 +672,19 @@ static bool _lineTo(RleWorker& rw, const SwPoint& to)
 }
 
 
+//QUILL
+static bool _besideCells(const RleWorker& rw, const SwPoint* arc)
+{
+    auto min = arc[0].x;
+    auto max = arc[0].x;
+    for (auto i = 1; i < 4; ++i) {
+        if (arc[i].x < min) min = arc[i].x;
+        if (arc[i].x > max) max = arc[i].x;
+    }
+    return TRUNC(min) >= rw.cellMax.x || TRUNC(max) < rw.cellMin.x;
+}
+
+
 static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, const SwPoint& to)
 {
     auto arc = rw.bezStack;
@@ -640,7 +705,7 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, 
         if (y > max) max = y;
     }
 
-    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y) goto draw;
+    if (TRUNC(min) >= rw.cellMax.y || TRUNC(max) < rw.cellMin.y || _besideCells(rw, arc)) goto draw;
 
     /* Decide whether to split or draw. See `Rapid Termination          */
     /* Evaluation for Recursive Subdivision of Bezier Curves' by Thomas */
@@ -653,23 +718,27 @@ static bool _cubicTo(RleWorker& rw, const SwPoint& ctrl1, const SwPoint& ctrl2, 
             auto L = HYPOT(diff);
 
             //avoid possible arithmetic overflow below by splitting
-            if (L > SHRT_MAX) goto split;
+            if (L > SHRT_MAX) {
+                if (_besideCells(rw, arc)) goto draw;  //QUILL
+                goto split;
+            }
 
             //max deviation may be as much as (s/L) * 3/4 (if Hain's v = 1)
             auto sLimit = L * (ONE_PIXEL / 6);
 
+            //QUILL
             auto diff1 = arc[1] - arc[0];
-            if (abs(diff.y * diff1.x - diff.x * diff1.y) > sLimit) goto split;
+            if (llabs((int64_t)diff.y * diff1.x - (int64_t)diff.x * diff1.y) > sLimit) goto split;
 
             //s is L * the perpendicular distance from P2 to the line P0 - P3
             auto diff2 = arc[2] - arc[0];
-            if (abs(diff.y * diff2.x - diff.x * diff2.y) > sLimit) goto split;
+            if (llabs((int64_t)diff.y * diff2.x - (int64_t)diff.x * diff2.y) > sLimit) goto split;
 
             /* Split super curvy segments where the off points are so far
             from the chord that the angles P0-P1-P3 or P0-P2-P3 become
             acute as detected by appropriate dot products */
-            if (diff1.x * (diff1.x - diff.x) + diff1.y * (diff1.y - diff.y) > 0 ||
-                diff2.x * (diff2.x - diff.x) + diff2.y * (diff2.y - diff.y) > 0)
+            if ((int64_t)diff1.x * (diff1.x - diff.x) + (int64_t)diff1.y * (diff1.y - diff.y) > 0 ||
+                (int64_t)diff2.x * (diff2.x - diff.x) + (int64_t)diff2.y * (diff2.y - diff.y) > 0)
                 goto split;
 
             //no reason to split
@@ -774,6 +843,13 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
     rw.bandSize = rw.bufferSize / (sizeof(SwCell) * 2);
     rw.bandShoot = 0;
     rw.antiAlias = antiAlias;
+    rw.rowBuckets = 1;
+    rw.xShift = 31;
+    if (outline->out.count >= BUSY_OUTLINE_PTS) {
+        rw.rowBuckets = ROW_BUCKETS;
+        rw.xShift = 0;
+        while (((rw.cellXCnt + 1) >> rw.xShift) >= ROW_BUCKETS) ++rw.xShift;
+    }
 
     if (!rle) rw.rle = new SwRle;
     else rw.rle = rle;
@@ -806,7 +882,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             rw.yCells = reinterpret_cast<SwCell**>(rw.buffer);
             rw.yCnt = band->max - band->min;
 
-            int cellStart = sizeof(SwCell*) * (int)rw.yCnt;
+            auto listCnt = rw.yCnt * rw.rowBuckets;
+            int cellStart = sizeof(SwCell*) * listCnt;
             int cellMod = cellStart % sizeof(SwCell);
 
             if (cellMod > 0) cellStart += sizeof(SwCell) - cellMod;
@@ -819,7 +896,7 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             rw.maxCells = cellsMax - rw.cells;
             if (rw.maxCells < 2) goto reduce_bands;
 
-            for (int y = 0; y < rw.yCnt; ++y)
+            for (int y = 0; y < listCnt; ++y)
                 rw.yCells[y] = nullptr;
 
             rw.cellsCnt = 0;
@@ -835,6 +912,8 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
             }
 
         reduce_bands:
+            if (_growCells(rw, cellPool)) continue;  //QUILL
+
             /* render pool overflow: we will reduce the render band by half */
             auto bottom = band->min;
             auto top = band->max;
@@ -858,6 +937,12 @@ SwRle* rleRender(SwRle* rle, const SwOutline* outline, const RenderRegion& bbox,
     }
     if (rw.bandShoot > 8 && rw.bandSize > 16) {
         rw.bandSize = (rw.bandSize >> 1);
+    }
+    //QUILL
+    if (cellPool->size > KEPT_POOL_SIZE) {
+        cellPool->size = KEPT_POOL_SIZE;
+        tvg::free(cellPool->buffer);
+        cellPool->buffer = tvg::malloc<SwCell>(cellPool->size);
     }
     return rw.rle;
 }
