@@ -1,6 +1,9 @@
 //! Poll batches: work that only needs to run once after a burst of
 //! envelopes (the UI redraws once per batch too) waits for `end_batch`.
 use super::*;
+use crate::telegram::envelope::{
+    ChatListPayload, ChatsPayload, EnvelopePayload, MediaPayload, UsersPayload,
+};
 
 /// What a poll batch postponed.
 #[derive(Debug, Default)]
@@ -48,7 +51,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// After an envelope: resolve and download the open chat's custom
+    /// `end_batch` for an account not on screen: nothing shows its custom
+    /// emoji, so they wait for the first batch once it is shown.
+    pub fn end_offscreen_batch(&mut self) {
+        self.batch.open = false;
+        self.session.end_update_batch();
+    }
+
+    /// After an envelope that may show a new custom emoji: resolve and download the open chat's custom
     /// emoji now, or once at the end of the batch.
     pub(super) fn sync_open_chat_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
         if self.batch.open {
@@ -67,4 +77,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         Ok(())
     }
+}
+
+/// Frequent payloads that never bring a custom emoji id into view, so the
+/// open chat's custom emoji need no second look. Anything not listed still
+/// counts: a missed kind costs time, not a missing emoji.
+pub(super) fn adds_no_custom_emoji(payload: &EnvelopePayload) -> bool {
+    matches!(
+        payload,
+        EnvelopePayload::Media(MediaPayload::UpdateFile(_) | MediaPayload::File(_))
+            | EnvelopePayload::Users(UsersPayload::UpdateUserStatus { .. })
+            | EnvelopePayload::Chats(
+                ChatsPayload::UpdateChatAction { .. }
+                    | ChatsPayload::UpdateChatReadInbox { .. }
+                    | ChatsPayload::UpdateChatReadOutbox { .. }
+                    | ChatsPayload::UpdateChatOnlineMemberCount { .. }
+            )
+            | EnvelopePayload::ChatList(
+                ChatListPayload::UpdateUnreadMessageCount { .. }
+                    | ChatListPayload::UpdateUnreadChatCount { .. }
+            )
+    )
 }

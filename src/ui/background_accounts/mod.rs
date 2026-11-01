@@ -457,7 +457,7 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = live.driver.end_batch();
+            live.driver.end_offscreen_batch();
             ingested |= live
                 .driver
                 .poll_ticks(quill::connect::TickScope::Background, now)

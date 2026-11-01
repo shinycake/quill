@@ -179,6 +179,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // so without this they waited for an unrelated update.
                 | EnvelopePayload::Bots(BotsPayload::InlineQueryResults(_))
         );
+        let emoji_neutral = batch::adds_no_custom_emoji(&owned.envelope.payload);
         // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
             owned.envelope.payload,
@@ -813,7 +814,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.refresh_open_mask_lists()?;
         self.apply_resolved_enable_sharing()?;
         self.maybe_resolve_emoji_status_choices()?;
-        self.sync_open_chat_custom_emoji()?;
+        if !emoji_neutral {
+            self.sync_open_chat_custom_emoji()?;
+        }
         if gif_bot_changed {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();
