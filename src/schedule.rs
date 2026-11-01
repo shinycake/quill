@@ -146,10 +146,11 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
         .unwrap_or(early)
 }
 
-/// The instant a picker means once it shows `civil`, having opened at
-/// `initial`. A time left as it opened keeps its own pass of a repeated
-/// hour; any other is resolved by [`civil_to_unix_with`]. Either way it is
-/// the whole minute shown, as tdesktop builds it from the date and time.
+/// The instant a picker means once it shows `civil`, having opened
+/// showing `initial`. A time left as it opened keeps its own pass of a
+/// repeated hour; any other is resolved by [`civil_to_unix_with`]. Either
+/// way it is the whole minute shown, as tdesktop builds it from the date
+/// and time.
 pub fn picked_instant(
     civil: &CivilTime,
     initial: i64,

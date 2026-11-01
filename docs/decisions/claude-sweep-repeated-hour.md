@@ -28,8 +28,8 @@ accept past times), Quill takes the first, as Qt does.
 A skipped time lands as far past the gap as it was into it, as Qt does:
 02:30 on the night clocks go forward becomes 03:30.
 
-`schedule::picked_instant` keeps the instant a picker opened at when the
-picked time is left as it was. A message set for 01:20 CST and reopened
+`schedule::picked_instant` keeps the instant a picker opened showing when
+the picked time is left as it was. A message set for 01:20 CST and reopened
 the evening before stays on 01:20 CST, not 01:20 CDT. tdesktop has no
 such rule: it rebuilds the time from the fields, so the same reopen moves
 the message an hour earlier.

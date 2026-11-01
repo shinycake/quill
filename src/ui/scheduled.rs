@@ -131,7 +131,7 @@ fn local_day(unix: i64, clock: &WallClock) -> String {
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
 }
 
-/// A date picker and the instant it opened at, so a time left as it was
+/// A date picker and the instant it opened showing, so a time left as it was
 /// keeps its own pass of a repeated hour.
 #[derive(Clone)]
 pub(crate) struct TimePicker {

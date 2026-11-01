@@ -38,7 +38,7 @@ impl WallClock {
         civil_at(unix, (self.offset_at)(unix))
     }
 
-    /// The instant a picker that opened at `initial` means once it shows
+    /// The instant a picker that opened showing `initial` means once it shows
     /// `civil` (see [`picked_instant`]).
     pub(crate) fn resolve(&self, civil: &CivilTime, initial: i64) -> i64 {
         picked_instant(civil, initial, &*self.offset_at, self.now())
