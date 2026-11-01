@@ -48,9 +48,32 @@ fn numbers_past_the_limit_are_refused_only_in_animation_data() {
 }
 
 #[test]
-fn a_key_with_a_nul_is_refused() {
-    let doc = with_layers(json!([{"a\u{0}": 1}]));
-    assert_eq!(check(&doc), Err(Malformed::Key));
+fn keys_and_strings_are_held_to_plain_text_from_the_root_down() {
+    for doc in [
+        json!({"layers": [], "layers\u{0}x": [{"ty": 0}]}),
+        json!({"layers": [], "assets\u{0}": []}),
+        json!({"layers": [], "nm": "a\u{0}"}),
+        json!({"layers": [], "meta": {"list": [{"g\u{0}": 1}]}}),
+        with_layers(json!([{"ty": 4, "shapes\u{0}": []}])),
+        with_layers(json!([{"nm": "\u{0}"}])),
+        with_shapes(json!([{"ty": "gr\u{0}", "it": []}])),
+        with_shapes(json!([{"ty": "gr", "it\u{0}": []}])),
+        with_assets(json!([]), json!([{"id": "a\u{0}", "layers": []}])),
+    ] {
+        assert_eq!(check(&doc), Err(Malformed::Text), "{doc}");
+    }
+}
+
+#[test]
+fn plain_text_is_settled_before_anything_else_is_read() {
+    let doc = json!({"layers": 1, "nm": "\u{0}"});
+    assert_eq!(check(&doc), Err(Malformed::Text));
+}
+
+#[test]
+fn punctuation_in_names_is_ordinary_text() {
+    let doc = json!({"layers": [{"nm": "{\"a\\b\"}\n\t\u{1}\u{2028}é"}], "nm": "}"});
+    assert_eq!(check(&doc), Ok(()));
 }
 
 #[test]
@@ -80,9 +103,8 @@ fn a_layer_kind_is_a_small_whole_number() {
 
 #[test]
 fn a_precomp_layer_holds_nothing_of_its_own() {
-    for own in [json!({"ty": 0, "shapes": []}), json!({"ty": 0, "t": {}})] {
-        assert_eq!(check(&with_layers(json!([own]))), Err(Malformed::Layer));
-    }
+    let own = with_layers(json!([{"ty": 0, "shapes": []}]));
+    assert_eq!(check(&own), Err(Malformed::Layer));
     assert_eq!(
         check(&with_layers(json!([{"ty": 4, "shapes": []}]))),
         Ok(())
@@ -194,12 +216,10 @@ fn a_precomp_cannot_reach_itself() {
 
 #[test]
 fn a_reference_goes_where_the_renderer_would_send_it() {
+    let (id, same_key) = ("a!", "`B");
     let doc = with_assets(
-        json!([precomp("a\u{0}x")]),
-        json!([
-            {"id": "a", "layers": [precomp("a")]},
-            {"id": "a\u{0}x", "layers": []},
-        ]),
+        json!([precomp(same_key)]),
+        json!([{"id": id, "layers": [precomp(same_key)]}]),
     );
     assert_eq!(check(&doc), Err(Malformed::Asset));
 }
@@ -389,20 +409,4 @@ fn a_dashed_stroke_costs_more_than_a_plain_one() {
     };
     assert_eq!(check(&shapes(false)), Ok(()));
     assert_eq!(check(&shapes(true)), Err(Malformed::TooComplex));
-}
-
-#[test]
-fn text_counts_each_character_as_its_costliest_glyph() {
-    let doc = |length| {
-        let text = "a".repeat(length);
-        let vertices = vec![json!([0, 0]); 100];
-        json!({
-            "layers": [{"ty": 5, "t": {"d": {"k": [{"s": {"t": text}, "t": 0}]}}}],
-            "chars": [{"data": {"shapes": [
-                {"ty": "sh", "ks": {"k": {"v": vertices}}},
-            ]}}],
-        })
-    };
-    assert_eq!(check(&doc(100)), Ok(()));
-    assert_eq!(check(&doc(100_000)), Err(Malformed::TooComplex));
 }

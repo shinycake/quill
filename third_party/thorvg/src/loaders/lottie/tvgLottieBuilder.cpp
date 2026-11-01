@@ -1107,10 +1107,8 @@ Shape* LottieBuilder::textShape(LottieText* text, float frameNo, const TextDocum
     shape->reset();
 
     ARRAY_FOREACH(p, glyph->children) {
-        if ((*p)->type != LottieObject::Group) continue;  //QUILL
         auto group = static_cast<LottieGroup*>(*p);
         ARRAY_FOREACH(p, group->children) {
-            if ((*p)->type != LottieObject::Path) continue;  //QUILL
             static_cast<LottiePath*>(*p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
             PAINT(shape)->mark(RenderUpdateFlag::Path);
         }
@@ -1238,13 +1236,12 @@ static LottieGlyph* _searchGlyph(const LottieFont* font, const char* p, const Te
 {
     capScale = 1.0f;
     auto outCode = p;
-    char capCode[2] = {};  //QUILL
 
     // SmallCaps: lowercase letters are converted to uppercase with 70% scale
     if ((unsigned char)*p < 0x80 && doc.caps) {
         if (*p >= 'a' && *p <= 'z') {
-            capCode[0] = *p + 'A' - 'a';
-            outCode = capCode;
+            char capCode = *p + 'A' - 'a';
+            outCode = &capCode;
             if (doc.caps == 2) capScale = 0.7f;
         }
     }
@@ -1366,7 +1363,7 @@ void LottieBuilder::updateText(LottieLayer* layer, float frameNo)
 
     auto text = static_cast<LottieText*>(layer->children.first());
     auto& doc = text->doc(frameNo, exps);
-    if (!doc.text || !doc.name) return;  //QUILL
+    if (!doc.text) return;
 
     if (text->font && text->font->origin == LottieFont::Origin::Local && !text->font->chars.empty()) {
         updateLocalFont(layer, frameNo, text, doc);
@@ -1688,7 +1685,6 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
                 auto len = strlen(doc.name);
                 for (uint32_t i = 0; i < comp->fonts.count; ++i) {
                     auto font = comp->fonts[i];
-                    if (!font->name) continue;  //QUILL
                     auto len2 = strlen(font->name);
                     if (len == len2 && !strcmp(font->name, doc.name)) {
                         text->font = font;

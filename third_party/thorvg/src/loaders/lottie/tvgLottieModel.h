@@ -301,11 +301,11 @@ struct LottieObject
 struct LottieGlyph
 {
     Array<LottieObject*> children;   //glyph shapes.
-    float width = 0.0f;  //QUILL
+    float width;
     char* code = nullptr;
     char* family = nullptr;
     char* style = nullptr;
-    uint16_t size = 0;
+    uint16_t size;
     uint8_t len;
 
     bool prepare()

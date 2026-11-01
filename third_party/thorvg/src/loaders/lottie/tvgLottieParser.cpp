@@ -1180,7 +1180,7 @@ void LottieParser::parseChars(Array<LottieGlyph*>& glyphs)
         auto glyph = new LottieGlyph;
         while (auto key = nextObjectKey()) {
             if (KEY_AS("ch")) glyph->code = getStringCopy();
-            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(tvg::clamp(getFloat(), 0.0f, 65535.0f));  //QUILL
+            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(getFloat());
             else if (KEY_AS("style")) glyph->style = getStringCopy();
             else if (KEY_AS("w")) glyph->width = getFloat();
             else if (KEY_AS("fFamily")) glyph->family = getStringCopy();
@@ -1611,10 +1611,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
         else if (KEY_AS("hd")) layer->hidden = getBool();
         else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
         else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
-        else if (KEY_AS("t")) parseText(layer->children);
         else if (KEY_AS("ef")) parseEffects(layer);
         else if (KEY_AS("au")) parseVolume(layer);
-        else skip();
+        else skip();  //QUILL
     }
 
     layer->prepare(&color);
@@ -1645,7 +1644,6 @@ void LottieParser::postProcess(Array<LottieGlyph*>& glyphs)
         auto glyph = *g;
         ARRAY_FOREACH(f, comp->fonts) {
             auto font = *f;
-            if (!font->family || !glyph->family || !font->style || !glyph->style) continue;  //QUILL
             if (!strcmp(font->family, glyph->family) && !strcmp(font->style, glyph->style)) {
                 font->chars.push(glyph);
                 free(glyph->family);
@@ -1809,11 +1807,8 @@ bool LottieParser::parse()
         else if (KEY_AS("nm")) comp->name = getStringCopy();
         else if (KEY_AS("assets")) parseAssets();
         else if (KEY_AS("layers")) comp->root = parseLayers();
-        else if (KEY_AS("fonts")) parseFonts();
-        else if (KEY_AS("chars")) parseChars(glyphs);
         else if (KEY_AS("markers")) parseMarkers();
-        else if (KEY_AS("slots")) captureSlots(key);
-        else skip();
+        else skip();  //QUILL
     }
 
     if (Invalid() || !comp->root) {

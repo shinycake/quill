@@ -51,7 +51,7 @@ index f09ca98eb..925e2c902 100644
  
  static inline Fill::ColorStop lerp(const Fill::ColorStop& from, const Fill::ColorStop& to, float t)
 diff --git a/src/loaders/lottie/tvgLottieBuilder.cpp b/src/loaders/lottie/tvgLottieBuilder.cpp
-index d4f7c385c..e6903f69a 100644
+index d4f7c385c..2a16c79e8 100644
 --- a/src/loaders/lottie/tvgLottieBuilder.cpp
 +++ b/src/loaders/lottie/tvgLottieBuilder.cpp
 @@ -178,25 +178,27 @@ static bool _update(LottieTransform* transform, float frameNo, Matrix& matrix, u
@@ -159,43 +159,7 @@ index d4f7c385c..e6903f69a 100644
      r.transform = ctx->propagator->transform();
      r.offset = repeater->offset(frameNo, tween, exps);
      r.position = repeater->position(frameNo, tween, exps);
-@@ -1093,8 +1107,10 @@ Shape* LottieBuilder::textShape(LottieText* text, float frameNo, const TextDocum
-     shape->reset();
- 
-     ARRAY_FOREACH(p, glyph->children) {
-+        if ((*p)->type != LottieObject::Group) continue;  //QUILL
-         auto group = static_cast<LottieGroup*>(*p);
-         ARRAY_FOREACH(p, group->children) {
-+            if ((*p)->type != LottieObject::Path) continue;  //QUILL
-             static_cast<LottiePath*>(*p)->pathset(frameNo, to<ShapeImpl>(shape)->rs.path, nullptr, tween, exps);
-             PAINT(shape)->mark(RenderUpdateFlag::Path);
-         }
-@@ -1222,12 +1238,13 @@ static LottieGlyph* _searchGlyph(const LottieFont* font, const char* p, const Te
- {
-     capScale = 1.0f;
-     auto outCode = p;
-+    char capCode[2] = {};  //QUILL
- 
-     // SmallCaps: lowercase letters are converted to uppercase with 70% scale
-     if ((unsigned char)*p < 0x80 && doc.caps) {
-         if (*p >= 'a' && *p <= 'z') {
--            char capCode = *p + 'A' - 'a';
--            outCode = &capCode;
-+            capCode[0] = *p + 'A' - 'a';
-+            outCode = capCode;
-             if (doc.caps == 2) capScale = 0.7f;
-         }
-     }
-@@ -1349,7 +1366,7 @@ void LottieBuilder::updateText(LottieLayer* layer, float frameNo)
- 
-     auto text = static_cast<LottieText*>(layer->children.first());
-     auto& doc = text->doc(frameNo, exps);
--    if (!doc.text) return;
-+    if (!doc.text || !doc.name) return;  //QUILL
- 
-     if (text->font && text->font->origin == LottieFont::Origin::Local && !text->font->chars.empty()) {
-         updateLocalFont(layer, frameNo, text, doc);
-@@ -1621,6 +1638,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
+@@ -1621,6 +1635,7 @@ static void _buildReference(LottieComposition* comp, LottieLayer* layer)
      ARRAY_FOREACH(p, comp->assets) {
          if (layer->rid != (*p)->id) continue;
          if (layer->type == LottieLayer::Precomp) {
@@ -203,15 +167,7 @@ index d4f7c385c..e6903f69a 100644
              auto asset = static_cast<LottieRootLayer*>(*p);
              if (_buildComposition(comp, asset)) {
                  layer->children = asset->children;
-@@ -1670,6 +1688,7 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
-                 auto len = strlen(doc.name);
-                 for (uint32_t i = 0; i < comp->fonts.count; ++i) {
-                     auto font = comp->fonts[i];
-+                    if (!font->name) continue;  //QUILL
-                     auto len2 = strlen(font->name);
-                     if (len == len2 && !strcmp(font->name, doc.name)) {
-                         text->font = font;
-@@ -1687,8 +1706,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
+@@ -1687,8 +1702,9 @@ static void _attachFont(LottieComposition* comp, LottieLayer* parent)
  static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
  {
      if (parent->children.count == 0) return false;
@@ -222,7 +178,7 @@ index d4f7c385c..e6903f69a 100644
  
      ARRAY_FOREACH(p, parent->children) {
          auto child = static_cast<LottieLayer*>(*p);
-@@ -1717,6 +1737,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
+@@ -1717,6 +1733,16 @@ static bool _buildComposition(LottieComposition* comp, LottieRootLayer* parent)
          //attach the necessary font data
          if (child->type == LottieLayer::Text) _attachFont(comp, child);
      }
@@ -240,7 +196,7 @@ index d4f7c385c..e6903f69a 100644
  }
  
 diff --git a/src/loaders/lottie/tvgLottieCommon.h b/src/loaders/lottie/tvgLottieCommon.h
-index f91e6d8f8..262d09485 100644
+index f91e6d8f8..55087370b 100644
 --- a/src/loaders/lottie/tvgLottieCommon.h
 +++ b/src/loaders/lottie/tvgLottieCommon.h
 @@ -33,8 +33,8 @@ struct PathSet
@@ -254,37 +210,7 @@ index f91e6d8f8..262d09485 100644
  
      void convert(RenderPath& to)
      {
-@@ -83,21 +83,22 @@ struct ColorStop
- 
- struct TextDocument
- {
-+    //QUILL
-     char* text = nullptr;
--    float height;
--    float shift;
--    RGB32 color;
-+    float height = 0.0f;
-+    float shift = 0.0f;
-+    RGB32 color{};
-     struct {
--        Point pos;
-+        Point pos{};
-         Point size{};
-     } bbox;
-     struct {
--        RGB32 color;
--        float width;
-+        RGB32 color{};
-+        float width = 0.0f;
-         bool below = false;
-     } stroke;
-     char* name = nullptr;
--    float size;
-+    float size = 0.0f;
-     float tracking = 0.0f;
-     float justify = 0.0f;    //horizontal alignment
-     uint8_t caps = 0;        //0: Regular, 1: AllCaps, 2: SmallCaps
-@@ -135,10 +136,11 @@ struct AssetSrc
+@@ -135,10 +135,11 @@ struct AssetSrc
  
  static inline RGB32 lerp(const RGB32& s, const RGB32& e, float t)
  {
@@ -322,7 +248,7 @@ index e0cc2a647..5aa5b857c 100644
      if (type == LottieLayer::Precomp || (color && type == LottieLayer::Solid)) {
          auto obj = Shape::gen();
 diff --git a/src/loaders/lottie/tvgLottieModel.h b/src/loaders/lottie/tvgLottieModel.h
-index e9beabec6..c3a707e37 100644
+index e9beabec6..665aaec63 100644
 --- a/src/loaders/lottie/tvgLottieModel.h
 +++ b/src/loaders/lottie/tvgLottieModel.h
 @@ -229,7 +229,7 @@ struct LottieMask
@@ -334,20 +260,6 @@ index e9beabec6..c3a707e37 100644
      bool inverse = false;
  };
  
-@@ -301,11 +301,11 @@ struct LottieObject
- struct LottieGlyph
- {
-     Array<LottieObject*> children;   //glyph shapes.
--    float width;
-+    float width = 0.0f;  //QUILL
-     char* code = nullptr;
-     char* family = nullptr;
-     char* style = nullptr;
--    uint16_t size;
-+    uint16_t size = 0;
-     uint8_t len;
- 
-     bool prepare()
 @@ -817,9 +817,13 @@ struct LottieGradient : LottieObject
          if (!colorStops.populated) {
              auto count = colorStops.count;  //colorstop count can be modified after population
@@ -464,7 +376,7 @@ index 0ab0d875c..a9641ee02 100644
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
 diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..a5622c88b 100644
+index 242d52a98..10cbf73d7 100644
 --- a/src/loaders/lottie/tvgLottieParser.cpp
 +++ b/src/loaders/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
@@ -563,7 +475,7 @@ index 242d52a98..a5622c88b 100644
 +            auto name = p + 1;
 +            for (++p; *p != '\0' && *p != '\"'; ++p) {
 +                if (*p == '\\' && p[1] != '\0') ++p;
-+            }
+             }
 +            if (*p == '\0') return nullptr;
 +            if (level != 0 || p - name != 2 || strncmp(name, "ty", 2)) continue;
 +            ++p;
@@ -571,7 +483,7 @@ index 242d52a98..a5622c88b 100644
 +            if (*p != ':') {
 +                --p;
 +                continue;
-             }
++            }
 +            ++p;
 +            while (*p != '\0' && (isspace(*p) || *p == '\n')) ++p;
 +            if (*p++ != '\"') return nullptr;
@@ -582,23 +494,31 @@ index 242d52a98..a5622c88b 100644
          }
      }
      return nullptr;
-@@ -1162,7 +1180,7 @@ void LottieParser::parseChars(Array<LottieGlyph*>& glyphs)
-         auto glyph = new LottieGlyph;
-         while (auto key = nextObjectKey()) {
-             if (KEY_AS("ch")) glyph->code = getStringCopy();
--            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(getFloat());
-+            else if (KEY_AS("size")) glyph->size = static_cast<uint16_t>(tvg::clamp(getFloat(), 0.0f, 65535.0f));  //QUILL
-             else if (KEY_AS("style")) glyph->style = getStringCopy();
-             else if (KEY_AS("w")) glyph->width = getFloat();
-             else if (KEY_AS("fFamily")) glyph->family = getStringCopy();
-@@ -1627,6 +1645,7 @@ void LottieParser::postProcess(Array<LottieGlyph*>& glyphs)
-         auto glyph = *g;
-         ARRAY_FOREACH(f, comp->fonts) {
-             auto font = *f;
-+            if (!font->family || !glyph->family || !font->style || !glyph->style) continue;  //QUILL
-             if (!strcmp(font->family, glyph->family) && !strcmp(font->style, glyph->style)) {
-                 font->chars.push(glyph);
-                 free(glyph->family);
+@@ -1593,10 +1611,9 @@ LottieLayer* LottieParser::parseLayer(LottieRootLayer* precomp)
+         else if (KEY_AS("hd")) layer->hidden = getBool();
+         else if (KEY_AS("refId")) layer->rid = djb2Encode(getString());
+         else if (KEY_AS("td")) layer->matteSrc = getInt();      //used for matte layer
+-        else if (KEY_AS("t")) parseText(layer->children);
+         else if (KEY_AS("ef")) parseEffects(layer);
+         else if (KEY_AS("au")) parseVolume(layer);
+-        else skip();
++        else skip();  //QUILL
+     }
+ 
+     layer->prepare(&color);
+@@ -1790,11 +1807,8 @@ bool LottieParser::parse()
+         else if (KEY_AS("nm")) comp->name = getStringCopy();
+         else if (KEY_AS("assets")) parseAssets();
+         else if (KEY_AS("layers")) comp->root = parseLayers();
+-        else if (KEY_AS("fonts")) parseFonts();
+-        else if (KEY_AS("chars")) parseChars(glyphs);
+         else if (KEY_AS("markers")) parseMarkers();
+-        else if (KEY_AS("slots")) captureSlots(key);
+-        else skip();
++        else skip();  //QUILL
+     }
+ 
+     if (Invalid() || !comp->root) {
 diff --git a/src/loaders/lottie/tvgLottieParserHandler.cpp b/src/loaders/lottie/tvgLottieParserHandler.cpp
 index e0933642f..41a9c7670 100644
 --- a/src/loaders/lottie/tvgLottieParserHandler.cpp

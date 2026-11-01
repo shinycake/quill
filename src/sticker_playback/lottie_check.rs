@@ -21,14 +21,13 @@ const DASHED_PAINTS: u64 = 16;
 const OFFSET_COPIES: u64 = 9;
 const MAX_LAYER_KIND: u64 = 15;
 const PRECOMP: u64 = 0;
-const TEXT: u64 = 5;
 const CUSTOM_EFFECT: u64 = 5;
-const ANIMATION_SECTIONS: [&str; 3] = ["layers", "assets", "chars"];
+const ANIMATION_SECTIONS: [&str; 2] = ["layers", "assets"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Malformed {
+    Text,
     Number,
-    Key,
     Array,
     Layer,
     Shape,
@@ -37,6 +36,7 @@ pub(super) enum Malformed {
 }
 
 pub(super) fn check(doc: &Value) -> Result<(), Malformed> {
+    check_text(doc)?;
     if work(doc)? > MAX_WORK {
         return Err(Malformed::TooComplex);
     }
@@ -62,6 +62,25 @@ fn work(doc: &Value) -> Result<u64, Malformed> {
     Ok(cost.work)
 }
 
+/// Everything below reads keys and strings as `serde_json` decoded them, and
+/// ThorVG has to read the same ones, so this holds for the whole document.
+/// `serde_json`'s recursion limit bounds the depth.
+fn check_text(value: &Value) -> Result<(), Malformed> {
+    let plain = |text: &str| !text.contains('\0');
+    match value {
+        Value::String(text) if !plain(text) => Err(Malformed::Text),
+        Value::Array(items) => items.iter().try_for_each(check_text),
+        Value::Object(fields) => fields.iter().try_for_each(|(key, field)| {
+            if plain(key) {
+                check_text(field)
+            } else {
+                Err(Malformed::Text)
+            }
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// `serde_json`'s recursion limit bounds the depth.
 fn check_values(value: &Value) -> Result<(), Malformed> {
     match value {
@@ -80,9 +99,6 @@ fn check_values(value: &Value) -> Result<(), Malformed> {
         }
         Value::Object(fields) => {
             for (key, field) in fields {
-                if key.contains('\0') {
-                    return Err(Malformed::Key);
-                }
                 if key == "k"
                     && let Value::Array(items) = field
                     && !items.iter().all(Value::is_number)
@@ -184,18 +200,15 @@ struct Walk<'a> {
     /// lookup, so this walks the graph ThorVG will build.
     by_key: HashMap<c_ulong, usize>,
     layers_seen: usize,
-    glyph_work: u64,
 }
 
-/// ThorVG's key for an id (`djb2Encode`): it stops at a NUL, and its width
-/// and the sign of its bytes follow the platform's C types.
+/// ThorVG's key for an id (`djb2Encode`): its width and the sign of its bytes
+/// follow the platform's C types.
 fn asset_key(id: &str) -> c_ulong {
-    id.bytes()
-        .take_while(|byte| *byte != 0)
-        .fold(5381, |hash: c_ulong, byte| {
-            hash.wrapping_mul(33)
-                .wrapping_add(c_int::from(byte as c_char) as c_ulong)
-        })
+    id.bytes().fold(5381, |hash: c_ulong, byte| {
+        hash.wrapping_mul(33)
+            .wrapping_add(c_int::from(byte as c_char) as c_ulong)
+    })
 }
 
 impl<'a> Walk<'a> {
@@ -204,7 +217,6 @@ impl<'a> Walk<'a> {
             assets: Vec::new(),
             by_key: HashMap::new(),
             layers_seen: 0,
-            glyph_work: glyph_work(doc)?,
         };
         let Some(assets) = doc.get("assets") else {
             return Ok(walk);
@@ -265,7 +277,7 @@ impl<'a> Walk<'a> {
             None => None,
         };
         let precomp = kind == Some(PRECOMP);
-        if precomp && (layer.contains_key("shapes") || layer.contains_key("t")) {
+        if precomp && layer.contains_key("shapes") {
             return Err(Malformed::Layer);
         }
         let mut cost = Cost::default();
@@ -289,11 +301,6 @@ impl<'a> Walk<'a> {
         cost.work = cost
             .work
             .saturating_add(offscreen.saturating_mul(OFFSCREEN_WORK));
-        if kind == Some(TEXT) {
-            cost.work = cost
-                .work
-                .saturating_add(text_length(layer).saturating_mul(self.glyph_work));
-        }
         if let Some(shapes) = layer.get("shapes") {
             let shapes = shape_list(shapes.as_array().ok_or(Malformed::Layer)?, 0)?;
             cost.work = cost.work.saturating_add(shapes);
@@ -411,35 +418,6 @@ fn path_work(vertices: u64) -> u64 {
     vertices
         .saturating_mul(VERTEX_WORK)
         .saturating_add(SHAPE_WORK)
-}
-
-fn glyph_work(doc: &Value) -> Result<u64, Malformed> {
-    let Some(glyphs) = doc.get("chars").and_then(Value::as_array) else {
-        return Ok(0);
-    };
-    let mut work = 0;
-    for glyph in glyphs {
-        let shapes = glyph.get("data").and_then(|data| data.get("shapes"));
-        if let Some(shapes) = shapes.and_then(Value::as_array) {
-            work = shape_list(shapes, 0)?.max(work);
-        }
-    }
-    Ok(work)
-}
-
-fn text_length(layer: &Map<String, Value>) -> u64 {
-    let keyframes = layer
-        .get("t")
-        .and_then(|text| text.get("d"))
-        .and_then(|document| document.get("k"))
-        .and_then(Value::as_array);
-    keyframes
-        .into_iter()
-        .flatten()
-        .filter_map(|keyframe| keyframe.get("s")?.get("t")?.as_str())
-        .map(|text| text.len() as u64)
-        .max()
-        .unwrap_or(0)
 }
 
 fn check_gradient(shape: &Map<String, Value>) -> Result<(), Malformed> {
