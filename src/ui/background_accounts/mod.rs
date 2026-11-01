@@ -321,7 +321,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let (live, status) = match started {
-            Ok(live) => (Some(live), BackgroundStatus::Connecting),
+            Ok(live) => {
+                live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
+                (Some(live), BackgroundStatus::Connecting)
+            }
             Err(ConnectBlocker::DiskFull) => {
                 self.disk.refused_start();
                 return;
@@ -393,25 +396,30 @@ impl QuillApp {
         let generation = self.background.generation;
         Self::spawn_main(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
-            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, || {
-                this.update(cx, |this, cx| {
-                    if generation != this.background.generation {
-                        return None;
-                    }
-                    let work_left = this.poll_background(cx);
-                    if this.background.has_work() {
-                        Some(PassEnd {
-                            work_left,
-                            due: None,
-                        })
-                    } else {
-                        this.background.polling = false;
-                        None
-                    }
-                })
-                .ok()
-                .flatten()
-            })
+            run_poll_loop(
+                executor,
+                &quill::wake::BACKGROUND_UPDATES,
+                POLL_PACE,
+                || {
+                    this.update(cx, |this, cx| {
+                        if generation != this.background.generation {
+                            return None;
+                        }
+                        let work_left = this.poll_background(cx);
+                        if this.background.has_work() {
+                            Some(PassEnd {
+                                work_left,
+                                due: None,
+                            })
+                        } else {
+                            this.background.polling = false;
+                            None
+                        }
+                    })
+                    .ok()
+                    .flatten()
+                },
+            )
             .await;
         })
         .detach();

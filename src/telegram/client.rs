@@ -140,6 +140,17 @@ impl ReceiveBridge {
     pub fn is_joined(&self) -> bool {
         self.thread.is_none() && self.route.is_none()
     }
+
+    /// Wake `wake`'s poll loop for this client's envelopes
+    /// ([`crate::telegram::hub::Routes::wake_with`]), and wake it now for
+    /// what arrived while the other loop was woken instead. An injected
+    /// bridge wakes nothing.
+    pub fn wake_with(&self, wake: &'static crate::wake::Signal) {
+        if let Some((hub, client_id)) = &self.route {
+            hub.routes().wake_with(*client_id, wake);
+            wake.poke();
+        }
+    }
 }
 
 impl Drop for ReceiveBridge {
