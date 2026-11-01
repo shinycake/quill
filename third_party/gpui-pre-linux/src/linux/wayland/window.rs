@@ -975,6 +975,13 @@ impl WaylandWindowStatePtr {
             return;
         }
 
+        // Quill: the GPU recovery timer wakes the window when an attempt is
+        // due; nothing is drawn before then.
+        if state.recovery_retry_at.is_some() {
+            self.frame_loop.set(FrameLoop::Parked);
+            return;
+        }
+
         if state.presentation.requires_presentation() {
             // Before the first present, or when throttling skipped draw, a
             // callback may never arrive. Otherwise let the compositor pace
@@ -2062,8 +2069,12 @@ impl PlatformWindow for WaylandWindow {
                 window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
                 display: backend.display_ptr().cast::<std::ffi::c_void>(),
             };
+            // Each attempt asks for one frame (`recovery_retry_due`), not a
+            // frame every refresh until the next.
+            state.redraw_requested = false;
             match renderer.recover(&raw_window) {
                 Recovery::Recovered => {
+                    state.recovery_retry_at = None;
                     state.redraw_requested = true;
                     if let Some(at) = renderer.hardware_probe_at() {
                         let surface_id = state.surface.id();

@@ -111,9 +111,14 @@ QUILL-CHANGES.md):
   instant has passed, instead of forcing a full frame (and a 350 ms sleep)
   on every refresh. After `GaveUp` nothing is forced and the timer parks.
 - `src/linux/wayland/window.rs`, `src/linux/wayland/client.rs`: a calloop
-  timer (`run_for_window_at`) redraws the window when the attempt is
-  due, instead of redrawing every refresh interval. The device-lost path no
-  longer unwraps the surface's backend.
+  timer (`run_for_window_at`) asks for one frame when the attempt is due.
+  The device-lost branch of `draw` clears `redraw_requested`, and
+  `complete_frame` parks the frame loop while an attempt is pending, so the
+  window is not redrawn every refresh interval in between (the first
+  version of this change still was: the branch returned before clearing
+  the flag, so each attempt's request kept the retry timer ticking at the
+  refresh rate). The device-lost path no longer unwraps the surface's
+  backend.
 - After a recovery that landed on a software adapter, both backends call
   `WgpuRenderer::probe_hardware` from a calloop timer at
   `hardware_probe_at`, re-arm it at the instant it returns, and redraw
