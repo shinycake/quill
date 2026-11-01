@@ -87,9 +87,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .envelope
             .extra
             .and_then(|id| self.session.requests.purpose(id));
+        // A message landing in a chat nobody shows changes no open view.
+        let shown_message = match &owned.envelope.payload {
+            EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
+                self.session.chat_is_shown(message.chat_id)
+            }
+            EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent {
+                chat_id, ..
+            }) => self.session.chat_is_shown(*chat_id),
+            _ => false,
+        };
         let view_after = match &owned.envelope.payload {
-            EnvelopePayload::Messages(MessagesPayload::Messages(_))
-            | EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_)) => true,
+            EnvelopePayload::Messages(MessagesPayload::Messages(_)) => true,
+            EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_)) => shown_message,
             EnvelopePayload::Ok | EnvelopePayload::Error(_)
                 if view_purpose == Some(RequestPurpose::ViewMessages) =>
             {
@@ -168,17 +178,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             owned.envelope.payload,
             EnvelopePayload::Stickers(StickersPayload::TrendingStickerSets { .. })
         ) && view_purpose == Some(RequestPurpose::GetTrendingStickerSets);
-        let thumbs_after = matches!(
-            owned.envelope.payload,
-            EnvelopePayload::Messages(MessagesPayload::Messages(_))
-                | EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_))
-                | EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent { .. })
+        let thumbs_after = shown_message
+            || matches!(
+                owned.envelope.payload,
+                EnvelopePayload::Messages(MessagesPayload::Messages(_))
                 | EnvelopePayload::Media(MediaPayload::UpdateFile(_))
                 | EnvelopePayload::Media(MediaPayload::File(_))
                 // The results panel's images: nothing else asks for them,
                 // so without this they waited for an unrelated update.
                 | EnvelopePayload::Bots(BotsPayload::InlineQueryResults(_))
-        );
+            );
         let emoji_neutral = batch::adds_no_custom_emoji(&owned.envelope.payload);
         // Only the first page jumps to its first hit; "older" pages append.
         let chat_search_hits = matches!(
@@ -720,7 +729,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // "Send via Blockchain": the temporary password is in, ask for the URL.
         let _ = self.continue_gift_export();
         if view_after {
-            self.maybe_view_open_messages()?;
+            self.sync_shown_views()?;
         }
         // M2: full rich blocks replace the partial message's blocks in
         // history. Only `RichMessage` rows are touched — an unrelated
@@ -843,17 +852,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.update_sticker_suggestions(&emoji)?;
         }
-        if view_after {
-            let _ = self.maybe_fetch_replied_messages();
-        }
         if thumbs_after
             || self.session.stickers.stickers.open
             || self.session.stickers.gifs.open
             || self.session.stickers.emoji.open
             || !self.session.stickers.stickers.suggestions.is_empty()
         {
-            self.maybe_download_shown_thumbs()?;
-            self.maybe_download_open_chat_media()?;
+            self.sync_shown_media()?;
         }
         // Parity slice: chat-list avatars download on every ingest; each
         // photo is requested at most once (in-flight / completed dedupe).

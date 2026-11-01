@@ -13,6 +13,15 @@ pub(crate) struct BatchState {
     /// An envelope was applied since the open chat's custom emoji were
     /// last looked at.
     emoji_dirty: bool,
+    /// The shown chats' messages changed: mark them viewed and fetch the
+    /// messages they reply to.
+    views_dirty: bool,
+    /// The shown chats' media, or a file they wait on, changed: download
+    /// their thumbnails and auto-download media.
+    media_dirty: bool,
+    /// How often the shown chats' media pass ran.
+    #[cfg(test)]
+    pub(crate) media_passes: usize,
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -45,14 +54,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn end_batch(&mut self) -> Result<(), ConnectSendError> {
         self.batch.open = false;
         self.session.end_update_batch();
+        if std::mem::take(&mut self.batch.views_dirty) {
+            self.run_shown_views()?;
+        }
+        if std::mem::take(&mut self.batch.media_dirty) {
+            self.run_shown_media()?;
+        }
         if std::mem::take(&mut self.batch.emoji_dirty) {
             return self.resolve_open_chat_custom_emoji();
         }
         Ok(())
     }
 
-    /// `end_batch` for an account not on screen: nothing shows its custom
-    /// emoji, so they wait for the first batch once it is shown.
+    /// `end_batch` for an account not on screen: nothing shows its chats,
+    /// so the passes for them wait for the first batch once it is shown.
     pub fn end_offscreen_batch(&mut self) {
         self.batch.open = false;
         self.session.end_update_batch();
@@ -66,6 +81,42 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         self.resolve_open_chat_custom_emoji()
+    }
+
+    /// After an envelope that changed the shown chats' messages: view them
+    /// and fetch their reply targets now, or once at the end of the batch.
+    pub(super) fn sync_shown_views(&mut self) -> Result<(), ConnectSendError> {
+        if self.batch.open {
+            self.batch.views_dirty = true;
+            return Ok(());
+        }
+        self.run_shown_views()
+    }
+
+    /// After an envelope that may change what the shown chats need
+    /// downloaded: ask for it now, or once at the end of the batch.
+    pub(super) fn sync_shown_media(&mut self) -> Result<(), ConnectSendError> {
+        if self.batch.open {
+            self.batch.media_dirty = true;
+            return Ok(());
+        }
+        self.run_shown_media()
+    }
+
+    fn run_shown_views(&mut self) -> Result<(), ConnectSendError> {
+        self.maybe_view_open_messages()?;
+        let _ = self.maybe_fetch_replied_messages();
+        Ok(())
+    }
+
+    fn run_shown_media(&mut self) -> Result<(), ConnectSendError> {
+        #[cfg(test)]
+        {
+            self.batch.media_passes += 1;
+        }
+        self.maybe_download_shown_thumbs()?;
+        self.maybe_download_open_chat_media()?;
+        Ok(())
     }
 
     fn resolve_open_chat_custom_emoji(&mut self) -> Result<(), ConnectSendError> {

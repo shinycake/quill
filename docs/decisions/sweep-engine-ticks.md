@@ -21,3 +21,19 @@ ran about once per envelope.
 - Resolved ids come from the `CustomEmojiStickers` index, not from a
   `HashSet` built per pass, and `custom_emoji_files_for` looks each id up
   instead of walking the cache.
+
+## Shown-chat passes
+
+`maybe_view_open_messages` with `maybe_fetch_replied_messages`, and
+`maybe_download_shown_thumbs` with `maybe_download_open_chat_media`, ran in
+the body of `ingest` for every envelope that might concern them. They now
+set `views_dirty` and `media_dirty` in a batch and run once in `end_batch`,
+as the emoji pass does; outside a batch they run at once. A new message or
+a content change in a chat that is not shown no longer starts them.
+
+One case now waits for the next update: a message in another chat that is
+the target of a cross-chat reply in the open chat changes its content. The
+reply strip's thumbnail then downloads on the next shown-chat update.
+
+The two remaining linear scans of the custom emoji cache in
+`session_files.rs` use `CustomEmojiStickers::lookup`.

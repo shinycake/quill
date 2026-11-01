@@ -136,3 +136,71 @@ fn an_offscreen_batch_resolves_custom_emoji_once_shown() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn photo_file(id: i32, size: i32) -> String {
+    format!(
+        r#"{{"@type":"file","id":{id},"size":{size},"expected_size":{size},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0}},"remote":{{"@type":"remoteFile","id":"r{id}","unique_id":"u{id}","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":{size}}}}}"#
+    )
+}
+
+fn photo_message(id: i64, chat_id: i64, thumb: i32, full: i32) -> String {
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{},"width":320,"height":240,"progressive_sizes":[]}},{{"@type":"photoSize","type":"x","photo":{},"width":800,"height":600,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}}}}}"#,
+        photo_file(thumb, 10),
+        photo_file(full, 80),
+    )
+}
+
+/// A storm of file progress looks at the open chat's media once per batch,
+/// and still sends the downloads a photo in that batch needs. A photo in a
+/// chat nobody shows needs no look at all.
+#[test]
+fn a_batch_of_file_updates_looks_at_shown_media_once() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let downloads = || {
+        let mut files: Vec<i64> = recorder
+            .snapshot()
+            .iter()
+            .filter(|request| request.contains("\"downloadFile\""))
+            .filter_map(|request| serde_json::from_str::<serde_json::Value>(request).ok())
+            .filter_map(|request| request["file_id"].as_i64())
+            .collect();
+        files.sort_unstable();
+        files
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(7)).unwrap();
+    let before = driver.batch.media_passes;
+    driver.begin_batch();
+    ingest(&mut driver, &photo_message(20, 7, 1, 2));
+    for size in 0..100 {
+        ingest(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"updateFile","file":{}}}"#,
+                photo_file(50, size)
+            ),
+        );
+    }
+    driver.end_batch().unwrap();
+    assert_eq!(driver.batch.media_passes, before + 1);
+    assert_eq!(downloads(), vec![1, 2]);
+    driver.begin_batch();
+    ingest(&mut driver, &photo_message(30, 8, 3, 4));
+    driver.end_batch().unwrap();
+    assert_eq!(driver.batch.media_passes, before + 1);
+    assert_eq!(downloads(), vec![1, 2]);
+    let _ = std::fs::remove_dir_all(dir);
+}
