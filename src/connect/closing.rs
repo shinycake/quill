@@ -57,8 +57,9 @@ pub enum CloseProgress {
 }
 
 /// Most time a quit waits for stopped exports to leave their last requests,
-/// inside [`QUIT_CLOSE_DEADLINE`]. A worker sees the stop within 100 ms; one
-/// copying a large file is left behind.
+/// inside [`QUIT_CLOSE_DEADLINE`]. A worker sees the stop within 100 ms,
+/// and a copy into the export folder within one 1 MiB chunk
+/// (`export::copy`).
 pub const EXPORT_STOP_HOLD: Duration = Duration::from_millis(400);
 
 /// A client that can be closed in steps.
