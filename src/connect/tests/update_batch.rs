@@ -267,3 +267,120 @@ fn a_refused_custom_emoji_file_downloads_once_its_transfer_stops() {
     assert_eq!(emoji_downloads(), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn text_message(id: i64, chat_id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{chat_id},"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}}}"#
+    )
+}
+
+fn sent_of_type(recorder: &RecordingSender, type_name: &str) -> Vec<serde_json::Value> {
+    recorder
+        .snapshot()
+        .iter()
+        .filter_map(|request| serde_json::from_str::<serde_json::Value>(request).ok())
+        .filter(|request| request["@type"] == type_name)
+        .collect()
+}
+
+/// New messages in the open chat are marked viewed once per batch, at its
+/// end, up to the newest; a message in a chat nobody shows marks nothing.
+#[test]
+fn a_batch_views_the_open_chat_new_messages_once() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    for chat in [7, 8] {
+        ingest(
+            &mut driver,
+            &format!(
+                r#"{{"@type":"updateNewChat","chat":{{"id":{chat},"title":"Alice","type":{{"@type":"chatTypePrivate","user_id":{chat}}},"unread_count":0}}}}"#
+            ),
+        );
+    }
+    driver.select_chat(ChatId(7)).unwrap();
+    let before = sent_of_type(&recorder, "viewMessages").len();
+    driver.begin_batch();
+    ingest(&mut driver, &text_message(20, 7));
+    ingest(&mut driver, &text_message(21, 7));
+    assert_eq!(sent_of_type(&recorder, "viewMessages").len(), before);
+    driver.end_batch().unwrap();
+    let views = sent_of_type(&recorder, "viewMessages");
+    assert_eq!(views.len(), before + 1);
+    assert_eq!(views[before]["chat_id"], 7);
+    assert_eq!(views[before]["message_ids"], json!([21]));
+    driver.begin_batch();
+    ingest(&mut driver, &text_message(30, 8));
+    driver.end_batch().unwrap();
+    assert_eq!(sent_of_type(&recorder, "viewMessages").len(), before + 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A shown message whose content turns into a photo gets the photo's
+/// downloads; the same change in a chat nobody shows looks at no media.
+#[test]
+fn a_content_change_in_the_open_chat_downloads_its_new_photo() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let downloads = || {
+        let mut files: Vec<i64> = sent_of_type(&recorder, "downloadFile")
+            .iter()
+            .filter_map(|request| request["file_id"].as_i64())
+            .collect();
+        files.sort_unstable();
+        files
+    };
+    let photo_content = |thumb: i32, full: i32| {
+        format!(
+            r#"{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{},"width":320,"height":240,"progressive_sizes":[]}},{{"@type":"photoSize","type":"x","photo":{},"width":800,"height":600,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}"#,
+            photo_file(thumb, 10),
+            photo_file(full, 80),
+        )
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    driver.select_chat(ChatId(7)).unwrap();
+    ingest(&mut driver, &text_message(20, 7));
+    ingest(&mut driver, &text_message(30, 8));
+    assert_eq!(downloads(), Vec::<i64>::new());
+    driver.begin_batch();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateMessageContent","chat_id":7,"message_id":20,"new_content":{}}}"#,
+            photo_content(1, 2)
+        ),
+    );
+    driver.end_batch().unwrap();
+    assert_eq!(downloads(), vec![1, 2]);
+    let before = driver.batch.media_passes;
+    driver.begin_batch();
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateMessageContent","chat_id":8,"message_id":30,"new_content":{}}}"#,
+            photo_content(3, 4)
+        ),
+    );
+    driver.end_batch().unwrap();
+    assert_eq!(driver.batch.media_passes, before);
+    assert_eq!(downloads(), vec![1, 2]);
+    let _ = std::fs::remove_dir_all(dir);
+}
