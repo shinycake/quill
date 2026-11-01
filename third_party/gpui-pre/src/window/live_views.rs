@@ -21,7 +21,8 @@ use crate::{AnyElement, IntoElement as _};
 
 pub(crate) struct LiveView {
     view: AnyView,
-    element_id_stack: ElementIdStack,
+    /// Without its own id, which comes back when it prepaints in a patch.
+    parent_id_stack: ElementIdStack,
     text_style_stack: Vec<TextStyleRefinement>,
     image_cache_stack: Vec<AnyImageCache>,
     content_mask: ContentMask<Pixels>,
@@ -42,12 +43,11 @@ impl LiveView {
 impl Window {
     /// A live view prepaints at `bounds`. Returns its entry in the frame.
     pub(crate) fn note_live_view(&mut self, view: AnyView, bounds: Bounds<Pixels>) -> usize {
-        // Its own id comes back when it prepaints in a patch.
-        let mut element_id_stack = self.element_id_stack.clone();
-        element_id_stack.pop();
+        let mut parent_id_stack = self.element_id_stack.clone();
+        parent_id_stack.pop();
         self.next_frame.live_views.push(LiveView {
             view,
-            element_id_stack,
+            parent_id_stack,
             text_style_stack: self.text_style_stack.clone(),
             image_cache_stack: self.image_cache_stack.clone(),
             content_mask: self.content_mask(),
@@ -112,8 +112,15 @@ impl Window {
         let layouts = self.text_system.layout_index();
 
         let mut sites = std::mem::take(&mut self.rendered_frame.live_views);
-        sites.retain(|site| site.scene.is_some());
         sites.sort_by_key(|site| site.scene.as_ref().map(|scene| scene.start));
+        let mut covered = 0;
+        sites.retain(|site| match &site.scene {
+            Some(scene) if scene.start >= covered => {
+                covered = scene.end;
+                true
+            }
+            _ => false,
+        });
 
         let mut elements: SmallVec<[AnyElement; 4]> = SmallVec::new();
         for site in &sites {
@@ -165,7 +172,7 @@ impl Window {
     }
 
     fn in_live_view(&mut self, site: &LiveView, f: impl FnOnce(&mut Self)) {
-        self.element_id_stack.clone_from(&site.element_id_stack);
+        self.element_id_stack.clone_from(&site.parent_id_stack);
         self.text_style_stack.clone_from(&site.text_style_stack);
         self.image_cache_stack.clone_from(&site.image_cache_stack);
         self.element_opacity = site.opacity;

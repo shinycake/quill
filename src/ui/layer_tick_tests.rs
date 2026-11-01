@@ -186,8 +186,6 @@ impl Scene {
     }
 }
 
-/// A notify of a live view changes its paint, where it was in the stack,
-/// and renders nothing around it.
 #[gpui_kit::test]
 fn a_live_view_redraws_in_place_alone(cx: &mut TestAppContext) {
     let mut scene = Scene::open(cx);
@@ -202,6 +200,75 @@ fn a_live_view_redraws_in_place_alone(cx: &mut TestAppContext) {
     scene.set_live(THIRD);
     assert_eq!(scene.hues(), vec![UNDER, THIRD, OVER]);
     assert_eq!(scene.page_renders.get(), page);
+}
+
+struct Shell {
+    inner: Entity<Live>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for Shell {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div().size(px(10.)).child(self.inner.clone().live())
+    }
+}
+
+struct Nest {
+    shell: Entity<Shell>,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for Nest {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div().size_full().child(self.shell.clone().live())
+    }
+}
+
+#[gpui_kit::test]
+fn a_live_view_inside_another_redraws_with_it(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (nest_renders, shell_renders) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (nest_counter, shell_counter) = (nest_renders.clone(), shell_renders.clone());
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Live {
+            hue: FIRST,
+            renders: Rc::default(),
+            kept: Rc::default(),
+        });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        Nest {
+            shell: cx.new(|_| Shell {
+                inner,
+                renders: shell_counter,
+            }),
+            renders: nest_counter,
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let (nest, shell) = (nest_renders.get(), shell_renders.get());
+
+    inner.update(&mut vcx, |live, cx| {
+        live.hue = SECOND;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+
+    let quads = vcx.update(|window, _| window.painted_quads());
+    let hues: Vec<_> = quads
+        .iter()
+        .filter_map(|quad| quad.background.as_solid())
+        .map(|color| color.h)
+        .collect();
+    assert_eq!(hues, vec![SECOND]);
+    assert_eq!(nest_renders.get(), nest, "what holds them stayed");
+    assert_eq!(shell_renders.get(), shell + 1);
 }
 
 /// What a live view keeps between frames survives a redraw on its own,
@@ -270,7 +337,6 @@ fn clicks_land_after_a_live_redraw(cx: &mut TestAppContext) {
     assert_eq!(scene.clicks.get(), 2, "not on the button");
 }
 
-/// The frames a window draws after a live redraw count like any other.
 #[gpui_kit::test]
 fn a_live_redraw_is_a_frame(cx: &mut TestAppContext) {
     let mut scene = Scene::open(cx);
@@ -320,7 +386,6 @@ fn open_stickers(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContex
     (app, vcx)
 }
 
-/// A sticker's ticks draw frames of its layer and render nothing else.
 #[gpui_kit::test]
 fn a_sticker_tick_renders_the_layers_alone(cx: &mut TestAppContext) {
     let (_app, mut vcx) = open_stickers(cx);
@@ -367,7 +432,6 @@ impl Render for Dimmed {
     }
 }
 
-/// A layer draws a cell as dim as the slice painted it.
 #[gpui_kit::test]
 fn a_layer_keeps_the_opacity_of_what_it_draws(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

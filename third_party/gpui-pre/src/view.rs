@@ -267,8 +267,8 @@ impl<T: Render> Entity<T> {
     /// on its being rendered, and it can't change the window's layout, hit
     /// tests, focus or accessibility tree: those stay as the last whole frame
     /// left them, and what it builds in such a frame only paints. A live
-    /// view in a cached view that replays, or in another live view, takes
-    /// the usual path through its ancestors.
+    /// view in a cached view that replays takes the usual path through its
+    /// ancestors, and one inside another live view redraws with it.
     #[track_caller]
     pub fn live(self) -> ViewElement<Entity<T>> {
         let live = AnyView::from(self.clone());
