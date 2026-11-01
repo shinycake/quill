@@ -368,6 +368,7 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
 #[test]
 fn storage_limits_send_the_four_options_and_read_them_back() {
     let mut f = fixture();
+    f.2.sent.lock().unwrap().clear();
     f.1.set_storage_limits(Some(2 * 1024 * 1024 * 1024), Some(31 * 86_400))
         .unwrap();
     let sent: Vec<Value> = requests_of(&f.2, "setOption");
@@ -713,4 +714,55 @@ fn password_ops_carry_distinct_error_lines() {
     let _ = RequestPurpose::Auth(AuthPurpose::PasswordStateOp {
         op: PasswordOp::ResetPassword,
     });
+}
+
+#[test]
+fn the_first_ready_sets_tdesktops_cache_limits_once() {
+    use crate::storage_limits::{DEFAULT_KEEP, DEFAULT_SIZE};
+    let f = fixture();
+    let sent: Vec<Value> = requests_of(&f.2, "setOption");
+    let value = |name: &str| {
+        sent.iter()
+            .find(|r| r["name"] == name)
+            .map(|r| r["value"]["value"].clone())
+    };
+    assert_eq!(sent.len(), 4, "{sent:?}");
+    assert_eq!(
+        value("storage_max_files_size"),
+        Some(serde_json::json!((DEFAULT_SIZE / 1024).to_string()))
+    );
+    assert_eq!(
+        value("storage_max_time_from_last_access"),
+        Some(serde_json::json!(DEFAULT_KEEP.to_string()))
+    );
+    assert_eq!(
+        value("use_storage_optimizer"),
+        Some(serde_json::json!(true))
+    );
+    let paths = f.1.paths.clone();
+    assert!(crate::data_settings::load_data_storage_prefs(&paths).storage_limits_seeded);
+    cleanup(f);
+}
+
+#[test]
+fn a_later_start_or_an_earlier_choice_is_left_alone() {
+    let mut f = fixture();
+    f.2.sent.lock().unwrap().clear();
+    f.1.maybe_seed_storage_limits().unwrap();
+    assert!(requests_of(&f.2, "setOption").is_empty(), "seeded once");
+
+    f.1.session.settings.data_storage.storage_limits_seeded = false;
+    let no_limit =
+        crate::telegram::envelope::OptionValue::Integer(crate::storage_limits::UNLIMITED_KIB);
+    f.1.session
+        .settings
+        .storage_limits
+        .apply_option("storage_max_files_size", &no_limit);
+    f.1.maybe_seed_storage_limits().unwrap();
+    assert!(
+        requests_of(&f.2, "setOption").is_empty(),
+        "an earlier No limit sticks"
+    );
+    assert!(f.1.session.settings.data_storage.storage_limits_seeded);
+    cleanup(f);
 }
