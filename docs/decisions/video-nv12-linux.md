@@ -1,6 +1,6 @@
 # NV12 video surfaces on Linux
 
-Sweep bundle B7: findings linux-windows-6 and media-7.
+Sweep bundle B7: findings linux-windows-6 and media-7, owner decision L41.
 
 ## Problem
 
@@ -60,6 +60,58 @@ replacement) now builds off macOS. The Linux-only branches that assumed
 `Picture` had one variant are gone. Live feeds take the same NV12 path.
 macOS is unchanged.
 
+### Copies and textures left on the way (media-7)
+
+With pictures on the GPU path, what each one still cost:
+
+- `src/video_decode`: `pack_nv12` packed the shim's planes into a fresh
+  `Vec`, and `bytes.into()` then copied that `Vec` into the `Arc<[u8]>`
+  the renderer shares (the comment said "without another copy"; `From<Vec>`
+  for `Arc<[T]>` copies). Pictures are now packed straight into buffers
+  from a small pool (`nv12::BufferPool`, 8 at most) that are filled again
+  once no picture holds them, so a playing clip allocates nothing per
+  picture and copies once in Rust. Windows gains the same.
+- `rotate_bgra` (pictures that stay BGRA: 10-bit, 4:2:2, odd sides,
+  BT.2020, and the pause after a refused surface) writes into a zeroed
+  `Vec` of the right size instead of growing one. The `Vec` can't come
+  from a pool: the `RenderImage` it becomes owns it.
+- The shim's NV12 resize (a picture larger than the viewer's box) no
+  longer passes `SWS_ACCURATE_RND`, which selects swscale's slower
+  exact-rounding paths. Telegram Desktop passes no flag
+  (`ffmpeg_utility.cpp`). The BGRA path already had it dropped for even
+  widths (`qv_bgra_sws_flags`); owner decision L41 keeps that as it is.
+- The wgpu atlas (images, so the BGRA pictures above and every other
+  image): an upload went through `bytes.to_vec()` into a pending list and
+  then `queue.write_texture`'s staging copy. It now goes to the queue at
+  once, and only an RGBA atlas copies to swap channels. A picture larger
+  than 1024 px got a texture of its own, created for each picture and freed
+  after it; a freed one is now kept as a spare (two at most, for eight
+  frames) for the next picture of its size, so a clip alternates between
+  two textures.
+
+### Measurements
+
+`quill --video-probe` now prints the mean and worst `convert_us` (the
+shim's conversion plus the Rust packing), and
+`QUILL_VIDEO_PROBE_OUTPUT=nv12` asks for NV12 as the player does. Release
+builds, this container (4 cores, no GPU), clips of colour bars made with
+the pinned FFmpeg (MPEG-4 Part 2, yuv420p, limited BT.709, 30 fps), mean of
+two runs each:
+
+| Clip | Pixels | Before | Pool | Pool and no `ACCURATE_RND` |
+| --- | --- | --- | --- | --- |
+| 1920x1080, 300 pictures | BGRA | 1.74 ms | 1.96 ms | (unchanged path) |
+| 1920x1080 | NV12, copied | 2.62 ms | 0.70 ms | 0.71 ms |
+| 2560x1440 scaled to 1920x1080, 150 pictures | NV12, scaled | 6.39 ms | 5.64 ms | 3.99 ms |
+
+Before the pool, NV12 at 1080p cost more than BGRA here: the allocation
+and the extra copy outweighed swscale's SIMD BGRA conversion. BGRA's
+two runs vary by about 0.3 ms between builds, so its change is noise.
+The atlas change is shown by its test (two textures for 30 pictures of
+1080p, where each picture made one before); its frame time was not
+measured, since the viewer no longer draws BGRA pictures on Linux unless
+a stream needs it.
+
 ## How verified
 
 - `yuv_surfaces::tests` in the vendored crate, on lavapipe:
@@ -68,6 +120,9 @@ macOS is unchanged.
   empty scene frees it; an HDR frame is refused. Run with the crate's
   `test-support` feature on and its font-reading test modules left out,
   as the atlas tests were (`QUILL-CHANGES.md`).
+- `wgpu_atlas::tests` the same way, with
+  `video_pictures_take_turns_in_two_textures`; `video_decode::tests`
+  (with the real shim) for the pool and the packing into a buffer.
 - `cargo test --features demo-capture --bin quill video_player`: the NV12
   backend tests that ran only on Windows now take the surface branch on
   Linux.

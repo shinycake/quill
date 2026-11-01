@@ -111,3 +111,18 @@ on the GPU, as gpui-pre-windows does (`docs/decisions/video-nv12-linux.md`):
   pipelines.
 - `src/wgpu_renderer.rs`: the surfaces layout's uniform has a dynamic
   offset; `record_frame` prepares and draws the surfaces.
+
+The Quill project also changed it in 2026 so pictures shown as images cost
+fewer copies and textures (sweep finding media-7,
+`docs/decisions/video-nv12-linux.md`):
+
+- `src/wgpu_atlas.rs`: `upload_texture` hands the bytes to
+  `queue.write_texture` at once (the queue stages them for the next submit)
+  instead of copying them into a pending list that `before_frame` flushed;
+  `swizzle_upload_data` returns a `Cow` and copies only to swap BGRA into
+  RGBA. A freed texture larger than 1024² (one picture's own) is kept as a
+  spare (at most two, for eight frames) and taken by the next picture of
+  that size, so a playing 1080p clip alternates between two textures instead
+  of creating one per picture. Test: `video_pictures_take_turns_in_two_textures`;
+  the upstream `before_frame_skips_uploads_for_removed_texture` is now
+  `a_tile_removed_before_the_frame_is_safe`.
