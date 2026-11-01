@@ -62,9 +62,7 @@ pub(super) fn packet_frames(packet: &[u8]) -> Option<u64> {
 }
 
 pub(super) struct OpusSource {
-    /// Every packet, back to back.
     bytes: Vec<u8>,
-    /// Where packet `i` ends in `bytes`.
     ends: Vec<usize>,
     /// Decoded frame index (48 kHz, pre-skip included) where packet `i` starts.
     starts: Vec<u64>,
@@ -85,7 +83,7 @@ pub(super) struct OpusSource {
 
 impl OpusSource {
     pub(super) fn new<R: Read + Seek>(mut reader: R) -> Result<Self, String> {
-        let size = reader.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+        let file_len = reader.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
         reader.rewind().map_err(|e| e.to_string())?;
         let mut reader = ogg::PacketReader::new(reader);
         let head = reader
@@ -124,10 +122,9 @@ impl OpusSource {
         if !(1..=2).contains(&channels) || *mapping_family != 0 {
             return Err("unsupported Opus channel layout".into());
         }
-        // The file is the packets and a little framing.
         let mut bytes = Vec::new();
         bytes
-            .try_reserve_exact(usize::try_from(size).unwrap_or(0))
+            .try_reserve_exact(usize::try_from(file_len).unwrap_or(0))
             .map_err(|e| e.to_string())?;
         let mut ends = Vec::new();
         let mut starts = Vec::new();

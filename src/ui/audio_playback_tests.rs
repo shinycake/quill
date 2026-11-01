@@ -1,5 +1,3 @@
-//! A track's start as the row shows it, over the `ready-audio` demo (a song
-//! playing in chat 11). Nothing reaches Telegram or an audio device.
 use super::AUDIO_BUILT;
 use crate::ui::app::QuillApp;
 use crate::ui::audio::engine::test_support::{device, track};
@@ -11,6 +9,10 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
+
+const DEMO_CHAT: ChatId = ChatId(11);
+const DEMO_SONG: MessageId = MessageId(801);
+const DEMO_SONG_SECS: f64 = 214.0;
 
 fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-audio-start-ui"));
@@ -33,11 +35,11 @@ fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn is_showing_pause(app: &QuillApp) -> bool {
-    app.seek_bar_view(ChatId(11), MessageId(801), 214.0).is_playing
+    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS).is_playing
 }
 
 fn shows_loading(app: &QuillApp) -> bool {
-    app.seek_bar_view(ChatId(11), MessageId(801), 214.0).loading
+    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS).loading
 }
 
 #[gpui_kit::test]
@@ -76,7 +78,7 @@ fn a_finished_build_lands_when_it_says_so_and_a_failed_one_tells_the_user(cx: &m
             .audio
             .start(&missing, 1.0, 1.0, 1.0, 214.0)
             .unwrap();
-        app.playback.audio.await_built();
+        app.playback.audio.await_build_done();
         assert_eq!(app.playback.audio.state(), EngineState::Loading);
     });
     AUDIO_BUILT.poke();

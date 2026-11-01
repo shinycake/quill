@@ -70,7 +70,6 @@ pub(crate) struct PlaybackUi {
     /// What the seek bars, the player bar and the Touch Bar showed of the
     /// track at the last tick: the tick redraws them only when it changed.
     pub(super) tick_shown: Option<TrackShown>,
-    /// `QuillApp::watch_audio_builds` is running.
     pub(super) builds_watched: bool,
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
@@ -245,14 +244,14 @@ mod tests {
         ui.playing_audio = Some(MessageId(1));
         ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
-        ui.audio.await_build();
+        ui.audio.await_landing();
         assert!(ui.is_playing());
         ui.audio.pause();
         assert!(!ui.is_playing());
         ui.audio.seek(2.0, false).unwrap();
         std::fs::remove_file(&path).unwrap();
         ui.audio.resume(2.0).unwrap();
-        ui.audio.await_build();
+        ui.audio.await_landing();
         assert!(!ui.is_playing());
         assert_eq!(ui.engine_state(), EngineState::Paused);
     }
@@ -265,7 +264,7 @@ mod tests {
         ui.playing_audio = Some(MessageId(1));
         ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
-        ui.audio.await_build();
+        ui.audio.await_landing();
         std::thread::sleep(std::time::Duration::from_millis(250));
         assert!(ui.active_position_secs().unwrap_or(9.0) < 0.05);
         pull(&mut source, usize::try_from(RATE).unwrap() * 2);

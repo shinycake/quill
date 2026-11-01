@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
-/// A track finished building (`AudioEngine::set_on_built`).
 static AUDIO_BUILT: quill::wake::Signal = quill::wake::Signal::new();
 
 pub(super) fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
@@ -224,8 +223,6 @@ impl QuillApp {
         }
     }
 
-    /// Land each track as soon as its build is done, so its sound starts
-    /// then and not at the next tick.
     fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
         if std::mem::replace(&mut self.playback.builds_watched, true) {
             return;

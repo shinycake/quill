@@ -1025,8 +1025,6 @@ mod tests {
         assert!(quiet.long_enough(false, at(1300)));
     }
 
-    /// A device already up pulls a new player's sound from the first
-    /// sample, so nothing may read the player's layout before it has one.
     #[test]
     fn a_new_player_keeps_its_sounds_rate_from_the_first_sample() {
         let (channels, rate) = mono(8000);
