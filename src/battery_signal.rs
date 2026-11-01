@@ -64,7 +64,12 @@ fn record(answer: Option<Option<bool>>) {
     let fresh = if answer.is_some() { FRESH } else { 0 };
     let next =
         |state: u64| (state & !(VALUE | FRESH)).wrapping_add(ANSWER) | fresh | encode(answer);
-    STATE.update(Ordering::AcqRel, Ordering::Acquire, next);
+    let mut state = STATE.load(Ordering::Acquire);
+    while let Err(now) =
+        STATE.compare_exchange_weak(state, next(state), Ordering::AcqRel, Ordering::Acquire)
+    {
+        state = now;
+    }
     crate::wake::BATTERY.poke();
 }
 
