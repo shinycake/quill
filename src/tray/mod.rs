@@ -375,11 +375,10 @@ pub fn tray_setting_switches(tray_available: bool, tray_enabled: bool) -> TraySe
 pub enum CloseOutcome {
     /// Close the window and quit.
     Quit,
-    /// macOS: hide the whole app; the tray and Dock keep it reachable.
-    HideApp,
-    /// Windows and X11: hide the window (off the taskbar and the switcher);
-    /// the tray icon's "Open Quill" shows it again
-    /// (`ui/window_control.rs`).
+    /// Hide the window (tdesktop `closeWithoutDestroy`), and only that one:
+    /// call and Picture-in-Picture windows stay. The tray icon's "Open
+    /// Quill" shows it again, and on macOS the Dock too
+    /// (`ui/window_control.rs`, `ui/link_inbox.rs`).
     Hide,
     /// Wayland: xdg-shell cannot hide a toplevel, so the window is
     /// minimized and "Open Quill" asks the compositor to raise it.
@@ -401,11 +400,10 @@ pub fn close_outcome(
     signed_in: bool,
 ) -> CloseOutcome {
     let background = run_in_background && tray_available;
-    match (background || (macos && signed_in), macos, hide_supported) {
-        (false, _, _) => CloseOutcome::Quit,
-        (true, true, _) => CloseOutcome::HideApp,
-        (true, false, true) => CloseOutcome::Hide,
-        (true, false, false) => CloseOutcome::Minimize,
+    match (background || (macos && signed_in), hide_supported) {
+        (false, _) => CloseOutcome::Quit,
+        (true, true) => CloseOutcome::Hide,
+        (true, false) => CloseOutcome::Minimize,
     }
 }
 

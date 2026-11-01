@@ -206,6 +206,11 @@ impl ChatWindows {
         self.open.iter().any(|open| open.slot.borrow().active)
     }
 
+    /// A chat window is open.
+    pub(super) fn any_open(&self) -> bool {
+        !self.open.is_empty()
+    }
+
     /// Whether the window `host` (`None`: the main window) may open the
     /// kit dialog the app flags ask for: the one already showing a dialog
     /// keeps it; otherwise the window the last input happened in.

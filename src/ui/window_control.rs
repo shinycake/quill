@@ -78,6 +78,20 @@ pub(crate) fn is_minimised(window: &Window) -> bool {
     platform::is_minimised(window)
 }
 
+/// Whether the window is off screen because [`set_visible`] hid it, or
+/// because it never showed. macOS only: elsewhere the tray brings a hidden
+/// window back and nothing asks.
+pub(crate) fn is_hidden(window: &Window) -> bool {
+    #[cfg(target_os = "macos")]
+    let hidden = platform::is_hidden(window);
+    #[cfg(not(target_os = "macos"))]
+    let hidden = {
+        let _ = window;
+        false
+    };
+    hidden
+}
+
 /// Keep the window above every other window, or stop.
 pub(crate) fn set_always_on_top(window: &Window, on: bool) -> bool {
     platform::set_always_on_top(window, on)
@@ -436,6 +450,14 @@ mod platform {
         let mut minimised = false;
         with_window(window, |native| minimised = native.isMiniaturized());
         minimised
+    }
+
+    pub(super) fn is_hidden(window: &Window) -> bool {
+        let mut hidden = false;
+        with_window(window, |native| {
+            hidden = !native.isVisible() && !native.isMiniaturized();
+        });
+        hidden
     }
 
     pub(super) fn set_always_on_top(window: &Window, on: bool) -> bool {

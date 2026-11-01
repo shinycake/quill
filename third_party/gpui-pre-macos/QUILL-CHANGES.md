@@ -116,3 +116,14 @@ The Quill project also changed it in 2026 for Agent access's screenshots
 - `src/window.rs`: `MacWindow::capture_image` renders the scene through
   `MetalRenderer::capture_scene`. No screen-recording permission is
   involved: the window renders its own frame.
+
+The Quill project also changed it in 2026 so a main window hidden by its
+close button comes back the way Telegram Desktop's does:
+
+- `src/platform.rs`: `should_handle_reopen` runs the reopen callback with
+  windows showing too (upstream skips it then). A call or
+  Picture-in-Picture window counts as showing, and the Dock click must still
+  bring back a hidden main window.
+- `src/platform.rs`: `applicationDidBecomeActive:` reaches
+  `Platform::on_app_lifecycle` as `AppLifecyclePhase::Active`, deferred to
+  the main queue. The other phases stay unused on macOS.
