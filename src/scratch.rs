@@ -19,7 +19,8 @@ fn dirs() -> MutexGuard<'static, Vec<PathBuf>> {
     DIRS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-extern "C" fn remove_all() {
+/// Also the `atexit` hook; an exit that skips the hooks calls it first.
+pub(crate) extern "C" fn remove_all() {
     // A panic here would abort the exiting process; only non-panicking calls.
     let list = std::mem::take(&mut *dirs());
     for dir in list {

@@ -126,6 +126,12 @@ impl PresentEstimator {
         self.cadence.on_grid(due, grid)
     }
 
+    /// How far apart its pictures come, once they come a whole number of
+    /// grid vsyncs apart (`Cadence::even`).
+    pub(crate) fn even_spacing(&self) -> Option<Duration> {
+        self.cadence.even_spacing()
+    }
+
     /// How long before a picture is shown to have asked for its frame
     /// (`request_policy`): the lead, and on the grid a quarter frame more,
     /// so that a late timer still makes the grid vsync, as the frame

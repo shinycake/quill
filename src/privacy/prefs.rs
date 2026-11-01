@@ -63,7 +63,7 @@ pub fn set_last_seen_warning_seen(seen: bool) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = path()
     {
-        let _ = crate::settings::write_json_deferred(&path, &stored);
+        crate::settings::write_json_deferred(&path, &stored);
     }
     if let Ok(mut guard) = PREFS.write() {
         *guard = Some(stored);

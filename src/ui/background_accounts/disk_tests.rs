@@ -34,6 +34,7 @@ fn an_account_still_closing_when_space_returns_starts_again(cx: &mut TestAppCont
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(2), fake.boxed(), false);
         app.apply_disk_reading(FULL, cx);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(ROOM, cx);
         app.ensure_background_accounts(cx);
         assert!(
@@ -58,6 +59,7 @@ fn nothing_starts_while_the_disk_is_full(cx: &mut TestAppContext) {
     let fake = Fake::default();
     app.update_in(&mut vcx, |app, _, cx| {
         app.background.closing.push(account(2), fake.boxed(), true);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(FULL, cx);
     });
     fake.close();
@@ -111,6 +113,7 @@ fn a_full_reading_ends_a_start_in_flight(cx: &mut TestAppContext) {
         app.ensure_background_accounts(cx);
         assert!(app.background.starting.contains(&account(1)));
         app.apply_disk_reading(FULL, cx);
+        app.apply_disk_reading(FULL, cx);
         assert!(!app.background.starting.contains(&account(1)));
     });
     vcx.run_until_parked();
@@ -121,17 +124,16 @@ fn a_full_reading_ends_a_start_in_flight(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_start_that_lands_on_a_refused_screen_opens_nothing(cx: &mut TestAppContext) {
+fn a_refused_screen_leaves_other_accounts_running_above_close(cx: &mut TestAppContext) {
     let (app, mut vcx, root) = app_with_unsigned_accounts(cx);
     app.update_in(&mut vcx, |app, _, cx| {
-        app.ensure_background_accounts(cx);
         app.open_client(Err(ConnectBlocker::DiskFull), cx);
-        assert!(app.background.starting.contains(&account(1)));
-    });
-    vcx.run_until_parked();
-    app.read_with(&vcx, |app, _| {
-        assert!(app.background.client(&account(1)).is_none());
-        assert!(!app.background.starting.contains(&account(1)));
+        app.apply_disk_reading(NEARLY, cx);
+        app.apply_disk_reading(NEARLY, cx);
+        assert!(!app.disk.is_full(), "only the screen's client waits");
+        assert!(app.disk_full_view().is_some());
+        app.ensure_background_accounts(cx);
+        assert!(app.background.client(&account(2)).is_some());
     });
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -141,6 +143,7 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
     let (app, mut vcx, root) = app_with_unsigned_accounts(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         app.start_connection(cx);
+        app.apply_disk_reading(FULL, cx);
         app.apply_disk_reading(FULL, cx);
     });
     vcx.run_until_parked();

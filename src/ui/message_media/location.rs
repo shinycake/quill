@@ -33,7 +33,7 @@ fn map_tile(
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.open_message_url(&url, cx);
+            this.open_link(&url, cx);
         }))
         .child(
             img(crate::ui::image_budget::sized_media(
@@ -152,7 +152,7 @@ pub(in crate::ui) fn location_row(
             .cursor_pointer()
             .pressable(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_message_url(&url, cx);
+                this.open_link(&url, cx);
             }))
             .child(tr(keys::Q_MISC_OPEN_MAP)),
     )
@@ -221,7 +221,7 @@ pub(in crate::ui) fn venue_row(
                 .cursor_pointer()
                 .pressable(cx.theme())
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&url, cx);
+                    this.open_link(&url, cx);
                 }))
                 .child(tr(keys::Q_MISC_OPEN_MAP)),
         )

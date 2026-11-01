@@ -3,7 +3,7 @@
 //! its picture, a tile painted out of sight stops redrawing, converting
 //! and asking the frame clock (and takes the waiting frame once back in
 //! sight), a size change mid-stream shows at the new size, and a refused
-//! NV12 frame (Windows) is replaced by its image. Time is
+//! NV12 frame (Windows, Linux) is replaced by its image. Time is
 //! the player's injected clock: nothing sleeps.
 use super::super::frame_clock::take_video_targets;
 use super::backend_ffmpeg::NV12_RETRY;
@@ -200,12 +200,12 @@ fn a_size_change_mid_stream_redraws_at_the_new_size(cx: &mut TestAppContext) {
     assert_eq!(player.picture_size(), Some((320, 180)));
 }
 
-/// Windows' NV12 path (forced on, so it runs on every machine): the
+/// The Windows and Linux NV12 path (forced on, so it runs on every machine): the
 /// renderer refuses the frame on screen, the tile shows the same picture
 /// as an image at once, new frames are images for the file player's
 /// pause, then NV12 again; and nothing is left once the player goes. On
-/// Windows the player's own pull sees the refusal; elsewhere no renderer
-/// draws NV12, so the test makes the same call the pull would.
+/// Windows and Linux the player's own pull sees the refusal; on macOS no
+/// renderer draws NV12, so the test makes the same call the pull would.
 #[gpui_kit::test]
 fn a_refused_nv12_frame_shows_as_an_image_and_nv12_comes_back(cx: &mut TestAppContext) {
     let t0 = Instant::now();
@@ -216,7 +216,7 @@ fn a_refused_nv12_frame_shows_as_an_image_and_nv12_comes_back(cx: &mut TestAppCo
     draw(vcx);
     let frame = player.live_nv12_frame().expect("an NV12 frame on screen");
     frame.mark_refused();
-    if !cfg!(target_os = "windows") {
+    if !cfg!(not(target_os = "macos")) {
         player.live_replace_refused(t0);
     }
     draw(vcx);
@@ -255,6 +255,6 @@ fn a_refused_nv12_frame_shows_as_an_image_and_nv12_comes_back(cx: &mut TestAppCo
     vcx.update(|_, cx| player.release_live(cx));
     assert!(player.live_nv12_frame().is_none());
     let alive = made.iter().filter(|image| image.strong_count() > 0).count();
-    // The picture the player draws next (an image off Windows) at most.
+    // The picture the player draws next (an image on macOS) at most.
     assert!(alive <= 1, "released: {alive} images alive");
 }

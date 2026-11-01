@@ -1,7 +1,7 @@
 //! An HDR picture file in the viewer switches the window to extended
 //! range while it shows upright, and back when it is rotated or closed
 //! (needs the `demo-capture` feature for gpui-kit's test support).
-use super::{HdrBadge, Headroom, set_test_headroom};
+use super::{HdrBadge, Headroom, set_test_headroom, set_test_renderer_left_edr};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -109,5 +109,30 @@ fn an_sdr_display_shows_the_standard_range_picture(cx: &mut TestAppContext) {
         assert_eq!(app.viewer_hdr_badge(), Some(HdrBadge::StandardRange));
         assert!(!app.viewer.hdr.edr_on());
     });
+    set_test_headroom(None);
+}
+
+#[gpui_kit::test]
+fn the_tag_says_standard_range_once_the_renderer_left_extended_range(cx: &mut TestAppContext) {
+    if !reads_iso_gain_maps() {
+        return;
+    }
+    set_test_headroom(Some(Headroom {
+        current: 4.0,
+        potential: 8.0,
+    }));
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_sunset(&app, vcx);
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.viewer_hdr_badge(), Some(HdrBadge::Shown));
+    });
+    set_test_renderer_left_edr(true);
+    app.update_in(vcx, |_, _, cx| cx.notify());
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.viewer_hdr_badge(), Some(HdrBadge::StandardRange));
+    });
+    set_test_renderer_left_edr(false);
     set_test_headroom(None);
 }

@@ -9,11 +9,11 @@
 //! becomes a new `RenderImage`; the one it replaces is retired to
 //! `image_budget`, which drops it from the GPU atlas once no frame shows it.
 //!
-//! On Windows the decoder is asked for NV12 instead
+//! On Windows and Linux the decoder is asked for NV12 instead
 //! ([`surface::NV12_SURFACES`]): pictures the stream allows (8-bit 4:2:0,
 //! BT.601/709, even sides) skip the decoder's BGRA conversion and become
-//! surface frames the DirectX renderer converts on the GPU; the rest stay
-//! images. When the window's renderer refuses a surface (its NV12
+//! surface frames the DirectX or wgpu renderer converts on the GPU; the
+//! rest stay images. When the window's renderer refuses a surface (its NV12
 //! textures or pipeline failed), the player asks [`Backend::replace_refused`]
 //! for the same picture as an image, and this backend shows images for
 //! [`NV12_RETRY`]: the decoder goes back to BGRA, NV12 pictures still
@@ -98,7 +98,7 @@ pub(super) struct FfmpegBackend {
     /// The transport's intent as last synced (its rate is the decoder's).
     want: Want,
     image: Option<Arc<RenderImage>>,
-    /// The surface picture on screen (Windows NV12), to show as an image
+    /// The surface picture on screen (NV12), to show as an image
     /// instead if the renderer refuses it.
     surface: Option<Picture>,
     /// The layout last asked of the decoder.
@@ -134,7 +134,7 @@ impl FfmpegBackend {
         }
     }
 
-    /// Whether to hand over NV12 surfaces now: on Windows, unless the
+    /// Whether to hand over NV12 surfaces now: off macOS, unless the
     /// window refused one less than [`NV12_RETRY`] ago.
     fn nv12_now(&self, now: Instant) -> bool {
         surface::NV12_SURFACES && nv12_allowed(self.nv12_paused_until, now)
@@ -198,7 +198,7 @@ impl FfmpegBackend {
 
     /// An NV12 picture as a surface when `nv12` ([`Self::nv12_now`]); the
     /// picture back otherwise (it becomes an image).
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "macos"))]
     fn surface_picture(
         &mut self,
         frame: VideoFrame,
@@ -224,8 +224,8 @@ impl FfmpegBackend {
         Ok((picture, stats))
     }
 
-    /// Off Windows every picture is an image.
-    #[cfg(not(target_os = "windows"))]
+    /// On macOS every FFmpeg picture is an image.
+    #[cfg(target_os = "macos")]
     fn surface_picture(
         &mut self,
         frame: VideoFrame,

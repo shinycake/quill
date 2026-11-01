@@ -215,18 +215,6 @@ impl OutputPlayer {
         woke
     }
 
-    /// Waits for a device that is opening, then for the audio thread to
-    /// take the seek, so never on the UI thread (the engine's seek worker
-    /// calls it). Fails at once when there is no device.
-    pub(in crate::ui) fn try_seek(&self, pos: Duration) -> Result<(), SeekError> {
-        if !self.output.wake_and_wait() {
-            return Err(SeekError::Other(Arc::new(std::io::Error::other(
-                "no audio output device",
-            ))));
-        }
-        self.player.try_seek(pos)
-    }
-
     /// Playing, with nothing to play it: the device it asked for failed to
     /// open, and none is up or opening.
     pub(in crate::ui) fn lost(&self) -> bool {
@@ -360,32 +348,6 @@ impl SharedOutput {
             return forced.is_some();
         }
         self.0.lock().open(&self.0)
-    }
-
-    /// [`Self::wake`], then wait for a device that is opening: whether one
-    /// is up.
-    fn wake_and_wait(&self) -> bool {
-        #[cfg(test)]
-        if let Some(forced) = &self.0.forced {
-            self.0.wakes.fetch_add(1, Ordering::Relaxed);
-            return forced.is_some();
-        }
-        let mut state = self.0.lock();
-        if !state.open(&self.0) {
-            return false;
-        }
-        #[cfg(test)]
-        if let (true, Some(gate)) = (state.opening, &self.0.gate) {
-            gate.not_on_ui("waited for the device to open");
-        }
-        while state.opening {
-            state = self
-                .0
-                .opened
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner);
-        }
-        state.device.is_some()
     }
 
     /// A device is up, or opening.
@@ -1124,7 +1086,6 @@ mod tests {
         player.output = SharedOutput::for_test(None);
         assert!(!player.play());
         assert!(!player.is_paused(), "a device that opens later plays it");
-        assert!(player.try_seek(Duration::from_millis(50)).is_err());
     }
 
     /// The first sound of the app's life is queued on the app mixer at
@@ -1253,24 +1214,6 @@ mod tests {
         output.settle_device();
         assert!(playing.lost());
         assert!(!paused.lost());
-    }
-
-    /// A seek waits, off the UI thread, for a device that is opening: it
-    /// goes ahead once the device is up, and fails once it couldn't open.
-    #[test]
-    fn a_seek_waits_for_the_opening_device_and_fails_without_one() {
-        for opens in [true, false] {
-            let (output, gate) = SharedOutput::gated();
-            // Nothing queued: a seek with a device up needs no audio thread.
-            let player = Arc::new(output.outlet().unwrap().player());
-            let (done, seeked) = std::sync::mpsc::channel();
-            let seeker = player.clone();
-            std::thread::spawn(move || {
-                let _ = done.send(seeker.try_seek(Duration::from_millis(500)).is_ok());
-            });
-            gate.answer(opens);
-            assert_eq!(seeked.recv().unwrap(), opens);
-        }
     }
 
     #[test]

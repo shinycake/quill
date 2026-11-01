@@ -14,6 +14,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: TelegramCredentials,
         prepared: PreparedConnect,
     ) -> Self {
+        let mut session = session;
+        let run = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos() as u64);
+        let leftovers = prepared.paths.root.join("export-leftovers");
+        session
+            .settings
+            .export_files
+            .set_leftovers(crate::export::leftovers::Leftovers::new(leftovers, run));
         Self {
             session,
             sender,
@@ -28,9 +37,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_audio: Default::default(),
             call_capture: Default::default(),
             call_screen: Default::default(),
+            call_devices_warmed: false,
             live_feeds: Arc::new(Mutex::new(HashMap::new())),
             group_camera_state: HashMap::new(),
             group_mute_state: HashMap::new(),
+            group_seen: HashMap::new(),
+            group_large_tile: None,
             conference_crypto: None,
             group_call_streams: Default::default(),
             group_levels: Default::default(),

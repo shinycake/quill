@@ -341,21 +341,21 @@ fn the_startup_sweep_deletes_only_what_was_recorded_when_it_began(cx: &mut TestA
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[cfg(unix)]
 #[gpui_kit::test]
 fn a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why(cx: &mut TestAppContext) {
-    use std::os::unix::fs::PermissionsExt;
     let (app, mut vcx) = new_app(cx);
     let root = temp_root();
     isolate(&app, &mut vcx, &root, &[]);
     let config = quill::passcode::config_path(&root);
     std::fs::write(&config, b"{}").unwrap();
-    // A read-only root: the record can't be written.
-    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // A folder in the record's place: no write can replace it, not even
+    // root's, which a read-only folder would not stop.
+    let record = root.join("accounts.json");
+    std::fs::remove_file(&record).unwrap();
+    std::fs::create_dir_all(record.join("held")).unwrap();
     app.update_in(&mut vcx, |app, _, cx| {
         app.begin_local_wipe(root.clone(), cx);
     });
-    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(config.exists(), "the passcode stays");
     assert!(folder(&root, &AccountKey::primary()));
     app.read_with(&vcx, |app, _| {

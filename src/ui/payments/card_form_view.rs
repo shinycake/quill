@@ -47,7 +47,7 @@ impl QuillApp {
     pub(in crate::ui) fn enter_new_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.checkout_card_entry() {
             Some(CardEntry::Native) => self.open_card_form(window, cx),
-            Some(CardEntry::Web(url)) => self.open_message_url(&url, cx),
+            Some(CardEntry::Web(url)) => self.open_link(&url, cx),
             None => {}
         }
     }

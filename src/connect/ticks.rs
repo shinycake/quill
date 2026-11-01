@@ -113,6 +113,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => true,
             Err(_) => {
                 self.session.requests.take(extra);
+                self.network_seen = seen;
                 false
             }
         }

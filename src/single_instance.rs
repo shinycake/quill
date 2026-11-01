@@ -8,10 +8,14 @@
 //! forwarded Telegram links.
 //!
 //! Wire protocol (one short-lived connection per launch): the client sends
-//! the header line `quill-ipc 1`, then one line per forwarded argument, then
-//! an empty line; the owner answers `ok`. A connection that does not answer
-//! in [`ACK_TIMEOUT`] means the owner is hung; the caller refuses to start
-//! a second instance rather than risk the database.
+//! the header line `quill-ipc 2`, then one line per forwarded argument, then
+//! an empty line. The owner answers `queued` once it holds the arguments,
+//! then `ok` when its UI thread beats, or `stuck` after [`UI_ANSWER`]. A
+//! connection that does not say `queued` in [`ACK_TIMEOUT`], or says
+//! `stuck`, means the owner is hung; the caller refuses to start a second
+//! instance rather than risk the database. A `quill-ipc 1` owner rejects
+//! the new header, so the client tries the old one, which an owner answers
+//! with `ok` alone.
 //!
 //! The header `quill-agent 1` instead opens a long-lived agent connection
 //! (see [`crate::agent::server`]); the rest of this file does not change for
@@ -23,7 +27,12 @@
 //! launches cannot both conclude they are the owner.
 #![deny(clippy::indexing_slicing)]
 
+mod heartbeat;
+
+pub use heartbeat::{Heartbeat, UI};
+
 use crate::lang::{keys, tr};
+use heartbeat::{Clock, SystemClock};
 use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -33,9 +42,15 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const HEADER: &str = "quill-ipc 1";
-/// How long a launch waits for the owner to acknowledge before giving up.
-pub const ACK_TIMEOUT: Duration = Duration::from_secs(3);
+const HEADER: &str = "quill-ipc 2";
+/// The protocol before the owner checked its UI thread: one `ok`.
+const LEGACY_HEADER: &str = "quill-ipc 1";
+/// How long a launch waits for the owner to take its arguments.
+const ACK_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long the owner waits for its UI thread before it says it is stuck:
+/// tdesktop's main-thread check (`sandbox.cpp`), so a UI that is only busy
+/// is not called frozen.
+const UI_ANSWER: Duration = Duration::from_secs(30);
 /// Upper bound on one forwarded message.
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 /// Upper bound on the header line that picks the protocol.
@@ -245,42 +260,81 @@ enum Forward {
     Delivered,
     NoOwner,
     Unresponsive,
+    /// The owner holds the arguments; its UI has yet to answer.
+    Queued(mpsc::Receiver<io::Result<String>>),
+}
+
+/// The owner's answer once its UI did or did not beat.
+enum Verdict {
+    Delivered,
+    Stuck,
+    /// The owner went away after it queued the launch.
+    Gone,
 }
 
 /// Sends `args` to a running owner. `NoOwner` covers every way a connect can
 /// fail (nothing listening, stale socket file); only a connection that opens
 /// but never answers is `Unresponsive`.
 fn forward(endpoint: &Endpoint, args: &[String]) -> Forward {
+    match forward_with(endpoint, HEADER, args) {
+        // Closed unread: an owner that predates `HEADER`, or a dying one.
+        Forward::NoOwner => forward_with(endpoint, LEGACY_HEADER, args),
+        sent => sent,
+    }
+}
+
+fn forward_with(endpoint: &Endpoint, header: &str, args: &[String]) -> Forward {
     let Ok(name) = endpoint.name() else {
         return Forward::NoOwner;
     };
     let Ok(stream) = Stream::connect(name) else {
         return Forward::NoOwner;
     };
-    let message = encode_message(args);
+    let message = encode_message(header, args);
     let (tx, rx) = mpsc::channel();
-    // No thread: `tx` is dropped with the closure and the wait below ends.
+    // No thread: `tx` is dropped with the closure and the waits below end.
     let _ = crate::thread_guard::spawn_guarded("quill-single-instance-send", move || {
-        let result = (|| -> io::Result<bool> {
-            let mut stream = stream;
-            stream.write_all(message.as_bytes())?;
-            stream.flush()?;
-            let mut ack = String::new();
-            BufReader::new(&stream).read_line(&mut ack)?;
-            Ok(ack.trim() == "ok")
-        })();
-        let _ = tx.send(result);
+        let mut stream = stream;
+        if let Err(error) = stream.write_all(message.as_bytes()).and(stream.flush()) {
+            let _ = tx.send(Err(error));
+            return;
+        }
+        let mut reader = BufReader::new(&stream);
+        loop {
+            let mut line = String::new();
+            let answer = match reader.read_line(&mut line) {
+                Ok(0) => Ok(String::new()),
+                Ok(_) => Ok(line.trim().to_string()),
+                Err(error) => Err(error),
+            };
+            let last = !matches!(&answer, Ok(line) if line == "queued");
+            if tx.send(answer).is_err() || last {
+                return;
+            }
+        }
     });
     match rx.recv_timeout(ACK_TIMEOUT) {
-        Ok(Ok(true)) => Forward::Delivered,
+        Ok(Ok(answer)) if answer == "ok" => Forward::Delivered,
+        Ok(Ok(answer)) if answer == "queued" => Forward::Queued(rx),
         // Connected, then dropped or garbled: a dying owner counts as gone.
-        Ok(Ok(false) | Err(_)) => Forward::NoOwner,
+        Ok(_) => Forward::NoOwner,
         Err(_) => Forward::Unresponsive,
     }
 }
 
-fn encode_message(args: &[String]) -> String {
-    let mut message = format!("{HEADER}\n");
+/// Waits for the second answer of a queued launch.
+fn verdict(answers: &mpsc::Receiver<io::Result<String>>) -> Verdict {
+    // The owner's own wait, plus room for it to write the answer.
+    match answers.recv_timeout(UI_ANSWER.saturating_add(ACK_TIMEOUT)) {
+        Ok(Ok(answer)) if answer == "ok" => Verdict::Delivered,
+        Ok(Ok(answer)) if answer == "stuck" => Verdict::Stuck,
+        Err(mpsc::RecvTimeoutError::Timeout) => Verdict::Stuck,
+        Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => Verdict::Gone,
+    }
+}
+
+fn encode_message(header: &str, args: &[String]) -> String {
+    let mut message = format!("{header}\n");
     for arg in args.iter().take(MAX_ARGS) {
         // One argument per line; embedded newlines cannot split an argument
         // into two (the owner validates each line again regardless).
@@ -402,7 +456,26 @@ impl Drop for Connection {
     }
 }
 
-fn serve(stream: Stream, slot: ClientSlot, on_launch: &(dyn Fn(Vec<String>) + Send + Sync)) {
+/// The UI an owner checks before it acknowledges a launch.
+#[derive(Clone, Copy)]
+struct Owner {
+    ui: &'static Heartbeat,
+    clock: &'static dyn Clock,
+    answer: Duration,
+}
+
+const APP_OWNER: Owner = Owner {
+    ui: &UI,
+    clock: &SystemClock,
+    answer: UI_ANSWER,
+};
+
+fn serve(
+    stream: Stream,
+    slot: ClientSlot,
+    on_launch: &(dyn Fn(Vec<String>) + Send + Sync),
+    owner: Owner,
+) {
     let connection = Connection::new(stream);
     let stream = connection.stream();
     // Best effort: Windows named pipes refuse timeouts.
@@ -417,16 +490,39 @@ fn serve(stream: Stream, slot: ClientSlot, on_launch: &(dyn Fn(Vec<String>) + Se
         crate::agent::server::serve(connection);
         return;
     }
-    if header != HEADER {
+    let legacy = header == LEGACY_HEADER;
+    if header != HEADER && !legacy {
         return;
     }
     let Some(args) = decode_args(stream) else {
         return;
     };
+    let mark = owner.ui.mark();
+    let deadline = owner.clock.now().checked_add(owner.answer);
     on_launch(args);
+    crate::wake::LINKS.poke();
     let mut out = stream;
-    let _ = out.write_all(b"ok\n");
+    if legacy {
+        // That launcher reads one line and gives up after a few seconds.
+        let _ = out.write_all(b"ok\n");
+        let _ = out.flush();
+        return;
+    }
+    let _ = out.write_all(b"queued\n");
     let _ = out.flush();
+    // Closing without an answer would read as a dead owner, and the launch
+    // would start a second Quill on this profile.
+    let answered =
+        deadline.is_none_or(|deadline| owner.ui.answered_by(mark, deadline, owner.clock));
+    let _ = out.write_all(if answered { b"ok\n" } else { b"stuck\n" });
+    let _ = out.flush();
+}
+
+fn not_responding() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "another Quill instance is running but not responding",
+    )
 }
 
 /// A connection to the instance listening on `endpoint`, for agent clients.
@@ -446,20 +542,40 @@ pub fn acquire(
     args: &[String],
     on_launch: impl Fn(Vec<String>) + Send + Sync + 'static,
 ) -> io::Result<Acquired> {
+    acquire_as(endpoint, args, on_launch, APP_OWNER)
+}
+
+fn acquire_as(
+    endpoint: &Endpoint,
+    args: &[String],
+    on_launch: impl Fn(Vec<String>) + Send + Sync + 'static,
+    owner: Owner,
+) -> io::Result<Acquired> {
     #[cfg(unix)]
     if let Some(parent) = endpoint.path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let _lock = AcquireLock::take(endpoint)?;
-    match forward(endpoint, args) {
-        Forward::Delivered => return Ok(Acquired::Forwarded),
-        Forward::Unresponsive => {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "another Quill instance is running but not responding",
-            ));
+    let mut lock = AcquireLock::take(endpoint)?;
+    // An owner that queues a launch and then closes, twice over, is broken
+    // rather than gone.
+    let mut tries = 2u8;
+    loop {
+        let answers = match forward(endpoint, args) {
+            Forward::Delivered => return Ok(Acquired::Forwarded),
+            Forward::Unresponsive => return Err(not_responding()),
+            Forward::NoOwner => break,
+            Forward::Queued(answers) => answers,
+        };
+        // The owner is alive and holds the launch: later launches need not
+        // wait behind its UI for the lock.
+        drop(lock);
+        match verdict(&answers) {
+            Verdict::Delivered => return Ok(Acquired::Forwarded),
+            Verdict::Stuck => return Err(not_responding()),
+            Verdict::Gone if tries > 1 => lock = AcquireLock::take(endpoint)?,
+            Verdict::Gone => return Err(not_responding()),
         }
-        Forward::NoOwner => {}
+        tries = tries.saturating_sub(1);
     }
     // Nobody answered: any socket file left behind is a crashed owner's.
     #[cfg(unix)]
@@ -481,6 +597,14 @@ pub fn acquire(
             // Windows race: another launch created the pipe first.
             return match forward(endpoint, args) {
                 Forward::Delivered => Ok(Acquired::Forwarded),
+                Forward::Queued(answers) => {
+                    drop(lock);
+                    match verdict(&answers) {
+                        Verdict::Delivered => Ok(Acquired::Forwarded),
+                        Verdict::Stuck => Err(not_responding()),
+                        Verdict::Gone => Err(e),
+                    }
+                }
                 _ => Err(e),
             };
         }
@@ -511,7 +635,7 @@ pub fn acquire(
             let on_launch = Arc::clone(&on_launch);
             // A client that connects and stalls must not block others.
             let _ = crate::thread_guard::spawn_guarded("quill-single-instance-client", move || {
-                serve(stream, slot, &*on_launch)
+                serve(stream, slot, &*on_launch, owner)
             });
         }
     })?;
@@ -643,12 +767,234 @@ mod tests {
         assert_eq!(acquire(&endpoint, &[], |_| ()).unwrap(), Acquired::Primary);
     }
 
+    /// A clock that moves only when a test moves it.
+    struct FakeClock {
+        start: std::time::Instant,
+        passed: std::sync::Mutex<Duration>,
+    }
+
+    impl super::Clock for FakeClock {
+        fn now(&self) -> std::time::Instant {
+            self.start + *self.passed.lock().unwrap()
+        }
+    }
+
+    fn fake_clock() -> &'static FakeClock {
+        Box::leak(Box::new(FakeClock {
+            start: std::time::Instant::now(),
+            passed: std::sync::Mutex::new(Duration::ZERO),
+        }))
+    }
+
+    fn heartbeat() -> &'static super::Heartbeat {
+        Box::leak(Box::new(super::Heartbeat::new()))
+    }
+
+    /// A second launch connected to an owner that serves it on a thread.
+    struct Launched {
+        reader: std::io::BufReader<interprocess::local_socket::Stream>,
+        owner: std::thread::JoinHandle<()>,
+    }
+
+    impl Launched {
+        fn line(&mut self) -> String {
+            use std::io::BufRead;
+            let mut line = String::new();
+            self.reader.read_line(&mut line).unwrap();
+            line
+        }
+
+        fn rest(mut self) -> String {
+            use std::io::Read;
+            let mut rest = String::new();
+            self.reader.read_to_string(&mut rest).unwrap();
+            self.owner.join().unwrap();
+            rest
+        }
+    }
+
+    fn launch(
+        tag: &str,
+        header: &str,
+        owner: super::Owner,
+        on_launch: fn(&super::Heartbeat),
+    ) -> Launched {
+        use interprocess::local_socket::{ListenerOptions, Stream, prelude::*};
+        use std::io::Write;
+        let endpoint = Endpoint::for_root(&temp_root(tag));
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&endpoint.path);
+        let listener = ListenerOptions::new()
+            .name(endpoint.name().unwrap())
+            .create_sync()
+            .unwrap();
+        let owner = std::thread::spawn(move || {
+            let stream = listener.accept().unwrap();
+            let slot = ClientSlots::default().try_take(1).unwrap();
+            let ui = owner.ui;
+            super::serve(stream, slot, &move |_| on_launch(ui), owner);
+        });
+        let mut client = Stream::connect(endpoint.name().unwrap()).unwrap();
+        client
+            .write_all(super::encode_message(header, &[]).as_bytes())
+            .unwrap();
+        Launched {
+            reader: std::io::BufReader::new(client),
+            owner,
+        }
+    }
+
+    fn owner(ui: &'static super::Heartbeat, clock: &'static FakeClock) -> super::Owner {
+        super::Owner {
+            ui,
+            clock,
+            answer: super::UI_ANSWER,
+        }
+    }
+
+    #[test]
+    fn an_owner_whose_window_answers_at_29_seconds_acknowledges_the_launch() {
+        let (ui, clock) = (heartbeat(), fake_clock());
+        ui.start();
+        let mut launched = launch("alive", super::HEADER, owner(ui, clock), |_| ());
+        assert_eq!(launched.line(), "queued\n");
+        *clock.passed.lock().unwrap() = Duration::from_secs(29);
+        ui.recheck();
+        ui.beat();
+        assert_eq!(launched.rest(), "ok\n");
+    }
+
+    #[test]
+    fn an_owner_whose_window_is_silent_for_30_seconds_says_it_is_stuck() {
+        let (ui, clock) = (heartbeat(), fake_clock());
+        ui.start();
+        let mut launched = launch("frozen", super::HEADER, owner(ui, clock), |_| ());
+        assert_eq!(launched.line(), "queued\n");
+        *clock.passed.lock().unwrap() = Duration::from_secs(30);
+        ui.recheck();
+        assert_eq!(launched.rest(), "stuck\n");
+    }
+
+    #[test]
+    fn an_owner_whose_window_beats_while_taking_the_launch_answers_at_once() {
+        let (ui, clock) = (heartbeat(), fake_clock());
+        ui.start();
+        let launched = launch("beats", super::HEADER, owner(ui, clock), |ui| ui.beat());
+        assert_eq!(launched.rest(), "queued\nok\n");
+    }
+
+    #[test]
+    fn an_owner_with_no_window_yet_or_any_more_acknowledges_at_once() {
+        let (ui, clock) = (heartbeat(), fake_clock());
+        let starting = launch("starting", super::HEADER, owner(ui, clock), |_| ());
+        assert_eq!(starting.rest(), "queued\nok\n");
+        ui.start();
+        ui.stop();
+        let closed = launch("closed", super::HEADER, owner(ui, clock), |_| ());
+        assert_eq!(closed.rest(), "queued\nok\n");
+    }
+
+    #[test]
+    fn a_launch_against_a_frozen_owner_is_told_so_and_does_not_take_over() {
+        let ui = heartbeat();
+        ui.start();
+        let owner = super::Owner {
+            ui,
+            clock: &super::SystemClock,
+            answer: Duration::ZERO,
+        };
+        let endpoint = Endpoint::for_root(&temp_root("frozen-acquire"));
+        let first = super::acquire_as(&endpoint, &[], |_| (), owner).unwrap();
+        assert_eq!(first, Acquired::Primary);
+        let second = acquire(&endpoint, &[], |_| panic!("not the owner"));
+        assert_eq!(
+            second.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::TimedOut)
+        );
+        assert_eq!(
+            Launch::after(&acquire(&endpoint, &[], |_| ())),
+            Launch::OwnerStuck
+        );
+    }
+
+    #[test]
+    fn an_owner_that_keeps_closing_after_it_queued_is_called_stuck() {
+        use interprocess::local_socket::{ListenerOptions, prelude::*};
+        use std::io::Write;
+        let endpoint = Endpoint::for_root(&temp_root("queue-and-close"));
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&endpoint.path);
+        let listener = ListenerOptions::new()
+            .name(endpoint.name().unwrap())
+            .create_sync()
+            .unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
+                let _ = super::read_header(&stream);
+                let _ = super::decode_args(&stream);
+                let mut out = &stream;
+                let _ = out.write_all(b"queued\n");
+            }
+        });
+        let launched = acquire(&endpoint, &[], |_| panic!("not the owner"));
+        assert_eq!(
+            launched.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::TimedOut)
+        );
+    }
+
+    #[test]
+    fn a_launch_from_an_older_quill_gets_its_single_ok() {
+        let (ui, clock) = (heartbeat(), fake_clock());
+        ui.start();
+        let launched = launch(
+            "legacy-launch",
+            super::LEGACY_HEADER,
+            owner(ui, clock),
+            |_| (),
+        );
+        assert_eq!(launched.rest(), "ok\n");
+    }
+
+    #[test]
+    fn a_launch_reaches_an_older_quill_that_answers_ok_alone() {
+        use interprocess::local_socket::{ListenerOptions, prelude::*};
+        use std::io::Write;
+        let endpoint = Endpoint::for_root(&temp_root("legacy-owner"));
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&endpoint.path);
+        let listener = ListenerOptions::new()
+            .name(endpoint.name().unwrap())
+            .create_sync()
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        // An owner from before `quill-ipc 2`: it drops any other header.
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
+                if super::read_header(&stream).as_deref() != Some(super::LEGACY_HEADER) {
+                    continue;
+                }
+                let _ = tx.send(super::decode_args(&stream).unwrap());
+                let mut out = &stream;
+                out.write_all(b"ok\n").unwrap();
+            }
+        });
+        let args = vec!["tg://resolve?domain=durov".to_string()];
+        assert_eq!(
+            acquire(&endpoint, &args, |_| panic!("not the owner")).unwrap(),
+            Acquired::Forwarded
+        );
+        assert_eq!(rx.recv().unwrap(), args);
+    }
+
     #[test]
     fn foreign_clients_are_ignored() {
         use super::decode_message;
         assert_eq!(decode_message(&b"GET / HTTP/1.1\r\n\r\n"[..]), None);
         assert_eq!(
-            decode_message(&b"quill-ipc 1\ntg://a\n\nignored\n"[..]),
+            decode_message(&b"quill-ipc 2\ntg://a\n\nignored\n"[..]),
             Some(vec!["tg://a".to_string()])
         );
     }

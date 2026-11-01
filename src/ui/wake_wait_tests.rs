@@ -1,9 +1,11 @@
 //! The poll loops' pacing, on the test scheduler's clock.
-use super::{NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
-use gpui_kit::TestAppContext;
+use super::{CHROME_PACE, NextPass, PassEnd, PollPace, RestTimer, run_poll_loop};
+use gpui_kit::{ActivityGuard, TestAppContext};
 use quill::wake::Signal;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 const fn ms(n: u64) -> Duration {
@@ -41,7 +43,13 @@ fn counted_loop(
     };
     let executor = cx.background_executor.clone();
     cx.foreground_executor
-        .spawn(run_poll_loop(executor, signal, pace, pass))
+        .spawn(run_poll_loop(
+            executor,
+            signal,
+            pace,
+            ActivityGuard::noop,
+            pass,
+        ))
         .detach();
     cx.run_until_parked();
     passes
@@ -72,7 +80,13 @@ fn flood(cx: &mut TestAppContext, signal: &'static Signal, end: PassEnd) -> Vec<
     };
     let executor = cx.background_executor.clone();
     cx.foreground_executor
-        .spawn(run_poll_loop(executor, signal, PACE, pass))
+        .spawn(run_poll_loop(
+            executor,
+            signal,
+            PACE,
+            ActivityGuard::noop,
+            pass,
+        ))
         .detach();
     cx.run_until_parked();
     for _ in 0..PASSES {
@@ -105,6 +119,106 @@ fn a_backlog_comes_back_after_the_gap_without_a_poke(cx: &mut TestAppContext) {
     cx.background_executor.advance_clock(ms(1));
     cx.run_until_parked();
     assert_eq!(passes.get(), 2);
+}
+
+#[gpui_kit::test]
+fn a_backlog_holds_app_nap_off_once_until_the_loop_rests(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Cell::new(0);
+    let pass = move || {
+        passes.set(passes.get() + 1);
+        Some(if passes.get() < 3 { BACKLOG } else { IDLE })
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 0));
+}
+
+/// Counts holds begun and holds still held.
+fn counted_hold() -> (impl Fn() -> ActivityGuard, impl Fn() -> (usize, usize)) {
+    let begun = Arc::new(AtomicUsize::new(0));
+    let held = Arc::new(AtomicUsize::new(0));
+    let hold = {
+        let (begun, held) = (begun.clone(), held.clone());
+        move || {
+            begun.fetch_add(1, Ordering::SeqCst);
+            held.fetch_add(1, Ordering::SeqCst);
+            let held = held.clone();
+            ActivityGuard::new(move || {
+                held.fetch_sub(1, Ordering::SeqCst);
+            })
+        }
+    };
+    let state = move || (begun.load(Ordering::SeqCst), held.load(Ordering::SeqCst));
+    (hold, state)
+}
+
+/// Updates that arrive just slower than each pass drains them: a poke ends
+/// every rest early, so the update it brought waits out the gap. App Nap
+/// would run that gap's timer up to 200 ms late.
+#[gpui_kit::test]
+fn a_poke_after_a_short_rest_waits_its_gap_under_the_hold(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Rc::new(Cell::new(0));
+    let pass = {
+        let passes = passes.clone();
+        move || {
+            passes.set(passes.get() + 1);
+            Some(IDLE)
+        }
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    assert_eq!((passes.get(), state()), (1, (0, 0)), "at rest, no hold");
+    cx.background_executor.advance_clock(ms(3));
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!((passes.get(), state()), (1, (1, 1)), "the gap runs held");
+    cx.background_executor.advance_clock(ms(7));
+    cx.run_until_parked();
+    assert_eq!(
+        (passes.get(), state()),
+        (2, (1, 0)),
+        "resting again lets go"
+    );
+}
+
+/// A poke after a full gap of rest runs at once, and takes no hold.
+#[gpui_kit::test]
+fn a_poke_after_a_long_rest_takes_no_hold(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Rc::new(Cell::new(0));
+    let pass = {
+        let passes = passes.clone();
+        move || {
+            passes.set(passes.get() + 1);
+            Some(IDLE)
+        }
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    cx.background_executor.advance_clock(ms(500));
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!((passes.get(), state()), (2, (0, 0)));
 }
 
 #[gpui_kit::test]
@@ -244,4 +358,31 @@ fn a_quiet_pass_rests_until_the_sooner_of_its_due_time_and_the_ceiling() {
         NextPass::Rest(PACE.ceiling)
     );
     assert_eq!(PACE.next(due(ms(0)), false), NextPass::Rest(PACE.gap));
+}
+
+/// The tray and icon badge recount on each pass. Every applied update batch
+/// pokes `wake::CHROME`, so a busy account pokes many times a second: the
+/// first poke still syncs at once, the rest at most four times a second.
+#[gpui_kit::test]
+fn a_burst_of_chrome_pokes_syncs_the_badge_four_times_a_second(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let passes = counted_loop(cx, &SIGNAL, CHROME_PACE, |_| IDLE);
+    cx.background_executor.advance_clock(ms(5000));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 1);
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 2, "the first update syncs at once");
+    for _ in 0..20 {
+        cx.background_executor.advance_clock(ms(50));
+        SIGNAL.poke();
+        cx.run_until_parked();
+    }
+    assert_eq!(passes.get(), 6, "one second of pokes: four more syncs");
+    cx.background_executor.advance_clock(ms(250));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 7, "the last poke still lands");
+    cx.background_executor.advance_clock(ms(2000));
+    cx.run_until_parked();
+    assert_eq!(passes.get(), 7, "then it rests");
 }

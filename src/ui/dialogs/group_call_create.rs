@@ -27,12 +27,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::group_call_create::{
     BeforeCreate, COUNTDOWN_REFRESH_SECS, Countdown, CreateKind, CurrentCall, JoinAsStep,
-    LeaveText, before_create, check_schedule, countdown, default_schedule_at, join_as_step,
-    schedule_max,
+    LeaveText, SCHEDULE_MIN_AHEAD_SECS, before_create, check_schedule, countdown,
+    default_schedule_at, join_as_step, schedule_max,
 };
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr, tr_with, trn};
-use quill::local_time::now_unix;
 use quill::telegram::envelope::MessageSender;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -225,7 +224,7 @@ impl QuillApp {
         let clock = WallClock::of(cx);
         let now = clock.now();
         let max = schedule_max(now, &|unix| clock.offset_at(unix));
-        let picked = picked_unix(&step.picker, cx)
+        let picked = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx)
             .ok_or(quill::schedule::ScheduleError::Invalid)
             .and_then(|date| check_schedule(date, now, max));
         match picked {
@@ -702,10 +701,10 @@ pub(super) fn or_schedule_link(
         .into_any_element()
 }
 
-/// The date and time picker and the live "will start in …" line.
-fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>) -> AnyElement {
-    let notified = picked_unix(&step.picker, cx).map(|date| {
-        let duration = match countdown(date, now_unix()) {
+/// The live "will start in …" line for the picked time.
+fn notified_line(step: &ScheduleStep, channel: bool, cx: &App) -> Option<String> {
+    picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx).map(|date| {
+        let duration = match countdown(date, WallClock::of(cx).now()) {
             Countdown::Days(n) => trn(keys::DAYS, n),
             Countdown::Hours(n) => trn(keys::HOURS, n),
             Countdown::Minutes(n) => trn(keys::MINUTES, n),
@@ -716,7 +715,12 @@ fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>)
             keys::GROUP_CALL_SCHEDULE_NOTIFIED_GROUP
         };
         tr_with(key, &[("duration", &duration)])
-    });
+    })
+}
+
+/// The date and time picker and the live "will start in …" line.
+fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>) -> AnyElement {
+    let notified = notified_line(step, channel, cx);
     div()
         .flex()
         .flex_col()

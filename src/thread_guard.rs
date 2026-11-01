@@ -7,39 +7,16 @@
 //! has already written the report by the time the unwind is caught; it asks
 //! [`panic_will_be_caught`] so it can file the report as a caught panic,
 //! which does not bring up the "closed unexpectedly" notice next launch.
+//! The count lives in `quill-panic-guard`, which the vendored Windows
+//! platform crate's vsync thread uses too.
 #![deny(clippy::indexing_slicing)]
 
-use std::cell::Cell;
+use quill_panic_guard::guarded;
+pub use quill_panic_guard::panic_will_be_caught;
 use std::io;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::{Builder, JoinHandle};
-
-thread_local! {
-    /// How many guards (`spawn_guarded` bodies, `ffi_boundary` calls) are
-    /// running on this thread.
-    static GUARDS: Cell<u32> = const { Cell::new(0) };
-}
-
-/// Whether a panic on this thread right now would be caught by
-/// `spawn_guarded` or `ffi_boundary` instead of ending the process. Safe to
-/// call from the panic hook (never panics itself).
-pub fn panic_will_be_caught() -> bool {
-    GUARDS.try_with(|guards| guards.get() > 0).unwrap_or(false)
-}
-
-/// Run `body` under `catch_unwind`, with the guard count raised.
-fn guarded<R>(body: impl FnOnce() -> R) -> std::thread::Result<R> {
-    let _ = GUARDS.try_with(|guards| guards.set(guards.get().saturating_add(1)));
-    // `AssertUnwindSafe`: after a panic the body's captures are only
-    // dropped, never observed again by this frame. State shared through
-    // `Arc`s or locks is the owner's to check, and locks recover from
-    // poisoning (`crate::locks`).
-    let result = catch_unwind(AssertUnwindSafe(body));
-    let _ = GUARDS.try_with(|guards| guards.set(guards.get().saturating_sub(1)));
-    result
-}
 
 /// Spawn a named thread that runs `body`. `join` yields `Some(result)` when
 /// `body` returned and `None` when it panicked. Spawning itself can fail

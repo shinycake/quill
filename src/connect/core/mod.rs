@@ -87,14 +87,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .envelope
             .extra
             .and_then(|id| self.session.requests.purpose(id));
-        // A message landing in a chat nobody shows changes no open view.
+        // A message landing in a chat nobody shows changes no open view,
+        // unless a shown chat's reply strip shows it.
         let shown_message = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(message)) => {
                 self.session.chat_is_shown(message.chat_id)
             }
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageContent {
-                chat_id, ..
-            }) => self.session.chat_is_shown(*chat_id),
+                chat_id,
+                message_id,
+                ..
+            }) => {
+                self.session.chat_is_shown(*chat_id)
+                    || self
+                        .session
+                        .shows_cross_chat_reply_to(*chat_id, *message_id)
+            }
             _ => false,
         };
         let view_after = match &owned.envelope.payload {
@@ -592,8 +600,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.pump_call_engine(active_call_before, bridge_signaling)?;
         self.pump_group_call_transport(group_calls_before)?;
-        self.pump_call_capture();
-        self.pump_call_screen();
+        self.pump_call_media(std::time::Instant::now());
         self.pump_call_audio()?;
         self.maybe_send_parameters()?;
         self.maybe_probe_channel_membership()?;
@@ -672,6 +679,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready {
             self.preload_known_forums();
+            self.check_export_leftovers();
         }
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
@@ -699,6 +707,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Quick reply shortcuts, so the first `/` already lists them
             // (tdesktop preloads them with the dialogs).
             let _ = self.ensure_quick_reply_shortcuts();
+            let _ = self.maybe_seed_storage_limits();
         }
         // Parity slice: `updateSavedNotificationSounds` may have marked the
         // list stale between ingests.

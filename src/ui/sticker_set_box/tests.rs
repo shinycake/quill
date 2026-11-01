@@ -11,6 +11,7 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::state::StickerSetViewStage;
+use quill::telegram::envelope::StickerItem;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -293,7 +294,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
             .photo_editor
             .take()
             .expect("editor")
-            .set_render_job();
+            .into_set_render_job();
         app.finish_set_image(
             78,
             quill::sticker_set_box::SetKind::Stickers,
@@ -420,6 +421,139 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
         && app.sticker_box.encoding.is_none()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
+}
+
+/// "Adapt from a Sticker" on a still sticker: the pick returns before the
+/// sticker is decoded, and the photo editor opens on it once the worker
+/// is done.
+#[gpui_kit::test]
+fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::PickExisting;
+    use quill::sticker_set_box::SetKind;
+    use quill::telegram::envelope::StickerFormat;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.sticker_box.pick = Some(PickExisting {
+            set_id: 78,
+            kind: SetKind::Emoji,
+            adapt: true,
+        });
+        cx.notify();
+    });
+    frames(vcx);
+    let mut item = app
+        .read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|stickers| stickers.first().cloned())
+        })
+        .expect("a demo sticker");
+    item.format = StickerFormat::Webp;
+    let opened_at_pick = vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.pick_existing_sticker(&item, window, cx);
+            app.viewer.photo_editor.is_some()
+        })
+    });
+    assert!(!opened_at_pick, "the decode waits for the worker");
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_some()));
+}
+
+fn adapt_pick(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+) -> (
+    Vec<StickerItem>,
+    crate::ui::sticker_set_box::state::PickExisting,
+) {
+    use crate::ui::sticker_set_box::state::PickExisting;
+    use quill::sticker_set_box::SetKind;
+    use quill::telegram::envelope::StickerFormat;
+    let pick = PickExisting {
+        set_id: 78,
+        kind: SetKind::Stickers,
+        adapt: true,
+    };
+    let items: Vec<StickerItem> = app
+        .read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .and_then(|s| s.media.media_library.set_stickers.get(&78).cloned())
+        })
+        .expect("demo stickers")
+        .into_iter()
+        .take(2)
+        .map(|mut item| {
+            item.format = StickerFormat::Webp;
+            item
+        })
+        .collect();
+    assert_eq!(items.len(), 2, "two demo stickers");
+    (items, pick)
+}
+
+fn choose(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    pick: crate::ui::sticker_set_box::state::PickExisting,
+    item: &StickerItem,
+) {
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.sticker_box.pick = Some(pick);
+            app.pick_existing_sticker(item, window, cx);
+        })
+    });
+}
+
+/// Closing the set box while a picked sticker decodes: the editor does not
+/// pop up for the box the user dismissed.
+#[gpui_kit::test]
+fn a_sticker_picked_then_closed_opens_no_editor(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let (items, pick) = adapt_pick(&app, vcx);
+    let item = &items[0];
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.sticker_box.pick = Some(pick);
+            app.pick_existing_sticker(item, window, cx);
+            app.close_sticker_set_dialog(cx);
+        })
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_none()));
+}
+
+/// Two picks in a row: the editor shows the later one, even when the
+/// earlier decode lands last.
+#[gpui_kit::test]
+fn the_later_pick_wins_when_the_earlier_decode_lands_last(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let (items, pick) = adapt_pick(&app, vcx);
+    let (first, second) = (&items[0], &items[1]);
+    choose(&app, vcx, pick, first);
+    choose(&app, vcx, pick, second);
+    let picture = |width, height| Some(image::RgbaImage::new(width, height));
+    app.update(vcx, |app, cx| {
+        app.land_still_pick(pick, second.file_id, picture(100, 100), cx);
+        app.land_still_pick(pick, first.file_id, picture(300, 200), cx);
+    });
+    frames(vcx);
+    let shown = app.read_with(vcx, |app, _| {
+        app.viewer.photo_editor.as_ref().and_then(|editor| {
+            editor
+                .placed
+                .first()
+                .map(|(item, _)| item.image.dimensions())
+        })
+    });
+    assert_eq!(shown, Some((100, 100)));
 }
 
 #[gpui_kit::test]

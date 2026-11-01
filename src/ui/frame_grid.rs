@@ -225,6 +225,9 @@ pub(crate) struct Cadence {
     last: Option<Instant>,
     /// The latest gaps in a row that were a whole number of grid ticks.
     even: u8,
+    /// The latest gap, and how many gaps in a row came that far apart.
+    spacing: Option<Duration>,
+    steady: u8,
 }
 
 /// Two due times this close are the same picture's.
@@ -242,6 +245,16 @@ impl Cadence {
             Some(last) if due > last + SAME_PICTURE => {
                 let even = grid.is_some_and(|grid| grid.whole_ticks(due - last));
                 self.even = if even { self.even.saturating_add(1) } else { 0 };
+                let gap = due - last;
+                let same = self
+                    .spacing
+                    .is_some_and(|spacing| spacing.abs_diff(gap) <= SAME_PICTURE);
+                self.steady = if same {
+                    self.steady.saturating_add(1)
+                } else {
+                    1
+                };
+                self.spacing = Some(gap);
                 self.last = Some(due);
             }
             // Back to the start (a loop, a seek): the spacing stays.
@@ -258,6 +271,13 @@ impl Cadence {
         self.even >= EVEN_GAPS
     }
 
+    /// How far apart its pictures come, once the last [`EVEN_GAPS`] came
+    /// [`Self::even`]ly and alike.
+    pub(crate) fn even_spacing(&self) -> Option<Duration> {
+        self.spacing
+            .filter(|_| self.even() && self.steady >= EVEN_GAPS)
+    }
+
     /// The vsync to draw the picture due at `due` on: the next vsync of
     /// `grid` (the display's, while other content animates on it) when the
     /// clip's pictures come [`Self::even`]ly; else its own.
@@ -267,6 +287,32 @@ impl Cadence {
             _ => due,
         }
     }
+}
+
+/// The grid vsyncs the frame clock ticks content on: `at`, and every
+/// `every` before and after it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Lattice {
+    pub(crate) at: Instant,
+    pub(crate) every: Duration,
+}
+
+/// The time content painted at `now` for a frame shown on `vsync` plays
+/// at: the time it would have been painted on the clock's last tick vsync
+/// at or before `vsync`. A play head started on any draw then moves to a
+/// new frame only on a tick's vsync, so a draw between ticks (a clip's, a
+/// scroll's) never shows one a refresh or two early, which the next tick
+/// would then hold that much longer.
+pub(crate) fn content_time(now: Instant, vsync: Vsync, lattice: Lattice) -> Instant {
+    let every = nanos(lattice.every);
+    if every == 0 {
+        return now;
+    }
+    let slack = nanos(vsync.period) / i128::from(PHASE_SLACK_DIV);
+    let index = (nanos_between(lattice.at, vsync.at) + slack).div_euclid(every);
+    let tick = shifted(lattice.at, index * every);
+    now.checked_sub(vsync.at.saturating_duration_since(tick))
+        .unwrap_or(now)
 }
 
 /// Something that animates on a display: the frame clock, or a clip (by

@@ -20,8 +20,8 @@ use crate::calls::engine::RemoteVideoState;
 use crate::calls::engine::{LiveFrameCallback, StreamState};
 use crate::calls::live_video::{LiveEnd, LiveFrame, LiveKey, LiveSink, LiveSource, LiveState};
 use crate::state::{ActiveCall, ActiveGroupCall};
-use crate::telegram::envelope::MessageSender;
-use std::collections::HashMap;
+use crate::telegram::envelope::{MessageSender, ParsedGroupCallParticipant};
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// The driver's live feeds, shared with the engine hook.
@@ -56,14 +56,71 @@ pub(crate) fn call_has_video(call: &ActiveGroupCall, key: LiveKey) -> bool {
             call.id == call_id
                 && call.participants.iter().any(|participant| {
                     participant.participant_id == MessageSender::User { user_id }
-                        && if screen {
-                            participant.screen_sharing_enabled
-                                || (participant.is_current_user
-                                    && (call.screen_sharing || call.screen_share_pending))
-                        } else {
-                            participant.video_enabled
-                        }
+                        && participant_has_video(call, participant, screen)
                 })
+        }
+    }
+}
+
+fn participant_has_video(
+    call: &ActiveGroupCall,
+    participant: &ParsedGroupCallParticipant,
+    screen: bool,
+) -> bool {
+    if screen {
+        participant.screen_sharing_enabled
+            || (participant.is_current_user && (call.screen_sharing || call.screen_share_pending))
+    } else {
+        participant.video_enabled
+    }
+}
+
+#[derive(Default)]
+struct CallTracks {
+    on: HashSet<LiveKey>,
+    others_video: Vec<LiveKey>,
+}
+
+fn tracks_on(call: &ActiveGroupCall) -> CallTracks {
+    let mut on = HashSet::new();
+    let mut others_video = Vec::new();
+    if call.is_my_video_enabled {
+        on.insert(LiveKey::Local { call_id: call.id });
+    }
+    for participant in call.participants.iter() {
+        let MessageSender::User { user_id } = participant.participant_id else {
+            continue;
+        };
+        for screen in [false, true] {
+            if participant_has_video(call, participant, screen) {
+                let key = LiveKey::Video {
+                    call_id: call.id,
+                    user_id,
+                    screen,
+                };
+                on.insert(key);
+                if !participant.is_current_user {
+                    others_video.push(key);
+                }
+            }
+        }
+    }
+    CallTracks { on, others_video }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct FeedInputs {
+    participants: u64,
+    my_video: bool,
+    sharing: bool,
+}
+
+impl FeedInputs {
+    fn of(call: &ActiveGroupCall) -> Self {
+        Self {
+            participants: call.participants.revision(),
+            my_video: call.is_my_video_enabled,
+            sharing: call.screen_sharing || call.screen_share_pending,
         }
     }
 }
@@ -176,47 +233,38 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// feeds whose video TDLib reports off (all of them once the call is
     /// left). The player sees the end; a feed asked for again later is a
     /// new one, so no frame from before shows when the video comes back.
-    pub(super) fn sync_call_feeds(&self, group_call_id: i32) {
+    pub(super) fn sync_call_feeds(&mut self, group_call_id: i32) {
         let calls = &self.session.calls;
         let call = calls
             .group_call(group_call_id)
             .filter(|call| calls.left_group_call != Some(call.id));
+        let inputs = call.map(FeedInputs::of);
+        let seen = self.group_seen.entry(group_call_id).or_default();
+        if inputs.is_some() && seen.feeds == inputs {
+            return;
+        }
+        seen.feeds = inputs;
+        let CallTracks { on, others_video } = call.map(tracks_on).unwrap_or_default();
         let mut ended = Vec::new();
-        self.live_feeds.lock_or_recover().retain(|key, source| {
+        let mut feeds = self.live_feeds.lock_or_recover();
+        feeds.retain(|key, source| {
             let ours =
                 key.call_id() == Some(group_call_id) && !matches!(key, LiveKey::Stream { .. });
-            let keep = !ours || call.is_some_and(|call| call_has_video(call, *key));
+            let keep = !ours || on.contains(key);
             if !keep {
                 ended.push(source.clone());
             }
             keep
         });
-        for source in ended {
-            source.end(LiveEnd::Left);
-        }
         // Open the feeds of others' video now, not when a tile first
         // asks: a static screen share may send its only frame before the
         // tile draws, and the hook drops frames that have no feed.
-        let Some(call) = call else {
-            return;
-        };
-        for participant in call.participants.iter() {
-            let MessageSender::User { user_id } = participant.participant_id else {
-                continue;
-            };
-            if participant.is_current_user {
-                continue;
-            }
-            for screen in [false, true] {
-                let key = LiveKey::Video {
-                    call_id: group_call_id,
-                    user_id,
-                    screen,
-                };
-                if call_has_video(call, key) {
-                    let _ = self.feed_source(key);
-                }
-            }
+        for key in others_video {
+            feeds.entry(key).or_insert_with(|| LiveSink::new().1);
+        }
+        drop(feeds);
+        for source in ended {
+            source.end(LiveEnd::Left);
         }
     }
 

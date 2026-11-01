@@ -632,6 +632,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.close_call_feeds(group_call_id);
         self.group_camera_state.remove(&group_call_id);
         self.group_mute_state.remove(&group_call_id);
+        self.group_seen.remove(&group_call_id);
     }
 
     /// Phase C3a: `endGroupCall` (schema 1.8.67, :14461). Gated on

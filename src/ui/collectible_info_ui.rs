@@ -13,6 +13,7 @@ use super::chat_row::chat_avatar;
 use super::earn::ton_icon;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::os_open::open_link_in;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -218,7 +219,10 @@ impl QuillApp {
                         .label(tr(keys::COLLECTIBLE_LEARN_MORE))
                         .ghost()
                         .w_full()
-                        .on_click(move |_, _, cx| cx.open_url(&learn_url)),
+                        .on_click({
+                            let app = app.downgrade();
+                            move |_, _, cx| open_link_in(&app, &learn_url, cx)
+                        }),
                 )
                 .child(
                     Button::new("collectible-copy")

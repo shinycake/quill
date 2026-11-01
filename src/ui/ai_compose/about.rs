@@ -34,7 +34,7 @@ impl QuillApp {
             }
             CocoonLink::Domain => {
                 let url = format!("https://{}", tr(keys::TRANSLATE_COCOON_EVERYONE_DOMAIN));
-                self.open_message_url(&url, cx);
+                self.open_link(&url, cx);
             }
         }
     }

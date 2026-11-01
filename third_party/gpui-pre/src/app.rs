@@ -1337,6 +1337,9 @@ impl App {
         self.foreground_executor.spawn(futures).detach();
 
         self.quitting = false;
+        // QUILL: macOS exits right after this, so `Application::run` never
+        // returns and code after it never runs.
+        log::logger().flush();
     }
 
     /// Get the id of the current keyboard layout
@@ -1368,6 +1371,27 @@ impl App {
     /// Gracefully quit the application via the platform's standard routine.
     pub fn quit(&self) {
         self.platform.quit();
+    }
+
+    /// Quill: `callback` decides whether a quit the OS started goes ahead:
+    /// a Dock Quit or log out on macOS, the end of the session on Windows.
+    /// [`App::quit`] never asks. A request that finds the app borrowed is
+    /// held and asked again from the event loop, never let through unasked.
+    pub fn on_quit_request(&self, mut callback: impl FnMut(&mut App) -> bool + 'static) {
+        let this = self.this.clone();
+        self.platform.on_quit_request(Box::new(move || {
+            let Some(app) = this.upgrade() else {
+                return crate::QuitAnswer::Allow;
+            };
+            let Ok(mut cx) = app.try_borrow_mut() else {
+                return crate::QuitAnswer::Later;
+            };
+            if cx.update(|cx| callback(cx)) {
+                crate::QuitAnswer::Allow
+            } else {
+                crate::QuitAnswer::Refuse
+            }
+        }));
     }
 
     /// Switches the platform between headless and windowed modes.

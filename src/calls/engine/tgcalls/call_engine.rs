@@ -392,6 +392,14 @@ impl CallEngine for TgcallsEngine {
         Ok(devices)
     }
 
+    fn warm_devices(&self) {
+        let api = self.api;
+        let _ = crate::thread_guard::spawn_guarded("quill-call-devices", move || {
+            let _ = devices::cameras(api);
+            let _ = devices::sound_devices();
+        });
+    }
+
     fn protocol(&self) -> EngineProtocol {
         self.protocol.clone()
     }

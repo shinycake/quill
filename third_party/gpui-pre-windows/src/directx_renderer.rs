@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // drawing returns an error instead of panicking when device-loss recovery
 // failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
-// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`). See
+// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`); shaders shared
+// by every window on a device (`shared_shaders`). See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
@@ -1207,14 +1208,7 @@ impl<T> PipelineState<T> {
         buffer_size: usize,
         blend_state: ID3D11BlendState,
     ) -> Result<Self> {
-        let vertex = {
-            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Vertex)?;
-            create_vertex_shader(device, raw_shader.as_bytes())?
-        };
-        let fragment = {
-            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Fragment)?;
-            create_fragment_shader(device, raw_shader.as_bytes())?
-        };
+        let (vertex, fragment) = shared_shaders(device, shader_module)?;
         let buffer = create_buffer(device, std::mem::size_of::<T>(), buffer_size)?;
         let view = create_buffer_view(device, &buffer)?;
 
@@ -1673,6 +1667,54 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
         device.CreateBlendState(&desc, Some(&mut state))?;
         Ok(state.unwrap())
     }
+}
+
+/// Quill: the shaders made on one D3D device, shared by every window that
+/// draws with it. Upstream made all of them again for each window, so each
+/// notification toast (a window of its own) had the driver build about ten
+/// shader pairs on the UI thread. Blend and sampler states need no cache:
+/// D3D11 hands back the existing object for an identical description. The
+/// cache follows the device: after a device loss the new device gets its
+/// own shaders.
+struct SharedShaders {
+    device: ID3D11Device,
+    pairs: Vec<(ShaderModule, ID3D11VertexShader, ID3D11PixelShader)>,
+}
+
+thread_local! {
+    static SHARED_SHADERS: std::cell::RefCell<Option<SharedShaders>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn shared_shaders(
+    device: &ID3D11Device,
+    module: ShaderModule,
+) -> Result<(ID3D11VertexShader, ID3D11PixelShader)> {
+    SHARED_SHADERS.with_borrow_mut(|shared| {
+        if shared.as_ref().is_some_and(|shared| shared.device != *device) {
+            *shared = None;
+        }
+        let shared = shared.get_or_insert_with(|| SharedShaders {
+            device: device.clone(),
+            pairs: Vec::new(),
+        });
+        if let Some((_, vertex, fragment)) = shared.pairs.iter().find(|(made, ..)| *made == module)
+        {
+            return Ok((vertex.clone(), fragment.clone()));
+        }
+        let vertex = {
+            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Vertex)?;
+            create_vertex_shader(device, raw_shader.as_bytes())?
+        };
+        let fragment = {
+            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Fragment)?;
+            create_fragment_shader(device, raw_shader.as_bytes())?
+        };
+        shared
+            .pairs
+            .push((module, vertex.clone(), fragment.clone()));
+        Ok((vertex, fragment))
+    })
 }
 
 #[inline]
@@ -2183,5 +2225,67 @@ mod dxgi {
             (number >> 16) & 0xFFFF,
             number & 0xFFFF
         ))
+    }
+}
+
+#[cfg(test)]
+mod shared_shader_tests {
+    use super::{SHARED_SHADERS, ShaderModule, shared_shaders};
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_WARP,
+            Direct3D11::{
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+                ID3D11Device, ID3D11VertexShader,
+            },
+        },
+    };
+
+    fn warp_device() -> ID3D11Device {
+        let mut device: Option<ID3D11Device> = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )
+        }
+        .expect("WARP device");
+        device.expect("WARP device")
+    }
+
+    fn owner(shader: &ID3D11VertexShader) -> ID3D11Device {
+        unsafe { shader.GetDevice() }.expect("shader device")
+    }
+
+    /// A device loss hands every window a new device: the shaders it gets
+    /// must be made on that device, and the lost device's shaders dropped.
+    #[::core::prelude::v1::test]
+    fn a_new_device_gets_its_own_shaders() {
+        let lost = warp_device();
+        let (first, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
+        let (again, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
+        assert_eq!(first, again, "a second window on one device shares them");
+
+        let recovered = warp_device();
+        let (made, _) = shared_shaders(&recovered, ShaderModule::Quad).expect("shaders");
+        assert_ne!(made, first);
+        assert_eq!(owner(&made), recovered);
+        let (sprite, _) =
+            shared_shaders(&recovered, ShaderModule::MonochromeSprite).expect("shaders");
+        assert_eq!(owner(&sprite), recovered);
+        let held = SHARED_SHADERS.with_borrow(|shared| {
+            shared
+                .as_ref()
+                .map(|shared| (shared.device == recovered, shared.pairs.len()))
+        });
+        assert_eq!(held, Some((true, 2)), "only the new device's shaders stay");
     }
 }

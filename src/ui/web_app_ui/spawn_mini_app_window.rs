@@ -427,7 +427,7 @@ impl QuillApp {
             label: None,
         };
         match open_decision(&link) {
-            OpenDecision::Open => self.open_message_url(url, cx),
+            OpenDecision::Open => self.open_link(url, cx),
             OpenDecision::Confirm {
                 url,
                 shown,
@@ -674,10 +674,10 @@ impl QuillApp {
                     cx.activate(true);
                     cx.notify();
                 }
-                "terms" => self.open_message_url(MINI_APP_TERMS_URL, cx),
+                "terms" => self.open_link(MINI_APP_TERMS_URL, cx),
                 "privacy" => {
                     if let Some(url) = privacy_policy_url {
-                        self.open_message_url(&url, cx);
+                        self.open_link(&url, cx);
                     }
                 }
                 "remove_from_menu" => {

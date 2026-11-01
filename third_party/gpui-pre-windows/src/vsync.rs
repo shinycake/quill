@@ -7,12 +7,13 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use gpui::FrameRequestSource;
 use gpui_util::ResultExt;
-use parking_lot::{Condvar, Mutex, RwLock};
+use parking_lot::{Condvar, Mutex};
 use smallvec::SmallVec;
 
 use crate::{
     refresh_interval::{DEFAULT_VSYNC_INTERVAL, VSYNC_INTERVAL_THRESHOLD, refresh_interval},
     vsync_has_work,
+    window_list::WindowList,
 };
 
 use windows::Win32::{
@@ -138,9 +139,9 @@ impl FrameGate {
     /// is called; there is no timeout. Returns `false` once the window list
     /// is gone (the platform was dropped). `raw` gives each list entry's
     /// handle.
-    pub(crate) fn wait_for_frames<W>(
+    pub(crate) fn wait_for_frames<W: Clone>(
         &self,
-        all_windows: &std::sync::Weak<RwLock<SmallVec<[W; 4]>>>,
+        all_windows: &std::sync::Weak<WindowList<W>>,
         raw: impl Fn(&W) -> HWND,
         wake_requested: impl Fn() -> bool,
     ) -> bool {
@@ -151,7 +152,7 @@ impl FrameGate {
             };
             let has_work = vsync_has_work(
                 windows
-                    .read()
+                    .snapshot()
                     .iter()
                     .map(|window| parked.contains(&hwnd_key(raw(window)))),
                 wake_requested(),

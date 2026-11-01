@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-struct SwitchSender {
-    inner: Arc<RecordingSender>,
-    down: Arc<AtomicBool>,
+pub(super) struct SwitchSender {
+    pub(super) inner: Arc<RecordingSender>,
+    pub(super) down: Arc<AtomicBool>,
 }
 
 impl JsonSender for SwitchSender {

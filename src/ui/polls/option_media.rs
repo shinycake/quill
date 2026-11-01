@@ -61,7 +61,7 @@ impl QuillApp {
             | PollOptionMedia::Venue {
                 location: place, ..
             } => {
-                self.open_message_url(&place.open_street_map_url(), cx);
+                self.open_link(&place.open_street_map_url(), cx);
             }
         }
     }

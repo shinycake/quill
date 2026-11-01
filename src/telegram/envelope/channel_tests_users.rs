@@ -343,3 +343,30 @@ fn cover_facts_parsed_from_user_status_and_full_info() {
         other => panic!("{other:?}"),
     }
 }
+
+// robustness-8: names are filtered once, where they are parsed, so the
+// chat list, call tiles, member lists, forward headers and window titles
+// all get the same text.
+#[test]
+fn names_drop_stacked_marks_and_tag_characters_when_parsed() {
+    let zalgo = "Ada\u{301}\u{302}\u{303}\u{304}\u{305}";
+    let tagged = "Love\u{E0041}\u{E0042}lace";
+    let user =
+        serde_json::json!({"@type": "user", "id": 31, "first_name": zalgo, "last_name": tagged});
+    let user = parse_user(&user).unwrap();
+    assert_eq!(user.display_name(), "Ada\u{301}\u{302} Lovelace");
+    let origin = serde_json::json!({"@type": "messageOriginHiddenUser", "sender_name": zalgo});
+    match parse_message_origin(Some(&origin)) {
+        Some(MessageOrigin::HiddenUser { sender_name }) => {
+            assert_eq!(sender_name, "Ada\u{301}\u{302}");
+        }
+        other => panic!("not a hidden origin: {other:?}"),
+    }
+    let title = serde_json::json!({"@type": "updateChatTitle", "chat_id": 5, "title": tagged});
+    match parse_envelope(&title.to_string()).unwrap().payload {
+        EnvelopePayload::Chats(ChatsPayload::UpdateChatTitle { title, .. }) => {
+            assert_eq!(title, "Lovelace");
+        }
+        _ => panic!("not a title update"),
+    }
+}

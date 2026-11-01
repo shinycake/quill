@@ -7,6 +7,7 @@ use crate::state::*;
 pub struct MessagesState {
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
+    pub rows_on_screen: Option<RowsOnScreen>,
     /// What the open message context menu may offer (`messageProperties`).
     pub message_menu_actions:
         Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
@@ -178,6 +179,7 @@ impl MessagesState {
     pub(crate) fn new() -> Self {
         Self {
             mention_search: None,
+            rows_on_screen: None,
             message_menu_actions: None,
             poll_option_menu: None,
             message_report: None,

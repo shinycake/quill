@@ -29,7 +29,12 @@ pub(crate) struct BusinessHoursUi {
 /// The note under the phone row menu for an anonymous Fragment number
 /// (`lng_info_mobile_context_menu_fragment_about`): the sentence with
 /// "Fragment" as the link to the address from the app config.
-pub(super) fn fragment_note_menu(menu: PopupMenu, muted: Hsla, url: String) -> PopupMenu {
+pub(super) fn fragment_note_menu(
+    menu: PopupMenu,
+    muted: Hsla,
+    url: String,
+    app: WeakEntity<QuillApp>,
+) -> PopupMenu {
     menu.separator().item(PopupMenuItem::element(move |_, cx| {
         div()
             .w(px(220.))
@@ -41,6 +46,7 @@ pub(super) fn fragment_note_menu(menu: PopupMenu, muted: Hsla, url: String) -> P
                 tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK),
                 ".",
                 url.clone(),
+                app.clone(),
                 cx,
             ))
     }))

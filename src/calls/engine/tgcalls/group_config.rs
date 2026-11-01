@@ -3,13 +3,8 @@
 //! (`ParseJoinResponse`), and which participant videos to receive at what
 //! quality (`GroupCall::updateRequestedVideoChannels`).
 use super::super::{GroupCallMode, GroupVideoSource, StreamQuality};
-use quill_calls_sys::{QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_MEDIUM, QC_GROUP_QUALITY_THUMBNAIL};
+use quill_calls_sys::{QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_THUMBNAIL};
 use serde_json::{Value, json};
-
-/// tdesktop's budget: one Full video costs as much as four Medium ones,
-/// and at most sixteen Medium ones are asked for.
-const FULL_AS_MEDIUMS: usize = 4;
-const MAX_MEDIUMS: usize = 16;
 
 /// The endpoint of an RTMP stream's video (tdesktop's
 /// `Data::RtmpEndpointId`, the one tgcalls delivers unified parts to).
@@ -51,29 +46,25 @@ pub(super) struct RequestedVideo<'a> {
     pub(super) max_quality: i32,
 }
 
-/// The qualities to ask for. Quill does not tell the engine how large
-/// each tile is, so every video is asked for as tdesktop asks for a
-/// tile in its grid (a camera up to Medium, a screen up to Full), then
-/// cut down the way tdesktop cuts its budget: screens fall back to
-/// Thumbnail when they alone cost more than it, cameras when they do.
+/// The qualities to ask for, as tdesktop asks them of a tile
+/// (`Viewport::setTileGeometry`, `GroupCall::updateRequestedVideoChannels`).
+/// tdesktop's small tiles are Thumbnail below 240 px or with others beside
+/// them, and Quill's are at most 120 px tall.
 pub(super) fn requested_videos(sources: &[GroupVideoSource]) -> Vec<RequestedVideo<'_>> {
-    let screens = sources.iter().filter(|source| source.screen).count();
-    let cameras = sources.len() - screens;
-    let screens_fit = screens * FULL_AS_MEDIUMS <= MAX_MEDIUMS;
-    let cameras_fit = cameras <= MAX_MEDIUMS;
     sources
         .iter()
-        .map(|source| {
-            let max_quality = match (source.screen, screens_fit, cameras_fit) {
-                (true, true, _) => QC_GROUP_QUALITY_FULL,
-                (false, _, true) => QC_GROUP_QUALITY_MEDIUM,
-                _ => QC_GROUP_QUALITY_THUMBNAIL,
-            };
-            RequestedVideo {
-                source,
-                min_quality: QC_GROUP_QUALITY_THUMBNAIL,
-                max_quality,
-            }
+        .map(|source| RequestedVideo {
+            source,
+            min_quality: if source.large && source.screen {
+                QC_GROUP_QUALITY_FULL
+            } else {
+                QC_GROUP_QUALITY_THUMBNAIL
+            },
+            max_quality: if source.large {
+                QC_GROUP_QUALITY_FULL
+            } else {
+                QC_GROUP_QUALITY_THUMBNAIL
+            },
         })
         .collect()
 }
@@ -125,14 +116,15 @@ mod tests {
             }],
             screen,
             audio_ssrc: 7000 + u32::try_from(index).unwrap(),
+            large: false,
         }
     }
 
-    fn maxima(sources: &[GroupVideoSource]) -> Vec<i32> {
-        requested_videos(sources)
-            .iter()
-            .map(|video| video.max_quality)
-            .collect()
+    fn bounds(source: GroupVideoSource) -> (i32, i32) {
+        let videos = [source];
+        let requested = requested_videos(&videos);
+        let video = requested.first().unwrap();
+        (video.min_quality, video.max_quality)
     }
 
     #[test]
@@ -149,47 +141,22 @@ mod tests {
     }
 
     #[test]
-    fn a_small_call_gets_medium_cameras_and_full_screens() {
-        let sources = [source(0, false), source(1, true)];
+    fn a_small_tile_asks_for_a_thumbnail_and_a_large_one_for_full() {
+        let thumbnail = (QC_GROUP_QUALITY_THUMBNAIL, QC_GROUP_QUALITY_THUMBNAIL);
+        assert_eq!(bounds(source(0, false)), thumbnail);
+        assert_eq!(bounds(source(0, true)), thumbnail);
+        let large = |screen| GroupVideoSource {
+            large: true,
+            ..source(0, screen)
+        };
         assert_eq!(
-            maxima(&sources),
-            vec![QC_GROUP_QUALITY_MEDIUM, QC_GROUP_QUALITY_FULL]
+            bounds(large(false)),
+            (QC_GROUP_QUALITY_THUMBNAIL, QC_GROUP_QUALITY_FULL)
         );
-        assert!(
-            requested_videos(&sources)
-                .iter()
-                .all(|video| video.min_quality == QC_GROUP_QUALITY_THUMBNAIL)
+        assert_eq!(
+            bounds(large(true)),
+            (QC_GROUP_QUALITY_FULL, QC_GROUP_QUALITY_FULL)
         );
-    }
-
-    #[test]
-    fn screens_keep_full_while_they_fit_whatever_the_cameras_cost() {
-        // As in tdesktop: 2 screens (8 mediums) + 9 cameras is over the
-        // budget, but neither kind alone is, so nothing is cut.
-        let mut sources: Vec<_> = (0..9).map(|index| source(index, false)).collect();
-        sources.extend((9..11).map(|index| source(index, true)));
-        let maxima = maxima(&sources);
-        assert!(maxima[..9].iter().all(|q| *q == QC_GROUP_QUALITY_MEDIUM));
-        assert!(maxima[9..].iter().all(|q| *q == QC_GROUP_QUALITY_FULL));
-    }
-
-    #[test]
-    fn too_many_cameras_drop_to_thumbnails() {
-        let sources: Vec<_> = (0..17).map(|index| source(index, false)).collect();
-        assert!(
-            maxima(&sources)
-                .iter()
-                .all(|q| *q == QC_GROUP_QUALITY_THUMBNAIL)
-        );
-    }
-
-    #[test]
-    fn too_many_screens_drop_to_thumbnails_and_cameras_keep_medium() {
-        let mut sources: Vec<_> = (0..5).map(|index| source(index, true)).collect();
-        sources.push(source(5, false));
-        let maxima = maxima(&sources);
-        assert!(maxima[..5].iter().all(|q| *q == QC_GROUP_QUALITY_THUMBNAIL));
-        assert_eq!(maxima[5], QC_GROUP_QUALITY_MEDIUM);
     }
 
     #[test]
@@ -202,7 +169,8 @@ mod tests {
         assert_eq!(channel["audio_ssrc"], 7000);
         assert_eq!(channel["ssrc_groups"][0]["semantics"], "SIM");
         assert_eq!(channel["ssrc_groups"][0]["ssrcs"], json!([1, 2, 3]));
-        assert_eq!(channel["max_quality"], QC_GROUP_QUALITY_FULL);
+        assert_eq!(channel["min_quality"], QC_GROUP_QUALITY_THUMBNAIL);
+        assert_eq!(channel["max_quality"], QC_GROUP_QUALITY_THUMBNAIL);
         assert_eq!(requested_video_json(&[], None), "[]");
     }
 

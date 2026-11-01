@@ -296,12 +296,8 @@ impl QuillApp {
 
     /// A window starts a frame, before anything in it renders (`None`: the
     /// main window).
-    pub(in crate::ui) fn sticker_frame_starts(
-        &self,
-        window: Option<ChatId>,
-        cx: &mut Context<QuillApp>,
-    ) {
-        self.playback.stickers.frame_starts(window);
+    pub(in crate::ui) fn sticker_frame_starts(&self, cx: &mut Context<QuillApp>) {
+        self.playback.stickers.frame_starts();
         self.ensure_sticker_closer(cx);
     }
 

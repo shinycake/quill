@@ -95,6 +95,7 @@ mod backend {
 #[cfg(target_os = "linux")]
 mod backend {
     use std::io;
+    use std::ops::ControlFlow;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
@@ -105,7 +106,7 @@ mod backend {
         | libc::RTMGRP_IPV4_ROUTE
         | libc::RTMGRP_IPV6_ROUTE;
 
-    fn subscribe() -> io::Result<OwnedFd> {
+    pub(in crate::net_watch) fn subscribe() -> io::Result<OwnedFd> {
         // SAFETY: constant arguments; the result is checked before use.
         let raw = unsafe {
             libc::socket(
@@ -138,9 +139,19 @@ mod backend {
     }
 
     pub(in crate::net_watch) fn watch() {
-        let Ok(socket) = subscribe() else {
-            return;
-        };
+        if let Ok(socket) = subscribe() {
+            listen(&socket, || {
+                super::super::network_changed();
+                ControlFlow::Continue(())
+            });
+        }
+    }
+
+    /// Calls `changed` after every read until it breaks or the socket fails.
+    pub(in crate::net_watch) fn listen(
+        socket: &OwnedFd,
+        mut changed: impl FnMut() -> ControlFlow<()>,
+    ) {
         let mut buffer = [0u8; 8192];
         loop {
             // SAFETY: `buffer` is writable for the length passed.
@@ -163,22 +174,124 @@ mod backend {
                     _ => return,
                 }
             }
-            super::super::network_changed();
+            if changed().is_break() {
+                return;
+            }
         }
     }
 }
 
 #[cfg(windows)]
 mod backend {
-    use windows_sys::Win32::NetworkManagement::IpHelper::NotifyAddrChange;
+    use std::ffi::c_void;
+    use std::io;
+    use windows_sys::Win32::Foundation::{HANDLE, NO_ERROR};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        CancelMibChangeNotify2, MIB_IPFORWARD_ROW2, MIB_IPINTERFACE_ROW, MIB_NOTIFICATION_TYPE,
+        MIB_UNICASTIPADDRESS_ROW, NotifyIpInterfaceChange, NotifyRouteChange2,
+        NotifyUnicastIpAddressChange,
+    };
+    use windows_sys::Win32::Networking::WinSock::AF_UNSPEC;
 
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
+    /// Who hears the notifications; the OS gets a pointer to it.
+    pub(in crate::net_watch) struct Listener(pub(in crate::net_watch) fn());
+
+    static NETWORK: Listener = Listener(super::super::network_changed);
+
+    fn notify(context: *const c_void) {
+        // SAFETY: every registration below passes a `&'static Listener`.
+        let listener = unsafe { &*context.cast::<Listener>() };
+        crate::thread_guard::ffi_boundary((), listener.0);
+    }
+
+    unsafe extern "system" fn interface(
+        context: *const c_void,
+        _row: *const MIB_IPINTERFACE_ROW,
+        _kind: MIB_NOTIFICATION_TYPE,
+    ) {
+        notify(context);
+    }
+
+    unsafe extern "system" fn address(
+        context: *const c_void,
+        _row: *const MIB_UNICASTIPADDRESS_ROW,
+        _kind: MIB_NOTIFICATION_TYPE,
+    ) {
+        notify(context);
+    }
+
+    unsafe extern "system" fn route(
+        context: *const c_void,
+        _row: *const MIB_IPFORWARD_ROW2,
+        _kind: MIB_NOTIFICATION_TYPE,
+    ) {
+        notify(context);
+    }
+
+    enum Kind {
+        Interface,
+        Address,
+        Route,
+    }
+
+    /// The registrations of one [`subscribe`] call.
+    pub(in crate::net_watch) struct Subscription(Vec<HANDLE>);
+
+    impl Drop for Subscription {
+        fn drop(&mut self) {
+            for handle in self.0.drain(..) {
+                // SAFETY: a handle from a successful Notify call, cancelled once.
+                unsafe { CancelMibChangeNotify2(handle) };
+            }
+        }
+    }
+
+    /// Interface, address and route changes on IPv4 and IPv6 alike.
+    /// `NotifyAddrChange` heard only IPv4 addresses. `initial` asks for one
+    /// call of each kind at once.
+    pub(in crate::net_watch) fn subscribe(
+        listener: &'static Listener,
+        initial: bool,
+    ) -> io::Result<Subscription> {
+        let context: *const c_void = std::ptr::from_ref(listener).cast();
+        let mut subscription = Subscription(Vec::with_capacity(3));
+        for kind in [Kind::Interface, Kind::Address, Kind::Route] {
+            let mut handle: HANDLE = std::ptr::null_mut();
+            let out = &raw mut handle;
+            // SAFETY: `context` points at a `'static` listener, each callback
+            // has the signature its call documents, and `out` is live.
+            let status = unsafe {
+                match kind {
+                    Kind::Interface => {
+                        NotifyIpInterfaceChange(AF_UNSPEC, Some(interface), context, initial, out)
+                    }
+                    Kind::Address => NotifyUnicastIpAddressChange(
+                        AF_UNSPEC,
+                        Some(address),
+                        context,
+                        initial,
+                        out,
+                    ),
+                    Kind::Route => {
+                        NotifyRouteChange2(AF_UNSPEC, Some(route), context, initial, out)
+                    }
+                }
+            };
+            if status != NO_ERROR {
+                return Err(io::Error::from_raw_os_error(status as i32));
+            }
+            subscription.0.push(handle);
+        }
+        Ok(subscription)
+    }
+
+    /// The callbacks run on system threads for as long as Quill does.
     pub(in crate::net_watch) fn watch() {
-        // SAFETY: two null pointers ask for the blocking form, which writes
-        // to neither.
-        while unsafe { NotifyAddrChange(std::ptr::null_mut(), std::ptr::null()) } == 0 {
-            super::super::network_changed();
+        match subscribe(&NETWORK, false) {
+            Ok(subscription) => std::mem::forget(subscription),
+            Err(error) => eprintln!("quill: no network notifications: {error}"),
         }
     }
 }
@@ -191,3 +304,7 @@ mod backend {
 }
 
 pub(super) use backend::{EVENTS_COVER_PROXY, watch};
+
+#[cfg(test)]
+#[path = "watcher_tests.rs"]
+mod watcher_tests;

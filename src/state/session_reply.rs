@@ -645,6 +645,21 @@ impl Session {
             .insert((chat_id.0, message_id.0), ReplyTarget::Missing);
     }
 
+    /// Whether a shown chat's row replies to `message_id` of `chat_id`, a
+    /// chat other than its own: a change to that message changes the strip.
+    pub fn shows_cross_chat_reply_to(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.chats_shown().iter().any(|shown| {
+            *shown != chat_id
+                && self.histories.get(&shown.0).is_some_and(|history| {
+                    history.messages.values().any(|message| {
+                        message.reply_to.as_ref().is_some_and(|reply| {
+                            reply.chat_id == chat_id && reply.message_id == message_id
+                        })
+                    })
+                })
+        })
+    }
+
     /// Thumbnails of fetched reply targets and other-chat replies that the
     /// bubble strips draw.
     pub(crate) fn reply_thumb_file_ids(&self) -> Vec<FileId> {
@@ -665,6 +680,16 @@ impl Session {
                     .and_then(|reply| reply.content.as_deref())
                 {
                     ids.extend(thumb_candidates(content));
+                }
+                // An other-chat original loaded in its own chat's history.
+                if let Some(reply) = message.reply_to.as_ref()
+                    && let (target_chat, Some(found)) = self.reply_original(message, reply)
+                    && target_chat != message.chat_id
+                {
+                    ids.extend(thumb_candidates(effective_content(
+                        &found.content,
+                        found.ephemeral.as_ref(),
+                    )));
                 }
                 if let Some(story) = message
                     .reply_to

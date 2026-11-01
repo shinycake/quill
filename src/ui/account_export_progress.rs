@@ -126,7 +126,9 @@ impl QuillApp {
                     Button::new("account-export-show")
                         .label(tr(keys::EXPORT_DONE))
                         .outline()
-                        .on_click(move |_, _, cx| cx.reveal_path(&folder)),
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.reveal_in_folder(&folder, cx)),
+                        ),
                 );
             }
             footer = footer.child(

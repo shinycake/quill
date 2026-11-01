@@ -16,7 +16,7 @@ use crate::platform::MemorySecretStore;
 use crate::state::ActiveCall;
 use crate::telegram::client::{ReceiveBridge, copy_and_parse};
 use crate::telegram::envelope::{AuthorizationState, CallState};
-use crate::telegram::hub::{ReceiveSource, TdHub};
+use crate::telegram::hub::{ReceiveSource, ReceiveWake, TdHub};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -96,7 +96,11 @@ fn channel_hub() -> (Arc<TdHub>, Sender<String>) {
     let (tx, rx) = mpsc::channel::<String>();
     let source: ReceiveSource =
         Box::new(move |timeout| rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
-    let hub = TdHub::with_source(source, Arc::new(MemorySink::new())).expect("hub thread");
+    let wake_tx = tx.clone();
+    let wake: ReceiveWake = Box::new(move || {
+        let _ = wake_tx.send(String::new());
+    });
+    let hub = TdHub::with_source(source, wake, Arc::new(MemorySink::new())).expect("hub thread");
     (Arc::new(hub), tx)
 }
 
@@ -108,7 +112,8 @@ fn dying_hub() -> (Arc<TdHub>, Sender<String>) {
         Ok(json) => Some(json),
         Err(_) => panic!("receive source failed"),
     });
-    let hub = TdHub::with_source(source, Arc::new(MemorySink::new())).expect("hub thread");
+    let hub = TdHub::with_source(source, Box::new(|| {}), Arc::new(MemorySink::new()))
+        .expect("hub thread");
     (Arc::new(hub), tx)
 }
 
@@ -545,6 +550,23 @@ fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() 
 }
 
 #[test]
+fn what_a_stopped_export_left_queued_goes_out_ahead_of_close() {
+    let mut client = calling_driver();
+    let (export, worker) = crate::export::ChatExport::scripted();
+    export.cancel();
+    client.driver.session.settings.chat_export = Some(export);
+    for request in ["cancelDownloadFile", "deleteFile"] {
+        let request = serde_json::json!({"@type": request, "file_id": 11});
+        worker.send(request).expect("queued");
+    }
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(
+        client.sent(),
+        ["cancelDownloadFile", "deleteFile", "setOption", "close"]
+    );
+}
+
+#[test]
 fn a_hang_up_nobody_answers_holds_close_back_only_so_long() {
     let mut client = calling_driver().with_call(false, CallState::Ready);
     crate::connect::closing::begin_close(&mut client.driver);
@@ -714,5 +736,45 @@ fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
         sent_close(),
         "the poll sent close: {:?}",
         recorder.snapshot()
+    );
+}
+
+#[test]
+fn a_running_call_or_joined_voice_chat_is_a_call_in_progress() {
+    assert!(!calling_driver().driver.call_in_progress());
+    assert!(
+        calling_driver()
+            .with_call(true, CallState::Ready)
+            .driver
+            .call_in_progress()
+    );
+    assert!(
+        !calling_driver()
+            .with_call(true, CallState::HangingUp)
+            .driver
+            .call_in_progress()
+    );
+    let ringing = CallState::Pending {
+        is_created: true,
+        is_received: true,
+    };
+    assert!(
+        !calling_driver()
+            .with_call(false, ringing)
+            .driver
+            .call_in_progress(),
+        "a call ringing in can be answered elsewhere"
+    );
+    assert!(
+        calling_driver()
+            .with_group_call(true)
+            .driver
+            .call_in_progress()
+    );
+    assert!(
+        !calling_driver()
+            .with_group_call(false)
+            .driver
+            .call_in_progress()
     );
 }

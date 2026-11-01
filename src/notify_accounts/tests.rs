@@ -442,8 +442,8 @@ fn the_unread_memo_recounts_after_an_account_switch() {
     second.ready_with_chat(7, false);
     second.ingest(&unread(3));
     assert_eq!(
-        first.driver.session.revision,
-        second.driver.session.revision
+        first.driver.session.chat_list.unread_revision,
+        second.driver.session.chat_list.unread_revision
     );
     let mut memo = UnreadMemo::default();
     assert_eq!(memo.get(&first.driver.session).count, 5);

@@ -16,10 +16,31 @@ use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+/// The `image/gif` file a message loops in its row: a GIF animation, or a
+/// GIF sent as a picture file, which tdesktop plays as an animation too
+/// (`DocumentData::isAnimation`). A picture file too large for the viewer
+/// keeps its file row (`shows_as_photo`) and never plays there.
+pub(super) fn row_gif_file(content: &MessageContent) -> Option<FileId> {
+    match content {
+        MessageContent::Animation(animation)
+            if animation.mime_type == "image/gif" && !animation.is_secret =>
+        {
+            animation.play_file_id()
+        }
+        MessageContent::Document(doc)
+            if doc.mime_type.eq_ignore_ascii_case("image/gif")
+                && quill::media_viewer::shows_as_photo(doc)
+                && doc.file_id.0 != 0 =>
+        {
+            Some(doc.file_id)
+        }
+        _ => None,
+    }
+}
 
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -46,18 +67,12 @@ impl QuillApp {
         {
             return;
         }
-        let MessageContent::Animation(animation) = &row.message.content else {
-            return;
-        };
-        if animation.is_secret || self.media_spoiler_covered(&row.message) {
-            return;
-        }
         // MP4 GIFs autoplay on the shared player (`inline_video`); only
         // true `.gif` files are decoded here.
-        if animation.mime_type != "image/gif" {
+        if self.media_spoiler_covered(&row.message) {
             return;
         }
-        let Some(file_id) = animation.play_file_id().filter(|id| {
+        let Some(file_id) = row_gif_file(&row.message.content).filter(|id| {
             session
                 .media
                 .files
@@ -67,7 +82,7 @@ impl QuillApp {
         }) else {
             return;
         };
-        let (id, mime) = (row.message.id, animation.mime_type.clone());
+        let (id, mime) = (row.message.id, "image/gif".to_string());
         // One GIF plays at a time; the others wait for it to stop.
         self.playback.autoplayed_gifs.insert(id);
         self.toggle_animation_playback(id, file_id, mime, cx);
@@ -180,15 +195,32 @@ impl QuillApp {
         self.playback.gif_decodes.insert(message_id, cancel.clone());
         let max_edge = self.gif_decode_edge(message_id, cx);
         Self::spawn_main(cx, async move |this, cx| {
-            let decoded = cx
-                .background_executor()
-                .spawn(async move { GifClip::decode(&path, max_edge, &cancel) })
-                .await;
+            let (first, first_in) = futures_channel::oneshot::channel();
+            let decode = cx.background_executor().spawn(async move {
+                GifClip::decode(&path, max_edge, &cancel, |clip| {
+                    let _ = first.send(clip);
+                })
+            });
+            // The first picture plays while the rest decode.
+            if let Ok(clip) = first_in.await {
+                let _ = this.update(cx, |this, cx| this.gif_started(message_id, clip, cx));
+            }
+            let decoded = decode.await;
             let _ = this.update(cx, |this, cx| {
                 this.gif_decoded(message_id, file_id, decoded, cx);
             });
         })
         .detach();
+    }
+
+    fn open_chat_animation(&self, message_id: MessageId) -> bool {
+        self.session().is_some_and(|session| {
+            session
+                .open_chat
+                .and_then(|chat| session.histories.get(&chat.0))
+                .and_then(|history| history.messages.get(&message_id.0))
+                .is_some_and(|message| matches!(message.content, MessageContent::Animation(_)))
+        })
     }
 
     /// The longer side to decode the GIF at: its tile in device pixels
@@ -206,6 +238,15 @@ impl QuillApp {
                     animation.height,
                     self.inline_caption_width(message, cx),
                 ),
+                MessageContent::Document(doc) => {
+                    doc.thumbnail.as_ref().map_or((0, 0, 0), |thumb| {
+                        (
+                            thumb.width,
+                            thumb.height,
+                            self.inline_caption_width(message, cx),
+                        )
+                    })
+                }
                 _ => (0, 0, 0),
             },
             None => (0, 0, 0),
@@ -213,35 +254,55 @@ impl QuillApp {
         InlineTile::media(MediaFrameKind::Gif, width, height, caption).decode_edge(scale)
     }
 
+    /// The GIF's first picture is in: it plays from here.
+    fn gif_started(&mut self, message_id: MessageId, clip: Arc<GifClip>, cx: &mut Context<Self>) {
+        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
+            return;
+        }
+        self.playback.gif = Some(clip);
+        self.playback.gif_started_at = Some(Instant::now());
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
+        self.notify_conversation(cx);
+        cx.notify();
+    }
+
     fn gif_decoded(
         &mut self,
         message_id: MessageId,
         file_id: FileId,
-        decoded: Result<GifClip, GifError>,
+        decoded: Result<Arc<GifClip>, GifError>,
         cx: &mut Context<Self>,
     ) {
         self.playback.gif_decodes.remove(&message_id);
-        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
-            // Stopped or replaced meanwhile: the pictures were never shown.
+        if self.playback.playing_animation != Some(message_id) {
+            // Stopped or replaced meanwhile.
             return;
         }
         match decoded {
-            Ok(clip) => {
-                self.playback.gif = Some(Rc::new(clip));
-                self.playback.gif_started_at = Some(Instant::now());
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
-            }
+            // Already playing since its first picture: the rest is in.
+            Ok(clip)
+                if self
+                    .playback
+                    .gif
+                    .as_ref()
+                    .is_some_and(|playing| Arc::ptr_eq(playing, &clip)) => {}
+            // Another clip of the same GIF is playing.
+            _ if self.playback.gif.is_some() => return,
+            Ok(clip) => self.gif_started(message_id, clip, cx),
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
                 self.playback.playing_animation = None;
                 self.play_gif_file(message_id, file_id, cx);
                 return;
             }
-            // Labelled `image/gif`, but a video: the inline player takes it.
+            // Labelled `image/gif`, but a video: the inline player takes an
+            // animation; a picture file stays still.
             Err(GifError::NotGif) => {
                 self.stop_animation_playback();
-                self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+                if self.open_chat_animation(message_id) {
+                    self.play_open_chat_clip(message_id, file_id, Demand::Loop, cx);
+                }
                 return;
             }
             Err(_) => {
@@ -277,5 +338,48 @@ impl QuillApp {
             });
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_gif_file;
+    use quill::ids::FileId;
+    use quill::telegram::envelope::{AlbumCoverThumb, DocumentContent, MessageContent};
+
+    fn picture_file(name: &str, mime: &str, size: i64) -> DocumentContent {
+        DocumentContent {
+            file_name: name.into(),
+            mime_type: mime.into(),
+            caption: String::new(),
+            caption_entities: Vec::new(),
+            file_id: FileId(7),
+            thumbnail: Some(AlbumCoverThumb {
+                width: 320,
+                height: 240,
+                file_id: FileId(8),
+            }),
+            minithumbnail: None,
+            size,
+        }
+    }
+
+    #[test]
+    fn a_gif_sent_as_a_picture_file_loops_in_its_row() {
+        let gif = picture_file("loop.gif", "image/gif", 2 << 20);
+        assert!(quill::media_viewer::shows_as_photo(&gif));
+        assert_eq!(
+            row_gif_file(&MessageContent::Document(gif)),
+            Some(FileId(7))
+        );
+        let png = picture_file("still.png", "image/png", 2 << 20);
+        assert_eq!(row_gif_file(&MessageContent::Document(png)), None);
+    }
+
+    #[test]
+    fn a_gif_file_too_large_for_the_viewer_keeps_its_file_row_and_does_not_play() {
+        let huge = picture_file("huge.gif", "image/gif", 65 << 20);
+        assert!(!quill::media_viewer::shows_as_photo(&huge));
+        assert_eq!(row_gif_file(&MessageContent::Document(huge)), None);
     }
 }

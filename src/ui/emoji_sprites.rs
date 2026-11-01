@@ -222,6 +222,8 @@ pub(super) fn glyph(emoji: &str, size: Pixels) -> Option<AnyElement> {
 /// when there is nothing to draw (the caller keeps its own text), or for
 /// right-to-left text, which keeps the bidirectional line.
 pub(super) fn one_line(text: &str, font: Pixels) -> Option<AnyElement> {
+    let shown = quill::display_text::filtered(text);
+    let text = shown.as_ref();
     if quill::text::has_rtl_text(text) {
         return None;
     }

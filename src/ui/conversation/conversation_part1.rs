@@ -14,6 +14,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if part.top() {
+            crate::ui::frame_clock::trace_slice_render("history");
             // One instant for the rows work and the dust of this frame, in
             // panes that build no rows too.
             self.pin_vanish_now();

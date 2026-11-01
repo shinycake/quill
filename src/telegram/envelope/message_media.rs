@@ -124,8 +124,9 @@ pub struct DocumentContent {
 pub struct MiniThumbnail {
     pub width: i32,
     pub height: i32,
-    /// Raw JPEG from `minithumbnail.data` (`bytes`).
-    pub data: Vec<u8>,
+    /// Raw JPEG from `minithumbnail.data` (`bytes`), shared so a view can
+    /// hold it without copying.
+    pub data: std::sync::Arc<[u8]>,
 }
 
 /// One `thumbnail` used as an album cover (`album_cover_thumbnail` or
@@ -309,7 +310,7 @@ pub(crate) fn parse_minithumbnail(value: Option<&Value>) -> Option<MiniThumbnail
     Some(MiniThumbnail {
         width: int53_or_zero(value.get("width")).sat_i32(),
         height: int53_or_zero(value.get("height")).sat_i32(),
-        data,
+        data: data.into(),
     })
 }
 

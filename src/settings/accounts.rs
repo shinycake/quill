@@ -393,6 +393,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
+    fn a_debug_build_never_reaches_the_release_data_folder() {
+        let release = directories::ProjectDirs::from("org", "shinycake", "Quill")
+            .map(|dirs| dirs.data_dir().to_path_buf());
+        assert!(release.is_some());
+        assert_ne!(real_app_root(), release);
+    }
+
+    #[test]
     fn account_paths_are_scoped() {
         let root = PathBuf::from("/tmp/quill-test");
         let paths = AccountPaths::for_root(&root, &AccountKey::primary());
@@ -531,6 +540,7 @@ mod account_registry_tests {
             2,
             "temp file cleaned up"
         );
+        assert_eq!(std::fs::read(&path).unwrap(), old);
         // Fail at the create step: read-only directory (Unix permissions).
         #[cfg(unix)]
         {
@@ -546,7 +556,6 @@ mod account_registry_tests {
                 assert_eq!(std::fs::read(&path).unwrap(), old);
             }
         }
-        assert_eq!(std::fs::read(&path).unwrap(), old);
         let _ = std::fs::remove_dir_all(&root);
     }
 

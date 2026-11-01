@@ -1,0 +1,12 @@
+[package]
+name = "quill-panic-guard"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "MIT"
+description = "The one per-thread count of running panic guards, shared by Quill and its vendored GPUI platform crates"
+repository = "https://github.com/shinycake/quill"
+publish = false
+
+[lints]
+workspace = true

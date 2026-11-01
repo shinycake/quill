@@ -94,3 +94,77 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   one closes, as on Windows. A successful recovery clears the state, so a
   later loss starts afresh. `Recovering` holds this wiring and its tests
   run with the policy's.
+- `try_recover` puts a recreated context in the shared slot only after the
+  window's renderer is built on it (sweep bundle B13, L09). Before, a build
+  that failed after the context was made left it installed: the window's
+  next `recover` saw a healthy context, switched to adopting it with its
+  failures reset (so the hardware-only and software steps started over),
+  and the other windows adopted a context the recreating window could not
+  draw with. Now the slot stays empty and the recreation backs off and falls
+  back as one sequence. Not run: there is no way to make the renderer build
+  fail on a working device here, and no GPU loss to recover from.
+- The look for the GPU belongs to the shared context, not to the window
+  that recreated it (sweep bundle B13, N45): `GpuContext` is now
+  `Rc<GpuSlot>`, the context plus a `SharedRecovery` holding the
+  `HardwareProbe`. A recreation that lands on a CPU adapter sets it, an
+  adoption keeps it, a loss clears it, and `hardware_probe_at` and
+  `probe_hardware` read it from any window. Before, closing the window that
+  recreated the context left the others on the software renderer for the
+  rest of the session. Test: `any_window_on_the_fallback_looks_for_the_gpu`.
+- A look for the GPU runs off the UI thread (sweep bundle B13, L11):
+  `look_for_gpu` makes a Vulkan/GL instance with no display and lists the
+  adapters on a thread of its own, and the windows check back for its answer
+  every 250 ms (`ProbeStep::Await`). Only when it saw a non-CPU adapter does
+  the window run `gpu_can_present` (which needs its surface) and recreate.
+  Before, every look, every 10 s to 2 minutes for as long as the GPU stayed
+  away, made an instance and a surface on the UI thread. Test:
+  `a_look_for_the_gpu_runs_off_the_ui_thread`. Not measured: there is no
+  display or GPU loss here to time a look against.
+- A GPU that keeps dying is not recovered onto forever (sweep bundle B13,
+  L10): `SharedRecovery` counts the shared context's losses (once per
+  context, by the window that sees it lost first) over 10 minutes. From the
+  3rd, recovery accepts a CPU adapter at once and does not look for the GPU
+  again; at the 6th it gives up (`on_device_gone`: Quill's alert and exit).
+  Before, each successful recovery started afresh, so a card or driver that
+  failed again after every recovery flashed the windows through recoveries
+  for the rest of the session, and the probe moved them back onto it.
+  `Target::Recreate`'s field is now `software_at_once`. Tests:
+  `a_gpu_that_keeps_dying_is_left_and_then_given_up_on`,
+  `losses_far_apart_are_each_recovered_from_afresh`.
+
+The Quill project also changed it in 2026 so Linux draws NV12 video pictures
+on the GPU, as gpui-pre-windows does (`docs/decisions/video-nv12-linux.md`):
+
+- `src/yuv_surfaces.rs` (new): `PrimitiveBatch::Surfaces` is drawn. Each
+  `SurfaceFormat::Nv12` frame is uploaded into an `R8Unorm` luma and an
+  `Rg8Unorm` chroma texture, kept per clip (at most 16 pairs) and filled
+  again in place while the size stays the same; a pair not drawn for two
+  frames, and every pair once no surface is on screen, is freed. Each draw's
+  bounds, mask and `YuvColor::rgb_rows` go into one uniform buffer at
+  dynamic offsets (at most 64 draws a frame). Frames are marked drawn or
+  refused (other formats, too large for a texture). Tests run on lavapipe.
+- `src/shaders.wgsl`: `fs_surface` takes the matrix rows from the uniform
+  instead of a fixed full-range BT.601 matrix and blends like the other
+  pipelines.
+- `src/wgpu_renderer.rs`: the surfaces layout's uniform has a dynamic
+  offset; `record_frame` prepares and draws the surfaces.
+
+The Quill project also changed it in 2026 so pictures shown as images cost
+fewer copies and textures (sweep finding media-7,
+`docs/decisions/video-nv12-linux.md`):
+
+- `src/wgpu_atlas.rs`: `upload_texture` hands the bytes to
+  `queue.write_texture` at once (the queue stages them for the next submit)
+  instead of copying them into a pending list that `before_frame` flushed;
+  `swizzle_upload_data` returns a `Cow` and copies only to swap BGRA into
+  RGBA. A freed texture larger than 1024² (one picture's own) is kept as a
+  spare (at most two, for eight frames) and taken by the next picture of
+  that size, so a playing 1080p clip alternates between two textures instead
+  of creating one per picture. Test: `video_pictures_take_turns_in_two_textures`;
+  the upstream `before_frame_skips_uploads_for_removed_texture` is now
+  `a_tile_removed_before_the_frame_is_safe`.
+
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

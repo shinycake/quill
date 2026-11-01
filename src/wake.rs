@@ -48,6 +48,42 @@ fn isolated_thread() -> Option<ThreadId> {
         .then(|| std::thread::current().id())
 }
 
+#[cfg(any(test, feature = "test-support"))]
+mod poked_here {
+    use super::Signal;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    thread_local! {
+        static POKES: RefCell<HashMap<usize, u64>> = RefCell::new(HashMap::new());
+    }
+
+    fn key(signal: &Signal) -> usize {
+        std::ptr::from_ref(signal) as usize
+    }
+
+    pub(super) fn count(signal: &Signal) {
+        let _ = POKES.try_with(|pokes| {
+            if let Ok(mut pokes) = pokes.try_borrow_mut() {
+                *pokes.entry(key(signal)).or_default() += 1;
+            }
+        });
+    }
+
+    pub(super) fn get(signal: &Signal) -> u64 {
+        POKES
+            .try_with(|pokes| {
+                pokes
+                    .try_borrow()
+                    .ok()
+                    .and_then(|pokes| pokes.get(&key(signal)).copied())
+            })
+            .ok()
+            .flatten()
+            .unwrap_or(0)
+    }
+}
+
 /// An epoch counter with a list of waiting tasks.
 pub struct Signal {
     epoch: AtomicU64,
@@ -70,6 +106,8 @@ impl Signal {
     /// Wake every waiter. Cheap and safe from any thread.
     pub fn poke(&self) {
         self.epoch.fetch_add(1, Ordering::AcqRel);
+        #[cfg(any(test, feature = "test-support"))]
+        poked_here::count(self);
         let me = isolated_thread();
         let woken = {
             let mut wakers = lock_or_recover(&self.wakers);
@@ -89,6 +127,14 @@ impl Signal {
         for (waker, _) in woken {
             waker.wake();
         }
+    }
+
+    /// Tests: how many times this thread has poked the signal. The epoch
+    /// also counts pokes from tests running in parallel, so only this
+    /// count shows that the code under test poked.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn pokes_on_this_thread(&self) -> u64 {
+        poked_here::get(self)
     }
 
     /// Ready once the epoch differs from `seen`; yields the new epoch.
@@ -210,6 +256,17 @@ mod tests {
         let _ = poker.join();
         let waited = waited.unwrap_or(Duration::from_secs(99));
         assert!(waited < Duration::from_millis(1000), "waited {waited:?}");
+    }
+
+    #[test]
+    fn a_thread_counts_only_its_own_pokes() {
+        static SIGNAL: Signal = Signal::new();
+        let other = std::thread::spawn(|| SIGNAL.poke());
+        let _ = other.join();
+        assert_eq!(SIGNAL.pokes_on_this_thread(), 0);
+        SIGNAL.poke();
+        assert_eq!(SIGNAL.pokes_on_this_thread(), 1);
+        assert_eq!(SIGNAL.epoch(), 2);
     }
 
     #[test]

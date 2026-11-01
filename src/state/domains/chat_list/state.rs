@@ -85,6 +85,9 @@ pub struct ChatListState {
     /// lists (`updateUnreadMessageCount` / `updateUnreadChatCount`); the
     /// badge uses these instead of summing the (paginated) loaded chats.
     pub unread_totals: UnreadTotals,
+    /// Moves whenever something the unread badges count may have changed
+    /// (see `Session::note_unread_inputs`).
+    pub unread_revision: u64,
     /// `updateUnreadChatCount` for each chat folder (tab counters).
     pub folder_unread_chats: HashMap<i32, UnreadPair>,
     pub chats_exhausted: bool,
@@ -171,6 +174,7 @@ impl ChatListState {
             pinned_archived_chat_count_max: 100,
             suggestions: Default::default(),
             unread_totals: UnreadTotals::default(),
+            unread_revision: 0,
             folder_unread_chats: HashMap::new(),
             chats_exhausted: false,
             archive_chats_exhausted: false,

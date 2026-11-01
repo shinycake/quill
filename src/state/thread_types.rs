@@ -40,22 +40,11 @@ pub struct ThreadView {
     pub root_ids: Vec<i64>,
     /// Root post and replies, keyed by message id. One contiguous window:
     /// `loaded_complete` once it reaches the root, `has_newer` while it
-    /// stops short of the newest reply (opened at the first unread).
+    /// stops short of `last_message_id` (opened at the first unread).
     pub history: TopicHistory,
-    /// The window stops short of `last_message_id`: newer pages load as
-    /// the reader scrolls down, and live replies wait outside it.
-    pub has_newer: bool,
-    /// The last newer page failed; auto-paging stops until a jump.
-    pub newer_failed: bool,
-    /// Bumped whenever the window is replaced, so the UI re-anchors its
-    /// scroll (at the unread divider, else at the bottom).
-    pub window_epoch: u64,
     /// The window was reset by the reducer (an own send while newer replies
     /// were unloaded); the driver has to request the newest page.
     pub reload_needed: bool,
-    /// Page requests issued for a window that was replaced since: their
-    /// answers are dropped.
-    pub stale_pages: HashSet<u64>,
     /// The unread divider goes above the first incoming reply after this id.
     pub unread_anchor: Option<MessageId>,
     /// The thread opens at its saved scroll position: the first page loads
@@ -92,11 +81,7 @@ impl ThreadView {
             last_message_id: 0,
             root_ids: Vec::new(),
             history: TopicHistory::default(),
-            has_newer: false,
-            newer_failed: false,
-            window_epoch: 0,
             reload_needed: false,
-            stale_pages: HashSet::new(),
             unread_anchor: None,
             saved_anchor: None,
             root_jump_serial: 0,
@@ -208,7 +193,7 @@ impl ThreadView {
     /// Recompute `has_newer` after a page landed: the window stops short of
     /// the newest reply the server reported.
     pub(crate) fn refresh_has_newer(&mut self) {
-        self.has_newer = self.last_message_id > 0
+        self.history.has_newer = self.last_message_id > 0
             && self
                 .newest_loaded_id()
                 .is_some_and(|newest| newest.0 < self.last_message_id);
@@ -240,7 +225,7 @@ impl ThreadView {
         }
         let was = self.last_read_inbox_message_id;
         self.last_read_inbox_message_id = id;
-        if self.has_newer {
+        if self.history.has_newer {
             let read_now = self.incoming_after(was) - self.incoming_after(id);
             self.unread_count = (self.unread_count - read_now as i32).max(0);
         } else {
@@ -265,7 +250,7 @@ impl ThreadView {
                 self.unread_count += 1;
             }
         }
-        if self.has_newer {
+        if self.history.has_newer {
             if incoming {
                 return false;
             }
@@ -287,10 +272,10 @@ impl ThreadView {
         self.history.loaded_complete = false;
         self.history.next_from_message_id = MessageId(0);
         self.history.reader = ReaderPosition::Tail;
-        self.has_newer = false;
-        self.newer_failed = false;
+        self.history.has_newer = false;
+        self.history.newer_failed = false;
         self.reload_needed = true;
-        self.window_epoch = self.window_epoch.wrapping_add(1);
+        self.history.window_epoch = self.history.window_epoch.wrapping_add(1);
     }
 }
 

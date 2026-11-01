@@ -25,6 +25,8 @@ use quill::data_settings::{
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::limit_steps::cap_at;
+use std::cell::Cell;
+use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
 /// `format_bytes` returns "" for 0 and tops out at MB.
 pub(crate) fn format_storage_bytes(n: i64) -> String {
@@ -55,6 +57,11 @@ pub(crate) struct StorageScroll {
     pub(in crate::ui) page: ScrollHandle,
     usage: ScrollAnchor,
     pending: bool,
+    /// The rows above the list were still loading at the last scroll: it
+    /// goes again once they arrive, unless the user scrolled meanwhile.
+    until_settled: bool,
+    /// The page's vertical offset the last scroll left.
+    placed: Rc<Cell<Option<Pixels>>>,
 }
 
 impl StorageScroll {
@@ -65,6 +72,8 @@ impl StorageScroll {
             page,
             usage,
             pending: false,
+            until_settled: false,
+            placed: Rc::default(),
         }
     }
 }
@@ -80,11 +89,28 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if std::mem::take(&mut self.settings.storage_scroll.pending) {
-            self.settings.storage_scroll.usage.scroll_to(window, cx);
-            // The offset changes on the next frame and paints nothing on
-            // its own.
-            window.on_next_frame(|window, _| window.refresh());
+        let settled = self.session().is_none_or(|session| {
+            session.settings.data_storage.seeded || !session.settings.auto_download_presets_loading
+        });
+        let scroll = &mut self.settings.storage_scroll;
+        let user_moved = scroll
+            .placed
+            .get()
+            .is_some_and(|placed| placed != scroll.page.offset().y);
+        if user_moved {
+            scroll.until_settled = false;
+        }
+        let again = scroll.until_settled && settled;
+        if std::mem::take(&mut scroll.pending) || again {
+            scroll.until_settled = !settled;
+            scroll.usage.scroll_to(window, cx);
+            let (placed, page) = (scroll.placed.clone(), scroll.page.clone());
+            // Runs after the anchor's own next-frame scroll. The new offset
+            // paints nothing on its own.
+            window.on_next_frame(move |window, _| {
+                placed.set(Some(page.offset().y));
+                window.refresh();
+            });
         }
     }
 
@@ -351,6 +377,19 @@ impl QuillApp {
             Some(stats) => {
                 body = body.child(self.local_storage_section(cx, &stats));
             }
+        }
+        // Telegram Desktop keeps no message database; TDLib's stays and
+        // is not part of the cache above, so its size is shown apart.
+        if let Some(bytes) = self.disk.database_bytes {
+            let size = format_storage_bytes(i64::try_from(bytes).unwrap_or(i64::MAX));
+            body = body.child(
+                div()
+                    .id("storage-database-size")
+                    .debug_selector(|| "storage-database-size".into())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr_with(keys::Q_DISK_DATABASE_SIZE, &[("size", &size)])),
+            );
         }
         // --- Network usage (B13) ---
         body = body.child(self.network_usage_section(cx));

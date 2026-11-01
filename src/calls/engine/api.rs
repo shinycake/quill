@@ -330,6 +330,10 @@ pub trait CallEngine {
     /// Phase C2b: engine -> app; enumerate capture and playback devices.
     fn media_devices(&self) -> Result<Vec<MediaDevice>, EngineError>;
 
+    /// A call is coming: do off this thread what makes the first
+    /// [`Self::media_devices`] of a process slow.
+    fn warm_devices(&self) {}
+
     /// Phase C2b: engine -> app; return the protocol the engine itself reports.
     fn protocol(&self) -> EngineProtocol;
 

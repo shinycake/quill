@@ -359,10 +359,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Who sends each audio ssrc, for the engine's decryption.
     pub(super) fn sync_conference_ssrc_owners(&mut self, group_call_id: i32) {
         let owners = match self.session.calls.group_call(group_call_id) {
-            Some(call) if call.is_conference() => crate::calls::engine::conference_ssrc_owners(
-                &call.participants,
-                call.loaded_all_participants,
-            ),
+            Some(call) if call.is_conference() => {
+                let inputs = (call.participants.revision(), call.loaded_all_participants);
+                let seen = self.group_seen.entry(group_call_id).or_default();
+                if seen.ssrc_owners == Some(inputs) {
+                    return;
+                }
+                seen.ssrc_owners = Some(inputs);
+                crate::calls::engine::conference_ssrc_owners(
+                    &call.participants,
+                    call.loaded_all_participants,
+                )
+            }
             _ => return,
         };
         if let Some(engine) = self.call_engine.as_deref_mut() {

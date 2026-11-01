@@ -453,13 +453,13 @@ impl QuillApp {
                         Button::new("banned-help")
                             .label(tr(keys::SIGNIN_BANNED_HELP))
                             .ghost()
-                            .on_click(cx.listener(move |_, _, _, cx| {
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 let url = signin::banned_help_mailto(
                                     &phone,
                                     quill::version::APP,
                                     std::env::consts::OS,
                                 );
-                                cx.open_url(&url);
+                                this.open_link(&url, cx);
                             })),
                     )
                     .child(
@@ -666,7 +666,7 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_OPEN_FRAGMENT))
                             .primary()
                             .w_full()
-                            .on_click(move |_, _, cx| cx.open_url(&url))
+                            .on_click(cx.listener(move |this, _, _, cx| this.open_link(&url, cx)))
                             .into_any_element(),
                     );
                 }

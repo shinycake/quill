@@ -269,12 +269,8 @@ fn a_paused_player_decodes_only_its_queue() {
 }
 
 #[test]
-fn a_silent_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
-    use super::{IDLE_POLL, idle_wait};
-    // Sound is drained without the state lock, so it keeps the short poll;
-    // a silent player is woken by every change and only needs a safety net.
-    assert_eq!(idle_wait(true), IDLE_POLL);
-    assert!(idle_wait(false) >= IDLE_POLL * 10);
+fn an_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
+    use super::IDLE_WAIT;
     let (mut player, calls) = scripted_player(None, false, 3);
     assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 3));
     std::thread::sleep(Duration::from_millis(60));
@@ -283,7 +279,7 @@ fn a_silent_idle_player_sleeps_long_but_wakes_when_a_picture_is_taken() {
     let taken = Instant::now();
     assert!(player.take_frame().is_some());
     assert!(wait_until(|| calls.load(Ordering::SeqCst) >= 4));
-    assert!(taken.elapsed() < idle_wait(false) / 2);
+    assert!(taken.elapsed() < IDLE_WAIT / 2);
 }
 
 #[test]
@@ -470,6 +466,11 @@ fn decoder() -> bool {
         return true;
     }
     let reason = super::unavailable_reason().unwrap_or("unknown");
+    // A shim that is there but out of date would skip these on every run.
+    assert!(
+        !reason.contains(super::ffi::STALE_HINT),
+        "quillvideo is out of date ({reason})"
+    );
     assert!(
         !require_video_lib(std::env::var_os("QUILL_REQUIRE_VIDEO_LIB").as_deref()),
         "QUILL_REQUIRE_VIDEO_LIB=1 but quillvideo is not available ({reason})"

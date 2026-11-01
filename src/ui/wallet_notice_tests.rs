@@ -153,7 +153,11 @@ fn the_button_opens_the_official_apps_page_and_ok_opens_nothing(cx: &mut TestApp
     click(vcx, "wallet-notice-ok");
     assert_eq!(notice(&app, vcx), None);
     assert_eq!(dialog(&shell, vcx), None);
-    assert_eq!(vcx.opened_url(), None, "OK never opens the browser");
+    assert_eq!(
+        quill::platform::os_opened_last(),
+        None,
+        "OK never opens the browser"
+    );
 
     app.update_in(vcx, |app, _, cx| {
         app.show_wallet_notice(WalletSurface::Receive, cx)
@@ -161,7 +165,7 @@ fn the_button_opens_the_official_apps_page_and_ok_opens_nothing(cx: &mut TestApp
     frames(vcx);
     click(vcx, "wallet-notice-open");
     assert_eq!(
-        vcx.opened_url().as_deref(),
+        quill::platform::os_opened_last().as_deref(),
         Some("https://telegram.org/apps")
     );
     assert_eq!(notice(&app, vcx), None);

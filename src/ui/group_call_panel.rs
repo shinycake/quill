@@ -893,13 +893,13 @@ mod tests {
         assert!(mute_state(&call) == MuteState::Join);
         call.is_joined = true;
         assert!(mute_state(&call) == MuteState::Connecting);
-        call.participants = std::sync::Arc::new(vec![me(false, true, false)]);
+        call.participants = vec![me(false, true, false)].into();
         assert!(mute_state(&call) == MuteState::Live);
         call.is_muted_self = true;
         assert!(mute_state(&call) == MuteState::Muted);
-        call.participants = std::sync::Arc::new(vec![me(true, false, false)]);
+        call.participants = vec![me(true, false, false)].into();
         assert!(mute_state(&call) == MuteState::ForceMuted);
-        call.participants = std::sync::Arc::new(vec![me(true, false, true)]);
+        call.participants = vec![me(true, false, true)].into();
         assert!(mute_state(&call) == MuteState::HandRaised);
         call.is_joined = false;
         call.scheduled_start_date = 2_000_000_000;

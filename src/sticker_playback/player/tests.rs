@@ -1,4 +1,4 @@
-use super::head::{PAUSE_GAP, pick};
+use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
 use super::source::Source;
 use super::store::{self, Scratch, Store};
 use super::*;
@@ -22,7 +22,7 @@ fn ms(n: u64) -> Duration {
 fn a_looping_head_wraps_and_asks_ahead() {
     // 10 frames at 10 fps: frame n at n × 100 ms.
     let tl = timeline(10, 10.0, 1);
-    let at = |t| pick(ms(t), PlayMode::Loop, tl, false).unwrap();
+    let at = |t| pick(ms(t), PlayMode::Loop, tl, false, 60.0).unwrap();
     assert_eq!(at(0).index, 0);
     assert_eq!(at(350).index, 3);
     assert_eq!(at(1250).index, 2, "second loop");
@@ -33,25 +33,25 @@ fn a_looping_head_wraps_and_asks_ahead() {
 #[test]
 fn a_one_shot_rests_on_the_frame_it_names() {
     let tl = timeline(10, 10.0, 1);
-    let last = pick(ms(1500), PlayMode::Once(Rest::Last), tl, false).unwrap();
+    let last = pick(ms(1500), PlayMode::Once(Rest::Last), tl, false, 60.0).unwrap();
     assert_eq!((last.index, last.animating), (9, false));
-    let first = pick(ms(1500), PlayMode::Once(Rest::First), tl, false).unwrap();
+    let first = pick(ms(1500), PlayMode::Once(Rest::First), tl, false, 60.0).unwrap();
     assert_eq!((first.index, first.animating), (0, false));
-    let playing = pick(ms(850), PlayMode::Once(Rest::First), tl, false).unwrap();
+    let playing = pick(ms(850), PlayMode::Once(Rest::First), tl, false, 60.0).unwrap();
     assert_eq!((playing.index, playing.animating), (8, true));
     assert_eq!(
         playing.ahead,
         [Some(9), Some(0), None],
         "the frame it rests on, then nothing past the end"
     );
-    let last = pick(ms(850), PlayMode::Once(Rest::Last), tl, false).unwrap();
+    let last = pick(ms(850), PlayMode::Once(Rest::Last), tl, false, 60.0).unwrap();
     assert_eq!(last.ahead, [Some(9), None, None]);
 }
 
 #[test]
 fn limited_loops_play_then_rest_on_the_first_frame() {
     let tl = timeline(4, 10.0, 1);
-    let at = |t| pick(ms(t), PlayMode::Loops(2), tl, false).unwrap();
+    let at = |t| pick(ms(t), PlayMode::Loops(2), tl, false, 60.0).unwrap();
     assert_eq!((at(650).index, at(650).animating), (2, true));
     assert_eq!((at(800).index, at(800).animating), (0, false));
 }
@@ -60,10 +60,10 @@ fn limited_loops_play_then_rest_on_the_first_frame() {
 fn a_fixed_position_shows_nothing_past_the_end() {
     let tl = timeline(4, 10.0, 1);
     assert_eq!(
-        pick(ms(0), PlayMode::At(ms(250)), tl, false).map(|p| p.index),
+        pick(ms(0), PlayMode::At(ms(250)), tl, false, 60.0).map(|p| p.index),
         Some(2)
     );
-    assert!(pick(ms(0), PlayMode::At(ms(400)), tl, false).is_none());
+    assert!(pick(ms(0), PlayMode::At(ms(400)), tl, false, 60.0).is_none());
 }
 
 #[test]
@@ -76,12 +76,143 @@ fn jittered_paints_hold_each_frame_for_the_same_number_of_refreshes() {
         let jitter = [-1.0, 0.6, -0.4, 1.0][paint as usize % 4];
         let at = (f64::from(paint) * 1000.0 / 120.0 + jitter).max(0.0);
         let pos = Duration::from_secs_f64(at / 1000.0);
-        shown.push(pick(pos, PlayMode::Loop, tl, false).unwrap().index);
+        shown.push(pick(pos, PlayMode::Loop, tl, false, 120.0).unwrap().index);
     }
     for pair in shown.chunks(2) {
         assert_eq!(pair.len(), 2);
         assert_eq!(pair.first(), pair.last(), "{shown:?}");
     }
+}
+
+/// `index` on the lap of a 60 frame loop nearest `along`.
+fn nearest_lap(index: u32, along: i64) -> i64 {
+    let off = (i64::from(index) - along).rem_euclid(60);
+    along + if off > 30 { off - 60 } else { off }
+}
+
+/// Steps between the frames a 30 fps head shows when painted every fourth
+/// refresh of a 120 Hz display, started `offset` refreshes after that beat,
+/// with every paint up to 1.5 ms early or late.
+fn emoji_steps_at_offset(offset: u32) -> Vec<i64> {
+    let tl = timeline(60, 30.0, 1);
+    let refresh = 1.0 / 120.0;
+    let mut seed: u64 = 0x9e37_79b9 ^ u64::from(offset);
+    let mut jitter = move || {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        ((seed >> 33) as f64 / f64::from(1u32 << 31) - 0.5) * 0.003
+    };
+    let start = f64::from(offset) * refresh + jitter();
+    let mut shown: Vec<i64> = Vec::new();
+    for beat in 1..2000u32 {
+        let paint = f64::from(beat * 4) * refresh + jitter();
+        if paint <= start {
+            continue;
+        }
+        let pos = Duration::from_secs_f64(paint - start);
+        let along = (pos.as_secs_f64() * 30.0 + 0.5) as i64;
+        let index = pick(pos, PlayMode::Loop, tl, false, 120.0).unwrap().index;
+        shown.push(nearest_lap(index, along));
+    }
+    shown
+        .windows(2)
+        .map(|pair| match pair {
+            [a, b] => b - a,
+            _ => 0,
+        })
+        .collect()
+}
+
+#[test]
+fn heads_painted_with_jitter_show_every_frame_once_at_any_phase() {
+    for offset in 0..4 {
+        let steps = emoji_steps_at_offset(offset);
+        let uneven = steps.iter().filter(|step| **step != 1).count();
+        assert_eq!(uneven, 0, "offset {offset}: {uneven} of {}", steps.len());
+    }
+}
+
+/// A view of `tl` painted for a second on a 120 Hz display, on the
+/// refreshes where a clock running free at `tick_fps` found its frame
+/// changing. A tick asks about the refresh after it, and at display rates
+/// the clock's wait is 92% of a frame (`frame_clock::tick_period`). The
+/// refreshes it painted on, and those it showed a new frame on.
+fn paints_when_changed(tl: Timeline, high_rate: bool, tick_fps: f64) -> (Vec<u32>, Vec<u32>) {
+    let t0 = Instant::now();
+    let refresh = Duration::from_secs_f64(1.0 / 120.0);
+    let tick_every = Duration::from_secs_f64(0.92 / tick_fps);
+    let mut head = PlayHead::default();
+    head.start(t0);
+    let mut shown = Some(0);
+    let mut tick = t0 + tick_every;
+    let (mut paints, mut changes) = (Vec::new(), Vec::new());
+    for vsync in 1..=120u32 {
+        let paint = t0 + refresh * vsync + Duration::from_micros(u64::from(vsync * 37 % 900));
+        let mut changing = false;
+        while tick <= paint {
+            changing |=
+                head.changes_at(tick + refresh, shown, PlayMode::Loop, tl, high_rate, 120.0);
+            tick += tick_every;
+        }
+        if !changing {
+            continue;
+        }
+        paints.push(vsync);
+        let index = head
+            .advance(paint, PlayMode::Loop, tl, high_rate, 120.0)
+            .map(|p| p.index);
+        if index != shown {
+            changes.push(vsync);
+            shown = index;
+        }
+    }
+    (paints, changes)
+}
+
+fn gaps(at: &[u32]) -> Vec<u32> {
+    at.windows(2)
+        .map(|pair| match pair {
+            [a, b] => b - a,
+            _ => 0,
+        })
+        .collect()
+}
+
+#[test]
+fn a_clip_at_its_files_rate_paints_only_for_its_own_frames() {
+    for (tl, frames, hold) in [
+        (timeline(480, 30.0, 4), 30, 4),
+        (timeline(480, 60.0, 2), 60, 2),
+    ] {
+        let (paints, changes) = paints_when_changed(tl, false, tl.tick_fps(true));
+        assert_eq!(changes.len(), frames, "{changes:?}");
+        assert!(gaps(&changes).iter().all(|gap| *gap == hold), "{changes:?}");
+        assert!(paints.len() < frames * 3 / 2, "{} paints", paints.len());
+    }
+}
+
+#[test]
+fn a_clip_on_the_fine_grid_paints_every_refresh() {
+    let tl = timeline(240, 60.0, 2);
+    let (paints, changes) = paints_when_changed(tl, true, tl.tick_fps(true));
+    assert_eq!(changes.len(), 120);
+    assert_eq!(paints.len(), 120);
+}
+
+#[test]
+fn a_slow_clip_paints_often_enough_to_keep_playing() {
+    let refreshes = |gap: Duration| (gap.as_secs_f64() * 120.0).round() as u32;
+    let fps = 1.0 / PAUSE_GAP.as_secs_f64();
+    let (paints, changes) = paints_when_changed(timeline(20, fps, 1), false, 120.0);
+    let longest_paint_gap = refreshes(REPAINT_GAP);
+    let frame_gap = refreshes(PAUSE_GAP);
+    assert!(
+        gaps(&paints).iter().all(|gap| *gap <= longest_paint_gap),
+        "{paints:?}"
+    );
+    assert!(
+        gaps(&changes).iter().all(|gap| *gap == frame_gap),
+        "{changes:?}"
+    );
 }
 
 #[test]
@@ -95,12 +226,54 @@ fn a_clip_too_slow_for_the_fine_grid_drops_to_its_files_rate() {
     assert!(!too_slow_for_grid(ms(50), timeline(60, 60.0, 1)));
 }
 
+/// Feeds `draws` (ms) to a fresh cost for a 60 fps file on a 120 grid;
+/// the draw that first reads as too slow, if one does.
+fn first_coarse(draws: &[f64]) -> Option<usize> {
+    let fine = timeline(120, 60.0, 2);
+    let mut cost = super::engine::DrawCost::default();
+    draws
+        .iter()
+        .position(|draw| cost.note(Duration::from_secs_f64(draw / 1000.0), fine))
+}
+
+#[test]
+fn a_cold_first_draw_keeps_a_fast_clip_on_the_fine_grid() {
+    let mut draws = vec![6.0];
+    draws.extend([0.8; 200]);
+    assert_eq!(first_coarse(&draws), None);
+}
+
+#[test]
+fn one_slow_draw_keeps_a_fast_clip_on_the_fine_grid() {
+    for at in [1, 2, 5, 9, 40] {
+        let mut draws = vec![0.8; 200];
+        if let Some(draw) = draws.get_mut(at) {
+            *draw = 14.0;
+        }
+        assert_eq!(first_coarse(&draws), None, "spike at draw {at}");
+    }
+}
+
+const TAP_EFFECT_DRAWS_MS: [f64; 8] = [2.6, 6.0, 3.1, 2.6, 4.4, 2.8, 6.0, 2.6];
+
+#[test]
+fn a_clip_slow_from_the_start_drops_to_its_files_rate_within_16_draws() {
+    let draws: Vec<f64> = TAP_EFFECT_DRAWS_MS
+        .iter()
+        .copied()
+        .cycle()
+        .take(40)
+        .collect();
+    let at = first_coarse(&draws);
+    assert!(at.is_some_and(|at| at < 16), "{at:?}");
+}
+
 #[test]
 fn a_low_rate_shows_only_the_files_own_frames() {
     // A 60 fps file on a 120 frame grid (step 2).
     let tl = timeline(120, 60.0, 2);
-    let high = pick(ms(25), PlayMode::Loop, tl, true).unwrap();
-    let low = pick(ms(25), PlayMode::Loop, tl, false).unwrap();
+    let high = pick(ms(25), PlayMode::Loop, tl, true, 60.0).unwrap();
+    let low = pick(ms(25), PlayMode::Loop, tl, false, 60.0).unwrap();
     assert_eq!(high.index, 3, "120 fps: an in-between frame");
     assert_eq!(low.index, 2, "60 fps: whole file frames only");
     assert_eq!(low.ahead, [Some(4), Some(6), Some(8)]);
@@ -117,14 +290,14 @@ fn each_head_plays_on_its_own_and_restarts() {
     let mut a = PlayHead::default();
     let mut b = PlayHead::default();
     // Until its first frame shows, a head waits on frame 0 and keeps ticking.
-    let waiting = a.advance(t0, mode, tl, false).unwrap();
+    let waiting = a.advance(t0, mode, tl, false, 60.0).unwrap();
     assert_eq!((waiting.index, waiting.animating), (0, true));
     a.start(t0);
     // B comes on screen later than A.
     let step = |head: &mut PlayHead, from: Instant, until: u64| {
         let mut last = None;
         for t in (0..=until).step_by(50) {
-            last = head.advance(from + ms(t), mode, tl, false);
+            last = head.advance(from + ms(t), mode, tl, false, 60.0);
         }
         last.unwrap()
     };
@@ -148,19 +321,21 @@ fn a_head_not_drawn_for_a_while_resumes_where_it_was() {
     let t0 = Instant::now();
     let mut head = PlayHead::default();
     head.start(t0);
-    head.advance(t0 + ms(150), PlayMode::Loop, tl, false);
+    head.advance(t0 + ms(150), PlayMode::Loop, tl, false, 60.0);
     let index = head
-        .advance(t0 + ms(300), PlayMode::Loop, tl, false)
+        .advance(t0 + ms(300), PlayMode::Loop, tl, false, 60.0)
         .unwrap();
     assert_eq!(index.index, 3);
     // Scrolled away for seconds: the clock did not run meanwhile.
     let back = t0 + ms(300) + PAUSE_GAP + ms(5000);
     assert_eq!(
-        head.advance(back, PlayMode::Loop, tl, false).unwrap().index,
+        head.advance(back, PlayMode::Loop, tl, false, 60.0)
+            .unwrap()
+            .index,
         3
     );
     assert_eq!(
-        head.advance(back + ms(100), PlayMode::Loop, tl, false)
+        head.advance(back + ms(100), PlayMode::Loop, tl, false, 60.0)
             .unwrap()
             .index,
         4
@@ -324,25 +499,16 @@ fn synthetic(edge: u32, count: u8) -> Origin {
     }))
 }
 
-/// Waits for `want` of `key` to be drawn.
+/// Asks for `want` of `key` until it is drawn, or a round draws nothing.
 fn frames_of(engine: &Engine, key: ClipKey, want: &[u32]) -> Vec<Rendered> {
-    let deadline = Instant::now() + Duration::from_secs(20);
     let mut got: Vec<Rendered> = Vec::new();
-    while Instant::now() < deadline {
-        if engine.info(&key).is_some() {
-            let missing: Vec<u32> = want
-                .iter()
-                .copied()
-                .filter(|i| !got.iter().any(|r| r.index == *i))
-                .collect();
-            if missing.is_empty() {
-                break;
-            }
-            engine.want(&key, &missing);
-        }
+    let mut asked = false;
+    loop {
+        engine.wait_idle();
         if let Some(ClipState::Failed(error)) = engine.state(&key) {
             panic!("{error}");
         }
+        let before = got.len();
         for frame in engine.take_rendered() {
             assert!(
                 frame.key != key || !got.iter().any(|r| r.index == frame.index),
@@ -353,12 +519,46 @@ fn frames_of(engine: &Engine, key: ClipKey, want: &[u32]) -> Vec<Rendered> {
                 got.push(frame);
             }
         }
-        std::thread::sleep(ms(2));
+        let missing: Vec<u32> = want
+            .iter()
+            .copied()
+            .filter(|i| !got.iter().any(|r| r.index == *i))
+            .collect();
+        if missing.is_empty() || (asked && got.len() == before) {
+            break;
+        }
+        engine.want(&key, &missing);
+        asked = true;
     }
     // A clip draws its first frame on open, asked for or not.
     got.retain(|r| want.contains(&r.index));
     got.sort_by_key(|r| r.index);
     got
+}
+
+/// Frames asked of a clip that failed are never drawn.
+#[test]
+fn the_workers_go_idle_with_frames_asked_of_a_failed_clip() {
+    let engine = Engine::new(1, 1 << 20);
+    let key = key(1, 16);
+    engine.open(key, Origin::Decoded(Box::new(|_| Err("no".to_string()))));
+    engine.wait_idle();
+    engine.want(&key, &[0, 1]);
+    engine.wait_idle();
+    assert_eq!(
+        engine.state(&key),
+        Some(ClipState::Failed("no".to_string()))
+    );
+}
+
+/// A worker that panics leaves its clip busy for good.
+#[test]
+fn waiting_for_the_workers_ends_when_one_panics() {
+    let engine = Engine::new(1, 1 << 20);
+    let key = key(1, 16);
+    engine.open(key, Origin::Decoded(Box::new(|_| panic!("decoder"))));
+    engine.wait_idle();
+    assert_eq!(engine.state(&key), Some(ClipState::Opening));
 }
 
 #[test]
@@ -552,4 +752,160 @@ fn sticker_store_bench() {
             stored as f64 / frames.max(1) as f64 / 1024.0,
         );
     }
+}
+
+#[test]
+fn clips_decoding_at_once_do_not_wait_for_each_other() {
+    use std::sync::{Barrier, mpsc};
+    let engine = Engine::new(2, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<()>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(());
+    }));
+    let both_decoding = Arc::new(Barrier::new(2));
+    let len = 16 * 16 * 4;
+    let keys = [key(1, 16), key(2, 16)];
+    for key in keys {
+        let both_decoding = both_decoding.clone();
+        engine.open(
+            key,
+            Origin::Decoded(Box::new(move |_| {
+                both_decoding.wait();
+                Ok(DecodedFrames {
+                    frames: vec![vec![7; len]; 3],
+                    fps: 30.0,
+                })
+            })),
+        );
+    }
+    while keys.iter().any(|key| engine.info(key).is_none()) {
+        wakes.recv().unwrap();
+    }
+}
+
+#[test]
+fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
+    use std::sync::mpsc;
+    let engine = Engine::new(1, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<()>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(());
+    }));
+    let a = key(1, 16);
+    engine.open(a, synthetic(16, 10));
+    while !engine.take_rendered().iter().any(|r| r.key == a) {
+        wakes.recv().unwrap();
+    }
+    let (started, decoding) = mpsc::channel::<Option<String>>();
+    let (release, released) = mpsc::channel::<()>();
+    let b = key(2, 16);
+    let len = 16 * 16 * 4;
+    engine.open(
+        b,
+        Origin::Decoded(Box::new(move |_| {
+            let _ = started.send(std::thread::current().name().map(str::to_owned));
+            let _ = released.recv();
+            Ok(DecodedFrames {
+                frames: vec![vec![7; len]; 3],
+                fps: 30.0,
+            })
+        })),
+    );
+    let thread = decoding.recv().unwrap();
+    assert_eq!(
+        thread.as_deref(),
+        Some("quill-sticker-open-0"),
+        "B decodes off the worker"
+    );
+    engine.want(&a, &[1]);
+    while !engine
+        .take_rendered()
+        .iter()
+        .any(|r| r.key == a && r.index == 1)
+    {
+        std::thread::yield_now();
+    }
+    assert_eq!(engine.state(&b), Some(ClipState::Opening));
+    release.send(()).unwrap();
+    while engine.info(&b).is_none() {
+        wakes.recv().unwrap();
+    }
+    engine.want(&b, &[2]);
+    while !engine
+        .take_rendered()
+        .iter()
+        .any(|r| r.key == b && r.index == 2)
+    {
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
+    use std::sync::mpsc;
+    let engine = Engine::new(2, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<Option<String>>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(std::thread::current().name().map(str::to_owned));
+    }));
+    let len = 16 * 16 * 4;
+    let key = key(1, 16);
+    let (started, decoding) = mpsc::channel::<Option<String>>();
+    let (release, released) = mpsc::channel::<()>();
+    engine.open(
+        key,
+        Origin::Decoded(Box::new(move |cancel: &Cancel| {
+            let _ = started.send(std::thread::current().name().map(str::to_owned));
+            let _ = released.recv();
+            if cancel.flag.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("Sticker playback cancelled".to_string());
+            }
+            Ok(DecodedFrames {
+                frames: vec![vec![1; len]; 3],
+                fps: 30.0,
+            })
+        })),
+    );
+    let old_opener = decoding.recv().unwrap();
+    // Scrolled away and back while it decodes: the same key opens again,
+    // and the other opener finishes it.
+    engine.close(&key);
+    engine.open(key, synthetic(16, 3));
+    while engine.info(&key).is_none() {
+        assert!(!matches!(engine.state(&key), Some(ClipState::Failed(_))));
+        wakes.recv().unwrap();
+    }
+    release.send(()).unwrap();
+    while wakes.recv().unwrap() != old_opener {}
+    assert!(
+        matches!(engine.state(&key), Some(ClipState::Ready(_))),
+        "{:?}",
+        engine.state(&key)
+    );
+}
+
+#[test]
+fn video_stickers_open_when_no_opener_thread_starts() {
+    // The worker thread "starts" without running: the test does its jobs.
+    let spawn = |name: String, _body: Box<dyn FnOnce() + Send>| {
+        if name.starts_with("quill-sticker-open") {
+            return Err(std::io::Error::other("no more threads"));
+        }
+        Ok(())
+    };
+    let engine = engine::Engine::start(1, 64 << 20, &spawn);
+    let key = key(1, 16);
+    engine.open(key, synthetic(16, 3));
+    let job = crate::locks::lock_or_recover(&engine.shared().state).next_job(0);
+    let Some(job @ engine::Job::Decode { key: decoding, .. }) = job else {
+        panic!("no thread takes the clip to decode it");
+    };
+    assert_eq!(decoding, key);
+    worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        job,
+    );
+    assert!(engine.info(&key).is_some(), "{:?}", engine.state(&key));
 }

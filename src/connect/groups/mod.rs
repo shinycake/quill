@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
-use crate::state::{GroupsPurpose, ThreadsPurpose};
+use crate::state::{GroupsPurpose, ThreadsPurpose, WindowEnd};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{
     add_chat_welcome_message, boost_chat, create_community, create_forum_topic,
@@ -24,6 +24,7 @@ mod boost_flow;
 mod boosts;
 mod community;
 mod forum;
+mod forum_window;
 mod group_type;
 mod info_edit;
 mod new_chat;

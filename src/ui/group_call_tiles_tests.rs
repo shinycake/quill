@@ -11,11 +11,10 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Bounds, Entity, Modifiers, Pixels, ScrollDelta, ScrollEvent, TestAppContext,
-    VisualTestContext, point, px, size,
+    VisualTestContext, WindowVisibility, point, px, size,
 };
 use quill::calls::tile_pin::TileKey;
 use quill::telegram::envelope::MessageSender;
-use std::sync::Arc;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -132,6 +131,51 @@ fn the_stage_shows_the_volume_of_anyone_but_you(cx: &mut TestAppContext) {
     assert!(find(call, "group-stage-volume").is_none(), "none for you");
 }
 
+#[gpui_kit::test]
+fn the_large_tile_counts_only_while_its_window_can_be_seen(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_share(cx);
+    let call = &mut call;
+    let (_, other) = people(&app, call);
+    let tile = TileKey {
+        participant: other,
+        screen: false,
+    };
+    let large =
+        |vcx: &mut VisualTestContext| app.read_with(vcx, |app, _| app.group_call_large_tile());
+    assert_eq!(large(call), None, "nothing pinned");
+    app.update(call, |app, cx| app.toggle_group_call_tile_pin(tile, cx));
+    frames(call);
+    assert_eq!(large(call), Some(tile));
+
+    call.simulate_visibility_change(WindowVisibility::Hidden);
+    assert_eq!(large(call), None, "minimized or covered");
+    call.simulate_visibility_change(WindowVisibility::Visible);
+    assert_eq!(large(call), Some(tile), "seen again");
+
+    call.simulate_close();
+    assert_eq!(large(call), None, "closed");
+}
+
+#[gpui_kit::test]
+fn a_replaced_call_window_hiding_leaves_the_large_tile(cx: &mut TestAppContext) {
+    let (app, mut main, mut call) = open_share(cx);
+    let call = &mut call;
+    let (_, other) = people(&app, call);
+    let tile = TileKey {
+        participant: other,
+        screen: false,
+    };
+    app.update(call, |app, cx| app.toggle_group_call_tile_pin(tile, cx));
+    frames(call);
+    // Another window took the call's place, as a layout switch does.
+    let replacement = main.update(|window, _| window.window_handle());
+    app.update(call, |app, _| app.group_call.window = Some(replacement));
+
+    call.simulate_visibility_change(WindowVisibility::Hidden);
+    let large = app.read_with(call, |app, _| app.group_call_large_tile());
+    assert_eq!(large, Some(tile), "the old window's hiding is not yours");
+}
+
 /// The microphone's halo plays by ticks for the call window alone: while it
 /// moves, the main window draws nothing for it.
 #[gpui_kit::test]
@@ -161,7 +205,7 @@ fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("the demo session");
         let call = session.calls.active_group_call.as_mut().expect("the call");
-        let participants = Arc::make_mut(&mut call.participants);
+        let participants = call.participants.edit();
         let listener = participants
             .iter()
             .find(|p| !p.is_current_user)

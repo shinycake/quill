@@ -201,16 +201,13 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     // Right-click the window's one message (its bubble sits at the left
-    // of the row, level with the row's reaction button): the menu belongs
-    // to the window.
+    // of the row): the menu belongs to the window.
     let point = cx
         .update_window(chat_window, |_, window, cx| {
             window.render_frame(cx);
-            let react = window
-                .within(("row", OTHER_LAST.0 as u64))
-                .find(format!("message-react-{}", OTHER_LAST.0))
-                .bounds();
-            gpui_kit::point(px(70.), react.center().y)
+            let row = h.app.read(cx).windows.slot_for(OTHER).expect("slot");
+            let row = row.borrow().history.painted_row_center(OTHER_LAST);
+            gpui_kit::point(px(70.), row.y)
         })
         .unwrap();
     let mut vcx = VisualTestContext::from_window(chat_window, cx);
@@ -1006,8 +1003,8 @@ fn a_chat_windows_pictures_go_through_a_cache_of_its_own(cx: &mut TestAppContext
     );
     let images = h
         .app
-        .read_with(cx, |app, cx| {
-            app.windows.image_cache_for(chat_window.window_id(), cx)
+        .read_with(cx, |app, _| {
+            app.windows.image_cache_for(chat_window.window_id())
         })
         .expect("the window's cache");
     let loaded = images.read_with(cx, |images, _| images.loaded_images());
@@ -1126,4 +1123,115 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         })
         .unwrap_or_default();
     assert_eq!(left, 0, "the dropped edit's PNG was deleted");
+}
+
+/// A Send held on a photo's render and a tap on that card, in a chat
+/// window that closes before the render lands: the main window says the
+/// photo did not go, no editor opens anywhere, and the edited photo waits
+/// in the chat's tray.
+#[gpui_kit::test]
+fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    use quill::composer::{AttachmentExtras, AttachmentKind, ComposerAttachment};
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let dir = quill::scratch::process_dir("quill-chat-window-edit");
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("held-closing.png");
+    image::RgbaImage::from_pixel(61, 17, image::Rgba([7, 8, 9, 255]))
+        .save(&original)
+        .unwrap();
+    let app = h.app.clone();
+    let path = original.clone();
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.update_pending_attachments(|tray| {
+                    tray.push(ComposerAttachment {
+                        file_name: "held-closing.png".into(),
+                        path: path.clone(),
+                        kind: AttachmentKind::Photo,
+                        spoiler: false,
+                        extras: AttachmentExtras::default(),
+                    })
+                })
+                .unwrap();
+                let item = app.tray_item(0).unwrap();
+                let pixels = image::open(&path).unwrap().to_rgba8();
+                app.viewer.photo_editor =
+                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.photo_editor_mut(PhotoEditor::rotate, cx);
+                app.save_photo_editor(window, cx);
+                app.submit_composer(String::new(), window, cx);
+                app.open_photo_editor(0, cx);
+            });
+        });
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| {
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO)
+        );
+        assert!(app.viewer.photo_editor.is_none(), "no editor opened");
+        assert!(app.viewer.photo_editor_after.is_none(), "the tap is gone");
+        assert!(!app.composer_sends.holds(&original), "the edit landed");
+    });
+    let edits = quill::scratch::temp_work_dir("quill-edits");
+    let rendered: Vec<_> = std::fs::read_dir(edits)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| std::fs::canonicalize(entry.path()).ok())
+                .filter(|path| image::image_dimensions(path).ok() == Some((17, 61)))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(rendered.len(), 1);
+    h.app.read_with(cx, |app, _| {
+        assert!(
+            app.composer_sends.holds(&rendered[0]),
+            "it waits in the tray"
+        );
+    });
+    let _ = std::fs::remove_file(&rendered[0]);
+}
+
+/// Whether `window` drew the status toast.
+fn status_toast_drawn(window: AnyWindowHandle, cx: &mut TestAppContext) -> bool {
+    cx.update_window(window, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("status-toast").is_some()
+    })
+    .unwrap()
+}
+
+#[gpui_kit::test]
+fn a_note_from_a_chat_window_toasts_in_that_window(cx: &mut TestAppContext) {
+    crate::ui::app_render::pin_toasts_for_tests();
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(OTHER));
+        app.connection
+            .set_note(crate::ui::status_note::StatusNote::error(
+                "Couldn't open the link",
+            ));
+        app.set_window_scope(None);
+        cx.notify();
+    });
+    assert!(status_toast_drawn(chat_window, cx), "the window shows it");
+    assert!(!status_toast_drawn(h.main, cx), "the main window does not");
+
+    // The next input in the main window brings the toast there.
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(None);
+        cx.notify();
+    });
+    assert!(status_toast_drawn(h.main, cx));
+    assert!(!status_toast_drawn(chat_window, cx));
 }

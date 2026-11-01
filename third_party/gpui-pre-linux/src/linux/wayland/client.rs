@@ -629,13 +629,14 @@ impl WaylandClientStatePtr {
     }
 
     /// Quill: run `f` on `surface_id`'s window from the event loop at `at`,
-    /// outside the draw that asked for it (a GPU recovery step).
+    /// outside the draw that asked for it (a GPU recovery step). Returns
+    /// whether the timer is armed.
     pub fn run_for_window_at(
         &self,
         surface_id: &ObjectId,
         at: Instant,
         f: impl FnOnce(WaylandWindowStatePtr) + 'static,
-    ) {
+    ) -> bool {
         let client = self.get_client();
         let state = client.borrow();
         let surface_id = surface_id.clone();
@@ -656,7 +657,9 @@ impl WaylandClientStatePtr {
                 })
         {
             log::error!("cannot schedule a GPU recovery step: {err}");
+            return false;
         }
+        true
     }
 
     /// Queue a retry tick for `surface_id` one refresh interval from now. An immediate
@@ -1058,7 +1061,7 @@ impl WaylandConnection {
         })?;
 
         let compositor_gpu = detect_compositor_gpu();
-        let gpu_context = Rc::new(RefCell::new(None));
+        let gpu_context = GpuContext::default();
 
         let (frame_ping, frame_ping_source) =
             calloop::ping::make_ping().context("failed to create Wayland frame ping")?;
@@ -2087,10 +2090,6 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                 size,
                 ..
             } => {
-                if format != wl_keyboard::KeymapFormat::XkbV1 {
-                    log::error!("Received keymap format {:?}, expected XkbV1", format);
-                    return;
-                }
                 let xkb_context = match new_xkb_context() {
                     Ok(context) => context,
                     Err(error) => {
@@ -2098,8 +2097,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                         return;
                     }
                 };
-                let Some(keymap) = compile_keymap(&xkb_context, fd, size) else {
-                    log::error!("cannot parse the compositor's keymap, keeping the previous one");
+                let received = if format == wl_keyboard::KeymapFormat::XkbV1 {
+                    compile_keymap(&xkb_context, fd, size)
+                } else {
+                    log::error!("Received keymap format {:?}, expected XkbV1", format);
+                    None
+                };
+                let Some(keymap) =
+                    keymap_to_use(received, state.keymap_state.is_some(), || {
+                        default_keymap(&xkb_context)
+                    })
+                else {
                     return;
                 };
                 state.keymap_state = Some(xkb::State::new(&keymap));
@@ -3223,23 +3231,71 @@ impl Dispatch<XdgDialogV1, ()> for WaylandClientStatePtr {
     }
 }
 
-/// Quill: the compositor's keymap, or None when xkb cannot parse it (the
-/// caller keeps the keymap it had).
+/// Quill: the compositor's keymap, or None when the file holds less than
+/// `size` bytes or xkb cannot parse it (the caller keeps the keymap it had).
+/// Read rather than mapped: touching a mapping past the end of a file
+/// shorter than `size` raises SIGBUS.
 fn compile_keymap(context: &xkb::Context, fd: OwnedFd, size: u32) -> Option<xkb::Keymap> {
-    // SAFETY: `fd` is the keymap file the compositor sent with `size`;
-    // `new_from_fd` maps it privately and reports a short or unreadable file
-    // as an error.
-    unsafe {
-        xkb::Keymap::new_from_fd(
-            context,
-            fd,
-            size as usize,
-            XKB_KEYMAP_FORMAT_TEXT_V1,
-            KEYMAP_COMPILE_NO_FLAGS,
-        )
+    use std::os::unix::fs::FileExt as _;
+    /// Far above any real keymap (tens of KiB); refuses a size that would
+    /// only allocate.
+    const MAX_KEYMAP: u64 = 16 << 20;
+    let file = std::fs::File::from(fd);
+    let length = file.metadata().log_err()?.len();
+    if u64::from(size) > length.min(MAX_KEYMAP) {
+        log::error!("the compositor's keymap is {length} bytes, not the {size} it said");
+        return None;
     }
-    .log_err()
-    .flatten()
+    let mut text = vec![0; size as usize];
+    file.read_exact_at(&mut text, 0).log_err()?;
+    // The text ends with a NUL.
+    if let Some(end) = text.iter().position(|byte| *byte == 0) {
+        text.truncate(end);
+    }
+    let text = String::from_utf8(text).log_err()?;
+    xkb::Keymap::new_from_string(
+        context,
+        text,
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
+}
+
+/// Quill: the keymap to install after a `wl_keyboard.keymap` event that
+/// brought `received`. Without one the previous keymap stays; with none
+/// yet, the default one, so typing still works.
+fn keymap_to_use(
+    received: Option<xkb::Keymap>,
+    have_one: bool,
+    default: impl FnOnce() -> Option<xkb::Keymap>,
+) -> Option<xkb::Keymap> {
+    if received.is_some() {
+        return received;
+    }
+    if have_one {
+        log::error!("no usable keymap from the compositor, keeping the previous one");
+        return None;
+    }
+    log::error!("no usable keymap from the compositor, using the default one");
+    default()
+}
+
+/// Quill: the keymap libxkbcommon builds from the system's rules (US
+/// unless `XKB_DEFAULT_*` says otherwise), else a US keymap built in, for
+/// a system without xkeyboard-config.
+fn default_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    let system = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    xkb::Keymap::new_from_names(&system, "", "", "", "", None, KEYMAP_COMPILE_NO_FLAGS)
+        .or_else(|| built_in_keymap(context))
+}
+
+fn built_in_keymap(context: &xkb::Context) -> Option<xkb::Keymap> {
+    xkb::Keymap::new_from_string(
+        context,
+        include_str!("default_keymap.xkb").to_owned(),
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
 }
 
 struct ModifierUpdate {
@@ -3271,6 +3327,19 @@ mod tests {
 
     use super::*;
 
+    /// A compositor whose first keymap xkb refuses (or that sent
+    /// `no_keymap`): keys still type, with the default keymap.
+    #[test]
+    fn without_a_usable_first_keymap_keys_type_with_the_default() {
+        let context = new_xkb_context().unwrap();
+        let keymap = keymap_to_use(None, false, || built_in_keymap(&context))
+            .expect("the default keymap");
+        let state = xkb::State::new(&keymap);
+        // Evdev keycode 30 (+8) is the A key.
+        assert_eq!(state.key_get_utf8(Keycode::new(38)), "a");
+        assert!(keymap_to_use(None, true, || built_in_keymap(&context)).is_none());
+    }
+
     #[test]
     fn keyboard_events_without_a_keymap_are_dropped() {
         assert!(update_modifiers(None, [1, 0, 0], 0).is_none());
@@ -3287,6 +3356,43 @@ mod tests {
         let update = update_modifiers(Some(&mut state), [shift, 0, 0], 0).expect("a keymap");
         assert!(update.modifiers.shift);
         assert!(!update.modifiers.control);
+    }
+
+    fn keymap_file(name: &str, text: &[u8]) -> OwnedFd {
+        let path = std::env::temp_dir().join(format!("quill-{name}-{}", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        OwnedFd::from(file)
+    }
+
+    fn us_keymap_text() -> Vec<u8> {
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&context, "", "", "us", "", None, KEYMAP_COMPILE_NO_FLAGS)
+                .expect("us keymap");
+        let mut text = keymap.get_as_string(XKB_KEYMAP_FORMAT_TEXT_V1).into_bytes();
+        text.push(0);
+        text
+    }
+
+    #[test]
+    fn the_compositors_keymap_compiles() {
+        let text = us_keymap_text();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("keymap", &text);
+        assert!(compile_keymap(&context, fd, text.len() as u32).is_some());
+    }
+
+    /// A compositor that says the keymap is longer than the file it sent:
+    /// mapping that length and parsing it raised SIGBUS past the file's end.
+    #[test]
+    fn a_keymap_shorter_than_its_size_is_refused() {
+        let text = us_keymap_text();
+        let half = text.get(..text.len() / 2).unwrap();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("short-keymap", half);
+        assert!(compile_keymap(&context, fd, (text.len() + (1 << 20)) as u32).is_none());
     }
 
     #[test]

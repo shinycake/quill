@@ -140,3 +140,22 @@ fn a_hardware_decoder_that_software_cannot_replace_stays_in_charge() {
     assert_eq!(again.pts, software.pts, "a seek plays the whole clip on it");
     assert!(again.finished.hardware);
 }
+
+#[test]
+fn a_seek_past_the_end_still_shows_the_last_picture_when_hardware_fails_on_the_way() {
+    if !decoder() {
+        return;
+    }
+    let clip = fixture("clip-h264-aac.mp4");
+    let mut demuxer =
+        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailThirdPicture).expect("open");
+    let total = demuxer.info().duration.expect("a duration");
+    demuxer.seek(total).expect("seek to the end");
+    let after = decode(demuxer, PixelOutput::Bgra);
+    let shown: Vec<f64> = after.pts.iter().map(|pts| (pts * 10.0).round()).collect();
+    assert_eq!(shown, vec![9.0], "the last picture, once");
+    assert!(
+        !after.finished.hardware,
+        "software took over during the seek"
+    );
+}

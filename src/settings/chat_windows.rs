@@ -91,12 +91,12 @@ pub fn load_chat_windows_from(path: &Path) -> ChatWindowsState {
 }
 
 /// Queue the state for a background write (the caller is on the UI thread);
-/// a load sees it at once and quitting flushes it.
-pub fn save_chat_windows(state: &ChatWindowsState) -> std::io::Result<()> {
-    let path = path().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "no app data directory")
-    })?;
-    super::write_json_deferred(&path, state)
+/// a load sees it at once and quitting flushes it. With no app data
+/// directory there is nowhere to save.
+pub fn save_chat_windows(state: &ChatWindowsState) {
+    if let Some(path) = path() {
+        super::write_json_deferred(&path, state);
+    }
 }
 
 pub fn save_chat_windows_to(path: &Path, state: &ChatWindowsState) -> std::io::Result<()> {

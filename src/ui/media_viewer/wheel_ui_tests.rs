@@ -42,7 +42,11 @@ pub(in crate::ui::media_viewer) fn new_app(
     (app, vcx)
 }
 
-fn add_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64) {
+pub(in crate::ui::media_viewer) fn add_photo(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    id: i64,
+) {
     add_captioned_photo(app, vcx, id, "");
 }
 
@@ -55,7 +59,8 @@ fn add_captioned_photo(
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         let history = session.histories.get_mut(&11).expect("history");
-        let mut message = history.messages.get(&101).expect("a message").clone();
+        let first = history.ordered().into_iter().next();
+        let mut message = first.expect("a message").clone();
         message.id = MessageId(id);
         message.content = MessageContent::Photo(PhotoContent {
             caption: caption.into(),

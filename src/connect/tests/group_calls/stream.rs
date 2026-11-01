@@ -106,6 +106,33 @@ fn an_engine_stream_request_wakes_the_poll_loop() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A poll handles at most 64 engine events. When more are queued, it
+/// pokes the loop itself, since no hook poke is left to come for them.
+#[test]
+fn a_poll_that_leaves_events_queued_wakes_the_next_one() {
+    let (dir, mut driver, _recorder, handle, ..) = joined_stream_call(GroupCallMode::Rtmp);
+    for id in 0..65 {
+        handle.emit_engine_event(EngineEvent::BroadcastRequestCancelled {
+            chat_id: 51,
+            request: engine_id(id),
+        });
+    }
+    let before = crate::wake::UPDATES.pokes_on_this_thread();
+    assert!(driver.pump_group_call_streams(Instant::now()));
+    assert_eq!(
+        crate::wake::UPDATES.pokes_on_this_thread(),
+        before + 1,
+        "one event is left for the next poll"
+    );
+    assert!(
+        driver.pump_group_call_streams(Instant::now()),
+        "the last one"
+    );
+    assert_eq!(crate::wake::UPDATES.pokes_on_this_thread(), before + 1);
+    assert!(!driver.pump_group_call_streams(Instant::now()), "none left");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn connect_records_the_stream_mode() {
     let (dir, driver, ..) = joined_stream_call(GroupCallMode::Rtmp);

@@ -89,16 +89,105 @@ it closes every window, PiP included, and Quill exits.
 That is acceptable for this step. The alternative was a crash with the same
 end state (process gone) plus a crash report. Follow-ups worth doing:
 
-- Show the reason on the way out. Something like an `on_window_closed` check
-  in Quill that notices the GPU error, or a MessageBoxW from the fork, would
-  tell the user why Quill closed (as `startup_failure` does at launch).
-- Better, keep Quill alive. Quill could switch to `QuitMode::Explicit` on
-  Windows, ask for `request_windowing(Windowed)` after a pause, and reopen
-  the main window. The platform side now supports that, because the dead
-  devices are dropped and a re-attach creates new ones.
+- Show the reason on the way out, and keep Quill alive where possible.
+  Done in the second pass below: `ui::startup_failure::device_loss`.
 - If only the main window failed while a PiP window lives, the PiP window
-  should be closed as well, or the main window reopened. Today Quill keeps
+  should be closed as well, or the main window reopened. When the whole
+  device is gone this is done (the PiP window closes, then the main window
+  reopens). When only the main window's renderer failed, Quill still keeps
   running with only the PiP window.
+
+### Windows, second pass
+
+A later audit found panics and gaps the first pass left in the Windows
+platform. Each is fixed in its own commit:
+
+- `directx_devices.rs`: device creation no longer panics. A device that
+  `D3D11CreateDevice` reports without a device or without a context is an
+  error, so the adapter is skipped. The search ends at `EnumAdapters`'
+  `DXGI_ERROR_NOT_FOUND` (it used to return that code through `?`, so the
+  message after the loop was never reached), an adapter that fails to cast
+  is skipped too, and running out of adapters returns "No GPU adapter
+  supports Direct3D 11" with the last adapter's error. An unexpected feature level is
+  logged instead of `unreachable!()`. Both callers already handle the
+  error: `attach_gpu` at launch (the startup alert) and
+  `try_to_recover_from_device_lost` after a device loss (retry, then close
+  the windows).
+- `platform.rs`, `begin_vsync_thread`: a failed spawn of the vsync thread
+  (out of threads or memory) was `unwrap`ped. It now returns the error, and
+  `attach_gpu` releases the devices it just made and returns it. At launch
+  that is `connect_initially`'s DirectX error, which the first
+  `open_window` returns and `main.rs` shows in the startup alert; from
+  `request_windowing(Windowed)` it is that call's error.
+- `platform.rs`, the vsync thread: its body runs under
+  `quill_panic_guard::guarded`. A panic there used to end the thread
+  silently, so no window got another frame and Quill looked hung. Now the
+  thread logs it and posts `WM_GPUI_GPU_DEVICE_GONE`, the same message as a
+  device that can't be recreated, so the platform drops its devices and
+  closes the windows. The guard count that Quill's panic hook reads moved
+  from `src/thread_guard.rs` into the std-only workspace crate
+  `crates/panic-guard`, which both the app and the fork depend on, so the
+  hook files this panic as caught. It is not in `gpui-pre` because the app's
+  core library (`--no-default-features`) has no GPUI.
+- `platform.rs`, stale vsync threads: `detach_gpu` stops the vsync thread
+  without joining it, so a stopped thread could still post
+  `WM_GPUI_GPU_DEVICE_GONE` or send recovered devices and so drop or replace
+  the devices of the thread started after it. Each thread now has a
+  generation that every start and stop moves on; it travels in `lparam`
+  (`wparam` holds the validation number), the platform ignores an older
+  one, and a thread whose devices were refused stops without touching the
+  windows.
+- `platform.rs`, `open_window` on a removed device: `WindowsWindow::new`
+  failed outright when the GPU had removed the device and the vsync thread
+  had not recovered yet, so a PiP or viewer window opened in that gap
+  returned an error. Waiting for recovery is not possible there (recovery
+  sends to the platform window on this thread), so `open_window` checks the
+  device first and makes new devices itself when it was removed.
+- Quill, `ui::startup_failure::device_loss`: after the platform closes every
+  window because the device is gone, Quill quit through GPUI's
+  last-window-closed rule without saying why. On Windows it now uses
+  `QuitMode::Explicit` and quits itself when the last window closes while
+  the GPU works. When `graphical_environment()` is `None` instead (Quill
+  never asks to go headless), it closes any window left (a PiP window),
+  asks once for `request_windowing(Windowed)` and reopens the main window.
+  If that fails, or the device goes a second time, it quits the normal way
+  and `report_gpu_gone` shows "Quill closed because the graphics card
+  stopped working" with the error, through the lang system, as on Linux.
+- `window_list.rs`: the platform's window list was a bare
+  `Arc<RwLock<SmallVec<..>>>`, and the helpers that drop the guard before
+  sending were opt-in, so a new caller could hold the read lock across
+  `SendMessageW` and deadlock with `open_window` or `close_one_window`
+  again. It is now a `WindowList` that only hands out copies (`snapshot`,
+  `find`) and changes under its own lock (`push`, `remove`), so no caller
+  can hold the lock at all. It uses std's `RwLock` and recovers a poisoned
+  lock, so it stays std-only and `scripts/test-window-list.sh` still runs it
+  on any host.
+- `platform.rs`, `open_window`: a window that opened while the vsync thread
+  was recovering from a device loss could stay blank. Recovery sends the
+  new devices to the platform window first and then to the windows in the
+  list; a window built from the old devices that joined the list after
+  that read never got them. `open_window` now compares the device the
+  window was made with against the platform's current one once the window
+  is listed, and sends it `WM_GPUI_GPU_DEVICE_LOST` with the current devices
+  when they differ. Either the window was listed in time for recovery's
+  read, or the platform already holds the new devices when it checks, so
+  no window misses both.
+- `timer_thread.rs` had no test. Its decisions (stop, fire what is due,
+  sleep until woken, or sleep for the next deadline and whether to hold the
+  1 ms system timer), the waitable timer's relative due time and the
+  fallback wait's timeout moved to the std-only `timer_step.rs`, which
+  `scripts/test-timer-step.sh` builds with `timer_queue.rs` and runs on any
+  host, in CI's Linux job. `timer_thread.rs` keeps only the Win32 calls.
+  Moving the timeout found one edge: a wait of exactly `u32::MAX` ms became
+  `INFINITE`; it is now clamped below that.
+- CI: Windows was compiled on pushes only (`windows-launch-smoke`, the
+  package), so a PR could break the Windows build, this fork included,
+  without a red check. The new `windows-check` job runs on every PR on
+  `windows-latest` and runs `cargo check --features demo-capture
+  --all-targets --locked`. Its first runs failed in the `quill` bin test
+  target: the Linux `dlopen` probe in `ui/startup_failure/vulkan.rs` was
+  compiled into every test build. The probe and its caller are Linux-only
+  now.
 
 ### macOS (`gpui-pre-macos`)
 

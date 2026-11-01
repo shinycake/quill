@@ -84,11 +84,15 @@ fn preview_slot_publishes_at_most_four_times_a_second() {
         height: 4,
         captured_at: at,
     };
-    assert!(slot.latest().is_none());
+    assert!(slot.latest_after(0).is_none());
     slot.offer(&frame(start));
-    assert_eq!(slot.latest().map(|(seq, _)| seq), Some(1));
+    assert_eq!(slot.latest_after(0).map(|(seq, _)| seq), Some(1));
     slot.offer(&frame(start + Duration::from_millis(100)));
-    assert_eq!(slot.latest().map(|(seq, _)| seq), Some(1));
+    assert_eq!(slot.latest_after(0).map(|(seq, _)| seq), Some(1));
     slot.offer(&frame(start + Duration::from_millis(300)));
-    assert_eq!(slot.latest().map(|(seq, _)| seq), Some(2));
+    assert_eq!(slot.latest_after(0).map(|(seq, _)| seq), Some(2));
+    assert!(
+        slot.latest_after(2).is_none(),
+        "the seen preview is not copied again"
+    );
 }

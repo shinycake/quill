@@ -34,9 +34,12 @@ fn a_picked_language_is_asked_for_by_the_pass_the_pick_wakes(cx: &mut TestAppCon
     });
     assert_eq!(shown_in.as_deref(), Some("en"));
 
-    let before = UPDATES.epoch();
+    let before = UPDATES.pokes_on_this_thread();
     app.update(&mut vcx, |app, cx| app.choose_translate_language("ar", cx));
-    assert_ne!(UPDATES.epoch(), before, "a resting poll loop runs a pass");
+    assert!(
+        UPDATES.pokes_on_this_thread() > before,
+        "a resting poll loop runs a pass"
+    );
 
     let asked = app.update(&mut vcx, |app, _| {
         app.pump_translation();

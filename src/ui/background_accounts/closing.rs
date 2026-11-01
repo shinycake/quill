@@ -12,10 +12,22 @@
 use super::*;
 use crate::ui::chat_window::ScopedApp;
 use gpui_kit::AsyncApp;
-use quill::connect::{QUIT_CLOSE_DEADLINE, deadline_after};
+use quill::connect::{EXPORT_STOP_HOLD, QUIT_CLOSE_DEADLINE, deadline_after};
 
 /// How often a waiter checks the closing set again.
 const CLOSE_POLL: Duration = Duration::from_millis(16);
+
+thread_local! {
+    /// What a dropped app could not confirm closed. Windows opens a new app
+    /// after a lost GPU; it must not open those databases either.
+    static LEFT_BY_DROPPED_APP: std::cell::RefCell<ClosingSet> =
+        std::cell::RefCell::new(ClosingSet::new());
+}
+
+/// The closing set a new app starts with.
+pub(super) fn take_left_by_dropped_app() -> ClosingSet {
+    LEFT_BY_DROPPED_APP.with(|left| std::mem::take(&mut *left.borrow_mut()))
+}
 
 /// What work waiting on closing clients should do now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,8 +107,8 @@ impl QuillApp {
         }
     }
 
-    pub(in crate::ui) fn close_every_client_later(&mut self, cx: &mut Context<Self>) {
-        self.close_screen_client(cx);
+    /// Close every background client, keeping each one's restart.
+    pub(in crate::ui) fn close_background_clients_later(&mut self, cx: &mut Context<Self>) {
         self.stop_background_clients(cx);
         self.background.closing.restart_all();
     }
@@ -160,6 +172,7 @@ impl QuillApp {
     /// background one, together, at most until `deadline`. Folders waiting
     /// for a close stay recorded and are deleted on the next start.
     pub(in crate::ui) fn close_all_for_quit(&mut self, deadline: Instant) {
+        self.stop_exports_and_wait(deadline_after(EXPORT_STOP_HOLD).min(deadline));
         if let Some(live) = self.live.take() {
             let key = live.driver.session.account.clone();
             self.background.push_closing(key, live, false);
@@ -172,6 +185,8 @@ impl QuillApp {
     /// the same shared deadline, never one wait per client.
     pub(in crate::ui) fn close_clients_on_drop(&mut self) {
         self.close_all_for_quit(deadline_after(QUIT_CLOSE_DEADLINE));
+        let closing = std::mem::take(&mut self.background.closing);
+        LEFT_BY_DROPPED_APP.with(|left| left.borrow_mut().absorb(closing));
     }
 
     /// Close every client when the app quits (once per app).

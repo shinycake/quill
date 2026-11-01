@@ -53,8 +53,8 @@ impl QuillApp {
                 thread_id: thread.thread_id,
                 unread_anchor: thread.unread_anchor,
                 unread_count: thread.unread_count,
-                has_newer: thread.has_newer,
-                window_epoch: thread.window_epoch,
+                has_newer: thread.history.has_newer,
+                window_epoch: thread.history.window_epoch,
                 saved_open: thread.saved_anchor.is_some(),
             });
         let history_key = (
@@ -63,18 +63,24 @@ impl QuillApp {
             thread_window.as_ref().map_or(0, |thread| thread.thread_id),
         );
         // The loaded window: the thread's own (it opens around its read
-        // position and pages forward like the main history) or the main
-        // history's (topic views page their own history and have none of
-        // this).
+        // position and pages forward like the main history), the topic's
+        // (no unread divider) or the main history's.
         let (unread_anchor, has_newer, window_epoch) = match &thread_window {
             Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
             None => session
-                .filter(|_| viewed_topic.is_none())
                 .and_then(|s| {
                     let chat = viewed_chat?;
-                    s.histories
-                        .get(&chat.0)
-                        .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch))
+                    match viewed_topic {
+                        Some(topic) => s
+                            .threads
+                            .topic_histories
+                            .get(&(chat.0, topic))
+                            .map(|h| (None, h.has_newer, h.window_epoch)),
+                        None => s
+                            .histories
+                            .get(&chat.0)
+                            .map(|h| (h.unread_anchor, s.history_has_newer(chat), h.window_epoch)),
+                    }
                 })
                 .unwrap_or((None, false, 0)),
         };
@@ -352,8 +358,10 @@ impl QuillApp {
         let top_probe = self.history.scroll_top_probe.clone();
         let view_probe = self.history.scroll_view_probe.clone();
         let hit_rows = self.history.hit_rows.clone();
+        let row_hover = self.history.row_hover.clone();
         let painted_ids = self.history.painted_ids.clone();
         let seen = self.history.seen.clone();
+        let on_screen_rows = self.history.on_screen.clone();
         let seen_app = cx.weak_entity();
         let bar_probe = self.history.bar_probe.clone();
         let bar_anchor = self.history.bar_anchor.clone();
@@ -420,7 +428,7 @@ impl QuillApp {
             .children(self.wallpaper_fade(&look, cx))
             .child(super::history_fx::reveal_viewport(
                 reveal,
-                MessageScroller::new(id, self.history.scroller.clone(), move |ix, _window, cx| {
+                MessageScroller::new(id, self.history.scroller.clone(), move |ix, window, cx| {
                     let gif_view = weak.clone();
                     cx.defer(move |cx| {
                         let _ = gif_view.update(cx, |this, cx| {
@@ -451,7 +459,7 @@ impl QuillApp {
                             });
                         });
                     }
-                    weak.update(cx, |this, cx| this.render_history_row(ix, cx))
+                    weak.update(cx, |this, cx| this.render_history_row(ix, window, cx))
                         .unwrap_or_else(|_| div().into_any_element())
                 })
                 // The kit's default row wrapper pads every non-last row with
@@ -511,6 +519,7 @@ impl QuillApp {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, cx| {
+                        row_hover.rows_painted(window, cx);
                         // Take the rows out so no guard is held across the
                         // calls below; a re-entrant borrow skips one frame.
                         let Ok(mut slot) = probe.try_borrow_mut() else {
@@ -557,6 +566,7 @@ impl QuillApp {
                         super::history_reads::note_seen(
                             &painted_ids,
                             &seen,
+                            &on_screen_rows,
                             viewed_chat,
                             bounds,
                             || {
@@ -624,17 +634,25 @@ impl QuillApp {
     pub(in crate::ui) fn render_history_row(
         &self,
         ix: usize,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(row) = self.history.rows.get(ix) else {
             return div().into_any_element();
         };
         self.note_stale_chrome(ix, row, cx);
+        let first_id = row.first_id();
+        let hover = &self.history.row_hover;
+        let corner = hover.corner_actions(first_id, self.a11y_tree_wanted(window));
         let palette = self.history.palette.get();
         let outgoing = super::chat_palette::row_is_outgoing(row);
         let element = super::chat_palette::with_palette(palette, outgoing, || {
-            self.render_history_row_body(row, cx)
+            self.render_history_row_body(row, corner, cx)
         });
+        let element = match first_id {
+            Some(id) => hover.area(id, element),
+            None => element,
+        };
         let has_day = row.day_label().is_some();
         // The wide layout centres dates and the unread label in its column.
         let wide = self.chat_wide();

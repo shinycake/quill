@@ -38,9 +38,9 @@ DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
   (`SurfaceFrame::with_yuv`, `yuv`); `YuvColor::rgb_rows` is the one place
   the matrix and range become the numbers a renderer uploads.
   `SurfaceFrame::nv12_planes` splits the two planes.
-- Only the vendored Windows renderer draws NV12. macOS keeps CoreVideo
-  surfaces and Linux (gpui-pre-wgpu) draws no surfaces, so Quill produces
-  NV12 frames on Windows only.
+- The vendored Windows and wgpu (Linux) renderers draw NV12 (the wgpu one
+  since `docs/decisions/video-nv12-linux.md`). macOS keeps CoreVideo
+  surfaces.
 - `SurfaceFrame::draw_state` / `mark_drawn` / `mark_refused` and
   `SurfaceDrawState { Pending, Drawn, Refused }`: the renderer that draws a
   frame says what happened to it, so the producer can replace a frame its
@@ -383,14 +383,6 @@ are not always what painting again would give:
   knows the orders primitives stored. A view that opens with a layer that drew
   nothing slides down as a whole on its first replay. With views that do not
   touch, that changed the batch count in 9 of 200 random cases, by -3 to +1.
-- The tree never sees a shadow's blur, so a tail can change sides with a
-  neighbour. Nothing here holds a tail to paint order: an earlier view's tail can
-  land over a later view's quad. On the same 777 frames, 263 of 4.46 million pairs
-  overlapping once blur is counted changed sides, none against paint order. 4 of
-  92 captures differed, by at most 9 of 255 levels. The shadow's alpha sets the
-  ceiling, since a tail's edge is half of it: about 13 levels on white at alpha
-  .10 and 32 at .25. A frame that paints fresh keeps the old order, so a tail can
-  shift between a painted frame and the next replay.
 - Painting never shows the tree a primitive past its layer's bounds, such as a
   glyph past its line, and a replayed box counts it. So a later view's quad over
   that overhang sorts above the glyph on a replay and can sort under it on a fresh
@@ -398,6 +390,11 @@ are not always what painting again would give:
   overlaps that differed in a model with offset glyphs. These are full-strength
   pixels, at glyph edges only, and they can change between a painted frame and
   the next replay.
+
+The tree sees a shadow's whole blur (`Primitive::painted_bounds`, the same margin as
+the shaders), on paint and on replay, so a tail keeps its side between a painted
+frame and the next replay. In random scenes that took 3,113 differing pairs to 0,
+for about 4% more batches.
 
 On a demo chat of 4,813 paint operations with a looping sticker, `Scene::replay`
 went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.
@@ -416,7 +413,9 @@ cache off:
   hitboxes marks the window dirty, because the ghost is painted on every draw,
   and an update at the position the ghost was last painted for
   (`drag_painted_at`) does nothing. `FileDropEvent::Entered` refreshes by itself
-  now, since it can arrive with the hit test unchanged. Tests:
+  now, since it can arrive with the hit test unchanged. A drawn frame whose
+  hovered hitboxes moved under a still pointer (`note_drag_hover`) refreshes
+  once, so cached `drag_over` styles follow them. Tests:
   `src/ui/drag_redraw_tests.rs`.
 
 The Quill project also changed it in 2026 so the end of a scroll doesn't keep
@@ -456,20 +455,56 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   and nothing is sent.
 - A live view whose element path runs through another live view's is drawn by
   that one, so a patch skips it as a site of its own. A cached view between the two
-  replays, so the inner one shows its old paint until a whole frame.
+  renders, since a patch refreshes: it has no frame to replay from but the last whole
+  one, and replaying would take the listeners that frame still needs. Its state stays
+  out of `rendered_frame`, as its ranges index the patch, so it renders in the next
+  whole frame too.
 - `Window::transact` drops the entries of a prepaint it rolls back, and a view
   prepainted twice is not nested in itself. A notified view no patch reaches draws a
   whole frame, since a tick that draws nothing would stop asking for the next.
 - The whole frame after a patch marks every live view it drew dirty, so a cached
   view holding one renders again instead of replaying an older paint.
+- A whole frame with no patch before it replays such a cached view: the live views
+  in that paint stay in the frame with it, their operations moved, so their next tick
+  is a patch too (`Window::replay_live_views`, in `paint_view` and for a replayed
+  deferred draw).
 
-What a live view builds takes no clicks and no hover, so it suits content that only
-shows. `Window::frame_number` counts these frames like any other.
+A hit test answers only for a whole frame's hitboxes, so a live view that builds
+any (a hover, a click, a tooltip) never patches: a notify of it draws a whole frame,
+a patch for another view leaves its last paint in place, and a patch that finds new
+hitboxes in a view asks for that whole frame. So a live view suits content that only
+shows; anything else about it stays correct and costs whole frames.
+`Window::frame_number` counts these frames like any other. With `test-support`,
+`Window::interactive_live_views` counts the live views that drew in whole frames
+alone in the last one.
 
 `Window::element_opacity` and `Window::with_element_opacity` are public so that
 content painted away from its place in the tree keeps the opacity it was given there.
 
 `src/ui/layer_tick_tests.rs` holds the tests.
+
+The Quill project also changed it in 2026 so text glyphs can be swept like color
+emoji, from a much higher count:
+
+- `src/platform.rs`: `AtlasState` counts text glyphs. `PlatformAtlas` gains
+  `text_glyph_count` and `remove_text_glyphs_unused_since`.
+- `src/window.rs`: `Window::text_glyph_count`, `Window::sweep_text_glyphs`.
+
+The Quill project also changed it in 2026 so `Scene::finish` stops allocating a
+sort buffer each frame:
+
+- `src/scene.rs`: `sort_primitives` leaves a sorted list alone and otherwise
+  sorts `(key, position)` pairs in a kept buffer, then moves the primitives by
+  swaps. `sort_by_key` took a scratch buffer of whole structs, up to 128 bytes
+  each, from `malloc`'s large path on every frame. Test:
+  `src/ui/scene_replay_tests.rs`.
+
+The Quill project also changed it in 2026 so a warning logged during a quit
+reaches the log:
+
+- `src/app.rs`: `App::shutdown` ends with `log::logger().flush()`. macOS exits
+  from `applicationWillTerminate`, so `Application::run` never returns there.
+  Test: `src/ui/quit_flush_tests.rs`.
 
 The Quill project also changed it in 2026 so the docs say what macOS now
 emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
@@ -481,3 +516,20 @@ The Quill project also changed it in 2026 so the input can wrap a long line
 without shaping it (`third_party/gpui-base/QUILL-CHANGES.md`):
 
 - `src/text_system/line_wrapper.rs`: `LineWrapper::width_for_char` is public.
+
+The Quill project also changed it in 2026 so an app can refuse a quit the OS
+started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
+`third_party/gpui-pre-windows/QUILL-CHANGES.md`):
+
+- `src/platform.rs`: `Platform::on_quit_request`, by default never called,
+  whose callback answers a `QuitAnswer`: `Allow`, `Refuse`, or `Later` when
+  the app is busy further up the stack. Linux has no session-end hook to call
+  it from.
+- `src/app.rs`: `App::on_quit_request`. A request that finds the app borrowed
+  answers `Later`, so the platform holds the quit and asks again from its
+  event loop instead of letting it through unasked.
+- `src/platform/test/platform.rs`, `src/app/test_context.rs`:
+  `TestAppContext::simulate_quit_request`, which returns the answer.
+- `src/platform.rs`, `src/window.rs`: `PlatformWindow::set_shutdown_block_reason`
+  (a no-op by default) and `Window::set_shutdown_block_reason`, the text
+  Windows shows while the window holds back the end of the session.

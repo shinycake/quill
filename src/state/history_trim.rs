@@ -28,12 +28,12 @@ pub enum WindowEnd {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct LiveTrimSpan {
-    oldest: usize,
-    newest: usize,
+pub(super) struct LiveTrimSpan {
+    pub(super) oldest: usize,
+    pub(super) newest: usize,
 }
 
-fn is_local(message: &HistoryMessage) -> bool {
+pub(super) fn is_local(message: &HistoryMessage) -> bool {
     message.pending || message.failed
 }
 
@@ -52,14 +52,14 @@ fn end_excess(messages: &HistoryMessages, end: WindowEnd, count: usize) -> Vec<i
     }
 }
 
-fn rows_above(messages: &HistoryMessages, reader: ReaderPosition) -> Option<usize> {
+pub(super) fn rows_above(messages: &HistoryMessages, reader: ReaderPosition) -> Option<usize> {
     match reader {
         ReaderPosition::Tail => None,
         ReaderPosition::Away { top } => Some(messages.range(..top.0).count()),
     }
 }
 
-fn live_trim_span(len: usize, rows_above_reader: Option<usize>) -> LiveTrimSpan {
+pub(super) fn live_trim_span(len: usize, rows_above_reader: Option<usize>) -> LiveTrimSpan {
     if len <= HISTORY_WINDOW_CAP {
         return LiveTrimSpan::default();
     }
@@ -115,82 +115,27 @@ impl HistoryState {
     }
 }
 
-impl TopicHistory {
-    fn trim_live(&mut self) -> usize {
-        let len = self.messages.len();
-        let span = live_trim_span(len, rows_above(&self.messages, self.reader));
-        self.trim_to_tail(len - span.oldest)
-    }
-}
-
 impl ThreadView {
-    fn trim_replies(&mut self, end: WindowEnd, count: usize) -> usize {
-        let roots = &self.root_ids;
-        let replies = self
-            .history
-            .messages
-            .keys()
-            .copied()
-            .filter(|id| *id > 0 && !roots.contains(id));
-        let messages = &self.history.messages;
-        let server = |id: &i64| messages.get(id).is_some_and(|message| !is_local(message));
-        let doomed: Vec<i64> = match end {
-            WindowEnd::Oldest => replies.filter(server).take(count).collect(),
-            WindowEnd::Newest => replies.rev().filter(server).take(count).collect(),
-        };
-        for id in &doomed {
-            self.history.messages.remove(id);
+    /// A dropped newest end is remembered as the thread's last reply.
+    fn note_trim(&mut self, end: WindowEnd) {
+        if end == WindowEnd::Newest {
+            self.last_message_id = self.last_message_id.max(self.history.latest_seen);
+            self.refresh_has_newer();
         }
-        if doomed.is_empty() {
-            return 0;
-        }
-        match end {
-            WindowEnd::Oldest => {
-                self.history.loaded_complete = false;
-                let oldest = self
-                    .history
-                    .messages
-                    .keys()
-                    .copied()
-                    .find(|id| *id > 0 && !self.root_ids.contains(id));
-                if let Some(oldest) = oldest {
-                    self.history.next_from_message_id = MessageId(oldest);
-                }
-            }
-            WindowEnd::Newest => {
-                let newest = doomed.iter().copied().max().unwrap_or(0);
-                self.last_message_id = self.last_message_id.max(newest);
-                self.newer_failed = false;
-                self.refresh_has_newer();
-            }
-        }
-        doomed.len()
     }
 
     pub(crate) fn trim_after_page(&mut self, far_end: WindowEnd) -> usize {
-        match self.history.messages.len().checked_sub(HISTORY_WINDOW_CAP) {
-            Some(1..) => {
-                let excess = self.history.messages.len() - HISTORY_WINDOW_TRIM_TO;
-                self.trim_replies(far_end, excess)
-            }
-            _ => 0,
+        let dropped = self.history.trim_after_page(far_end, &self.root_ids);
+        if dropped > 0 {
+            self.note_trim(far_end);
         }
+        dropped
     }
 
     pub(crate) fn trim_live(&mut self) -> Vec<WindowEnd> {
-        let history = &self.history;
-        let span = live_trim_span(
-            history.messages.len(),
-            rows_above(&history.messages, history.reader),
-        );
-        let mut moved = Vec::new();
-        for (end, count) in [
-            (WindowEnd::Oldest, span.oldest),
-            (WindowEnd::Newest, span.newest),
-        ] {
-            if self.trim_replies(end, count) > 0 {
-                moved.push(end);
-            }
+        let moved = self.history.trim_live(&self.root_ids);
+        for end in &moved {
+            self.note_trim(*end);
         }
         moved
     }
@@ -216,11 +161,8 @@ impl Session {
         {
             self.prune_reply_targets(chat_id);
         }
-        if let Some(topic) =
-            topic_id.and_then(|topic| self.threads.topic_histories.get_mut(&(chat_id.0, topic)))
-            && topic.trim_live() > 0
-        {
-            self.prune_reply_targets(chat_id);
+        if let Some(topic) = topic_id {
+            self.trim_live_topic(chat_id, topic);
         }
     }
 

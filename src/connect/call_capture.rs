@@ -20,22 +20,25 @@ use crate::calls::capture::feeder::AUDIO_SINK_FRAMES;
 use crate::calls::capture::system_audio::SystemAudioMix;
 use crate::calls::capture::{
     AudioFrame, CaptureError, CaptureEvent, CaptureFeeder, FrameSink, LevelCell, MicCapture,
-    MicControls,
+    MicControls, device_thread::DeviceThread,
 };
 use crate::calls::engine::{
-    CaptureTarget, MediaDeviceKind, TransportState, external_capture_enabled,
+    CaptureTarget, ExternalFrameSender, MediaDeviceKind, TransportState, external_capture_enabled,
 };
+use crate::wake::Signal;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Opens a microphone backend: `(device name, controls, sink)`. The
-/// driver uses cpal; tests inject a fake.
-pub type MicOpener = Box<
-    dyn FnMut(
-        Option<&str>,
-        Arc<MicControls>,
-        FrameSink<AudioFrame>,
-    ) -> Result<Box<dyn MicCapture>, CaptureError>,
+/// Opens a microphone backend on its own thread: `(device name, controls,
+/// sink)`. The driver uses cpal; tests inject a fake.
+pub type MicOpener = Arc<
+    dyn Fn(
+            Option<&str>,
+            Arc<MicControls>,
+            FrameSink<AudioFrame>,
+        ) -> Result<Box<dyn MicCapture>, CaptureError>
+        + Send
+        + Sync,
 >;
 
 /// After a failed open or a lost device, open the microphone again after
@@ -56,6 +59,8 @@ pub struct CallCapture {
     /// Why the microphone could not be opened or stopped, for the call
     /// window's note.
     pub error: Option<String>,
+    /// Poked when the microphone has news; the poll loop's by default.
+    wake: Option<&'static Signal>,
 }
 
 struct ActiveCapture {
@@ -63,16 +68,9 @@ struct ActiveCapture {
     device: Option<String>,
     controls: Arc<MicControls>,
     sink: FrameSink<AudioFrame>,
-    feeder: CaptureFeeder,
-    mic: Box<dyn MicCapture>,
-}
-
-impl Drop for ActiveCapture {
-    fn drop(&mut self) {
-        // Close the device first; the feeder then drains nothing more and
-        // joins when its field drops.
-        self.mic.stop();
-    }
+    sender: Arc<dyn ExternalFrameSender>,
+    mic: DeviceThread,
+    feeder: Option<CaptureFeeder>,
 }
 
 impl CallCapture {
@@ -80,6 +78,15 @@ impl CallCapture {
     /// on in builds and modes where it would be off.
     pub fn inject_opener(&mut self, opener: MicOpener) {
         self.opener = Some(opener);
+    }
+
+    /// Poke `wake` instead of the poll loop's signal (tests).
+    pub fn inject_wake(&mut self, wake: &'static Signal) {
+        self.wake = Some(wake);
+    }
+
+    fn wake(&self) -> &'static Signal {
+        self.wake.unwrap_or(&crate::wake::UPDATES)
     }
 
     /// Whether Quill captures the call microphone at all. Unit tests
@@ -91,7 +98,16 @@ impl CallCapture {
 
     /// The call the microphone feeds right now.
     pub fn target(&self) -> Option<CaptureTarget> {
-        self.active.as_ref().map(|active| active.target)
+        self.active
+            .as_ref()
+            .filter(|active| active.feeder.is_some())
+            .map(|active| active.target)
+    }
+
+    pub fn opening(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.feeder.is_none())
     }
 
     /// The level written by the running capture.
@@ -103,7 +119,8 @@ impl CallCapture {
     pub fn frames_sent(&self) -> u64 {
         self.active
             .as_ref()
-            .map_or(0, |active| active.feeder.stats().sent())
+            .and_then(|active| active.feeder.as_ref())
+            .map_or(0, |feeder| feeder.stats().sent())
     }
 
     /// The raw microphone's highest level since the last take while the
@@ -151,50 +168,77 @@ impl CallCapture {
             .is_some_and(|active| active.controls.system_audio().is_some())
     }
 
+    pub(crate) fn until_reopen(&self, now: Instant) -> Option<Duration> {
+        let waited = now.saturating_duration_since(self.failed_at?);
+        REOPEN_AFTER
+            .checked_sub(waited)
+            .filter(|left| !left.is_zero())
+    }
+
     fn open(
         &mut self,
         target: CaptureTarget,
         device: Option<String>,
         noise_suppression: bool,
         muted: bool,
-        sender: Arc<dyn crate::calls::engine::ExternalFrameSender>,
+        sender: Arc<dyn ExternalFrameSender>,
     ) {
         let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
         controls.set_muted(muted);
         controls.set_system_audio(self.system_audio.clone());
-        let sink = FrameSink::new(AUDIO_SINK_FRAMES);
-        let opened = match self.opener.as_mut() {
-            Some(opener) => opener(device.as_deref(), controls.clone(), sink.clone()),
-            None => open_cpal(device.as_deref(), controls.clone(), sink.clone()),
+        let sink = FrameSink::waking(AUDIO_SINK_FRAMES, self.wake());
+        let opener = self.opener.clone();
+        let mic = DeviceThread::open(
+            "quill-call-mic",
+            self.wake(),
+            {
+                let device = device.clone();
+                let controls = controls.clone();
+                let sink = sink.clone();
+                move || match opener {
+                    Some(opener) => opener(device.as_deref(), controls, sink),
+                    None => open_cpal(device.as_deref(), controls, sink),
+                }
+            },
+            |mut mic| mic.stop(),
+        );
+        self.active = Some(ActiveCapture {
+            target,
+            device,
+            controls,
+            sink,
+            sender,
+            mic,
+            feeder: None,
+        });
+    }
+
+    fn finish_open(&mut self, now: Instant) {
+        let Some(active) = self
+            .active
+            .as_mut()
+            .filter(|active| active.feeder.is_none())
+        else {
+            return;
         };
-        let mic = match opened {
-            Ok(mic) => mic,
-            Err(err) => {
-                self.failed_at = Some(Instant::now());
-                self.error = Some(err.to_string());
-                return;
-            }
+        let Some(answer) = active.mic.opened() else {
+            return;
         };
-        match CaptureFeeder::start(sink.clone(), sender) {
-            Ok(feeder) => {
-                self.failed_at = None;
-                self.error = None;
-                self.active = Some(ActiveCapture {
-                    target,
-                    device,
-                    controls,
-                    sink,
-                    feeder,
-                    mic,
-                });
-            }
-            Err(err) => {
-                let mut mic = mic;
-                mic.stop();
-                self.failed_at = Some(Instant::now());
-                self.error = Some(format!("Couldn't start the call microphone: {err}"));
-            }
-        }
+        let failure = match answer {
+            Ok(()) => match CaptureFeeder::start(active.sink.clone(), active.sender.clone()) {
+                Ok(feeder) => {
+                    active.feeder = Some(feeder);
+                    self.failed_at = None;
+                    self.error = None;
+                    return;
+                }
+                Err(err) => format!("Couldn't start the call microphone: {err}"),
+            },
+            Err(err) => err.to_string(),
+        };
+        self.active = None;
+        self.failed_at = Some(now);
+        self.error = Some(failure);
     }
 }
 
@@ -257,9 +301,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|device| device.name.clone())
     }
 
+    pub(crate) fn pump_call_media(&mut self, now: Instant) -> bool {
+        let shown = |driver: &Self| {
+            (
+                driver.call_capture.target(),
+                driver.call_capture.error.clone(),
+                driver.call_screen.target(),
+                driver.call_screen.paused(),
+                driver.call_screen.error.clone(),
+            )
+        };
+        let before = shown(self);
+        self.warm_call_devices();
+        self.pump_call_capture(now);
+        self.pump_call_screen();
+        before != shown(self)
+    }
+
+    fn warm_call_devices(&mut self) {
+        let calls = &self.session.calls;
+        // A tracked video chat may be one you only look at or one that is
+        // scheduled; only a ringing, placed or joined call needs devices.
+        let coming = calls.active_call.is_some()
+            || calls
+                .active_group_call
+                .as_ref()
+                .is_some_and(|call| call.is_joined);
+        if self.call_devices_warmed || !coming {
+            return;
+        }
+        if let Some(engine) = self.call_engine.as_deref() {
+            engine.warm_devices();
+            self.call_devices_warmed = true;
+        }
+    }
+
     /// Start, follow and stop the call microphone. Called from the
     /// driver pump.
-    pub(crate) fn pump_call_capture(&mut self) {
+    pub(crate) fn pump_call_capture(&mut self, now: Instant) {
         let wanted = self.capture_wanted();
         let device = self.capture_device_name();
         let group_pref = self.session.calls.prefs.call_noise_suppression;
@@ -284,7 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         if let Some(err) = failure {
             capture.stop();
-            capture.failed_at = Some(Instant::now());
+            capture.failed_at = Some(now);
             capture.error = Some(err);
         }
         let Some((target, muted)) = wanted else {
@@ -293,6 +372,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         let noise_suppression = denoises(target, group_pref);
+        capture.finish_open(now);
         if let Some(active) = capture.active.as_ref() {
             active.controls.set_muted(muted);
             active.controls.set_noise_suppression(noise_suppression);
@@ -301,7 +381,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !capture.enabled()
             || capture
                 .failed_at
-                .is_some_and(|at| at.elapsed() < REOPEN_AFTER)
+                .is_some_and(|at| now.saturating_duration_since(at) < REOPEN_AFTER)
         {
             return;
         }

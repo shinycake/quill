@@ -91,8 +91,8 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_LEARN_MORE))
                             .small()
                             .ghost()
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.open_url(quill::phone_suggestion::LEARN_MORE_URL)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_link(quill::phone_suggestion::LEARN_MORE_URL, cx)
                             }))
                             .into_any_element(),
                     ]),

@@ -20,9 +20,9 @@ impl Session {
             })) if err.premium_limit == Some(PremiumLimitKind::Pins) => {
                 self.open_premium_limit(PremiumLimitKind::SavedPins, 0);
             }
-            Some(RequestPurpose::GetTopicHistory) => {
+            Some(RequestPurpose::GetTopicHistory | RequestPurpose::GetTopicHistoryNewer) => {
                 if let Some(pending) = pending {
-                    self.mark_topic_load_failed(pending);
+                    self.fail_topic_page(pending);
                 }
             }
             // Saved Messages: a 404 from `loadSavedMessagesTopics` says all

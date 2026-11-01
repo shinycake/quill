@@ -30,9 +30,13 @@ upload progress, and `Media::Player::Instance` drops `WaitingForData` for audio.
 - `OpusSource` keeps its packets in one block, so ending a track on the audio thread frees two
   allocations and not one per packet.
 
-## Left alone
-A seek within a playing track still runs in the source on the audio thread. A coarse MP3 seek
-would be quicker there, but lands in the wrong place on a VBR file.
+## Seeks in a playing track
+A seek in a playing track is a build too: the thread opens the file at the target and `settle`
+swaps the new player in, so the decoder's seek (a scan on a long MP3) never runs on the audio
+thread. The old sound plays on until the swap, and a build that fails leaves it playing with the
+reason in `error`. tdesktop's loader thread does the same work for a seek outside what it has
+buffered (`Mixer::seek`, `Loaders::loadData`). The seek board, its worker thread and the stall
+report it fed are gone. A stalled device shows as `DeviceStalled` only in the demo simulation now.
 
 ## Test
 `cargo test --features demo-capture --bin quill -- ui::audio ui::playback_state`. The row test

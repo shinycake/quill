@@ -141,6 +141,9 @@ fn the_custom_end_opens_a_day_after_the_installed_clock(cx: &mut TestAppContext)
             .restrict_dialog
             .as_ref()
             .expect("the restrict box");
-        assert_eq!(picked_unix(&restrict.custom, cx), Some(tomorrow));
+        assert_eq!(
+            picked_unix(&restrict.custom, quill::moderation::MIN_RESTRICT_SECS, cx),
+            Some(tomorrow)
+        );
     });
 }

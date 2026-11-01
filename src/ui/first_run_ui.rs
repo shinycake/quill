@@ -69,17 +69,37 @@ pub(super) fn initial_first_run(
     if !pending {
         return FirstRun::Done;
     }
-    FirstRun::welcome(open_intro(cx), Instant::now())
+    start_intro(cx)
 }
 
-/// The intro clip, playing with its sound; `None` with interface animations
-/// off, or when it can't be written out or opened.
-pub(super) fn open_intro(cx: &mut Context<QuillApp>) -> Option<VideoPlayer> {
+/// The onboarding's welcome: the intro on black while its clip is hashed
+/// and written out off the UI thread, then the clip playing with its
+/// sound. With interface animations off, the notice at once.
+pub(super) fn start_intro(cx: &mut Context<QuillApp>) -> FirstRun {
+    let now = Instant::now();
     if super::motion::interface_animations_off() {
-        return None;
+        return FirstRun::welcome(None, now);
     }
-    let path = intro_file()?;
-    let player = VideoPlayer::open(&path, Purpose::Viewer, Some(INTRO_SECONDS), cx).ok()?;
+    let written = cx.background_spawn(async { intro_file() });
+    cx.spawn(async move |this, cx| {
+        let path = written.await;
+        let _ = this.update(cx, |this, cx| {
+            if !this.first_run.awaits_intro() {
+                return;
+            }
+            let player = path.and_then(|path| open_intro(&path, cx));
+            this.first_run.intro_written(player);
+            cx.notify();
+        });
+    })
+    .detach();
+    FirstRun::writing_intro(now)
+}
+
+/// The intro clip at `path`, playing with its sound; `None` when it can't
+/// be opened.
+fn open_intro(path: &std::path::Path, cx: &mut Context<QuillApp>) -> Option<VideoPlayer> {
+    let player = VideoPlayer::open(path, Purpose::Viewer, Some(INTRO_SECONDS), cx).ok()?;
     player.play();
     player.watch(cx.entity_id());
     Some(player)
@@ -87,9 +107,14 @@ pub(super) fn open_intro(cx: &mut Context<QuillApp>) -> Option<VideoPlayer> {
 
 /// The bundled clip as a file the player can open (the players read
 /// files, not memory), written once into the app's own data folder under
-/// a name that changes with its content.
+/// a name that changes with its content. One write at a time: Replay
+/// while the first write runs waits for it and finds the file written,
+/// where a second rename onto the clip the player holds open would fail on
+/// Windows.
 fn intro_file() -> Option<PathBuf> {
     use std::io::Write;
+    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = quill::locks::lock_or_recover(&WRITING);
     let hash = INTRO_MP4
         .iter()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
@@ -195,15 +220,20 @@ impl QuillApp {
     fn first_run_curtain(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let now = Instant::now();
         self.settle_first_run(now, cx);
-        let player = self.first_run.intro_player()?;
+        if !matches!(self.first_run, FirstRun::Welcome { .. }) {
+            return None;
+        }
         let look = self.first_run.intro_look(now);
         if look.curtain <= 0. {
             return None;
         }
-        player.set_volume(look.volume);
+        let player = self.first_run.intro_player();
+        if let Some(player) = player {
+            player.set_volume(look.volume);
+        }
         // A GPU surface ignores element opacity: the clip is darkened by
         // the veil over it, and drawn only while the cover is opaque.
-        let clip = (look.curtain >= 1.).then(|| {
+        let clip = player.filter(|_| look.curtain >= 1.).map(|player| {
             div()
                 .absolute()
                 .inset_0()
@@ -274,7 +304,7 @@ impl QuillApp {
     /// intro through the focus its cover holds.
     pub(super) fn replay_first_run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_settings();
-        self.first_run = FirstRun::welcome(open_intro(cx), Instant::now());
+        self.first_run = start_intro(cx);
         window.focus(&self.focus_sidebar, cx);
         cx.notify();
     }

@@ -428,6 +428,7 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_LEARN_MORE),
                         "",
                         url,
+                        cx.weak_entity(),
                         cx,
                     ))
                     .into_any_element(),

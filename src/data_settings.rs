@@ -232,6 +232,11 @@ pub struct DataStoragePrefs {
     /// loaded from disk); the screen shows "Loading…" until then.
     #[serde(default)]
     pub seeded: bool,
+    /// True once the cache limits got their first value on this account
+    /// (`ConnectDriver::maybe_seed_storage_limits`). Never reset, so a
+    /// later "No limit" sticks.
+    #[serde(default)]
+    pub storage_limits_seeded: bool,
     pub mobile: AutoDownloadNetSettings,
     pub roaming: AutoDownloadNetSettings,
     pub wifi: AutoDownloadNetSettings,
@@ -242,6 +247,7 @@ impl Default for DataStoragePrefs {
         Self {
             version: DATA_STORAGE_PREFS_VERSION,
             seeded: false,
+            storage_limits_seeded: false,
             mobile: AutoDownloadNetSettings::default(),
             roaming: AutoDownloadNetSettings::default(),
             wifi: AutoDownloadNetSettings::default(),

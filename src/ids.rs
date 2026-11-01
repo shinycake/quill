@@ -41,6 +41,14 @@ impl fmt::Display for AccountKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct ChatId(pub i64);
 
+impl ChatId {
+    /// The chat TDLib gives a supergroup or channel
+    /// (`DialogId(ChannelId)`: `-1000000000000 - channel_id`).
+    pub fn from_supergroup(supergroup_id: i64) -> Self {
+        Self(-1_000_000_000_000_i64.saturating_sub(supergroup_id))
+    }
+}
+
 /// TDLib `int53` message identifier. Unique only within a chat.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord, Default,

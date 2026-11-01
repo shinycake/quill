@@ -47,7 +47,9 @@ impl Session {
                 self.set_auth(AuthorizationState::StartupFailed(if err.code == 401 {
                     StartupFailure::WrongKey
                 } else {
-                    StartupFailure::DataFolder
+                    StartupFailure::DataFolder {
+                        detail: err.database_detail.clone(),
+                    }
                 }));
             }
             _ => {}

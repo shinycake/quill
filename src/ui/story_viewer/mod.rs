@@ -233,16 +233,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn story_area_open_map(&mut self, url: &str, label: String, cx: &mut Context<Self>) {
+    fn story_area_open_map(&mut self, url: &str, cx: &mut Context<Self>) {
         let open = quill::platform::open_external_url(url);
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            this.connection.set_note(if opened {
-                StatusNote::info(label)
-            } else {
-                StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
-            });
-            cx.notify();
-        });
+        self.report_failed_open(open, tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP), cx);
     }
 
     /// Phase 9.8: a story area tap — the action each `StoryAreaType`
@@ -258,31 +251,13 @@ impl QuillApp {
     /// DECISIONS.md Phase 9.8).
     pub(super) fn story_area_click(&mut self, kind: &StoryAreaKind, cx: &mut Context<Self>) {
         match kind {
-            StoryAreaKind::Location {
-                location, address, ..
-            } => {
-                let url = location.open_street_map_url();
-                let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
-                self.story_area_open_map(&url, label, cx);
-            }
-            StoryAreaKind::Venue {
-                title,
-                address,
-                location,
-                ..
-            } => {
-                let url = location.open_street_map_url();
-                let mut label = Self::story_area_pin_label(&[title, tr(keys::Q_MEDIA_VENUE)]);
-                if !title.is_empty() && !address.is_empty() {
-                    label.push_str(" — ");
-                    label.push_str(address);
-                }
-                self.story_area_open_map(&url, label, cx);
+            StoryAreaKind::Location { location, .. } | StoryAreaKind::Venue { location, .. } => {
+                self.story_area_open_map(&location.open_street_map_url(), cx);
             }
             StoryAreaKind::SuggestedReaction { emoji, .. } => {
                 self.pick_story_reaction(emoji, cx);
             }
-            StoryAreaKind::Link { url } => self.open_message_url(url, cx),
+            StoryAreaKind::Link { url } => self.open_link(url, cx),
             StoryAreaKind::Message {
                 chat_id,
                 message_id,

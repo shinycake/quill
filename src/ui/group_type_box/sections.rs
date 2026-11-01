@@ -178,7 +178,10 @@ impl QuillApp {
                     .child(tr(problem.text()))
                     .into_any_element(),
             ),
-            LinkStatus::Purchasable => Some(self.group_type_purchase_line(type_box, cx)),
+            LinkStatus::Purchasable => {
+                let app = cx.weak_entity();
+                Some(self.group_type_purchase_line(type_box, app, cx))
+            }
         };
         let failed = if facts.setup {
             self.new_chat_username_failure()
@@ -215,7 +218,12 @@ impl QuillApp {
     /// "Sorry, this link is taken. But it's available for purchase.
     /// Learn more..." with the Fragment address (tdesktop
     /// `UsernameCheckInfo::PurchaseAvailable`).
-    fn group_type_purchase_line(&self, type_box: &GroupTypeBox, cx: &App) -> AnyElement {
+    fn group_type_purchase_line(
+        &self,
+        type_box: &GroupTypeBox,
+        app: WeakEntity<QuillApp>,
+        cx: &App,
+    ) -> AnyElement {
         let name = type_box.link_text(cx);
         let url = self
             .session()
@@ -234,6 +242,7 @@ impl QuillApp {
                     tr(keys::USERNAME_PURCHASE_AVAILABLE_LINK),
                     after,
                     url,
+                    app,
                     cx,
                 ))
                 .into_any_element(),

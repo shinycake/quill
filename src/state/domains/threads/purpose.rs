@@ -12,6 +12,11 @@ pub enum ThreadsPurpose {
     /// `foundChatMessages`; correlated via
     /// `PendingRequest::forum_topic_id`.
     GetTopicHistory,
+    /// `searchChatMessages` for a forum topic with a negative offset: the
+    /// page after the topic window's newest message, while the window
+    /// stops short of the topic's latest (`TopicHistory::has_newer`).
+    /// Correlated like `GetTopicHistory`.
+    GetTopicHistoryNewer,
     /// Slice G2: forum topic management (schema 1.8.67, lines
     /// 12665/12674/12713/12725/12736/12718). `createForumTopic`
     /// answers `forumTopicInfo`; the rest answer `ok`. The topic list is
@@ -98,6 +103,7 @@ pub enum ThreadsPurpose {
 flat_purposes!(Threads(ThreadsPurpose) {
     GetForumTopics,
     GetTopicHistory,
+    GetTopicHistoryNewer,
     CreateForumTopic,
     ToggleGeneralForumTopicHidden,
     ToggleChatViewAsTopics,

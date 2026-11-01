@@ -39,6 +39,10 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let demo = ScreenshotDemo::named("ready-sticker-playback");
     let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        view.read(cx)
+            .playback
+            .stickers
+            .follow(cx.background_executor().clone());
         for file in STICKER_FILES {
             view.read(cx).playback.stickers.set_fixture(
                 file,
@@ -356,6 +360,7 @@ fn a_covering_chat_window_keeps_its_own_stickers_animating(cx: &mut TestAppConte
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let shown = frames_of(chat, vcx);
@@ -376,6 +381,7 @@ fn a_chat_window_beside_the_main_window_ticks_alone(cx: &mut TestAppContext) {
     let chat = open_chat_window(&app, vcx, OPEN, beside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let frame = |vcx: &mut VisualTestContext| {
@@ -477,6 +483,47 @@ fn a_covered_main_window_leaves_windows_and_views_that_do_not_follow_the_app_alo
     assert_eq!(main_draws(vcx), (0, 0), "the main window under it");
 }
 
+/// A tick of the main window's layer draws whenever one of its stickers
+/// comes to a new frame before the main window's next refresh, also when a
+/// window on a faster display painted a sticker last: there a tick would
+/// look only that display's shorter refresh ahead, skip, and show the
+/// frame a refresh late.
+#[gpui_kit::test]
+fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mut TestAppContext) {
+    use std::time::Duration;
+    let (app, mut vcx) = open(cx);
+    let vcx = &mut vcx;
+    let (painter, layer) = app.read_with(vcx, |app, _| {
+        let (_, painter) = app.slices.conversation_ids().expect("its layer");
+        (painter, app.slices.conversation_layer().expect("its layer"))
+    });
+    crate::ui::sticker_player::note_display_hz(120.0);
+    // 1 ms steps up to the stickers' next frame: whether a tick at each
+    // would draw.
+    let mut draws = Vec::new();
+    while !layer.changes_within(Duration::ZERO) {
+        assert!(draws.len() < 40, "no frame of a 30 fps sticker in 40 ms");
+        draws.push(app.read_with(vcx, |app, _| app.idle_layer_tick(painter).is_none()));
+        app.read_with(vcx, |app, _| {
+            app.playback.stickers.skip(Duration::from_millis(1));
+        });
+    }
+    // The main window refreshes every 16.7 ms (60 Hz).
+    let within = draws.len().saturating_sub(16);
+    assert!(
+        within > 0,
+        "the frame came {} ms after the first paint",
+        draws.len()
+    );
+    let skipped = draws
+        .get(within..)
+        .map_or(0, |last| last.iter().filter(|d| !**d).count());
+    assert_eq!(
+        skipped, 0,
+        "ticks skipped in the last 16 ms before a frame: {draws:?}"
+    );
+}
+
 /// A chat window inside the main window's bounds, away from its edges.
 fn inside() -> Bounds<Pixels> {
     Bounds::new(point(px(100.), px(100.)), size(px(400.), px(300.)))
@@ -491,6 +538,7 @@ fn a_chat_window_hidden_behind_the_active_one_draws_nothing(cx: &mut TestAppCont
     let under = open_chat_window(&app, vcx, OPEN, inside());
     for _ in 0..4 {
         app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.update(vcx, |_, cx| cx.notify());
         let _ = frames_over(vcx, 1);
     }
     let front = open_chat_window(&app, vcx, OTHER, beside());
@@ -507,3 +555,6 @@ fn a_chat_window_hidden_behind_the_active_one_draws_nothing(cx: &mut TestAppCont
     vcx.run_until_parked();
     assert_eq!(frames_of(under, vcx), shown, "shown again");
 }
+
+#[path = "slices_tests.rs"]
+mod slices;

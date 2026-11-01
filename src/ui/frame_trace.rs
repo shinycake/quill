@@ -3,9 +3,6 @@
 use gpui_kit::EntityId;
 use std::time::Duration;
 
-#[cfg(test)]
-use super::SLICE_RENDERS;
-
 /// `QUILL_TRACE_TICKS=1` also counts slice renders (`app_slice`), logged
 /// once a second, to check that a tick redraws only what animates.
 pub(in crate::ui) fn trace_slice_render(kind: &'static str) {
@@ -165,4 +162,60 @@ pub(super) fn trace_caller(
             );
         }
     });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every view a video frame was asked for on this thread, in order.
+    pub(super) static VIDEO_TARGETS: std::cell::RefCell<Vec<EntityId>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The views video frames were asked for since the last call, for tests.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn take_video_targets() -> Vec<EntityId> {
+    VIDEO_TARGETS.with(|targets| std::mem::take(&mut *targets.borrow_mut()))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Slice renders on this thread by kind, for tests.
+    pub(super) static SLICE_RENDERS: std::cell::RefCell<std::collections::BTreeMap<&'static str, u32>> =
+        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
+}
+
+/// The slice renders since the last call, by kind, for tests.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn take_slice_renders() -> std::collections::BTreeMap<&'static str, u32> {
+    SLICE_RENDERS.with(|counts| std::mem::take(&mut *counts.borrow_mut()))
+}
+
+/// What a window drew over `secs` of the test clock, for tests: the
+/// slice renders by kind, with `(window frame)` once per frame (a test
+/// window draws as soon as it is dirty), and `(next frame)` for each
+/// callback that asked for a display frame (an animation frame), which
+/// a test window only runs when asked.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(crate) fn frames_over(
+    vcx: &mut gpui_kit::VisualTestContext,
+    secs: u64,
+) -> std::collections::BTreeMap<&'static str, u32> {
+    let _ = take_slice_renders();
+    let mut next_frames = 0;
+    for _ in 0..secs * 10 {
+        vcx.executor().advance_clock(Duration::from_millis(100));
+        vcx.run_until_parked();
+        next_frames += vcx.update(|window, cx| window.simulate_next_frame(cx));
+        vcx.run_until_parked();
+    }
+    let mut drawn = take_slice_renders();
+    if next_frames > 0 {
+        drawn.insert(
+            "(next frame)",
+            u32::try_from(next_frames).unwrap_or(u32::MAX),
+        );
+    }
+    drawn
 }

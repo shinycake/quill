@@ -212,6 +212,10 @@ impl Tdlib for Account {
         let _ = self.call(request, Duration::ZERO);
     }
 
+    fn is_cancelled(&self) -> bool {
+        self.cancel_after.is_some_and(|n| self.calls.len() >= n)
+    }
+
     fn call(&mut self, request: Value, _timeout: Duration) -> Result<Value, ExportError> {
         let method = request["@type"].as_str().unwrap().to_string();
         self.calls.push(method.clone());

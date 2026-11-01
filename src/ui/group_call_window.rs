@@ -161,12 +161,14 @@ impl QuillApp {
                                 .map(|c| c.id);
                             app.group_call.stream.pending_join = None;
                             app.group_call.stream.overlay = None;
+                            app.sync_group_call_large_tile();
                             cx.notify();
                         });
                         true
                     });
                     let view = cx.new(|cx| {
                         let activation_owner = render_owner.downgrade();
+                        let visibility_owner = render_owner.downgrade();
                         GroupCallPanel {
                             owner: render_owner.downgrade(),
                             _observe: follow_app(&render_owner, cx),
@@ -181,6 +183,20 @@ impl QuillApp {
                                             app.group_call_ptt_release_all(cx)
                                         });
                                     }
+                                },
+                            ),
+                            _visibility: cx.observe_window_visibility(
+                                window,
+                                move |_, visibility, window, cx| {
+                                    let from = window.window_handle();
+                                    let _ = visibility_owner.update(cx, |app, _| {
+                                        // A replaced window still reports while it goes.
+                                        if app.group_call.window != Some(from) {
+                                            return;
+                                        }
+                                        app.group_call.window_visible = visibility.is_visible();
+                                        app.sync_group_call_large_tile();
+                                    });
                                 },
                             ),
                             pinned_on_top: false,
@@ -203,6 +219,7 @@ impl QuillApp {
                 match result {
                     Ok(handle) => {
                         app.group_call.window = Some(handle.into());
+                        app.group_call.window_visible = true;
                         app.group_call.stream.window_is_stream = stream;
                     }
                     Err(_) => app.connection.set_note(StatusNote::error(tr(
@@ -212,6 +229,18 @@ impl QuillApp {
                 cx.notify();
             });
         });
+    }
+
+    pub(super) fn group_call_large_tile(&self) -> Option<quill::calls::tile_pin::TileKey> {
+        let seen = self.group_call.window.is_some() && self.group_call.window_visible;
+        self.group_call.pin.pinned().filter(|_| seen)
+    }
+
+    fn sync_group_call_large_tile(&mut self) {
+        let tile = self.group_call_large_tile();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.set_group_call_large_tile(tile);
+        }
     }
 
     /// Bring the group call window back (the call bar).
@@ -291,6 +320,7 @@ pub(super) struct GroupCallPanel {
     /// Takes keyboard focus so push-to-talk key events reach the window.
     focus: FocusHandle,
     _activation: Subscription,
+    _visibility: Subscription,
     /// The window stays above the others (tdesktop "pin on top").
     pinned_on_top: bool,
     /// The title the window was given (a stream's follows its chat).
@@ -354,6 +384,7 @@ impl Render for GroupCallPanel {
             app.frame.tick_view.set(None);
             body
         });
+        owner.update(cx, |app, _| app.sync_group_call_large_tile());
         if animating {
             window.request_animation_frame();
         }

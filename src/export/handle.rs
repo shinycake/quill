@@ -2,15 +2,14 @@
 //! channels the connect driver pumps (requests out to TDLib, answers back).
 //! [`WorkerLink`] is the session's end, shared by the chat export here and
 //! the account export (`account/handle.rs`).
+use super::leftovers::Leftovers;
 use super::loaded_files::LoadedFiles;
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
-use crate::json_access::JsonExt;
 use crate::locks::LockExt;
 use crate::wake::Signal;
 use serde_json::Value;
-use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,12 +22,33 @@ pub(crate) struct ChannelTdlib {
     requests: mpsc::Sender<Value>,
     replies: mpsc::Receiver<Value>,
     cancelled: Arc<AtomicBool>,
+    leftovers: Option<Leftovers>,
+    /// Dropped with the worker, which tells the link it ended.
+    _alive: mpsc::Sender<()>,
 }
 
 impl ChannelTdlib {
     #[cfg(test)]
-    pub(crate) fn into_requests(self) -> mpsc::Sender<Value> {
-        self.requests
+    pub(crate) fn into_scripted(self) -> ScriptedWorker {
+        ScriptedWorker {
+            requests: self.requests,
+            _alive: self._alive,
+        }
+    }
+}
+
+/// A test's stand-in for the worker thread: it sends the requests, and the
+/// worker counts as running until it is dropped.
+#[cfg(test)]
+pub(crate) struct ScriptedWorker {
+    requests: mpsc::Sender<Value>,
+    _alive: mpsc::Sender<()>,
+}
+
+#[cfg(test)]
+impl ScriptedWorker {
+    pub(crate) fn send(&self, request: Value) -> Result<(), mpsc::SendError<Value>> {
+        self.requests.send(request)
     }
 }
 
@@ -70,6 +90,14 @@ impl Tdlib for ChannelTdlib {
             crate::wake::UPDATES.poke();
         }
     }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn leftovers(&self) -> Option<&Leftovers> {
+        self.leftovers.as_ref()
+    }
 }
 
 /// The session's end of a worker: its next request, the one the driver
@@ -80,34 +108,40 @@ pub struct WorkerLink {
     /// The request the driver sent and awaits an answer for.
     pub pending: Option<RequestId>,
     cancelled: Arc<AtomicBool>,
-    /// Files the view asked for while the export ran. The export leaves
-    /// them in TDLib's cache even when it downloaded them first.
-    view_files: HashSet<i32>,
+    /// Disconnected once the worker ended.
+    ended: mpsc::Receiver<()>,
 }
 
 impl WorkerLink {
     /// A connected pair: the session's end and the worker's.
-    pub(crate) fn pair() -> (Self, ChannelTdlib) {
+    pub(crate) fn pair(leftovers: Option<Leftovers>) -> (Self, ChannelTdlib) {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
+        let (alive, ended) = mpsc::channel();
         let worker = ChannelTdlib {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
+            leftovers,
+            _alive: alive,
         };
         let link = Self {
             requests,
             replies,
             pending: None,
             cancelled,
-            view_files: HashSet::new(),
+            ended,
         };
         (link, worker)
     }
 
     pub fn idle_or_cancelled(&self) -> bool {
-        self.pending.is_none() || self.cancelled.load(Ordering::Acquire)
+        self.pending.is_none() || self.is_cancelled()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
     }
 
     /// The next request for TDLib, if the worker has one waiting.
@@ -115,23 +149,9 @@ impl WorkerLink {
         self.requests.try_recv().ok()
     }
 
-    pub fn note_view_file(&mut self, file_id: i32) {
-        self.view_files.insert(file_id);
-    }
-
-    /// Answer the worker's `deleteFile` for a file the view asked for
-    /// without sending it. Returns whether `request` was one.
-    pub fn keep_view_file(&mut self, request: &Value) -> bool {
-        let kept = request.at("@type") == "deleteFile"
-            && request
-                .at("file_id")
-                .as_i64()
-                .and_then(|id| i32::try_from(id).ok())
-                .is_some_and(|id| self.view_files.contains(&id));
-        if kept {
-            let _ = self.replies.send(serde_json::json!({"@type": "ok"}));
-        }
-        kept
+    /// Answer the worker's request at once: the driver takes it from here.
+    pub fn answer_ok(&self) {
+        let _ = self.replies.send(serde_json::json!({"@type": "ok"}));
     }
 
     /// Hand TDLib's answer to the worker.
@@ -153,6 +173,20 @@ impl WorkerLink {
     /// Ask the worker to stop. It does so at its next step.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn worker_ended(&self) -> bool {
+        matches!(self.ended.try_recv(), Err(mpsc::TryRecvError::Disconnected))
+    }
+
+    /// Block until the worker ended or `until` passed. Returns whether it
+    /// ended.
+    pub fn wait_ended(&self, until: Instant) -> bool {
+        let left = until.saturating_duration_since(Instant::now());
+        matches!(
+            self.ended.recv_timeout(left),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        )
     }
 }
 
@@ -178,12 +212,16 @@ pub struct ChatExport {
 
 impl ChatExport {
     /// Create the output folder and start the worker thread.
-    pub fn start(settings: ExportSettings, files_root: PathBuf) -> io::Result<Self> {
+    pub fn start(
+        settings: ExportSettings,
+        files_root: PathBuf,
+        leftovers: Option<Leftovers>,
+    ) -> io::Result<Self> {
         let parent = settings.dir.canonicalize()?;
         let now = crate::local_time::civil_local(crate::local_time::now_unix());
         let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
         let folder = create_folder(&parent, &settings.title, &stamp)?;
-        let (link, mut tdlib) = WorkerLink::pair();
+        let (link, mut tdlib) = WorkerLink::pair(leftovers);
         let progress = Arc::new(Mutex::new(Progress::starting()));
         let title = settings.title.clone();
         let worker_progress = progress.clone();
@@ -230,14 +268,14 @@ impl ChatExport {
     }
 
     #[cfg(test)]
-    pub(crate) fn scripted() -> (Self, mpsc::Sender<Value>) {
-        let (link, worker) = WorkerLink::pair();
+    pub(crate) fn scripted() -> (Self, ScriptedWorker) {
+        let (link, worker) = WorkerLink::pair(None);
         let export = Self {
             link,
             progress: Arc::new(Mutex::new(Progress::starting())),
             folder: PathBuf::new(),
             title: String::new(),
         };
-        (export, worker.into_requests())
+        (export, worker.into_scripted())
     }
 }

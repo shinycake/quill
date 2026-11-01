@@ -34,8 +34,7 @@ pub fn load_contact_prefs(paths: &AccountPaths) -> ContactPrefs {
         .unwrap_or_default()
 }
 
-/// Persist contacts prefs; a failure reaches the status note through
-/// [`take_deferred_write_failure`].
+/// Persist contacts prefs, waiting for the disk; the caller notes a failure.
 pub fn save_contact_prefs(paths: &AccountPaths, prefs: &ContactPrefs) -> std::io::Result<()> {
     write_json_atomic(&contact_prefs_path(paths), prefs)
 }

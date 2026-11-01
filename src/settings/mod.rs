@@ -22,15 +22,19 @@ pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
+pub(crate) use deferred::{discard_deferred_writes_under, read_with_pending, write_json_deferred};
 pub use deferred::{flush_deferred_writes, take_deferred_write_failure};
-pub(crate) use deferred::{read_with_pending, write_json_deferred};
 pub use first_run::*;
 pub use media::*;
 pub use settings_search::*;
 pub use video_pip::*;
 pub use window_save::*;
 
+#[cfg(not(debug_assertions))]
 pub const APP_DIR_NAME: &str = "Quill";
+/// A stray debug run gets a folder of its own, so it never opens real accounts.
+#[cfg(debug_assertions)]
+pub const APP_DIR_NAME: &str = "Quill Debug";
 pub const PREFS_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -166,7 +170,7 @@ fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T)
 where
     T: Serialize,
 {
-    let _ = write_json_deferred(&paths.root.join(file_name), prefs);
+    write_json_deferred(&paths.root.join(file_name), prefs);
 }
 
 /// Write `value` as JSON to `path` atomically: a sibling temp file is

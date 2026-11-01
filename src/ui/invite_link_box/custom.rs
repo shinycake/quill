@@ -15,7 +15,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::invite_link_form::{
-    CUSTOM_DATE_MAX_AHEAD, DAY, Expire, Usage, custom_date_ok, custom_limit,
+    CUSTOM_DATE_MAX_AHEAD, CUSTOM_DATE_MIN_AHEAD, DAY, Expire, Usage, custom_date_ok, custom_limit,
 };
 use quill::lang::{keys, tr};
 
@@ -95,7 +95,7 @@ impl QuillApp {
     /// The Custom box's value, when it is one tdesktop takes.
     fn invite_link_custom_value(&self, cx: &App) -> Option<CustomValue> {
         match self.invite_link_custom()? {
-            CustomBox::Date(picker) => picked_unix(picker, cx)
+            CustomBox::Date(picker) => picked_unix(picker, CUSTOM_DATE_MIN_AHEAD, cx)
                 .filter(|date| custom_date_ok(*date, WallClock::of(cx).now()))
                 .and_then(|date| i32::try_from(date).ok())
                 .map(CustomValue::Date),

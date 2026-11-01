@@ -5,10 +5,10 @@
 //! - macOS: AVPlayer decodes in hardware ([`backend_avplayer`]); pictures
 //!   are GPU pixel buffers drawn through GPUI's `surface`.
 //! - Linux and Windows (and macOS with `QUILL_VIDEO_BACKEND=ffmpeg`): the
-//!   bundled FFmpeg shim ([`backend_ffmpeg`]); pictures are BGRA images,
-//!   except on Windows, where the decoder hands over NV12 and the DirectX
-//!   renderer converts it on the GPU ([`surface`],
-//!   `docs/decisions/video-player-nv12.md`).
+//!   bundled FFmpeg shim ([`backend_ffmpeg`]); the decoder hands over NV12
+//!   and the DirectX (Windows) or wgpu (Linux) renderer converts it on the
+//!   GPU ([`surface`], `docs/decisions/video-player-nv12.md`); pictures
+//!   the stream doesn't allow in NV12 are BGRA images.
 //! - Live feeds (streams, live stories, video chat tracks): frames pushed
 //!   by the call engine ([`backend_live`], [`VideoPlayer::live`]).
 //!
@@ -28,7 +28,7 @@ mod decoder_load;
 mod element;
 mod live_follow;
 mod live_picture;
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(not(target_os = "macos"), test))]
 mod live_surface;
 pub(super) mod pacing;
 mod picture;
@@ -39,8 +39,7 @@ mod transport;
 #[cfg(target_os = "macos")]
 mod backend_avplayer;
 
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
+#[cfg(all(test, feature = "demo-capture"))]
 mod live_view_tests;
 #[cfg(test)]
 mod tests;
@@ -53,7 +52,6 @@ pub(crate) use live_follow::{follow_live_feed, follow_live_slot, shows_feed};
 #[cfg(feature = "demo-capture")]
 pub(crate) use live_picture::{bgra_only, take_made_images};
 pub(crate) use picture::Picture;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use picture::SurfaceHandle;
 use picture::turn;
 pub(crate) use transport::{PlayState, Transport};
@@ -184,7 +182,7 @@ trait Backend {
         let _ = now;
         None
     }
-    /// The renderer refused the surface on screen (Windows NV12): the same
+    /// The renderer refused the surface on screen (NV12): the same
     /// picture as an image, as decoded (the player turns it), and images
     /// for a while. `None` when the backend has no such surface.
     fn replace_refused(&mut self, _now: Instant) -> Option<Picture> {
@@ -283,6 +281,7 @@ impl VideoPlayer {
         duration_hint: Option<f64>,
         cx: &mut App,
     ) -> Result<Self, PlayerError> {
+        warm_decoder(cx);
         let player = Self::from_backend(open_backend(path, purpose)?, duration_hint);
         let poll = player.spawn_open_poll(cx);
         if let Ok(mut inner) = player.0.inner.try_borrow_mut() {
@@ -741,7 +740,7 @@ impl VideoPlayer {
         self.current_picture()
     }
 
-    /// The renderer refused the surface on screen (Windows NV12, this
+    /// The renderer refused the surface on screen (NV12, this
     /// window couldn't draw it): show the same picture as an image, from
     /// the backend (which owns it and goes on with images for a while) or,
     /// failing that, converted here.
@@ -805,6 +804,7 @@ impl VideoPlayer {
                 next_due,
                 interval: inner.estimator.interval(),
                 lead: inner.estimator.request_lead(),
+                even_spacing: inner.estimator.even_spacing(),
                 requested: self.0.requested.clone(),
             }
         })
@@ -814,6 +814,7 @@ impl VideoPlayer {
             next_due: None,
             interval: Duration::from_millis(16),
             lead: Duration::from_millis(16),
+            even_spacing: None,
             requested: self.0.requested.clone(),
         })
     }
@@ -854,6 +855,9 @@ pub(super) struct FrameDemand {
     pub(super) interval: Duration,
     /// How far ahead of its draw start a frame is shown.
     pub(super) lead: Duration,
+    /// Its pictures' spacing, once they come a whole number of grid
+    /// vsyncs apart.
+    pub(super) even_spacing: Option<Duration>,
     pub(super) requested: FrameRequested,
 }
 
@@ -922,9 +926,14 @@ pub(crate) fn plays_gif_files() -> bool {
     if cfg!(target_os = "macos") {
         return backend_ffmpeg::preferred_on_macos();
     }
-    // Read without loading the shim on the UI thread: a load still running
-    // counts as a success, and the player reports it if it fails.
-    quill::video_decode::available_now() != Some(false)
+    gif_player_from(quill::video_decode::available_now())
+}
+
+/// Only a finished load: a GIF opened while the shim still loads plays in
+/// process, which every GIF can, instead of failing later in a player
+/// whose shim turns out to be missing.
+fn gif_player_from(loaded: Option<bool>) -> bool {
+    loaded == Some(true)
 }
 
 /// A process-unique player id (the `QUILL_TRACE_VIDEO` column).
