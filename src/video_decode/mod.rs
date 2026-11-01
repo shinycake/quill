@@ -45,6 +45,9 @@ pub const AUDIO_OUTPUT_LATENCY: f64 = 0.07;
 /// bursts of ~20 ms, too coarse to pace pictures directly). Well inside the
 /// ±45 ms at which lip sync errors become noticeable.
 pub const SYNC_TOLERANCE: f64 = 0.04;
+/// A gap in the sound's timestamps longer than this plays as silence, so
+/// the sound after it plays at its time (shorter ones are rounding).
+const SOUND_GAP_MIN: f64 = 0.005;
 /// A picture is due this much before its time (half a 60 Hz refresh), so
 /// it isn't held a whole refresh for rounding.
 const DUE_SLACK: f64 = 0.008;
@@ -492,6 +495,11 @@ pub struct AudioTap {
     chunk: Vec<f32>,
     at: usize,
     chunk_pts: f64,
+    /// Where the sound played so far ends, since the last seek.
+    end_pts: Option<f64>,
+    /// Silent samples owed before `chunk`, for a gap in the sound.
+    gap: usize,
+    gap_at: usize,
     generation: u64,
     /// Whether the last sample was real sound (not underrun silence).
     sounding: bool,
@@ -518,6 +526,11 @@ impl AudioTap {
             self.generation = generation;
             self.chunk.clear();
             self.at = 0;
+            self.end_pts = None;
+            self.gap = 0;
+        }
+        if self.gap_at < self.gap {
+            return self.next_gap_sample();
         }
         if self.at >= self.chunk.len() {
             let next = {
@@ -535,13 +548,14 @@ impl AudioTap {
             };
             match next {
                 Some(chunk) => {
-                    self.chunk_pts = chunk.pts;
-                    self.chunk = chunk.samples;
-                    self.at = 0;
+                    self.start_chunk(chunk);
                     // Through the state lock: the decode thread is then
                     // either before its room check or waiting, never between.
                     drop(lock(&self.wake.state));
                     self.wake.wake.notify_one();
+                    if self.gap > 0 {
+                        return self.next_gap_sample();
+                    }
                 }
                 None => {
                     self.set_sounding(false);
@@ -557,15 +571,50 @@ impl AudioTap {
         if self.at.is_multiple_of(channels) {
             let played =
                 self.chunk_pts + (self.at / channels) as f64 / f64::from(self.sample_rate());
-            self.shared
-                .played
-                .store(played.to_bits(), Ordering::Release);
-            self.shared
-                .played_generation
-                .store(self.generation, Ordering::Release);
+            self.publish_played(played);
         }
         self.set_sounding(true);
         sample
+    }
+
+    /// Take `chunk` as the next sound, after the silence of any gap
+    /// between where the sound played so far ends and where it starts.
+    fn start_chunk(&mut self, chunk: AudioChunk) {
+        let channels = usize::from(self.channels());
+        let rate = f64::from(self.sample_rate());
+        let gap = self.end_pts.map_or(0.0, |end| chunk.pts - end);
+        self.gap = if gap > SOUND_GAP_MIN {
+            (gap * rate).round() as usize * channels
+        } else {
+            0
+        };
+        self.gap_at = 0;
+        let frames = chunk.samples.len() / channels;
+        self.end_pts = Some(chunk.pts + frames as f64 / rate);
+        self.chunk_pts = chunk.pts;
+        self.chunk = chunk.samples;
+        self.at = 0;
+    }
+
+    fn next_gap_sample(&mut self) -> f32 {
+        self.gap_at += 1;
+        let channels = usize::from(self.channels());
+        if self.gap_at.is_multiple_of(channels) {
+            let left = (self.gap - self.gap_at) / channels;
+            let played = self.chunk_pts - left as f64 / f64::from(self.sample_rate());
+            self.publish_played(played);
+        }
+        self.set_sounding(true);
+        0.0
+    }
+
+    fn publish_played(&self, played: f64) {
+        self.shared
+            .played
+            .store(played.to_bits(), Ordering::Release);
+        self.shared
+            .played_generation
+            .store(self.generation, Ordering::Release);
     }
 
     fn set_sounding(&mut self, sounding: bool) {

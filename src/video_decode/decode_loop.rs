@@ -121,6 +121,9 @@ impl Decoder {
                 chunk: Vec::new(),
                 at: 0,
                 chunk_pts: 0.0,
+                end_pts: None,
+                gap: 0,
+                gap_at: 0,
                 generation: 0,
                 sounding: false,
             });

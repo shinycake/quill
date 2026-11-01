@@ -47,6 +47,8 @@ struct Shape {
     declares_pictures: bool,
     duration: f64,
     held_packet_limit: usize,
+    /// No sound from the first time up to the second.
+    sound_gap: (f64, f64),
 }
 
 impl Shape {
@@ -58,6 +60,7 @@ impl Shape {
             declares_pictures: true,
             duration: picture_secs.max(sound_secs),
             held_packet_limit: 1024,
+            sound_gap: (0.0, 0.0),
         }
     }
 
@@ -70,6 +73,10 @@ impl Shape {
             .chain(
                 (0..sounds)
                     .map(|n| n as f64 * CHUNK_SECS)
+                    .filter(|pts| {
+                        let (from, to) = self.sound_gap;
+                        !(from - 1e-9..to - 1e-9).contains(pts)
+                    })
                     .map(|pts| (pts + self.sound_behind_secs, Packet::Sound(pts))),
             )
             .collect();
@@ -533,6 +540,27 @@ fn a_silent_clip_nobody_paints_keeps_its_picture_current() {
         "{} at {position}",
         shown.pts
     );
+}
+
+#[test]
+fn sound_after_a_gap_plays_at_its_time() {
+    let mut rig = Rig::open(Shape {
+        sound_gap: (1.0, 2.0),
+        ..Shape::clip(4.0, 4.0)
+    });
+    rig.player.play();
+    let mut play = |secs: f64| {
+        for _ in 0..(secs / 0.1).round() as usize {
+            rig.pull_sound(0.1);
+            rig.settle();
+        }
+        rig.player.heard().expect("sound plays")
+    };
+    let heard = play(1.5);
+    let expected = 1.5 - AUDIO_OUTPUT_LATENCY;
+    assert!((heard - expected).abs() < 0.01, "{heard}");
+    let heard = play(1.0);
+    assert!((heard - (expected + 1.0)).abs() < 0.01, "{heard}");
 }
 
 #[test]
