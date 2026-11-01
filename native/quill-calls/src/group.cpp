@@ -411,7 +411,7 @@ char *qc_group_join_payload(qc_group *group, uint32_t *audio_ssrc) {
 	});
 	// The caller is the UI thread: a completion that never comes fails the
 	// join, and one tgcalls dropped must not throw across the C boundary.
-	if (future.wait_for(kJoinPayloadTimeout) != std::future_status::ready) {
+	if (future.wait_for(quill_calls::kJoinPayloadTimeout) != std::future_status::ready) {
 		return nullptr;
 	}
 	try {
