@@ -101,8 +101,11 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   failures reset (so the hardware-only and software steps started over),
   and the other windows adopted a context the recreating window could not
   draw with. Now the slot stays empty and the recreation backs off and falls
-  back as one sequence. Not run: there is no way to make the renderer build
-  fail on a working device here, and no GPU loss to recover from.
+  back as one sequence. The order lives in `install_once_built`, which
+  `try_recover` calls with the renderer build and the slot write. Test:
+  `a_context_the_renderer_failed_on_is_not_installed` (a failed build leaves
+  the slot empty and the window recreating, its failure counted). Not run:
+  a real renderer build failing on a working device, and a GPU loss.
 - The look for the GPU belongs to the shared context, not to the window
   that recreated it (sweep bundle B13, N45): `GpuContext` is now
   `Rc<GpuSlot>`, the context plus a `SharedRecovery` holding the

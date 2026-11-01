@@ -2,7 +2,7 @@
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
-    Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+    install_once_built, Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
@@ -2559,11 +2559,7 @@ impl WgpuRenderer {
     }
 
     /// One attempt: adopt the context another window recreated, or make a
-    /// new one, with or without CPU adapters. A new context becomes the
-    /// shared one only once this window's renderer is built on it. Installed
-    /// before, a failed build left a context that looked recovered: this
-    /// window's next call switched to adopting it, with its failures reset,
-    /// and the other windows adopted it too.
+    /// new one on the adapters the attempt admits ([`install_once_built`]).
     #[cfg(not(target_family = "wasm"))]
     fn try_recover<W>(
         &mut self,
@@ -2590,9 +2586,11 @@ impl WgpuRenderer {
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
             let context = WgpuContext::new_on(instance, &surface, self.compositor_gpu, adapters)?;
-            self.rebuild(gpu_context, &context, surface, config)?;
-            *gpu_context.borrow_mut() = Some(context);
-            return Ok(());
+            return install_once_built(
+                context,
+                |context| self.rebuild(gpu_context, context, surface, config),
+                |context| *gpu_context.borrow_mut() = Some(context),
+            );
         }
 
         let gpu_context = Rc::clone(gpu_context);

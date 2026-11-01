@@ -228,6 +228,21 @@ impl Recovering {
     }
 }
 
+/// A context a recreation made becomes the shared one (`install`) only once
+/// this window's renderer is built on it. Installed before, a failed build
+/// left a context that looked recovered: the window's next call switched to
+/// adopting it, with its failures reset, and the other windows adopted it
+/// too.
+pub(crate) fn install_once_built<C, E>(
+    context: C,
+    build: impl FnOnce(&C) -> Result<(), E>,
+    install: impl FnOnce(C),
+) -> Result<(), E> {
+    build(&context)?;
+    install(context);
+    Ok(())
+}
+
 /// When a window on a CPU adapter that recovery fell back to looks for the
 /// GPU again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -394,7 +409,7 @@ impl SharedRecovery {
 #[cfg(test)]
 mod tests {
     use super::{
-        Adapters, Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, LOSS_WINDOW, Losses,
+        install_once_built, Adapters, Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, LOSS_WINDOW, Losses,
         MAX_DELAY, Next, PROBE_FIRST, PROBE_MAX, PROBE_POLL, ProbeStep, Recovering,
         RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, SOFTWARE_AFTER_LOSSES, Shared,
         SharedRecovery, Target,
@@ -567,6 +582,45 @@ mod tests {
             adapters: Adapters::Any,
         };
         assert!(!recovering.begin(start, software));
+    }
+
+    /// The renderer could not be built on a new context: the slot stays
+    /// empty, so the window's next call keeps recreating, with its failures
+    /// counted, instead of adopting a context it cannot draw with.
+    #[test]
+    fn a_context_the_renderer_failed_on_is_not_installed() {
+        let start = Instant::now();
+        let mut slot: Option<&str> = None;
+        let mut recovering = Recovering::default();
+        assert!(recovering.begin(start, HARDWARE_LOST));
+        let Next::Wait(due) = recovering.next(start) else {
+            panic!("the first attempt waits for the driver");
+        };
+        let built = install_once_built(
+            "new context",
+            |_| Err("surface size above the device's limit"),
+            |context| slot = Some(context),
+        );
+        assert_eq!(built, Err("surface size above the device's limit"));
+        assert_eq!(slot, None);
+        let Next::Wait(next) = recovering.failed(due) else {
+            panic!("a failed attempt waits");
+        };
+
+        // The next call finds the slot as the window left it.
+        let shared = match slot {
+            Some(_) => Shared::Healthy,
+            None => HARDWARE_LOST,
+        };
+        assert!(!recovering.begin(next, shared));
+        assert_eq!(recovering.target(), Some(hardware()));
+        assert!(next - due > FIRST_DELAY, "the failure was counted");
+
+        let built = install_once_built("new context", |_| Ok::<(), &str>(()), |context| {
+            slot = Some(context)
+        });
+        assert_eq!(built, Ok(()));
+        assert_eq!(slot, Some("new context"));
     }
 
     #[test]
