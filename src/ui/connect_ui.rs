@@ -206,12 +206,14 @@ impl super::app::QuillApp {
         prepared: Result<(TelegramCredentials, quill::connect::PreparedConnect), ConnectBlocker>,
         cx: &mut gpui_kit::Context<Self>,
     ) {
-        self.open_client(
+        let opened = if self.disk.is_full() {
+            Err(ConnectBlocker::DiskFull)
+        } else {
             prepared.and_then(|(credentials, prepared)| {
                 start_prepared_live_connect(credentials, prepared, Arc::new(DiscardSink))
-            }),
-            cx,
-        );
+            })
+        };
+        self.open_client(opened, cx);
     }
 
     /// Put the opened client on screen, or say why there is none.
@@ -227,7 +229,7 @@ impl super::app::QuillApp {
                 self.live = Some(live);
             }
             Err(ConnectBlocker::DiskFull) => {
-                self.disk.refused_open();
+                self.enter_disk_state(quill::disk_guard::DiskState::Full, cx);
                 self.connection.set_note(StatusNote::silent(""));
             }
             Err(blocker) => {

@@ -5,13 +5,21 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::connect::ConnectBlocker;
 use quill::disk_guard::FLOORS;
+use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    new_app_of_height(cx, 800.)
+}
+
+fn new_app_of_height(
+    cx: &mut TestAppContext,
+    height: f32,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(height)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -61,6 +69,46 @@ fn a_full_disk_shows_the_screen_with_what_is_free_and_what_is_needed(cx: &mut Te
     assert_eq!(view.title, tr(keys::Q_DISK_FULL_TITLE));
     assert!(view.body.contains("Available: 80.0 MB"), "{}", view.body);
     assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
+}
+
+#[gpui_kit::test]
+fn a_full_disk_closes_chat_windows(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    let main_only = vcx.windows().len();
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_chat_in_new_window(ChatId(11), window, cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(vcx.windows().len(), main_only + 1, "the chat window opened");
+    read(&app, &mut vcx, Some(0));
+    vcx.run_until_parked();
+    assert_eq!(vcx.windows().len(), main_only);
+}
+
+#[gpui_kit::test]
+fn going_full_brings_the_main_window_forward_once(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    vcx.deactivate_window();
+    read(&app, &mut vcx, Some(0));
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
+    vcx.deactivate_window();
+    read(&app, &mut vcx, Some(0));
+    vcx.run_until_parked();
+    assert!(!vcx.update(|window, _| window.is_window_active()), "once");
+}
+
+#[gpui_kit::test]
+fn a_refused_open_brings_the_main_window_forward(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.deactivate_window();
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_client(Err(ConnectBlocker::DiskFull), cx);
+    });
+    vcx.run_until_parked();
+    assert!(vcx.update(|window, _| window.is_window_active()));
 }
 
 #[gpui_kit::test]

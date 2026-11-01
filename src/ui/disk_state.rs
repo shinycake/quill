@@ -5,32 +5,38 @@ use super::message_media::format_bytes;
 use super::status_note::StatusNote;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::alert::Alert;
-use gpui_kit::{Context, IntoElement as _, Styled as _};
+use gpui_kit::{AnyWindowHandle, Context, IntoElement as _, Styled as _, Window};
 use quill::auth::{AuthAction, AuthView};
-use quill::disk_guard::{DiskState, FLOORS, available_bytes, next_read_in};
+use quill::disk_guard::{DiskState, DiskStep, FLOORS, available_bytes, next_read_in};
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 
-#[derive(Default)]
 pub(crate) struct DiskUi {
     state: DiskState,
     free: Option<u64>,
+    main_window: AnyWindowHandle,
+    start_refused: bool,
 }
 
 impl DiskUi {
-    pub(crate) fn start(cx: &mut Context<QuillApp>) -> Self {
+    pub(crate) fn start(window: &Window, cx: &mut Context<QuillApp>) -> Self {
         if let Some(root) = quill::settings::safe_app_root() {
             watch(root, cx);
         }
-        Self::default()
+        Self {
+            state: DiskState::default(),
+            free: None,
+            main_window: window.window_handle(),
+            start_refused: false,
+        }
     }
 
     pub(super) fn is_full(&self) -> bool {
         self.state == DiskState::Full
     }
 
-    pub(super) fn refused_open(&mut self) {
-        self.state = DiskState::Full;
+    pub(super) fn refused_start(&mut self) {
+        self.start_refused = true;
     }
 }
 
@@ -58,10 +64,8 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
 
 impl QuillApp {
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
-        let before = self.disk.state;
         let shown = self.disk.free;
-        let after = before.next(free, &FLOORS);
-        self.disk.state = after;
+        let after = self.disk.state.next(free, &FLOORS);
         self.disk.free = free.or(shown);
         let mut running = false;
         let background = self.background.clients_mut();
@@ -69,20 +73,44 @@ impl QuillApp {
             running = true;
             let _ = live.driver.note_disk(after, free, &FLOORS);
         }
-        if after == DiskState::Full {
-            if running {
-                self.close_clients_for_full_disk(cx);
-            }
-        } else if before == DiskState::Full {
-            if self.account.passcode.locked {
+        let retry = self.disk.start_refused && free.is_some_and(|free| free >= FLOORS.open);
+        let before = self.enter_disk_state(after, cx);
+        match before.step(after, running, retry) {
+            DiskStep::Hold => {}
+            DiskStep::Close => self.close_clients_for_full_disk(cx),
+            DiskStep::Reconnect if self.account.passcode.locked => {
                 self.account.passcode.deferred_connect = true;
-            } else {
-                self.start_connection(cx);
+            }
+            DiskStep::Reconnect => self.start_connection(cx),
+            DiskStep::RetryStarts => {
+                self.disk.start_refused = false;
+                self.ensure_background_accounts(cx);
             }
         }
         if before != after || (after == DiskState::Full && self.disk.free != shown) {
             cx.notify();
         }
+    }
+
+    pub(super) fn enter_disk_state(
+        &mut self,
+        after: DiskState,
+        cx: &mut Context<Self>,
+    ) -> DiskState {
+        let before = std::mem::replace(&mut self.disk.state, after);
+        if after == DiskState::Full && before != DiskState::Full {
+            self.bring_main_window_forward(cx);
+        }
+        before
+    }
+
+    fn bring_main_window_forward(&self, cx: &mut Context<Self>) {
+        let main_window = self.disk.main_window;
+        cx.defer(move |cx| {
+            let _ = main_window.update(cx, |_, window, cx| {
+                super::link_inbox::raise_main_window(window, cx);
+            });
+        });
     }
 
     fn close_clients_for_full_disk(&mut self, cx: &mut Context<Self>) {

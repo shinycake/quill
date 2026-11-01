@@ -327,7 +327,7 @@ impl QuillApp {
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
-            disk: super::disk_state::DiskUi::start(cx),
+            disk: super::disk_state::DiskUi::start(window, cx),
             live,
             demo_session,
             demo_ui: super::demo_state::DemoUi::new(demo_sink),

@@ -18,7 +18,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::connect::{ClosingSet, LiveConnect, start_background_live_connect};
+use quill::connect::{ClosingSet, ConnectBlocker, LiveConnect, start_background_live_connect};
 use quill::diagnostics::DiscardSink;
 use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
@@ -287,6 +287,7 @@ impl QuillApp {
                     // whose folder is being deleted.
                     if !this.background.starting.remove(&key)
                         || this.background.wiping
+                        || this.disk.is_full()
                         || this.background.deleting.contains(&key)
                         || active_account(&root) == key
                         || this.background.client(&key).is_some()
@@ -297,26 +298,39 @@ impl QuillApp {
                     let started = prepared.and_then(|prepared| {
                         start_background_live_connect(credentials, prepared, Arc::new(DiscardSink))
                     });
-                    let (live, status) = match started {
-                        Ok(live) => (Some(live), BackgroundStatus::Connecting),
-                        Err(blocker) => (
-                            None,
-                            BackgroundStatus::Failed(blocker.user_message().to_string()),
-                        ),
-                    };
-                    this.background.clients.push(BackgroundClient {
-                        key,
-                        live,
-                        status,
-                        unread: AccountUnread::default(),
-                    });
-                    this.spawn_background_poll(cx);
-                    cx.notify();
+                    this.finish_background_start(key, started, cx);
                 });
             })
             .detach();
         }
         self.spawn_background_poll(cx);
+    }
+
+    fn finish_background_start(
+        &mut self,
+        key: AccountKey,
+        started: Result<LiveConnect, ConnectBlocker>,
+        cx: &mut Context<Self>,
+    ) {
+        let (live, status) = match started {
+            Ok(live) => (Some(live), BackgroundStatus::Connecting),
+            Err(ConnectBlocker::DiskFull) => {
+                self.disk.refused_start();
+                return;
+            }
+            Err(blocker) => (
+                None,
+                BackgroundStatus::Failed(blocker.user_message().to_string()),
+            ),
+        };
+        self.background.clients.push(BackgroundClient {
+            key,
+            live,
+            status,
+            unread: AccountUnread::default(),
+        });
+        self.spawn_background_poll(cx);
+        cx.notify();
     }
 
     /// Close one background client without waiting for it, and end a start
@@ -339,17 +353,21 @@ impl QuillApp {
         self.publish_background_unread();
     }
 
-    /// Close every background client (local data is about to be wiped:
-    /// wait with `after_closing` before deleting it). Never blocks.
-    pub(super) fn stop_background_accounts(&mut self, cx: &mut Context<Self>) {
+    fn stop_background_clients(&mut self, cx: &mut Context<Self>) {
         self.background.generation += 1;
         self.background.starting.clear();
         self.background.polling = false;
         self.background.close_all_later();
-        self.background.closing.cancel_restarts();
         self.publish_background_unread();
         // The new generation's poll drains the closing clients.
         self.spawn_background_poll(cx);
+    }
+
+    /// Close every background client (local data is about to be wiped:
+    /// wait with `after_closing` before deleting it). Never blocks.
+    pub(super) fn stop_background_accounts(&mut self, cx: &mut Context<Self>) {
+        self.stop_background_clients(cx);
+        self.background.closing.cancel_restarts();
     }
 
     fn publish_background_unread(&self) {
@@ -526,3 +544,7 @@ mod closing_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod deleting_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod disk_tests;

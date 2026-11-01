@@ -95,8 +95,8 @@ impl QuillApp {
 
     pub(in crate::ui) fn close_every_client_later(&mut self, cx: &mut Context<Self>) {
         self.close_screen_client(cx);
-        self.background.close_all_later();
-        self.spawn_background_poll(cx);
+        self.stop_background_clients(cx);
+        self.background.closing.restart_all();
     }
 
     /// Drain the closing clients once. Accounts closed only for a call
