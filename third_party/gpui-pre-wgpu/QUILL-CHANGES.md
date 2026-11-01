@@ -111,3 +111,12 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   `probe_hardware` read it from any window. Before, closing the window that
   recreated the context left the others on the software renderer for the
   rest of the session. Test: `any_window_on_the_fallback_looks_for_the_gpu`.
+- A look for the GPU runs off the UI thread (sweep bundle B13, L11):
+  `look_for_gpu` makes a Vulkan/GL instance with no display and lists the
+  adapters on a thread of its own, and the windows check back for its answer
+  every 250 ms (`ProbeStep::Await`). Only when it saw a non-CPU adapter does
+  the window run `gpu_can_present` (which needs its surface) and recreate.
+  Before, every look, every 10 s to 2 minutes for as long as the GPU stayed
+  away, made an instance and a surface on the UI thread. Test:
+  `a_look_for_the_gpu_runs_off_the_ui_thread`. Not measured: there is no
+  display or GPU loss here to time a look against.

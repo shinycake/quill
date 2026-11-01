@@ -40,6 +40,8 @@ const GIVE_UP_AFTER: u32 = 9;
 /// the longest gap between looks.
 const PROBE_FIRST: Duration = Duration::from_secs(10);
 const PROBE_MAX: Duration = Duration::from_secs(120);
+/// While a look runs on its thread: how often a window checks for its answer.
+const PROBE_POLL: Duration = Duration::from_millis(250);
 
 /// What a recovery is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,6 +201,29 @@ impl Recovering {
 pub(crate) struct HardwareProbe {
     looks: u32,
     due: Instant,
+    /// A look is running on its own thread.
+    looking: bool,
+}
+
+/// What a window does when its probe timer fires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProbeStep {
+    /// Not yet: the next look is at this instant.
+    Wait(Instant),
+    /// Start a look off the UI thread.
+    Look,
+    /// A look is running: check for its answer at this instant.
+    Await(Instant),
+}
+
+impl ProbeStep {
+    /// When the window's timer fires next.
+    pub(crate) fn at(self) -> Option<Instant> {
+        match self {
+            Self::Wait(at) | Self::Await(at) => Some(at),
+            Self::Look => None,
+        }
+    }
 }
 
 impl HardwareProbe {
@@ -218,6 +243,7 @@ impl HardwareProbe {
         (from_gpu && landed_on_software).then_some(Self {
             looks: 0,
             due: now + PROBE_FIRST,
+            looking: false,
         })
     }
 
@@ -225,8 +251,24 @@ impl HardwareProbe {
         self.due
     }
 
+    pub(crate) fn step(&self, now: Instant) -> ProbeStep {
+        if self.looking {
+            ProbeStep::Await(now + PROBE_POLL)
+        } else if now < self.due {
+            ProbeStep::Wait(self.due)
+        } else {
+            ProbeStep::Look
+        }
+    }
+
+    /// A look started on its own thread.
+    pub(crate) fn started(&mut self) {
+        self.looking = true;
+    }
+
     /// The GPU was not back: look again later, less often each time.
     pub(crate) fn missed(&mut self, now: Instant) {
+        self.looking = false;
         self.looks = self.looks.saturating_add(1);
         self.due = now
             + PROBE_FIRST
@@ -274,8 +316,8 @@ impl SharedRecovery {
 mod tests {
     use super::{
         Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, MAX_DELAY, Next, PROBE_FIRST,
-        PROBE_MAX, Recovering, RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, Shared,
-        SharedRecovery, Target,
+        PROBE_MAX, PROBE_POLL, ProbeStep, Recovering, RecoveryPolicy, RecoveryStep,
+        SOFTWARE_AFTER, Shared, SharedRecovery, Target,
     };
     use std::time::{Duration, Instant};
 
@@ -528,5 +570,25 @@ mod tests {
         );
         shared.lost();
         assert_eq!(shared.probe(), None);
+    }
+
+    /// A look makes a Vulkan instance and lists the adapters, tens of
+    /// milliseconds: it runs on its own thread, and the windows only check
+    /// back for its answer until it comes.
+    #[test]
+    fn a_look_for_the_gpu_runs_off_the_ui_thread() {
+        let start = Instant::now();
+        let mut probe = HardwareProbe::after_recovery(start, Some(hardware()), true)
+            .expect("falling back to a CPU adapter looks for the GPU");
+        assert_eq!(probe.step(start), ProbeStep::Wait(start + PROBE_FIRST));
+        let due = probe.due();
+        assert_eq!(probe.step(due), ProbeStep::Look);
+        probe.started();
+        // Another window's timer, or the same one, while the look runs.
+        assert_eq!(probe.step(due), ProbeStep::Await(due + PROBE_POLL));
+        let answered = due + Duration::from_millis(80);
+        probe.missed(answered);
+        assert_eq!(probe.step(answered), ProbeStep::Wait(probe.due()));
+        assert!(probe.due() > answered);
     }
 }

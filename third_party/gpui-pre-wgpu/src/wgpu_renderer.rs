@@ -1,7 +1,9 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
-use crate::device_recovery::{Attempt, Next, Recovering, Shared, SharedRecovery, Target};
+use crate::device_recovery::{
+    Attempt, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -177,6 +179,10 @@ pub type GpuContext = Rc<GpuSlot>;
 pub struct GpuSlot {
     context: RefCell<Option<WgpuContext>>,
     recovery: RefCell<SharedRecovery>,
+    /// The answer of the look for the GPU running on its thread: whether
+    /// it saw a GPU adapter.
+    #[cfg(not(target_family = "wasm"))]
+    look: RefCell<Option<std::sync::mpsc::Receiver<bool>>>,
 }
 
 impl GpuSlot {
@@ -2450,8 +2456,8 @@ impl WgpuRenderer {
         let gpu_context = self.context.clone()?;
         let mut probe = gpu_context.recovery.borrow().probe()?;
         let now = Instant::now();
-        if now < probe.due() {
-            return Some(probe.due());
+        if let ProbeStep::Wait(due) = probe.step(now) {
+            return Some(due);
         }
         if self.device_lost() {
             return None;
@@ -2462,9 +2468,35 @@ impl WgpuRenderer {
             .is_some_and(|ctx| is_software(ctx) && !ctx.device_lost());
         if !on_software {
             gpu_context.recovery.borrow_mut().set_probe(None);
+            *gpu_context.look.borrow_mut() = None;
             return None;
         }
-        if !gpu_can_present(window) {
+        let seen = match probe.step(now) {
+            ProbeStep::Wait(due) => return Some(due),
+            ProbeStep::Look => {
+                *gpu_context.look.borrow_mut() = Some(look_for_gpu());
+                probe.started();
+                gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                return probe.step(now).at();
+            }
+            ProbeStep::Await(again) => {
+                let mut look = gpu_context.look.borrow_mut();
+                match look.as_ref().map(|answer| answer.try_recv()) {
+                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => return Some(again),
+                    Some(Ok(seen)) => {
+                        *look = None;
+                        seen
+                    }
+                    Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) | None => {
+                        *look = None;
+                        false
+                    }
+                }
+            }
+        };
+        // The surface check needs this window, so it stays here; it only
+        // runs once a GPU adapter is back.
+        if !seen || !gpu_can_present(window) {
             probe.missed(now);
             gpu_context.recovery.borrow_mut().set_probe(Some(probe));
             return Some(probe.due());
@@ -2612,6 +2644,26 @@ pub enum Recovery {
 
 fn is_software(context: &WgpuContext) -> bool {
     context.adapter.get_info().device_type == wgpu::DeviceType::Cpu
+}
+
+/// Quill: start looking for a GPU adapter on a thread of its own: making a
+/// Vulkan instance and listing the adapters takes tens of milliseconds,
+/// and a look ran on the UI thread every 10 s to 2 minutes for as long as
+/// the GPU stayed away. The answer is whether a non-CPU adapter is listed;
+/// a thread that cannot start answers no.
+#[cfg(not(target_family = "wasm"))]
+fn look_for_gpu() -> std::sync::mpsc::Receiver<bool> {
+    let (answer, receiver) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("quill-gpu-look".into())
+        .spawn(move || {
+            let instance = WgpuContext::instance(None);
+            let seen = gpui::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+                .iter()
+                .any(|adapter| adapter.get_info().device_type != wgpu::DeviceType::Cpu);
+            let _ = answer.send(seen);
+        });
+    receiver
 }
 
 /// Quill: whether a GPU, not a CPU adapter, says it can present to
