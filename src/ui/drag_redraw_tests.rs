@@ -202,9 +202,17 @@ fn a_file_entering_over_a_drop_target_renders_its_style(cx: &mut TestAppContext)
 
 fn set_covered(window: AnyWindowHandle, counts: &Counts, cx: &mut TestAppContext) {
     counts.covered.set(!counts.covered.get());
+    notify_root(window, cx);
+    draw_what_is_dirty(window, cx);
+}
+
+fn notify_root(window: AnyWindowHandle, cx: &mut TestAppContext) {
     cx.update_window(window, |root, _, cx| cx.notify(root.entity_id()))
         .unwrap();
-    cx.run_until_parked();
+}
+
+fn draw_what_is_dirty(window: AnyWindowHandle, cx: &mut TestAppContext) {
+    cx.update_window(window, |_, _, _| ()).unwrap();
 }
 
 #[gpui_kit::test]
@@ -217,8 +225,7 @@ fn a_drop_target_covered_under_a_still_pointer_renders_again_once(cx: &mut TestA
     set_covered(window, &counts, cx);
 
     assert_eq!(counts.slice.get(), slice + 1);
-    cx.update_window(window, |root, _, cx| cx.notify(root.entity_id()))
-        .unwrap();
-    cx.run_until_parked();
+    notify_root(window, cx);
+    draw_what_is_dirty(window, cx);
     assert_eq!(counts.slice.get(), slice + 1, "the next frame replays");
 }
