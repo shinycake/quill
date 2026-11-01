@@ -53,6 +53,24 @@ ones, ends a little short or a little over.
 - Predicting the reveal to choose the window: a second layout pass always covers the final
   viewport, and the prediction would have to copy the scroll logic.
 
+## Splitting a long message
+tdesktop `CutPart` cuts `TextWithEntities`, so a cut can never leave a marker behind. Quill cut the
+raw markup, and a span longer than the limit went out with literal `**` on both sides. The splitter
+now parses once, cuts the text at the same break levels, and writes each part with
+`ComposerDoc::to_final_markup`. Code, code blocks and quotes break freely, as in tdesktop; other
+spans break only when no clean break fits. tdesktop drops such an entity at the cut; Quill keeps the
+formatting on both sides, because no text or format needs to be lost.
+
+Writing a part needs markup that parses back to the same document. `to_final_markup` escapes marker
+characters of the text with `ESCAPE` (U+0011) when the plain markup would not read back. Plain text
+gets the same markup as before, so a draft echoed by TDLib still compares equal to the field's.
+
+## Counting off the UI thread
+"Will be sent as N messages" needs a parse and a split, in proportion to the text. On 100 KB this
+was 80% of a keystroke. Text whose byte length fits is `Fits` at once, with no parse. Otherwise the
+count runs on a background thread for the latest revision, and the note on screen stays until it
+returns. tdesktop has no such label, so there is nothing to match on timing.
+
 ## Kit tests
 `cargo test -p gpui-base` is refused outside the workspace and CI does not run the kit's tests. The
 ones that need a real text system are in `src/ui/composer_long_line_tests.rs`, which CI runs. To run
