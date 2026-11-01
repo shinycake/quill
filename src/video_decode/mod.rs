@@ -653,6 +653,9 @@ impl Drop for AudioTap {
     fn drop(&mut self) {
         self.shared.detached.store(true, Ordering::Relaxed);
         lock(&self.shared.queue).chunks.clear();
+        // Through the state lock, as in `next_sample`: a decode thread that
+        // saw the sound attached is then already waiting, and gets the wake.
+        drop(lock(&self.wake.state));
         self.wake.wake.notify_one();
     }
 }
