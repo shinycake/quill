@@ -546,6 +546,42 @@ fn a_held_delete_goes_when_its_own_export_stops_while_another_still_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_cache_copy_whose_delete_fails_stays_listed_for_the_next_start() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let journal = prepared.paths.root.join("export-leftovers");
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let leftovers = driver.session.settings.export_files.leftovers().unwrap();
+    let entry = crate::export::leftovers::Entry {
+        remote_id: "AgAD".into(),
+        path: None,
+    };
+    leftovers.record(11, &entry);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 11}))
+        .unwrap();
+    driver.pump_chat_export();
+    answer_export_request(
+        &mut driver,
+        &recorder,
+        &sink,
+        "deleteFile",
+        serde_json::json!({"@type": "error", "code": 500, "message": "busy"}),
+    );
+    assert_eq!(
+        std::fs::read_dir(&journal).unwrap().count(),
+        1,
+        "the file is still in the cache"
+    );
+    drop(worker);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Answer the sent request of type `method` (the last one) with `body`.
 fn answer_export_request(
     driver: &mut ConnectDriver<Arc<RecordingSender>>,

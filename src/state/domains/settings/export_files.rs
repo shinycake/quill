@@ -132,7 +132,11 @@ impl ExportFiles {
         let Some(leftovers) = &self.leftovers else {
             return;
         };
-        if let Some(name) = self.deletes.remove(&request) {
+        // A failed delete leaves the file in the cache: its entry stays for
+        // the next start's check to try again.
+        if let Some(name) = self.deletes.remove(&request)
+            && value.at("@type") != "error"
+        {
             leftovers.forget(&name);
         }
         if let Some(earlier) = self.checks.remove(&request) {
