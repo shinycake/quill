@@ -727,7 +727,7 @@ fn a_file_found_too_large_after_its_download_leaves_the_cache() {
 fn cancelled_download(fake: &mut Fake, td: &Path) {
     fake.cancel_after = Some(1);
     assert!(matches!(
-        super::worker::fetch_file(fake, td, 10, None),
+        super::worker::fetch_file(fake, td, super::worker::FileOf { id: 10, chat: None }, None),
         Err(ExportError::Cancelled)
     ));
 }
@@ -809,9 +809,14 @@ fn cancelling_after_a_download_still_releases_the_cache_copy() {
     let dir = scratch("cancel-release");
     let (mut fake, _, td) = one_photo(&dir);
     fake.local.insert(10, not_local());
-    let fetched = super::worker::fetch_file(&mut fake, &td, 10, None)
-        .unwrap()
-        .unwrap();
+    let fetched = super::worker::fetch_file(
+        &mut fake,
+        &td,
+        super::worker::FileOf { id: 10, chat: None },
+        None,
+    )
+    .unwrap()
+    .unwrap();
     fake.cancel_after = Some(fake.calls.len());
     assert!(matches!(
         fetched.release(&mut fake),

@@ -11,7 +11,7 @@ use crate::export::loaded_files::LoadedFiles;
 use crate::export::model::{Entity, file_of, formatted, int, thumb_of};
 use crate::export::names::{Namer, date_part, sanitize};
 use crate::export::settings::{MediaKind, Skip};
-use crate::export::worker::{ExportError, Tdlib, fetch_file, place_into, query};
+use crate::export::worker::{ExportError, FileOf, Tdlib, fetch_file, place_into, query};
 use crate::json_access::JsonExt;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -45,7 +45,11 @@ impl Files<'_> {
         if let Some(path) = self.loaded.find(file_id) {
             return Ok(saved(path));
         }
-        match fetch_file(tdlib, self.files_root, file_id, limit)? {
+        let file = FileOf {
+            id: file_id,
+            chat: None,
+        };
+        match fetch_file(tdlib, self.files_root, file, limit)? {
             Ok(source) => {
                 let placed = place_into(tdlib, self.root, relative, &source);
                 source.release(tdlib)?;

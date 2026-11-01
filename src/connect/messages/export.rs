@@ -88,8 +88,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The view asked for `file_id`: a running export must not delete it
     /// from TDLib's cache after copying it.
     pub(crate) fn note_view_file(&mut self, file_id: crate::ids::FileId) {
-        for link in self.session.settings.export_links_mut() {
-            link.note_view_file(file_id.0);
+        let settings = &mut self.session.settings;
+        if settings.export_links().next().is_some() || settings.export_files.holds_any() {
+            settings.export_files.note_view_file(file_id.0);
         }
     }
 
@@ -97,7 +98,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let chat = self.pump_chat_export();
         let account = self.pump_account_export();
         let rich_html = self.pump_rich_html_exports();
-        chat | account | rich_html | self.send_due_export_deletes()
+        let held = self.release_held_export_deletes();
+        chat | account | rich_html | held | self.send_due_export_deletes()
     }
 
     /// `close` comes next and TDLib takes nothing after it, so what the
@@ -118,16 +120,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return false;
         };
-        if link(&mut self.session).is_some_and(|link| link.keep_view_file(&request)) {
-            if let Some(file_id) = deleted_file(&request) {
-                self.session.settings.export_files.kept(file_id);
+        if let Some(file_id) = deleted_file(&request) {
+            if let Some(link) = link(&mut self.session) {
+                link.answer_ok();
             }
+            let chat = request.at("chat_id").as_i64();
+            self.release_export_file(file_id, chat);
             return true;
         }
         let extra = self.session.request(purpose, None);
-        if let Some(file_id) = deleted_file(&request) {
-            self.session.settings.export_files.deleting(extra, file_id);
-        }
         crate::json_access::set(
             &mut request,
             "@extra",
