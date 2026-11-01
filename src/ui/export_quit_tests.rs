@@ -273,6 +273,40 @@ fn an_os_quit_that_finds_the_app_busy_is_asked_again_later(cx: &mut TestAppConte
     assert_eq!(answer, QuitAnswer::Later, "never let through unasked");
 }
 
+/// A modal panel holds the app for as long as it is up: macOS and Windows
+/// ask a quit again from their event loop a bounded number of times, then
+/// cancel it, instead of spinning that loop until the panel goes.
+#[gpui_kit::test]
+fn an_os_quit_that_finds_the_app_busy_for_good_is_cancelled_after_bounded_asks(
+    cx: &mut TestAppContext,
+) {
+    use gpui_kit::{QUIT_ASKS_AGAIN, QuitStep};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    settle(vcx);
+    let os = vcx.cx.clone();
+    let settled = vcx.cx.update(|_| {
+        let mut asked = 0;
+        for _ in 0..=QUIT_ASKS_AGAIN {
+            match os.simulate_quit_request().step(asked) {
+                QuitStep::AskAgain(next) => asked = next,
+                QuitStep::Settled(allow) => return Some((allow, asked)),
+            }
+        }
+        None
+    });
+    assert_eq!(
+        settled,
+        Some((false, QUIT_ASKS_AGAIN)),
+        "cancelled, not asked for ever"
+    );
+    assert_eq!(
+        vcx.cx.simulate_quit_request().step(QUIT_ASKS_AGAIN),
+        QuitStep::Settled(true)
+    );
+}
+
 #[gpui_kit::test]
 fn an_os_quit_with_the_main_window_gone_is_refused_during_an_export(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);

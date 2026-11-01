@@ -1385,7 +1385,7 @@ impl WindowsPlatformInner {
             WM_GPUI_DOCK_MENU_ACTION => self.handle_dock_action_event(lparam.0 as _),
             WM_GPUI_KEYBOARD_LAYOUT_CHANGED => self.handle_keyboard_layout_change(),
             WM_GPUI_DISPLAYS_CHANGED => self.handle_displays_changed(),
-            WM_GPUI_QUIT_REQUEST_LATER => self.handle_quit_request_later(),
+            WM_GPUI_QUIT_REQUEST_LATER => self.handle_quit_request_later(lparam),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(lparam),
             _ => None,
@@ -1422,7 +1422,7 @@ impl WindowsPlatformInner {
             QuitAnswer::Allow => Some(1),
             QuitAnswer::Refuse => Some(0),
             QuitAnswer::Later => {
-                self.ask_quit_request_later(handle);
+                self.ask_quit_request_later(handle, 1);
                 Some(0)
             }
         }
@@ -1441,12 +1441,13 @@ impl WindowsPlatformInner {
     }
 
     // Broadcasts can arrive while the app is mid-update, so the app is
-    // asked from the message loop. The end of the session is refused
-    // meanwhile.
-    fn ask_quit_request_later(&self, handle: HWND) {
+    // asked from the message loop, at most `QUIT_ASKS_AGAIN` times
+    // (`QuitAnswer::step`); the message carries how many asks it had. The
+    // end of the session is refused meanwhile.
+    fn ask_quit_request_later(&self, handle: HWND, asked: u32) {
         unsafe {
             self.validation_number
-                .message(WM_GPUI_QUIT_REQUEST_LATER, 0)
+                .message(WM_GPUI_QUIT_REQUEST_LATER, asked as isize)
                 .post(handle)
                 .log_err();
         }
@@ -1454,13 +1455,13 @@ impl WindowsPlatformInner {
 
     // A quit the app allows now ends it, and a shutdown that waits on it
     // goes on.
-    fn handle_quit_request_later(&self) -> Option<isize> {
-        match self.ask_quit_request() {
-            QuitAnswer::Allow => unsafe { PostQuitMessage(0) },
-            QuitAnswer::Refuse => {}
-            QuitAnswer::Later => {
-                self.ask_quit_request_later(self.dispatcher.platform_window_handle.as_raw())
-            }
+    fn handle_quit_request_later(&self, lparam: LPARAM) -> Option<isize> {
+        let asked = u32::try_from(lparam.0).unwrap_or(QUIT_ASKS_AGAIN);
+        match self.ask_quit_request().step(asked) {
+            QuitStep::Settled(true) => unsafe { PostQuitMessage(0) },
+            QuitStep::Settled(false) => {}
+            QuitStep::AskAgain(asked) => self
+                .ask_quit_request_later(self.dispatcher.platform_window_handle.as_raw(), asked),
         }
         Some(0)
     }

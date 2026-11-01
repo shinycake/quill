@@ -154,5 +154,8 @@ refused, as Telegram Desktop refuses them through Qt while an export runs:
   app cannot be asked (it is borrowed, or the callback is running further up
   the stack), it answers `NSTerminateLater` and asks again from the main
   queue, then calls `replyToApplicationShouldTerminate:` with the answer.
+  It asks again at most `QUIT_ASKS_AGAIN` times (`QuitAnswer::step`), then
+  replies with a cancel, so a modal panel left up does not keep the main
+  queue spinning.
   `Platform::quit` sets `quit_decided`, so the app's own quit, `restart`
   included, reaches `terminate:` without asking.
