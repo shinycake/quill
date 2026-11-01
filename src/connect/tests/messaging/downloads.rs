@@ -160,6 +160,7 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
                 settings_open: false,
             },
             std::time::Instant::now(),
+            ONLINE,
         );
     };
     tick(&mut driver);
@@ -522,6 +523,7 @@ fn tick_on_screen(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
             settings_open: false,
         },
         std::time::Instant::now(),
+        ONLINE,
     );
 }
 
@@ -598,6 +600,7 @@ fn a_claimed_avatar_survives_an_error_a_cancel_and_data_saver() {
     driver.poll_ticks(
         crate::connect::TickScope::Background,
         std::time::Instant::now(),
+        ONLINE,
     );
     assert!(avatar_downloads(&recorder, 95).is_empty());
     let _ = std::fs::remove_dir_all(&dir);

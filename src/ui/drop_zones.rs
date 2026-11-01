@@ -38,9 +38,22 @@ impl QuillApp {
             return;
         }
         self.composer_ui.drop_paths = paths.to_vec();
-        let entries: Vec<DragEntry> = paths.iter().map(|path| DragEntry::probe(path)).collect();
-        self.composer_ui.drop_state = classify(&entries);
-        cx.notify();
+        self.composer_ui.drop_state = None;
+        // Each path is looked at on disk, which can stall on a network drive.
+        let probed = paths.to_vec();
+        self.run_off_ui_scoped_then(
+            move || {
+                let entries: Vec<DragEntry> = probed.iter().map(|p| DragEntry::probe(p)).collect();
+                (probed, classify(&entries))
+            },
+            |this, (probed, state), cx| {
+                if this.composer_ui.drop_paths == probed {
+                    this.composer_ui.drop_state = state;
+                    cx.notify();
+                }
+            },
+            cx,
+        );
     }
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.

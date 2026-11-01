@@ -117,6 +117,7 @@ mod photo_edit;
 mod photo_editor;
 mod photo_editor_items;
 mod photo_editor_profile;
+mod photo_editor_save;
 mod photo_editor_set;
 mod pickers_state;
 mod pin_box;
@@ -184,6 +185,7 @@ pub(crate) use format_helpers::*;
 pub(crate) use history_row::*;
 pub(crate) use keybindings::*;
 pub(crate) use menu_states::*;
+pub(crate) use navigation::flush_settings_on_quit;
 pub(crate) use playback::*;
 mod story_page;
 

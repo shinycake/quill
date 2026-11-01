@@ -42,6 +42,12 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     std::process::exit(1)
 }
 
+/// Says why a launch that opens no window is exiting: a bundled app has no
+/// stderr.
+pub(crate) fn tell(title: &str, body: &str) {
+    show_alert(title, body, body);
+}
+
 /// A GPU lost mid-session that the renderer could not recreate (Linux):
 /// quit the normal way, so the quit observers close the TDLib clients and
 /// save state, and say why once they have run ([`report_gpu_gone`]).
@@ -139,12 +145,15 @@ fn is_vulkan_failure(detail: &str) -> bool {
 #[cfg(target_os = "macos")]
 fn show_alert(title: &str, detail: &str, _summary: &str) {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::NSAlert;
+    use objc2_app_kit::{NSAlert, NSApplication};
     use objc2_foundation::NSString;
     // AppKit alerts need the main thread; GPUI runs foreground tasks there.
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
+    // A launch that exits again never started GPUI, which would have made
+    // the application object and brought it forward.
+    NSApplication::sharedApplication(mtm).activate();
     let alert = NSAlert::new(mtm);
     alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(detail));

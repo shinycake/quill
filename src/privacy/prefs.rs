@@ -36,7 +36,7 @@ fn current() -> Stored {
     }
     let loaded = if PERSIST.load(Ordering::SeqCst) {
         path()
-            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|path| crate::settings::read_with_pending(&path).ok())
             .and_then(|bytes| serde_json::from_slice::<Stored>(&bytes).ok())
             .unwrap_or_default()
     } else {
@@ -63,7 +63,7 @@ pub fn set_last_seen_warning_seen(seen: bool) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = path()
     {
-        let _ = crate::settings::write_json_atomic(&path, &stored);
+        let _ = crate::settings::write_json_deferred(&path, &stored);
     }
     if let Ok(mut guard) = PREFS.write() {
         *guard = Some(stored);

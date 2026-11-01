@@ -45,12 +45,7 @@ impl QuillApp {
     pub(crate) fn set_desktop_notifications(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.desktop_notifications = on;
-            if let Err(err) = live.driver.save_desktop_notifications() {
-                self.connection.set_note(StatusNote::silent(tr_with(
-                    keys::Q_PREFS_COULDN_T_SAVE_DESKTOP_NOTIFICATIONS,
-                    &[("err", &err.to_string())],
-                )));
-            }
+            live.driver.save_desktop_notifications();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.desktop_notifications = on;
             self.connection.set_note(StatusNote::silent(tr(
@@ -74,12 +69,7 @@ impl QuillApp {
     pub(crate) fn set_inapp_sounds_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.inapp_sounds_enabled = on;
-            if let Err(err) = live.driver.save_inapp_sounds_enabled() {
-                self.connection.set_note(StatusNote::silent(tr_with(
-                    keys::Q_PREFS_COULDN_T_SAVE_NOTIFICATION_SOUNDS,
-                    &[("err", &err.to_string())],
-                )));
-            }
+            live.driver.save_inapp_sounds_enabled();
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.inapp_sounds_enabled = on;
             self.connection

@@ -106,6 +106,7 @@
 "lng_send_silent_message" = "Send without sound";
 "lng_settings_save" = "Save";
 "lng_shortcuts_archive_chat" = "Archive chat";
+"lng_slowmode_no_many" = "Slow mode is enabled. You can't send more than one message at a time.";
 "lng_sr_chat_column_message" = "Message";
 "lng_sr_message_column_dice" = "Dice";
 "lng_sure_delete_and_exit" = "Are you sure you want to delete all message history and leave «{group}»?\n\nThis action cannot be undone.";
@@ -228,7 +229,6 @@
 "qll_chat_couldnt_copy_this_image" = "couldn't copy this image";
 "qll_chat_couldnt_load_link_preview" = "couldn't load link preview";
 "qll_chat_couldnt_save" = "couldn't save: {err}";
-"qll_chat_couldnt_save_recent_hashtags" = "Couldn't save recent hashtags: {err}";
 "qll_chat_couldnt_stop_sharing_try_again" = "Couldn't stop sharing; try again.";
 "qll_chat_create" = "✨ Create";
 "qll_chat_create_link" = "Create link";

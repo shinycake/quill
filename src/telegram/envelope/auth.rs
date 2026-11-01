@@ -238,6 +238,8 @@ pub enum AuthorizationState {
     Closing,
     Closed,
     Unknown(String),
+    /// Quill's own state, never sent by TDLib: this client cannot start.
+    StartupFailed(crate::auth::StartupFailure),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
