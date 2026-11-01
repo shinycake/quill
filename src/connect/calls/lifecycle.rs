@@ -1,5 +1,6 @@
 //! Connect driver: starting, accepting, swapping and ending one-to-one calls.
 use super::*;
+use crate::notify_accounts::ringing_incoming_call;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C1: `createCall` for a user. Gated on a known non-bot
@@ -120,6 +121,44 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.hangup(call_id);
         }
         Ok(extra)
+    }
+
+    /// The account is closing (quit, account switch): end its calls, as
+    /// tdesktop's `Instance::isQuitPrevent` does. A call still ringing in
+    /// stays unanswered, so the caller's other devices can still take it.
+    pub(crate) fn hang_up_for_close(&mut self) {
+        let calls = &self.session.calls;
+        let call_running = calls.active_call.as_ref().is_some_and(|call| {
+            !matches!(
+                call.state,
+                CallState::HangingUp | CallState::Discarded { .. } | CallState::Error { .. }
+            )
+        });
+        let joined = calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined);
+        if call_running && ringing_incoming_call(&self.session).is_none() {
+            let _ = self.discard_call();
+        }
+        if joined {
+            let _ = self.leave_group_call();
+        }
+    }
+
+    /// A hang-up or a leave went out and the server has not answered yet:
+    /// the terminal `updateCall`, or the `ok` to `leaveGroupCall`.
+    pub(crate) fn hang_up_pending(&self) -> bool {
+        let calls = &self.session.calls;
+        let hanging_up = calls
+            .active_call
+            .as_ref()
+            .is_some_and(|call| matches!(call.state, CallState::HangingUp));
+        let leaving = calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| calls.left_group_call == Some(call.id));
+        hanging_up || leaving
     }
 
     /// Swap prompt: decline the pending incoming call as busy.

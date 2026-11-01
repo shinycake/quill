@@ -41,6 +41,7 @@ pub fn wait_closed<S: JsonSender>(
         if now >= deadline {
             return false;
         }
+        super::closing::release_close(driver, now);
         let slice = deadline
             .saturating_duration_since(now)
             .min(Duration::from_millis(50));

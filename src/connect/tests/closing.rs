@@ -9,11 +9,13 @@
 //! native library is missing.
 use super::super::*;
 use super::*;
+use crate::calls::engine::RemoteVideoState;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::AccountKey;
 use crate::platform::MemorySecretStore;
-use crate::telegram::client::ReceiveBridge;
-use crate::telegram::envelope::AuthorizationState;
+use crate::state::ActiveCall;
+use crate::telegram::client::{ReceiveBridge, copy_and_parse};
+use crate::telegram::envelope::{AuthorizationState, CallState};
 use crate::telegram::hub::{ReceiveSource, TdHub};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -111,6 +113,11 @@ fn dying_hub() -> (Arc<TdHub>, Sender<String>) {
 }
 
 fn client_on(hub: Arc<TdHub>, tx: Sender<String>) -> (Box<dyn Closable>, Handle) {
+    let (client, handle) = test_client(hub, tx);
+    (Box::new(client), handle)
+}
+
+fn test_client(hub: Arc<TdHub>, tx: Sender<String>) -> (TestClient, Handle) {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -142,7 +149,7 @@ fn client_on(hub: Arc<TdHub>, tx: Sender<String>) -> (Box<dyn Closable>, Handle)
         finished,
         auth,
     };
-    (Box::new(client), handle)
+    (client, handle)
 }
 
 fn client() -> (Box<dyn Closable>, Handle) {
@@ -421,4 +428,222 @@ fn dropping_the_set_finishes_its_clients_within_the_quit_deadline() {
     let took = started.elapsed();
     assert!(handle.finished());
     assert!(took < QUIT_CLOSE_DEADLINE * 3, "{took:?}");
+}
+
+const CALL_ID: i32 = 5;
+
+fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
+    ActiveCall {
+        id: CALL_ID,
+        user_id: 11,
+        is_outgoing,
+        is_video: false,
+        state,
+        started_at: Instant::now(),
+        ready_at: None,
+        ready: None,
+        transport: None,
+        transport_error: None,
+        signaling_queue: Vec::new(),
+        signaling_dropped: 0,
+        muted: false,
+        camera_on: false,
+        screen_sharing: false,
+        remote_video: RemoteVideoState::Inactive,
+        remote_screen: RemoteVideoState::Inactive,
+        remote_audio_muted: false,
+        remote_battery_low: false,
+        signal_bars: None,
+    }
+}
+
+fn call_discarded_json() -> String {
+    format!(
+        r#"{{"@type":"updateCall","call":{{"@type":"call","id":{CALL_ID},"user_id":11,"is_outgoing":true,"is_video":false,"state":{{"@type":"callStateDiscarded","reason":{{"@type":"callDiscardReasonHungUp"}},"need_rating":false,"need_debug_information":false,"need_log":false}}}},"@client_id":{CLIENT_ID}}}"#
+    )
+}
+
+/// A ready driver on the recording sender, its working folder removed on
+/// drop, with no client around it.
+struct CallingDriver {
+    recorder: Arc<RecordingSender>,
+    driver: ConnectDriver<Arc<RecordingSender>>,
+    dir: std::path::PathBuf,
+}
+
+impl Drop for CallingDriver {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn calling_driver() -> CallingDriver {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let driver = ready_driver(&recorder, prepared, &sink, &seq);
+    recorder.sent.lock().expect("sent").clear();
+    CallingDriver {
+        recorder,
+        driver,
+        dir,
+    }
+}
+
+impl CallingDriver {
+    fn with_call(mut self, is_outgoing: bool, state: CallState) -> Self {
+        self.driver.session.calls.active_call = Some(active_call(is_outgoing, state));
+        self
+    }
+
+    fn with_group_call(mut self, is_joined: bool) -> Self {
+        let mut call = tracked_group_call(false, false, false);
+        call.is_joined = is_joined;
+        self.driver.session.calls.active_group_call = Some(call);
+        self
+    }
+
+    /// The `@type` of everything sent, in order.
+    fn sent(&self) -> Vec<String> {
+        self.recorder
+            .snapshot()
+            .iter()
+            .map(|json| {
+                let value: serde_json::Value = serde_json::from_str(json).expect("request json");
+                value["@type"].as_str().unwrap_or_default().to_string()
+            })
+            .collect()
+    }
+
+    fn feed(&mut self, json: &str) {
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let seq = AtomicU64::new(100);
+        let update = copy_and_parse(json, &seq, &sink).expect("update");
+        self.driver.ingest(update).expect("ingest");
+    }
+}
+
+fn the_hold_is_over() -> Instant {
+    crate::connect::closing::deadline_after(crate::connect::closing::HANG_UP_HOLD * 2)
+}
+
+#[test]
+fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() {
+    let mut client = calling_driver().with_call(true, CallState::Ready);
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["discardCall", "setOption"]);
+
+    let before_the_hold_ends = Instant::now();
+    crate::connect::closing::release_close(&mut client.driver, before_the_hold_ends);
+    assert!(
+        !client.sent().iter().any(|sent| sent == "close"),
+        "close waits for the hang-up"
+    );
+
+    client.feed(&call_discarded_json());
+    crate::connect::closing::release_close(&mut client.driver, before_the_hold_ends);
+    assert_eq!(client.sent().last().map(String::as_str), Some("close"));
+}
+
+#[test]
+fn a_hang_up_nobody_answers_holds_close_back_only_so_long() {
+    let mut client = calling_driver().with_call(false, CallState::Ready);
+    crate::connect::closing::begin_close(&mut client.driver);
+    crate::connect::closing::release_close(&mut client.driver, the_hold_is_over());
+    assert_eq!(client.sent(), ["discardCall", "setOption", "close"]);
+
+    crate::connect::closing::release_close(&mut client.driver, the_hold_is_over());
+    assert_eq!(client.sent().len(), 3, "close goes out once");
+}
+
+#[test]
+fn a_call_still_ringing_in_is_left_to_ring() {
+    let mut client = calling_driver().with_call(
+        false,
+        CallState::Pending {
+            is_created: true,
+            is_received: true,
+        },
+    );
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["setOption", "close"]);
+}
+
+#[test]
+fn an_outgoing_call_still_ringing_is_hung_up() {
+    let mut client = calling_driver().with_call(
+        true,
+        CallState::Pending {
+            is_created: true,
+            is_received: false,
+        },
+    );
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["discardCall", "setOption"]);
+}
+
+#[test]
+fn a_call_already_hanging_up_gets_no_second_discard_but_still_holds_close() {
+    let mut client = calling_driver().with_call(true, CallState::HangingUp);
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["setOption"]);
+    crate::connect::closing::release_close(&mut client.driver, the_hold_is_over());
+    assert_eq!(client.sent(), ["setOption", "close"]);
+}
+
+#[test]
+fn closing_leaves_a_joined_group_call_and_sends_close_behind_the_answer() {
+    let mut client = calling_driver().with_group_call(true);
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["leaveGroupCall", "setOption"]);
+
+    let leave = client
+        .recorder
+        .snapshot()
+        .into_iter()
+        .next()
+        .expect("the leave request");
+    let leave: serde_json::Value = serde_json::from_str(&leave).expect("request json");
+    let extra = leave["@extra"].as_str().expect("request id").to_string();
+    client.feed(&format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#));
+    assert!(
+        client.driver.session.calls.active_group_call.is_none(),
+        "the answer drops the tracked call"
+    );
+    crate::connect::closing::release_close(&mut client.driver, Instant::now());
+    assert_eq!(client.sent().last().map(String::as_str), Some("close"));
+}
+
+#[test]
+fn a_group_call_only_looked_at_is_not_left() {
+    let mut client = calling_driver().with_group_call(false);
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["setOption", "close"]);
+}
+
+#[test]
+fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
+    let (hub, tx) = channel_hub();
+    let (mut client, handle) = test_client(hub, tx);
+    client.driver.session.calls.active_call = Some(active_call(true, CallState::Ready));
+    let mut set = ClosingSet::new();
+    set.push(key(1), Box::new(client), false);
+    let sent_close = || {
+        handle
+            .sent()
+            .iter()
+            .any(|json| json.contains("\"@type\":\"close\""))
+    };
+    assert!(handle.sent().iter().any(|json| json.contains("discardCall")));
+    assert!(!sent_close(), "close waits for the hang-up");
+
+    handle.tx.send(call_discarded_json()).expect("send");
+    let give_up = Instant::now() + Duration::from_secs(2);
+    while !sent_close() && Instant::now() < give_up {
+        let _ = set.poll(Instant::now());
+        std::thread::yield_now();
+    }
+    assert!(sent_close(), "the poll sent close: {:?}", handle.sent());
 }

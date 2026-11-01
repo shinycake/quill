@@ -39,6 +39,11 @@ pub const QUIT_CLOSE_DEADLINE: Duration = Duration::from_millis(1500);
 /// Most time one poll spends applying one closing client's updates.
 pub const CLOSE_DRAIN_BUDGET: Duration = Duration::from_millis(4);
 
+/// Most time `close` waits behind a call's hang-up, inside
+/// [`QUIT_CLOSE_DEADLINE`]: `close` sent right behind `discardCall` or
+/// `leaveGroupCall` can cut them off before they reach the server.
+pub const HANG_UP_HOLD: Duration = Duration::from_millis(500);
+
 /// Where one closing client stands after a drain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseProgress {
@@ -63,8 +68,9 @@ pub trait Closable {
     fn finish(&mut self);
 }
 
-/// Like tdesktop on quit: announce going offline, then `close` on the same
-/// ordered queue. A client that is Closed already gets nothing.
+/// Like tdesktop on quit: end the account's calls, announce going offline,
+/// then `close` on the same ordered queue, held back until the hang-up
+/// landed ([`release_close`]). A client that is Closed already gets nothing.
 pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
     // `parity:data-proxy-web`: no hidden web view outlives its client.
     driver.shut_down_carriers();
@@ -72,9 +78,26 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
         return;
     }
     if matches!(driver.session.auth, AuthorizationState::Ready) {
+        driver.hang_up_for_close();
         let _ = driver.set_online(false);
     }
-    let _ = driver.request_close();
+    if driver.hang_up_pending() {
+        driver.close_held_until = Some(deadline_after(HANG_UP_HOLD));
+    } else {
+        let _ = driver.request_close();
+    }
+}
+
+/// Send the `close` that [`begin_close`] held back, once the hang-up landed
+/// or [`HANG_UP_HOLD`] ran out.
+pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
+    let Some(until) = driver.close_held_until else {
+        return;
+    };
+    if now >= until || !driver.hang_up_pending() {
+        driver.close_held_until = None;
+        let _ = driver.request_close();
+    }
 }
 
 /// How [`drain_until_closed`] stopped.
@@ -138,7 +161,9 @@ pub(crate) fn drain_bridged<S: JsonSender>(
     // Read before draining: what was queued before the loop died is still
     // applied, and a dry channel then means nothing more can come.
     let stopped = bridge.stopped_unexpectedly();
-    match drain_until_closed(driver, || bridge.next_timeout(Duration::ZERO), budget) {
+    let drained = drain_until_closed(driver, || bridge.next_timeout(Duration::ZERO), budget);
+    release_close(driver, Instant::now());
+    match drained {
         Drained::Closed => CloseProgress::Closed,
         Drained::Dry if stopped => CloseProgress::Lost,
         Drained::Dry | Drained::Budget => CloseProgress::Pending,
