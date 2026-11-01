@@ -374,7 +374,8 @@ pub(in crate::ui) fn session_history_row(
             ))
         }
         MessageContent::Document(doc) if quill::media_viewer::shows_as_photo(doc) => {
-            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, cx))
+            let gif = gif_play.filter(|_| animation_playing);
+            Some(picture_file_attachment(message.id.0 as u64, doc, files, downloading, media_roots, (message.chat_id, message.id), (frame_w, frame_h), corners, gif, cx))
         }
         MessageContent::Document(doc) => Some(document_chip(
             message.id.0 as u64,
