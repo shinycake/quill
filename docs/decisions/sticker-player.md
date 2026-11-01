@@ -193,6 +193,24 @@ frames a second for 30 pictures.
 - `QUILL_TRACE_STICKERS` prints how many open clips play at their file's
   rate (`coarse`).
 
+### Follow-up: emoji on the content grid skipped frames (2026-11-01)
+
+A quarter grid frame of slack is 8.33 ms for a 30 fps emoji, one whole
+refresh at 120 Hz. Emoji paint every fourth refresh there, so a head that
+started one refresh after that beat sat exactly on a frame boundary at
+every paint for its whole life: a paint a little early showed the frame
+before, one a little late the frame due, and each early-late pair was a
+skip and a 67 ms hold (4 to 11 per 945 frames, clumped by run). One head
+in four starts on that phase.
+
+The slack is now a quarter grid frame or half a refresh, whichever is
+less, so every phase sits at least 4.17 ms from a boundary at 120 Hz. 60
+fps files and 60 Hz displays keep a quarter frame. A seeded test of four
+start phases with paints up to 1.5 ms off shows every frame once; with
+the old slack the second phase skips or repeats on about half its paints.
+Feeding heads the target vsync in place of the paint's wall time would
+remove the jitter itself and is left for later.
+
 ## Verification
 
 `/verify` captures at 2x, before and after: a sticker message in history,

@@ -1,7 +1,7 @@
 //! A view of a clip: one place it shows, with its own play head.
 #![deny(clippy::indexing_slicing)]
 
-use super::{ClipSpec, HeadId, OPENING_FPS, Player, high_rate};
+use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_hz, high_rate};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{PlayMode, edge_for};
@@ -111,10 +111,11 @@ impl StickerView {
                 self.mode,
                 timeline,
                 high,
+                display_hz(),
             ),
             _ => {
                 let mut head = head;
-                head.advance(self.player.now(), self.mode, timeline, high)
+                head.advance(self.player.now(), self.mode, timeline, high, display_hz())
             }
         };
         match pick {

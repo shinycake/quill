@@ -22,7 +22,7 @@ fn ms(n: u64) -> Duration {
 fn a_looping_head_wraps_and_asks_ahead() {
     // 10 frames at 10 fps: frame n at n × 100 ms.
     let tl = timeline(10, 10.0, 1);
-    let at = |t| pick(ms(t), PlayMode::Loop, tl, false).unwrap();
+    let at = |t| pick(ms(t), PlayMode::Loop, tl, false, 60.0).unwrap();
     assert_eq!(at(0).index, 0);
     assert_eq!(at(350).index, 3);
     assert_eq!(at(1250).index, 2, "second loop");
@@ -33,25 +33,25 @@ fn a_looping_head_wraps_and_asks_ahead() {
 #[test]
 fn a_one_shot_rests_on_the_frame_it_names() {
     let tl = timeline(10, 10.0, 1);
-    let last = pick(ms(1500), PlayMode::Once(Rest::Last), tl, false).unwrap();
+    let last = pick(ms(1500), PlayMode::Once(Rest::Last), tl, false, 60.0).unwrap();
     assert_eq!((last.index, last.animating), (9, false));
-    let first = pick(ms(1500), PlayMode::Once(Rest::First), tl, false).unwrap();
+    let first = pick(ms(1500), PlayMode::Once(Rest::First), tl, false, 60.0).unwrap();
     assert_eq!((first.index, first.animating), (0, false));
-    let playing = pick(ms(850), PlayMode::Once(Rest::First), tl, false).unwrap();
+    let playing = pick(ms(850), PlayMode::Once(Rest::First), tl, false, 60.0).unwrap();
     assert_eq!((playing.index, playing.animating), (8, true));
     assert_eq!(
         playing.ahead,
         [Some(9), Some(0), None],
         "the frame it rests on, then nothing past the end"
     );
-    let last = pick(ms(850), PlayMode::Once(Rest::Last), tl, false).unwrap();
+    let last = pick(ms(850), PlayMode::Once(Rest::Last), tl, false, 60.0).unwrap();
     assert_eq!(last.ahead, [Some(9), None, None]);
 }
 
 #[test]
 fn limited_loops_play_then_rest_on_the_first_frame() {
     let tl = timeline(4, 10.0, 1);
-    let at = |t| pick(ms(t), PlayMode::Loops(2), tl, false).unwrap();
+    let at = |t| pick(ms(t), PlayMode::Loops(2), tl, false, 60.0).unwrap();
     assert_eq!((at(650).index, at(650).animating), (2, true));
     assert_eq!((at(800).index, at(800).animating), (0, false));
 }
@@ -60,10 +60,10 @@ fn limited_loops_play_then_rest_on_the_first_frame() {
 fn a_fixed_position_shows_nothing_past_the_end() {
     let tl = timeline(4, 10.0, 1);
     assert_eq!(
-        pick(ms(0), PlayMode::At(ms(250)), tl, false).map(|p| p.index),
+        pick(ms(0), PlayMode::At(ms(250)), tl, false, 60.0).map(|p| p.index),
         Some(2)
     );
-    assert!(pick(ms(0), PlayMode::At(ms(400)), tl, false).is_none());
+    assert!(pick(ms(0), PlayMode::At(ms(400)), tl, false, 60.0).is_none());
 }
 
 #[test]
@@ -76,11 +76,54 @@ fn jittered_paints_hold_each_frame_for_the_same_number_of_refreshes() {
         let jitter = [-1.0, 0.6, -0.4, 1.0][paint as usize % 4];
         let at = (f64::from(paint) * 1000.0 / 120.0 + jitter).max(0.0);
         let pos = Duration::from_secs_f64(at / 1000.0);
-        shown.push(pick(pos, PlayMode::Loop, tl, false).unwrap().index);
+        shown.push(pick(pos, PlayMode::Loop, tl, false, 120.0).unwrap().index);
     }
     for pair in shown.chunks(2) {
         assert_eq!(pair.len(), 2);
         assert_eq!(pair.first(), pair.last(), "{shown:?}");
+    }
+}
+
+/// Steps between the frames a 30 fps head shows when painted every fourth
+/// refresh of a 120 Hz display, started `offset` refreshes after that beat,
+/// with every paint up to 1.5 ms early or late.
+fn emoji_steps_at_offset(offset: u32) -> Vec<i64> {
+    let tl = timeline(60, 30.0, 1);
+    let refresh = 1.0 / 120.0;
+    let mut seed: u64 = 0x9e37_79b9 ^ u64::from(offset);
+    let mut jitter = move || {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        ((seed >> 33) as f64 / f64::from(1u32 << 31) - 0.5) * 0.003
+    };
+    let start = f64::from(offset) * refresh + jitter();
+    let mut shown: Vec<i64> = Vec::new();
+    for beat in 1..2000u32 {
+        let paint = f64::from(beat * 4) * refresh + jitter();
+        if paint <= start {
+            continue;
+        }
+        let pos = Duration::from_secs_f64(paint - start);
+        let along = (pos.as_secs_f64() * 30.0 + 0.5) as i64;
+        let index = pick(pos, PlayMode::Loop, tl, false, 120.0).unwrap().index;
+        // Unwrapped: the loop's frame nearest the head's place.
+        let off = (i64::from(index) - along).rem_euclid(60);
+        shown.push(along + if off > 30 { off - 60 } else { off });
+    }
+    shown
+        .windows(2)
+        .map(|pair| match pair {
+            [a, b] => b - a,
+            _ => 0,
+        })
+        .collect()
+}
+
+#[test]
+fn heads_painted_with_jitter_show_every_frame_once_at_any_phase() {
+    for offset in 0..4 {
+        let steps = emoji_steps_at_offset(offset);
+        let uneven = steps.iter().filter(|step| **step != 1).count();
+        assert_eq!(uneven, 0, "offset {offset}: {uneven} of {}", steps.len());
     }
 }
 
@@ -147,8 +190,8 @@ fn a_coarse_clip_ticks_twice_per_file_frame() {
 fn a_low_rate_shows_only_the_files_own_frames() {
     // A 60 fps file on a 120 frame grid (step 2).
     let tl = timeline(120, 60.0, 2);
-    let high = pick(ms(25), PlayMode::Loop, tl, true).unwrap();
-    let low = pick(ms(25), PlayMode::Loop, tl, false).unwrap();
+    let high = pick(ms(25), PlayMode::Loop, tl, true, 60.0).unwrap();
+    let low = pick(ms(25), PlayMode::Loop, tl, false, 60.0).unwrap();
     assert_eq!(high.index, 3, "120 fps: an in-between frame");
     assert_eq!(low.index, 2, "60 fps: whole file frames only");
     assert_eq!(low.ahead, [Some(4), Some(6), Some(8)]);
@@ -165,14 +208,14 @@ fn each_head_plays_on_its_own_and_restarts() {
     let mut a = PlayHead::default();
     let mut b = PlayHead::default();
     // Until its first frame shows, a head waits on frame 0 and keeps ticking.
-    let waiting = a.advance(t0, mode, tl, false).unwrap();
+    let waiting = a.advance(t0, mode, tl, false, 60.0).unwrap();
     assert_eq!((waiting.index, waiting.animating), (0, true));
     a.start(t0);
     // B comes on screen later than A.
     let step = |head: &mut PlayHead, from: Instant, until: u64| {
         let mut last = None;
         for t in (0..=until).step_by(50) {
-            last = head.advance(from + ms(t), mode, tl, false);
+            last = head.advance(from + ms(t), mode, tl, false, 60.0);
         }
         last.unwrap()
     };
@@ -196,19 +239,21 @@ fn a_head_not_drawn_for_a_while_resumes_where_it_was() {
     let t0 = Instant::now();
     let mut head = PlayHead::default();
     head.start(t0);
-    head.advance(t0 + ms(150), PlayMode::Loop, tl, false);
+    head.advance(t0 + ms(150), PlayMode::Loop, tl, false, 60.0);
     let index = head
-        .advance(t0 + ms(300), PlayMode::Loop, tl, false)
+        .advance(t0 + ms(300), PlayMode::Loop, tl, false, 60.0)
         .unwrap();
     assert_eq!(index.index, 3);
     // Scrolled away for seconds: the clock did not run meanwhile.
     let back = t0 + ms(300) + PAUSE_GAP + ms(5000);
     assert_eq!(
-        head.advance(back, PlayMode::Loop, tl, false).unwrap().index,
+        head.advance(back, PlayMode::Loop, tl, false, 60.0)
+            .unwrap()
+            .index,
         3
     );
     assert_eq!(
-        head.advance(back + ms(100), PlayMode::Loop, tl, false)
+        head.advance(back + ms(100), PlayMode::Loop, tl, false, 60.0)
             .unwrap()
             .index,
         4

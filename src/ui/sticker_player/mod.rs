@@ -527,8 +527,9 @@ impl Player {
                             mode,
                             timeline,
                             high_rate,
+                            display_hz(),
                         ),
-                        _ => head_state.advance(now, mode, timeline, high_rate),
+                        _ => head_state.advance(now, mode, timeline, high_rate, display_hz()),
                     };
                     pick.and_then(|pick| {
                         let exact = clip

@@ -6,6 +6,8 @@ use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, PresentEstimator};
 use super::{Cadence, ContentGrid, Source, Vsync, clock_tick, display_grid, note_playing, shared};
 use gpui_kit::EntityId;
+use quill::sticker_playback::player::head::pick;
+use quill::sticker_playback::player::{PlayMode, Timeline};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -626,8 +628,15 @@ impl Sim {
             }
             if self.emoji_fps > 0 {
                 // An emoji shows the frame its paint time reached.
-                let along = self.now.duration_since(self.t0).as_secs_f64();
-                let frame = (along * f64::from(self.emoji_fps) + 0.25).floor() as u64;
+                let emoji = Timeline {
+                    frames: u32::MAX,
+                    file_fps: f64::from(self.emoji_fps),
+                    step: 1,
+                };
+                let along = self.now.duration_since(self.t0);
+                let display_hz = 1.0 / self.period.as_secs_f64();
+                let frame = pick(along, PlayMode::Loop, emoji, false, display_hz)
+                    .map_or(0, |pick| u64::from(pick.index));
                 self.emoji_frames.push((present, frame));
             }
             // `tick_animation_layer`.
