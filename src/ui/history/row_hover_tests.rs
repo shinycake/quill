@@ -3,7 +3,7 @@
 //! reaches Telegram.
 
 use crate::ui::app::QuillApp;
-use crate::ui::scroll_restore_tests::{A, frames, open, select};
+use crate::ui::history::demo_chat::{A, frames, open, select};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     Entity, Modifiers, Pixels, Point, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase,

@@ -505,6 +505,10 @@ pub(in crate::ui) fn map_tile_path(
 impl QuillApp {}
 
 pub(in crate::ui) mod bubble_width;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "demo_chat_tests.rs"]
+pub(in crate::ui) mod demo_chat;
 mod reaction_chip_row;
 mod row_hover;
 pub(in crate::ui) use row_hover::{CornerActions, RowHover};
