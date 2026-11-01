@@ -345,10 +345,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn pump_group_call_streams(&mut self, now: Instant) -> bool {
         let mut handled = false;
         let mut levels_changed = false;
-        for _ in 0..EVENTS_PER_TICK {
+        for taken in 1..=EVENTS_PER_TICK {
             let Some(event) = self.group_call_streams.next_event() else {
                 break;
             };
+            if taken == EVENTS_PER_TICK {
+                // More may be queued, with no poke left to come for them.
+                crate::wake::UPDATES.poke();
+            }
             if let EngineEvent::GroupAudioLevels {
                 group_call_id,
                 levels,
