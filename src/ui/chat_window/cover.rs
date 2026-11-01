@@ -125,6 +125,13 @@ impl ChatWindows {
             .collect()
     }
 
+    /// Whether `view` is the view of a chat window the app's gate holds.
+    pub(in crate::ui) fn holds_view(&self, view: EntityId, cx: &App) -> bool {
+        self.open.iter().any(|open| {
+            open.view.entity_id() == view && AppGate::holds(cx, open.handle.window_id())
+        })
+    }
+
     /// `chat_id`'s window is active or not and stands at `place`. Returns
     /// whether its activation changed.
     pub(super) fn note_place(
