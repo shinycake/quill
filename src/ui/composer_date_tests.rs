@@ -101,7 +101,7 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
         app.open_composer_date_dialog(window, cx);
         let dialog = app.composer_ui.date_dialog.as_ref().expect("box");
         assert_eq!(
-            crate::ui::scheduled::picked_unix(&dialog.picker, cx),
+            crate::ui::scheduled::picked_unix(&dialog.picker, 0, cx),
             Some(TIME)
         );
         app.close_composer_date_dialog(window, cx);

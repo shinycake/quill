@@ -126,7 +126,7 @@ impl QuillApp {
         let Some(dialog) = self.composer_ui.date_dialog.as_ref() else {
             return;
         };
-        let Some(time) = picked_unix(&dialog.picker, cx)
+        let Some(time) = picked_unix(&dialog.picker, 0, cx)
             .filter(|time| (1..=MAX_DATE).contains(time))
             .and_then(|time| i32::try_from(time).ok())
         else {

@@ -27,8 +27,8 @@ use quill::composer::{ComposerEdit, ComposerScheduling};
 use quill::ids::MessageId;
 use quill::lang::{keys, tr, tr_with};
 use quill::schedule::{
-    MAX_SCHEDULE_SECS, ScheduleError, ScheduleKind, default_schedule_time, parse_picker_stamp,
-    repeat_period_text, validate_send_date,
+    MAX_SCHEDULE_SECS, MIN_SCHEDULE_SECS, ScheduleError, ScheduleKind, default_schedule_time,
+    parse_picker_stamp, repeat_period_text, validate_send_date,
 };
 use quill::telegram::envelope::{
     ChatKind, MessageSchedulingState, ParsedMessage, effective_content,
@@ -181,8 +181,10 @@ pub(super) fn new_date_time_picker(
 }
 
 /// The unix time a date picker currently shows (local zone), if it holds
-/// a complete date and time.
-pub(super) fn picked_unix(picker: &TimePicker, cx: &App) -> Option<i64> {
+/// a complete date and time. `lead` is how far ahead of now the picker's
+/// earliest allowed time is, zero when past times are fine: a repeated
+/// hour's first showing sooner than that gives way to its second.
+pub(super) fn picked_unix(picker: &TimePicker, lead: i64, cx: &App) -> Option<i64> {
     let clock = WallClock::of(cx);
     picker
         .state
@@ -190,7 +192,7 @@ pub(super) fn picked_unix(picker: &TimePicker, cx: &App) -> Option<i64> {
         .date_time()
         .start()
         .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
-        .map(|civil| clock.resolve(&civil, picker.initial))
+        .map(|civil| clock.resolve(&civil, picker.initial, lead))
 }
 
 impl QuillApp {
@@ -309,7 +311,7 @@ impl QuillApp {
             return;
         };
         let target = picker.target;
-        let picked = picked_unix(&picker.date, cx)
+        let picked = picked_unix(&picker.date, MIN_SCHEDULE_SECS, cx)
             .ok_or(ScheduleError::Invalid)
             .and_then(|unix| validate_send_date(unix, WallClock::of(cx).now()));
         match picked {

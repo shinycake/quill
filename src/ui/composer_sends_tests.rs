@@ -7,7 +7,7 @@
 use crate::ui::app::QuillApp;
 use crate::ui::composer_sends::SendSlot;
 use crate::ui::keybindings::bind_keys;
-use crate::ui::scheduled::ScheduleTarget;
+use crate::ui::scheduled::{ScheduleTarget, picker_value};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use crate::ui::wall_clock::WallClock;
@@ -488,6 +488,33 @@ fn a_schedule_in_the_repeated_hour_confirmed_unchanged_keeps_its_pass(cx: &mut T
         assert_eq!(
             app.pending_send().scheduling,
             ComposerScheduling::SendAtDate(second_pass)
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        // 01:29:58 CDT: 01:30 CDT is two seconds off, too soon to schedule,
+        // and the clock shows 01:30 again an hour later, as CST.
+        let first_pass = WallClock::CHICAGO_FALL_BACK - 1800;
+        cx.set_global(WallClock::chicago_at(first_pass - 2));
+        app.select_listed_chat(A, window, cx);
+        app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+        let value = picker_value(first_pass, cx).expect("a picker value");
+        let date = app
+            .composer_ui
+            .schedule_picker
+            .as_ref()
+            .map(|picker| picker.date.state.clone())
+            .expect("the picker");
+        date.update(cx, |state, cx| state.set_date_time(value, window, cx));
+        app.confirm_schedule_picker(window, cx);
+        assert!(app.composer_ui.schedule_picker.is_none(), "no \"too soon\"");
+        assert_eq!(
+            app.pending_send().scheduling,
+            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 1800)
         );
     });
 }

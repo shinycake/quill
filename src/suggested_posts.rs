@@ -469,10 +469,15 @@ impl SuggestedPostLimits {
         *slot = value.max(0);
     }
 
-    /// The earliest and latest time a post may be set for
+    /// How far ahead of now the earliest time a post may be set for lies
     /// (`ChooseSuggestTimeBox`: the minimum delay plus a minute).
+    pub fn min_lead(&self) -> i64 {
+        self.send_delay_min.saturating_add(60)
+    }
+
+    /// The earliest and latest time a post may be set for.
     pub fn time_range(&self, now: i64) -> (i64, i64) {
-        let min = now.saturating_add(self.send_delay_min).saturating_add(60);
+        let min = now.saturating_add(self.min_lead());
         let max = now.saturating_add(self.send_delay_max).max(min);
         (min, max)
     }

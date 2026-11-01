@@ -39,9 +39,11 @@ impl WallClock {
     }
 
     /// The instant a picker that opened showing `initial` means once it shows
-    /// `civil` (see [`picked_instant`]).
-    pub(crate) fn resolve(&self, civil: &CivilTime, initial: i64) -> i64 {
-        picked_instant(civil, initial, &*self.offset_at, self.now())
+    /// `civil`, when it takes times `lead` seconds from now or later (see
+    /// [`picked_instant`]).
+    pub(crate) fn resolve(&self, civil: &CivilTime, initial: i64, lead: i64) -> i64 {
+        let earliest = self.now().saturating_add(lead);
+        picked_instant(civil, initial, &*self.offset_at, earliest)
     }
 }
 

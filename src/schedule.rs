@@ -121,12 +121,14 @@ pub fn validate_send_date(send_date: i64, now: i64) -> Result<i64, ScheduleError
 
 /// Unix time of a local wall-clock moment, given the zone as a function
 /// from a unix instant to its UTC offset. A moment the clock shows twice,
-/// in the hour repeated when clocks go back, is the first showing after
-/// `now`: a time picked during the second pass of that hour means the one
-/// still ahead. When both showings are past it is the first, as in Qt's
-/// `QDateTime`. A moment the clock skips lands as far past
-/// the gap as it was into it, as Qt's `QDateTime` moves it.
-pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now: i64) -> i64 {
+/// in the hour repeated when clocks go back, is the first showing at or
+/// after `earliest`, the first instant the picker takes: a time picked
+/// during the second pass of that hour, or just before its first pass is
+/// due, means the one the picker can still take. When both showings are
+/// before `earliest` it is the first, as in Qt's `QDateTime`. A moment the
+/// clock skips lands as far past the gap as it was into it, as Qt's
+/// `QDateTime` moves it.
+pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, earliest: i64) -> i64 {
     let naive =
         civil.day_number() * 86_400 + i64::from(civil.hour) * 3600 + i64::from(civil.minute) * 60;
     // Offsets span less than a day each way and real zones change at most
@@ -141,21 +143,22 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
     showings
         .iter()
         .copied()
-        .find(|t| *t > now)
+        .find(|t| *t >= earliest)
         .or(showings.first().copied())
         .unwrap_or(early)
 }
 
 /// The instant a picker means once it shows `civil`, having opened
 /// showing `initial`. A time left as it opened keeps its own pass of a
-/// repeated hour; any other is resolved by [`civil_to_unix_with`]. Either
+/// repeated hour; any other is resolved by [`civil_to_unix_with`] from
+/// `earliest`, the first instant the picker takes. Either
 /// way it is the whole minute shown, as tdesktop builds it from the date
 /// and time.
 pub fn picked_instant(
     civil: &CivilTime,
     initial: i64,
     offset_at: impl Fn(i64) -> i32,
-    now: i64,
+    earliest: i64,
 ) -> i64 {
     let shown = civil_at(initial, offset_at(initial));
     let unchanged = (shown.year, shown.month, shown.day, shown.hour, shown.minute)
@@ -163,7 +166,7 @@ pub fn picked_instant(
     if unchanged {
         initial - initial.rem_euclid(60)
     } else {
-        civil_to_unix_with(civil, offset_at, now)
+        civil_to_unix_with(civil, offset_at, earliest)
     }
 }
 
@@ -382,6 +385,22 @@ mod tests {
         let picked = civil_to_unix_with(&one_fifteen, &zone, now);
         assert_eq!(picked, FALL_BACK + 900);
         assert_eq!(validate_send_date(picked, now), Ok(picked));
+    }
+
+    #[test]
+    fn a_first_showing_too_soon_to_take_gives_way_to_the_second() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // 01:29:58 CDT: 01:30 CDT is two seconds off, under the minimum.
+        let now = FALL_BACK - 1802;
+        let one_thirty = civil(1, 30, FALL_BACK, -5 * 3600);
+        let picked = civil_to_unix_with(&one_thirty, &zone, now + MIN_SCHEDULE_SECS);
+        assert_eq!(picked, FALL_BACK + 1800);
+        assert_eq!(validate_send_date(picked, now), Ok(picked));
+        // Where past times are fine, it stays the first.
+        assert_eq!(
+            civil_to_unix_with(&one_thirty, &zone, now),
+            FALL_BACK - 1800
+        );
     }
 
     #[test]

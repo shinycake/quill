@@ -322,7 +322,11 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
             Some(GroupCallCreate {
                 step: CreateStep::Schedule(step),
                 ..
-            }) => picked_unix(&step.picker, cx),
+            }) => picked_unix(
+                &step.picker,
+                quill::calls::group_call_create::SCHEDULE_MIN_AHEAD_SECS,
+                cx,
+            ),
             _ => None,
         }
     });

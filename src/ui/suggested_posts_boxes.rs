@@ -271,7 +271,8 @@ impl QuillApp {
         let send_date = if anytime {
             0
         } else {
-            let Some(picked) = super::scheduled::picked_unix(&time_box.picker, cx) else {
+            let lead = self.suggest_limits().min_lead();
+            let Some(picked) = super::scheduled::picked_unix(&time_box.picker, lead, cx) else {
                 if let Some(time_box) = self.suggested_posts.time.as_mut() {
                     time_box.error = Some(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME).into());
                 }
