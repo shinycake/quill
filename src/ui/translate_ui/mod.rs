@@ -175,6 +175,8 @@ impl QuillApp {
                 &[("err", &err.to_string())],
             )));
         }
+        // A pass applies them to the open chat.
+        quill::wake::UPDATES.poke();
         cx.notify();
     }
 
