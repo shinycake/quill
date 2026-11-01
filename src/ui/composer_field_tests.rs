@@ -328,6 +328,50 @@ fn a_mention_tag_survives_edits_around_and_inside_it() {
 }
 
 #[test]
+fn every_change_moves_the_document_revision() {
+    with_field(|cx, handle, input| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("composer", cx);
+            let bold = doc("bold", vec![DocSpan::new(0..4, ComposerTag::Bold)], vec![]);
+            let plain = doc("bold", vec![], vec![]);
+            let revision = |cx: &gpui_kit::App| input.read(cx).document_revision();
+            let mut seen = vec![revision(cx)];
+            let mut changed = |cx: &gpui_kit::App, step: &str| {
+                let now = revision(cx);
+                assert!(!seen.contains(&now), "{step} kept the revision");
+                seen.push(now);
+            };
+            window.input("a", cx);
+            changed(cx, "typing");
+            load(&input, &plain, window, cx);
+            changed(cx, "loading text");
+            load(&input, &bold, window, cx);
+            changed(cx, "loading the same text with spans");
+            input.update(cx, |state, cx| state.set_spans(Vec::new(), window, cx));
+            assert!(input.read(cx).spans().is_empty());
+            changed(cx, "changing the spans");
+            window.press("secondary-z", cx);
+            assert!(!input.read(cx).spans().is_empty());
+            changed(cx, "undoing a span change");
+            let redo = if cfg!(target_os = "macos") {
+                "cmd-shift-z"
+            } else {
+                "ctrl-y"
+            };
+            window.press(redo, cx);
+            assert!(input.read(cx).spans().is_empty());
+            changed(cx, "redoing a span change");
+            let unchanged = revision(cx);
+            window.render_frame(cx);
+            park(&input, 2, window, cx);
+            assert_eq!(revision(cx), unchanged, "moving the caret changed nothing");
+        })
+        .unwrap();
+    });
+}
+
+#[test]
 fn typed_markdown_becomes_formatting_and_backspace_takes_it_back() {
     with_field(|cx, handle, input| {
         cx.update_window(handle, |_, window, cx| {
