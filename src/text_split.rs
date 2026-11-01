@@ -11,7 +11,8 @@
 //! also fits whichever unit the server counts.
 #![deny(clippy::indexing_slicing)]
 
-use crate::composer::{MarkupScanner, Seam, parse_format_markup, scan_work};
+use crate::composer::{parse_format_markup, scan_work};
+use crate::composer_doc::{ComposerDoc, ComposerTag, DisjointRanges, DocSpan};
 
 /// UTF-16 code units of `text`.
 pub fn utf16_len(text: &str) -> usize {
@@ -52,144 +53,136 @@ fn break_level(prev: Option<char>, ch: char, next: Option<char>) -> Option<u8> {
     None
 }
 
-/// Largest char-boundary byte index `b` with `units(rest[..b]) <= max`.
-fn largest_fitting_prefix(rest: &str, seams: &[Seam], max: i32) -> usize {
-    let first_over = seams.partition_point(|seam| seam.utf16_units <= max);
-    let fits = first_over
-        .checked_sub(1)
-        .and_then(|last| seams.get(last))
-        .map_or(0, |seam| seam.byte);
-    let over = seams.get(first_over).map_or(rest.len(), |seam| seam.byte);
-    let max_units = usize::try_from(max).unwrap_or(0);
-    last_fitting_boundary(rest, fits, over, |bound| {
-        markup_text_units(rest.get(..bound).unwrap_or_default()) <= max_units
-    })
+/// What a cut should stay out of. tdesktop `CutPart` breaks code, code blocks
+/// and quotes freely and any other entity only when nothing else fits.
+struct Cuts {
+    spans: DisjointRanges,
+    emoji: DisjointRanges,
 }
 
-fn last_fitting_boundary(
-    rest: &str,
-    from: usize,
-    to: usize,
-    fits: impl Fn(usize) -> bool,
-) -> usize {
-    scan_work::add(to.saturating_sub(from));
-    let bounds: Vec<usize> = rest
-        .get(from..to)
-        .unwrap_or_default()
-        .char_indices()
-        .map(|(i, _)| from + i)
-        .collect();
-    let (mut lo, mut hi) = (0usize, bounds.len().saturating_sub(1));
-    while lo < hi {
-        let mid = (lo + hi).div_ceil(2);
-        let Some(&bound) = bounds.get(mid) else {
-            break;
-        };
-        if fits(bound) {
-            lo = mid;
-        } else {
-            hi = mid - 1;
+impl Cuts {
+    fn of(doc: &ComposerDoc) -> Self {
+        let unbroken = doc
+            .spans
+            .iter()
+            .filter(|span| {
+                !matches!(
+                    span.tag,
+                    ComposerTag::Code | ComposerTag::Pre(_) | ComposerTag::Quote
+                )
+            })
+            .map(|span| DocSpan::new(span.range.clone(), ComposerTag::Bold));
+        let emoji = doc
+            .emoji
+            .iter()
+            .map(|emoji| DocSpan::new(emoji.range.clone(), ComposerTag::Bold));
+        Self {
+            spans: DisjointRanges::of(unbroken),
+            emoji: DisjointRanges::of(emoji),
         }
     }
-    bounds.get(lo).copied().unwrap_or(from)
+
+    fn clean(&self, at: usize) -> bool {
+        self.spans.around(at).is_none() && self.emoji.around(at).is_none()
+    }
+
+    /// `at`, or the start of the custom emoji it falls in when that is past
+    /// `from`: an emoji cut in two would lose its picture.
+    fn outside_emoji(&self, at: usize, from: usize) -> usize {
+        self.emoji
+            .around(at)
+            .filter(|emoji| emoji.start > from)
+            .map_or(at, |emoji| emoji.start)
+    }
 }
 
-fn fitting_hard_cut(rest: &str, hard: usize, limit: i32) -> usize {
-    if head_fits(rest, hard, limit) {
-        return hard;
-    }
-    match last_fitting_boundary(rest, 0, hard, |at| head_fits(rest, at, limit)) {
-        0 => hard,
-        at => at,
-    }
+enum Cut {
+    At(usize),
+    RestFits,
+    /// A scalar wider than the limit, which can never fit.
+    Stuck,
 }
 
-fn break_candidates(rest: &str, half: usize, hard: usize) -> Vec<(u8, usize)> {
-    scan_work::add(hard.saturating_sub(half));
+/// Where the part of `text` from `from` ends: the best line, sentence or word
+/// break in the second half of the window (tdesktop `CutPart`), or the limit.
+fn next_cut(text: &str, from: usize, limit: usize, cuts: &Cuts) -> Cut {
+    let rest = text.get(from..).unwrap_or_default();
     let mut candidates: Vec<(u8, usize)> = Vec::new();
-    let mut prev = None;
-    let mut chars = rest
-        .get(half..)
-        .unwrap_or_default()
-        .char_indices()
-        .peekable();
+    let (mut units, mut hard, mut prev) = (0, from, None);
+    let mut chars = rest.char_indices().peekable();
     while let Some((rel, ch)) = chars.next() {
-        let at = half + rel;
-        if at > hard {
-            break;
-        }
+        let at = from + rel;
         let next = chars.peek().map(|&(_, c)| c);
-        if at > half
+        if units > limit / 2
             && let Some(level) = break_level(prev, ch, next)
         {
             candidates.push((level, at));
         }
+        units += ch.len_utf16();
+        if units > limit {
+            scan_work::add(rel);
+            candidates.sort_by(|a, b| b.cmp(a));
+            let best = || candidates.iter().map(|&(_, at)| at);
+            let cut = best()
+                .find(|&at| cuts.clean(at))
+                .or_else(|| best().find(|&at| cuts.outside_emoji(at, from) == at))
+                .unwrap_or_else(|| cuts.outside_emoji(hard, from));
+            return if cut > from { Cut::At(cut) } else { Cut::Stuck };
+        }
+        hard = at + ch.len_utf8();
         prev = Some(ch);
     }
-    candidates.sort_by(|a, b| b.cmp(a));
-    candidates
-}
-
-fn head_fits(rest: &str, at: usize, limit: i32) -> bool {
-    let head = rest.get(..at).unwrap_or_default().trim_end();
-    i32::try_from(markup_text_units(head)).is_ok_and(|units| units <= limit)
-}
-
-fn cut_preserves_formatting(seams: &[Seam], at: usize) -> bool {
-    seams
-        .binary_search_by_key(&at, |seam| seam.byte)
-        .is_ok_and(|ix| seams.get(ix).is_some_and(|seam| seam.outside_spans))
+    scan_work::add(rest.len());
+    Cut::RestFits
 }
 
 /// Split composer markup into messages of at most `limit` units each,
-/// cutting at the best line / sentence / word break in the second half of
-/// the window (tdesktop `CutPart`) and never through a formatting span
-/// when a clean cut exists. Whitespace at the seams is trimmed. Falls back
-/// to a hard cut at the limit for text without any usable break.
+/// cutting the parsed text as tdesktop's `CutPart` does, so formatting carries
+/// over a cut and no marker is left behind. Whitespace at the seams is
+/// trimmed. Falls back to a hard cut at the limit for text without any usable
+/// break.
 ///
 /// Returns the input unchanged (one element) when it already fits, and an
 /// empty vector for blank input or a non-positive `limit`.
 pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
-    if limit <= 0 {
+    let Ok(limit) = usize::try_from(limit) else {
+        return Vec::new();
+    };
+    let markup = markup.trim();
+    if limit == 0 || markup.is_empty() {
         return Vec::new();
     }
-    let mut parts = Vec::new();
-    let mut scanner = MarkupScanner::new(markup.trim());
-    loop {
-        let rest = scanner.rest();
-        if rest.is_empty() {
-            break;
-        }
-        let Some(seams) = scanner.scan(limit) else {
-            parts.push(rest.to_string());
-            break;
-        };
-        let hard = largest_fitting_prefix(rest, seams, limit);
-        if hard == 0 {
-            // A single scalar wider than the limit: cannot ever fit.
-            break;
-        }
-        let half = largest_fitting_prefix(rest, seams, limit / 2);
-        let candidates = break_candidates(rest, half, hard);
-        let best = || candidates.iter().take(48).map(|&(_, at)| at);
-        let fits = |at: usize| head_fits(rest, at, limit);
-        let cut = best()
-            .find(|&at| cut_preserves_formatting(seams, at) && fits(at))
-            .or_else(|| best().find(|&at| fits(at)))
-            .unwrap_or_else(|| fitting_hard_cut(rest, hard, limit));
-        let head = rest.get(..cut).unwrap_or_default().trim_end();
-        let tail = rest.get(cut..).unwrap_or_default().trim_start();
-        if head.is_empty() || tail.len() >= rest.len() {
-            // Defensive: guarantee progress.
-            parts.push(rest.get(..hard).unwrap_or_default().to_string());
-            let tail = rest.get(hard..).unwrap_or_default().trim_start();
-            scanner.advance(rest.len() - tail.len());
-            continue;
-        }
-        parts.push(head.to_string());
-        scanner.advance(rest.len() - tail.len());
+    let doc = ComposerDoc::from_markup(markup);
+    if utf16_len(&doc.text) <= limit {
+        return vec![markup.to_string()];
     }
-    parts
+    let cuts = Cuts::of(&doc);
+    let text = doc.text.as_str();
+    let skip_space = |at: usize| {
+        let rest = text.get(at..).unwrap_or_default();
+        text.len() - rest.trim_start().len()
+    };
+    let mut ranges = Vec::new();
+    let mut from = skip_space(0);
+    while from < text.len() {
+        match next_cut(text, from, limit, &cuts) {
+            Cut::At(cut) => {
+                let head = text.get(from..cut).unwrap_or_default();
+                ranges.push(from..from + head.trim_end().len());
+                from = skip_space(cut);
+            }
+            Cut::RestFits => {
+                let rest = text.get(from..).unwrap_or_default();
+                ranges.push(from..from + rest.trim_end().len());
+                break;
+            }
+            Cut::Stuck => break,
+        }
+    }
+    doc.slices(&ranges)
+        .iter()
+        .map(ComposerDoc::to_final_markup)
+        .collect()
 }
 
 #[cfg(test)]
@@ -199,6 +192,8 @@ mod scale_tests;
 #[cfg(test)]
 mod tests {
     use super::{markup_text_units, split_markup_text, units_over_limit, utf16_len};
+    use crate::composer::parse_format_markup;
+    use crate::composer_doc::{ComposerDoc, ComposerTag};
 
     #[test]
     fn short_text_is_untouched() {
@@ -292,7 +287,92 @@ mod tests {
             assert!(markup_text_units(part) <= 256, "{part:?}");
         }
         let squashed = |text: &str| text.split_whitespace().collect::<String>();
-        assert_eq!(squashed(&parts.concat()), squashed(&text));
+        let parsed = |text: &str| parse_format_markup(text).0;
+        let joined: String = parts.iter().map(|part| parsed(part)).collect();
+        assert_eq!(squashed(&joined), squashed(&parsed(&text)));
+    }
+
+    #[test]
+    fn a_span_longer_than_the_limit_stays_formatted_on_both_sides() {
+        let text = format!("**{}**", "word ".repeat(30).trim());
+        let parts = split_markup_text(&text, 40);
+        assert!(parts.len() > 1);
+        for part in &parts {
+            let doc = ComposerDoc::from_markup(part);
+            assert!(!doc.text.contains('*'), "{part:?}");
+            assert_eq!(doc.spans.len(), 1, "{part:?}");
+        }
+    }
+
+    #[test]
+    fn a_code_block_longer_than_the_limit_keeps_its_language() {
+        let text = format!("```rust\n{}\n```", "let a = 1;\n".repeat(20).trim());
+        let parts = split_markup_text(&text, 50);
+        assert!(parts.len() > 1);
+        for part in &parts {
+            let doc = ComposerDoc::from_markup(part);
+            assert!(!doc.text.contains('`'), "{part:?}");
+            assert_eq!(
+                doc.spans.first().map(|span| &span.tag),
+                Some(&ComposerTag::Pre("rust".into()))
+            );
+        }
+    }
+
+    #[test]
+    fn a_hard_cut_leaves_a_custom_emoji_whole() {
+        let text = format!("{}![long label](tg://emoji?id=7)", "x".repeat(16));
+        let parts = split_markup_text(&text, 20);
+        assert_eq!(parts.len(), 2);
+        assert_eq!(ComposerDoc::from_markup(&parts[1]).emoji.len(), 1);
+    }
+
+    #[test]
+    fn parts_read_as_the_whole_does() {
+        let mut random = crate::composer_doc::Random::new(0x2545_f491_4f6c_dd1d);
+        let mut failed = Vec::new();
+        for _ in 0..24_000 {
+            let pieces = 1 + random.below(40);
+            let markup = random.markup(pieces);
+            let limit = [16, 33, 64, 100][random.below(4)];
+            let parts = split_markup_text(&markup, limit);
+            let whole = tagged_chars(&ComposerDoc::from_markup(markup.trim()));
+            let joined: Vec<_> = parts
+                .iter()
+                .flat_map(|part| tagged_chars(&ComposerDoc::from_markup(part)))
+                .collect();
+            let too_long = parts
+                .iter()
+                .any(|part| markup_text_units(part) > limit as usize);
+            if too_long || joined != whole {
+                failed.push(format!("{limit} {markup:?}\n  {parts:?}"));
+            }
+        }
+        let count = failed.len();
+        failed.truncate(6);
+        assert!(count == 0, "{count} failed\n{}", failed.join("\n"));
+    }
+
+    fn tagged_chars(doc: &ComposerDoc) -> Vec<(char, Vec<String>)> {
+        doc.text
+            .char_indices()
+            .filter(|(_, ch)| !ch.is_whitespace())
+            .map(|(at, ch)| {
+                let mut tags: Vec<&ComposerTag> = doc
+                    .spans
+                    .iter()
+                    .filter(|span| span.range.contains(&at))
+                    .map(|span| &span.tag)
+                    .collect();
+                let block = tags.iter().find(|tag| matches!(tag, ComposerTag::Pre(_)));
+                if let Some(&block) = block {
+                    tags = vec![block];
+                }
+                let mut tags: Vec<String> = tags.iter().map(|tag| tag.to_tag()).collect();
+                tags.sort();
+                (ch, tags)
+            })
+            .collect()
     }
 
     #[test]

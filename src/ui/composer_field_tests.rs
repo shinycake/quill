@@ -48,7 +48,9 @@ impl Render for Field {
 
 /// The composer field (styler installed) in a window whose text system
 /// shapes like the real platforms (`BidiTextSystem`).
-fn with_field(test: impl FnOnce(&mut TestAppContext, AnyWindowHandle, Entity<TextareaState>)) {
+pub(super) fn with_field(
+    test: impl FnOnce(&mut TestAppContext, AnyWindowHandle, Entity<TextareaState>),
+) {
     let dispatcher = gpui_kit::TestDispatcher::new(0);
     let mut cx = TestAppContext::build_with_text_system(
         dispatcher,
@@ -75,14 +77,18 @@ fn with_field(test: impl FnOnce(&mut TestAppContext, AnyWindowHandle, Entity<Tex
     cx.quit();
 }
 
-fn caret(input: &Entity<TextareaState>, at: usize, cx: &gpui_kit::App) -> Bounds<Pixels> {
+pub(super) fn caret(
+    input: &Entity<TextareaState>,
+    at: usize,
+    cx: &gpui_kit::App,
+) -> Bounds<Pixels> {
     input
         .read(cx)
         .range_to_bounds(&(at..at))
         .unwrap_or_else(|| panic!("offset {at} is laid out"))
 }
 
-fn load(
+pub(super) fn load(
     input: &Entity<TextareaState>,
     doc: &ComposerDoc,
     window: &mut Window,
@@ -94,7 +100,12 @@ fn load(
     window.render_frame(cx);
 }
 
-fn park(input: &Entity<TextareaState>, at: usize, window: &mut Window, cx: &mut gpui_kit::App) {
+pub(super) fn park(
+    input: &Entity<TextareaState>,
+    at: usize,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) {
     input.update(cx, |state, cx| state.set_selected_range(at..at, cx));
     window.render_frame(cx);
 }

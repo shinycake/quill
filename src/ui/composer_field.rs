@@ -574,3 +574,8 @@ pub(super) fn mention_name(first_name: &str, display_name: &str) -> String {
         first_name.to_string()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "composer_long_line_tests.rs"]
+mod long_line_tests;

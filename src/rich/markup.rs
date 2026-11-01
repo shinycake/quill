@@ -209,18 +209,14 @@ fn nonempty_lines(parts: &[&str]) -> Option<String> {
 }
 
 /// M2: resolve editor markup to clean text + render entities for the live
-/// block preview. `parse_format_markup` yields UTF-16 offsets;
-/// `TextEntity` needs UTF-8 byte offsets (converted with
-/// `utf16_to_utf8_offset`, as in `rich_text_to_parts`). Block quotes are
-/// block-level — inside a paragraph the text survives and the marker is
-/// dropped, mirroring `formatted_to_rich_text`.
+/// block preview. Block quotes are block-level: inside a paragraph the text
+/// survives and the marker is dropped, mirroring `formatted_to_rich_text`.
 fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
     let (clean, composer_entities) = crate::composer::parse_format_markup(text);
     let entities = composer_entities
         .into_iter()
         .filter_map(|entity| {
-            let start = utf16_to_utf8_offset(&clean, entity.offset).ok()?;
-            let end = utf16_to_utf8_offset(&clean, entity.offset + entity.length).ok()?;
+            let std::ops::Range { start, end } = entity.bytes;
             if end <= start {
                 return None;
             }

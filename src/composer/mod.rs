@@ -61,7 +61,6 @@ pub use markup::{
     custom_emoji_markup, date_link, date_link_time, entities_to_markup, find_urls, mention_user_id,
 };
 pub use markup_parser::parse_format_markup;
-pub(crate) use markup_parser::{MarkupScanner, Seam};
 pub use media_options::{
     AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, MediaSendOptions, PAID_MEDIA_MAX_STARS,
     PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoScaleTimedOut, PriceInput, can_use_high_quality,
