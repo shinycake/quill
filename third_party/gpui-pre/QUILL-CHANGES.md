@@ -349,19 +349,6 @@ moved callback, as a window the user dragged reports itself.
 `simulate_window_move_to_display` (the latter calls the existing
 `TestWindow::simulate_move_to_display`).
 
-## The Windows manifest opts into long paths
-
-Added in 2026, the follow-up named in `docs/decisions/platform-small-fixes.md`:
-
-- `resources/windows/gpui.manifest.xml`: `longPathAware` is `true`, as in
-  Telegram Desktop's manifest, so Win32 calls that take a plain path (the
-  shell, FFmpeg's file opens) work past 260 characters where the system
-  allows long paths. `scripts/check-windows-manifest.py`, which CI's
-  `linux-fmt-clippy-test` job runs, fails if it or per-monitor DPI goes
-  missing.
-
-Not run on Windows by the author.
-
 ## A replayed range enters the bounds tree once
 
 Changed in 2026 for the deep sweep. `Scene::replay` sent every layer, and every

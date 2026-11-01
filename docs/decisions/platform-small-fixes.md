@@ -1,8 +1,8 @@
 # Platform small fixes (Linux desktop id, file names, paths)
 
 Source: quality-sweep platform audit, findings P2, P5, P7, P10. tdesktop reference: it ships a
-Windows manifest with per-monitor DPI and `longPathAware`, and its Linux desktop file is named after
-the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
+Windows manifest with per-monitor DPI and the UTF-8 code page, and its Linux desktop file is named
+after the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
 
 ## What changed
 
@@ -11,9 +11,8 @@ the app id (`org.telegram.desktop.desktop`) with a matching `StartupWMClass`.
   still enabled through another dependency path and embeds `gpui.manifest.xml` (PerMonitorV2 +
   dpiAware, Common-Controls 6, Win10 supportedOS, asInvoker, SegmentHeap). Adding Quill's own made the
   Windows link fail with CVT1100 (duplicate RT_MANIFEST 1, Windows CI on `cursor/platform-small-fixes`),
-  even with `/MANIFEST:NO`. Only `longPathAware` and the UTF-8 code page are missing; a follow-up can
-  add them by patching the vendored gpui manifest rather than adding a second one. `longPathAware`
-  was added that way later (`third_party/gpui-pre/QUILL-CHANGES.md`); the UTF-8 code page was not.
+  even with `/MANIFEST:NO`. Only the UTF-8 code page is missing; a follow-up can add it by patching
+  the vendored gpui manifest rather than adding a second one.
 - **P5 desktop id.** `assets/quill.desktop` is now `assets/org.shinycake.quill.desktop` with
   `StartupWMClass=org.shinycake.quill`, matching the window app_id. Package script, installer
   (`linux-install.sh`, keeps a hidden `NoDisplay` `quill.desktop` alias only where an old one existed,
