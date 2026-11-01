@@ -962,10 +962,22 @@ impl Player {
         }
         // A clip nobody paints keeps its last picture queued; once the
         // clock has passed it, it would only be shown late.
+        // Held for a first picture after a seek that nobody paints, while
+        // the sound plays on past it: the decode thread already paces the
+        // pictures on the sound (`paint_floor`), so the clock follows it.
+        let clock = self.clock();
+        if clock.held
+            && clock.is_playing()
+            && let Some(heard) = self.heard().filter(|&heard| heard > clock.position(now))
+        {
+            self.with_clock(|clock| clock.follow(heard, now));
+        }
         let position = self.position_at(now);
+        // Running without a picture shown since the seek: released above.
+        let running = !self.first || !self.clock().held;
         let drained = {
             let state = lock(&self.shared.state);
-            let passed = |last: &VideoFrame| !self.first && last.pts <= position + DUE_SLACK;
+            let passed = |last: &VideoFrame| running && last.pts <= position + DUE_SLACK;
             state.eof && state.video.back().is_none_or(passed)
         };
         if !drained {

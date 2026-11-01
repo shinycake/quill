@@ -527,6 +527,26 @@ fn a_clip_nobody_paints_ends_when_its_time_runs_out() {
     assert!(rig.player.error().is_none());
 }
 
+/// A round video seeked from the player bar while nothing paints it.
+#[test]
+fn a_clip_seeked_while_nobody_paints_ends_when_its_time_runs_out() {
+    let mut rig = Rig::open(Shape::clip(2.0, 2.0));
+    let t0 = rig.start();
+    rig.player.seek(1.0);
+    rig.settle();
+    rig.play_with_nothing_painting(0.5);
+    rig.player.update_ended(t0 + Duration::from_secs_f64(0.5));
+    assert!(!rig.player.ended, "still playing at 1.5 s");
+    rig.play_with_nothing_painting(1.0);
+    rig.player.update_ended(t0 + Duration::from_secs_f64(1.5));
+    assert!(
+        rig.player.ended,
+        "{} pictures queued at {}",
+        rig.pictures_queued(),
+        rig.player.position_at(t0 + Duration::from_secs_f64(1.5)),
+    );
+}
+
 #[test]
 fn a_silent_clip_nobody_paints_keeps_its_picture_current() {
     let mut rig = Rig::open(Shape::clip(10.0, 0.0));
