@@ -385,7 +385,7 @@ impl QuillApp {
         if self.history.scroll_date.wake.is_some() {
             return;
         }
-        self.history.scroll_date.wake = Some(Self::spawn_main(cx, async move |app, cx| {
+        self.history.scroll_date.wake = Some(self.spawn_scoped(cx, async move |app, cx| {
             cx.background_executor().timer(wait).await;
             let _ = app.update(cx, |this, cx| {
                 this.history.scroll_date.wake = None;
