@@ -212,7 +212,7 @@ impl Session {
             && let Some(topic_history) =
                 self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
         {
-            topic_history.upsert(row);
+            topic_history.note_live(row);
         }
     }
 

@@ -165,6 +165,7 @@ mod sticker_gif_types;
 mod story_insights;
 mod story_types;
 mod thread_types;
+mod topic_window;
 mod updates_sync;
 mod web_app_types;
 

@@ -40,6 +40,7 @@ mod flood_retry;
 mod flood_retry_lost;
 mod folder_followups;
 mod forum_saved;
+mod forum_window;
 mod gift_export;
 mod gift_manage;
 mod gift_market;

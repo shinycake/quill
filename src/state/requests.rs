@@ -117,6 +117,7 @@ impl RequestPurpose {
                 | RequestPurpose::GetHistoryAround
                 | RequestPurpose::GetHistoryNewer
                 | RequestPurpose::GetTopicHistory
+                | RequestPurpose::GetTopicHistoryNewer
                 | RequestPurpose::GetMessageThreadHistory { .. }
                 | RequestPurpose::SearchMessages
                 | RequestPurpose::SearchChatMessages

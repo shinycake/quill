@@ -141,7 +141,7 @@ impl Session {
         };
         if Some(thread.origin_chat_id) != origin_chat
             || thread.origin_message_id.0 != message_id
-            || thread.stale_pages.remove(&pending.id.0)
+            || thread.history.stale_pages.remove(&pending.id.0)
         {
             return;
         }
@@ -166,7 +166,7 @@ impl Session {
             // The newer side: an empty page says the window reached the
             // newest reply whatever the server reported before.
             if added == 0 {
-                thread.has_newer = false;
+                thread.history.has_newer = false;
             } else {
                 thread.refresh_has_newer();
             }
@@ -226,12 +226,12 @@ impl Session {
         };
         if Some(thread.origin_chat_id) != origin_chat
             || thread.origin_message_id.0 != message_id
-            || thread.stale_pages.remove(&pending.id.0)
+            || thread.history.stale_pages.remove(&pending.id.0)
         {
             return;
         }
         if newer {
-            thread.newer_failed = true;
+            thread.history.newer_failed = true;
         } else if thread.saved_anchor.take().is_some() {
             // The page around the saved position failed: load the default
             // first page instead.
@@ -277,7 +277,10 @@ impl Session {
         let Some(thread) = self.threads.thread.as_mut() else {
             return false;
         };
-        thread.stale_pages.extend(stale.into_iter().map(|id| id.0));
+        thread
+            .history
+            .stale_pages
+            .extend(stale.into_iter().map(|id| id.0));
         thread.reset_window();
         true
     }
@@ -380,7 +383,10 @@ impl Session {
             .collect();
         let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
         if let Some(thread) = self.threads.thread.as_mut() {
-            thread.stale_pages.extend(stale.into_iter().map(|id| id.0));
+            thread
+                .history
+                .stale_pages
+                .extend(stale.into_iter().map(|id| id.0));
         }
     }
 

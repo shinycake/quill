@@ -192,13 +192,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(thread) = self
-            .session
-            .threads
-            .thread
-            .as_ref()
-            .filter(|thread| thread.thread_id != 0 && thread.has_newer && !thread.newer_failed)
-        else {
+        let Some(thread) = self.session.threads.thread.as_ref().filter(|thread| {
+            thread.thread_id != 0 && thread.history.has_newer && !thread.history.newer_failed
+        }) else {
             return Ok(None);
         };
         let Some(from) = thread.newest_loaded_id() else {
@@ -240,7 +236,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         thread.unread_anchor = None;
-        if thread.has_newer {
+        if thread.history.has_newer {
             self.session.reset_thread_window();
         }
         if !self.thread_needs_reload() {

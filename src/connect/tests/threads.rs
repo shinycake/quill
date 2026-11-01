@@ -429,7 +429,16 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
             text_message(43, 14, 40, "a"),
         ),
     );
-    assert!(driver.session.threads.thread.as_ref().unwrap().has_newer);
+    assert!(
+        driver
+            .session
+            .threads
+            .thread
+            .as_ref()
+            .unwrap()
+            .history
+            .has_newer
+    );
     assert!(!driver.thread_needs_reload());
 
     // 2. Scrolling down pages forward from the newest loaded reply; one
@@ -458,8 +467,8 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
     {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.unread_anchor, None);
-        assert!(!thread.has_newer);
-        assert_eq!(thread.window_epoch, 1);
+        assert!(!thread.history.has_newer);
+        assert_eq!(thread.history.window_epoch, 1);
     }
     ingest(
         &mut driver,
@@ -496,7 +505,7 @@ fn unread_thread_opens_at_the_read_position_and_jumps_to_the_latest_replies() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         let ids: Vec<i64> = thread.ordered().iter().map(|m| m.id.0).collect();
         assert_eq!(ids, vec![47, 48, 49]);
-        assert!(!thread.has_newer);
+        assert!(!thread.history.has_newer);
         assert_eq!(thread.history.next_from_message_id, MessageId(47));
     }
     // With the newest replies shown, the button only scrolls.
@@ -580,7 +589,7 @@ fn a_thread_opens_at_its_saved_reply_and_falls_back_when_it_is_gone() {
         let thread = driver.session.threads.thread.as_ref().unwrap();
         assert_eq!(thread.status, ThreadStatus::Ready);
         assert!(thread.history.messages.contains_key(&46));
-        assert!(thread.has_newer);
+        assert!(thread.history.has_newer);
     }
     assert!(!driver.session.thread_saved_open_pending(ChatId(14)));
     assert!(!driver.thread_needs_reload());

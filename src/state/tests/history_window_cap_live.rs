@@ -259,7 +259,7 @@ fn a_reopened_chat_starts_at_the_tail_again() {
 }
 
 #[test]
-fn a_forum_topic_on_screen_drops_only_rows_above_its_reader() {
+fn a_forum_topic_on_screen_drops_rows_far_from_its_reader() {
     let (mut session, _sink) = session();
     let cap = HISTORY_WINDOW_CAP as i64;
     session.topic_history_entry(ChatId(7), 3);
@@ -285,11 +285,14 @@ fn a_forum_topic_on_screen_drops_only_rows_above_its_reader() {
         session.apply_update_new_message(message);
     }
     let topic = &session.threads.topic_histories[&(7, 3)];
+    assert!(topic.messages.len() <= HISTORY_WINDOW_CAP);
     assert_eq!(
-        topic.messages.len(),
-        1200 + 399,
+        topic.messages.keys().next(),
+        Some(&(cap + 2 - 1200)),
         "the reader keeps their rows"
     );
+    assert!(topic.has_newer, "the newest end went and pages back in");
+    assert_eq!(topic.latest_seen, cap + 400);
 }
 
 #[test]
