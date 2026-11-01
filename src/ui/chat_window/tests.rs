@@ -841,6 +841,33 @@ fn closing_a_chat_window_ends_the_recording_made_there(cx: &mut TestAppContext) 
 }
 
 #[gpui_kit::test]
+fn a_microphone_that_comes_up_after_its_window_closed_is_dropped(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    h.app.update(cx, |app, cx| {
+        app.recording.open_voice = std::sync::Arc::new(|| {
+            let path = std::env::temp_dir().join("quill-window-recording-test.ogg");
+            Ok(quill::voice::VoiceCapture::preview(path, 3, vec![4]))
+        });
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.start_voice_capture(CaptureFor::Message, cx);
+        })
+        .expect("the chat has a window");
+    });
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let (active, busy) = h
+        .app
+        .read_with(cx, |app, _| (app.recording_active(), app.recording_busy()));
+    assert!(!active, "no recording outlives its window");
+    assert!(!busy, "and the next one may start");
+}
+
+#[gpui_kit::test]
 fn a_sent_recording_leaves_no_window_behind_for_the_next_one(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
@@ -1053,7 +1080,7 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
         .map(|entries| {
             entries
                 .flatten()
-                .map(|entry| entry.path())
+                .filter_map(|entry| std::fs::canonicalize(entry.path()).ok())
                 .filter(|path| image::image_dimensions(path).ok() == Some((13, 53)))
                 .collect()
         })

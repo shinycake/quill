@@ -33,9 +33,6 @@ impl QuillApp {
                 unread,
             });
         } else {
-            // Closed without waiting. An account closed for a call starts
-            // again in the background once Closed (`reap_closing`); one that
-            // needs a sign-in keeps only its status until it is switched to.
             self.close_live_later(live, !status.stops_client(), cx);
             if status.stops_client() {
                 self.background.clients.push(BackgroundClient {

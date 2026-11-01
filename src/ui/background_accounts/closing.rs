@@ -165,6 +165,7 @@ impl QuillApp {
             self.background.push_closing(key, live, false);
         }
         self.background.close_all_within(deadline);
+        quill::calls::engine::await_call_teardown(deadline);
     }
 
     /// The window's app is dropped without the quit observer having run:

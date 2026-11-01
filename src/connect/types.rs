@@ -278,6 +278,7 @@ pub struct ConnectDriver<S: JsonSender> {
     /// Poll-batch state (`begin_batch` / `end_batch`).
     pub(crate) batch: super::core::batch::BatchState,
     pub(crate) call_engine: Option<Box<dyn CallEngine>>,
+    pub(crate) close_held_until: Option<std::time::Instant>,
     pub(crate) signaling_outbox: SignalingOutbox,
     pub(crate) transport_outbox: TransportOutbox,
     /// Phase C2e: engine-emitted peer camera states (worker thread ->

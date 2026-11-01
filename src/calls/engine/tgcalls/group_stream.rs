@@ -23,7 +23,7 @@ impl TgcallsEngine {
         &self,
         chat_id: i64,
         request: BroadcastRequestId,
-    ) -> Option<NonNull<qc_group>> {
+    ) -> Option<Native<qc_group>> {
         self.groups
             .values()
             .find(|call| call.chat_id == chat_id && call.context.instance == request.instance)

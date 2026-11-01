@@ -10,18 +10,41 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ErrorKind, FromSample, I24, SampleFormat, SizedSample, Stream, StreamConfig};
 
-use crate::cpal_stream::{StreamErrors, downmix_into};
+use crate::cpal_stream::{MicThread, StreamErrors, downmix_into};
 use crate::resample::Resampler;
 
-/// An open, running input stream. Dropping it stops the microphone.
+/// An open, running input stream on its own thread. Dropping it stops the
+/// microphone, on that thread.
 pub struct MicStream {
-    stream: Stream,
+    device: MicThread<MicCommand>,
     /// Set by the stream's error callback (device unplugged, …).
     pub error: Arc<Mutex<Option<String>>>,
 }
 
+enum MicCommand {
+    Pause,
+    Play,
+}
+
 /// Open the default input device and send mono 48 kHz chunks to `out`.
+/// Waits for the device, so call it off the UI thread.
 pub fn open_default(out: Sender<Vec<f32>>) -> Result<MicStream, String> {
+    let error = Arc::new(Mutex::new(None));
+    let stream_error = error.clone();
+    let device = MicThread::open(
+        "quill-voice-mic",
+        move || open_stream(out, stream_error),
+        |stream: &mut Stream, command| {
+            let _ = match command {
+                MicCommand::Pause => stream.pause(),
+                MicCommand::Play => stream.play(),
+            };
+        },
+    )?;
+    Ok(MicStream { device, error })
+}
+
+fn open_stream(out: Sender<Vec<f32>>, error: Arc<Mutex<Option<String>>>) -> Result<Stream, String> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -33,9 +56,7 @@ pub fn open_default(out: Sender<Vec<f32>>) -> Result<MicStream, String> {
     let rate = supported.sample_rate();
     let format = supported.sample_format();
     let config: StreamConfig = supported.config();
-    let error = Arc::new(Mutex::new(None));
     let on_error = {
-        let error = error.clone();
         // Xruns and reroutes leave the recording running; only the rest
         // end the voice note.
         let mut errors = StreamErrors::new("voice note microphone");
@@ -58,19 +79,19 @@ pub fn open_default(out: Sender<Vec<f32>>) -> Result<MicStream, String> {
         other => Err(format!("Unsupported microphone format ({other:?}).")),
     }?;
     stream.play().map_err(|err| friendly_error(&err))?;
-    Ok(MicStream { stream, error })
+    Ok(stream)
 }
 
 impl MicStream {
     /// Release the microphone for now. A backend that cannot pause leaves
     /// the stream running; the encoder drops its audio either way.
     pub fn pause(&self) {
-        let _ = self.stream.pause();
+        self.device.send(MicCommand::Pause);
     }
 
     /// Listen again after [`Self::pause`].
     pub fn play(&self) {
-        let _ = self.stream.play();
+        self.device.send(MicCommand::Play);
     }
 }
 

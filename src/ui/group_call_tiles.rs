@@ -104,9 +104,13 @@ impl QuillApp {
             .tile_overlays
             .retain(|key, _| players.contains_key(key));
         let mut built: Vec<Tile> = Vec::new();
-        for participant in &call.participants {
+        for participant in call.participants.iter() {
+            let own_camera = participant.is_current_user && call.is_my_video_enabled;
+            if !own_camera && !participant.video_enabled && !participant.screen_sharing_enabled {
+                continue;
+            }
             let name = self.group_call_participant_name(&participant.participant_id);
-            if participant.is_current_user && call.is_my_video_enabled {
+            if own_camera {
                 let picture = self.group_self_tile_content(call, participant, &name, cx);
                 built.push(Tile {
                     key: TileKey {
