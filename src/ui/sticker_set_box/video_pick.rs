@@ -72,6 +72,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.sticker_box.pick = None;
+        self.sticker_box.pending_still = None;
         let Some(path) = self.local_media_path(file_id) else {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.download_file(file_id, 16);

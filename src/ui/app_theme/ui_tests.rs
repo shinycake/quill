@@ -234,3 +234,88 @@ fn a_custom_theme_is_read_off_the_ui_thread(cx: &mut TestAppContext) {
         assert_eq!(applied_id(app), Some(&ThemeId::default_day()));
     });
 }
+
+/// Edit on a custom theme reads it off the UI thread. Opening the current
+/// theme's editor meanwhile wins: the late read neither replaces that
+/// editor nor reports its own failure.
+#[gpui_kit::test]
+fn a_late_custom_read_leaves_a_newer_editor_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let missing = "quill-test-no-such-theme-b9-editor".to_string();
+    let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
+    app.update_in(vcx, |app, window, cx| {
+        app.open_theme_editor(EditorSource::Custom(missing), window, cx);
+        assert!(app.settings.app_theme.editor.is_none(), "still reading");
+        app.open_theme_editor(EditorSource::Current, window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        let editor = app.settings.app_theme.editor.as_ref();
+        assert!(editor.is_some_and(|editor| editor.editing.is_none()));
+        assert_eq!(app.connection.status_note(), note);
+    });
+}
+
+/// Closing Settings while a custom theme is read for the editor: the
+/// editor does not pop up on its own afterwards.
+#[gpui_kit::test]
+fn closing_settings_drops_the_editor_read(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let missing = "quill-test-no-such-theme-b9-closed".to_string();
+    let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
+    app.update_in(vcx, |app, window, cx| {
+        app.open_theme_editor(EditorSource::Custom(missing), window, cx);
+        app.close_settings();
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(app.settings.app_theme.editor.is_none());
+        assert_eq!(app.connection.status_note(), note, "no load error either");
+    });
+}
+
+/// A custom day theme and a custom night theme: once both are read,
+/// switching between day and night shows the new mode's theme at once,
+/// never the other mode's for a moment.
+#[gpui_kit::test]
+fn switching_between_two_custom_themes_never_shows_the_other(cx: &mut TestAppContext) {
+    use quill::app_theme::{ThemeFile, store};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = QuillApp::themes_dir();
+    let day = "quill-test-b9-custom-day".to_string();
+    let night = "quill-test-b9-custom-night".to_string();
+    for (name, theme) in [(&day, BuiltinTheme::Day), (&night, BuiltinTheme::Night)] {
+        store::save(&dir, name, &ThemeFile::from_palette(&theme.palette())).expect("saved");
+    }
+    let show = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, dark: bool| {
+        app.update_in(vcx, |app, _, cx| {
+            app.appearance.theme = if dark {
+                quill::settings::ThemeChoice::Dark
+            } else {
+                quill::settings::ThemeChoice::Light
+            };
+            reapply(app, cx);
+            applied_id(app).cloned()
+        })
+    };
+    app.update_in(vcx, |app, _, _| {
+        app.appearance.auto_night = quill::settings::AutoNight::Off;
+        app.appearance.day_theme = ThemeId::Custom(day.clone());
+        app.appearance.night_theme = ThemeId::Custom(night.clone());
+    });
+    // The first time each is read off the UI thread.
+    show(&app, vcx, false);
+    vcx.run_until_parked();
+    show(&app, vcx, true);
+    vcx.run_until_parked();
+    for dark in [false, true, false] {
+        let expected = ThemeId::Custom(if dark { night.clone() } else { day.clone() });
+        assert_eq!(show(&app, vcx, dark), Some(expected));
+    }
+    for name in [&day, &night] {
+        let _ = store::delete(&dir, name);
+    }
+}

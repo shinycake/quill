@@ -45,7 +45,7 @@ pub(crate) struct ThemeEditor {
     selected: EditorRow,
     /// The custom theme being edited; saving under the same name replaces
     /// it.
-    editing: Option<String>,
+    pub(super) editing: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -119,6 +119,7 @@ impl QuillApp {
     ) {
         match source {
             EditorSource::Current => {
+                self.settings.app_theme.editor_read = None;
                 let palette = self
                     .settings
                     .app_theme
@@ -131,28 +132,45 @@ impl QuillApp {
                 let image = image_color(&file);
                 self.show_theme_editor(file, None, image, window, cx);
             }
-            // The theme's picture is decoded off the UI thread.
+            // The theme's picture is decoded off the UI thread. The read is
+            // dropped when the editor, Settings or the theme goes away first.
             EditorSource::Custom(name) => {
+                let themes = &mut self.settings.app_theme;
+                if themes
+                    .editor_read
+                    .as_ref()
+                    .is_some_and(|(reading, _)| *reading == name)
+                {
+                    return;
+                }
                 let dir = Self::themes_dir();
+                let wanted = name.clone();
                 let read = cx.background_spawn(async move {
-                    store::load(&dir, &name).map(|file| {
+                    store::load(&dir, &wanted).map(|file| {
                         let image = image_color(&file);
-                        (file, name, image)
+                        (file, image)
                     })
                 });
-                cx.spawn_in(window, async move |this, cx| {
+                let editing = name.clone();
+                let task = cx.spawn_in(window, async move |this, cx| {
                     let read = read.await;
-                    let _ = this.update_in(cx, |this, window, cx| match read {
-                        Ok((file, name, image)) => {
-                            this.show_theme_editor(file, Some(name), image, window, cx);
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        this.settings.app_theme.editor_read = None;
+                        if this.settings.app_theme.editor.is_some() {
+                            return;
                         }
-                        Err(err) => {
-                            this.connection.set_note(StatusNote::error(err.note()));
-                            cx.notify();
+                        match read {
+                            Ok((file, image)) => {
+                                this.show_theme_editor(file, Some(editing), image, window, cx);
+                            }
+                            Err(err) => {
+                                this.connection.set_note(StatusNote::error(err.note()));
+                                cx.notify();
+                            }
                         }
                     });
-                })
-                .detach();
+                });
+                themes.editor_read = Some((name, task));
             }
         }
     }
@@ -215,6 +233,7 @@ impl QuillApp {
     /// Close the editor; what it changed goes away unless it was saved.
     pub(crate) fn close_theme_editor(&mut self, cx: &mut Context<Self>) {
         self.settings.app_theme.editor = None;
+        self.settings.app_theme.editor_read = None;
         self.apply_appearance(cx);
         cx.notify();
     }

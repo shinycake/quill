@@ -33,6 +33,12 @@ impl<K: Hash + Eq + Clone, V: Clone> OffRender<K, V> {
         }
     }
 
+    /// Whether the picture under `key` was made (`Some(false)`: it failed).
+    #[cfg(test)]
+    pub(super) fn made(&mut self, key: &K) -> Option<bool> {
+        self.made.get(key).map(|made| made.is_some())
+    }
+
     fn land(&mut self, key: K, made: Option<V>) -> SmallVec<[EntityId; 2]> {
         let views = self.waiting.remove(&key).unwrap_or_default();
         if let Some(Some(old)) = self.made.insert(key, made) {

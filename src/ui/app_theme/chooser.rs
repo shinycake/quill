@@ -401,7 +401,9 @@ impl QuillApp {
                 Ok((name, palette)) => {
                     this.refresh_custom_themes();
                     let night = palette.is_dark();
-                    this.settings.app_theme.custom_cache = Some((name.clone(), Some(palette)));
+                    this.settings
+                        .app_theme
+                        .cache_palette(name.clone(), Some(palette));
                     this.choose_app_theme(ThemeId::Custom(name), night, cx);
                 }
                 Err(err) => {

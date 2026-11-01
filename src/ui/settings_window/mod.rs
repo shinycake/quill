@@ -79,6 +79,7 @@ impl QuillApp {
             self.leave_settings_page(page);
         }
         self.settings.search.close();
+        self.settings.app_theme.editor_read = None;
         self.settings.open = false;
         self.settings.page = None;
         self.settings.sub = None;

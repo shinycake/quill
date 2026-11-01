@@ -107,9 +107,14 @@ fn open_intro(path: &std::path::Path, cx: &mut Context<QuillApp>) -> Option<Vide
 
 /// The bundled clip as a file the player can open (the players read
 /// files, not memory), written once into the app's own data folder under
-/// a name that changes with its content.
+/// a name that changes with its content. One write at a time: Replay
+/// while the first write runs waits for it and finds the file written,
+/// where a second rename onto the clip the player holds open would fail on
+/// Windows.
 fn intro_file() -> Option<PathBuf> {
     use std::io::Write;
+    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = quill::locks::lock_or_recover(&WRITING);
     let hash = INTRO_MP4
         .iter()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {

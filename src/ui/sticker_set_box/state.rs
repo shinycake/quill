@@ -109,6 +109,8 @@ pub(crate) struct StickerSetBoxUi {
     pub(crate) pick: Option<PickExisting>,
     /// A chosen video waiting for its download.
     pub(crate) pending_video: Option<PendingVideo>,
+    /// A chosen still sticker being decoded for the editor.
+    pub(crate) pending_still: Option<(PickExisting, FileId)>,
 }
 
 impl StickerSetBoxUi {
@@ -127,6 +129,7 @@ impl StickerSetBoxUi {
                 .new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_MEDIA_SEARCH_EMOJI))),
             pick: None,
             pending_video: None,
+            pending_still: None,
         }
     }
 
@@ -151,5 +154,6 @@ impl StickerSetBoxUi {
         self.discard_create();
         self.pick = None;
         self.pending_video = None;
+        self.pending_still = None;
     }
 }

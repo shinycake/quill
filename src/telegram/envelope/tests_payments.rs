@@ -351,10 +351,7 @@ fn paid_media_keeps_locked_previews_and_caption() {
     assert_eq!(caption, "Behind the scenes");
     assert_eq!(locked.len(), 2);
     assert_eq!((locked[0].width, locked[0].height), (800, 600));
-    assert_eq!(
-        locked[0].minithumbnail.as_ref().unwrap().data,
-        vec![1, 2, 3]
-    );
+    assert_eq!(*locked[0].minithumbnail.as_ref().unwrap().data, [1, 2, 3]);
     assert_eq!(locked[1].duration, 12);
     assert!(locked[1].minithumbnail.is_none());
 }

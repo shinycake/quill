@@ -490,5 +490,8 @@ shader again:
   existing object for an identical description. A new device after a device
   loss replaces the cache.
 
-Type-checked with `cargo check --target x86_64-pc-windows-gnu` on Linux. Not
-run on Windows by the author.
+`shared_shader_tests` checks the device-loss reset on two WARP devices: a new
+device gets shaders made on it and the old device's are dropped. Run it on
+Windows with `cargo test -p gpui-pre-windows -p quill --lib --features
+quill/demo-capture shared_shader_tests` (the crate is not a workspace member,
+so its `test-support` feature comes through Quill's `demo-capture`).

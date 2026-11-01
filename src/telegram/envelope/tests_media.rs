@@ -651,7 +651,7 @@ fn message_audio_parses_1_8_67_fields() {
     assert_eq!(audio.play_file_id(), Some(FileId(7)));
     let mini_thumb = audio.album_cover_minithumbnail.as_ref().expect("mini");
     assert_eq!(mini_thumb.width, 8);
-    assert_eq!(mini_thumb.data, vec![0xFF, 0xD8, 0xFF]);
+    assert_eq!(*mini_thumb.data, [0xFF, 0xD8, 0xFF]);
     let cover_thumb = audio.album_cover_thumbnail.as_ref().expect("cover");
     assert_eq!(cover_thumb.file_id, FileId(8));
     assert_eq!(cover_thumb.width, 90);

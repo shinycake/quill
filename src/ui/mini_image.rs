@@ -33,7 +33,7 @@ mod tests {
         let mini = MiniThumbnail {
             width: 2,
             height: 2,
-            data: vec![1, 2, 3],
+            data: vec![1, 2, 3].into(),
         };
         // `Image` sources land in GPUI's never-evicting asset cache.
         assert!(!matches!(mini_image(&mini), ImageSource::Image(_)));
