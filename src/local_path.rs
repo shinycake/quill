@@ -18,12 +18,15 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     if candidate.is_empty() {
         return None;
     }
-    let key = (candidate.to_owned(), roots_key(allowed_roots));
+    let roots = roots_key(allowed_roots);
     let now = std::time::Instant::now();
-    if let Some((at, verdict, ttl)) = VERDICTS.lock_or_recover().get(&key)
-        && now.duration_since(*at) < *ttl
+    if let Some(verdict) = VERDICTS
+        .lock_or_recover()
+        .get(candidate)
+        .and_then(|variants| variants.iter().find(|v| v.roots == roots))
+        .filter(|v| now.duration_since(v.at) < v.ttl)
     {
-        return verdict.clone();
+        return verdict.path.clone();
     }
     let verdict = sandboxed_display_path_uncached(candidate, allowed_roots);
     // A plain file (final component not a symlink) that passed stays valid
@@ -37,7 +40,14 @@ pub fn sandboxed_display_path(candidate: &str, allowed_roots: &[PathBuf]) -> Opt
     };
     let mut cache = VERDICTS.lock_or_recover();
     make_room(&mut cache, now);
-    cache.insert(key, (now, verdict.clone(), ttl));
+    let variants = cache.entry(candidate.to_owned()).or_default();
+    variants.retain(|v| v.roots != roots);
+    variants.push(Verdict {
+        roots,
+        at: now,
+        path: verdict.clone(),
+        ttl,
+    });
     drop(cache);
     verdict
 }
@@ -53,9 +63,7 @@ fn is_plain_file(path: &Path) -> bool {
 /// or finished downloading (TDLib `updateFile`), so the next display check
 /// looks at the disk again.
 pub fn invalidate_display_path(candidate: &str) {
-    VERDICTS
-        .lock_or_recover()
-        .retain(|(path, _), _| path != candidate);
+    VERDICTS.lock_or_recover().remove(candidate);
 }
 const VERDICT_CAP: usize = 8192;
 
@@ -65,14 +73,17 @@ fn make_room(cache: &mut VerdictCache, now: std::time::Instant) {
     if cache.len() < VERDICT_CAP {
         return;
     }
-    cache.retain(|_, (at, _, ttl)| now.duration_since(*at) < *ttl);
+    cache.retain(|_, variants| {
+        variants.retain(|v| now.duration_since(v.at) < v.ttl);
+        !variants.is_empty()
+    });
     if cache.len() < VERDICT_CAP {
         return;
     }
     let excess = cache.len() + 1 - VERDICT_CAP;
     let mut ages: Vec<_> = cache
         .iter()
-        .map(|(k, (at, _, _))| (*at, k.clone()))
+        .filter_map(|(k, variants)| Some((variants.iter().map(|v| v.at).max()?, k.clone())))
         .collect();
     ages.sort_by_key(|(at, _)| *at);
     for (_, key) in ages.into_iter().take(excess) {
@@ -80,8 +91,17 @@ fn make_room(cache: &mut VerdictCache, now: std::time::Instant) {
     }
 }
 
-type VerdictCache =
-    HashMap<(String, u64), (std::time::Instant, Option<PathBuf>, std::time::Duration)>;
+/// One display check of a path against one set of roots.
+struct Verdict {
+    roots: u64,
+    at: std::time::Instant,
+    path: Option<PathBuf>,
+    ttl: std::time::Duration,
+}
+
+/// Verdicts by path, one per set of roots it was checked against, so a
+/// lookup borrows the path and an invalidation is one remove.
+type VerdictCache = HashMap<String, Vec<Verdict>>;
 static VERDICTS: LazyLock<Mutex<VerdictCache>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static CANONICAL_ROOTS: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -358,17 +378,25 @@ mod tests {
     fn verdict_cache_hard_cap_evicts_oldest_first() {
         let base = std::time::Instant::now();
         let mut cache = VerdictCache::new();
+        let verdict = |at| {
+            vec![Verdict {
+                roots: 1,
+                at,
+                path: None,
+                ttl: VERDICT_TTL,
+            }]
+        };
         for i in 0..VERDICT_CAP {
             // All fresh (inside the TTL), so only the cap can evict; entry 0 is oldest.
             let at = base + std::time::Duration::from_micros(i as u64);
-            cache.insert((format!("p{i}"), 1), (at, None, VERDICT_TTL));
+            cache.insert(format!("p{i}"), verdict(at));
         }
         let now = base + std::time::Duration::from_millis(500);
         make_room(&mut cache, now);
         assert_eq!(cache.len(), VERDICT_CAP - 1);
-        assert!(!cache.contains_key(&("p0".to_owned(), 1)));
-        assert!(cache.contains_key(&(format!("p{}", VERDICT_CAP - 1), 1)));
-        cache.insert(("new".to_owned(), 1), (now, None, VERDICT_TTL));
+        assert!(!cache.contains_key("p0"));
+        assert!(cache.contains_key(&format!("p{}", VERDICT_CAP - 1)));
+        cache.insert("new".to_owned(), verdict(now));
         assert_eq!(cache.len(), VERDICT_CAP);
     }
 
@@ -392,6 +420,38 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn invalidating_a_path_drops_every_roots_variant_and_no_other_path() {
+        // A parallel sweep clears the memo, which would hide what is kept.
+        let _guard = lock_shared_media_cache();
+        let root = scratch("verdict-variants");
+        let other_root = scratch("verdict-variants-other");
+        let (a, b) = (root.join("a.jpg"), root.join("b.jpg"));
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"x").unwrap();
+        let (a, b) = (
+            a.to_str().unwrap().to_owned(),
+            b.to_str().unwrap().to_owned(),
+        );
+        let narrow = vec![root.clone()];
+        let wide = vec![other_root.clone(), root.clone()];
+        for roots in [&narrow, &wide] {
+            assert!(sandboxed_display_path(&a, roots).is_some());
+            assert!(sandboxed_display_path(&b, roots).is_some());
+        }
+        fs::remove_file(&a).unwrap();
+        fs::remove_file(&b).unwrap();
+        invalidate_display_path(&a);
+        for roots in [&narrow, &wide] {
+            assert!(sandboxed_display_path(&a, roots).is_none());
+            // Still memoized: its file is gone but nothing invalidated it.
+            assert!(sandboxed_display_path(&b, roots).is_some());
+        }
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&other_root);
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn symlink_verdict_is_rechecked_quickly() {
         let root = scratch("verdict-link");
         let outside = scratch("verdict-outside");
@@ -407,10 +467,13 @@ mod tests {
         fs::write(&inside, b"x").unwrap();
         fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(&inside, &link).unwrap();
-        let key = (path.clone(), roots_key(&roots));
+        let key = roots_key(&roots);
         invalidate_display_path(&path);
         assert!(sandboxed_display_path(&path, &roots).is_some());
-        let ttl = VERDICTS.lock_or_recover().get(&key).map(|(_, _, ttl)| *ttl);
+        let ttl = VERDICTS
+            .lock_or_recover()
+            .get(&path)
+            .and_then(|variants| variants.iter().find(|v| v.roots == key).map(|v| v.ttl));
         assert_eq!(ttl, Some(VERDICT_TTL));
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
