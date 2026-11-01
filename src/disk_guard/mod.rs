@@ -28,7 +28,7 @@ pub struct DataReading {
 /// `device` is where the root was last seen ([`data_root_device`]).
 pub fn read_data(root: &Path, device: Option<u64>) -> DataReading {
     let mut reading = folders::tightest(&folders::data_folders(root), read_volume);
-    reading.unwritable |= folders::volume_gone(root, device);
+    reading.unwritable |= folders::volume_gone(root, device) || folders::dangling_link(root);
     reading
 }
 

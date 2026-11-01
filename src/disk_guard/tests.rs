@@ -238,6 +238,20 @@ fn a_symlinked_files_folder_is_read_where_it_really_lives() {
     let _ = std::fs::remove_dir_all(&elsewhere);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_files_folder_linked_to_a_pulled_drive_is_unwritable() {
+    let root = crate::scratch::unique_dir("quill-disk-pulled");
+    let drive = crate::scratch::unique_dir("quill-disk-drive");
+    std::fs::create_dir_all(root.join("accounts/primary/tdlib")).unwrap();
+    std::os::unix::fs::symlink(&drive, root.join("accounts/primary/files")).unwrap();
+    assert!(!read_data(&root, None).unwritable, "the drive is there");
+    std::fs::remove_dir_all(&drive).unwrap();
+    assert!(read_data(&root, None).unwritable, "the drive was pulled");
+    assert_eq!(data_free_bytes(&root), Some(0));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn a_missing_data_root_still_gets_a_reading() {
     let root = std::env::temp_dir().join("quill-no-such-root/at/all");

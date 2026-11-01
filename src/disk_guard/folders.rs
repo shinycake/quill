@@ -10,6 +10,19 @@ use std::path::{Path, PathBuf};
 /// The data root, `accounts`, and each account folder with its `tdlib` and
 /// `files` folders, symlinks resolved and each real folder listed once.
 pub(super) fn data_folders(root: &Path) -> Vec<PathBuf> {
+    let mut real: Vec<PathBuf> = candidates(root)
+        .iter()
+        .filter_map(|folder| std::fs::canonicalize(folder).ok())
+        .collect();
+    real.sort();
+    real.dedup();
+    if real.is_empty() {
+        real.push(root.to_path_buf());
+    }
+    real
+}
+
+fn candidates(root: &Path) -> Vec<PathBuf> {
     let accounts = root.join("accounts");
     let mut folders = vec![root.to_path_buf(), accounts.clone()];
     if let Ok(entries) = std::fs::read_dir(&accounts) {
@@ -20,16 +33,17 @@ pub(super) fn data_folders(root: &Path) -> Vec<PathBuf> {
             folders.push(account);
         }
     }
-    let mut real: Vec<PathBuf> = folders
-        .iter()
-        .filter_map(|folder| std::fs::canonicalize(folder).ok())
-        .collect();
-    real.sort();
-    real.dedup();
-    if real.is_empty() {
-        real.push(root.to_path_buf());
-    }
-    real
+    folders
+}
+
+/// A data folder is a link whose target is gone: the drive it points at
+/// was pulled, so TDLib cannot write there. Its own volume says nothing
+/// about that, and it is left out of [`data_folders`].
+pub(super) fn dangling_link(root: &Path) -> bool {
+    candidates(root).iter().any(|folder| {
+        std::fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink())
+            && std::fs::metadata(folder).is_err()
+    })
 }
 
 /// `folders` read by `read`: the least free space over them, and whether
