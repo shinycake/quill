@@ -49,7 +49,7 @@ One extra commit fixes a test build that was already broken on sweep-all. An ear
 ## What did not run
 
 - No real GPU loss and no real renderer build failure. The keeps-dying path is tested at the policy and adapter-filter level, not on hardware.
-- Windows: `cargo check --target x86_64-pc-windows-gnu` could not run, because that target is not installed here. The changed renderer code is shared across platforms, and the Windows backend calls it the same way.
+- Windows: `cargo check --target x86_64-pc-windows-gnu` could not run, because that target is not installed here. gpui-pre-windows never calls the wgpu recovery code that changed (`recover`, `probe_hardware`, `hardware_probe_at`), so none of the GPU changes run on Windows. The battery and keymap changes are Linux-only.
 - macOS: nothing here is macOS-only.
 - An active Telegram session for the N49 numbers. Only the idle demo was measured.
 
