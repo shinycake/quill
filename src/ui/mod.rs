@@ -481,7 +481,7 @@ mod screen_chooser_demo;
 mod screenshot_demo;
 pub(crate) mod screenshot_demo_input;
 mod scroll_load;
-pub(in crate::ui) mod scroll_restore_tests;
+mod scroll_restore_tests;
 mod search_ui;
 mod secret_chats;
 mod security;

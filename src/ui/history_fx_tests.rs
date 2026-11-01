@@ -5,7 +5,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::frame_clock::take_slice_renders;
-use crate::ui::scroll_restore_tests::{A, frames, open, select};
+use crate::ui::history::demo_chat::{A, frames, open, select};
 use gpui_kit::{
     Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, TouchPhase, VisualTestContext,
     point, px,
