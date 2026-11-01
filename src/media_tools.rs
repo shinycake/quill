@@ -558,21 +558,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The stand-in tools are checked in with their executable bit, never
+    /// written here: a child another test thread is starting shares this
+    /// process's open files until its exec, so a script started right after
+    /// it was written failed now and then with `ETXTBSY` ("Text file busy").
     #[cfg(unix)]
     #[test]
     fn a_tool_that_exits_with_an_error_or_hangs_fails_the_self_test() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = scratch("selftest");
-        let script = |name: &str, body: &str| {
-            let path = root.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path
+        let fixture = |name: &str| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/media-tools")
+                .join(name)
         };
-        assert!(runs(&script("good", "exit 0")));
-        assert!(!runs(&script("bad", "exit 3")));
-        assert!(!runs(&root.join("absent")));
-        let _ = std::fs::remove_dir_all(root);
+        assert!(runs(&fixture("good.sh")));
+        assert!(!runs(&fixture("bad.sh")));
+        assert!(!runs(&fixture("absent")));
     }
 
     #[test]

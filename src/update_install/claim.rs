@@ -103,6 +103,16 @@ impl Claim {
     }
 }
 
+impl Drop for Claim {
+    /// Unlocked, not only closed: a child another thread is starting shares
+    /// the open file, and with it the lock, until its exec. After
+    /// [`Claim::release`] this runs once the claim is deleted, so no start
+    /// ever sees it unlocked.
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
 /// Claims mean "this process is handing the update off" until it exits.
 static HELD: Mutex<Vec<Claim>> = Mutex::new(Vec::new());
 
@@ -252,6 +262,10 @@ pub(super) fn liveness(path: &Path, kind: Kind, now: SystemTime) -> Liveness {
         Ok(()) => kind == Kind::Claimed && young(CLAIM_GRACE),
     };
     if live {
+        // Any lock this check took ends here, not when the file closes: a
+        // child another thread is starting shares the open file, and with
+        // it the lock, until its exec.
+        let _ = file.unlock();
         Liveness::Live
     } else {
         Liveness::Stale(Claim {
