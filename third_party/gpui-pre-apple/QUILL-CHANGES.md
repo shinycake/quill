@@ -148,5 +148,7 @@ caches for every line:
   shaping and fallback caches, which cost about a third of the CPU cycles of
   scrolling the emoji panel.
 - `src/sized_fonts.rs`: the map, std-only and bounded, tested by
-  `scripts/test-sized-fonts.sh`. `test_kept_fonts_shape_like_new_ones` in
-  `text_system.rs` compares a kept font's shaping with a new font's.
+  `scripts/test-sized-fonts.sh`. At the limit it drops the font unused longest,
+  so the fonts every line needs survive. `test_kept_fonts_shape_like_new_ones`
+  and `test_adjacent_runs_shape_alike_past_the_font_limit` in `text_system.rs`
+  compare a kept font's shaping with a new font's, and CI runs them on macOS.
