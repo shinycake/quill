@@ -155,10 +155,12 @@ pub struct MetalRenderer {
     // QUILL: HDR still images (`64RGBAHalf` surfaces), and the drawable
     // format the pipelines above were built for. A float (EDR) layer swaps
     // in a set built for `RGBA16Float`; the other set is kept for the way
-    // back.
+    // back. A format whose set failed to build is not tried again, because
+    // the attempt would repeat on every frame.
     hdr_surfaces_pipeline_state: metal::RenderPipelineState,
     drawable_format: MTLPixelFormat,
     other_pipelines: Option<DrawablePipelines>,
+    failed_format: Option<MTLPixelFormat>,
     library: metal::Library,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
@@ -501,6 +503,7 @@ impl MetalRenderer {
             hdr_surfaces_pipeline_state,
             drawable_format: MTLPixelFormat::BGRA8Unorm,
             other_pipelines: None,
+            failed_format: None,
             library,
             unit_vertices,
             instance_buffer_pool,
@@ -695,7 +698,7 @@ impl MetalRenderer {
         );
         // QUILL: free spares a burst left before taking the next drawable.
         self.trim_spare_drawables();
-        let drawable = if let Some(drawable) = layer.next_drawable() {
+        let drawable = if let Some(drawable) = self.next_usable_drawable(&layer) {
             drawable
         } else {
             log::error!(
@@ -722,6 +725,23 @@ impl MetalRenderer {
             command_buffer.present_drawable(drawable);
             command_buffer.commit();
         }
+    }
+
+    /// QUILL: the next drawable, in a format the pipelines can draw. When the
+    /// float set can't be built, the layer leaves extended range for the
+    /// 8-bit set, which the frame in hand and every later one draws with. The
+    /// HDR picture comes out clamped to standard range.
+    fn next_usable_drawable<'a>(
+        &mut self,
+        layer: &'a metal::MetalLayerRef,
+    ) -> Option<&'a metal::MetalDrawableRef> {
+        let drawable = layer.next_drawable()?;
+        let Err(error) = self.match_drawable_format(drawable.texture().pixel_format()) else {
+            return Some(drawable);
+        };
+        log::error!("leaving extended range: {error:#}");
+        leave_extended_range(layer);
+        layer.next_drawable()
     }
 
     fn render_frame(
@@ -788,8 +808,8 @@ impl MetalRenderer {
             (viewport_size.width.ceil() as i32).into(),
             (viewport_size.height.ceil() as i32).into(),
         );
-        let drawable = layer
-            .next_drawable()
+        let drawable = self
+            .next_usable_drawable(&layer)
             .ok_or_else(|| anyhow::anyhow!("Failed to get drawable for render_to_image"))?;
 
         let command_buffer = self.render_frame(scene, drawable.texture(), viewport_size)?;
@@ -1566,9 +1586,17 @@ impl MetalRenderer {
         if format == self.drawable_format {
             return Ok(());
         }
-        let incoming = match self.other_pipelines.take() {
-            Some(pipelines) if pipelines.format == format => pipelines,
-            _ => DrawablePipelines::build(&self.device, &self.library, format)?,
+        anyhow::ensure!(
+            self.failed_format != Some(format),
+            "the {format:?} pipelines did not build earlier"
+        );
+        let stashed = self
+            .other_pipelines
+            .take_if(|pipelines| pipelines.format == format);
+        let incoming = match stashed {
+            Some(pipelines) => pipelines,
+            None => DrawablePipelines::build(&self.device, &self.library, format)
+                .inspect_err(|_| self.failed_format = Some(format))?,
         };
         let outgoing = DrawablePipelines {
             format: self.drawable_format,
@@ -1590,6 +1618,21 @@ impl MetalRenderer {
         self.other_pipelines = Some(outgoing);
         self.drawable_format = format;
         Ok(())
+    }
+}
+
+/// QUILL: the state Quill's `set_window_edr` puts back when the viewer closes.
+/// That code only touches the layer when the viewer's state changes, so the
+/// layer stays 8-bit after this.
+fn leave_extended_range(layer: &metal::MetalLayerRef) {
+    layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+    layer.set_wants_extended_dynamic_range_content(false);
+    // SAFETY: `layer` is a live CAMetalLayer, and nil is its default colorspace.
+    unsafe {
+        let _: () = objc2::msg_send![
+            layer.as_ptr().cast::<AnyObject>(),
+            setColorspace: ptr::null::<c_void>()
+        ];
     }
 }
 
@@ -2230,6 +2273,88 @@ mod tests {
         });
         assert!(result.is_ok());
         assert_eq!(tries.get(), 2);
+    }
+
+    fn library_without_functions(device: &metal::DeviceRef) -> metal::Library {
+        library_from_source(device, "#include <metal_stdlib>").unwrap()
+    }
+
+    fn renderer_on_a_float_layer() -> MetalRenderer {
+        let renderer = MetalRenderer::new(Default::default(), false, false).unwrap();
+        let layer = renderer.layer().unwrap();
+        layer.set_drawable_size(CGSize::new(16.0, 16.0));
+        layer.set_framebuffer_only(false);
+        layer.set_pixel_format(MTLPixelFormat::RGBA16Float);
+        layer.set_wants_extended_dynamic_range_content(true);
+        renderer
+    }
+
+    fn empty_scene() -> Scene {
+        let mut scene = Scene::default();
+        scene.finish();
+        scene
+    }
+
+    #[test]
+    fn a_failed_edr_switch_leaves_edr_and_still_draws() {
+        let mut renderer = renderer_on_a_float_layer();
+        renderer.library = library_without_functions(&renderer.device);
+
+        let image = renderer.render_to_image(&empty_scene()).unwrap();
+
+        let layer = renderer.layer().unwrap();
+        assert_eq!(layer.pixel_format(), MTLPixelFormat::BGRA8Unorm);
+        assert!(!layer.wants_extended_dynamic_range_content());
+        assert_eq!(image.dimensions(), (16, 16));
+    }
+
+    #[test]
+    fn a_format_that_failed_is_not_built_again() {
+        let mut renderer = renderer_on_a_float_layer();
+        let library = mem::replace(
+            &mut renderer.library,
+            library_without_functions(&renderer.device),
+        );
+        renderer.draw(&empty_scene());
+        assert_eq!(
+            renderer.layer().unwrap().pixel_format(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+
+        // A rebuild would work now, and would keep the layer on float.
+        renderer.library = library;
+        renderer
+            .layer()
+            .unwrap()
+            .set_pixel_format(MTLPixelFormat::RGBA16Float);
+        renderer.draw(&empty_scene());
+
+        assert_eq!(
+            renderer.layer().unwrap().pixel_format(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+    }
+
+    #[test]
+    fn a_failed_switch_keeps_the_stashed_pipelines() {
+        let mut renderer = MetalRenderer::new_headless(Default::default()).unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::BGRA8Unorm)
+            .unwrap();
+        renderer.library = library_without_functions(&renderer.device);
+
+        assert!(
+            renderer
+                .match_drawable_format(MTLPixelFormat::RGBA8Unorm)
+                .is_err()
+        );
+
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
     }
 
     #[test]

@@ -103,13 +103,18 @@ window, not the app:
   function, creating a pipeline and creating the CoreVideo texture cache report
   errors where 0.3.10 used `expect` and `assert_eq!`, and a device-less Mac gets
   an error where 0.3.10 called `process::exit`. `with_shaders` retries a failed
-  setup once, since `MTLCompilerService` can fail under load. The pipelines
-  built for an EDR drawable report errors through `render_frame`.
-  `MetalHeadlessRenderer::new` keeps its `expect`, because the registry crate
-  gpui-pre-platform calls it without a `Result`. It is test support only.
+  setup once, since `MTLCompilerService` can fail under load. A failed build
+  of the pipelines for an EDR drawable is remembered in `failed_format`, keeps
+  the stashed set, and takes the layer back to 8-bit with
+  `leave_extended_range`, so the window goes on drawing and never rebuilds per
+  frame. `MetalHeadlessRenderer::new` keeps its `expect`, because the registry
+  crate gpui-pre-platform calls it without a `Result`. It is test support only.
   Tests: `shaders_that_do_not_compile_are_an_error`,
   `a_library_without_our_functions_is_an_error`,
-  `one_failed_library_build_is_retried`.
+  `one_failed_library_build_is_retried`,
+  `a_failed_edr_switch_leaves_edr_and_still_draws`,
+  `a_format_that_failed_is_not_built_again`,
+  `a_failed_switch_keeps_the_stashed_pipelines`.
 - `Cargo.toml`, `src/thermal.rs`, `src/metal_renderer.rs`: so CI can run
   `cargo test -p gpui-pre-apple` on its own, `runtime_shaders` is a default
   feature (Quill always builds with it, through gpui-kit), and the thermal test
