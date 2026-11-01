@@ -1,5 +1,3 @@
-//! A language picked for a translated chat reaches TDLib on the pass the
-//! pick wakes (needs the `demo-capture` feature for gpui-kit's test support).
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -10,13 +8,6 @@ use quill::wake::UPDATES;
 
 const CHANNEL: ChatId = ChatId(13);
 const NEWEST_POST: MessageId = MessageId(208);
-
-fn settle(vcx: &mut VisualTestContext) {
-    for _ in 0..3 {
-        vcx.update(|window, _| window.refresh());
-        vcx.run_until_parked();
-    }
-}
 
 #[gpui_kit::test]
 fn a_picked_language_is_asked_for_by_the_pass_the_pick_wakes(cx: &mut TestAppContext) {
@@ -31,7 +22,7 @@ fn a_picked_language_is_asked_for_by_the_pass_the_pick_wakes(cx: &mut TestAppCon
         Root::new(shell, window, cx)
     });
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
-    settle(&mut vcx);
+    vcx.run_until_parked();
     let Some(app) = slot.borrow().clone() else {
         panic!("the window opened");
     };
@@ -43,9 +34,9 @@ fn a_picked_language_is_asked_for_by_the_pass_the_pick_wakes(cx: &mut TestAppCon
     });
     assert_eq!(shown_in.as_deref(), Some("en"));
 
-    let woke = UPDATES.epoch();
+    let before = UPDATES.epoch();
     app.update(&mut vcx, |app, cx| app.choose_translate_language("ar", cx));
-    assert_ne!(UPDATES.epoch(), woke, "a resting poll loop runs a pass");
+    assert_ne!(UPDATES.epoch(), before, "a resting poll loop runs a pass");
 
     let asked = app.update(&mut vcx, |app, _| {
         app.pump_translation();

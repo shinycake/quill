@@ -238,7 +238,6 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
     assert!((f32::from(second.size.width) - PHOTO_WIDTH).abs() < 1.0);
 }
 
-/// The first file of each of `items`, the one its thumb shows.
 fn thumb_files(items: &[MediaViewerItem]) -> Vec<FileId> {
     items
         .iter()
@@ -265,13 +264,13 @@ fn a_photo_that_lands_has_its_thumb_asked_for_by_the_same_pass(cx: &mut TestAppC
 fn the_first_frame_of_a_viewer_wakes_the_pass_that_asks_for_its_thumbs(cx: &mut TestAppContext) {
     let (app, mut vcx) = group_info(cx);
     let vcx = &mut vcx;
-    let woke = UPDATES.epoch();
+    let before = UPDATES.epoch();
     click_the_avatar(vcx);
     assert!(
         app.read_with(vcx, |app, _| app.viewer.extra.strip_asked.is_empty()),
         "the open had no width to lay the strip out in"
     );
-    assert_ne!(UPDATES.epoch(), woke, "a resting poll loop runs a pass");
+    assert_ne!(UPDATES.epoch(), before, "a resting poll loop runs a pass");
     let (asked, gallery) = app.update(vcx, |app, cx| {
         app.pump_profile_gallery(cx);
         (

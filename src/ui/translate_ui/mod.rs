@@ -124,7 +124,6 @@ pub(super) struct TranslateUi {
     offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
     /// What `pump_translation` tested last (`pump_scan`).
     pub(super) pump: pump_scan::PumpScan,
-    /// What the demo's passes would have sent: it has no driver to ask.
     #[cfg(test)]
     asked: Vec<(MessageId, &'static str)>,
 }
@@ -175,7 +174,6 @@ impl QuillApp {
                 &[("err", &err.to_string())],
             )));
         }
-        // A pass applies them to the open chat.
         quill::wake::UPDATES.poke();
         cx.notify();
     }

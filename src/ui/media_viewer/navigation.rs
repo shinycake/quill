@@ -9,7 +9,7 @@ impl QuillApp {
     /// Items are the chat's photo/video messages (oldest first); the clicked
     /// message becomes the current item. When nothing viewable is local yet
     /// the viewer shows a loading state and `downloadFile` is triggered —
-    /// the 40ms poll loop re-renders when `updateFile` lands.
+    /// the poll loop re-renders when `updateFile` lands.
     pub(in crate::ui) fn open_media_viewer(
         &mut self,
         chat_id: ChatId,

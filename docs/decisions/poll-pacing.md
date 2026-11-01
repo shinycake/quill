@@ -46,13 +46,22 @@ Things that relied on the ramp without knowing it:
   pass that sends a download asks for no redraw, so the poke cannot feed itself.
 - The chat export worker writes its progress and last stage to a slot only a pass reads, and the
   Writing stage can go a long way with no request. Both writes poke now.
-- Work a click leaves for the next pass pokes: a queued deep link, the Translate toggle, opening
-  Settings for the grams probe, and a linked media timestamp. That timestamp counted 100 passes
-  before giving up, which is 200 s on a quiet account. It has a 12 s deadline now, close to what
-  the count came to at the 8 polls a second its comment assumed.
+- These clicks leave work for the next pass, so they poke: a queued deep link, the Translate
+  toggle and any Translate setting, opening Settings for the grams probe, and a linked media
+  timestamp. That timestamp counted 100 passes before giving up, which is 200 s on a quiet
+  account. It has a 12 s deadline now, close to what the count came to at the 8 polls a second
+  its comment assumed.
+- A picked Translate language took two passes: one followed the language and sent nothing. One
+  pass does both now.
+- The profile photo strip's thumbs are asked for on open, on a step and by a pass. The pass asked
+  before it added a page's tiles, so it asks after now. The strip's width comes from a frame,
+  which the open has not drawn yet, so a new width pokes. A frame at the same width does not, and
+  a pass that asks for thumbs asks for no redraw, so the poke cannot feed itself.
 - A group call stream takes 64 events a pass and pokes when it takes the 64th, for what is left.
 
-Anything else with no poke waits at most the ceiling, as it did at rest before.
+Anything else with no poke waits for the next pass, up to the ceiling, which is what it waited at
+rest before. A step whose result only a later pass reads adds a ceiling each, where the ramp added
+10 ms. The cases above are the ones found by reading the code, so there may be others.
 
 ## The kept timer
 
