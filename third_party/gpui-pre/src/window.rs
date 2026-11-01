@@ -5364,6 +5364,12 @@ impl Window {
         self.sprite_atlas.remove_emoji_glyphs_unused_since(mark)
     }
 
+    /// QUILL: this window's atlas, for tests that seed it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn sprite_atlas(&self) -> &Arc<dyn PlatformAtlas> {
+        &self.sprite_atlas
+    }
+
     /// Returns whether every frame of an image is present in the sprite atlas.
     #[cfg(any(test, feature = "test-support"))]
     pub fn has_image_atlas_entry(&self, data: &RenderImage) -> bool {

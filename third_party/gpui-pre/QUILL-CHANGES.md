@@ -427,3 +427,8 @@ presenting:
   `sustain_duration` goes from 1 s to 150 ms: a gesture that stopped
   re-presented the unchanged frame at display rate for a second, and held off
   the macOS frame idle by as long. Gaps inside a gesture are far shorter.
+
+The Quill project also changed it in 2026 so tests can seed a window's atlas
+(`src/ui/glyph_sweep_tests.rs`):
+
+- `src/window.rs`: `Window::sprite_atlas`, in test support only.

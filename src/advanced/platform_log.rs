@@ -64,9 +64,11 @@ mod tests {
     #[test]
     fn an_error_from_log_err_reaches_the_file() {
         send(Level::Error, "the device is gone");
-        assert!(logged().contains(
-            "ERROR third_party/gpui-pre-windows/src/platform.rs:7 the device is gone"
-        ));
+        assert!(
+            logged().contains(
+                "ERROR third_party/gpui-pre-windows/src/platform.rs:7 the device is gone"
+            )
+        );
     }
 
     #[test]

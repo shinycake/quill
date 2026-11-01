@@ -1,8 +1,8 @@
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Context, Entity, ExternalPaths, FileDropEvent,
-    InteractiveElement, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement, PlatformInput, Pixels, Point, Render, StatefulInteractiveElement, Styled,
-    StyleRefinement, TestAppContext, Window, div, point, px,
+    AnyWindowHandle, AppContext, Context, Entity, ExternalPaths, FileDropEvent, InteractiveElement,
+    IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels,
+    PlatformInput, Point, Render, StatefulInteractiveElement, StyleRefinement, Styled,
+    TestAppContext, Window, div, point, px,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -42,9 +42,7 @@ impl Render for Slice {
                 div()
                     .id("source")
                     .size(px(100.))
-                    .on_drag(Payload, move |_, _, _, cx| {
-                        cx.new(|_| Ghost(ghost.clone()))
-                    }),
+                    .on_drag(Payload, move |_, _, _, cx| cx.new(|_| Ghost(ghost.clone()))),
             )
             .child(
                 div()
@@ -78,9 +76,11 @@ struct Shell {
 impl Render for Shell {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.counts.shell.set(self.counts.shell.get() + 1);
-        div()
-            .size_full()
-            .child(self.slice.clone().cached(StyleRefinement::default().size_full()))
+        div().size_full().child(
+            self.slice
+                .clone()
+                .cached(StyleRefinement::default().size_full()),
+        )
     }
 }
 
@@ -140,7 +140,10 @@ fn a_drag_inside_one_hitbox_moves_the_ghost_without_rendering_cached_views(
 
     assert_eq!(counts.slice.get(), slice);
     assert_eq!(counts.shell.get(), shell + 1);
-    assert_eq!(counts.ghost_at.borrow().last(), Some(&point(px(60.), px(50.))));
+    assert_eq!(
+        counts.ghost_at.borrow().last(),
+        Some(&point(px(60.), px(50.)))
+    );
 }
 
 #[gpui_kit::test]

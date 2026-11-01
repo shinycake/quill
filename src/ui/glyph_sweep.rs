@@ -1,5 +1,5 @@
-//! Color emoji glyphs the main window no longer draws leave the GPU once
-//! Quill goes idle.
+//! Color emoji glyphs a window no longer draws leave the GPU once Quill goes
+//! idle.
 //!
 //! GPUI rasterizes each emoji once per size and keeps the tile in the
 //! window's sprite atlas until the window closes. Color emoji are 4 bytes a
@@ -12,27 +12,40 @@
 //! [`begin`] (from the idle trim, between frames) starts a new use mark and
 //! redraws every view, cached ones too, so each emoji on screen is asked
 //! for under it; once that frame is drawn, [`start_frame`] (which saw it
-//! start, from `QuillApp::render`) drops the emoji glyphs nothing asked for
-//! since. The redraw is one ordinary frame, and the emoji on screen keep
-//! their tiles.
+//! start, from the main and chat windows' `render`) drops the emoji glyphs
+//! nothing asked for since. The redraw is one ordinary frame, and the emoji on
+//! screen keep their tiles. Each window has its own atlas, and sweeps alone.
 //! New emoji glyphs count as activity, so the idle trim comes after
 //! scrolling through emoji too.
 
-use gpui_kit::{App, Window};
-use std::cell::Cell;
+use gpui_kit::{AnyWindowHandle, App, Window, WindowId};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::mem;
 
 /// Emoji glyphs kept without a sweep: about a screen of them.
 const KEEP: usize = 128;
 
-thread_local! {
+#[derive(Clone, Copy, Default)]
+struct WindowSweep {
     /// The sweep under way: its use mark and the frame it began after.
-    static PENDING: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
+    pending: Option<(u64, u64)>,
+    /// Frames this window has started.
+    frames: u64,
     /// Emoji glyphs the last sweep kept (what was on screen then).
-    static KEPT: Cell<usize> = const { Cell::new(0) };
+    kept: usize,
     /// Emoji glyphs the atlas held at the start of the last frame.
-    static SEEN: Cell<usize> = const { Cell::new(0) };
+    seen: usize,
     /// The window went to the background since the last sweep began.
-    static LEFT: Cell<bool> = const { Cell::new(false) };
+    left: bool,
+}
+
+thread_local! {
+    static WINDOWS: RefCell<HashMap<WindowId, WindowSweep>> = RefCell::default();
+}
+
+fn with_sweep<R>(id: WindowId, read: impl FnOnce(&mut WindowSweep) -> R) -> R {
+    WINDOWS.with_borrow_mut(|windows| read(windows.entry(id).or_default()))
 }
 
 /// Sweep when the atlas holds more emoji than a screen's worth and twice
@@ -42,52 +55,67 @@ fn worth_a_sweep(count: usize, kept: usize, left: bool) -> bool {
     count > KEEP.max(kept * 2) || left && count > 0
 }
 
-/// The main window became active or not. Going to the background sweeps
-/// once the idle trim comes, however few emoji there are: nothing tells
-/// how many left the screen (a closed emoji panel), and one redraw behind
-/// another app costs nothing the user sees.
-pub(super) fn window_activation(active: bool) {
+/// A window became active or not. Going to the background sweeps once the
+/// idle trim comes, however few emoji there are: nothing tells how many left
+/// the screen (a closed emoji panel), and one redraw behind another app costs
+/// nothing the user sees.
+pub(super) fn window_activation(id: WindowId, active: bool) {
     if !active {
-        LEFT.set(true);
+        with_sweep(id, |sweep| sweep.left = true);
         super::image_budget::note_activity();
     }
 }
 
-/// Quill went idle: start a sweep of the main window's emoji glyphs if it
-/// holds more than it can be showing, or went to the background. Call
-/// between frames.
-pub(super) fn begin(window: &mut Window) {
-    if PENDING.get().is_some() {
-        return;
+/// The idle trim's pass: forget closed windows, and start a sweep of each open
+/// one's emoji glyphs if it holds more than it can be showing, or went to the
+/// background. Call between frames.
+pub(super) fn begin_for(open: &[AnyWindowHandle], cx: &mut App) {
+    WINDOWS.with_borrow_mut(|windows| {
+        windows.retain(|id, _| open.iter().any(|handle| handle.window_id() == *id));
+    });
+    for handle in open {
+        let _ = handle.update(cx, |_, window, _| begin(window));
     }
-    if !worth_a_sweep(window.emoji_glyph_count(), KEPT.get(), LEFT.replace(false)) {
-        return;
-    }
-    let mark = window.begin_emoji_glyph_sweep();
-    PENDING.set(Some((mark, super::image_budget::frame())));
 }
 
-/// At the start of each main-window frame, after
-/// `image_budget::begin_frame`: note new emoji glyphs as activity, and
-/// finish a sweep right after the frame that redraws everything (the first
+fn begin(window: &mut Window) {
+    let id = window.window_handle().window_id();
+    let count = window.emoji_glyph_count();
+    let due = with_sweep(id, |sweep| {
+        sweep.pending.is_none() && worth_a_sweep(count, sweep.kept, mem::take(&mut sweep.left))
+    });
+    if due {
+        let mark = window.begin_emoji_glyph_sweep();
+        with_sweep(id, |sweep| sweep.pending = Some((mark, sweep.frames)));
+    }
+}
+
+/// At the start of each frame of a window: note new emoji glyphs as activity,
+/// and finish a sweep right after the frame that redraws everything (the first
 /// after `begin`), so an idle window needs no frame more.
 pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
-    if let Some((mark, began)) = PENDING.get() {
-        let frame = super::image_budget::frame();
-        if frame == began + 1 {
+    let id = window.window_handle().window_id();
+    let finished = with_sweep(id, |sweep| {
+        sweep.frames += 1;
+        let frames = sweep.frames;
+        sweep
+            .pending
+            .take_if(|(_, began)| frames > *began)
+            .map(|(mark, began)| (mark, frames == began + 1))
+    });
+    match finished {
+        Some((mark, true)) => {
             // Deferred work runs once this frame is drawn.
-            PENDING.set(None);
             let handle = window.window_handle();
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, _| sweep(window, mark));
             });
-        } else if frame > began + 1 {
-            PENDING.set(None);
-            sweep(window, mark);
         }
+        Some((mark, false)) => sweep(window, mark),
+        None => {}
     }
     let count = window.emoji_glyph_count();
-    if count > SEEN.replace(count) {
+    if count > with_sweep(id, |sweep| mem::replace(&mut sweep.seen, count)) {
         super::image_budget::note_activity();
     }
 }
@@ -95,12 +123,19 @@ pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
 fn sweep(window: &mut Window, mark: u64) {
     let gone = window.sweep_emoji_glyphs(mark);
     let kept = window.emoji_glyph_count();
-    KEPT.set(kept);
-    SEEN.set(kept);
+    with_sweep(window.window_handle().window_id(), |sweep| {
+        sweep.kept = kept;
+        sweep.seen = kept;
+    });
     if super::frame_clock::trace_ticks() {
         eprintln!("emoji glyph sweep: {gone} dropped, {kept} kept");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "glyph_sweep_tests.rs"]
+mod window_tests;
 
 #[cfg(test)]
 mod tests {
