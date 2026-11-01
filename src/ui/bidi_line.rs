@@ -54,8 +54,14 @@ pub(crate) fn one_line(
         .into_any_element()
 }
 
-/// [`one_line`] for plain text.
+/// [`one_line`] for plain text, without what message text drops before
+/// shaping (`quill::display_text`).
 pub(crate) fn one_line_plain(text: impl Into<SharedString>) -> AnyElement {
+    let text: SharedString = text.into();
+    let text = match quill::display_text::filtered(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(shown) => shown.into(),
+    };
     one_line(text, Vec::new(), Vec::new())
 }
 

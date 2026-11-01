@@ -206,10 +206,7 @@ impl QuillApp {
                         .flatten();
                     // MED1: the grouping toggle decides album vs separate
                     // sends (TGX `RememberAlbumSetting`).
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
+                    let albumable = ComposerAttachment::albumable(&attachments);
                     let grouped = self.composer_group_media_effective();
                     let reply = self.reply_for_send(cx);
                     let mut snaps = Vec::new();
@@ -392,10 +389,7 @@ impl QuillApp {
                     }
                     let reply = self.reply_for_send(cx);
                     // MED1: the grouping toggle applies to the demo too.
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
+                    let albumable = ComposerAttachment::albumable(&attachments);
                     let messages = if albumable && self.composer_group_media_effective() {
                         ComposerAttachment::split_for_send(&attachments, true).len()
                     } else {
@@ -407,7 +401,15 @@ impl QuillApp {
                         return;
                     }
                     if albumable && self.composer_group_media_effective() {
-                        self.apply_demo_album(&text, &attachments, reply.as_ref());
+                        let groups = ComposerAttachment::split_for_send(&attachments, true);
+                        for (i, group) in groups.iter().enumerate() {
+                            let text = if i == 0 { text.as_str() } else { "" };
+                            let reply = reply.as_ref().filter(|_| i == 0);
+                            match group.as_slice() {
+                                [one] => self.apply_demo_outgoing(text, Some(one), reply),
+                                _ => self.apply_demo_album(text, group, reply),
+                            }
+                        }
                     } else if attachments.len() >= 2 {
                         for (i, att) in attachments.iter().enumerate() {
                             self.apply_demo_outgoing(
@@ -694,21 +696,21 @@ impl QuillApp {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }
+            // Joins the tray as a dropped file does: a photo next to media,
+            // a file next to files.
             Some(att) => {
-                let name = att.file_name.clone();
-                let before = self.pending_attachments().len();
-                self.update_pending_attachments(|tray| {
-                    ComposerAttachment::push_attachment(tray, att)
+                let added = self.update_pending_attachments(|tray| {
+                    ComposerAttachment::append_dropped_files(tray, std::slice::from_ref(&att.path))
                 });
-                self.connection
-                    .set_note(if self.pending_attachments().len() == before {
-                        StatusNote::silent(tr_with(
-                            keys::Q_CHAT_ALBUM_IS_FULL,
-                            &[("before", &before.to_string())],
-                        ))
-                    } else {
-                        StatusNote::silent(tr_with(keys::Q_CHAT_ATTACHED_NAME, &[("name", &name)]))
+                if let Some(added) = added {
+                    self.connection.set_note(match added {
+                        Ok(_) => StatusNote::silent(tr_with(
+                            keys::Q_CHAT_ATTACHED_NAME,
+                            &[("name", &att.file_name)],
+                        )),
+                        Err(note) => StatusNote::error(note),
                     });
+                }
             }
             None => {
                 self.connection

@@ -156,7 +156,7 @@ pub(super) fn reply_header_strip(
                                     .text_xs()
                                     .font_medium()
                                     .text_color(color)
-                                    .child(name),
+                                    .child(quill::display_text::filtered(&name).into_owned()),
                             )
                             .when(header.is_quote, |this| {
                                 this.child(

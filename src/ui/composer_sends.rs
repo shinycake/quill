@@ -406,6 +406,14 @@ impl QuillApp {
         if let Some(sent) = self.composer_sends.finish(&slot) {
             self.forget_tray_checks(&sent.attachments);
         }
+        // An editor still open on a photo of the tray that went would save
+        // into nothing.
+        let on_sent_tray = self.viewer.photo_editor.as_ref().is_some_and(|editor| {
+            matches!(&editor.purpose, super::photo_editor::EditorPurpose::Attachment(item) if item.slot == slot)
+        });
+        if on_sent_tray {
+            self.viewer.photo_editor = None;
+        }
     }
 
     /// Drop the open slot's tray and the choices made for it; the schedule

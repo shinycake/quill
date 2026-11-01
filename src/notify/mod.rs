@@ -101,6 +101,19 @@ pub struct OsNotification {
     pub body: String,
 }
 
+impl OsNotification {
+    /// The notification as it is drawn: title and body lose what message
+    /// text drops before shaping (`display_text`), on every backend.
+    pub fn shown(mut self) -> Self {
+        for text in [&mut self.title, &mut self.body] {
+            if let std::borrow::Cow::Owned(shown) = crate::display_text::filtered(text) {
+                *text = shown;
+            }
+        }
+        self
+    }
+}
+
 /// A queued notification with burst coalescing: consecutive `updateNewMessage`
 /// decisions for the same chat merge into one entry whose display body becomes
 /// "N new messages" once `count > 1`.

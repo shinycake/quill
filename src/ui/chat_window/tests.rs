@@ -1124,3 +1124,79 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         .unwrap_or_default();
     assert_eq!(left, 0, "the dropped edit's PNG was deleted");
 }
+
+/// A Send held on a photo's render and a tap on that card, in a chat
+/// window that closes before the render lands: the main window says the
+/// photo did not go, no editor opens anywhere, and the edited photo waits
+/// in the chat's tray.
+#[gpui_kit::test]
+fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppContext) {
+    use crate::ui::photo_editor::{EditorPurpose, PhotoEditor};
+    use quill::composer::{AttachmentExtras, AttachmentKind, ComposerAttachment};
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let dir = quill::scratch::process_dir("quill-chat-window-edit");
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = dir.join("held-closing.png");
+    image::RgbaImage::from_pixel(61, 17, image::Rgba([7, 8, 9, 255]))
+        .save(&original)
+        .unwrap();
+    let app = h.app.clone();
+    let path = original.clone();
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.update_pending_attachments(|tray| {
+                    tray.push(ComposerAttachment {
+                        file_name: "held-closing.png".into(),
+                        path: path.clone(),
+                        kind: AttachmentKind::Photo,
+                        spoiler: false,
+                        extras: AttachmentExtras::default(),
+                    })
+                })
+                .unwrap();
+                let item = app.tray_item(0).unwrap();
+                let pixels = image::open(&path).unwrap().to_rgba8();
+                app.viewer.photo_editor =
+                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.photo_editor_mut(PhotoEditor::rotate, cx);
+                app.save_photo_editor(window, cx);
+                app.submit_composer(String::new(), window, cx);
+                app.open_photo_editor(0, cx);
+            });
+        });
+        window.dispatch_action(Box::new(CloseWindow), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(h.other_windows(cx).is_empty());
+    h.settle(cx);
+    h.app.read_with(cx, |app, _| {
+        assert_eq!(
+            app.connection.note().text(),
+            quill::lang::tr(quill::lang::keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO)
+        );
+        assert!(app.viewer.photo_editor.is_none(), "no editor opened");
+        assert!(app.viewer.photo_editor_after.is_none(), "the tap is gone");
+        assert!(!app.composer_sends.holds(&original), "the edit landed");
+    });
+    let edits = quill::scratch::temp_work_dir("quill-edits");
+    let rendered: Vec<_> = std::fs::read_dir(edits)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| std::fs::canonicalize(entry.path()).ok())
+                .filter(|path| image::image_dimensions(path).ok() == Some((17, 61)))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(rendered.len(), 1);
+    h.app.read_with(cx, |app, _| {
+        assert!(
+            app.composer_sends.holds(&rendered[0]),
+            "it waits in the tray"
+        );
+    });
+    let _ = std::fs::remove_file(&rendered[0]);
+}

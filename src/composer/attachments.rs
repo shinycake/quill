@@ -102,6 +102,16 @@ impl ComposerAttachment {
         self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
     }
 
+    /// Whether the tray can go as albums: two or more photos and videos,
+    /// or two or more files (tdesktop `AlbumType::PhotoVideo` and
+    /// `AlbumType::File`); the two never share an album.
+    pub fn albumable(list: &[Self]) -> bool {
+        let media = |att: &Self| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video);
+        list.len() >= 2
+            && (list.iter().all(media)
+                || list.iter().all(|att| att.kind == AttachmentKind::Document))
+    }
+
     /// The messages the tray is sent as: albums of at most
     /// [`ALBUM_MAX_ITEMS`](crate::album::ALBUM_MAX_ITEMS) in order (tdesktop
     /// `DivideByGroups`); when `grouped` is false every file is its own
@@ -409,6 +419,23 @@ mod tests {
         let dropped: Vec<&str> = list.iter().map(|att| att.file_name.as_str()).collect();
         assert_eq!(order, dropped);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn twelve_files_go_as_albums_of_10_and_2_and_never_with_media() {
+        let files: Vec<ComposerAttachment> = (0..12)
+            .map(|ix| attachment(&format!("{ix:02}.txt"), AttachmentKind::Document))
+            .collect();
+        assert!(ComposerAttachment::albumable(&files));
+        let sizes: Vec<usize> = ComposerAttachment::split_for_send(&files, true)
+            .iter()
+            .map(Vec::len)
+            .collect();
+        assert_eq!(sizes, [10, 2]);
+        let mut mixed = files[..2].to_vec();
+        mixed.push(attachment("c.jpg", AttachmentKind::Photo));
+        assert!(!ComposerAttachment::albumable(&mixed));
+        assert!(!ComposerAttachment::albumable(&files[..1]));
     }
 
     #[test]

@@ -60,7 +60,11 @@ pub(super) fn chat_preview_line(
         author_signature.unwrap_or(peer_title).to_string()
     };
     let body = effective_content(content, ephemeral).preview();
-    (name, body, id)
+    let shown = |text: String| match quill::display_text::filtered(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(shown) => shown,
+    };
+    (shown(name), shown(body), id)
 }
 
 /// kit Phase 3: one flat item for the virtualized chat list — a chat row
@@ -740,7 +744,8 @@ pub(super) fn session_chat_row(
                                     .child(if announced {
                                         String::new()
                                     } else {
-                                        chat.last_preview_sender.clone()
+                                        quill::display_text::filtered(&chat.last_preview_sender)
+                                            .into_owned()
                                     }),
                             )
                         })
@@ -777,7 +782,10 @@ pub(super) fn session_chat_row(
                                                         } else {
                                                             accent().into()
                                                         })
-                                                        .child(format!("{sender}: ")),
+                                                        .child(format!(
+                                                            "{}: ",
+                                                            quill::display_text::filtered(&sender)
+                                                        )),
                                                 )
                                             },
                                         )
@@ -820,7 +828,10 @@ pub(super) fn session_chat_row(
                                                         format!("row-activity-{}", id.0).into(),
                                                     ),
                                                 )
-                                                .child(div().min_w_0().truncate().child(line.text))
+                                                .child(div().min_w_0().truncate().child(
+                                                    quill::display_text::filtered(&line.text)
+                                                        .into_owned(),
+                                                ))
                                                 .into_any_element(),
                                             None => div()
                                                 .min_w_0()
@@ -986,3 +997,7 @@ pub(crate) use selected_fg::selected_secondary_fg;
 mod with_call_badge;
 #[allow(unused_imports)]
 pub use with_call_badge::*;
+
+#[cfg(test)]
+#[path = "preview_line_tests.rs"]
+mod preview_line_tests;

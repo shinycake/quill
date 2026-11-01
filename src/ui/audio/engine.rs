@@ -1740,9 +1740,11 @@ mod tests {
     }
 
     /// What a saved position resumes from: the sound the device played,
-    /// not what the speed stretcher read ahead of it.
+    /// not what the speed stretcher read ahead of it. It may trail what was
+    /// played by up to a block, never run past it: a resume from there
+    /// replays a moment instead of skipping one.
     #[test]
-    fn position_is_what_was_played_within_a_block_at_1x_and_1_5x() {
+    fn position_trails_what_was_played_by_at_most_a_block_at_1x_and_1_5x() {
         const RATE: u32 = 48_000;
         for speed in [1.0, 1.5] {
             let (output, mut device) = device_at(RATE);
@@ -1754,7 +1756,11 @@ mod tests {
             let block = 0.04 * speed;
             let secs = engine.position_secs();
             assert!(
-                (secs - played).abs() <= block,
+                secs <= played + 1e-9,
+                "at {speed}x played {played} s, position read {secs}: past the sound"
+            );
+            assert!(
+                played - secs <= block,
                 "at {speed}x played {played} s, position read {secs}"
             );
         }

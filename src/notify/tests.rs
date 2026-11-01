@@ -724,3 +724,16 @@ fn a_burst_keeps_its_first_photo() {
     assert_eq!(queue.len(), 1);
     assert_eq!(queue[0].photo, Some(FileId(5)));
 }
+
+#[test]
+fn a_zalgo_name_and_tags_are_not_drawn_in_a_notification() {
+    let shown = OsNotification {
+        chat_id: ChatId(7),
+        message_id: None,
+        title: format!("Ada{}", "\u{0301}".repeat(40)),
+        body: "hi \u{1F4DA}\u{E0069}\u{E007F} there".into(),
+    }
+    .shown();
+    assert_eq!(shown.title, "Ada\u{0301}\u{0301}");
+    assert_eq!(shown.body, "hi \u{1F4DA} there");
+}

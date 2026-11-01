@@ -601,14 +601,18 @@ impl Element for SelectableRichText {
         {
             SELECTED_MESSAGE.with(|selected| selected.set(Some(message)));
         }
-        if let Some(map) = &self.source {
-            let copied: String = projection
-                .ranges()
-                .iter()
-                .flatten()
-                .filter_map(|range| map.source_of(&self.text, range.clone()))
-                .collect();
-            handle.copy_with(move |_| copied.clone(), cx);
+        if let Some(map) = self.source.take() {
+            let (text, ranges) = (self.text.clone(), projection.ranges().to_vec());
+            handle.copy_with(
+                move |_| {
+                    ranges
+                        .iter()
+                        .flatten()
+                        .filter_map(|range| map.source_of(&text, range.clone()))
+                        .collect()
+                },
+                cx,
+            );
         }
         if !self.emoji.is_empty() || SELECTED_EMOJI.with(|map| !map.borrow().is_empty()) {
             let order = self.document_order;

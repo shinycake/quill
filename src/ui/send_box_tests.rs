@@ -6,7 +6,8 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::test::TestWindowExt;
+use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::ids::ChatId;
 use quill::telegram::envelope::{ChannelMemberStatus, SupergroupFullAdmin};
@@ -219,5 +220,123 @@ fn a_slot_whose_files_are_being_read_says_so_and_other_chats_are_free(cx: &mut T
         app.composer_ui.send_box.prep.finish(job.unwrap());
         assert!(!app.tray_preparing());
         assert!(app.send_box_option_controls(cx).is_empty());
+    });
+}
+
+/// Paste the PNG fixture into the focused composer.
+fn paste_picture(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    let bytes = std::fs::read(fixture("demo-thumb.png")).expect("fixture");
+    vcx.write_to_clipboard(gpui_kit::ClipboardItem::new_image(
+        &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
+    ));
+    app.update_in(vcx, |app, window, cx| {
+        let focus = app.composer.read(cx).focus_handle(cx);
+        window.focus(&focus, cx);
+        assert!(app.paste_image_from_clipboard(window, cx));
+    });
+}
+
+#[gpui_kit::test]
+fn a_picture_pasted_over_a_file_joins_it_as_a_file(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        tray(app, &[("demo-notes.txt", AttachmentKind::Document)]);
+    });
+    paste_picture(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let kinds: Vec<AttachmentKind> = app.pending_attachments().iter().map(|a| a.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Document]);
+        assert_eq!(app.pending_attachments()[0].file_name, "demo-notes.txt");
+        assert!(app.connection.note().text().contains("quill-paste-"));
+    });
+    // Over a photo it is a photo.
+    app.update_in(&mut vcx, |app, _, _| {
+        tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
+    });
+    paste_picture(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let kinds: Vec<AttachmentKind> = app.pending_attachments().iter().map(|a| a.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Photo, AttachmentKind::Photo]);
+    });
+}
+
+/// `count` photos with names that sort in tray order.
+fn photos(count: usize) -> Vec<ComposerAttachment> {
+    let dir = quill::scratch::process_dir("quill-tray-past-ten");
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    (0..count)
+        .map(|ix| {
+            let path = dir.join(format!("p{ix:02}.png"));
+            std::fs::copy(fixture("demo-thumb.png"), &path).expect("copy");
+            ComposerAttachment::pick(&path, AttachmentKind::Photo).expect("picked")
+        })
+        .collect()
+}
+
+/// The demo chat's newest `count` messages, oldest first: the file name
+/// each sent photo came from, and its album.
+fn newest_photos(app: &QuillApp, count: usize) -> Vec<(String, i64)> {
+    let session = app.demo_session.as_ref().expect("demo session");
+    let chat = session.open_chat.expect("an open chat");
+    let history = session.histories.get(&chat.0).expect("history");
+    let newest: Vec<_> = history.ordered().into_iter().rev().take(count).collect();
+    newest
+        .into_iter()
+        .rev()
+        .filter_map(|message| {
+            let quill::telegram::envelope::MessageContent::Photo(photo) = &message.content else {
+                return None;
+            };
+            let file = session.file(photo.sizes.first()?.file_id)?;
+            let name = std::path::Path::new(file.usable_path()?)
+                .file_name()?
+                .to_str()?
+                .to_string();
+            Some((name, message.media_album_id))
+        })
+        .collect()
+}
+
+#[gpui_kit::test]
+fn removing_cards_before_and_past_the_tenth_sends_the_rest_in_order(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let tray = photos(13);
+        app.update_pending_attachments(|items| *items = tray)
+            .expect("an open chat");
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.update_in(&mut vcx, |app, _, cx| {
+        // The first card, then the eleventh as the tray now stands.
+        app.remove_attachment(0, cx);
+        app.remove_attachment(10, cx);
+        let names: Vec<&str> = app
+            .pending_attachments()
+            .iter()
+            .map(|att| att.file_name.as_str())
+            .collect();
+        let expected: Vec<String> = (1..13)
+            .filter(|ix| *ix != 11)
+            .map(|ix| format!("p{ix:02}.png"))
+            .collect();
+        assert_eq!(names, expected);
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.composer_ui.group_media = Some(true);
+        app.submit_composer(String::new(), window, cx);
+        assert!(app.pending_attachments().is_empty(), "the tray went");
+        let sent = newest_photos(app, 11);
+        let names: Vec<&str> = sent.iter().map(|(name, _)| name.as_str()).collect();
+        let expected: Vec<String> = (1..13)
+            .filter(|ix| *ix != 11)
+            .map(|ix| format!("p{ix:02}.png"))
+            .collect();
+        assert_eq!(names, expected);
+        // Ten in one album, the eleventh alone.
+        let album = sent.first().map(|(_, album)| *album).unwrap_or_default();
+        assert_ne!(album, 0);
+        assert!(sent[..10].iter().all(|(_, id)| *id == album));
+        assert_eq!(sent[10].1, 0);
     });
 }
