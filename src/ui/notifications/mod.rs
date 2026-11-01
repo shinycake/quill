@@ -388,6 +388,7 @@ impl QuillApp {
         let ticks = live.driver.poll_ticks(
             quill::connect::TickScope::OnScreen { settings_open },
             std::time::Instant::now(),
+            quill::net_watch::latest(),
         );
         progressed |= ticks.progressed;
         if ticks.redraw_now {

@@ -1288,6 +1288,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.replace_text(content.text().clone(), window, cx);
         self.install_spans(&content, cx);
         self.install_tokens(content);
+        self.document_revision = self.document_revision.wrapping_add(1);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
 
@@ -1637,6 +1638,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         // The text will be set during prepare_if_need in element.rs
         self._pending_update = true;
         self
+    }
+
+    /// Moves with every change to the text or its spans (Quill patch), so a
+    /// caller can keep what it derived from them until it does.
+    pub fn document_revision(&self) -> u64 {
+        self.document_revision
     }
 
     /// Return the value of the input field as an owned string.
@@ -3458,6 +3465,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 };
             }
         }
+        self.document_revision = self.document_revision.wrapping_add(1);
         self.refresh_span_layout(&spans_before, true, cx);
         self.restore_selections(replay.selections);
         self.mode

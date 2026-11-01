@@ -295,13 +295,17 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        match super::editor_art::sticker_pixels(std::path::Path::new(&path), format) {
-            Some(image) => self.photo_editor_mut(|editor| editor.place(image), cx),
-            None => {
-                self.connection
-                    .set_note(StatusNote::error(tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER)));
-                cx.notify();
-            }
-        }
+        self.run_off_ui_then(
+            move || super::editor_art::sticker_pixels(std::path::Path::new(&path), format),
+            |this, image, cx| match image {
+                Some(image) => this.photo_editor_mut(|editor| editor.place(image), cx),
+                None => {
+                    this.connection
+                        .set_note(StatusNote::error(tr(keys::Q_MISC_COULDNT_USE_THAT_STICKER)));
+                    cx.notify();
+                }
+            },
+            cx,
+        );
     }
 }

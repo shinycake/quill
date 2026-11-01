@@ -133,6 +133,15 @@ fn background_status_follows_the_authorization_state() {
 }
 
 #[test]
+fn a_refused_database_stops_the_background_client_and_says_so() {
+    let status = background_status(&AuthorizationState::StartupFailed(
+        crate::auth::StartupFailure::WrongKey,
+    ));
+    assert_eq!(status.label(), Some("Couldn't open this account"));
+    assert!(status.stops_client());
+}
+
+#[test]
 fn a_background_account_notifies_for_an_unmuted_chat() {
     let mut account = Background::new("notify");
     account.ready_with_chat(7, false);
