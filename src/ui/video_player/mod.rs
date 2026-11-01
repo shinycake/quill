@@ -805,6 +805,7 @@ impl VideoPlayer {
                 next_due,
                 interval: inner.estimator.interval(),
                 lead: inner.estimator.request_lead(),
+                on_grid: inner.estimator.draws_on_grid(),
                 requested: self.0.requested.clone(),
             }
         })
@@ -814,6 +815,7 @@ impl VideoPlayer {
             next_due: None,
             interval: Duration::from_millis(16),
             lead: Duration::from_millis(16),
+            on_grid: false,
             requested: self.0.requested.clone(),
         })
     }
@@ -854,6 +856,7 @@ pub(super) struct FrameDemand {
     pub(super) interval: Duration,
     /// How far ahead of its draw start a frame is shown.
     pub(super) lead: Duration,
+    pub(super) on_grid: bool,
     pub(super) requested: FrameRequested,
 }
 

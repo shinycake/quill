@@ -62,7 +62,11 @@ the others (`shared`).
 - **Layer redraws.** When a clip's picture redraws an animation layer, its emoji
   draw with it. The clock's next tick then counts one content frame from that
   draw (`later_tick`, `LayerDraws`). A tick's own draw never counts, and the
-  due time is not clamped to now, so a late wake is never put off.
+  due time is not clamped to now, so a late wake is never put off. Nor does
+  a draw for a clip off the grid (24 or 25 fps): its pictures land between
+  the grid vsyncs the emoji tick on, so the redraw shows no new emoji frame,
+  and counting it held an emoji frame for 6 vsyncs in place of 4
+  (`frame_clock::clip_redraws_off_grid`, from the estimator's `on_grid`).
 - **Layers a clip keeps drawing.** When a layer's inline clip has already asked
   for a picture due a display frame or more before the layer's content needs
   its next frame (a 60 fps clip beside 30 fps emoji), the layer asks for no tick
@@ -119,6 +123,10 @@ Fixed in review, before → after:
   clip 90 → 60.
 - A 60 fps clip with 30 fps emoji on one layer: the clock woke 60 times a
   second → 0, with 60 window frames a second either way.
+- A 24 or 25 fps clip on the layer of 30 fps emoji (2026-11-01): emoji held
+  2, 4, 4, 6, 4 vsyncs over and over → 4 every time, at four clip phases.
+  On #1252 the Mac showed 36 to 45 of about 235 emoji holds at 50 ms,
+  against 5 to 11 before the grid.
 
 Clips sharing the grid keep their holds (4 display frames each at 30 fps). With
 late timers their holds are steadier than before: 3–5 frames before, 4 after.

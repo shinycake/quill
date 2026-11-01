@@ -1,7 +1,8 @@
 use super::super::frame_clock::{
-    ClockRun, ClockTiming, LayerDraws, Woke, later_tick, layer_redrawn_by_clip, note_clock_playing,
-    video_request, video_request_done,
+    ClockRun, ClockTiming, Woke, clip_redraws_off_grid, later_tick, layer_redrawn_by_clip,
+    note_clock_playing, video_request, video_request_done,
 };
+use super::super::layer_draws::LayerDraws;
 use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, PresentEstimator};
 use super::{Cadence, ContentGrid, Source, Vsync, clock_tick, display_grid, note_playing, shared};
@@ -239,9 +240,9 @@ fn a_late_tick_is_never_put_off() {
     // The last tick drew its layer on `t0`; the next is due two grid
     // ticks on, and its wake came late, past that frame's start.
     let mut layers = LayerDraws::default();
-    layers.drawn(painter, before(t0, period * 4));
+    layers.drawn(painter, before(t0, period * 4), true);
     layers.ticked(painter);
-    layers.drawn(painter, t0);
+    layers.drawn(painter, t0, true);
     let planned = t0 + period * 4;
     let late = before(planned, lead) + Duration::from_millis(2);
     let redrawn = layers.redrawn([Some(painter)]);
@@ -253,7 +254,7 @@ fn a_late_tick_is_never_put_off() {
     // A late picture redrew the layer a display frame after that tick: the
     // frame after it is still the planned one, so a late wake is not put
     // off either.
-    layers.drawn(painter, t0 + period);
+    layers.drawn(painter, t0 + period, true);
     let redrawn = layers.redrawn([Some(painter)]);
     assert_eq!(redrawn, Some(t0 + period));
     assert_eq!(
@@ -263,8 +264,8 @@ fn a_late_tick_is_never_put_off() {
     // A clip's picture redrew the layer one grid tick after the tick: the
     // next tick waits for the frame one content frame after that draw.
     layers.ticked(painter);
-    layers.drawn(painter, t0);
-    layers.drawn(painter, t0 + period * 2);
+    layers.drawn(painter, t0, true);
+    layers.drawn(painter, t0 + period * 2, true);
     let redrawn = layers.redrawn([Some(painter)]);
     assert_eq!(redrawn, Some(t0 + period * 2));
     let wake = t0 + period * 7 / 4;
@@ -641,7 +642,8 @@ impl Sim {
             }
             // `tick_animation_layer`.
             if let Some((_, vsync)) = self.display() {
-                self.layers.drawn(painter, vsync.at);
+                let counts = !clip_redraws_off_grid(painter, self.now);
+                self.layers.drawn(painter, vsync.at, counts);
             }
             if self.emoji_fps > 0 {
                 let fps = self.emoji_fps;
@@ -708,7 +710,16 @@ impl Sim {
             note_playing(self.display, source, now, due);
         }
         let lead = self.estimator.request_lead();
-        let ask = video_request(&self.requested, target, now, Some(due), interval, lead);
+        let on_grid = self.estimator.draws_on_grid();
+        let ask = video_request(
+            &self.requested,
+            target,
+            now,
+            Some(due),
+            interval,
+            lead,
+            on_grid,
+        );
         if let Some(request) = ask {
             match request {
                 FrameRequest::NextFrame => self.next_frame.push(target),
@@ -756,6 +767,27 @@ impl Sim {
             .windows(2)
             .filter_map(|pair| match pair {
                 [a, b] => Some(b - a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How long each emoji frame that came up after warming up stayed on
+    /// screen, in display frames.
+    fn emoji_holds(&self) -> Vec<u32> {
+        let mut firsts: Vec<Instant> = Vec::new();
+        let mut last = None;
+        for (at, frame) in &self.emoji_frames {
+            if last.is_some_and(|last| last != *frame) && *at >= self.warm() {
+                firsts.push(*at);
+            }
+            last = Some(*frame);
+        }
+        let period = self.period.as_secs_f64();
+        firsts
+            .windows(2)
+            .filter_map(|pair| match pair {
+                [a, b] => Some((b.duration_since(*a).as_secs_f64() / period).round() as u32),
                 _ => None,
             })
             .collect()
@@ -928,6 +960,32 @@ fn a_clip_the_grid_would_hold_unevenly_keeps_its_vsyncs_beside_emoji() {
     // 25 fps: four and five display frames, as alone.
     let sim = Sim::new(11, 120.0, true).emoji(30).clip(25.0).run(2.0);
     assert!(sim.holds().iter().all(|hold| *hold == 4 || *hold == 5));
+}
+
+#[test]
+fn a_clip_off_the_grid_on_the_emojis_layer_never_puts_their_tick_off() {
+    // A 24 or 25 fps clip drawn by the layer of 30 fps emoji redraws it
+    // between the grid vsyncs the emoji tick on, showing no new emoji
+    // frame: the emoji still tick every fourth vsync, not five or six.
+    let mut display = 160;
+    for fps in [24.0, 25.0] {
+        for offset in [0, 5, 10, 20] {
+            display += 1;
+            let sim = Sim::new(display, 120.0, true)
+                .emoji(30)
+                .clip(fps)
+                .on_layer(Duration::from_millis(offset))
+                .run(2.0);
+            let holds = sim.emoji_holds();
+            let case = format!("{fps} fps, {offset} ms");
+            assert!(
+                holds.len() > 20 && holds.iter().all(|hold| *hold == 4),
+                "{case}: {holds:?}"
+            );
+            let draws = sim.draws_in_a_second();
+            assert!(draws <= 56, "{case}: {draws} window frames in a second");
+        }
+    }
 }
 
 #[test]

@@ -42,7 +42,7 @@ pub(crate) struct FrameUi {
     pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
     /// What the main window's animation layers drew since their ticks
     /// (`QuillApp::note_layer_drawn`).
-    pub(super) layers_drawn: std::cell::RefCell<super::frame_clock::LayerDraws>,
+    pub(super) layers_drawn: std::cell::RefCell<super::layer_draws::LayerDraws>,
     /// History motion: new-message reveal and selection-mode fades.
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).

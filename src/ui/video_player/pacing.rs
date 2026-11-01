@@ -126,6 +126,11 @@ impl PresentEstimator {
         self.cadence.on_grid(due, grid)
     }
 
+    /// Whether the picture asked for last draws on the grid.
+    pub(crate) fn draws_on_grid(&self) -> bool {
+        self.on_grid
+    }
+
     /// How long before a picture is shown to have asked for its frame
     /// (`request_policy`): the lead, and on the grid a quarter frame more,
     /// so that a late timer still makes the grid vsync, as the frame

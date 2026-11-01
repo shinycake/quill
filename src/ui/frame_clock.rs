@@ -128,72 +128,6 @@ impl ClockRun {
     }
 }
 
-/// What each animation layer of the main window drew since the clock last
-/// ticked it: a layer a clip's picture redrew (with its emoji) needs no
-/// tick of its own until one content frame after that draw.
-#[derive(Debug, Default)]
-pub(super) struct LayerDraws(Vec<LayerDraw>);
-
-#[derive(Debug)]
-struct LayerDraw {
-    painter: EntityId,
-    /// The clock ticked it and it has not drawn since: its next draw is
-    /// the tick's own.
-    ticked: bool,
-    /// The vsync it last drew on after its tick's own draw.
-    redrawn: Option<Instant>,
-}
-
-impl LayerDraws {
-    /// The clock ticked `painter` (any other view is no layer: ignored).
-    pub(super) fn ticked(&mut self, painter: EntityId) {
-        if let Some(draw) = self.0.iter_mut().find(|draw| draw.painter == painter) {
-            draw.ticked = true;
-            draw.redrawn = None;
-        }
-    }
-
-    /// `painter` drew a frame shown on the vsync at `at`.
-    pub(super) fn drawn(&mut self, painter: EntityId, at: Instant) {
-        if let Some(draw) = self.0.iter_mut().find(|draw| draw.painter == painter) {
-            if std::mem::take(&mut draw.ticked) {
-                draw.redrawn = None;
-            } else {
-                draw.redrawn = Some(at);
-            }
-            return;
-        }
-        // The chat list's and the conversation's; a replaced one ages out.
-        if self.0.len() >= 4 {
-            self.0.remove(0);
-        }
-        self.0.push(LayerDraw {
-            painter,
-            ticked: false,
-            redrawn: Some(at),
-        });
-    }
-
-    /// The oldest of the vsyncs `targets` were last redrawn on since their
-    /// ticks: `None` unless every target is a layer redrawn since.
-    pub(super) fn redrawn(
-        &self,
-        targets: impl IntoIterator<Item = Option<EntityId>>,
-    ) -> Option<Instant> {
-        let mut oldest: Option<Instant> = None;
-        for target in targets {
-            let painter = target?;
-            let at = self
-                .0
-                .iter()
-                .find(|draw| draw.painter == painter)?
-                .redrawn?;
-            oldest = Some(oldest.map_or(at, |oldest| oldest.min(at)));
-        }
-        oldest
-    }
-}
-
 impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
     /// calls this each time it renders; the clock stops after a tick in
@@ -362,10 +296,11 @@ impl QuillApp {
     /// window (`tick_animation_layer`), for [`Self::tick_after_draws`].
     pub(super) fn note_layer_drawn(&self, painter: EntityId) {
         if let Some((_, vsync)) = self.clock_display() {
+            let counts = !clip_redraws_off_grid(painter, Instant::now());
             self.frame
                 .layers_drawn
                 .borrow_mut()
-                .drawn(painter, vsync.at);
+                .drawn(painter, vsync.at, counts);
         }
     }
 
@@ -437,7 +372,7 @@ pub(super) enum Woke {
 /// the tick then comes one content frame after that draw, sharing the
 /// clip's next window frame. A tick is never put off for being late: the
 /// frame after `redrawn` is counted from that draw, not from `now`, and a
-/// tick's own draw is no redraw ([`LayerDraws`]). `None` when it is due.
+/// tick's own draw is no redraw (`LayerDraws`). `None` when it is due.
 pub(super) fn later_tick(
     display: Option<(ClockTiming, Vsync)>,
     now: Instant,
@@ -498,6 +433,8 @@ pub(crate) struct VideoFrameAsk {
     pub(crate) interval: Duration,
     /// How long before it is shown a frame starts drawing.
     pub(crate) lead: Duration,
+    /// Its pictures draw on the content grid (`frame_grid`).
+    pub(crate) on_grid: bool,
     /// The clip plays with sound (keeps drawing behind another app).
     pub(crate) plays_sound: bool,
     /// Keep drawing while the window is inactive (a Picture-in-Picture
@@ -536,6 +473,7 @@ pub(super) fn video_request(
     next_due: Option<Instant>,
     interval: Duration,
     lead: Duration,
+    on_grid: bool,
 ) -> Option<FrameRequest> {
     if video_request_in_flight(requested.get(), target, now) {
         return None;
@@ -553,34 +491,61 @@ pub(super) fn video_request(
     requested.set(Some((target, now.checked_add(lost_after).unwrap_or(now))));
     VIDEO_ASKS.with(|asks| {
         let mut asks = asks.borrow_mut();
-        asks.retain(|(other, _)| {
-            other.upgrade().is_some_and(|other| {
+        asks.retain(|ask| {
+            ask.requested.upgrade().is_some_and(|other| {
                 !Rc::ptr_eq(&other, requested)
                     && other.get().is_some_and(|(_, lost_at)| now < lost_at)
             })
         });
-        asks.push((Rc::downgrade(requested), next_due.unwrap_or(now)));
+        asks.push(VideoAsk {
+            requested: Rc::downgrade(requested),
+            due: next_due.unwrap_or(now),
+            on_grid,
+        });
     });
     Some(request)
 }
 
 thread_local! {
-    /// Each player's clip frame request ([`video_request`]), with when the
-    /// picture it asked for is due.
-    static VIDEO_ASKS: RefCell<Vec<(Weak<Cell<Option<(EntityId, Instant)>>>, Instant)>> =
-        const { RefCell::new(Vec::new()) };
+    /// Each player's clip frame request.
+    static VIDEO_ASKS: RefCell<Vec<VideoAsk>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A player's clip frame request ([`video_request`]).
+struct VideoAsk {
+    requested: Weak<Cell<Option<(EntityId, Instant)>>>,
+    /// When the picture it asked for is due.
+    due: Instant,
+    /// The clip draws on the content grid (`PresentEstimator::on_grid`).
+    on_grid: bool,
+}
+
+impl VideoAsk {
+    fn in_flight(&self, target: EntityId, now: Instant) -> bool {
+        self.requested
+            .upgrade()
+            .is_some_and(|requested| video_request_in_flight(requested.get(), target, now))
+    }
+}
+
+/// Whether a clip off the content grid asks frames for `target` at `now`.
+/// Its pictures land between the grid vsyncs content ticks on, so a draw
+/// of the layer for one shows no new frame of the content beside it.
+pub(super) fn clip_redraws_off_grid(target: EntityId, now: Instant) -> bool {
+    VIDEO_ASKS.with(|asks| {
+        asks.borrow()
+            .iter()
+            .any(|ask| !ask.on_grid && ask.in_flight(target, now))
+    })
 }
 
 /// Whether a clip frame asked for `target` and still in flight at `now`
 /// shows a picture by `by`: its draw redraws `target` by then.
 fn video_redraws(target: EntityId, by: Instant, now: Instant) -> bool {
     VIDEO_ASKS.with(|asks| {
-        asks.borrow().iter().any(|(requested, due)| {
-            *due <= by
-                && requested
-                    .upgrade()
-                    .is_some_and(|requested| video_request_in_flight(requested.get(), target, now))
-        })
+        asks.borrow()
+            .iter()
+            .any(|ask| ask.due <= by && ask.in_flight(target, now))
     })
 }
 
@@ -664,6 +629,7 @@ pub(crate) fn request_video_frame(
         ask.next_due,
         ask.interval,
         ask.lead,
+        ask.on_grid,
     ) else {
         return;
     };
@@ -1042,6 +1008,7 @@ mod tests {
             next_due: None,
             interval: Duration::from_millis(8),
             lead: Duration::from_millis(8),
+            on_grid: false,
             plays_sound: true,
             keep_alive: false,
             requested: requested.clone(),
