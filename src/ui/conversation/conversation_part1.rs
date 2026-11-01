@@ -503,6 +503,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        super::video_player::warm_decoder(cx);
         let session = self.session();
         let open = session.and_then(|s| s.open_chat);
         let title = open
