@@ -14,6 +14,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: TelegramCredentials,
         prepared: PreparedConnect,
     ) -> Self {
+        let mut session = session;
+        let run = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos() as u64);
+        let leftovers = prepared.paths.root.join("export-leftovers");
+        session
+            .settings
+            .export_files
+            .set_leftovers(crate::export::leftovers::Leftovers::new(leftovers, run));
         Self {
             session,
             sender,

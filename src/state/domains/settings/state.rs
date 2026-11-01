@@ -216,6 +216,8 @@ pub struct SettingsState {
     /// (`parity:menu-save-selection-html`); the driver removes each one
     /// when the UI takes its outcome.
     pub rich_html_exports: Vec<crate::rich_html::RichHtmlExport>,
+    /// Cache copies the exports downloaded for themselves.
+    pub export_files: ExportFiles,
     /// The `setlanguage` link whose box is open.
     pub language_link: Option<LanguageLinkLookup>,
     /// Settings → Language: packs, the switch in flight, strings to install.
@@ -322,6 +324,7 @@ impl SettingsState {
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),
+            export_files: ExportFiles::default(),
             language_link: None,
             language: LanguageState::default(),
         }

@@ -416,3 +416,154 @@ fn an_export_leaves_a_file_the_open_chat_rides_along_on() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Answer the sent request of type `method` (the last one) with `body`.
+fn answer_export_request(
+    driver: &mut ConnectDriver<Arc<RecordingSender>>,
+    recorder: &RecordingSender,
+    sink: &Arc<dyn DiagnosticSink>,
+    method: &str,
+    body: Value,
+) -> Value {
+    let sent = recorder.snapshot().into_iter().rev();
+    let request: Value = sent
+        .map(|json| serde_json::from_str::<Value>(&json).unwrap())
+        .find(|request| request["@type"] == method)
+        .unwrap_or_else(|| panic!("{method} sent"));
+    let mut answer = body;
+    answer["@extra"] = request["@extra"].clone();
+    static SEQ: AtomicU64 = AtomicU64::new(500);
+    driver
+        .ingest(copy_and_parse(&answer.to_string(), &SEQ, sink).unwrap())
+        .unwrap();
+    request
+}
+
+fn cached_file(id: i64, path: &std::path::Path) -> Value {
+    serde_json::json!({"@type": "file", "id": id, "size": 4, "expected_size": 4,
+        "local": {"@type": "localFile", "path": path.to_string_lossy(),
+            "can_be_downloaded": true, "can_be_deleted": true,
+            "is_downloading_active": false, "is_downloading_completed": true,
+            "download_offset": 0, "downloaded_prefix_size": 4, "downloaded_size": 4},
+        "remote": {"@type": "remoteFile", "id": "AgAD", "unique_id": "u",
+            "is_uploading_active": false, "is_uploading_completed": true, "uploaded_size": 4}})
+}
+
+#[test]
+fn a_file_an_earlier_run_left_in_the_cache_goes_on_the_next_start() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let journal = prepared.paths.root.join("export-leftovers");
+    let photo = dir.join("photo.jpg");
+    std::fs::write(&photo, b"jpeg").unwrap();
+    let earlier = crate::export::leftovers::Leftovers::new(journal.clone(), 1);
+    earlier.record(
+        5,
+        &crate::export::leftovers::Entry {
+            remote_id: "AgAD".into(),
+            path: Some(photo.canonicalize().unwrap()),
+        },
+    );
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+
+    let asked = answer_export_request(
+        &mut driver,
+        &recorder,
+        &sink,
+        "getRemoteFile",
+        cached_file(42, &photo),
+    );
+    assert_eq!(asked["remote_file_id"], "AgAD");
+    driver.pump_exports();
+    let deleted = answer_export_request(
+        &mut driver,
+        &recorder,
+        &sink,
+        "deleteFile",
+        serde_json::json!({"@type": "ok"}),
+    );
+
+    assert_eq!(deleted["file_id"], 42, "this run's id for the file");
+    assert_eq!(std::fs::read_dir(&journal).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_used_since_an_earlier_run_left_it_stays_in_the_cache() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let journal = prepared.paths.root.join("export-leftovers");
+    let photo = dir.join("photo.jpg");
+    let other = dir.join("again.jpg");
+    std::fs::write(&photo, b"jpeg").unwrap();
+    std::fs::write(&other, b"jpeg").unwrap();
+    let earlier = crate::export::leftovers::Leftovers::new(journal.clone(), 1);
+    earlier.record(
+        5,
+        &crate::export::leftovers::Entry {
+            remote_id: "AgAD".into(),
+            path: Some(photo.canonicalize().unwrap()),
+        },
+    );
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+
+    answer_export_request(
+        &mut driver,
+        &recorder,
+        &sink,
+        "getRemoteFile",
+        cached_file(42, &other),
+    );
+    driver.pump_exports();
+
+    let sent = recorder.snapshot();
+    assert!(!sent.iter().any(|json| json.contains("deleteFile")));
+    assert_eq!(std::fs::read_dir(&journal).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cache_copy_leaves_the_list_once_its_delete_is_answered_or_the_view_keeps_it() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let journal = prepared.paths.root.join("export-leftovers");
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let leftovers = driver.session.settings.export_files.leftovers().unwrap();
+    let entry = crate::export::leftovers::Entry {
+        remote_id: "AgAD".into(),
+        path: None,
+    };
+    leftovers.record(10, &entry);
+    leftovers.record(11, &entry);
+    let listed = || std::fs::read_dir(&journal).unwrap().count();
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+
+    let _ = driver.download_file(crate::ids::FileId(10), 1);
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 10}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(listed(), 1, "the view keeps file 10");
+
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 11}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(listed(), 1, "listed until TDLib answers");
+    answer_export_request(
+        &mut driver,
+        &recorder,
+        &sink,
+        "deleteFile",
+        serde_json::json!({"@type": "ok"}),
+    );
+    assert_eq!(listed(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}

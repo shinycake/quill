@@ -14,6 +14,9 @@ impl Session {
     ) {
         match payload {
             CommonPayload::AccountExport(value) => {
+                if let Some(pending) = pending {
+                    self.settings.export_files.answer(pending.id, &value);
+                }
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::ExportAccount
                     && let Some(export) = self.settings.account_export.as_mut()

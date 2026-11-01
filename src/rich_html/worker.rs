@@ -148,10 +148,14 @@ fn write_page<T: Tdlib>(
         // A file that cannot be fetched or copied shows as "Media
         // unavailable"; only a cancel stops the export.
         if let Ok(source) = fetch_file(tdlib, env.files_root, job.file_id, None)? {
-            let copied = place_into(folder, &job.relative, &source).is_ok();
+            let placed = place_into(tdlib, folder, &job.relative, &source);
             source.release(tdlib)?;
-            if copied {
-                saved.insert(job.file_id, job.relative);
+            match placed {
+                Ok(()) => {
+                    saved.insert(job.file_id, job.relative);
+                }
+                Err(ExportError::Cancelled) => return Err(ExportError::Cancelled),
+                Err(_) => {}
             }
         }
     }

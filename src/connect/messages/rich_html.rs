@@ -49,6 +49,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 labels: PageLabels::current(),
             },
             self.tdlib_files().to_path_buf(),
+            self.session.settings.export_files.leftovers().cloned(),
         )?;
         self.session.settings.rich_html_exports.push(export);
         Ok(())

@@ -2,6 +2,7 @@
 //! channels the connect driver pumps (requests out to TDLib, answers back).
 //! [`WorkerLink`] is the session's end, shared by the chat export here and
 //! the account export (`account/handle.rs`).
+use super::leftovers::Leftovers;
 use super::loaded_files::LoadedFiles;
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
@@ -23,6 +24,7 @@ pub(crate) struct ChannelTdlib {
     requests: mpsc::Sender<Value>,
     replies: mpsc::Receiver<Value>,
     cancelled: Arc<AtomicBool>,
+    leftovers: Option<Leftovers>,
 }
 
 impl ChannelTdlib {
@@ -70,6 +72,14 @@ impl Tdlib for ChannelTdlib {
             crate::wake::UPDATES.poke();
         }
     }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    fn leftovers(&self) -> Option<&Leftovers> {
+        self.leftovers.as_ref()
+    }
 }
 
 /// The session's end of a worker: its next request, the one the driver
@@ -88,7 +98,7 @@ pub struct WorkerLink {
 
 impl WorkerLink {
     /// A connected pair: the session's end and the worker's.
-    pub(crate) fn pair() -> (Self, ChannelTdlib) {
+    pub(crate) fn pair(leftovers: Option<Leftovers>) -> (Self, ChannelTdlib) {
         let (request_tx, requests) = mpsc::channel();
         let (replies, reply_rx) = mpsc::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -96,6 +106,7 @@ impl WorkerLink {
             requests: request_tx,
             replies: reply_rx,
             cancelled: cancelled.clone(),
+            leftovers,
         };
         let link = Self {
             requests,
@@ -194,12 +205,16 @@ pub struct ChatExport {
 
 impl ChatExport {
     /// Create the output folder and start the worker thread.
-    pub fn start(settings: ExportSettings, files_root: PathBuf) -> io::Result<Self> {
+    pub fn start(
+        settings: ExportSettings,
+        files_root: PathBuf,
+        leftovers: Option<Leftovers>,
+    ) -> io::Result<Self> {
         let parent = settings.dir.canonicalize()?;
         let now = crate::local_time::civil_local(crate::local_time::now_unix());
         let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
         let folder = create_folder(&parent, &settings.title, &stamp)?;
-        let (link, mut tdlib) = WorkerLink::pair();
+        let (link, mut tdlib) = WorkerLink::pair(leftovers);
         let progress = Arc::new(Mutex::new(Progress::starting()));
         let title = settings.title.clone();
         let worker_progress = progress.clone();
@@ -247,7 +262,7 @@ impl ChatExport {
 
     #[cfg(test)]
     pub(crate) fn scripted() -> (Self, mpsc::Sender<Value>) {
-        let (link, worker) = WorkerLink::pair();
+        let (link, worker) = WorkerLink::pair(None);
         let export = Self {
             link,
             progress: Arc::new(Mutex::new(Progress::starting())),

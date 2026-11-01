@@ -1,6 +1,7 @@
 //! Connect driver: account and chat export request pumps.
 use super::*;
 use crate::export::handle::WorkerLink;
+use crate::json_access::JsonExt;
 use crate::state::Session;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -22,6 +23,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.account_export = Some(crate::export::AccountExport::start(
             settings,
             self.tdlib_files().to_path_buf(),
+            self.session.settings.export_files.leftovers().cloned(),
         )?);
         Ok(())
     }
@@ -65,6 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.chat_export = Some(crate::export::ChatExport::start(
             settings,
             self.tdlib_files().to_path_buf(),
+            self.session.settings.export_files.leftovers().cloned(),
         )?);
         Ok(())
     }
@@ -93,7 +96,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn pump_exports(&mut self) -> bool {
         let chat = self.pump_chat_export();
         let account = self.pump_account_export();
-        chat | account | self.pump_rich_html_exports()
+        let rich_html = self.pump_rich_html_exports();
+        chat | account | rich_html | self.send_due_export_deletes()
     }
 
     /// `close` comes next and TDLib takes nothing after it, so what the
@@ -115,9 +119,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         };
         if link(&mut self.session).is_some_and(|link| link.keep_view_file(&request)) {
+            if let Some(file_id) = deleted_file(&request) {
+                self.session.settings.export_files.kept(file_id);
+            }
             return true;
         }
         let extra = self.session.request(purpose, None);
+        if let Some(file_id) = deleted_file(&request) {
+            self.session.settings.export_files.deleting(extra, file_id);
+        }
         crate::json_access::set(
             &mut request,
             "@extra",
@@ -134,4 +144,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         true
     }
+}
+
+fn deleted_file(request: &serde_json::Value) -> Option<i32> {
+    if request.at("@type") != "deleteFile" {
+        return None;
+    }
+    i32::try_from(request.at("file_id").as_i64()?).ok()
 }

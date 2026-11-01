@@ -18,12 +18,16 @@ pub struct AccountExport {
 
 impl AccountExport {
     /// Create `DataExport_<date>` in the chosen folder and start the worker.
-    pub fn start(settings: AccountSettings, files_root: PathBuf) -> io::Result<Self> {
+    pub fn start(
+        settings: AccountSettings,
+        files_root: PathBuf,
+        leftovers: Option<crate::export::leftovers::Leftovers>,
+    ) -> io::Result<Self> {
         let parent = settings.dir.canonicalize()?;
         let now = crate::local_time::civil_local(crate::local_time::now_unix());
         let stamp = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
         let folder = create_folder(&parent, &stamp)?;
-        let (link, mut tdlib) = WorkerLink::pair();
+        let (link, mut tdlib) = WorkerLink::pair(leftovers);
         let progress = Arc::new(Mutex::new(AccountProgress::starting()));
         let worker_progress = progress.clone();
         let worker_folder = folder.clone();
@@ -67,7 +71,7 @@ impl AccountExport {
 
     #[cfg(test)]
     pub(crate) fn scripted() -> (Self, std::sync::mpsc::Sender<serde_json::Value>) {
-        let (link, worker) = WorkerLink::pair();
+        let (link, worker) = WorkerLink::pair(None);
         let export = Self {
             link,
             progress: Arc::new(Mutex::new(AccountProgress::starting())),

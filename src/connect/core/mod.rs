@@ -672,6 +672,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let became_ready = !was_ready && matches!(self.session.auth, AuthorizationState::Ready);
         if became_ready {
             self.preload_known_forums();
+            self.check_export_leftovers();
         }
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;

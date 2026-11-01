@@ -137,7 +137,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     let dir = quill::scratch::process_dir("quill-link-inbox-export");
     let _ = std::fs::create_dir_all(&dir);
     let settings = quill::export::ExportSettings::new(16, "Export Chat".into(), dir.clone());
-    let Ok(export) = quill::export::ChatExport::start(settings, dir.clone()) else {
+    let Ok(export) = quill::export::ChatExport::start(settings, dir.clone(), None) else {
         panic!("the export did not start");
     };
     app.update(vcx, |app, _| {

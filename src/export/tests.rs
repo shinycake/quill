@@ -57,6 +57,7 @@ struct Fake {
     /// started using the file meanwhile.
     touched_after_download: Option<Value>,
     fail_history: bool,
+    leftovers: Option<super::leftovers::Leftovers>,
 }
 
 impl Fake {
@@ -70,6 +71,7 @@ impl Fake {
             cancel_after: None,
             touched_after_download: None,
             fail_history: false,
+            leftovers: None,
         }
     }
 
@@ -81,6 +83,14 @@ impl Fake {
 impl Tdlib for Fake {
     fn post_unanswered(&mut self, request: Value) {
         let _ = self.call(request, Duration::ZERO);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_after.is_some_and(|n| self.calls.len() >= n)
+    }
+
+    fn leftovers(&self) -> Option<&super::leftovers::Leftovers> {
+        self.leftovers.as_ref()
     }
 
     fn call(&mut self, request: Value, _timeout: Duration) -> Result<Value, ExportError> {
@@ -131,7 +141,8 @@ impl Tdlib for Fake {
                 let id = request["file_id"].as_i64().unwrap();
                 let cached = json!({"is_downloading_completed": true});
                 let local = self.local.get(&id).cloned().unwrap_or(cached);
-                json!({"@type": "file", "id": id, "local": local})
+                json!({"@type": "file", "id": id, "local": local,
+                    "remote": {"id": format!("remote-{id}")}})
             }
             "deleteFile" => {
                 let id = request["file_id"].as_i64().unwrap();
@@ -624,6 +635,48 @@ fn a_file_left_in_the_cache_after_all_stays_apart_from_the_export() {
     assert_eq!(fake.count("deleteFile"), 0);
     std::fs::write(run.out.join(PHOTO), b"edited").unwrap();
     assert_eq!(std::fs::read(td.join("p.jpg")).unwrap(), b"jpeg");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_stop_during_the_copy_leaves_no_file_and_still_releases_the_cache() {
+    let dir = scratch("stopped-copy");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.local.insert(10, not_local());
+    let probe_dir = scratch("stopped-copy-probe");
+    let (mut probe, probe_settings, probe_td) = one_photo(&probe_dir);
+    probe.local.insert(10, not_local());
+    let _ = export(&mut probe, &probe_settings, &probe_td);
+    let downloaded = probe
+        .calls
+        .iter()
+        .position(|c| c == "downloadFile")
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&probe_dir);
+    fake.cancel_after = Some(downloaded + 1);
+    let leftovers = super::leftovers::Leftovers::new(dir.join("leftovers"), 1);
+    fake.leftovers = Some(leftovers.clone());
+
+    let run = export(&mut fake, &s, &td);
+
+    assert!(matches!(run.result, Err(ExportError::Cancelled)));
+    let photos = run.out.join("photos");
+    let left: Vec<_> = std::fs::read_dir(&photos).map_or(Vec::new(), |dir| dir.collect());
+    assert!(
+        left.is_empty(),
+        "nothing sits under the photo's name: {left:?}"
+    );
+    assert_eq!(fake.count("deleteFile"), 1, "the delete still went out");
+    let next_run = super::leftovers::Leftovers::new(dir.join("leftovers"), 2);
+    let listed: Vec<_> = next_run.earlier().into_iter().map(|e| e.entry).collect();
+    assert_eq!(
+        listed,
+        [super::leftovers::Entry {
+            remote_id: "remote-10".into(),
+            path: Some(td.join("p.jpg").canonicalize().unwrap()),
+        }],
+        "listed for the next start in case the delete never lands"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

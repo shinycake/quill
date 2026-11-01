@@ -43,13 +43,13 @@ fn scratch(name: &str) -> PathBuf {
 
 fn running_chat_export(dir: &Path) -> ChatExport {
     let settings = ExportSettings::new(16, "Export Chat".into(), dir.to_path_buf());
-    ChatExport::start(settings, dir.to_path_buf()).unwrap()
+    ChatExport::start(settings, dir.to_path_buf(), None).unwrap()
 }
 
 fn running_account_export(dir: &Path) -> AccountExport {
     let mut settings = AccountSettings::new(dir.to_path_buf());
     settings.sections = Sections::of(&[Section::Sessions]);
-    AccountExport::start(settings, dir.to_path_buf()).unwrap()
+    AccountExport::start(settings, dir.to_path_buf(), None).unwrap()
 }
 
 struct Unpark(Thread);
@@ -221,7 +221,7 @@ fn running_rich_html_export(dir: &Path) -> RichHtmlExport {
         fallback_title: "Chat".into(),
         labels: PageLabels::current(),
     };
-    RichHtmlExport::start(request, dir.to_path_buf()).unwrap()
+    RichHtmlExport::start(request, dir.to_path_buf(), None).unwrap()
 }
 
 #[gpui_kit::test]
