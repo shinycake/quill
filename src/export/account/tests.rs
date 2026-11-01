@@ -712,3 +712,34 @@ fn export_folders_are_private_and_never_overwrite_each_other() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_profile_photo_sent_in_a_chat_links_to_the_copy_already_saved() {
+    let (dir, td, mut account) = setup("shared-file");
+    let profile = "profile_pictures/photo_1@14-11-2023_22-21-40.jpg";
+    account
+        .histories
+        .get_mut(&PERSONAL)
+        .unwrap()
+        .insert(0, photo(4, 1_700_000_400, 200));
+    let settings = everything(&dir);
+    let run = export(&mut account, &settings, &td);
+    run.result.unwrap();
+    let root = &run.root;
+    let pages: Vec<String> = std::fs::read_dir(root.join("chats"))
+        .unwrap()
+        .map(|chat| read(&chat.unwrap().path().join("messages.html")))
+        .collect();
+    let chat = pages.iter().find(|page| page.contains("hi Bo")).unwrap();
+    assert!(chat.contains(&format!("../../{profile}")));
+    let result = read(&root.join("result.json"));
+    assert!(result.contains(&format!("\"{profile}\"")));
+    assert!(!result.contains(&format!("/../../{profile}")));
+    let photos = root.join("chats/chat_1/photos");
+    assert_eq!(
+        std::fs::read_dir(photos).unwrap().count(),
+        1,
+        "not copied again"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

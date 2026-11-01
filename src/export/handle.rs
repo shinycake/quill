@@ -2,6 +2,7 @@
 //! channels the connect driver pumps (requests out to TDLib, answers back).
 //! [`WorkerLink`] is the session's end, shared by the chat export here and
 //! the account export (`account/handle.rs`).
+use super::loaded_files::LoadedFiles;
 use super::settings::ExportSettings;
 use super::worker::{ExportError, Job, Progress, Stage, Tdlib, create_folder, run};
 use crate::ids::RequestId;
@@ -168,12 +169,14 @@ impl ChatExport {
                     *slot = progress;
                 });
             };
+            let loaded = LoadedFiles::default();
             let job = Job {
                 settings: &settings,
                 files_root: &files_root,
                 offset_at: &crate::local_time::utc_offset_at,
                 report: &report,
                 me: None,
+                loaded: &loaded,
             };
             let last = match run(&job, &mut tdlib, &worker_folder) {
                 Ok(summary) => Stage::Finished(summary),

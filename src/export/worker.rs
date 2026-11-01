@@ -13,6 +13,7 @@ use super::assets;
 use super::collect::{collect, read_chunk};
 use super::html::{self, Item, MESSAGES_PER_FILE, Outcome, PageSpec};
 use super::json::{self, JsonWriter, MessageSink};
+use super::loaded_files::LoadedFiles;
 use super::model::{Body, ExportMessage, MediaRef};
 use super::names::Namer;
 use super::settings::{ExportSettings, Skip};
@@ -151,6 +152,9 @@ pub struct Job<'a> {
     /// The viewer's user id, when known: "only my messages" then searches
     /// by sender instead of paging the whole history.
     pub me: Option<i64>,
+    /// Files this export already saved, shared by every chat of an
+    /// account export.
+    pub loaded: &'a LoadedFiles,
 }
 
 /// A TDLib answer, or its error as an [`ExportError`].
@@ -272,40 +276,54 @@ fn save_file<T: Tdlib>(
     job: &Job<'_>,
     tdlib: &mut T,
     namer: &mut Namer,
-    out: &Path,
+    out: &ChatOut<'_>,
     media: &MediaRef,
     date: i32,
 ) -> Result<Outcome, ExportError> {
     if let Some(skip) = job.settings.skip_reason(media.kind, media.size) {
         return Ok(Outcome::Skipped(skip));
     }
-    let source = match fetch_file(
-        tdlib,
-        job.files_root,
-        media.file_id,
-        Some(job.settings.size_limit),
-    )? {
-        Ok(source) => source,
+    let limit = Some(job.settings.size_limit);
+    let offset = (job.offset_at)(i64::from(date));
+    let path = match save_once(job, tdlib, out, media.file_id, limit, |source| {
+        namer.path(media, date, offset, &source.path.to_string_lossy())
+    })? {
+        Ok(path) => path,
         Err(skip) => return Ok(Outcome::Skipped(skip)),
     };
-    let path = namer.path(
-        media,
-        date,
-        (job.offset_at)(i64::from(date)),
-        &source.path.to_string_lossy(),
-    );
-    place_into(out, &path, &source)?;
-    source.release(tdlib)?;
-    let mut thumb = None;
-    if let Some(preview) = media.thumb
-        && let Ok(source) = fetch_file(tdlib, job.files_root, preview.file_id, None)?
-    {
-        let relative = namer.thumb_path(&path);
-        place_into(out, &relative, &source)?;
-        source.release(tdlib)?;
-        thumb = Some(relative);
-    }
+    let thumb = match media.thumb {
+        Some(preview) => save_once(job, tdlib, out, preview.file_id, None, |_| {
+            namer.thumb_path(&path)
+        })?
+        .ok(),
+        None => None,
+    };
     Ok(Outcome::Saved { path, thumb })
+}
+
+/// Save TDLib file `file_id` into `out` under the name `name` picks, or
+/// point at the copy this export already saved. The path is relative to
+/// the chat's folder.
+fn save_once<T: Tdlib>(
+    job: &Job<'_>,
+    tdlib: &mut T,
+    out: &ChatOut<'_>,
+    file_id: i32,
+    limit: Option<i64>,
+    name: impl FnOnce(&Fetched) -> String,
+) -> Result<Result<String, Skip>, ExportError> {
+    if let Some(saved) = job.loaded.find(file_id) {
+        return Ok(Ok(out.from_folder(&saved)));
+    }
+    let source = match fetch_file(tdlib, job.files_root, file_id, limit)? {
+        Ok(source) => source,
+        Err(skip) => return Ok(Err(skip)),
+    };
+    let path = name(&source);
+    place_into(out.folder, &path, &source)?;
+    source.release(tdlib)?;
+    job.loaded.save(file_id, out.from_root(&path));
+    Ok(Ok(path))
 }
 
 /// Where one chat's files go and how its pages link out.
@@ -326,6 +344,25 @@ pub struct ChatOut<'a> {
     /// (tdesktop does for a chat export, and leaves empty chats of an
     /// account export without pages).
     pub page_when_empty: bool,
+}
+
+impl ChatOut<'_> {
+    /// `root_relative`, a path from the export root, as a path from this
+    /// chat's folder.
+    fn from_folder(&self, root_relative: &str) -> String {
+        match root_relative.strip_prefix(self.json_prefix) {
+            Some(inside) => inside.to_string(),
+            None => format!("{}{root_relative}", self.base),
+        }
+    }
+
+    /// A path from this chat's folder as a path from the export root.
+    fn from_root(&self, folder_relative: &str) -> String {
+        match folder_relative.strip_prefix(self.base) {
+            Some(outside) if !self.base.is_empty() => outside.to_string(),
+            _ => format!("{}{folder_relative}", self.json_prefix),
+        }
+    }
 }
 
 /// What one chat's export wrote.
@@ -375,11 +412,11 @@ fn flush_page(
 }
 
 /// The outcome with its paths made relative to the export root.
-fn rooted_outcome(outcome: Option<&Outcome>, prefix: &str) -> Option<Outcome> {
+fn rooted_outcome(outcome: Option<&Outcome>, out: &ChatOut<'_>) -> Option<Outcome> {
     match outcome {
-        Some(Outcome::Saved { path, thumb }) if !prefix.is_empty() => Some(Outcome::Saved {
-            path: format!("{prefix}{path}"),
-            thumb: thumb.as_ref().map(|t| format!("{prefix}{t}")),
+        Some(Outcome::Saved { path, thumb }) => Some(Outcome::Saved {
+            path: out.from_root(path),
+            thumb: thumb.as_deref().map(|t| out.from_root(t)),
         }),
         other => other.cloned(),
     }
@@ -427,7 +464,7 @@ fn write_chat<T: Tdlib>(
         for msg in read_chunk(out.spool, chunk)? {
             let outcome = match &msg.body {
                 Body::Media(media) => {
-                    let outcome = save_file(job, tdlib, &mut namer, out.folder, media, msg.date)?;
+                    let outcome = save_file(job, tdlib, &mut namer, out, media, msg.date)?;
                     match outcome {
                         Outcome::Saved { .. } => result.files += 1,
                         Outcome::Skipped(_) => result.skipped += 1,
@@ -438,7 +475,7 @@ fn write_chat<T: Tdlib>(
             };
             if let Some(sink) = json.as_mut() {
                 let offset = (job.offset_at)(i64::from(msg.date));
-                let rooted = rooted_outcome(outcome.as_ref(), out.json_prefix);
+                let rooted = rooted_outcome(outcome.as_ref(), out);
                 sink.push_message(&json::message_json(&msg, rooted.as_ref(), offset))?;
             }
             buffer.push((msg, outcome));

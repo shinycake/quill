@@ -161,12 +161,14 @@ fn export(fake: &mut Fake, settings: &ExportSettings, files_root: &Path) -> Run 
     let out = create_folder(&settings.dir, &settings.title, "2023-11-14").unwrap();
     let last = std::cell::RefCell::new(Progress::starting());
     let report = |p: Progress| *last.borrow_mut() = p;
+    let loaded = super::loaded_files::LoadedFiles::default();
     let job = Job {
         settings,
         files_root,
         offset_at: &|_| 0,
         report: &report,
         me: None,
+        loaded: &loaded,
     };
     let result = run(&job, fake, &out);
     Run {
@@ -668,4 +670,26 @@ fn what_the_worker_publishes_wakes_the_poll_pass() {
         slot.lock()
             .is_ok_and(|p| matches!(p.stage, Stage::Cancelled))
     );
+}
+
+#[test]
+fn a_file_that_occurs_again_is_saved_once_and_linked_from_both_messages() {
+    let dir = scratch("repeat");
+    let (mut fake, s, td) = one_photo(&dir);
+    fake.messages = vec![
+        photo_message(2, 1_700_000_160, 10, 4),
+        photo_message(1, 1_700_000_100, 10, 4),
+    ];
+    fake.local.insert(10, not_local());
+    let run = export(&mut fake, &s, &td);
+    assert_eq!(run.result.unwrap().files, 2);
+    assert_eq!(fake.count("downloadFile"), 1);
+    assert_eq!(
+        std::fs::read_dir(run.out.join("photos")).unwrap().count(),
+        1
+    );
+    let html = read(&run.out.join("messages.html"));
+    assert!(html.matches(PHOTO).count() >= 2, "both messages show it");
+    assert!(!html.contains("photo_2@"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -7,6 +7,7 @@
 use super::settings::AccountSettings;
 use crate::export::collect::user_name;
 use crate::export::html::Outcome;
+use crate::export::loaded_files::LoadedFiles;
 use crate::export::model::{Entity, file_of, formatted, int, thumb_of};
 use crate::export::names::{Namer, date_part, sanitize};
 use crate::export::settings::{MediaKind, Skip};
@@ -23,13 +24,16 @@ const TOP_CHATS: i64 = 30;
 /// Where section files are copied, and the rules for them.
 pub struct Files<'a> {
     pub root: &'a Path,
+    /// Shared with the chats, so a file saved here is not saved again.
+    pub loaded: &'a LoadedFiles,
     pub files_root: &'a Path,
     pub settings: &'a AccountSettings,
     pub offset_at: &'a dyn Fn(i64) -> i32,
 }
 
 impl Files<'_> {
-    /// Copy TDLib file `file_id` to `relative`, or say why not.
+    /// Copy TDLib file `file_id` to `relative`, or say why not. A file
+    /// this export already saved keeps its first path.
     fn save<T: Tdlib>(
         &self,
         tdlib: &mut T,
@@ -37,14 +41,16 @@ impl Files<'_> {
         relative: &str,
         limit: Option<i64>,
     ) -> Result<Outcome, ExportError> {
+        let saved = |path: String| Outcome::Saved { path, thumb: None };
+        if let Some(path) = self.loaded.find(file_id) {
+            return Ok(saved(path));
+        }
         match fetch_file(tdlib, self.files_root, file_id, limit)? {
             Ok(source) => {
                 place_into(self.root, relative, &source)?;
                 source.release(tdlib)?;
-                Ok(Outcome::Saved {
-                    path: relative.to_string(),
-                    thumb: None,
-                })
+                self.loaded.save(file_id, relative.to_string());
+                Ok(saved(relative.to_string()))
             }
             Err(skip) => Ok(Outcome::Skipped(skip)),
         }
