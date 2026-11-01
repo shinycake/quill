@@ -60,11 +60,11 @@ changed file has the "Modified by the Quill project" header, and each crate's
   `unimplemented!()`. Windows has no "hide others"; Quill doesn't call them
   today.
 
-- After the windows are told to close, the vsync thread also posts
-  `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the platform window. That
-  drops the dead devices, so `is_windowed()` reports false, and keeps a
-  reason that `open_window` returns ("the GPU device was lost and could not
-  be recreated"), the same way the launch failure does.
+- The vsync thread posts `WM_GPUI_GPU_DEVICE_GONE` (`WM_USER + 11`) to the
+  platform window. That drops the dead devices, so `is_windowed()` reports
+  false, keeps a reason that `open_window` returns ("the GPU device was lost
+  and could not be recreated"), the same way the launch failure does, and
+  then tells every open window to close.
   `request_windowing(Windowed)` can attach fresh devices later.
 - `close_one_window` logs a window that isn't in the list instead of
   `unwrap`ing its position, and `handle_gpui_events` returns `None` for an
