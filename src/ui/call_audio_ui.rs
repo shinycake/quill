@@ -142,11 +142,21 @@ impl QuillApp {
     pub(super) fn toggle_mic_test(&mut self, cx: &mut Context<Self>) {
         if self.calls.mic_test.is_some() {
             self.calls.mic_test = None;
-        } else {
-            match LevelTap::open_default() {
-                Ok(tap) => self.start_mic_test(Box::new(tap), cx),
-                Err(err) => self.connection.set_note(StatusNote::error(err)),
-            }
+        } else if !self.calls.mic_test_opening {
+            self.calls.mic_test_opening = true;
+            let opening = cx.background_spawn(async { LevelTap::open_default() });
+            Self::spawn_main(cx, async move |this, cx| {
+                let opened = opening.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.calls.mic_test_opening = false;
+                    match opened {
+                        Ok(tap) => this.start_mic_test(Box::new(tap), cx),
+                        Err(err) => this.connection.set_note(StatusNote::error(err)),
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
         }
         cx.notify();
     }

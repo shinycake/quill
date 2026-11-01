@@ -3,7 +3,8 @@
 //! paused, and the chooser is open over four made-up sources.
 //! `QUILL_DEMO_SCREEN_DENIED=1` shows the privacy box instead;
 //! `QUILL_DEMO_SCREEN_AUDIO=1` adds Windows' "Share System Audio" box,
-//! ticked for the running share.
+//! ticked for the running share. `QUILL_DEMO_CALL_CROWD=<people>` adds that
+//! many listeners and opens the member list scrolled down.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -150,6 +151,23 @@ pub(super) fn picture(width: u32, height: u32, variant: usize) -> Vec<u8> {
     rgba
 }
 
+/// How far down `QUILL_DEMO_CALL_CROWD` opens the member list.
+const CROWD_SCROLL: f32 = 2000.;
+
+/// One more person in a crowded call: a user can be in the list twice, and
+/// the row number keeps the rows apart.
+fn listener(user_id: i64, row: usize) -> ParsedGroupCallParticipant {
+    ParsedGroupCallParticipant {
+        audio_source_id: 5_000 + row as i32,
+        is_speaking: false,
+        video_enabled: false,
+        video_info: None,
+        screen_sharing_enabled: false,
+        screen_sharing_video_info: None,
+        ..participant(user_id, false)
+    }
+}
+
 fn participant(user_id: i64, me: bool) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         participant_id: MessageSender::User { user_id },
@@ -191,6 +209,10 @@ impl QuillApp {
         self.demo_high_contrast(cx);
         let denied = std::env::var_os("QUILL_DEMO_SCREEN_DENIED").is_some();
         let audio = std::env::var_os("QUILL_DEMO_SCREEN_AUDIO").is_some();
+        let crowd = std::env::var("QUILL_DEMO_CALL_CROWD")
+            .ok()
+            .and_then(|people| people.parse::<usize>().ok())
+            .unwrap_or(0);
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -201,13 +223,27 @@ impl QuillApp {
             .or_else(|| users.first().copied())
             .unwrap_or(1);
         let other = users.iter().copied().find(|id| *id != me).unwrap_or(me + 1);
+        let mut participants = vec![participant(me, true), participant(other, false)];
+        participants.extend(
+            users
+                .iter()
+                .cycle()
+                .take(crowd)
+                .enumerate()
+                .map(|(row, user)| listener(*user, row)),
+        );
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_joined: true,
             screen_sharing: true,
             screen_share_paused: true,
-            participants: vec![participant(me, true), participant(other, false)],
+            participants: std::sync::Arc::new(participants),
             ..ActiveGroupCall::fresh(7)
         });
+        if crowd > 0 {
+            self.group_call
+                .members_scroll
+                .set_offset(point(px(0.), px(-CROWD_SCROLL)));
+        }
         // Your hidden window sent one frame before it paused; the other
         // camera keeps sending.
         let tiles = [

@@ -215,6 +215,22 @@ impl QuillApp {
         self.request_tick(target, fps, false, cx);
     }
 
+    /// [`Self::request_animation_tick`] for `view` in a window of its own,
+    /// such as the voice chat's: the tick redraws only that view, whatever
+    /// covers the main window, and that window being active counts as
+    /// Quill being active.
+    #[track_caller]
+    pub(super) fn request_window_view_tick(
+        &self,
+        view: EntityId,
+        window: &Window,
+        fps: u32,
+        cx: &mut Context<Self>,
+    ) {
+        self.frame.window_views.borrow_mut().insert(view);
+        self.request_tick(Some(view), fps, window.is_window_active(), cx);
+    }
+
     /// [`Self::request_animation_tick`] for the whole app that keeps
     /// ticking behind another app: the agent takeover, which the user
     /// watches from the app the agent runs in.
@@ -241,7 +257,9 @@ impl QuillApp {
         // (`chat_window::cover`): its slices and their layers get no tick.
         // A tick for the whole app still comes, whichever window asks; it
         // redraws every window but that one then (`tick_app`).
-        if target.is_some() && self.frame.main_covered.get() {
+        let own_window =
+            target.is_some_and(|view| self.frame.window_views.borrow().contains(&view));
+        if target.is_some() && !own_window && self.frame.main_covered.get() {
             return;
         }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
@@ -283,6 +301,8 @@ impl QuillApp {
                         let demand = this.frame.animation_demand.replace(0);
                         let targets =
                             std::mem::take(&mut *this.frame.animation_targets.borrow_mut());
+                        let window_views =
+                            std::mem::take(&mut *this.frame.window_views.borrow_mut());
                         let sound = this.frame.animation_sound.replace(false);
                         if demand > 0 && tick_wanted(this.frame.window_active.get(), sound) {
                             note_clock_playing(
@@ -303,6 +323,10 @@ impl QuillApp {
                                 for id in targets.into_iter().flatten() {
                                     app.notify(id);
                                 }
+                            }
+                            let app: &mut App = cx;
+                            for id in window_views {
+                                app.notify(id);
                             }
                         }
                         Woke::Ticked(demand)

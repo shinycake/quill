@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::demo::demo_file_json;
 use super::message_media::waveform_row;
-use super::recording_state::{CaptureFor, CaptureMedia};
+use super::recording_state::CaptureFor;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -19,7 +19,7 @@ use quill::playback::PlaybackClock;
 use quill::send_rights::SendKind;
 use quill::telegram::client::copy_and_parse;
 use quill::voice::{
-    RecordBarFacts, RecordControl, VoiceCapture, format_voice_duration, record_controls,
+    RecordBarFacts, RecordControl, format_voice_duration, record_controls,
 };
 use std::sync::Arc;
 /// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
@@ -120,22 +120,7 @@ impl QuillApp {
     }
 
     fn begin_voice_capture(&mut self, cx: &mut Context<Self>) {
-        if self.recording_busy() {
-            return;
-        }
-        match VoiceCapture::start() {
-            Ok(capture) => {
-                self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::Message);
-                self.sync_voice_action();
-                self.spawn_voice_tick(cx);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MISC_RECORDING_VOICE_NOTE)));
-            }
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-            }
-        }
-        cx.notify();
+        self.start_voice_capture(CaptureFor::Message, cx);
     }
 
     /// MED2: start a round video-note camera capture (ffmpeg V4L2, squared
@@ -185,7 +170,7 @@ impl QuillApp {
             }
             return;
         }
-        if let Some(reason) = self.recording.voice_mut().and_then(|c| c.failure()) {
+        if let Some(reason) = self.recording.voice().and_then(|c| c.failure()) {
             self.fail_recording(reason, cx);
         }
     }
@@ -347,11 +332,10 @@ impl QuillApp {
     pub(super) fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.stop_record_preview();
         self.recording.once = false;
-        let was_video = self.recording.video().is_some();
+        let was_video = self.recording.video().is_some() || self.recording.opening_video();
         match self.recording.take() {
-            Some(CaptureMedia::Voice(capture)) => capture.discard(),
-            Some(CaptureMedia::Video(capture)) => capture.discard(),
-            None => {}
+            Some(media) => cx.background_spawn(async move { media.discard() }).detach(),
+            None => self.recording.cancel_start(),
         }
         self.recording.locked = false;
         self.recording.discard_confirm = false;

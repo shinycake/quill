@@ -91,7 +91,7 @@ fn joined_group_call(muted: bool) -> ActiveGroupCall {
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
     me.audio_source_id = 4242;
     me.can_unmute_self = true;
-    call.participants = vec![me];
+    call.participants = Arc::new(vec![me]);
     call
 }
 

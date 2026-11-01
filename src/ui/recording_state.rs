@@ -1,6 +1,8 @@
 //! Voice and round video recording.
 #![deny(clippy::indexing_slicing)]
 
+use std::sync::Arc;
+
 use quill::ids::ChatId;
 use quill::playback::PlaybackClock;
 use quill::video::VideoNoteCapture;
@@ -12,6 +14,31 @@ use super::app::QuillApp;
 pub(crate) enum CaptureMedia {
     Voice(VoiceCapture),
     Video(VideoNoteCapture),
+}
+
+impl CaptureMedia {
+    /// End it and remove its file. Waits on the device and the disk, so the
+    /// UI runs this off the UI thread.
+    pub(super) fn discard(self) {
+        match self {
+            Self::Voice(capture) => capture.discard(),
+            Self::Video(capture) => capture.discard(),
+        }
+    }
+}
+
+/// A capture on its way up, off the UI thread. It is not a recording yet
+/// (no bar, nothing to send), but no other one may start meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CaptureStart {
+    Idle,
+    Opening {
+        video: bool,
+        origin: Option<ChatId>,
+        purpose: CaptureFor,
+    },
+    /// Cancelled while opening: what arrives is dropped.
+    Cancelled,
 }
 
 /// Where the recording goes once sent.
@@ -40,10 +67,9 @@ pub(crate) struct RecordingUi {
     /// The voice or round video message being recorded, with the window it
     /// belongs to. One at a time, for the whole app.
     capture: Option<Capture>,
-    /// A round video capture is being started off the UI thread. It is
-    /// not a recording yet (no bar, nothing to send or cancel), but no
-    /// other one may start meanwhile.
-    pub(super) starting: bool,
+    pub(super) start: CaptureStart,
+    /// Opens the microphone. Runs off the UI thread.
+    pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
     pub(super) locked: bool,
@@ -65,7 +91,8 @@ impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {
             capture: None,
-            starting: false,
+            start: CaptureStart::Idle,
+            open_voice: Arc::new(VoiceCapture::start),
             locked: false,
             lock_next: false,
             discard_confirm: false,
@@ -84,7 +111,37 @@ impl RecordingUi {
 
     /// A recording runs or is about to: another one must not start.
     pub(super) fn busy(&self) -> bool {
-        self.capture.is_some() || self.starting
+        self.capture.is_some() || self.start != CaptureStart::Idle
+    }
+
+    /// A round video's camera is being started.
+    pub(super) fn opening_video(&self) -> bool {
+        matches!(self.start, CaptureStart::Opening { video: true, .. })
+    }
+
+    /// The window of a capture still on its way up.
+    pub(super) fn opening_origin(&self) -> Option<Option<ChatId>> {
+        match self.start {
+            CaptureStart::Opening { origin, .. } => Some(origin),
+            _ => None,
+        }
+    }
+
+    /// A capture for `wanted` is still on its way up.
+    pub(super) fn opening_for(&self, wanted: CaptureFor) -> bool {
+        matches!(self.start, CaptureStart::Opening { purpose, .. } if purpose == wanted)
+    }
+
+    /// The capture on its way up is no longer wanted.
+    pub(super) fn cancel_start(&mut self) {
+        if matches!(self.start, CaptureStart::Opening { .. }) {
+            self.start = CaptureStart::Cancelled;
+        }
+    }
+
+    /// The start ended: whether what it brought is still wanted.
+    pub(super) fn finish_start(&mut self) -> bool {
+        std::mem::replace(&mut self.start, CaptureStart::Idle) != CaptureStart::Cancelled
     }
 
     /// The window the recording belongs to (`Some(None)`: the main
@@ -162,6 +219,16 @@ impl RecordingUi {
 }
 
 impl QuillApp {
+    /// A capture starts off the UI thread, for the window whose state is
+    /// in place.
+    pub(super) fn begin_capture_start(&mut self, video: bool, purpose: CaptureFor) {
+        self.recording.start = CaptureStart::Opening {
+            video,
+            origin: self.windows.scope,
+            purpose,
+        };
+    }
+
     /// Hold a recording that just started, as the window whose state is
     /// in place (the one whose composer or story viewer asked for it).
     pub(super) fn hold_capture(&mut self, media: CaptureMedia, purpose: CaptureFor) {

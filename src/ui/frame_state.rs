@@ -14,6 +14,9 @@ pub(crate) struct FrameUi {
     /// What asked for the next tick: cached slices by entity id, `None`
     /// for `QuillApp` itself (see `frame_clock`).
     pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
+    /// The targets among those that sit in a window of their own, which
+    /// the main window's state does not hold back (`frame_clock`).
+    pub(super) window_views: std::cell::RefCell<std::collections::HashSet<EntityId>>,
     /// The next tick serves media playing with sound (allowed while the
     /// window is inactive).
     pub(super) animation_sound: std::cell::Cell<bool>,
@@ -77,6 +80,7 @@ impl FrameUi {
             animation_demand: Default::default(),
             row_fx: Default::default(),
             animation_targets: Default::default(),
+            window_views: Default::default(),
             animation_sound: Default::default(),
             window_active: std::cell::Cell::new(true),
             main_active: std::cell::Cell::new(true),

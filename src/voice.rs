@@ -412,24 +412,24 @@ impl VoiceCapture {
     /// The reason recording stopped on its own (device unplugged, no
     /// microphone access), if it did.
     #[cfg(feature = "ui")]
-    pub fn failure(&mut self) -> Option<String> {
+    pub fn failure(&self) -> Option<String> {
         use std::sync::atomic::Ordering;
         let live = self.live.as_ref()?;
         let error = live.mic.error.lock_or_recover().take();
-        let reason = error.or_else(|| {
+        error.or_else(|| {
             let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
                 && live.samples.load(Ordering::Relaxed) == 0;
             idle.then(|| crate::media_tools::no_audio_message(false))
-        })?;
-        self.stop_live();
-        Some(reason)
+        })
     }
 
     #[cfg(not(feature = "ui"))]
-    pub fn failure(&mut self) -> Option<String> {
+    pub fn failure(&self) -> Option<String> {
         None
     }
 
+    /// Close the microphone and remove the file. Joins the encoder, so the
+    /// UI runs this off the UI thread.
     pub fn discard(mut self) {
         self.stop_live();
         if !self.keep_file {
@@ -444,9 +444,9 @@ impl VoiceCapture {
         self.close_microphone().complete()
     }
 
-    /// Release the microphone now (quick, and the stream may not leave this
-    /// thread) and hand back what is left: joining the encoder can wait on
-    /// the disk, so [`VoiceFinish::complete`] runs off the UI thread.
+    /// Tell the microphone's thread to release it and hand back what is
+    /// left: joining the encoder waits on that and on the disk, so
+    /// [`VoiceFinish::complete`] runs off the UI thread.
     pub fn close_microphone(mut self) -> VoiceFinish {
         let wall = self.clock.elapsed_at(Instant::now());
         let worker = self.stop_mic();
@@ -564,10 +564,10 @@ impl VoiceFinish {
 }
 
 impl Drop for VoiceCapture {
+    /// The microphone closes on its thread and the encoder ends after it;
+    /// nobody waits for either.
     fn drop(&mut self) {
-        if self.live.is_some() {
-            self.stop_live();
-        }
+        let _ = self.stop_mic();
     }
 }
 

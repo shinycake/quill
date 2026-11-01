@@ -29,8 +29,63 @@ fn joined_unmuted_call(audio_source_id: i32) -> ActiveGroupCall {
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
     me.audio_source_id = audio_source_id;
     me.can_unmute_self = true;
-    call.participants = vec![me];
+    call.participants = Arc::new(vec![me]);
     call
+}
+
+#[test]
+fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
+    let (dir, _recorder, mut driver, _seq) = group_call_test_driver();
+    let (opened_on, on_thread) = std::sync::mpsc::channel();
+    driver.call_audio.open_microphone = Arc::new(move || {
+        let _ = opened_on.send(std::thread::current().id());
+        Ok(Box::new(TestLevel(Mutex::new(None))) as Box<dyn LevelSource + Send>)
+    });
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+
+    driver.pump_call_audio().unwrap();
+    assert!(!driver.call_audio.is_open(), "the pump does not wait");
+    assert_ne!(
+        on_thread.recv().unwrap(),
+        std::thread::current().id(),
+        "opened off the driver's thread"
+    );
+
+    let give_up = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !driver.call_audio.is_open() && std::time::Instant::now() < give_up {
+        driver.pump_call_audio().unwrap();
+        std::thread::yield_now();
+    }
+    assert!(driver.call_audio.is_open(), "the pump took the source");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_tap_opened_after_the_call_stopped_wanting_it_is_dropped() {
+    let (dir, _recorder, mut driver, _seq) = group_call_test_driver();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (answered, was_answered) = std::sync::mpsc::channel();
+    driver.call_audio.open_microphone = Arc::new({
+        let released = Mutex::new(released);
+        let answered = Mutex::new(answered);
+        move || {
+            let _ = released.lock().unwrap().recv();
+            let _ = answered.lock().unwrap().send(());
+            Err("gone".into())
+        }
+    });
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    driver.pump_call_audio().unwrap();
+
+    driver.session.calls.active_group_call = None;
+    driver.pump_call_audio().unwrap();
+    release.send(()).unwrap();
+    was_answered.recv().unwrap();
+
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    driver.pump_call_audio().unwrap();
+    assert_eq!(driver.call_audio.error, None, "nobody waits for that open");
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -43,10 +98,11 @@ fn tap_runs_only_while_joined_and_allowed_to_speak() {
     call.is_joined = false;
     assert_eq!(tap_wanted(&call), None, "not joined: no tap");
     call.is_joined = true;
-    call.participants[0].is_muted_for_all_users = true;
-    call.participants[0].can_unmute_self = false;
+    let participants = Arc::make_mut(&mut call.participants);
+    participants[0].is_muted_for_all_users = true;
+    participants[0].can_unmute_self = false;
     assert_eq!(tap_wanted(&call), None, "muted by an admin: no tap");
-    call.participants.clear();
+    Arc::make_mut(&mut call.participants).clear();
     assert_eq!(tap_wanted(&call), None, "no self participant yet: no tap");
 }
 

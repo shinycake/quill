@@ -12,13 +12,12 @@ use super::*;
 use crate::ui::composer_field::{emoji_token, field_doc};
 use crate::ui::media_panel::PanelTab;
 use crate::ui::recording::RecordMode;
-use crate::ui::recording_state::{CaptureFor, CaptureMedia};
+use crate::ui::recording_state::CaptureFor;
 use crate::ui::status_note::StatusNote;
 use gpui_base::input::InputContent;
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::requests::{AnimationSend, StickerSend};
-use quill::voice::VoiceCapture;
 
 /// The story the reply row is open on: `(poster chat, story id)`.
 pub(in crate::ui) fn reply_target(
@@ -64,7 +63,9 @@ impl QuillApp {
         if self.story_reply_panel_active() {
             self.close_media_panel(cx);
         }
-        if self.story_reply_recording_active() {
+        if self.story_reply_recording_active()
+            || self.recording.opening_for(CaptureFor::StoryReply)
+        {
             self.cancel_recording(cx);
         }
         self.stories.reply_open = false;
@@ -448,21 +449,7 @@ impl QuillApp {
     }
 
     fn begin_story_voice_capture(&mut self, cx: &mut Context<Self>) {
-        if self.recording_busy() {
-            return;
-        }
-        match VoiceCapture::start() {
-            Ok(capture) => {
-                self.hold_capture(CaptureMedia::Voice(capture), CaptureFor::StoryReply);
-                self.spawn_voice_tick(cx);
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_MEDIA_RECORDING_VOICE_REPLY)));
-            }
-            Err(err) => {
-                self.connection.set_note(StatusNote::error(err));
-            }
-        }
-        cx.notify();
+        self.start_voice_capture(CaptureFor::StoryReply, cx);
     }
 
     /// The recording bar's Send, for a recording started from the reply

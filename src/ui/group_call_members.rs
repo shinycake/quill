@@ -3,6 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::frame_clock::trace_slice_render;
+use super::group_call_members_view::ROW_HEIGHT;
 use super::group_call_panel::*;
 use super::group_call_speaker::speaker_userpic;
 use gpui_kit::assets::IconName;
@@ -91,6 +93,15 @@ pub(super) fn member_look(
 }
 
 impl QuillApp {
+    /// The messages sit below every member row, so showing them scrolls there.
+    pub(super) fn toggle_group_call_messages(&mut self, cx: &mut Context<Self>) {
+        self.group_call.chat_shown = !self.group_call.chat_shown;
+        if self.group_call.chat_shown {
+            self.group_call.members_scroll.scroll_to_bottom();
+        }
+        cx.notify();
+    }
+
     /// The "⋯" menu: the chat's settings and admin tools.
     pub(super) fn group_call_menu(
         &self,
@@ -129,10 +140,7 @@ impl QuillApp {
                 if call.are_messages_allowed || !call.messages.is_empty() {
                     menu = menu.item(item(
                         if chat_shown { tr(keys::Q_AV_HIDE_CHAT) } else { tr(keys::Q_AV_SHOW_CHAT) },
-                        |this, _, cx| {
-                            this.group_call.chat_shown = !this.group_call.chat_shown;
-                            cx.notify();
-                        },
+                        |this, _, cx| this.toggle_group_call_messages(cx),
                     ));
                 }
                 if share_link {
@@ -182,6 +190,7 @@ impl QuillApp {
         now: std::time::Instant,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        trace_slice_render("group-member-row");
         let name = self.group_call_participant_name(&participant.participant_id);
         let photo = match &participant.participant_id {
             MessageSender::User { user_id } => {
@@ -214,7 +223,8 @@ impl QuillApp {
         let owner = cx.entity().downgrade();
         let row = div()
             .id(row_id.clone())
-            .h(px(56.))
+            .h(px(ROW_HEIGHT))
+            .debug_selector(|| format!("group-member-row-{}", participant.audio_source_id))
             .px(px(14.))
             .flex()
             .items_center()

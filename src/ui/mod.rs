@@ -356,6 +356,7 @@ mod group_admin_panels;
 mod group_admin_settings;
 mod group_call_extras;
 mod group_call_members;
+mod group_call_members_view;
 mod group_call_panel;
 mod group_call_settings;
 mod group_call_share;

@@ -18,7 +18,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::telegram::SendReply;
 use quill::video::{VideoNoteCapture, VideoNoteDraft};
-use quill::voice::VoiceDraft;
+use quill::voice::{VoiceCapture, VoiceDraft};
 
 /// Where a recording goes, fixed when Send is tapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -375,17 +375,16 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         let choice = self.capture_choice();
-        self.recording.starting = true;
+        self.begin_capture_start(true, purpose);
         let starting = cx.background_spawn(async move { VideoNoteCapture::start(hq, &choice) });
         self.spawn_scoped(cx, async move |this, cx| {
             let result = starting.await;
             let held = this.update(cx, |this, cx| {
-                this.recording.starting = false;
                 this.hold_started_video(result, purpose, lock, cx);
             });
             if held.is_err() {
                 let _ = this.main().update(cx, |this, _| {
-                    this.recording.starting = false;
+                    this.recording.finish_start();
                 });
             }
         })
@@ -399,8 +398,9 @@ impl QuillApp {
         lock: bool,
         cx: &mut Context<Self>,
     ) {
+        let wanted = self.recording.finish_start();
         match result {
-            Ok(capture) if !self.recording_active() => {
+            Ok(capture) if wanted && !self.recording_active() => {
                 self.hold_capture(CaptureMedia::Video(capture), purpose);
                 self.spawn_voice_tick(cx);
                 let note = match purpose {
@@ -413,16 +413,84 @@ impl QuillApp {
                 };
                 self.connection.set_note(StatusNote::silent(tr(note)));
             }
-            // Another recording took the place meanwhile.
+            // Cancelled, or another recording took the place meanwhile.
             Ok(capture) => {
                 cx.background_spawn(async move { capture.discard() })
                     .detach();
             }
-            Err(err) => self.connection.set_note(StatusNote::error(err)),
+            Err(err) if wanted => self.connection.set_note(StatusNote::error(err)),
+            Err(_) => {}
+        }
+        cx.notify();
+    }
+
+    /// Start a voice capture for `purpose`. Opening the microphone waits on
+    /// the audio system, so it runs off the UI thread, and the recording
+    /// bar shows once the device is up. The capture is held by the window
+    /// that asked, or dropped (file removed) once that window closed or the
+    /// start was cancelled.
+    pub(super) fn start_voice_capture(&mut self, purpose: CaptureFor, cx: &mut Context<Self>) {
+        if self.recording_busy() {
+            return;
+        }
+        self.begin_capture_start(false, purpose);
+        let open = self.recording.open_voice.clone();
+        let opening = cx.background_spawn(async move { open() });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let mut result = Some(opening.await);
+            let held = this.update(cx, |this, cx| {
+                if let Some(result) = result.take() {
+                    this.hold_started_voice(result, purpose, cx);
+                }
+            });
+            if held.is_err() {
+                let _ = this.main().update(cx, |this, _| {
+                    this.recording.finish_start();
+                });
+                if let Some(Ok(capture)) = result {
+                    cx.background_spawn(async move { capture.discard() })
+                        .detach();
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn hold_started_voice(
+        &mut self,
+        result: Result<VoiceCapture, String>,
+        purpose: CaptureFor,
+        cx: &mut Context<Self>,
+    ) {
+        let wanted = self.recording.finish_start();
+        match result {
+            Ok(capture) if wanted => {
+                self.hold_capture(CaptureMedia::Voice(capture), purpose);
+                self.spawn_voice_tick(cx);
+                let note = match purpose {
+                    CaptureFor::Message => {
+                        self.sync_voice_action();
+                        keys::Q_MISC_RECORDING_VOICE_NOTE
+                    }
+                    CaptureFor::StoryReply => keys::Q_MEDIA_RECORDING_VOICE_REPLY,
+                };
+                self.connection.set_note(StatusNote::silent(tr(note)));
+            }
+            Ok(capture) => {
+                cx.background_spawn(async move { capture.discard() })
+                    .detach();
+            }
+            Err(err) if wanted => self.connection.set_note(StatusNote::error(err)),
+            Err(_) => {}
         }
         cx.notify();
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "recording_start_tests.rs"]
+mod start_tests;
 
 #[cfg(test)]
 mod tests {

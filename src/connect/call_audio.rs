@@ -17,7 +17,9 @@ use crate::calls::engine::CallEngine;
 use crate::locks::LockExt;
 use crate::state::{ActiveGroupCall, CallsPurpose, RequestPurpose};
 use crate::telegram::requests::set_group_call_participant_is_speaking;
+use crate::thread_guard::spawn_guarded;
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "ui")]
@@ -34,9 +36,15 @@ pub trait LevelSource {
 /// After a failed open, try the microphone again after this long.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
 
+/// A level source a worker opened, or why it could not.
+type Opened = Result<Box<dyn LevelSource + Send>, String>;
+
 /// Driver-side state of the level tap and the speaking decision.
 pub struct CallAudio {
     source: Option<Box<dyn LevelSource>>,
+    /// A worker is opening the microphone; the pump picks up its answer.
+    opening: Option<Receiver<Opened>>,
+    pub(crate) open_microphone: Arc<dyn Fn() -> Opened + Send + Sync>,
     /// A source injected by tests or demos; used instead of opening
     /// the microphone, and kept across close/open.
     injected: Option<Box<dyn LevelSource>>,
@@ -54,6 +62,8 @@ impl Default for CallAudio {
     fn default() -> Self {
         Self {
             source: None,
+            opening: None,
+            open_microphone: Arc::new(open_microphone),
             injected: None,
             injected_open: false,
             tracker: SpeakingTracker::default(),
@@ -100,6 +110,7 @@ impl CallAudio {
             // Drop what the stream measured before you could speak.
             let _ = level.take();
             self.source = Some(Box::new(CaptureLevel(level)));
+            self.opening = None;
             self.failed_at = None;
             self.error = None;
             return;
@@ -107,7 +118,17 @@ impl CallAudio {
         if self.failed_at.is_some_and(|at| at.elapsed() < REOPEN_AFTER) {
             return;
         }
-        match open_microphone() {
+        let Some(opening) = self.opening.as_ref() else {
+            self.opening = Some(self.open_on_worker());
+            return;
+        };
+        let opened = match opening.try_recv() {
+            Ok(opened) => opened,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err("The microphone thread stopped.".to_string()),
+        };
+        self.opening = None;
+        match opened {
             Ok(source) => {
                 self.source = Some(source);
                 self.failed_at = None;
@@ -120,8 +141,21 @@ impl CallAudio {
         }
     }
 
+    /// Opening the device waits on the audio system, so a worker does it
+    /// and wakes the pump. A source nobody waits for any more closes there.
+    fn open_on_worker(&self) -> Receiver<Opened> {
+        let (answer, opened) = mpsc::channel();
+        let open = self.open_microphone.clone();
+        let _ = spawn_guarded("quill-level-tap-open", move || {
+            let _ = answer.send(open());
+            crate::wake::UPDATES.poke();
+        });
+        opened
+    }
+
     /// Close the microphone; an injected source goes back to waiting.
     fn close(&mut self) {
+        self.opening = None;
         let source = self.source.take();
         if self.injected_open {
             self.injected = source;
@@ -145,14 +179,14 @@ impl LevelSource for CaptureLevel {
 }
 
 #[cfg(feature = "ui")]
-fn open_microphone() -> Result<Box<dyn LevelSource>, String> {
+fn open_microphone() -> Opened {
     // No call capture: the tap measures the raw microphone.
     crate::calls::level_tap::LevelTap::open_default()
-        .map(|tap| Box::new(tap) as Box<dyn LevelSource>)
+        .map(|tap| Box::new(tap) as Box<dyn LevelSource + Send>)
 }
 
 #[cfg(not(feature = "ui"))]
-fn open_microphone() -> Result<Box<dyn LevelSource>, String> {
+fn open_microphone() -> Opened {
     Err("No microphone support in this build.".into())
 }
 

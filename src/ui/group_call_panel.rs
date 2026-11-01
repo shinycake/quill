@@ -16,6 +16,7 @@
 
 use super::app::QuillApp;
 use super::format_helpers::format_starts_in;
+use super::group_call_members_view::{GroupCallMembers, ROW_HEIGHT, RowsPlace};
 use super::nested_click::SwallowPress;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
@@ -40,6 +41,10 @@ pub(super) const MEMBER_INACTIVE_STATUS: u32 = 0x61c0ff;
 pub(super) const LEAVE_BG: u32 = 0xf75c5c7f;
 pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
 pub(super) const MEMBER_NOT_JOINED: u32 = call_chrome::GROUP_MUTED;
+
+/// The padding of the member rows' card, and its invite row's height.
+const CARD_PADDING: f32 = 4.;
+const INVITE_ROW_HEIGHT: f32 = 48.;
 
 /// A member menu entry's effect.
 pub(super) type MemberAction = Box<dyn Fn(&mut QuillApp, &mut Context<QuillApp>)>;
@@ -128,7 +133,13 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
 
 impl QuillApp {
     /// The group call window's content, built with the app's context.
-    pub(super) fn group_call_panel_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn group_call_panel_body(
+        &mut self,
+        panel: EntityId,
+        members: &Entity<GroupCallMembers>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let Some(call) = self
             .session()
             .and_then(|s| s.calls.active_group_call.clone())
@@ -140,7 +151,7 @@ impl QuillApp {
         };
         let state = mute_state(&call);
         // Your own microphone: the halo follows the level while live.
-        let (self_level, self_speaking) = self.group_call_self_level();
+        let (self_level, _) = self.group_call_self_level();
         let level_reach = (state == MuteState::Live).then(|| {
             let now = self.group_call_now_ms();
             if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
@@ -151,7 +162,7 @@ impl QuillApp {
             }
             let value = self.group_call.level_anim.value(now);
             if self.group_call.level_anim.is_running(now) || value > 0.0 {
-                self.request_animation_tick(30, cx);
+                self.request_window_view_tick(panel, window, 30, cx);
             }
             quill::calls::audio_level::halo_reach(value)
         });
@@ -201,7 +212,7 @@ impl QuillApp {
                 .role(Role::Button)
                 .aria_label(tr(keys::GROUP_CALL_INVITE))
                 .tab_index(0)
-                .h(px(48.))
+                .h(px(INVITE_ROW_HEIGHT))
                 .px(px(14.))
                 .flex()
                 .items_center()
@@ -221,13 +232,11 @@ impl QuillApp {
                 .child(div().text_size(px(14.)).child(tr(keys::GROUP_CALL_INVITE)))
         });
 
-        let now = std::time::Instant::now();
-        let rows: Vec<AnyElement> = call
-            .participants
-            .iter()
-            .map(|participant| self.group_member_row(&call, participant, self_speaking, now, cx))
-            .collect();
-        self.tick_group_member_speakers(now, cx);
+        self.group_call.rows_place = RowsPlace {
+            card: usize::from(tiles.is_some()),
+            head: CARD_PADDING + if can_invite { INVITE_ROW_HEIGHT } else { 0. },
+        };
+        let rows_height = call.participants.len() as f32 * ROW_HEIGHT;
 
         let members = div()
             .id("group-call-members")
@@ -235,18 +244,24 @@ impl QuillApp {
             .min_h_0()
             .mx(px(16.))
             .overflow_y_scroll()
+            .track_scroll(&self.group_call.members_scroll)
             .flex()
             .flex_col()
             .gap(px(8.))
             .children(tiles)
             .child(
                 div()
+                    .flex_shrink_0()
                     .rounded(px(12.))
                     .bg(call_chrome::group_raised())
                     .overflow_hidden()
-                    .py(px(4.))
+                    .py(px(CARD_PADDING))
                     .children(invite_row)
-                    .children(rows)
+                    .child(
+                        members
+                            .clone()
+                            .cached(StyleRefinement::default().w_full().h(px(rows_height))),
+                    )
                     .when(
                         !call.loaded_all_participants && call.participants.len() >= 100,
                         |this| {
@@ -879,13 +894,13 @@ mod tests {
         assert!(mute_state(&call) == MuteState::Join);
         call.is_joined = true;
         assert!(mute_state(&call) == MuteState::Connecting);
-        call.participants.push(me(false, true, false));
+        call.participants = std::sync::Arc::new(vec![me(false, true, false)]);
         assert!(mute_state(&call) == MuteState::Live);
         call.is_muted_self = true;
         assert!(mute_state(&call) == MuteState::Muted);
-        call.participants[0] = me(true, false, false);
+        call.participants = std::sync::Arc::new(vec![me(true, false, false)]);
         assert!(mute_state(&call) == MuteState::ForceMuted);
-        call.participants[0] = me(true, false, true);
+        call.participants = std::sync::Arc::new(vec![me(true, false, true)]);
         assert!(mute_state(&call) == MuteState::HandRaised);
         call.is_joined = false;
         call.scheduled_start_date = 2_000_000_000;
