@@ -423,3 +423,19 @@ give-up:
   listed until its `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a post to it fails.
 - `src/window_list.rs`: `for_each_open_after_unlock` skips destroyed windows.
   It is std-only, tested by `scripts/test-window-list.sh`.
+
+The Quill project changed it in 2026 so opening a window does not build every
+shader again:
+
+- `src/directx_renderer.rs`: `PipelineState::new` takes its vertex and pixel
+  shader from `shared_shaders`, a per-thread cache keyed by the D3D device.
+  Upstream made all ten shader pairs for each window, so every Quill
+  notification toast (a pop-up window of its own) had the driver build them on
+  the UI thread, and debug builds compiled the HLSL with `D3DCompileFromFile`
+  each time. Instance buffers, the swap chain and DirectComposition stay per
+  window. Blend and sampler states are left as they were: D3D11 returns the
+  existing object for an identical description. A new device after a device
+  loss replaces the cache.
+
+Type-checked with `cargo check --target x86_64-pc-windows-gnu` on Linux. Not
+run on Windows by the author.

@@ -434,6 +434,7 @@ impl QuillApp {
         let owner = cx.entity().downgrade();
         let view = cx.new(|_| NotifyView::new(id, content, owner));
         let root = view.clone();
+        let opening = Instant::now();
         let handle = cx
             .open_window(
                 WindowOptions {
@@ -456,6 +457,7 @@ impl QuillApp {
             )
             .ok()?;
         let now = Instant::now();
+        trace_open(now.saturating_duration_since(opening));
         let mut opacity = Anim::still(0.0, now);
         opacity.retarget(1.0, FAST_ANIM_MS, false, now);
         Some(Popup {
@@ -897,6 +899,18 @@ pub(super) fn display_checksum(display: &dyn PlatformDisplay) -> u64 {
     match display.uuid() {
         Ok(uuid) if !uuid.is_nil() => custom::display_checksum(&uuid.to_string()),
         _ => custom::display_checksum(&format!("{:?}", display.id())),
+    }
+}
+
+/// `QUILL_TRACE_TOASTS=1`: print how long opening each notification window
+/// held the UI thread (on Windows that includes the window's renderer).
+fn trace_open(took: Duration) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_TOASTS").is_some()) {
+        eprintln!(
+            "toast window opened in {:.1} ms",
+            took.as_secs_f64() * 1000.
+        );
     }
 }
 
