@@ -4,12 +4,16 @@
 //! what is under it, and an idle window asks for no frames.
 use crate::ui::agent_state::{TEST_LOCK, reset_for_test};
 use crate::ui::app::QuillApp;
+use crate::ui::frame_clock::take_slice_renders;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, point, px, size};
+use gpui_kit::{
+    AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, WindowVisibility, point, px,
+    size,
+};
 use quill::agent::ui_driver::bridge::{self, UiCommand, UiReply};
 use quill::agent::ui_driver::takeover::{self, Aim, FADE_IN, FADE_OUT, HOLD, PauseReason, Phase};
 use quill::agent::{access, activity};
@@ -380,5 +384,37 @@ fn turning_access_off_mid_drive_removes_the_takeover_at_once(cx: &mut TestAppCon
     // The takeover clock is pinned, so a fade could not have moved on:
     // only the gate removes the layer this frame.
     assert!(!pill(vcx), "no fade: the glow, ghost and pill are gone now");
+    takeover::reset_for_test();
+}
+
+/// The takeover is process-wide, so a window that shows no agents shares it
+/// with whatever drives another app in the process. Hiding redraws for the
+/// takeover only where it shows: a redraw here would reach every window that
+/// follows the app, a hidden chat window's clips included.
+#[gpui_kit::test]
+fn hiding_a_window_redraws_it_for_the_takeover_only_where_agents_show(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (_app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    settle(vcx);
+    let draws_as_it_hides = |vcx: &mut VisualTestContext| {
+        vcx.simulate_visibility_change(WindowVisibility::Visible);
+        vcx.run_until_parked();
+        let _ = take_slice_renders();
+        vcx.simulate_visibility_change(WindowVisibility::Hidden);
+        vcx.run_until_parked();
+        take_slice_renders().get("app").copied().unwrap_or(0)
+    };
+
+    takeover::reset_for_test();
+    access::set_enabled(true);
+    access::set_ui_driver(true);
+    let _elsewhere = activity::connect("Claude Code");
+    drive_at(1000);
+    assert_eq!(draws_as_it_hides(vcx), 0, "no agents show here");
+
+    let _presence = turn_on();
+    drive_at(1000);
+    assert!(draws_as_it_hides(vcx) > 0, "the takeover shows here");
     takeover::reset_for_test();
 }
