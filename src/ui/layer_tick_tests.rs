@@ -403,6 +403,32 @@ fn a_sticker_tick_renders_the_layers_alone(cx: &mut TestAppContext) {
     let _ = take_slice_renders();
 }
 
+/// A patch, then a frame something else asks for: the slices around the
+/// layers replay.
+#[gpui_kit::test]
+fn a_composer_frame_after_a_patch_leaves_the_conversation_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_stickers(cx);
+    let vcx = &mut vcx;
+    let (_, painter) = app
+        .read_with(vcx, |app, _| app.slices.conversation_ids())
+        .expect("its layer");
+    let _ = take_slice_renders();
+
+    vcx.update(|_, cx| cx.notify(painter));
+    vcx.run_until_parked();
+    let patch = take_slice_renders();
+    assert!(patch.contains_key("animation layer"), "{patch:?}");
+    assert!(!patch.contains_key("app"), "a patch: {patch:?}");
+
+    app.update(vcx, |app, cx| app.notify_composer(cx));
+    vcx.run_until_parked();
+    let drawn = take_slice_renders();
+    assert_eq!(drawn.get("composer"), Some(&1), "{drawn:?}");
+    for kind in ["conversation", "sidebar"] {
+        assert!(!drawn.contains_key(kind), "{kind} replayed: {drawn:?}");
+    }
+}
+
 /// Paints a layered item inside a half transparent box, and the layer after
 /// it, as the painter does.
 struct Dimmed {
