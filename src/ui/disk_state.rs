@@ -5,7 +5,7 @@ use super::message_media::format_bytes;
 use super::status_note::StatusNote;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::alert::Alert;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -41,6 +41,8 @@ pub(crate) struct DiskUi {
     /// How many times this run the full-disk screen went up, each with one
     /// system notification.
     full_notices: u32,
+    /// The on-screen account's cached files, while that folder exists.
+    cache_folder: Option<PathBuf>,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -65,6 +67,7 @@ impl DiskUi {
             screen_refused: false,
             held_for_call: false,
             full_notices: 0,
+            cache_folder: None,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -103,7 +106,7 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
         let mut device = None;
         loop {
             let folder = root.clone();
-            let (reading, floors, seen_on) = cx
+            let (reading, floors, seen_on, cache) = cx
                 .background_executor()
                 .spawn(async move {
                     let reading = match demo_reading() {
@@ -113,18 +116,32 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
                         },
                         None => read_data(&folder, device),
                     };
-                    (reading, data_floors(&folder), data_root_device(&folder))
+                    let floors = data_floors(&folder);
+                    (
+                        reading,
+                        floors,
+                        data_root_device(&folder),
+                        cache_folder(&folder),
+                    )
                 })
                 .await;
             device = seen_on.or(device);
-            let Ok(wait) = this.update(cx, |this, cx| this.apply_data_reading(reading, floors, cx))
-            else {
+            let Ok(wait) = this.update(cx, |this, cx| {
+                this.disk.cache_folder = cache;
+                this.apply_data_reading(reading, floors, cx)
+            }) else {
                 break;
             };
             cx.background_executor().timer(wait).await;
         }
     })
     .detach();
+}
+
+fn cache_folder(root: &std::path::Path) -> Option<PathBuf> {
+    let active = quill::settings::active_account(root);
+    let files = quill::settings::AccountPaths::for_root(root, &active).tdlib_files;
+    files.is_dir().then_some(files)
 }
 
 /// `QUILL_DEMO_DISK_FREE_MB` stands in for the disk in a capture build. It
@@ -327,6 +344,26 @@ impl QuillApp {
             action: AuthAction::ProvideParameters,
             blocking: true,
         })
+    }
+
+    /// On the full-disk screen, a link that shows the account's cached files
+    /// in the file manager, so they can be removed there. Quill deletes
+    /// nothing itself while TDLib is closed: TDLib keeps their records.
+    pub(super) fn disk_full_reveal(&self) -> Option<gpui_kit::AnyElement> {
+        if !self.disk.shows_screen() || self.disk.unwritable {
+            return None;
+        }
+        let folder = self.disk.cache_folder.clone()?;
+        Some(
+            Button::new("disk-full-reveal")
+                .label(tr(keys::Q_DISK_SHOW_CACHED_FILES))
+                .link()
+                .small()
+                .on_click(move |_, _, _| {
+                    let _ = quill::platform::reveal_in_file_manager(&folder);
+                })
+                .into_any_element(),
+        )
     }
 
     /// The kit's banner has no action slot, so the row around it carries the

@@ -10,3 +10,4 @@
 "qll_disk_full_in_call" = "Disk is full. Quill will disconnect when the call ends.";
 "qll_disk_full_notice" = "Quill disconnected to keep your data safe. Free up space and it reconnects by itself.";
 "qll_disk_unwritable_notice" = "Quill disconnected to keep your data safe. The disk that holds its data is missing or can only be read.";
+"qll_disk_show_cached_files" = "Show cached files";

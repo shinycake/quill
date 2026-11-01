@@ -381,3 +381,24 @@ fn each_time_the_disk_fills_sends_one_notice(cx: &mut TestAppContext) {
     });
     assert_eq!(notices(&app, &mut vcx), 2, "the screen was up already");
 }
+
+#[gpui_kit::test]
+fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_demo_app(cx, "wait-phone", 800.);
+    let folder = quill::scratch::unique_dir("quill-disk-cache");
+    app.update_in(&mut vcx, |app, _, _| {
+        app.disk.cache_folder = Some(folder.clone())
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(vcx.update(|window, _| window.try_find("disk-full-reveal").is_none()));
+    fill(&app, &mut vcx, Some(0));
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(vcx.update(|window, _| window.try_find("disk-full-reveal").is_some()));
+    app.update_in(&mut vcx, |app, _, _| app.disk.cache_folder = None);
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(
+        vcx.update(|window, _| window.try_find("disk-full-reveal").is_none()),
+        "no folder, no link"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
