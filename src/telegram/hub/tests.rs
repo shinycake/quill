@@ -370,67 +370,6 @@ fn a_send_to_an_unmade_client_ends_a_blocked_receive() {
     assert!(answer.contains("Invalid TDLib instance"), "{answer}");
 }
 
-const EXIT_CHILD: &str = "QUILL_TEST_HUB_EXIT_CHILD";
-
-#[expect(
-    clippy::exit,
-    reason = "the re-executed child test process is the exit under test"
-)]
-fn exit_child_main() -> ! {
-    let Ok(live) = crate::telegram::client::LiveTdJson::connect(Arc::new(MemorySink::new())) else {
-        std::process::exit(3);
-    };
-    let bridge = live.bridge();
-    let _ = live.send(r#"{"@type":"close"}"#);
-    while let Some(owned) = bridge.next_timeout(Duration::from_secs(10)) {
-        if matches!(
-            owned.envelope.payload,
-            EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(
-                AuthorizationState::Closed
-            ))
-        ) {
-            std::process::exit(0);
-        }
-    }
-    std::process::exit(4);
-}
-
-#[test]
-#[ignore = "QUILL_TDJSON_PATH=<libtdjson> QUILL_TEST_HUB_EXIT_RUNS=700 cargo test --lib exit_with -- --ignored --nocapture"]
-fn exit_with_the_receive_thread_blocked_stays_clean() {
-    if std::env::var_os(EXIT_CHILD).is_some() {
-        exit_child_main();
-    }
-    let runs: u32 = std::env::var("QUILL_TEST_HUB_EXIT_RUNS")
-        .ok()
-        .and_then(|runs| runs.parse().ok())
-        .unwrap_or(100);
-    let exe = std::env::current_exe().unwrap();
-    let mut unclean = 0;
-    let mut slowest = Duration::ZERO;
-    for _ in 0..runs {
-        let started = Instant::now();
-        let status = std::process::Command::new(&exe)
-            .args([
-                "--ignored",
-                "--exact",
-                "telegram::hub::tests::exit_with_the_receive_thread_blocked_stays_clean",
-            ])
-            .env(EXIT_CHILD, "1")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .unwrap();
-        slowest = slowest.max(started.elapsed());
-        if status.code() != Some(0) {
-            eprintln!("{status}");
-            unclean += 1;
-        }
-    }
-    eprintln!("{runs} exits, {unclean} unclean, slowest {slowest:?}");
-    assert_eq!(unclean, 0);
-}
-
 #[test]
 fn each_route_wakes_only_its_own_poll_loop_and_a_switch_swaps_them() {
     static ON_SCREEN: crate::wake::Signal = crate::wake::Signal::new();

@@ -46,6 +46,7 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     }
     log::logger().flush();
     show_alert(tr(keys::Q_MISC_QUILL_COULD_NOT_OPEN_A), &message, &summary);
+    quill::telegram::hub::set_exit_status(1);
     std::process::exit(1)
 }
 

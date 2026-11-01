@@ -17,6 +17,8 @@
 //! It is stopped once, at process exit, before TDLib's own teardown: `exit`
 //! destroys TDLib's static client manager, and a receive thread still inside
 //! `td_receive` then reads freed memory ([`stop_shared_before_tdlib_teardown`]).
+//! While a client may still be open, exit then skips TDLib's teardown, on
+//! which TDLib's workers abort.
 
 use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
@@ -27,6 +29,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+mod exit;
+pub(crate) use exit::note_made;
+pub use exit::{set_exit_status, stop_shared_before_tdlib_teardown};
 
 /// Seconds one `td_receive` call may block. Anything TDLib has to say ends
 /// it sooner, and a stop makes TDLib say something ([`ReceiveWake`]), so
@@ -333,41 +339,6 @@ impl TdHub {
     }
 }
 
-static EXIT_HOOK: std::sync::Once = std::sync::Once::new();
-
-/// Stop the shared hub's receive thread when the process exits, before
-/// TDLib destroys its static client manager under it. Call right after a
-/// client id is made and before its route exists: `atexit` hooks and static
-/// destructors run in reverse order of registration, and TDLib registers the
-/// manager's destructor then, so a hook registered after that runs first.
-///
-/// TDLib's function-local statics go in that order too, so one first used
-/// after the hook is registered is gone when the hook runs, and a `td_send`
-/// in the hook aborts on it. The wake therefore runs once here, and
-/// `td_receive` is free because no route exists yet.
-pub fn stop_shared_before_tdlib_teardown(api: &TdJson) {
-    EXIT_HOOK.call_once(|| {
-        api.wake_receive();
-        let _ = api.receive(0.0);
-        // SAFETY: `stop_shared_at_exit` is a plain `extern "C" fn()` that
-        // catches every panic. A failed registration leaves exit as before.
-        let _ = unsafe { libc::atexit(stop_shared_at_exit) };
-    });
-}
-
-/// Runs inside `exit`, so it never calls `std::thread::current()`: on macOS
-/// that ends the process silently once `exit` has torn down thread locals.
-extern "C" fn stop_shared_at_exit() {
-    crate::thread_guard::ffi_boundary((), || {
-        // Never block exit on the slot. It is held only while a hub is
-        // being made; that rare quit keeps the old behaviour.
-        let hub = crate::locks::try_lock_or_recover(&SHARED).and_then(|slot| slot.clone());
-        if let Some(hub) = hub {
-            hub.stop_within(EXIT_STOP_WAIT);
-        }
-    });
-}
-
 impl Drop for TdHub {
     fn drop(&mut self) {
         self.shutdown();
@@ -441,6 +412,7 @@ fn receive_one(
     let Some(owned) = copy_and_parse(&json, seq, sink) else {
         return;
     };
+    exit::note_received(&owned);
     let note = match routes.deliver(owned) {
         Delivery::Delivered => return,
         Delivery::Unrouted => "unrouted-client",
