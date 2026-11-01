@@ -5,7 +5,7 @@ use super::app::QuillApp;
 use super::audio::{NotificationSound, notification_sound};
 use super::connect_ui::live_status_for;
 use super::notification_settings::MAX_OS_NOTIFICATION_THREADS;
-use super::wake_wait::{PassEnd, PollPace, run_poll_loop};
+use super::wake_wait::{PassEnd, PollPace, backlog_hold, run_poll_loop};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -202,7 +202,8 @@ impl QuillApp {
         // window-scope: `poll_live` puts the main window's state in place itself.
         cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
-            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, || {
+            let hold = backlog_hold(&executor);
+            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
                     if generation != this.connection.generation {
                         return None;
