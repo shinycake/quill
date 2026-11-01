@@ -15,6 +15,7 @@ fn exporting(session: &Session) -> bool {
     let account = settings.account_export.as_ref();
     chat.is_some_and(|export| !export.progress().is_settled())
         || account.is_some_and(|export| !export.progress().is_settled())
+        || (settings.rich_html_exports.iter()).any(|export| export.outcome().is_none())
 }
 
 impl QuillApp {
@@ -32,6 +33,9 @@ impl QuillApp {
             }
             if let Some(export) = &session.settings.account_export {
                 export.cancel();
+            }
+            for export in &session.settings.rich_html_exports {
+                export.link.cancel();
             }
         }
     }

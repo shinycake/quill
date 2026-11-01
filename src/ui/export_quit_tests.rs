@@ -8,6 +8,7 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::export::account::{AccountSettings, Section, Sections};
 use quill::export::{AccountExport, ChatExport, ExportSettings};
+use quill::rich_html::{PageLabels, RichHtmlExport, RichHtmlRequest};
 use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -203,5 +204,41 @@ fn an_export_that_ended_holds_nothing_and_reports_from_off_screen(cx: &mut TestA
         session.settings.account_export = None;
     });
     assert!(ask(&app, vcx).get(), "nothing runs any more");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn running_rich_html_export(dir: &Path) -> RichHtmlExport {
+    let request = RichHtmlRequest {
+        chat_id: quill::ids::ChatId(16),
+        message_id: quill::ids::MessageId(5),
+        base_dir: dir.to_path_buf(),
+        fallback_title: "Chat".into(),
+        labels: PageLabels::current(),
+    };
+    RichHtmlExport::start(request, dir.to_path_buf()).unwrap()
+}
+
+#[gpui_kit::test]
+fn a_running_save_as_html_asks_and_stop_ends_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("rich-html");
+    let export = running_rich_html_export(&dir);
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.rich_html_exports.push(export);
+    });
+    let exited = ask(&app, vcx);
+    assert!(!exited.get(), "held back");
+    assert!(box_open(&app, vcx));
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert!(exited.get(), "stopped, then exited");
+    let export = app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.rich_html_exports.remove(0)
+    });
+    wait_for_the_end(|| export.outcome().is_some());
+    drop(export);
     let _ = std::fs::remove_dir_all(&dir);
 }
