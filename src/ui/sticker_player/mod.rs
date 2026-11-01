@@ -115,12 +115,23 @@ struct UiClip {
     drawn: SmallVec<[PaintStamp; 2]>,
     /// When the closer last found it on screen.
     seen: Option<Instant>,
-    /// What each head drawing it wants: its frame and the next ones.
-    wants: Vec<(HeadId, u32, [Option<u32>; AHEAD], Instant)>,
+    /// What each head drawing it wants.
+    wants: Vec<Want>,
     /// When its first frame arrived.
     ready_at: Option<Instant>,
     /// Where views asked for it since it opened.
     places: Places,
+}
+
+/// What a head drawing a clip wants.
+struct Want {
+    head: HeadId,
+    index: u32,
+    ahead: [Option<u32>; AHEAD],
+    at: Instant,
+    /// It rests on `index`, and its window draws it only when something else
+    /// changes: the frame stays for as long as the head does.
+    rests: bool,
 }
 
 /// Where a view is in a clip.
@@ -512,8 +523,14 @@ impl Player {
                                     .map(|(index, image)| (*index, image.clone()))
                             })
                             .or_else(|| clip.shown.clone());
-                        clip.wants.retain(|(h, ..)| *h != head);
-                        clip.wants.push((head, pick.index, pick.ahead, now));
+                        clip.wants.retain(|want| want.head != head);
+                        clip.wants.push(Want {
+                            head,
+                            index: pick.index,
+                            ahead: pick.ahead,
+                            at: now,
+                            rests: !pick.animating,
+                        });
                         let (index, image) = found?;
                         if clip
                             .shown
@@ -554,22 +571,26 @@ impl Player {
     /// Ask the engine for what the heads drawing `key` want next, and let
     /// go of drawn frames none of them needs any more.
     fn ask(&self, key: &ClipKey, now: Instant, retired: &mut Vec<Arc<RenderImage>>) {
-        let Ok(mut inner) = self.inner.try_borrow_mut() else {
+        let Ok(mut guard) = self.inner.try_borrow_mut() else {
             return;
         };
+        let inner = &mut *guard;
         let Some(clip) = inner.clips.get_mut(key) else {
             return;
         };
-        clip.wants
-            .retain(|(.., at)| now.saturating_duration_since(*at) <= WANT_TTL);
+        let heads = &inner.heads;
+        clip.wants.retain(|want| {
+            now.saturating_duration_since(want.at) <= WANT_TTL
+                || want.rests && heads.contains_key(&(want.head, key.file))
+        });
         let mut wanted: SmallVec<[u32; 16]> = SmallVec::new();
         // Each head's own frame first, then the frames ahead in order.
-        for (_, index, ..) in &clip.wants {
-            wanted.push(*index);
+        for want in &clip.wants {
+            wanted.push(want.index);
         }
         for slot in 0..AHEAD {
-            for (_, _, ahead, _) in &clip.wants {
-                if let Some(index) = ahead.get(slot).copied().flatten() {
+            for want in &clip.wants {
+                if let Some(index) = want.ahead.get(slot).copied().flatten() {
                     wanted.push(index);
                 }
             }
@@ -596,7 +617,7 @@ impl Player {
             seen.push(*index);
             fresh
         });
-        drop(inner);
+        drop(guard);
         if !wanted.is_empty() {
             self.engine.want(key, &wanted);
         }

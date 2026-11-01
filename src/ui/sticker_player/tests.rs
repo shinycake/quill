@@ -333,6 +333,31 @@ fn a_clip_in_a_chat_windows_replaying_slice_stays_open() {
     assert_eq!((closed.clips, closed.next), (0, Some(CLOSE_AFTER)));
 }
 
+/// A sticker at rest asks for nothing while its window stays quiet. Another
+/// window playing the same clip leaves its frame alone: the quiet window's
+/// next draw (a caret blink) showed the frame the other head had reached, so
+/// a rested sticker moved each time the main window opened a chat with it.
+#[test]
+fn a_head_at_rest_keeps_its_frame_while_another_head_plays_the_clip() {
+    let (player, spec) = player(12);
+    let (resting, playing) = (head("resting"), head("playing"));
+    let once = PlayMode::Once(Rest::Last);
+    let t0 = Instant::now();
+    for step in 0..=12 {
+        let _ = shown(&player, &spec, resting, once, t0 + ms(34) * step);
+    }
+    assert_eq!(shown(&player, &spec, resting, once, t0 + ms(442)), 11);
+    let t1 = t0 + ms(1000);
+    let _ = shown(&player, &spec, playing, once, t1);
+    for step in 0..3 {
+        let at = t1 + ms(34) * step;
+        assert_eq!(shown(&player, &spec, playing, once, at), step as u8);
+    }
+    let late = player.screen_stats().late;
+    assert_eq!(shown(&player, &spec, resting, once, t1 + ms(102)), 11);
+    assert_eq!(player.screen_stats().late, late, "its frame was still there");
+}
+
 /// A window lets go of its chat (the main window opens another one): the
 /// heads and clips only its views used go, and what views in another
 /// window use stays as it is, frames and position. Stopping everything
