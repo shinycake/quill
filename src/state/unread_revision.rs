@@ -2,9 +2,7 @@
 //! Most updates a signed-in account receives (statuses, typing, file
 //! progress) cannot change what the badges count, so they leave it alone.
 use super::*;
-use crate::telegram::envelope::{
-    ChatListPayload, ChatsPayload, MediaPayload, SettingsPayload, UsersPayload,
-};
+use crate::telegram::envelope::{ChatsPayload, MediaPayload, SettingsPayload, UsersPayload};
 
 impl Session {
     pub(crate) fn note_unread_inputs(&mut self, payload: &EnvelopePayload) {
