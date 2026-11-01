@@ -58,7 +58,7 @@ pub(crate) struct TestPlatform {
     weak: Weak<Self>,
     menus: RefCell<Vec<OwnedMenu>>,
     pub(crate) app_lifecycle_callback: RefCell<Option<Box<dyn FnMut(AppLifecyclePhase)>>>,
-    pub(crate) quit_request_callback: RefCell<Option<Box<dyn FnMut() -> bool>>>,
+    pub(crate) quit_request_callback: RefCell<Option<Box<dyn FnMut() -> crate::QuitAnswer>>>,
     pub(crate) memory_warning_callback: RefCell<Option<Box<dyn FnMut()>>>,
 }
 
@@ -688,7 +688,7 @@ impl Platform for TestPlatform {
 
     fn on_quit(&self, _callback: Box<dyn FnMut() -> bool>) {}
 
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> crate::QuitAnswer>) {
         *self.quit_request_callback.borrow_mut() = Some(callback);
     }
 

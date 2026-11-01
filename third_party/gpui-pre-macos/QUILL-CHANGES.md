@@ -143,6 +143,9 @@ refused, as Telegram Desktop refuses them through Qt while an export runs:
 
 - `src/platform.rs`: `applicationShouldTerminate:` asks the new
   `Platform::on_quit_request` callback and answers `NSTerminateCancel` when it
-  says no. Upstream has no such method, so AppKit terminated at once.
+  refuses. Upstream has no such method, so AppKit terminated at once. When the
+  app cannot be asked (it is borrowed, or the callback is running further up
+  the stack), it answers `NSTerminateLater` and asks again from the main
+  queue, then calls `replyToApplicationShouldTerminate:` with the answer.
   `Platform::quit` sets `quit_decided`, so the app's own quit, `restart`
   included, reaches `terminate:` without asking.

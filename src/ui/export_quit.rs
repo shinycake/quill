@@ -41,6 +41,10 @@ impl QuillApp {
         }
     }
 
+    pub(in crate::ui) fn exporting_anywhere(&self) -> bool {
+        self.all_sessions().any(exporting)
+    }
+
     pub(crate) fn exit_held_by_export(
         &mut self,
         exit: impl Fn(&mut Window, &mut App) + 'static,
@@ -54,6 +58,7 @@ impl QuillApp {
         if self.dialogs.export_stop.replace(Box::new(exit)).is_some() {
             return true;
         }
+        window.set_shutdown_block_reason(Some(tr(keys::EXPORT_PROGRESS_TITLE)));
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (stop, closed) = (app.clone(), app.clone());
@@ -73,7 +78,8 @@ impl QuillApp {
                     }
                     true
                 })
-                .on_close(move |_, _, cx| {
+                .on_close(move |_, window, cx| {
+                    window.set_shutdown_block_reason(None);
                     let _ = closed.update(cx, |this, _| this.dialogs.export_stop = None);
                 })
         });

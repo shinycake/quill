@@ -1372,17 +1372,21 @@ impl App {
 
     /// Quill: `callback` decides whether a quit the OS started goes ahead:
     /// a Dock Quit or log out on macOS, the end of the session on Windows.
-    /// [`App::quit`] never asks. A request that finds the app borrowed goes
-    /// ahead, as it would with no callback.
+    /// [`App::quit`] never asks. A request that finds the app borrowed is
+    /// held and asked again from the event loop, never let through unasked.
     pub fn on_quit_request(&self, mut callback: impl FnMut(&mut App) -> bool + 'static) {
         let this = self.this.clone();
         self.platform.on_quit_request(Box::new(move || {
             let Some(app) = this.upgrade() else {
-                return true;
+                return crate::QuitAnswer::Allow;
             };
-            match app.try_borrow_mut() {
-                Ok(mut cx) => cx.update(|cx| callback(cx)),
-                Err(_) => true,
+            let Ok(mut cx) = app.try_borrow_mut() else {
+                return crate::QuitAnswer::Later;
+            };
+            if cx.update(|cx| callback(cx)) {
+                crate::QuitAnswer::Allow
+            } else {
+                crate::QuitAnswer::Refuse
             }
         }));
     }

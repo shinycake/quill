@@ -14,9 +14,8 @@ use gpui::{
     BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor, GraphicalEnvironment,
     KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
     PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
-    PlatformWindow, Result, SystemMenuType, Task, ThermalState, WindowAppearance, WindowKind,
-    WindowParams, WindowingRequest,
-    popup::PopupNotSupportedError,
+    PlatformWindow, QuitAnswer, Result, SystemMenuType, Task, ThermalState, WindowAppearance,
+    WindowKind, WindowParams, WindowingRequest, popup::PopupNotSupportedError,
 };
 use gpui_apple::{
     keychain,
@@ -194,7 +193,9 @@ pub(crate) struct MacPlatformState {
     on_system_wake: Option<Box<dyn FnMut()>>,
     system_power_observers_registered: bool,
     quit: Option<Box<dyn FnMut() -> bool>>,
-    quit_request: Option<Box<dyn FnMut() -> bool>>,
+    quit_request: Option<Box<dyn FnMut() -> QuitAnswer>>,
+    /// `quit_request` was registered; an empty slot then means it runs.
+    quit_request_set: bool,
     /// `Platform::quit` ran: the app decided, so `terminate:` asks nothing.
     quit_decided: bool,
     menu_command: Option<Box<dyn FnMut(&dyn Action)>>,
@@ -262,6 +263,7 @@ impl MacPlatform {
             app_lifecycle: None,
             quit: None,
             quit_request: None,
+            quit_request_set: false,
             quit_decided: false,
             menu_command: None,
             validate_menu_command: None,
@@ -1057,8 +1059,10 @@ impl Platform for MacPlatform {
         self.0.lock().quit = Some(callback);
     }
 
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
-        self.0.lock().quit_request = Some(callback);
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> QuitAnswer>) {
+        let mut lock = self.0.lock();
+        lock.quit_request = Some(callback);
+        lock.quit_request_set = true;
     }
 
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
@@ -1427,20 +1431,51 @@ extern "C-unwind" fn should_terminate(
     _: *mut AnyObject,
 ) -> NSApplicationTerminateReply {
     let platform = unsafe { get_mac_platform(this) };
-    let mut lock = platform.0.lock();
-    if lock.quit_decided {
+    if platform.0.lock().quit_decided {
         return NSApplicationTerminateReply::TerminateNow;
     }
+    match ask_quit_request(platform) {
+        QuitAnswer::Allow => NSApplicationTerminateReply::TerminateNow,
+        QuitAnswer::Refuse => NSApplicationTerminateReply::TerminateCancel,
+        QuitAnswer::Later => {
+            ask_quit_request_later(platform);
+            NSApplicationTerminateReply::TerminateLater
+        }
+    }
+}
+
+fn ask_quit_request(platform: &MacPlatform) -> QuitAnswer {
+    let mut lock = platform.0.lock();
+    if !lock.quit_request_set {
+        return QuitAnswer::Allow;
+    }
     let Some(mut callback) = lock.quit_request.take() else {
-        return NSApplicationTerminateReply::TerminateNow;
+        return QuitAnswer::Later;
     };
     drop(lock);
-    let allowed = callback();
+    let answer = callback();
     platform.0.lock().quit_request.get_or_insert(callback);
-    if allowed {
-        NSApplicationTerminateReply::TerminateNow
-    } else {
-        NSApplicationTerminateReply::TerminateCancel
+    answer
+}
+
+// The app was busy when AppKit asked: it waits for
+// `replyToApplicationShouldTerminate:`, and the app is asked again from the
+// main queue.
+fn ask_quit_request_later(platform: &MacPlatform) {
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    // SAFETY: platform lives for the process lifetime while callbacks are registered.
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, answer_later);
+    }
+
+    extern "C" fn answer_later(context: *mut c_void) {
+        // SAFETY: context is the MacPlatform pointer queued above.
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        match ask_quit_request(platform) {
+            QuitAnswer::Later => ask_quit_request_later(platform),
+            answer => NSApplication::sharedApplication(platform.1)
+                .replyToApplicationShouldTerminate(answer == QuitAnswer::Allow),
+        }
     }
 }
 

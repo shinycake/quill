@@ -428,5 +428,12 @@ The Quill project also changed it in 2026 so the end of a session can be
 refused like a Dock Quit on macOS:
 
 - `src/platform.rs`: `WM_QUERYENDSESSION` asks `Platform::on_quit_request`
-  and answers 0 when it says no. A request with `ENDSESSION_CRITICAL` set
-  asks nothing, because that session ends whatever the answer.
+  and answers 0 when it refuses. A request with `ENDSESSION_CRITICAL` set
+  asks nothing, because that session ends whatever the answer. When the app
+  cannot be asked (broadcasts arrive mid-update, for example inside a COM
+  call), it answers 0 and posts `WM_GPUI_QUIT_REQUEST_LATER`
+  (`src/gpui_message.rs`), which asks from the message loop and quits if the
+  app then allows it.
+- `src/window.rs`: `set_shutdown_block_reason` calls
+  `ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy` (the
+  `Win32_System_Shutdown` feature in `Cargo.toml`).

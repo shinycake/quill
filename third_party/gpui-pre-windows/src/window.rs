@@ -23,7 +23,12 @@ use windows::{
         Graphics::Dwm::*,
         Graphics::Gdi::*,
         System::{
-            Com::*, Diagnostics::Debug::MessageBeep, LibraryLoader::*, Ole::*, SystemServices::*,
+            Com::*,
+            Diagnostics::Debug::MessageBeep,
+            LibraryLoader::*,
+            Ole::*,
+            Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy},
+            SystemServices::*,
         },
         UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
     },
@@ -983,6 +988,16 @@ impl PlatformWindow for WindowsWindow {
         unsafe { SetWindowTextW(self.0.hwnd, &HSTRING::from(title)) }
             .inspect_err(|e| log::error!("Set title failed: {e}"))
             .ok();
+    }
+
+    fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        let hwnd = self.0.hwnd;
+        match reason {
+            Some(reason) => unsafe { ShutdownBlockReasonCreate(hwnd, &HSTRING::from(reason)) },
+            None => unsafe { ShutdownBlockReasonDestroy(hwnd) },
+        }
+        .inspect_err(|e| log::error!("Shutdown block reason failed: {e}"))
+        .ok();
     }
 
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {

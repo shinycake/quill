@@ -3110,6 +3110,12 @@ impl Window {
         self.a11y.set_window_title(title.to_string());
     }
 
+    /// Quill: the reason Windows shows while this window holds back the end
+    /// of the session, or `None` to stop showing it.
+    pub fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        self.platform_window.set_shutdown_block_reason(reason);
+    }
+
     /// Sets the position of the macOS traffic light buttons.
     #[cfg(target_os = "macos")]
     pub fn set_traffic_light_position(&self, position: Point<Pixels>) {

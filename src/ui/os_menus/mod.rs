@@ -326,7 +326,9 @@ pub(crate) fn register_actions(handle: AnyWindowHandle, app: WeakEntity<QuillApp
     let next = player(Some(Step::Next));
     cx.on_action(move |_: &DockPlayerNext, cx| next(cx));
     // Dock Quit and log out (tdesktop's `Quit(QuitReason::QtQuitEvent)`):
-    // refused and asked, so the user's answer ends the app.
+    // refused and asked, so the user's answer ends the app. When the window
+    // cannot be reached nothing can ask, so only a quit with no export
+    // running goes ahead.
     let asked = app.clone();
     cx.on_quit_request(move |cx| {
         let held = handle.update(cx, |_, window, cx| {
@@ -334,7 +336,12 @@ pub(crate) fn register_actions(handle: AnyWindowHandle, app: WeakEntity<QuillApp
                 this.exit_held_by_export(super::export_quit::quit_app, window, cx)
             })
         });
-        !matches!(held, Ok(Ok(true)))
+        match held {
+            Ok(Ok(held)) => !held,
+            _ => !asked
+                .read_with(cx, |this, _| this.exporting_anywhere())
+                .unwrap_or(false),
+        }
     });
     // Quit with no window key: the main window hidden by its close button
     // on a Mac (the window's own handler closes it first otherwise).
