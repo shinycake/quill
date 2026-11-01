@@ -1844,10 +1844,7 @@ mod tests {
     }
 
     /// What a saved position resumes from: the sound the device played,
-    /// not what the speed stretcher read ahead of it. At 48 kHz, as devices
-    /// run: the mixer converts a new player's first 512 samples from its
-    /// still-empty queue's 48 kHz, so an 8 kHz rig pulls 340 frames more
-    /// than it plays.
+    /// not what the speed stretcher read ahead of it.
     #[test]
     fn position_is_what_was_played_within_a_block_at_1x_and_1_5x() {
         const RATE: u32 = 48_000;
@@ -1855,7 +1852,7 @@ mod tests {
             let (output, mut device) = device_at(RATE);
             let mut engine = AudioEngine::new(output);
             let path = track_at("played.wav", 4, RATE);
-            engine.start(&path, 0.0, 1.0, speed, 4.0).unwrap();
+            start_landed(&mut engine, &path, 0.0, 1.0, speed, 4.0);
             pull(&mut device, usize::try_from(RATE).unwrap() / 2);
             let played = 0.5 * speed;
             let block = 0.04 * speed;
