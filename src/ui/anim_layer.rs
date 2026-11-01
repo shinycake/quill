@@ -337,6 +337,8 @@ impl Layer {
             })
             .collect();
         order.sort_by_key(|&ix| items.get(ix).map_or(0, |item| item.seq.get()));
+        // An item's opacity holds every ancestor's, the painter's among them.
+        let around = window.element_opacity();
         for ix in order {
             let Some(item) = items.get(ix) else {
                 continue;
@@ -344,7 +346,7 @@ impl Layer {
             if item.visible().is_none() {
                 continue;
             }
-            let opacity = Some(item.opacity.get());
+            let opacity = (around > 0.).then(|| item.opacity.get() / around);
             window.with_element_opacity(opacity, |window| {
                 window.with_content_mask(Some(item.mask), |window| match &item.content {
                     Content::Frames(view) => view.paint(item.bounds, window),

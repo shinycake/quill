@@ -406,6 +406,8 @@ fn a_sticker_tick_renders_the_layers_alone(cx: &mut TestAppContext) {
 struct Dimmed {
     layer: super::Layer,
     painted_at: Rc<Cell<f32>>,
+    /// The opacity of what holds both.
+    around: f32,
 }
 
 impl Render for Dimmed {
@@ -421,6 +423,7 @@ impl Render for Dimmed {
         let (prepaint, paint) = (self.layer.clone(), self.layer.clone());
         div()
             .size_full()
+            .opacity(self.around)
             .child(div().opacity(0.5).child(item))
             .child(
                 canvas(
@@ -441,6 +444,7 @@ fn a_layer_keeps_the_opacity_of_what_it_draws(cx: &mut TestAppContext) {
         let view = cx.new(|_| Dimmed {
             layer: super::Layer::default(),
             painted_at: view_painted_at,
+            around: 1.,
         });
         Root::new(view, window, cx)
     });
@@ -773,4 +777,25 @@ fn a_tick_no_patch_can_reach_takes_a_whole_frame(cx: &mut TestAppContext) {
     assert!(tick.inner_renders > 0, "the notified view rendered");
     assert!(tick.holder_renders > 0, "in a whole frame");
     assert_eq!(tick.hues, vec![SECOND], "and shows its new paint");
+}
+
+/// What [`Dimmed`] shows at full opacity, and inside a box at half: the
+/// layer sits under that box too, as a slice and its painter sit under
+/// whatever dims the window.
+#[gpui_kit::test]
+fn a_layer_under_a_dimmed_ancestor_dims_its_items_once(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let painted_at = Rc::new(Cell::new(1.));
+    let view_painted_at = painted_at.clone();
+    let handle = cx.open_window(size(px(100.), px(100.)), move |window, cx| {
+        let view = cx.new(|_| Dimmed {
+            layer: super::Layer::default(),
+            painted_at: view_painted_at,
+            around: 0.5,
+        });
+        Root::new(view, window, cx)
+    });
+    let vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.run_until_parked();
+    assert_eq!(painted_at.get(), 0.25, "half of a half, and no more");
 }
