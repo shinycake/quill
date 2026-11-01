@@ -12,13 +12,10 @@
 //!   messages go and `loaded_complete` clears, so scrolling up pages them
 //!   in again.
 //!
-//! The trim is page-driven only. Live `updateNewMessage` appends never
-//! trim: a user reading the oldest loaded rows while new messages arrive
-//! must not have them vanish. A trim never changes the end the viewport is
-//! on, so scroll anchoring needs no reset and `window_epoch` is
-//! deliberately not bumped (that would re-anchor to the bottom / unread
-//! divider and yank the reader); every path that really replaces the window
-//! (`reset_window`) still bumps it.
+//! A trim never changes the end the viewport is on, so scroll anchoring
+//! needs no reset and `window_epoch` is deliberately not bumped (that would
+//! re-anchor to the bottom / unread divider and yank the reader); every
+//! path that really replaces the window (`reset_window`) still bumps it.
 use super::*;
 
 /// Messages kept in one chat's window before the far end is trimmed.
@@ -26,12 +23,33 @@ pub const HISTORY_WINDOW_CAP: usize = 1500;
 /// A trim shrinks the window to this size (hysteresis: it is not
 /// re-trimmed on every following page).
 pub const HISTORY_WINDOW_TRIM_TO: usize = 1200;
+const ROWS_KEPT_ABOVE_READER: usize = 200;
 
 /// Which end of the window a trim drops.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowEnd {
     Oldest,
     Newest,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct LiveTrimSpan {
+    oldest: usize,
+    newest: usize,
+}
+
+fn live_trim_span(len: usize, rows_above_reader: Option<usize>) -> LiveTrimSpan {
+    if len <= HISTORY_WINDOW_CAP {
+        return LiveTrimSpan::default();
+    }
+    let excess = len - HISTORY_WINDOW_TRIM_TO;
+    let oldest = rows_above_reader.map_or(excess, |above| {
+        above.saturating_sub(ROWS_KEPT_ABOVE_READER).min(excess)
+    });
+    LiveTrimSpan {
+        oldest,
+        newest: excess - oldest,
+    }
 }
 
 impl HistoryState {
@@ -75,6 +93,79 @@ impl HistoryState {
         for id in &doomed {
             self.messages.remove(id);
             self.visible.remove(id);
+            self.viewed.remove(id);
+        }
+        doomed.len()
+    }
+
+    fn trim_live(&mut self) -> usize {
+        let len = self.messages.len();
+        let above = self
+            .reader_top
+            .map(|top| self.messages.range(..top).count());
+        let span = live_trim_span(len, above);
+        let dropped = self.trim_window_end(WindowEnd::Oldest, 0, len - span.oldest);
+        dropped + self.trim_window_end(WindowEnd::Newest, 0, len - dropped - span.newest)
+    }
+}
+
+impl TopicHistory {
+    fn trim_live(&mut self) -> usize {
+        let len = self.messages.len();
+        let above = self
+            .reader_top
+            .map(|top| self.messages.range(..top).count());
+        self.trim_to_tail(len - live_trim_span(len, above).oldest)
+    }
+}
+
+impl ThreadView {
+    fn trim_replies(&mut self, end: WindowEnd, count: usize) -> usize {
+        let roots = &self.root_ids;
+        let replies = self
+            .history
+            .messages
+            .keys()
+            .copied()
+            .filter(|id| *id > 0 && !roots.contains(id));
+        let doomed: Vec<i64> = match end {
+            WindowEnd::Oldest => replies.take(count).collect(),
+            WindowEnd::Newest => replies.rev().take(count).collect(),
+        };
+        let unsent = |id: &i64| {
+            self.history
+                .messages
+                .get(id)
+                .is_some_and(|message| message.pending || message.failed)
+        };
+        if doomed.iter().any(unsent) {
+            return 0;
+        }
+        for id in &doomed {
+            self.history.messages.remove(id);
+        }
+        if doomed.is_empty() {
+            return 0;
+        }
+        match end {
+            WindowEnd::Oldest => {
+                self.history.loaded_complete = false;
+                let oldest = self
+                    .history
+                    .messages
+                    .keys()
+                    .copied()
+                    .find(|id| *id > 0 && !self.root_ids.contains(id));
+                if let Some(oldest) = oldest {
+                    self.history.next_from_message_id = MessageId(oldest);
+                }
+            }
+            WindowEnd::Newest => {
+                let newest = doomed.iter().copied().max().unwrap_or(0);
+                self.last_message_id = self.last_message_id.max(newest);
+                self.newer_failed = false;
+                self.refresh_has_newer();
+            }
         }
         doomed.len()
     }
@@ -87,6 +178,43 @@ impl Session {
         self.histories.get_mut(&chat_id.0).map_or(0, |history| {
             history.trim_window_end(end, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO)
         })
+    }
+
+    pub(crate) fn trim_live_windows(&mut self, chat_id: ChatId, topic_id: Option<i32>) {
+        if self.chat_is_shown(chat_id)
+            && let Some(history) = self.histories.get_mut(&chat_id.0)
+        {
+            history.trim_live();
+        }
+        if let Some(topic) =
+            topic_id.and_then(|topic| self.threads.topic_histories.get_mut(&(chat_id.0, topic)))
+        {
+            topic.trim_live();
+        }
+    }
+
+    /// Where the reader of the history `key` is: `top`, the message at the
+    /// top of the screen, or `None` at the tail.
+    pub fn note_history_reader(&mut self, (chat, topic, thread): ScrollKey, top: Option<i64>) {
+        let reader = if thread != 0 {
+            self.threads
+                .thread
+                .as_mut()
+                .filter(|view| view.chat_id.0 == chat && view.thread_id == thread)
+                .map(|view| &mut view.history.reader_top)
+        } else if let Some(topic) = topic {
+            self.threads
+                .topic_histories
+                .get_mut(&(chat, topic))
+                .map(|history| &mut history.reader_top)
+        } else {
+            self.histories
+                .get_mut(&chat)
+                .map(|history| &mut history.reader_top)
+        };
+        if let Some(reader) = reader {
+            *reader = top;
+        }
     }
 }
 
@@ -136,11 +264,13 @@ pub fn row_window_shift(old: &[(i64, i64)], new: &[(i64, i64)]) -> Option<RowWin
 #[cfg(test)]
 mod tests {
     use super::{
-        HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, RowWindowShift, WindowEnd, row_window_shift,
+        HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, LiveTrimSpan, ROWS_KEPT_ABOVE_READER,
+        RowWindowShift, WindowEnd, live_trim_span, row_window_shift,
     };
     use crate::ids::{ChatId, MessageId};
     use crate::state::{HistoryMessage, HistoryState};
     use crate::telegram::envelope::MessageContent;
+    use std::collections::HashSet;
 
     fn message(id: i64) -> HistoryMessage {
         HistoryMessage {
@@ -260,17 +390,45 @@ mod tests {
     }
 
     #[test]
-    fn trimming_keeps_tombstones_and_viewed_bookkeeping() {
+    fn trimming_keeps_tombstones_and_forgets_what_was_viewed() {
         let mut state = window(1..=1600);
         state.remove(MessageId(5), true);
-        state.viewed.insert(1_500);
+        state.viewed.extend([100, 1_500]);
         state.trim_window_end(
             WindowEnd::Newest,
             HISTORY_WINDOW_CAP,
             HISTORY_WINDOW_TRIM_TO,
         );
         assert!(state.is_tombstone(MessageId(5)));
-        assert!(state.viewed.contains(&1_500));
+        assert_eq!(state.viewed, HashSet::from([100]));
+    }
+
+    #[test]
+    fn a_live_trim_spares_the_rows_around_the_reader() {
+        let cap = HISTORY_WINDOW_CAP;
+        let excess = cap + 1 - HISTORY_WINDOW_TRIM_TO;
+        let span = |oldest, newest| LiveTrimSpan { oldest, newest };
+        assert_eq!(live_trim_span(cap, None), span(0, 0), "within the cap");
+        assert_eq!(
+            live_trim_span(cap + 1, None),
+            span(excess, 0),
+            "at the tail"
+        );
+        assert_eq!(
+            live_trim_span(cap + 1, Some(0)),
+            span(0, excess),
+            "at the top"
+        );
+        assert_eq!(
+            live_trim_span(cap + 1, Some(ROWS_KEPT_ABOVE_READER + 10)),
+            span(10, excess - 10),
+            "rows past the margin go, then the newest"
+        );
+        assert_eq!(
+            live_trim_span(cap + 1, Some(cap - 3)),
+            span(excess, 0),
+            "near the bottom, away from the tail"
+        );
     }
 
     #[test]

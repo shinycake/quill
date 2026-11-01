@@ -9,7 +9,7 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::Session;
+use crate::state::{HistoryState, Session};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -242,6 +242,16 @@ impl Sim {
             .get(&chat.0)
             .map_or(0, |h| h.messages.len());
         let has_newer = self.driver.session.history_has_newer(chat);
+        let top = self
+            .driver
+            .session
+            .histories
+            .get(&chat.0)
+            .and_then(HistoryState::oldest_id)
+            .filter(|_| self.edge == Edge::Top);
+        self.driver
+            .session
+            .note_history_reader((chat.0, None, 0), top.map(|id| id.0));
         if rows == 0 {
             // The empty pane asks for its first page (`conversation_part1`).
             if !self.driver.session.history_loading(chat) {
@@ -388,6 +398,21 @@ impl Sim {
         self.render();
     }
 
+    fn burst(&mut self, chat: i64, n: i64) {
+        self.log.push(format!("{n} live messages in {chat}"));
+        for _ in 0..n {
+            let id = self.fresh_ids(chat, 1);
+            let message = message_json(chat, id);
+            self.ingest(&format!(
+                r#"{{"@type":"updateNewMessage","message":{message}}}"#
+            ));
+            self.ingest(&format!(
+                r#"{{"@type":"updateChatLastMessage","chat_id":{chat},"last_message":{message},"positions":[]}}"#
+            ));
+        }
+        self.render();
+    }
+
     /// Everything has answered: the open chat shows messages, and the edge
     /// the reader holds has loaded to the end of the chat.
     fn check(&self, round: usize) {
@@ -453,16 +478,51 @@ fn run(seed: u64, rounds: usize) {
     sim.check(rounds);
 }
 
+fn run_long(seed: u64, rounds: usize) {
+    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let lengths: Vec<i64> = CHATS.iter().map(|_| 900 + rng.below(800) as i64).collect();
+    let mut sim = Sim::with_lengths(rng, &lengths);
+    sim.log.push(format!("seed {seed}"));
+    for round in 0..rounds {
+        if sim.rng.chance(35) {
+            let n = 1 + sim.rng.below(400) as i64;
+            let open = sim.driver.session.open_chat.map_or(CHATS[0], |chat| chat.0);
+            sim.burst(open, n);
+        } else {
+            sim.random_action();
+        }
+        if sim.rng.chance(40) {
+            sim.settle();
+            sim.check(round);
+        }
+    }
+    sim.settle();
+    sim.check(rounds);
+}
+
 #[test]
 fn history_paging_never_stalls() {
     let seeds: u64 = std::env::var("QUILL_SIM_SEEDS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200);
+    every_seed(seeds, |seed| run(seed, 60));
+}
+
+#[test]
+fn paging_past_the_window_cap_under_live_messages_never_stalls() {
+    let seeds: u64 = std::env::var("QUILL_SIM_SEEDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map_or(4, |seeds: u64| (seeds / 40).max(1));
+    every_seed(seeds, |seed| run_long(seed, 30));
+}
+
+fn every_seed(seeds: u64, run: impl Fn(u64) + std::panic::RefUnwindSafe) {
     let mut failures = BTreeMap::<String, Vec<u64>>::new();
     let mut first = BTreeMap::<String, String>::new();
     for seed in 1..=seeds {
-        let outcome = std::panic::catch_unwind(|| run(seed, 60));
+        let outcome = std::panic::catch_unwind(|| run(seed));
         if let Err(panic) = outcome {
             let text = panic.downcast_ref::<String>().cloned().unwrap_or_default();
             let kind = text
@@ -630,4 +690,52 @@ fn deleting_the_latest_message_leaves_the_window_at_the_latest() {
         message_json(7, 1990)
     ));
     assert!(!sim.driver.session.history_has_newer(ChatId(7)));
+}
+
+#[test]
+fn a_reader_at_the_top_of_a_chat_left_open_still_reaches_both_ends() {
+    let mut sim = Sim::with_lengths(Rng(3), &[1490, 10, 10]);
+    sim.short_pages = false;
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    sim.driver.select_chat(ChatId(7)).unwrap();
+    sim.settle();
+    sim.edge = Edge::Top;
+    sim.settle();
+    sim.check(0);
+    assert_eq!(sim.driver.session.histories[&7].messages.len(), 1490);
+
+    sim.burst(7, cap - 1490 + 200);
+    let history = &sim.driver.session.histories[&7];
+    assert_eq!(history.oldest_id(), Some(MessageId(10)));
+    assert!(history.messages.len() < crate::state::HISTORY_WINDOW_CAP);
+    assert!(sim.driver.session.history_has_newer(ChatId(7)));
+
+    sim.edge = Edge::Bottom;
+    sim.settle();
+    sim.check(1);
+    assert!(!sim.driver.session.history_has_newer(ChatId(7)));
+    assert!(sim.driver.session.histories[&7].messages.len() <= crate::state::HISTORY_WINDOW_CAP);
+
+    sim.edge = Edge::Top;
+    sim.settle();
+    sim.check(2);
+}
+
+#[test]
+fn a_chat_left_open_at_the_bottom_pages_back_after_its_trim() {
+    let mut sim = Sim::with_lengths(Rng(3), &[100, 10, 10]);
+    sim.short_pages = false;
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    sim.driver.select_chat(ChatId(7)).unwrap();
+    sim.settle();
+    sim.burst(7, cap + 400);
+    sim.settle();
+    sim.check(0);
+    let history = &sim.driver.session.histories[&7];
+    assert!(history.messages.len() <= crate::state::HISTORY_WINDOW_CAP);
+    assert!(!history.loaded_complete);
+
+    sim.edge = Edge::Top;
+    sim.settle();
+    sim.check(1);
 }

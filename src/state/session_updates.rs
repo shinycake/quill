@@ -200,7 +200,7 @@ impl Session {
         // Live updates keep landing in chats nobody is looking at: a chat
         // no view uses keeps a bounded tail (`history_prune.rs`); one the UI
         // still reads (a pending forward's source) keeps the page cap. The
-        // shown chats are trimmed by page.
+        // shown chats are trimmed per page and per live message.
         if !self.chat_is_shown(chat_id) {
             if self.chat_history_in_use(chat_id) || self.history_pruning.release_pending(chat_id) {
                 self.trim_history_window(chat_id, WindowEnd::Oldest);

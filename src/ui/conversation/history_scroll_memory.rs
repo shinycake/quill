@@ -53,6 +53,9 @@ impl QuillApp {
                 Some(SavedScroll { anchor, offset })
             });
         self.history.scroll_memory.record(key, saved);
+        if let Some(session) = self.session_mut() {
+            session.note_history_reader(key, saved.map(|scroll| scroll.anchor.0));
+        }
     }
 
     /// The first rows of a new or replaced window are in: start at the

@@ -809,6 +809,78 @@ fn a_splice_keeps_following_the_tail(cx: &mut TestAppContext) {
     assert_eq!(top_message(&app, vcx), None, "no scroll anchor at the tail");
 }
 
+fn live_past_the_end(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    from: i64,
+    count: i64,
+) -> i64 {
+    let updates: Vec<String> = (from..from + count)
+        .map(|n| {
+            let date = BASE_DATE + (MESSAGES / 10) * 86400 + n * 60;
+            text_message(id(n), Some(21), date, "")
+        })
+        .collect();
+    let refs: Vec<&str> = updates.iter().map(String::as_str).collect();
+    apply(app, vcx, &refs);
+    from + count
+}
+
+fn row_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (usize, usize) {
+    app.read_with(vcx, |app, cx| {
+        (
+            app.history.rows.len(),
+            app.history.scroller.read(cx).item_count(),
+        )
+    })
+}
+
+#[gpui_kit::test]
+fn a_live_trim_keeps_following_the_tail(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.history
+            .scroller
+            .update(cx, |state, cx| state.scroll_to_end(cx));
+    });
+    frames(vcx);
+    let cap = quill::state::HISTORY_WINDOW_CAP as i64;
+    let next = live_past_the_end(&app, vcx, MESSAGES, cap - MESSAGES);
+    assert!(following_tail(&app, vcx), "at the tail before the trim");
+    let (before, _) = row_count(&app, vcx);
+    live_past_the_end(&app, vcx, next, 2);
+    assert!(following_tail(&app, vcx), "at the tail after the trim");
+    let (rows, listed) = row_count(&app, vcx);
+    assert!(rows < before, "{rows} rows, {before} before");
+    assert_eq!(listed, rows, "scroller in step");
+    assert_eq!(top_message(&app, vcx), None, "no scroll anchor at the tail");
+}
+
+#[gpui_kit::test]
+fn a_live_trim_leaves_the_reader_where_they_were(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    mixed_group(&app, vcx);
+    let cap = quill::state::HISTORY_WINDOW_CAP as i64;
+    let next = live_past_the_end(&app, vcx, MESSAGES, cap - MESSAGES);
+    app.update(vcx, |app, cx| {
+        app.history
+            .scroller
+            .update(cx, |state, cx| state.scroll_to_item_offset(1_000, 12., cx));
+    });
+    frames(vcx);
+    let left = top_message(&app, vcx).expect("away from the tail");
+    let (before, _) = row_count(&app, vcx);
+    live_past_the_end(&app, vcx, next, 2);
+    let (rows, listed) = row_count(&app, vcx);
+    assert!(rows < before, "{rows} rows, {before} before");
+    assert_eq!(listed, rows, "scroller in step");
+    assert_eq!(top_message(&app, vcx), Some(left), "the reader stays put");
+    assert!(!following_tail(&app, vcx), "still away from the tail");
+}
+
 #[gpui_kit::test]
 fn more_changes_than_a_patch_holds_build_the_rows_whole(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");

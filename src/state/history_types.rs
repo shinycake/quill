@@ -529,6 +529,11 @@ pub struct HistoryState {
     /// resets): a lower bound for the chat's latest message when the chat
     /// summary doesn't carry one.
     pub latest_seen: i64,
+    /// The message at the top of the screen while the reader is away from
+    /// the tail; `None` at the tail. Reported by the view
+    /// (`Session::note_history_reader`) and kept while its frames stop, so
+    /// a hidden window stays where it was left.
+    pub reader_top: Option<i64>,
 }
 
 impl HistoryState {
@@ -600,6 +605,7 @@ impl HistoryState {
         self.newer_failed = false;
         self.load_failed = false;
         self.saved_open = None;
+        self.reader_top = None;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
 
