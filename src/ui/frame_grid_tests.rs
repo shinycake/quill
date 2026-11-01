@@ -1,12 +1,14 @@
 use super::super::frame_clock::{
-    ClockRun, ClockTiming, Woke, clip_frame_keeps_time, content_at, forget_video_requests,
-    later_tick, layer_redrawn_by_clip, note_clock_playing, video_request, video_request_done,
+    ClockRun, ClockTiming, TickDraw, Woke, clip_frame_keeps_time, content_at,
+    forget_video_requests, later_tick, layer_redrawn_by_clip, note_clock_playing, video_request,
+    video_request_done,
 };
 use super::super::layer_draws::LayerDraws;
 use super::super::video_player::FrameRequested;
 use super::super::video_player::pacing::{FrameRequest, PresentEstimator};
 use super::{
     Cadence, ContentGrid, Lattice, Source, Vsync, clock_tick, display_grid, note_playing, shared,
+    vsync_tick,
 };
 use gpui_kit::EntityId;
 use quill::sticker_playback::player::head::pick;
@@ -202,6 +204,168 @@ fn the_clock_wakes_three_quarters_of_a_frame_before_its_frame_starts() {
     assert_eq!(clock_tick(&grid, lead, t0, now, 25), None);
 }
 
+/// A 60 Hz display, the frame for its latest vsync `at` just started.
+struct JustStarted {
+    at: Instant,
+    vsync: Vsync,
+    period: Duration,
+    lead: Duration,
+    now: Instant,
+}
+
+fn just_started() -> JustStarted {
+    let at = Instant::now();
+    let period = hz(60.0);
+    let lead = period * 3 / 2;
+    JustStarted {
+        at,
+        vsync: Vsync { at, period },
+        period,
+        lead,
+        now: before(at, lead) + Duration::from_millis(1),
+    }
+}
+
+impl JustStarted {
+    /// The vsync of the tick after one on `last` at `fps`.
+    fn tick_after(&self, last: Instant, fps: u32) -> Option<Instant> {
+        vsync_tick(self.vsync, self.lead, last, self.now, fps).map(|(_, at)| at)
+    }
+}
+
+#[test]
+fn a_tick_wakes_three_quarters_of_a_frame_before_its_vsyncs_frame_starts() {
+    let d = just_started();
+    let (wake, at) = vsync_tick(d.vsync, d.lead, d.at, d.now, 60).unwrap();
+    assert!(close(at, d.at + d.period));
+    assert!(close(wake, before(at, d.lead + d.period * 3 / 4)));
+}
+
+#[test]
+fn noise_in_the_last_tick_leaves_the_next_on_its_vsync() {
+    let d = just_started();
+    let noisy = d.at + Duration::from_micros(300);
+    assert!(close(d.tick_after(noisy, 60).unwrap(), d.at + d.period));
+}
+
+#[test]
+fn half_the_displays_rate_ticks_on_every_other_vsync() {
+    let d = just_started();
+    assert!(close(d.tick_after(d.at, 30).unwrap(), d.at + d.period * 2));
+}
+
+#[test]
+fn a_rate_above_the_displays_ticks_on_every_vsync() {
+    let d = just_started();
+    assert!(close(d.tick_after(d.at, 120).unwrap(), d.at + d.period));
+}
+
+#[test]
+fn a_rate_no_whole_number_of_vsyncs_fits_has_no_vsync_tick() {
+    let d = just_started();
+    assert_eq!(d.tick_after(d.at, 24), None);
+}
+
+#[test]
+fn a_wake_past_the_start_of_its_frame_ticks_the_next_vsync_at_once() {
+    let d = just_started();
+    let missed = d.at + d.period;
+    let late = before(missed, d.lead) + Duration::from_micros(200);
+    let (wake, next) = vsync_tick(d.vsync, d.lead, d.at, late, 60).unwrap();
+    assert!(close(next, missed + d.period));
+    assert!(wake >= late);
+}
+
+#[test]
+fn a_display_reporting_no_period_has_no_vsync_tick() {
+    let d = just_started();
+    let none = Vsync {
+        at: d.at,
+        period: Duration::ZERO,
+    };
+    assert_eq!(vsync_tick(none, d.lead, d.at, d.now, 60), None);
+}
+
+#[test]
+fn a_frame_shows_on_the_vsync_reported_for_it() {
+    let d = just_started();
+    assert!(close(d.vsync.target(d.now).at, d.at));
+}
+
+#[test]
+fn past_the_reported_vsync_a_frame_shows_on_the_next_one_after_it() {
+    let d = just_started();
+    let target = |now| d.vsync.target(now).at;
+    assert!(close(target(d.at), d.at + d.period));
+    let two_and_a_half = d.at + d.period * 2 + d.period / 2;
+    assert!(close(target(two_and_a_half), d.at + d.period * 3));
+}
+
+#[test]
+fn early_or_late_in_its_frame_a_paint_plays_at_the_frames_vsync() {
+    let d = just_started();
+    let late = d.now + Duration::from_millis(9);
+    for paint in [d.now, late] {
+        assert_eq!(content_at(paint, Some(d.vsync), None), d.at);
+    }
+}
+
+#[test]
+fn a_draw_between_ticks_plays_at_the_last_tick() {
+    let d = just_started();
+    let tick = d.at + d.period * 2;
+    let lattice = Lattice {
+        at: tick,
+        every: d.period * 2,
+    };
+    let next_frame = Vsync {
+        at: d.at + d.period * 3,
+        period: d.period,
+    };
+    let played = content_at(d.now + d.period * 3, Some(next_frame), Some(lattice));
+    assert!(close(played, tick));
+}
+
+#[test]
+fn without_a_recent_vsync_a_paint_plays_at_its_own_time() {
+    let d = just_started();
+    let later = d.at + d.period * 3;
+    let lattice = Lattice {
+        at: d.at,
+        every: d.period,
+    };
+    assert_eq!(content_at(later, Some(d.vsync), None), later);
+    assert_eq!(content_at(later, None, Some(lattice)), later);
+}
+
+#[test]
+fn a_planned_tick_draws_on_its_vsync() {
+    let d = just_started();
+    let planned = d.at + d.period * 2;
+    assert_eq!(
+        TickDraw::of(Some(d.vsync), Some(planned), d.period, d.now),
+        TickDraw::On(planned)
+    );
+}
+
+#[test]
+fn a_tick_planned_for_no_vsync_draws_on_the_frame_after_the_latest() {
+    let d = just_started();
+    assert_eq!(
+        TickDraw::of(Some(d.vsync), None, d.period, d.now),
+        TickDraw::On(d.at + d.period)
+    );
+}
+
+#[test]
+fn with_no_recent_vsync_a_tick_draws_within_a_refresh() {
+    let d = just_started();
+    let within = TickDraw::Within(d.period);
+    assert_eq!(TickDraw::of(None, None, d.period, d.now), within);
+    let stopped = d.at + d.period * 3;
+    assert_eq!(TickDraw::of(Some(d.vsync), None, d.period, stopped), within);
+}
+
 #[test]
 fn content_shares_the_grid_only_with_something_else_on_its_display() {
     let now = Instant::now();
@@ -308,6 +472,9 @@ struct Sim {
     /// after that call each starts drawing.
     app_draws: Vec<(Instant, Duration)>,
     emoji_fps: u32,
+    /// The rate its view ticks at when that is faster than its frames
+    /// change, and a tick draws only a new frame (`idle_layer_tick`).
+    tick_fps: Option<u32>,
     /// How far the emoji's play head started after `t0`.
     emoji_start: Duration,
     clip: Option<Clip>,
@@ -402,6 +569,7 @@ impl Sim {
             clip_started: false,
             app_draws: vec![(t0, DRAW_START)],
             emoji_fps: 0,
+            tick_fps: None,
             emoji_start: Duration::ZERO,
             clip: None,
             clock: None,
@@ -430,6 +598,11 @@ impl Sim {
     /// `t0`, on a draw starting as long after its vsync's call as any.
     fn emoji_phase(mut self, refreshes: u32) -> Self {
         self.emoji_start = self.period * refreshes;
+        self
+    }
+
+    fn ticking(mut self, fps: u32) -> Self {
+        self.tick_fps = Some(fps);
         self
     }
 
@@ -546,7 +719,7 @@ impl Sim {
         self.demand = self.demand.max(fps);
         self.targets.insert(Some(target));
         if self.clock.is_none() {
-            self.clock = Some(ClockRun::new());
+            self.clock = Some(ClockRun::new(fps));
             self.clock_starts += 1;
             self.plan_tick();
         }
@@ -577,9 +750,16 @@ impl Sim {
                 let targets = std::mem::take(&mut self.targets);
                 if demand > 0 {
                     note_clock_playing(self.timing, self.now, demand);
-                    for id in targets.into_iter().flatten() {
-                        self.layers.ticked(id);
-                        self.dirty.push(id);
+                    let vsync = self.display().map(|(_, vsync)| vsync);
+                    let draw = TickDraw::of(vsync, planned, self.period, self.now);
+                    if self.tick_fps.is_some() && !self.emoji_changes_in(draw) {
+                        self.demand = demand;
+                        self.targets = targets;
+                    } else {
+                        for id in targets.into_iter().flatten() {
+                            self.layers.ticked(id);
+                            self.dirty.push(id);
+                        }
                     }
                 }
                 Woke::Ticked(demand)
@@ -646,25 +826,10 @@ impl Sim {
                 self.draw_clip(painter, present);
             }
             if self.emoji_fps > 0 {
-                // An emoji shows the frame its paint time reached.
-                let emoji = Timeline {
-                    frames: u32::MAX,
-                    file_fps: f64::from(self.emoji_fps),
-                    step: 1,
-                };
                 // `Player::frame`: `content_now`.
-                let painted = self
-                    .display()
-                    .zip(self.lattice)
-                    .map_or(self.now, |((_, vsync), lattice)| {
-                        content_at(self.now, vsync, lattice)
-                    });
-                let along = painted
-                    .duration_since(self.t0)
-                    .saturating_sub(self.emoji_start);
-                let display_hz = 1.0 / self.period.as_secs_f64();
-                let frame = pick(along, PlayMode::Loop, emoji, false, display_hz)
-                    .map_or(0, |pick| u64::from(pick.index));
+                let vsync = self.display().map(|(_, vsync)| vsync);
+                let played = content_at(self.now, vsync, self.lattice);
+                let frame = self.emoji_frame_at(played);
                 self.emoji_frames.push((present, frame));
             }
             // `tick_animation_layer`.
@@ -674,7 +839,7 @@ impl Sim {
                 self.layers.drawn(painter, vsync.at, counts);
             }
             if self.emoji_fps > 0 {
-                let fps = self.emoji_fps;
+                let fps = self.tick_fps.unwrap_or(self.emoji_fps);
                 // `QuillApp::layer_wants_tick`.
                 if layer_redrawn_by_clip(self.display(), painter, fps, self.now) {
                     self.targets.remove(&Some(painter));
@@ -689,6 +854,34 @@ impl Sim {
         if dirty.contains(&view) {
             self.draw_clip(view, present);
         }
+    }
+
+    /// The frame the emoji's head, started on a draw, shows at `played`: a
+    /// present time where the display reports them, else a paint's.
+    fn emoji_frame_at(&self, played: Instant) -> u64 {
+        let emoji = Timeline {
+            frames: u32::MAX,
+            file_fps: f64::from(self.emoji_fps),
+            step: 1,
+        };
+        let shown_after = if self.timing.is_some() {
+            self.lead
+        } else {
+            Duration::ZERO
+        };
+        let along = played.saturating_duration_since(self.t0 + self.emoji_start + shown_after);
+        let display_hz = 1.0 / self.period.as_secs_f64();
+        pick(along, PlayMode::Loop, emoji, false, display_hz)
+            .map_or(0, |pick| u64::from(pick.index))
+    }
+
+    fn emoji_changes_in(&self, draw: TickDraw) -> bool {
+        let at = match draw {
+            TickDraw::On(at) => at,
+            TickDraw::Within(ahead) => self.now + ahead,
+        };
+        let shown = self.emoji_frames.last().map(|(_, frame)| *frame);
+        shown != Some(self.emoji_frame_at(at))
     }
 
     /// `VideoFrame`: pull the picture for the present time, then ask for
@@ -1039,22 +1232,86 @@ fn an_animation_keeps_its_refreshes_and_the_clock() {
 }
 
 #[test]
-fn one_animation_alone_draws_exactly_as_before() {
-    for fps in [24, 25, 30, 60] {
+fn a_rate_no_vsync_fits_runs_free_as_on_a_display_without_vsync_times() {
+    for (rate, fps) in [(60.0, 24), (60.0, 25), (120.0, 25), (144.0, 60)] {
         for late in [Late::Little, Late::Realistic] {
-            let before = Sim::new(12, 120.0, false).emoji(fps).late(late).run(1.6);
-            let after = Sim::new(13, 120.0, true).emoji(fps).late(late).run(1.6);
-            assert_eq!(after.timeline(), before.timeline(), "{fps} fps, {late:?}");
+            let free = Sim::new(232, rate, false).emoji(fps).late(late).run(1.6);
+            let sim = Sim::new(233, rate, true).emoji(fps).late(late).run(1.6);
+            assert_eq!(
+                sim.draws_in_a_second(),
+                free.draws_in_a_second(),
+                "{rate} Hz, {fps} fps, {late:?}"
+            );
         }
     }
 }
 
 #[test]
-fn a_60_hz_display_draws_as_before() {
-    for (emoji, clip) in [(30, 30.0), (60, 25.0)] {
-        let before = Sim::new(14, 60.0, false).emoji(emoji).clip(clip).run(1.6);
-        let after = Sim::new(15, 60.0, true).emoji(emoji).clip(clip).run(1.6);
-        assert_eq!(after.timeline(), before.timeline(), "{emoji} + {clip} fps");
+fn without_vsync_times_a_quiet_wake_keeps_the_clock_and_its_phase() {
+    for late in [Late::Little, Late::Realistic] {
+        let sim = Sim::new(234, 60.0, false).emoji(60).late(late).run(3.0);
+        let holds = sim.emoji_holds();
+        assert!(holds.len() > 100, "{late:?}: {holds:?}");
+        assert!(holds.iter().all(|at| *at <= 2), "{late:?}: {holds:?}");
+        assert_eq!(sim.clock_starts, 1, "{late:?}");
+    }
+}
+
+#[test]
+fn the_clock_stops_at_its_second_wake_with_nothing_asked() {
+    let period = hz(60.0);
+    let mut run = ClockRun::new(60);
+    let at = Instant::now();
+    assert!(run.woke(Some(at), Woke::Ticked(60)));
+    assert!(run.woke(Some(at + period), Woke::Ticked(0)));
+    assert!(run.woke(Some(at + period * 2), Woke::Ticked(60)));
+    assert!(run.woke(Some(at + period * 3), Woke::Ticked(0)));
+    assert!(!run.woke(Some(at + period * 4), Woke::Ticked(0)));
+    assert_eq!(run.lattice(), None);
+}
+
+#[test]
+fn a_restarted_clock_ticks_at_the_rate_that_asked() {
+    let now = Instant::now();
+    let (wait, _) = ClockRun::new(60).plan(None, now);
+    assert!(wait < hz(60.0));
+    let (wait, _) = ClockRun::new(15).plan(None, now);
+    assert_eq!(wait, hz(15.0));
+}
+
+#[test]
+fn a_tick_faster_than_its_frames_draws_on_the_refresh_they_change() {
+    for phase in 0..4 {
+        let sim = Sim::new(240 + u64::from(phase), 60.0, true)
+            .emoji(15)
+            .emoji_phase(phase)
+            .ticking(60)
+            .run(3.0);
+        let draws = sim.draws_in_a_second();
+        assert!(
+            draws <= 16,
+            "head phase {phase}: {draws} frames in a second"
+        );
+        let holds = sim.emoji_holds();
+        assert!(
+            holds.len() > 30 && holds.iter().all(|hold| *hold == 4),
+            "head phase {phase}: {holds:?}"
+        );
+    }
+}
+
+#[test]
+fn a_60_hz_display_shares_nothing_and_loses_no_refresh_beside_a_clip() {
+    for (display, emoji, hold, clip) in [(14, 30, 2, 30.0), (15, 60, 1, 25.0)] {
+        let sim = Sim::new(display, 60.0, true)
+            .emoji(emoji)
+            .clip(clip)
+            .run(1.6);
+        let holds = sim.emoji_holds();
+        assert!(
+            holds.len() > 20 && holds.iter().all(|at| *at == hold),
+            "{emoji} + {clip} fps: {holds:?}"
+        );
     }
 }
 
@@ -1080,8 +1337,6 @@ fn pictures_due_just_after_a_grid_vsync_draw_once() {
 fn emoji_skip_no_frame_as_a_clip_starts_and_stops_beside_them() {
     // Emoji animating alone tick off the grid; a clip starting beside them
     // moves their ticks onto it, and one stopping moves them off again.
-    // Neither may hold an emoji frame too long, nor stop the clock (which
-    // restarts at 30 fps, holding a 60 fps sticker's frame too long).
     let mut display = 100;
     for emoji in [60, 30] {
         for on_layer in [false, true] {

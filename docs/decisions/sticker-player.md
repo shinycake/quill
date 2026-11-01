@@ -206,8 +206,9 @@ less, so every phase sits at least 4.17 ms from a boundary at 120 Hz. 60
 fps files and 60 Hz displays keep a quarter frame. A seeded test of four
 start phases with paints up to 1.5 ms off shows every frame once; with
 the old slack the second phase skips or repeats on about half its paints.
-Feeding heads the target vsync in place of the paint's wall time would
-remove the jitter itself and is left for later.
+On displays reporting vsync times heads now read the target vsync, which
+removes the jitter there (`anim-frame-coalesce.md`); the slack stays for
+the others.
 
 ### Follow-up: ticks that draw nothing new (2026-11-01)
 

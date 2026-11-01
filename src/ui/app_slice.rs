@@ -31,10 +31,10 @@
 use super::anim_layer::{AnimationLayer, Layer};
 use super::app::QuillApp;
 use super::conversation::ConversationPart;
+use super::frame_clock::TickDraw;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
 
 /// Which part of `QuillApp` a slice draws.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -517,8 +517,8 @@ impl QuillApp {
 
     /// The rate to keep ticking `target` at when a tick would draw nothing
     /// new: it is an animation layer whose content shows the same frames
-    /// through the main window's next refresh. `None`: draw it.
-    pub(super) fn idle_layer_tick(&self, target: EntityId) -> Option<u32> {
+    /// in the tick's `draw`. `None`: draw it.
+    pub(super) fn idle_layer_tick(&self, target: EntityId, draw: TickDraw) -> Option<u32> {
         let parts = [
             self.slices.sidebar.as_ref(),
             self.slices.conversation.as_ref(),
@@ -527,15 +527,7 @@ impl QuillApp {
         .flatten()
         .find(|parts| parts.painter.entity_id() == target)?;
         let (layer, _) = parts.layer.demand();
-        // A skipped tick's draw would have shown within one refresh of the
-        // main window, whichever window painted a sticker last. Unknown, a
-        // 60 Hz one, the longest look-ahead, skips least.
-        let refresh = self
-            .frame
-            .main_refresh
-            .get()
-            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
-        (layer > 0 && !parts.layer.changes_within(refresh)).then_some(layer)
+        (layer > 0 && !parts.layer.changes_in(draw)).then_some(layer)
     }
 
     /// The chat list, as a cached slice filling its laid-out column,

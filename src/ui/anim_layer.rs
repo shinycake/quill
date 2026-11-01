@@ -42,11 +42,11 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::frame_clock::TickDraw;
 use super::sticker_player::StickerView;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Duration;
 
 thread_local! {
     /// The layer of the slice being rendered, laid out or painted.
@@ -115,11 +115,9 @@ impl Content {
         }
     }
 
-    /// Whether drawing it within `ahead` shows something new: a sticker
-    /// only on another frame, clock-driven drawing and live tiles always.
-    fn changes_within(&self, ahead: Duration) -> bool {
+    fn changes_in(&self, draw: TickDraw) -> bool {
         match self {
-            Content::Frames(view) => view.changes_within(ahead),
+            Content::Frames(view) => view.changes_in(draw),
             Content::Paint { .. } | Content::Tile { .. } => true,
             Content::Mirror { .. } => false,
         }
@@ -272,16 +270,16 @@ impl Layer {
         (layer, inline)
     }
 
-    /// Whether drawing the layer within `ahead` would change what it shows.
-    /// A sticker held to its file's rate ticks faster than its frames
-    /// change, so each frame stays up for the same number of refreshes;
-    /// the ticks between need no draw.
-    pub(super) fn changes_within(&self, ahead: Duration) -> bool {
+    /// Whether drawing the layer in `draw` would change what it shows. A
+    /// sticker held to its file's rate ticks faster than its frames change,
+    /// so each frame stays up for the same number of refreshes; the ticks
+    /// between need no draw.
+    pub(super) fn changes_in(&self, draw: TickDraw) -> bool {
         self.0.items.borrow().iter().any(|item| {
             item.seq.get() != 0
                 && !item.inline.get()
                 && item.visible().is_some()
-                && item.content.changes_within(ahead)
+                && item.content.changes_in(draw)
         })
     }
 

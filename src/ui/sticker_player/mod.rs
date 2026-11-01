@@ -485,10 +485,7 @@ impl Player {
     ) -> Option<Arc<RenderImage>> {
         self.drain();
         let display = display_of(window);
-        let now = match window {
-            None => super::frame_clock::content_now(now),
-            Some(_) => now,
-        };
+        let played = super::frame_clock::content_now(display.id, now);
         let key = spec.key(edge);
         let high_rate = high_rate && !self.engine.coarse(&key);
         let place = Place::of(head, window);
@@ -540,7 +537,7 @@ impl Player {
                             high_rate,
                             display.hz,
                         ),
-                        _ => head_state.advance(now, mode, timeline, high_rate, display.hz),
+                        _ => head_state.advance(played, mode, timeline, high_rate, display.hz),
                     };
                     pick.and_then(|pick| {
                         let exact = clip
@@ -548,7 +545,7 @@ impl Player {
                             .get(&pick.index)
                             .map(|image| (pick.index, image.clone()));
                         if exact.is_some() {
-                            head_state.start(now);
+                            head_state.start(played);
                         } else if head_state.started() {
                             inner.stats.late += 1;
                         }

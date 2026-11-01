@@ -1,6 +1,7 @@
 //! A view of a clip: one place it shows, with its own play head.
 #![deny(clippy::indexing_slicing)]
 
+use super::super::frame_clock::TickDraw;
 use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_of, high_rate};
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -158,24 +159,32 @@ impl StickerView {
         }
     }
 
-    /// Whether painting it within `ahead` from now would show another
-    /// frame than it shows, so a frame clock tick needs to draw it.
-    pub(in crate::ui) fn changes_within(&self, ahead: Duration) -> bool {
+    /// Whether painting it in `draw` would show another frame than it
+    /// shows, so a frame clock tick needs to draw it.
+    pub(in crate::ui) fn changes_in(&self, draw: TickDraw) -> bool {
         let Ok(inner) = self.player.inner.try_borrow() else {
             return true;
         };
         match self.state(&inner) {
             ViewState::Gone => false,
             ViewState::Opening => true,
-            ViewState::Open(open) => open.head.changes_at(
-                self.player.now() + ahead,
-                open.shown,
-                self.mode,
-                open.timeline,
-                open.high,
-                display_of(self.window).hz,
-            ),
+            ViewState::Open(open) => self.open_changes(&open, draw),
         }
+    }
+
+    fn open_changes(&self, open: &Open, draw: TickDraw) -> bool {
+        let at = match draw {
+            TickDraw::On(at) => at,
+            TickDraw::Within(ahead) => self.player.now() + ahead,
+        };
+        open.head.changes_at(
+            at,
+            open.shown,
+            self.mode,
+            open.timeline,
+            open.high,
+            display_of(self.window).hz,
+        )
     }
 
     /// When its clip's first frame arrived (at any size), the clip's

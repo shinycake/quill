@@ -1,6 +1,7 @@
 //! The UI half of the player: views of one clip share its frames and keep
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
+use super::super::frame_clock::TickDraw;
 use super::super::image_budget::{begin_frame, take_unshowable};
 use super::display::{WindowDisplay, display_of, set_display};
 use super::{CLOSE_AFTER, ClipSpec, HeadId, Leaving, Part, Place, Player, ViewAsk};
@@ -477,10 +478,16 @@ fn a_tick_draws_a_view_only_when_its_frame_changes() {
     let refresh = ms(8);
     let t0 = player.now();
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, t0), 0);
-    assert!(!view.changes_within(refresh), "frame 0 stays up");
+    let draw = TickDraw::Within(refresh);
+    assert!(!view.changes_in(draw), "frame 0 stays up");
     player.skip(ms(20));
-    assert!(view.changes_within(refresh), "frame 1 is due by 28 ms");
+    assert!(view.changes_in(draw), "frame 1 is due by 28 ms");
     let at = player.now() + refresh;
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, at), 1);
-    assert!(!view.changes_within(refresh), "frame 1 is up");
+    assert!(!view.changes_in(draw), "frame 1 is up");
+    let frame = Duration::from_secs_f64(1.0 / FPS);
+    let quarter_frame_slack = frame / 4;
+    let frame_2 = t0 + frame * 2 - quarter_frame_slack;
+    assert!(!view.changes_in(TickDraw::On(frame_2 - ms(1))));
+    assert!(view.changes_in(TickDraw::On(frame_2 + ms(1))));
 }

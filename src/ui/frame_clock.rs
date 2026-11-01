@@ -13,7 +13,9 @@
 //! clock ticks on the main window's content grid (`frame_grid`), the
 //! vsyncs the clip draws on too, so they share window frames. An animation
 //! layer whose inline clip redraws it more often than its content needs
-//! asks for no tick at all ([`layer_redrawn_by_clip`]).
+//! asks for no tick at all ([`layer_redrawn_by_clip`]). Elsewhere it ticks
+//! on the display's own vsyncs where it knows them, and runs free on a
+//! timer where it does not.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
@@ -70,40 +72,46 @@ pub(super) struct ClockRun {
     pub(super) fps: u32,
     last: LastDraw,
     later: Option<(Duration, Option<Instant>)>,
-    /// The grid vsyncs it ticks on, while it ticks on the grid.
+    /// The vsyncs it ticks on, while it ticks on vsyncs.
     lattice: Option<Lattice>,
+    /// Wakes in a row with nothing asked.
+    idle_wakes: u32,
 }
+
+/// [`ClockRun::idle_wakes`] that stop the clock. A wake can beat the draw of
+/// the tick before it, and that draw asks for the next tick: stopped there,
+/// the clock would restart after the draw, off its phase.
+const IDLE_WAKES_TO_STOP: u32 = 2;
 
 /// The vsync the frame clock's content last drew on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LastDraw {
     /// No tick yet: the draw that started the clock, on the latest vsync.
     Start,
-    /// A tick off the grid: its draw comes on the vsync after the latest
+    /// A tick on no vsync: its draw comes on the vsync after the latest
     /// one when it woke (the clock plans right after).
-    OffGrid,
-    /// A tick on this grid vsync.
+    Free,
     On(Instant),
 }
 
 impl ClockRun {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(fps: u32) -> Self {
         Self {
-            fps: 30,
+            fps,
             last: LastDraw::Start,
             later: None,
             lattice: None,
+            idle_wakes: 0,
         }
     }
 
-    /// The grid vsyncs it ticks content on, while it ticks on the grid.
     pub(super) fn lattice(&self) -> Option<Lattice> {
         self.lattice
     }
 
-    /// How long to sleep for the next tick at `now`, and the grid vsync it
-    /// draws on (`None`: off the grid), for a main window drawn as
-    /// `display` says.
+    /// How long to sleep for the next tick at `now`, and the vsync it
+    /// draws on (`None`: unknown), for a main window drawn as `display`
+    /// says.
     pub(super) fn plan(
         &mut self,
         display: Option<(ClockTiming, Vsync)>,
@@ -114,7 +122,7 @@ impl ClockRun {
         }
         let last = display.map(|(_, vsync)| match self.last {
             LastDraw::Start => vsync.at,
-            LastDraw::OffGrid => vsync.at + vsync.period,
+            LastDraw::Free => vsync.at + vsync.period,
             LastDraw::On(at) => at,
         });
         tick_wait(display, now, self.fps, last)
@@ -132,12 +140,17 @@ impl ClockRun {
                 self.later = Some(plan);
             }
             Woke::Ticked(0) => {
-                self.lattice = None;
-                return false;
+                self.idle_wakes += 1;
+                if self.idle_wakes >= IDLE_WAKES_TO_STOP {
+                    self.lattice = None;
+                    return false;
+                }
+                self.last = planned.map_or(LastDraw::Free, LastDraw::On);
             }
             Woke::Ticked(fps) => {
+                self.idle_wakes = 0;
                 self.fps = fps;
-                self.last = planned.map_or(LastDraw::OffGrid, LastDraw::On);
+                self.last = planned.map_or(LastDraw::Free, LastDraw::On);
                 self.lattice = planned.map(|at| Lattice {
                     at,
                     every: content_frame(fps),
@@ -150,8 +163,8 @@ impl ClockRun {
 
 impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
-    /// calls this each time it renders; the clock stops after a tick in
-    /// which nothing asked.
+    /// calls this each time it renders; the clock stops after two ticks in
+    /// a row in which nothing asked.
     #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
         let target = self.frame.tick_view.get().or(self.slices.current());
@@ -255,8 +268,9 @@ impl QuillApp {
             return;
         }
         self.frame.frame_clock_running.set(true);
+        let fps = self.frame.animation_demand.get();
         cx.spawn(async move |this, cx| {
-            let mut run = ClockRun::new();
+            let mut run = ClockRun::new(fps);
             loop {
                 let (wait, vsync) = this
                     .update(cx, |this, _| run.plan(this.clock_display(), Instant::now()))
@@ -294,10 +308,11 @@ impl QuillApp {
                                         .filter(|id| !this.tick_hidden(*id, cx))
                                         .filter(|id| !this.windows.holds_view(*id, cx))
                                         .collect();
+                                    let draw = this.tick_draw(vsync);
                                     // Only the slices with animated content
                                     // redraw.
                                     for id in views {
-                                        if let Some(fps) = this.idle_layer_tick(id) {
+                                        if let Some(fps) = this.idle_layer_tick(id, draw) {
                                             this.request_animation_tick_for(Some(id), fps, cx);
                                             continue;
                                         }
@@ -366,6 +381,21 @@ impl QuillApp {
         later_tick(self.clock_display(), Instant::now(), fps, planned, redrawn)
     }
 
+    /// When a draw this tick asks for shows: on `planned`, the vsync it was
+    /// planned for, else the frame after the main window's latest. Without
+    /// vsync times, within the main window's next refresh, whichever
+    /// window painted last; unknown, a 60 Hz one, the longest look-ahead,
+    /// skips least.
+    pub(super) fn tick_draw(&self, planned: Option<Instant>) -> TickDraw {
+        let refresh = self
+            .frame
+            .main_refresh
+            .get()
+            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
+        let vsync = self.clock_display().map(|(_, vsync)| vsync);
+        TickDraw::of(vsync, planned, refresh, Instant::now())
+    }
+
     /// Whether animation layer `painter`, just drawn with content at `fps`
     /// (`tick_animation_layer`), needs a tick: not while a clip's picture
     /// redraws it in time ([`layer_redrawn_by_clip`]). The clock then also
@@ -421,27 +451,28 @@ impl QuillApp {
     }
 }
 
-/// How long until the next tick at `now` of content at `fps`, and the grid
+/// How long until the next tick at `now` of content at `fps`, and the
 /// vsync it draws on, for a main window drawn as `display` says with that
 /// display's latest vsync, if known: one content frame after `last` (the
 /// vsync the content last drew on) on the content grid while a clip also
-/// plays on the display (`frame_grid`); else one period at `fps` from
-/// now, as before.
+/// plays on the display (`frame_grid`), else on the display's vsyncs; one
+/// period at `fps` from now where no vsync fits.
 fn tick_wait(
     display: Option<(ClockTiming, Vsync)>,
     now: Instant,
     fps: u32,
     last: Option<Instant>,
 ) -> (Duration, Option<Instant>) {
-    let on_grid = display.and_then(|(timing, vsync)| {
-        let grid = frame_grid::display_grid(timing.display, vsync, now)?;
-        // Alone, content keeps its own timing.
-        if !frame_grid::shared(timing.display, Source::Clock, now) {
+    let on_vsync = display.zip(last).and_then(|((timing, vsync), last)| {
+        if !vsync.fresh(now) {
             return None;
         }
-        frame_grid::clock_tick(&grid, timing.lead, last?, now, fps)
+        frame_grid::display_grid(timing.display, vsync, now)
+            .filter(|_| frame_grid::shared(timing.display, Source::Clock, now))
+            .and_then(|grid| frame_grid::clock_tick(&grid, timing.lead, last, now, fps))
+            .or_else(|| frame_grid::vsync_tick(vsync, timing.lead, last, now, fps))
     });
-    match on_grid {
+    match on_vsync {
         Some((wake, vsync)) => (wake.saturating_duration_since(now), Some(vsync)),
         None => (tick_period(fps), None),
     }
@@ -456,9 +487,35 @@ pub(super) fn note_clock_playing(timing: Option<ClockTiming>, now: Instant, fps:
     }
 }
 
+/// When the draw a tick asks for shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) enum TickDraw {
+    /// On this vsync.
+    On(Instant),
+    /// Within this long of now: its vsync is not known.
+    Within(Duration),
+}
+
+impl TickDraw {
+    pub(super) fn of(
+        vsync: Option<Vsync>,
+        planned: Option<Instant>,
+        refresh: Duration,
+        now: Instant,
+    ) -> Self {
+        let next = || {
+            let shown = vsync.filter(|vsync| vsync.fresh(now))?.target(now);
+            shown.at.checked_add(shown.period)
+        };
+        planned
+            .or_else(next)
+            .map_or(Self::Within(refresh), Self::On)
+    }
+}
+
 /// What a wake of the frame clock did.
 pub(super) enum Woke {
-    /// Ticked what asked at this rate (0: nothing asked, the clock stops).
+    /// Ticked what asked at this rate (0: nothing asked).
     Ticked(u32),
     /// Nothing was due yet: wait this long, for that vsync.
     Later((Duration, Option<Instant>)),
@@ -493,30 +550,40 @@ pub(super) fn later_tick(
 }
 
 thread_local! {
-    /// The main window's display and the grid vsyncs the clock ticks its
-    /// content on, while it ticks on the grid.
+    /// The main window's display and the vsyncs the clock ticks its content
+    /// on, while it ticks on vsyncs.
     static CONTENT_LATTICE: Cell<Option<(u64, Lattice)>> = const { Cell::new(None) };
 }
 
-/// The time content the main window paints at `now` plays at: on the
-/// clock's last tick vsync while it ticks on the grid
-/// (`frame_grid::content_time`), else `now`.
-pub(in crate::ui) fn content_now(now: Instant) -> Instant {
-    let Some((display, lattice)) = CONTENT_LATTICE.with(Cell::get) else {
+/// The time content a window on `display` paints at `now` plays at
+/// ([`content_at`]).
+pub(in crate::ui) fn content_now(display: Option<u64>, now: Instant) -> Instant {
+    let Some(display) = display else {
         return now;
     };
-    display_vsync(display).map_or(now, |vsync| content_at(now, vsync, lattice))
+    let lattice = CONTENT_LATTICE
+        .with(Cell::get)
+        .filter(|(clock, _)| *clock == display)
+        .map(|(_, lattice)| lattice);
+    content_at(now, display_vsync(display), lattice)
 }
 
-/// The time content painted at `now` for the frame shown on `vsync` plays
-/// at, while the clock ticks on `lattice`: its own on a frame that draws a
-/// picture of a clip keeping time with it, else the last tick's
-/// (`frame_grid::content_time`).
-pub(super) fn content_at(now: Instant, vsync: Vsync, lattice: Lattice) -> Instant {
-    if clip_frame_keeps_time(None, vsync, lattice.every) {
-        now
-    } else {
-        frame_grid::content_time(now, vsync, lattice)
+/// The time content painted at `now` plays at, on a display whose latest
+/// vsync is `vsync`, while the clock ticks there on `lattice`: the vsync
+/// its frame shows on, so a late paint moves nothing, or the last tick's
+/// there (`frame_grid::content_time`) unless that frame draws a picture of
+/// a clip keeping time with it. `now` without a recent vsync: the display
+/// reports none (Windows, Linux), or its display link has stopped.
+pub(super) fn content_at(now: Instant, vsync: Option<Vsync>, lattice: Option<Lattice>) -> Instant {
+    let Some(shown) = vsync.filter(|vsync| vsync.fresh(now)) else {
+        return now;
+    };
+    let shown = shown.target(now);
+    match lattice {
+        Some(lattice) if !clip_frame_keeps_time(None, shown, lattice.every) => {
+            frame_grid::content_time(shown, lattice)
+        }
+        _ => shown.at,
     }
 }
 
