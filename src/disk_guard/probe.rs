@@ -1,6 +1,6 @@
 //! The free bytes on a volume, as this user can write them: `f_bavail`
-//! leaves out what is reserved for root, and `GetDiskFreeSpaceExW` counts
-//! quotas.
+//! leaves out what is reserved for root, `GetDiskFreeSpaceExW` counts
+//! quotas, and on Linux `super::linux` adds the user's block quota.
 use std::path::Path;
 
 /// Free bytes on the volume holding `path`. `None` when the read fails or
@@ -17,7 +17,7 @@ fn nearest_existing(path: &Path) -> &Path {
 
 /// Some network and FUSE volumes report zero blocks: that is no reading,
 /// and it must not look like a full disk.
-fn usable(blocks: u64, available: u64, block_size: u64) -> Option<u64> {
+pub(super) fn usable(blocks: u64, available: u64, block_size: u64) -> Option<u64> {
     (blocks != 0 && block_size != 0).then(|| available.saturating_mul(block_size))
 }
 
@@ -37,7 +37,10 @@ fn read_available(path: &Path) -> Option<u64> {
     usable(stat.f_blocks, stat.f_bavail, u64::from(stat.f_bsize))
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(target_os = "linux")]
+use super::linux::read_available;
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn read_available(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;

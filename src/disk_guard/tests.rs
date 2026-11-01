@@ -194,3 +194,79 @@ fn a_missing_data_root_still_gets_a_reading() {
     let root = std::env::temp_dir().join("quill-no-such-root/at/all");
     assert!(data_free_bytes(&root).is_some());
 }
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::super::linux::{Statvfs, room_under, source_in, zero_needs_a_write};
+    use std::path::{Path, PathBuf};
+
+    fn quota(soft: u64, hard: u64, used: u64) -> libc::dqblk {
+        // SAFETY: an all-zero dqblk is valid.
+        let mut quota: libc::dqblk = unsafe { std::mem::zeroed() };
+        quota.dqb_bsoftlimit = soft;
+        quota.dqb_bhardlimit = hard;
+        quota.dqb_curspace = used;
+        quota.dqb_valid = libc::QIF_BLIMITS | libc::QIF_SPACE;
+        quota
+    }
+
+    #[test]
+    fn a_user_quota_counts_as_the_free_space() {
+        assert_eq!(room_under(&quota(0, 1024, 1024 * 1000)), Some(24 * 1024));
+        assert_eq!(
+            room_under(&quota(512, 1024, 0)),
+            Some(512 * 1024),
+            "soft first"
+        );
+        assert_eq!(room_under(&quota(10, 0, 1 << 30)), Some(0), "over it");
+        assert_eq!(room_under(&quota(0, 0, 5)), None, "no limit");
+        let mut unset = quota(0, 1024, 0);
+        unset.dqb_valid = 0;
+        assert_eq!(room_under(&unset), None);
+    }
+
+    #[test]
+    fn a_zero_on_btrfs_or_as_root_is_tried_with_a_write() {
+        let zero = |btrfs, free_to_root| Statvfs {
+            available: 0,
+            free_to_root,
+            btrfs,
+        };
+        assert!(zero_needs_a_write(&zero(true, 0), false), "btrfs metadata");
+        assert!(zero_needs_a_write(&zero(false, 4096), true), "root reserve");
+        assert!(!zero_needs_a_write(&zero(false, 4096), false), "not root");
+        assert!(!zero_needs_a_write(&zero(false, 0), true), "really full");
+        let some = Statvfs {
+            available: 1,
+            free_to_root: 1,
+            btrfs: true,
+        };
+        assert!(!zero_needs_a_write(&some, true));
+    }
+
+    #[test]
+    fn the_quota_device_is_the_longest_mount_holding_the_path() {
+        let mountinfo = "\
+22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw
+40 22 8:17 / /home rw,relatime shared:2 - ext4 /dev/sdb1 rw,usrquota
+41 22 8:33 / /mnt/my\\040disk rw - xfs /dev/sdc1 rw";
+        let source = |path: &str| source_in(mountinfo, Path::new(path));
+        assert_eq!(source("/home/me/.local"), Some(PathBuf::from("/dev/sdb1")));
+        assert_eq!(source("/var/lib"), Some(PathBuf::from("/dev/sda1")));
+        assert_eq!(source("/mnt/my disk/q"), Some(PathBuf::from("/dev/sdc1")));
+        assert_eq!(source_in("garbage", Path::new("/")), None);
+    }
+
+    #[test]
+    fn a_real_folder_reads_on_linux() {
+        assert!(super::super::linux::read_available(&std::env::temp_dir()).is_some());
+    }
+
+    #[test]
+    fn a_write_that_fits_is_no_full_disk_and_leaves_nothing() {
+        let folder = crate::scratch::unique_dir("quill-disk-write");
+        assert!(!super::super::linux::small_write_fails(&folder));
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}

@@ -7,6 +7,8 @@
 #![deny(clippy::indexing_slicing)]
 
 mod folders;
+#[cfg(target_os = "linux")]
+mod linux;
 mod probe;
 
 pub use probe::available_bytes;
