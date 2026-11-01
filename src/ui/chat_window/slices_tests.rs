@@ -18,7 +18,6 @@ fn opened(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, Visu
     (app, vcx, VisualTestContext::from_window(chat, cx))
 }
 
-/// Typing redraws the composer, and the history above it stays.
 #[gpui_kit::test]
 fn a_keystroke_in_a_chat_window_builds_no_history(cx: &mut TestAppContext) {
     let (_app, _vcx, mut chat) = opened(cx);
@@ -29,7 +28,10 @@ fn a_keystroke_in_a_chat_window_builds_no_history(cx: &mut TestAppContext) {
     chat.run_until_parked();
     let drawn = take_slice_renders();
     assert_eq!(drawn.get("history"), None, "the history stayed: {drawn:?}");
-    assert!(drawn.contains_key("chat window composer"), "the composer: {drawn:?}");
+    assert!(
+        drawn.contains_key("chat window composer"),
+        "the composer: {drawn:?}"
+    );
 }
 
 /// The caret's blink notifies the field alone.
@@ -44,11 +46,12 @@ fn a_caret_blink_in_a_chat_window_builds_no_history(cx: &mut TestAppContext) {
     chat.run_until_parked();
     let drawn = take_slice_renders();
     assert_eq!(drawn.get("history"), None, "the history stayed: {drawn:?}");
-    assert!(drawn.contains_key("chat window composer"), "the composer: {drawn:?}");
+    assert!(
+        drawn.contains_key("chat window composer"),
+        "the composer: {drawn:?}"
+    );
 }
 
-/// A tick of its stickers redraws the window's layer, and neither of its
-/// slices.
 #[gpui_kit::test]
 fn a_chat_windows_stickers_tick_in_its_layer_alone(cx: &mut TestAppContext) {
     let (_app, mut vcx, _chat) = opened(cx);
@@ -62,9 +65,6 @@ fn a_chat_windows_stickers_tick_in_its_layer_alone(cx: &mut TestAppContext) {
     }
 }
 
-/// The main window opening another chat leaves the stickers of the chat
-/// window's chat playing: they are that window's, however the main window
-/// lets go of its own.
 #[gpui_kit::test]
 fn a_main_window_chat_switch_leaves_a_chat_windows_stickers_playing(cx: &mut TestAppContext) {
     let (app, mut vcx, _chat) = opened(cx);
@@ -79,8 +79,6 @@ fn a_main_window_chat_switch_leaves_a_chat_windows_stickers_playing(cx: &mut Tes
     );
 }
 
-/// A window whose session view is gone draws nothing of whatever is in
-/// place instead, and closes.
 #[gpui_kit::test]
 fn a_chat_window_that_lost_its_session_view_builds_no_history(cx: &mut TestAppContext) {
     let (app, mut vcx, mut chat) = opened(cx);
@@ -117,8 +115,6 @@ fn held(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, AnyWin
     (app, vcx, under)
 }
 
-/// A held chat window draws nothing whatever the app does. Once it shows
-/// again it draws what changed, and its stickers play on.
 #[gpui_kit::test]
 fn a_held_chat_window_catches_up_when_it_shows_again(cx: &mut TestAppContext) {
     let (app, mut vcx, under) = held(cx);
@@ -126,7 +122,11 @@ fn a_held_chat_window_catches_up_when_it_shows_again(cx: &mut TestAppContext) {
     app.update(vcx, |_, cx| cx.notify());
     let drawn = frames_over(vcx, 1);
     assert_eq!(frames_of(under, vcx), 0, "held: nothing drawn");
-    for part in ["chat window conversation", "chat window composer", "chat window layer"] {
+    for part in [
+        "chat window conversation",
+        "chat window composer",
+        "chat window layer",
+    ] {
         assert_eq!(drawn.get(part), None, "{part} held: {drawn:?}");
     }
 
@@ -134,7 +134,10 @@ fn a_held_chat_window_catches_up_when_it_shows_again(cx: &mut TestAppContext) {
     vcx.simulate_window_move(under, beside().origin);
     vcx.run_until_parked();
     let drawn = take_slice_renders();
-    assert!(drawn.contains_key("chat window conversation"), "it caught up: {drawn:?}");
+    assert!(
+        drawn.contains_key("chat window conversation"),
+        "it caught up: {drawn:?}"
+    );
     let drawn = frames_over(vcx, 1);
     assert!(
         drawn.get("chat window layer").is_some_and(|n| *n > 5),
@@ -152,5 +155,8 @@ fn activating_a_held_chat_window_shows_it(cx: &mut TestAppContext) {
         .expect("the window");
     vcx.run_until_parked();
     let drawn = take_slice_renders();
-    assert!(drawn.contains_key("chat window conversation"), "it shows: {drawn:?}");
+    assert!(
+        drawn.contains_key("chat window conversation"),
+        "it shows: {drawn:?}"
+    );
 }

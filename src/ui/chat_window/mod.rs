@@ -146,7 +146,9 @@ impl ChatWindows {
 
     /// Each open chat window's image cache, and whether the window is
     /// active (for the idle trim).
-    pub(super) fn image_caches(&self) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
+    pub(super) fn image_caches(
+        &self,
+    ) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
         self.open
             .iter()
             .map(|open| {
@@ -543,8 +545,7 @@ impl QuillApp {
         self.set_window_chat_active(chat_id, false);
         self.playback.userpic_videos.forget_window(chat_id);
         self.playback.inline_videos.forget_window(chat_id, cx);
-        super::image_budget::forget_window(chat_id);
-        self.playback.stickers.window_closed();
+        self.playback.stickers.window_closed(chat_id);
         self.leave_sticker_chat(
             Some(chat_id),
             Some(chat_id),

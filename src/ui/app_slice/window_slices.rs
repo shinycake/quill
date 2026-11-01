@@ -15,7 +15,6 @@ use std::rc::Rc;
 #[derive(Default)]
 pub(in crate::ui) struct WindowSlices {
     pub(super) conversation: Option<SliceParts>,
-    /// The composer slice, below the conversation slice.
     pub(super) composer: Option<Entity<AppSlice>>,
     /// The media panel's layer: over the composer, whose slice draws the
     /// panel, or the selector, which the window draws.

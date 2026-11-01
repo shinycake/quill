@@ -111,8 +111,7 @@ impl LatestFrames {
     /// window's view drew it if it was retired no earlier than that
     /// window's frame and already existed then; a replayed slice, if it
     /// was retired no earlier than the slice's last render and existed by
-    /// its end. Without the id check a chat list replaying for minutes
-    /// kept every video frame retired meanwhile.
+    /// its end.
     fn may_show(&self, id: usize, retired: u64) -> bool {
         self.whole
             .iter()

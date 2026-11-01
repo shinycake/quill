@@ -72,8 +72,6 @@ impl QuillApp {
                 .flex_1()
                 .min_w_0()
                 .min_h_0()
-                // Files dragged over the chat: the zones say what each one
-                // does (`drop_zones`); a drop outside any zone attaches them.
                 .on_drag_move(
                     cx.listener(|this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
                         let paths = event.drag(cx).paths().to_vec();

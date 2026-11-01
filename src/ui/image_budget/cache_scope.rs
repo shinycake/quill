@@ -27,7 +27,8 @@ impl CacheScope {
     ) -> R {
         let owner = self.cache.read(cx).window;
         SCOPED.with(|scoped| scoped.borrow_mut().push((self.cache.clone(), owner)));
-        let result = window.with_image_cache(Some(self.cache.clone().into()), |window| f(window, cx));
+        let result =
+            window.with_image_cache(Some(self.cache.clone().into()), |window| f(window, cx));
         SCOPED.with(|scoped| scoped.borrow_mut().pop());
         result
     }

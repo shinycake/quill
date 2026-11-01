@@ -779,9 +779,6 @@ fn a_tick_no_patch_can_reach_takes_a_whole_frame(cx: &mut TestAppContext) {
     assert_eq!(tick.hues, vec![SECOND], "and shows its new paint");
 }
 
-/// What [`Dimmed`] shows at full opacity, and inside a box at half: the
-/// layer sits under that box too, as a slice and its painter sit under
-/// whatever dims the window.
 #[gpui_kit::test]
 fn a_layer_under_a_dimmed_ancestor_dims_its_items_once(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -811,7 +808,6 @@ fn probe_hues(vcx: &mut VisualTestContext) -> Vec<f32> {
         .collect()
 }
 
-/// A fill that takes a hover, once `hover` says so.
 struct Hoverable {
     hue: f32,
     hover: bool,
@@ -921,7 +917,6 @@ fn hover_in_a_live_view_holds_through_its_ticks(cx: &mut TestAppContext) {
     assert_eq!(scene.hues(), vec![FIRST]);
 }
 
-/// A view that only shows stays cheap: this is what a hit test costs.
 #[gpui_kit::test]
 fn a_live_view_with_nothing_to_hover_ticks_alone(cx: &mut TestAppContext) {
     let mut scene = HoverScene::open(cx, false);
@@ -931,8 +926,6 @@ fn a_live_view_with_nothing_to_hover_ticks_alone(cx: &mut TestAppContext) {
     assert_eq!(scene.page_renders.get(), page, "its page stayed");
 }
 
-/// A patch that finds a hover the last whole frame never hit tested gets
-/// the whole frame that does, and the pointer is found on it.
 #[gpui_kit::test]
 fn a_hover_a_patch_built_gets_a_whole_frame(cx: &mut TestAppContext) {
     let mut scene = HoverScene::open(cx, false);
@@ -988,8 +981,6 @@ impl Render for TilePage {
     }
 }
 
-/// What a layer draws takes no hover, and a tile shows one all the same:
-/// the slice's hit test answers it, in the patches a tick stays.
 #[gpui_kit::test]
 fn a_hover_tile_shows_the_pointer_in_patches(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -1028,7 +1019,6 @@ fn a_hover_tile_shows_the_pointer_in_patches(cx: &mut TestAppContext) {
 
 struct CountedHost {
     inner: Entity<Live>,
-    /// It draws the live view deferred.
     deferred: bool,
     renders: Rc<Cell<u32>>,
 }
@@ -1141,7 +1131,7 @@ impl CachedScene {
         probe_hues(&mut self.vcx)
     }
 
-    /// Whole frames, and renders of the cached view, since `before`.
+    /// Whole frames and renders of the cached view so far.
     fn renders(&self) -> (u32, u32) {
         (self.page_renders.get(), self.host_renders.get())
     }
@@ -1223,8 +1213,6 @@ impl Render for OuterPage {
     }
 }
 
-/// The inner view's tick shows at once, through the cached view between
-/// them, tick after tick, and nothing around the outer view renders.
 #[gpui_kit::test]
 fn a_live_view_behind_a_cached_view_in_a_live_view_shows_every_tick(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -1310,8 +1298,6 @@ impl Render for ShrinkingPage {
     }
 }
 
-/// A patch moves a cached view inside a live one in the scene. The whole
-/// frame after it must not replay ranges that index the patch.
 #[gpui_kit::test]
 fn a_whole_frame_after_a_patch_replays_no_range_of_the_patch(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -1348,7 +1334,6 @@ fn a_whole_frame_after_a_patch_replays_no_range_of_the_patch(cx: &mut TestAppCon
     assert_eq!(probe_hues(&mut vcx), vec![SECOND, UNDER, FIRST]);
 }
 
-/// Every tick of a nested live view is a patch, not only the first.
 #[gpui_kit::test]
 fn a_live_view_inside_another_ticks_alone_tick_after_tick(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);

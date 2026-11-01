@@ -156,8 +156,6 @@ fn next_frame(window: Option<ChatId>, draw: WindowDraw) -> u64 {
     if window.is_none() {
         super::frame_clock::trace_slice_render("(window frame)");
     }
-    // The frame just drawn, in whichever window, painted only images that
-    // exist by now.
     retired::close_frame();
     let frame = FRAME.with(|frame| {
         frame.set(frame.get() + 1);
@@ -249,7 +247,6 @@ pub(super) struct PaintStamp {
 }
 
 impl PaintStamp {
-    /// Whether both were painted in the same place.
     pub(super) fn same_place(self, other: PaintStamp) -> bool {
         self.window == other.window && self.scope == other.scope
     }
@@ -260,7 +257,6 @@ pub(super) fn paint_stamp() -> PaintStamp {
     paint_stamp_in(SCOPED.with(|scoped| scoped.borrow().last().and_then(|(_, window)| *window)))
 }
 
-/// A stamp for content painted now in `window`.
 pub(super) fn paint_stamp_in(window: Option<ChatId>) -> PaintStamp {
     PaintStamp {
         window,
@@ -717,9 +713,6 @@ impl BoundedImageCache {
         Self::in_window(scope, None)
     }
 
-    /// The cache of `chat`'s window. Before it, chat windows drew outside
-    /// any bounded cache, so every picture one showed stayed in GPUI's
-    /// asset cache for good.
     pub(super) fn for_window(chat: ChatId, scope: Rc<Cell<Option<EntityId>>>) -> Self {
         Self::in_window(scope, Some(chat))
     }
@@ -1004,7 +997,10 @@ mod tests {
         let used = begin_frame();
         assert!(may_be_visible(None, None, used));
         begin_frame();
-        assert!(may_be_visible(None, None, used), "last frame may still show it");
+        assert!(
+            may_be_visible(None, None, used),
+            "last frame may still show it"
+        );
         begin_frame();
         assert!(!may_be_visible(None, None, used));
     }
@@ -1050,23 +1046,30 @@ mod tests {
             assert!(shows_now(painted(scope)), "{scope:?} shows");
         }
         assert!(!newly_shown(None, None, Some(whole)), "and was not away");
-        assert!(!may_be_visible(None, Some(layer), whole), "the layer drew since");
+        assert!(
+            !may_be_visible(None, Some(layer), whole),
+            "the layer drew since"
+        );
         assert!(!shows_now(painted(Some(layer))));
         let next = begin_frame();
         slice_shown(slice, None);
         slice_rendered(layer, None);
-        assert!(may_be_visible(None, None, whole), "until the next one is done");
+        assert!(
+            may_be_visible(None, None, whole),
+            "until the next one is done"
+        );
         assert!(!shows_now(painted(None)));
         assert!(shows_now(painted(Some(slice))), "the slice replays it");
         begin_patch_frame();
-        assert!(!may_be_visible(None, None, whole), "whole frame {next} is on");
+        assert!(
+            !may_be_visible(None, None, whole),
+            "whole frame {next} is on"
+        );
         assert!(may_be_visible(None, Some(slice), whole));
     }
 
     /// Between frames only the latest frame is on screen: what the frame
     /// before drew and the latest did not (a closed panel) is gone.
-    /// A chat window's slice replays what it rendered, whatever the main
-    /// window draws meanwhile, until it renders again.
     #[test]
     fn what_a_chat_windows_slice_replays_stays_on_screen() {
         let chat = ChatId(5);
@@ -1090,8 +1093,6 @@ mod tests {
         assert!(may_be_visible(Some(chat), Some(slice), rendered));
     }
 
-    /// Patch frames of a chat window leave what its whole frame drew, and
-    /// another window's frames say nothing about it.
     #[test]
     fn a_chat_window_counts_its_own_whole_frames() {
         let chat = ChatId(5);
@@ -1111,7 +1112,6 @@ mod tests {
         assert!(!shows_now(stamp));
     }
 
-    /// Nothing a closed window drew shows, in any slice of it.
     #[test]
     fn a_closed_window_shows_nothing() {
         let chat = ChatId(5);
@@ -1383,8 +1383,9 @@ mod tests {
         }
         impl Render for ChatWindow {
             fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-                self.cache
-                    .update(cx, |cache, cx| cache.begin_window_frame(super::WindowDraw::Whole, window, cx));
+                self.cache.update(cx, |cache, cx| {
+                    cache.begin_window_frame(super::WindowDraw::Whole, window, cx)
+                });
                 let left = self.show_left.then(|| img(self.left.clone()).size(px(40.)));
                 let pictures = div()
                     .size_full()
@@ -1412,7 +1413,8 @@ mod tests {
         }
         let view_paths = (on_screen.clone(), left.clone());
         let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| ChatWindow {
-            cache: cx.new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
+            cache: cx
+                .new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
             on_screen: view_paths.0,
             left: view_paths.1,
             show_left: true,

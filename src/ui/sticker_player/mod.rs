@@ -654,7 +654,8 @@ impl Player {
         let mut next: Option<Duration> = None;
         let mut stale = Vec::new();
         for (key, clip) in &mut inner.clips {
-            clip.drawn.retain(|drawn| super::image_budget::shows_now(*drawn));
+            clip.drawn
+                .retain(|drawn| super::image_budget::shows_now(*drawn));
             if !clip.drawn.is_empty() {
                 clip.seen = Some(now);
                 continue;
@@ -692,9 +693,9 @@ impl Player {
         self.screen_changes();
     }
 
-    /// A chat window closed (`image_budget::forget_window` came first):
-    /// what it showed is gone.
-    pub(super) fn window_closed(&self) {
+    /// A chat window closed: what it showed is gone.
+    pub(super) fn window_closed(&self, chat: ChatId) {
+        super::image_budget::forget_window(chat);
         self.screen_changes();
     }
 

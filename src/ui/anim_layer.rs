@@ -354,8 +354,7 @@ impl Layer {
             })
             .collect();
         order.sort_by_key(|&ix| items.get(ix).map_or(0, |item| item.seq.get()));
-        // An item's opacity holds every ancestor's, the painter's among them.
-        let around = window.element_opacity();
+        let painter_opacity = window.element_opacity();
         for ix in order {
             let Some(item) = items.get(ix) else {
                 continue;
@@ -363,7 +362,7 @@ impl Layer {
             if item.visible().is_none() {
                 continue;
             }
-            let opacity = (around > 0.).then(|| item.opacity.get() / around);
+            let opacity = (painter_opacity > 0.).then(|| item.opacity.get() / painter_opacity);
             window.with_element_opacity(opacity, |window| {
                 window.with_content_mask(Some(item.mask), |window| match &item.content {
                     Content::Frames(view) => view.paint(item.bounds, window),
@@ -388,7 +387,6 @@ pub(super) struct Layered {
     content: Content,
     child: Option<AnyElement>,
     style: StyleRefinement,
-    /// It shows the pointer (see [`hover_tile`]).
     hover: bool,
 }
 
@@ -675,13 +673,9 @@ impl Render for AnimationLayer {
         let Some(app) = self.app.upgrade() else {
             return painter.into_any_element();
         };
-        // A patch can land while input in another window has its state in
-        // place; the layer draws in its own window's, as that window's
-        // view does, and a chat window that lost its state draws nothing.
         let content = app.update(cx, |app, cx| {
             let outer_scope = app.windows.scope;
-            app.set_window_scope(target);
-            let content = (app.windows.scope == target).then(|| {
+            let content = app.set_window_scope(target).then(|| {
                 match target {
                     None => app.main_frame_starts(window, WindowDraw::Patch, cx),
                     Some(chat) => app.chat_frame_starts(chat, WindowDraw::Patch, window, cx),

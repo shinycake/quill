@@ -125,7 +125,6 @@ mod tests {
         })
     }
 
-    /// The tooltip and the forward drag stay with the row's footer.
     #[gpui_kit::test]
     fn a_mirrored_footer_builds_no_hitboxes(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);

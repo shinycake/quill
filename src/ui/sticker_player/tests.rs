@@ -2,8 +2,8 @@
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
 use super::super::image_budget::{
-    BoundedImageCache, WindowDraw, begin_chat_frame, begin_frame, forget_window, slice_rendered,
-    slice_shown, take_unshowable,
+    BoundedImageCache, WindowDraw, begin_chat_frame, begin_frame, slice_rendered, slice_shown,
+    take_unshowable,
 };
 use super::{CLOSE_AFTER, ClipSpec, DISPLAY, HeadId, Leaving, Part, Place, Player, ViewAsk};
 use gpui_kit::EntityId;
@@ -20,7 +20,6 @@ const EDGE: u32 = 16;
 /// 30 frames a second: one frame every 33.3 ms.
 const FPS: f64 = 30.0;
 
-/// A frame of `chat`'s window starts.
 fn chat_frame(player: &Player, chat: ChatId) {
     player.frame_starts();
     begin_chat_frame(chat, WindowDraw::Whole);
@@ -303,13 +302,11 @@ fn each_window_judges_the_clips_it_drew_by_its_own_frames() {
     // Drawn in a window that then closed: nothing shows it.
     chat_frame(&player, chat);
     let _ = player.frame(&spec, head("chat"), rest, EDGE, false, Some(chat), t0);
-    forget_window(chat);
-    player.window_closed();
+    player.window_closed(chat);
     let closed = player.close_stale(t0 + ms(1_000));
     assert_eq!((closed.clips, closed.next), (0, Some(ms(4_000))));
 }
 
-/// A chat window's slice replaying a clip it drew inline keeps it open.
 #[test]
 fn a_clip_in_a_chat_windows_replaying_slice_stays_open() {
     let (player, spec) = player(4);

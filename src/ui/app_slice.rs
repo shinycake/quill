@@ -13,9 +13,9 @@
 //! which a window's slot holds), and the same code serves both.
 //!
 //! Invalidation contract:
-//! - Every `QuillApp` notify notifies every slice of every window
-//!   (`observe_self`), so all existing `cx.notify()` call sites keep
-//!   refreshing everything.
+//! - Every `QuillApp` notify notifies every slice of every window but a
+//!   held one (`observe_self`), so a `cx.notify()` refreshes everything
+//!   that can show.
 //! - Animated content asks the frame clock for a tick from inside a slice;
 //!   the tick notifies only that slice (`SliceScope` records which one is
 //!   being laid out or painted), and the other slices replay.
@@ -734,10 +734,7 @@ impl QuillApp {
                 // Laid out at the bottom of its box: while the box still
                 // has last frame's height, a taller composer grows over
                 // the history (as its popups do) for that one frame.
-                let redraw = self
-                    .windows
-                    .view_in_place()
-                    .or(self.slices.app_only_id());
+                let redraw = self.windows.view_in_place().or(self.slices.app_only_id());
                 div()
                     .size_full()
                     .flex()
@@ -781,8 +778,6 @@ impl Render for AppSlice {
             return Empty.into_any_element();
         };
         app.update(cx, |app, cx| {
-            // A chat window whose session view went closes at its next
-            // render; its slice never shows what is in place instead.
             if app.windows.scope != slice_window {
                 return Empty.into_any_element();
             }

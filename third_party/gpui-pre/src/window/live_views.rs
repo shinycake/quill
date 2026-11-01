@@ -91,7 +91,6 @@ impl Window {
         self.next_frame.live_views.len() - 1
     }
 
-    /// The live view `site` finished prepainting.
     pub(crate) fn live_view_prepainted(&mut self, site: usize) {
         let hitboxes = self.next_frame.hitboxes.len();
         if let Some(site) = self.next_frame.live_views.get_mut(site) {
@@ -118,8 +117,8 @@ impl Window {
     ) {
         let from = from.start.scene_index..from.end.scene_index;
         let start = start.scene_index;
-        // A scene that refuses paint took none of it.
-        if self.next_frame.scene.len() - start != from.len() {
+        let scene_took_it = self.next_frame.scene.len() - start == from.len();
+        if !scene_took_it {
             return;
         }
         let replayed = self.rendered_frame.live_views.iter().filter_map(|site| {
@@ -208,15 +207,10 @@ impl Window {
         let tree = self.a11y.pause_tree();
         let layouts = self.text_system.layout_index();
 
-        // The entries stay, nested ones too: the next tick finds its view
-        // in them.
-        let (mut sites, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.rendered_frame.live_views)
+        let (mut sites, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.rendered_frame.live_views)
             .into_iter()
             .partition(LiveView::draws_itself);
         sites.sort_by_key(|site| site.scene.as_ref().map(|scene| scene.start));
-        // A cached view in a live view renders, as it does in one that
-        // renders in a whole frame: the frame it would replay from is older
-        // than this one, and its mouse listeners stay there.
         self.refreshing = true;
 
         let mut elements: SmallVec<[AnyElement; 4]> = SmallVec::new();
@@ -260,10 +254,8 @@ impl Window {
         self.image_cache_stack.clear();
         self.element_opacity = 1.0;
         self.refreshing = false;
-        sites.extend(rest);
+        sites.extend(kept);
         self.rendered_frame.live_views = sites;
-        // A cached view's ranges index this frame, which goes: with no state
-        // it renders in the next whole frame.
         let mut states = std::mem::take(&mut self.next_frame.element_states);
         states.retain(|(_, state), _| *state != TypeId::of::<ViewElementState>());
         self.rendered_frame.element_states.extend(states);

@@ -47,7 +47,6 @@ pub(super) struct WindowSlot {
     pub(super) chat_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     pub(super) share: ShareUi,
-    /// Its conversation and composer slices and their layers.
     pub(super) slices: WindowSlices,
     /// The pictures the window shows (`image_budget`); they go with it.
     /// Stays here while the window's state is in place.
@@ -117,9 +116,10 @@ impl QuillApp {
     /// whose session view is gone (the session records a diagnostic, and
     /// the window closes at its next render), puts the main window's state
     /// in place: a window never shows its own slot over another view.
-    pub(in crate::ui) fn set_window_scope(&mut self, target: Option<ChatId>) {
+    /// Returns whether `target`'s state is in place.
+    pub(in crate::ui) fn set_window_scope(&mut self, target: Option<ChatId>) -> bool {
         if self.windows.scope == target {
-            return;
+            return true;
         }
         if let Some(current) = self.windows.scope.take()
             && let Some(slot) = self.windows.slot_for(current)
@@ -134,6 +134,7 @@ impl QuillApp {
             self.swap_slot(&slot);
             self.windows.scope = Some(chat_id);
         }
+        self.windows.scope == target
     }
 
     /// Put `target`'s view in the session's place. `false` when the

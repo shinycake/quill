@@ -134,9 +134,6 @@ fn a_slice_render_covers_what_was_made_until_its_frame_was_done() {
     assert!(!main.may_show(after, retired), "made after the render");
 }
 
-/// What a chat window's slice painted stays while the slice replays,
-/// with the main window closed and through the window's patch frames; a
-/// closed chat window keeps nothing.
 #[test]
 fn a_replaying_chat_slice_keeps_what_it_painted_until_its_window_closes() {
     let chat = ChatId(5);
@@ -269,8 +266,9 @@ mod windows {
 
     impl Render for StillWindow {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            self.cache
-                .update(cx, |cache, cx| cache.begin_window_frame(WindowDraw::Whole, window, cx));
+            self.cache.update(cx, |cache, cx| {
+                cache.begin_window_frame(WindowDraw::Whole, window, cx)
+            });
             div().children(self.shown.clone().map(|picture| img(picture).size(px(40.))))
         }
     }
@@ -383,7 +381,8 @@ mod windows {
         retire_all([picture()]);
         cx.run_until_parked();
         let chat = cx.open_window(size(px(200.), px(200.)), |_, cx| StillWindow {
-            cache: cx.new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
+            cache: cx
+                .new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
             shown: Some(picture()),
         });
         let chat_view = chat.root(cx).expect("the chat view");

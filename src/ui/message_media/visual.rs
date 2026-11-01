@@ -3,6 +3,15 @@
 use super::*;
 use quill::lang::{keys, tr};
 
+/// How a looping GIF's Pause disc learns the pointer is on it.
+#[derive(Clone, Copy)]
+enum DiscHover {
+    /// The row's copy: from the row's group.
+    Group,
+    /// The animation layer's copy, which holds no hover of its own.
+    Told(bool),
+}
+
 pub(in crate::ui) fn photo_attachment(
     row_id: u64,
     photo: &quill::telegram::envelope::PhotoContent,
@@ -281,10 +290,8 @@ pub(in crate::ui) fn animation_attachment(
         // its own frame cadence while the row renders, the slice keeping
         // the picture it rendered with underneath. The badge and the Pause
         // disc (shown on hover; the row's own disc under it takes the
-        // click) ride with it, since the layer paints over the row. The
-        // layer's copy takes no hover, so it is told; the slice's reads
-        // the group.
-        let draw = move |frame: Arc<RenderImage>, hovered: Option<bool>| {
+        // click) ride with it, since the layer paints over the row.
+        let draw = move |frame: Arc<RenderImage>, hover: DiscHover| {
             div()
                 .relative()
                 .w(frame_w)
@@ -306,10 +313,10 @@ pub(in crate::ui) fn animation_attachment(
                         .justify_center()
                         .child({
                             let disc = media_disc(("gif-disc-shown", row_id), MediaDisc::Pause);
-                            match hovered {
-                                Some(true) => disc,
-                                Some(false) => disc.invisible(),
-                                None => disc
+                            match hover {
+                                DiscHover::Told(true) => disc,
+                                DiscHover::Told(false) => disc.invisible(),
+                                DiscHover::Group => disc
                                     .invisible()
                                     .group_hover(MEDIA_VISUAL_GROUP, |s| s.visible()),
                             }
@@ -318,12 +325,13 @@ pub(in crate::ui) fn animation_attachment(
                 .into_any_element()
         };
         let under = match gif.frame_now() {
-            Some(frame) => draw(frame, None),
+            Some(frame) => draw(frame, DiscHover::Group),
             None => visual.map_or_else(|| div().into_any_element(), still),
         };
         let fps = gif.fps();
         crate::ui::anim_layer::hover_tile(under, fps, move |hovered| {
-            gif.frame_now().map(|frame| draw(frame, Some(hovered)))
+            gif.frame_now()
+                .map(|frame| draw(frame, DiscHover::Told(hovered)))
         })
         .into_any_element()
     } else if !blocked && let Some(path) = visual {
