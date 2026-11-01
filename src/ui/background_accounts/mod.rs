@@ -20,8 +20,9 @@ use super::app::QuillApp;
 use super::export_progress::take_ended_exports;
 use super::selection_html::rich_html_note;
 use super::status_note::StatusNote;
+use super::wake_wait::{PassEnd, PollPace, run_poll_loop};
 use gpui_kit::*;
-use quill::connect::{ClosingSet, LiveConnect, start_background_live_connect};
+use quill::connect::{ClosingSet, ConnectBlocker, LiveConnect, start_background_live_connect};
 use quill::diagnostics::DiscardSink;
 use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
@@ -53,6 +54,13 @@ pub(crate) type AccountClicks = Arc<Mutex<Vec<(AccountKey, ChatId, NotificationA
 /// the rest waits for the next poll (a reconnect burst must not stall the
 /// window).
 const INGEST_BUDGET: Duration = Duration::from_millis(4);
+
+/// The background poll's pace, slower than the screen's (the updates only
+/// feed notifications and counters). Updates do not wait for the ceiling.
+const POLL_PACE: PollPace = PollPace {
+    gap: Duration::from_millis(40),
+    ceiling: Duration::from_secs(2),
+};
 
 /// One account that is not on screen.
 pub(super) struct BackgroundClient {
@@ -208,8 +216,7 @@ impl QuillApp {
     /// connect and switch.
     pub(super) fn ensure_background_accounts(&mut self, cx: &mut Context<Self>) {
         self.watch_quit_close(cx);
-        // Local data is being wiped: nothing opens until it is gone.
-        if self.background.wiping {
+        if self.background.wiping || self.disk.is_full() {
             return;
         }
         let Some(root) = self.client_accounts_root() else {
@@ -291,6 +298,7 @@ impl QuillApp {
                     // whose folder is being deleted.
                     if !this.background.starting.remove(&key)
                         || this.background.wiping
+                        || this.disk.is_full()
                         || this.background.deleting.contains(&key)
                         || active_account(&root) == key
                         || this.background.client(&key).is_some()
@@ -301,26 +309,39 @@ impl QuillApp {
                     let started = prepared.and_then(|prepared| {
                         start_background_live_connect(credentials, prepared, Arc::new(DiscardSink))
                     });
-                    let (live, status) = match started {
-                        Ok(live) => (Some(live), BackgroundStatus::Connecting),
-                        Err(blocker) => (
-                            None,
-                            BackgroundStatus::Failed(blocker.user_message().to_string()),
-                        ),
-                    };
-                    this.background.clients.push(BackgroundClient {
-                        key,
-                        live,
-                        status,
-                        unread: AccountUnread::default(),
-                    });
-                    this.spawn_background_poll(cx);
-                    cx.notify();
+                    this.finish_background_start(key, started, cx);
                 });
             })
             .detach();
         }
         self.spawn_background_poll(cx);
+    }
+
+    fn finish_background_start(
+        &mut self,
+        key: AccountKey,
+        started: Result<LiveConnect, ConnectBlocker>,
+        cx: &mut Context<Self>,
+    ) {
+        let (live, status) = match started {
+            Ok(live) => (Some(live), BackgroundStatus::Connecting),
+            Err(ConnectBlocker::DiskFull) => {
+                self.disk.refused_start();
+                return;
+            }
+            Err(blocker) => (
+                None,
+                BackgroundStatus::Failed(blocker.user_message().to_string()),
+            ),
+        };
+        self.background.clients.push(BackgroundClient {
+            key,
+            live,
+            status,
+            unread: AccountUnread::default(),
+        });
+        self.spawn_background_poll(cx);
+        cx.notify();
     }
 
     /// Close one background client without waiting for it, and end a start
@@ -343,17 +364,21 @@ impl QuillApp {
         self.publish_background_unread();
     }
 
-    /// Close every background client (local data is about to be wiped:
-    /// wait with `after_closing` before deleting it). Never blocks.
-    pub(super) fn stop_background_accounts(&mut self, cx: &mut Context<Self>) {
+    fn stop_background_clients(&mut self, cx: &mut Context<Self>) {
         self.background.generation += 1;
         self.background.starting.clear();
         self.background.polling = false;
         self.background.close_all_later();
-        self.background.closing.cancel_restarts();
         self.publish_background_unread();
         // The new generation's poll drains the closing clients.
         self.spawn_background_poll(cx);
+    }
+
+    /// Close every background client (local data is about to be wiped:
+    /// wait with `after_closing` before deleting it). Never blocks.
+    pub(super) fn stop_background_accounts(&mut self, cx: &mut Context<Self>) {
+        self.stop_background_clients(cx);
+        self.background.closing.cancel_restarts();
     }
 
     fn publish_background_unread(&self) {
@@ -370,46 +395,31 @@ impl QuillApp {
         self.background.polling = true;
         let generation = self.background.generation;
         Self::spawn_main(cx, async move |this, cx| {
-            const BUSY: Duration = Duration::from_millis(40);
-            // Idle sleeps are cut short by the receive thread's poke.
-            const IDLE_MAX: Duration = Duration::from_secs(2);
-            let mut delay = Duration::from_millis(100);
-            loop {
-                let seen = quill::wake::UPDATES.epoch();
-                let step = this
-                    .update(cx, |this, cx| {
-                        if generation != this.background.generation {
-                            return None;
-                        }
-                        let busy = this.poll_background(cx);
-                        if this.background.has_work() {
-                            Some(busy)
-                        } else {
-                            this.background.polling = false;
-                            None
-                        }
-                    })
-                    .ok()
-                    .flatten();
-                match step {
-                    None => break,
-                    Some(true) => delay = BUSY,
-                    Some(false) => delay = (delay * 2).clamp(BUSY, IDLE_MAX),
-                }
-                super::wake_wait::sleep_or_wake(
-                    cx.background_executor(),
-                    &quill::wake::UPDATES,
-                    seen,
-                    delay,
-                )
-                .await;
-            }
+            let executor = cx.background_executor().clone();
+            run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, || {
+                this.update(cx, |this, cx| {
+                    if generation != this.background.generation {
+                        return None;
+                    }
+                    let work_left = this.poll_background(cx);
+                    if this.background.has_work() {
+                        Some(PassEnd {
+                            work_left,
+                            due: None,
+                        })
+                    } else {
+                        this.background.polling = false;
+                        None
+                    }
+                })
+                .ok()
+                .flatten()
+            })
+            .await;
         })
         .detach();
     }
 
-    /// Apply what every background client received, then show its
-    /// notifications. Returns whether anything arrived.
     /// The app's proxy list and IPv6 choice: the account on screen's, once
     /// it is loaded and no change of it is in flight.
     fn app_proxy_list(&self) -> Option<(Vec<quill::proxy::ProxyEntry>, bool)> {
@@ -420,16 +430,18 @@ impl QuillApp {
         Some((proxy.all_entries()?, proxy.prefer_ipv6))
     }
 
+    /// Apply what every background client received, then show its
+    /// notifications. Returns whether a budget left updates queued.
     fn poll_background(&mut self, cx: &mut Context<Self>) -> bool {
         let notify_from_all = self.background.notify_from_all;
         let app_active = self.frame.window_active.get();
         let now = Instant::now();
-        let mut busy = false;
+        let mut backlog = false;
         let mut changed = false;
         let mut drained: Vec<(AccountKey, BackgroundDrain)> = Vec::new();
         let proxy_target = self.app_proxy_list();
         // Clients on their way out: one non-blocking drain each.
-        busy |= self.reap_closing(cx);
+        self.reap_closing(cx);
         let mut stopped: Vec<(AccountKey, LiveConnect)> = Vec::new();
         let mut signed_out: Vec<AccountKey> = Vec::new();
         let mut export_notes: Vec<StatusNote> = Vec::new();
@@ -445,6 +457,7 @@ impl QuillApp {
                 let _ = live.driver.ingest(owned);
                 ingested = true;
                 if started.elapsed() >= INGEST_BUDGET {
+                    backlog = true;
                     break;
                 }
             }
@@ -459,7 +472,6 @@ impl QuillApp {
             if let Some((list, prefer_ipv6)) = &proxy_target {
                 ingested |= live.driver.sync_proxies_to(list, *prefer_ipv6);
             }
-            busy |= ingested;
             export_notes.extend(take_ended_exports(&mut live.driver.session));
             export_notes.extend(
                 live.driver
@@ -528,7 +540,7 @@ impl QuillApp {
         if changed {
             cx.notify();
         }
-        busy
+        backlog
     }
 }
 
@@ -543,3 +555,7 @@ mod closing_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod deleting_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod disk_tests;

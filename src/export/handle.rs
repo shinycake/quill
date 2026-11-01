@@ -14,11 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-pub(crate) fn publish_end<P>(progress: &Mutex<P>, end: impl FnOnce(&mut P), wake: &Signal) {
-    end(&mut progress.lock_or_recover());
-    wake.poke();
-}
-
 /// The worker's end: blocks on channels the driver services from the poll
 /// loop.
 pub(crate) struct ChannelTdlib {
@@ -143,6 +138,13 @@ impl Drop for WorkerLink {
     }
 }
 
+/// Change the slot a poll pass reads, and wake that pass: stretches of the
+/// Writing stage send no request, so nothing else would.
+pub(crate) fn publish<P>(slot: &Mutex<P>, wake: &Signal, change: impl FnOnce(&mut P)) {
+    change(&mut slot.lock_or_recover());
+    wake.poke();
+}
+
 pub struct ChatExport {
     pub link: WorkerLink,
     progress: Arc<Mutex<Progress>>,
@@ -164,9 +166,9 @@ impl ChatExport {
         let worker_folder = folder.clone();
         crate::thread_guard::spawn_guarded("quill-export", move || {
             let report = |progress: Progress| {
-                if let Ok(mut slot) = worker_progress.lock() {
+                publish(&worker_progress, &crate::wake::UPDATES, |slot| {
                     *slot = progress;
-                }
+                });
             };
             let job = Job {
                 settings: &settings,
@@ -180,11 +182,9 @@ impl ChatExport {
                 Err(ExportError::Cancelled) => Stage::Cancelled,
                 Err(err) => Stage::Failed(err.to_string()),
             };
-            publish_end(
-                &worker_progress,
-                |slot| slot.stage = last,
-                &crate::wake::UPDATES,
-            );
+            publish(&worker_progress, &crate::wake::UPDATES, |slot| {
+                slot.stage = last;
+            });
         })?;
         Ok(Self {
             link,

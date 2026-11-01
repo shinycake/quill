@@ -6,7 +6,7 @@
 //! A library without the `qs_*` symbols (built before them) counts as not
 //! installed, and stickers fall back to the `ffmpeg` binary.
 
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -172,8 +172,7 @@ impl StickerDecoder {
         let api = api().map_err(|_| OpenError::Unavailable)?;
         let failed = |what: &str| OpenError::Failed(what.to_string());
         let edge = i32::try_from(edge.clamp(1, MAX_SIDE)).map_err(|_| failed("bad size"))?;
-        let utf8 = path.to_str().ok_or_else(|| failed("path is not UTF-8"))?;
-        let c_path = CString::new(utf8).map_err(|_| failed("invalid path"))?;
+        let c_path = crate::ffi_path::c_path(path).ok_or_else(|| failed("invalid path"))?;
         let mut err = [0u8; 256];
         // SAFETY: a valid NUL-terminated path and an error buffer of the
         // stated length, both alive for the call.

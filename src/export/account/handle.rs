@@ -3,7 +3,7 @@
 //! polls. Replaces the earlier raw JSONL account export.
 use super::settings::AccountSettings;
 use super::worker::{AccountJob, AccountProgress, AccountStage, create_folder, run};
-use crate::export::handle::{WorkerLink, publish_end};
+use crate::export::handle::{WorkerLink, publish};
 use crate::export::worker::ExportError;
 use crate::locks::LockExt;
 use std::io;
@@ -29,9 +29,9 @@ impl AccountExport {
         let worker_folder = folder.clone();
         crate::thread_guard::spawn_guarded("quill-export-account", move || {
             let report = |progress: AccountProgress| {
-                if let Ok(mut slot) = worker_progress.lock() {
+                publish(&worker_progress, &crate::wake::UPDATES, |slot| {
                     *slot = progress;
-                }
+                });
             };
             let job = AccountJob {
                 settings: &settings,
@@ -44,11 +44,9 @@ impl AccountExport {
                 Err(ExportError::Cancelled) => AccountStage::Cancelled,
                 Err(err) => AccountStage::Failed(err.to_string()),
             };
-            publish_end(
-                &worker_progress,
-                |slot| slot.stage = last,
-                &crate::wake::UPDATES,
-            );
+            publish(&worker_progress, &crate::wake::UPDATES, |slot| {
+                slot.stage = last;
+            });
         })?;
         Ok(Self {
             link,

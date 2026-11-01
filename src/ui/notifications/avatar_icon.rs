@@ -171,7 +171,7 @@ pub(in crate::ui) fn circular_icon_for(source: &Path) -> Option<PathBuf> {
     // reads a half-written PNG.
     let partial = target.with_extension("png.part");
     icon.save_with_format(&partial, ImageFormat::Png).ok()?;
-    std::fs::rename(&partial, &target).ok()?;
+    quill::fs_retry::rename_retrying(&partial, &target, quill::fs_retry::LONG).ok()?;
     Some(target)
 }
 

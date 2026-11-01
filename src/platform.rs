@@ -199,7 +199,8 @@ impl SecretStore for FileSecretStore {
         let written = write_key_file_0600(&tmp, &sealed);
         sealed.zeroize();
         written?;
-        std::fs::rename(&tmp, &path).map_err(|_| SecretStoreError::Platform)?;
+        crate::fs_retry::rename_retrying(&tmp, &path, crate::fs_retry::SHORT)
+            .map_err(|_| SecretStoreError::Platform)?;
         set_mode_0600(&path)?;
         Ok(())
     }
@@ -479,13 +480,24 @@ pub mod keychain {
     }
 }
 
+/// The OS's answer to an open: true when the helper started (`open`,
+/// `xdg-open`) or the shell took the target (Windows).
+#[must_use]
+pub enum OsOpen {
+    Answered(bool),
+    /// Windows calls the shell on a thread of its own, since a cold browser
+    /// or a network path can take seconds. A thread that ended without
+    /// answering cancels the channel: nothing opened.
+    Pending(futures_channel::oneshot::Receiver<bool>),
+}
+
 /// Open an `http`/`https` URL with the OS (`xdg-open` / `open`). No WebView.
 ///
 /// The argument is passed without a shell. Non-HTTP schemes are refused so a
 /// message entity cannot launch a local file or a command.
-pub fn open_external_url(url: &str) -> bool {
+pub fn open_external_url(url: &str) -> OsOpen {
     if !crate::text::openable_http_url(url) {
-        return false;
+        return OsOpen::Answered(false);
     }
     os_open(
         std::ffi::OsStr::new(url.trim()),
@@ -509,9 +521,11 @@ pub fn mailto_url(address: &str) -> Option<String> {
 }
 
 /// Open the mail client on a new message to `address`.
-pub fn open_mailto(address: &str) -> bool {
-    mailto_url(address)
-        .is_some_and(|url| os_open(std::ffi::OsStr::new(&url), "open the mail client"))
+pub fn open_mailto(address: &str) -> OsOpen {
+    match mailto_url(address) {
+        Some(url) => os_open(std::ffi::OsStr::new(&url), "open the mail client"),
+        None => OsOpen::Answered(false),
+    }
 }
 
 /// Hand a URL or path to the OS default handler: the one door every helper
@@ -519,16 +533,20 @@ pub fn open_mailto(address: &str) -> bool {
 /// (`ui_driver::guard::refuse_outside_if_injecting`): what leaves Quill
 /// for the OS stays with the user, whichever link, button or file the
 /// agent reached. `what` is the verb phrase the refusal names.
-fn os_open(target: &std::ffi::OsStr, what: &str) -> bool {
+fn os_open(target: &std::ffi::OsStr, what: &str) -> OsOpen {
     if crate::agent::ui_driver::guard::refuse_outside_if_injecting(what) {
-        return false;
+        return OsOpen::Answered(false);
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(answer) = test_launches::scripted_answer() {
+        return answer;
     }
     os_open_now(target)
 }
 
 /// macOS `open`, Linux `xdg-open` (argv, no shell).
 #[cfg(not(windows))]
-fn os_open_now(target: &std::ffi::OsStr) -> bool {
+fn os_open_now(target: &std::ffi::OsStr) -> OsOpen {
     let program = if cfg!(target_os = "macos") {
         "open"
     } else {
@@ -536,20 +554,32 @@ fn os_open_now(target: &std::ffi::OsStr) -> bool {
     };
     let mut command = std::process::Command::new(program);
     command.arg(target);
-    os_spawn(command)
+    OsOpen::Answered(os_spawn(command))
 }
 
 /// Windows calls `ShellExecuteW` directly: `cmd /C start` would re-parse
 /// `&`, `|` and `^` inside a link or file name and run whatever follows as
 /// a second command.
 #[cfg(all(windows, not(any(test, feature = "test-support"))))]
-fn os_open_now(target: &std::ffi::OsStr) -> bool {
+fn os_open_now(target: &std::ffi::OsStr) -> OsOpen {
+    open_off_thread(target, shell_execute)
+}
+
+#[cfg(all(windows, not(any(test, feature = "test-support"))))]
+fn shell_execute(target: &std::ffi::OsStr) -> bool {
     use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Com::{
+        COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+    };
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let file = wide(target);
     let verb = wide(std::ffi::OsStr::new("open"));
+    // SAFETY: called once on this thread before any COM use; balanced by
+    // `CoUninitialize` below when it succeeds. Shell extensions that
+    // ShellExecuteW may load expect an initialized apartment.
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
     // SAFETY: both strings are NUL-terminated UTF-16 buffers that outlive
     // the call; null HWND, parameters and directory are allowed.
     let result = unsafe {
@@ -562,14 +592,35 @@ fn os_open_now(target: &std::ffi::OsStr) -> bool {
             SW_SHOWNORMAL,
         )
     };
+    if com.is_ok() {
+        // SAFETY: matches the successful `CoInitializeEx` above, on the
+        // same thread.
+        unsafe { CoUninitialize() };
+    }
     // ShellExecuteW reports success with a value greater than 32.
     result as isize > 32
 }
 
+#[cfg(any(test, all(windows, not(feature = "test-support"))))]
+fn open_off_thread(
+    target: &std::ffi::OsStr,
+    open: impl FnOnce(&std::ffi::OsStr) -> bool + Send + 'static,
+) -> OsOpen {
+    let target = target.to_os_string();
+    let (answer, answered) = futures_channel::oneshot::channel();
+    let thread = crate::thread_guard::spawn_guarded("os-open", move || {
+        let _ = answer.send(open(&target));
+    });
+    match thread {
+        Ok(_) => OsOpen::Pending(answered),
+        Err(_) => OsOpen::Answered(false),
+    }
+}
+
 #[cfg(all(windows, any(test, feature = "test-support")))]
-fn os_open_now(_target: &std::ffi::OsStr) -> bool {
+fn os_open_now(_target: &std::ffi::OsStr) -> OsOpen {
     test_launches::note();
-    true
+    OsOpen::Answered(true)
 }
 
 /// Start a helper program (`open`, `xdg-open`, `explorer`) without a shell.
@@ -594,10 +645,20 @@ fn os_spawn(_command: std::process::Command) -> bool {
 
 #[cfg(any(test, feature = "test-support"))]
 mod test_launches {
+    use super::OsOpen;
     use std::cell::Cell;
 
     thread_local! {
         static LAUNCHES: Cell<usize> = const { Cell::new(0) };
+        static NEXT_ANSWER: Cell<Option<OsOpen>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn script_answer(answer: OsOpen) {
+        NEXT_ANSWER.with(|next| next.set(Some(answer)));
+    }
+
+    pub(super) fn scripted_answer() -> Option<OsOpen> {
+        NEXT_ANSWER.with(Cell::take)
     }
 
     pub(super) fn note() {
@@ -617,10 +678,16 @@ pub fn os_launch_attempts() -> usize {
     test_launches::count()
 }
 
+/// The next open on this thread gets `answer`.
+#[cfg(any(test, feature = "test-support"))]
+pub fn script_next_os_open(answer: OsOpen) {
+    test_launches::script_answer(answer);
+}
+
 /// MED3: open a downloaded file with the system viewer (`xdg-open` /
 /// `open`). Reuses the same OS-open mechanism as URLs, without the
 /// http-scheme gate (a local path is the point here). No shell involved.
-pub fn open_local_file(path: &std::path::Path) -> bool {
+pub fn open_local_file(path: &std::path::Path) -> OsOpen {
     os_open(path.as_os_str(), "open a file with its app")
 }
 
@@ -650,19 +717,68 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> bool {
         os_spawn(command)
     }
     #[cfg(not(windows))]
-    match path.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => {
-            let mut command = std::process::Command::new("xdg-open");
-            command.arg(dir);
-            os_spawn(command)
-        }
-        _ => open_local_file(path),
+    {
+        let target = path
+            .parent()
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .unwrap_or(path);
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(target);
+        os_spawn(command)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_lite::future::block_on;
+
+    fn pending(open: OsOpen) -> futures_channel::oneshot::Receiver<bool> {
+        match open {
+            OsOpen::Pending(answer) => answer,
+            OsOpen::Answered(opened) => panic!("answered {opened} on the calling thread"),
+        }
+    }
+
+    #[test]
+    fn opening_runs_off_the_calling_thread_and_answers_when_it_ends() {
+        let caller = std::thread::current().id();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (seen_tx, seen) = std::sync::mpsc::channel();
+        let open = open_off_thread(
+            std::ffi::OsStr::new("https://example.com/a"),
+            move |target| {
+                seen_tx
+                    .send((std::thread::current().id(), target.to_os_string()))
+                    .unwrap();
+                released.recv().unwrap();
+                false
+            },
+        );
+        let mut answer = pending(open);
+        let (thread, target) = seen.recv().unwrap();
+        assert_ne!(thread, caller);
+        assert_eq!(target, "https://example.com/a");
+        assert_eq!(answer.try_recv(), Ok(None), "the shell is still busy");
+        release.send(()).unwrap();
+        assert_eq!(block_on(answer), Ok(false));
+    }
+
+    #[test]
+    fn a_successful_open_answers_true() {
+        let answer = pending(open_off_thread(std::ffi::OsStr::new("C:/file.pdf"), |_| {
+            true
+        }));
+        assert_eq!(block_on(answer), Ok(true));
+    }
+
+    #[test]
+    fn an_opener_that_dies_cancels_the_answer() {
+        let answer = pending(open_off_thread(std::ffi::OsStr::new("C:/file.pdf"), |_| {
+            std::panic::resume_unwind(Box::new("the shell call died"))
+        }));
+        assert!(block_on(answer).is_err());
+    }
 
     #[test]
     fn mailto_accepts_plain_addresses_only() {

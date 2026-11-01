@@ -548,16 +548,6 @@ fn replies_on_the_same_page_jump_with_the_script() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn a_worker_ending_wakes_the_poll_loop_after_it_published() {
-    let progress = std::sync::Mutex::new(Stage::Starting);
-    let wake = crate::wake::Signal::new();
-    let seen = wake.epoch();
-    crate::export::handle::publish_end(&progress, |stage| *stage = Stage::Cancelled, &wake);
-    assert_ne!(wake.epoch(), seen);
-    assert_eq!(*progress.lock().unwrap(), Stage::Cancelled);
-}
-
 fn not_local() -> Value {
     json!({"is_downloading_completed": false, "is_downloading_active": false,
         "downloaded_size": 0})
@@ -662,4 +652,16 @@ fn cancelling_leaves_a_download_something_else_asked_for() {
     cancelled_download(&mut fake, &td);
     assert_eq!(fake.count("cancelDownloadFile"), 0);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn what_the_worker_publishes_wakes_the_poll_pass() {
+    let wake = crate::wake::Signal::new();
+    let slot = std::sync::Mutex::new(Progress::starting());
+    super::handle::publish(&slot, &wake, |progress| progress.stage = Stage::Cancelled);
+    assert_eq!(wake.epoch(), 1);
+    assert!(
+        slot.lock()
+            .is_ok_and(|p| matches!(p.stage, Stage::Cancelled))
+    );
 }

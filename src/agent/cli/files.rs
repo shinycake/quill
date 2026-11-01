@@ -62,7 +62,8 @@ pub fn write_atomic(path: &Path, text: &str, like: Option<&Permissions>) -> std:
     let temp = PathBuf::from(temp);
     // Left by a run that stopped before its rename.
     let _ = std::fs::remove_file(&temp);
-    let result = create_new(&temp, text, like).and_then(|()| std::fs::rename(&temp, path));
+    let result = create_new(&temp, text, like)
+        .and_then(|()| crate::fs_retry::rename_retrying(&temp, path, crate::fs_retry::LONG));
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
     }

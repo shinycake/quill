@@ -118,7 +118,7 @@ impl Render for QuillApp {
         self.frame_upkeep(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
-        let inputs_live = self.live.is_some() || self.auth_ui.demo_inputs;
+        let inputs_live = (self.live.is_some() || self.auth_ui.demo_inputs) && !self.disk.is_full();
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
@@ -594,6 +594,7 @@ impl Render for QuillApp {
                 cx,
             ))
             .children(self.frozen_banner(cx))
+            .children(self.disk_low_banner(cx))
             .children(self.live_share_strip(cx))
             .children(self.unconfirmed_login_banner(cx))
             .when(
