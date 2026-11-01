@@ -104,6 +104,7 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[gpui_kit::test]
     fn opening_a_player_starts_the_load(cx: &mut TestAppContext) {
+        use super::Warmed;
         cx.update(|cx| {
             assert!(!cx.has_global::<Warmed>());
             let _ = super::super::VideoPlayer::open(
