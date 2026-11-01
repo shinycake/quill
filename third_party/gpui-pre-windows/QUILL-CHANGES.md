@@ -431,17 +431,29 @@ Added in 2026, after an audit of the earlier panic pass
 
 - `src/directx_devices.rs`: `get_device` returns an error for a device
   `D3D11CreateDevice` did not hand back, `get_adapter` skips an adapter
-  without a device context and returns an error after the last adapter, and
+  that fails to cast or has no device or context, stops at
+  `DXGI_ERROR_NOT_FOUND`, and returns an error naming the last adapter's
+  failure, and
   `DirectXDevices::new` logs an unexpected feature level. No `unwrap` or
   `unreachable!` is left in the file.
 - `src/platform.rs`: `begin_vsync_thread` returns the thread's spawn error
   instead of unwrapping it. `attach_gpu` then detaches the GPU again and
   returns the error, so launch fails with the startup alert and
   `request_windowing(Windowed)` fails, instead of the app panicking.
-- `src/platform.rs`: the vsync thread's body runs under `catch_unwind`. On a
-  panic it logs and posts `WM_GPUI_GPU_DEVICE_GONE` to the platform window,
-  which drops the devices and destroys every window, instead of leaving them
-  without frames.
+- `src/platform.rs`: the vsync thread's body runs under
+  `panic_guard::guarded` (`quill-panic-guard`, a new dependency, so Quill's
+  panic hook knows the panic is caught). On a panic it logs and posts
+  `WM_GPUI_GPU_DEVICE_GONE` to the platform window, which drops the devices
+  and destroys every window, instead of leaving them without frames.
+- `src/platform.rs`: each vsync thread has a `VsyncGeneration`, moved on by
+  every start (`begin_vsync_thread`) and stop (`detach_gpu`).
+  `WM_GPUI_GPU_DEVICE_GONE` carries it in `lparam`, and the platform's
+  `WM_GPUI_GPU_DEVICE_LOST` now points at a `RecoveredDevices` that carries
+  it. The platform ignores both from an older generation, and answers
+  `HANDED_OVER` only when it took the devices; otherwise the thread stops
+  without sending them to the windows.
+- `src/platform.rs`: `open_window` replaces devices the GPU removed before
+  it builds the window (`replace_removed_devices`), instead of failing.
 - `src/window_list.rs`: `WindowList` replaces the bare `RwLock` and the
   `for_each_after_unlock` / `for_each_open_after_unlock` helpers. Callers get
   copies only (`snapshot`, `find`) or change it under its own lock (`push`,
