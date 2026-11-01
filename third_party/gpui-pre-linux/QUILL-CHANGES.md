@@ -75,3 +75,54 @@ The Quill project also changed it in 2026 for Agent access's screenshots
   `image` dependency (no default features). Type-checked with
   `cargo check --target x86_64-unknown-linux-gnu` on macOS; not run on
   Linux by the author.
+
+The Quill project also changed it in 2026 so Wayland events the protocol
+allows no longer panic on the main thread (sweep finding linux-windows-5):
+
+- `src/linux/wayland/client.rs`: a keymap xkb cannot parse is logged and the
+  previous keymap kept (`compile_keymap`, was `expect`); `Modifiers` and `Key`
+  events that arrive with no keymap (a compositor that sent `no_keymap`, a
+  non-XkbV1 format, or one xkb refused) are dropped with a log
+  (`update_modifiers`, was `unwrap`); drag enter skips the offer when no
+  pipe can be made (was `Pipe::new().unwrap()`).
+- `src/linux/wayland/clipboard.rs`: a clipboard read returns nothing when no
+  pipe can be made, and `flush_for_reply` waits for a full socket
+  (`WouldBlock`, which `Connection::flush` reports as an error) to drain
+  instead of `flush().unwrap()`. Tests in both files ran with
+  `cargo test -p gpui-pre-linux -p quill --lib --features quill/demo-capture`
+  (the second package turns on `gpui/test-support`) on Linux.
+
+The Quill project also changed it in 2026 so X11 draws a refused frame again
+(sweep finding linux-windows-10):
+
+- `src/linux/x11/present_retry.rs` (new) and `src/linux/x11/window.rs`: when
+  `WgpuRenderer::draw` returns false (suboptimal, lost, outdated, timed-out
+  or occluded surface), the next refresh forces a frame, up to 8 in a row,
+  and a parked refresh timer is woken for it. Upstream ignored the result,
+  so the window kept stale content until the next invalidation. Wayland
+  already retries through `PresentationState`.
+
+The Quill project also changed it in 2026 for `WgpuRenderer::recover`'s new
+`Recovery` result (sweep finding linux-windows-3, see gpui-pre-wgpu's
+QUILL-CHANGES.md):
+
+- `src/linux/x11/window.rs`: while an attempt is not yet due the window
+  keeps its refresh timer running and forces a frame only once the attempt's
+  instant has passed, instead of forcing a full frame (and a 350 ms sleep)
+  on every refresh. After `GaveUp` nothing is forced and the timer parks.
+- `src/linux/wayland/window.rs`, `src/linux/wayland/client.rs`: a calloop
+  timer (`run_for_window_at`) asks for one frame when the attempt is due.
+  The device-lost branch of `draw` clears `redraw_requested`, and
+  `complete_frame` parks the frame loop while an attempt is pending, so the
+  window is not redrawn every refresh interval in between (the first
+  version of this change still was: the branch returned before clearing
+  the flag, so each attempt's request kept the retry timer ticking at the
+  refresh rate). The device-lost path no longer unwraps the surface's
+  backend.
+- After a recovery that landed on a software adapter, both backends call
+  `WgpuRenderer::probe_hardware` from a calloop timer at
+  `hardware_probe_at`, re-arm it at the instant it returns, and redraw
+  when the renderer was rebuilt.
+- Both backends close a window on `Recovery::CloseWindow` from a calloop
+  timer (`run_for_window_at`, also in `src/linux/x11/client.rs`), outside
+  the draw, without asking `should_close`, as Windows destroys the window.

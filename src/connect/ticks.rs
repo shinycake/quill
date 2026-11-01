@@ -47,6 +47,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let TickScope::OnScreen { settings_open } = scope else {
             return outcome;
         };
+        // User avatars the last frames showed without a file.
+        outcome.progress(self.download_claimed_avatars());
         // Settings → My Grams: the balance probe and unknown names.
         outcome.progress(self.grams_tick(settings_open));
         // Bots named by a group's command list that the app does not know.

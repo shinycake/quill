@@ -1,6 +1,6 @@
 //! Batch 4: online presence. The window reports its last input to a
 //! process-wide clock (an invisible canvas listening to mouse, scroll and
-//! key events); the 40 ms poll loop turns "window active and not idle"
+//! key events); the poll loop turns "window active and not idle"
 //! (`quill::presence`, tdesktop's `updateOnline`) into TDLib's `online`
 //! option, sent only when it changes.
 //!

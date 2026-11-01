@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 /// A temporary app root with the primary account and `account-1`, each
 /// with a local database.
-fn temp_root() -> PathBuf {
+pub(super) fn temp_root() -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
         "quill-deleting-{}-{}",
@@ -49,7 +49,7 @@ fn registered(root: &Path, key: &AccountKey) -> bool {
 }
 
 /// Point `app` at `root` and an in-memory keychain holding `keys`.
-fn isolate(
+pub(super) fn isolate(
     app: &Entity<QuillApp>,
     vcx: &mut VisualTestContext,
     root: &Path,
@@ -68,7 +68,7 @@ fn isolate(
     store
 }
 
-fn credentials() -> TelegramCredentials {
+pub(super) fn credentials() -> TelegramCredentials {
     TelegramCredentials {
         api_id: 1,
         api_hash: "unit-test-hash-not-for-network".into(),

@@ -22,7 +22,7 @@
 #endif
 
 /* Bumped whenever a struct or signature below changes. */
-#define QV_ABI_VERSION 3
+#define QV_ABI_VERSION 4
 
 typedef struct QvOptions {
   /* Scale video down (never up) to fit within this box, keeping the aspect
@@ -134,11 +134,20 @@ QV_API void qv_info(void *ctx, QvInfo *out);
 QV_API int32_t qv_set_output(void *ctx, int32_t format);
 
 /* Decode the next picture or audio chunk in presentation order per stream.
- * Returns 1 with `out` filled, 0 at the end of the file, < 0 on error. */
+ * Returns 1 with `out` filled, 0 at the end of the file, < 0 on error. Too
+ * many corrupt video packets in a row are an error. */
 QV_API int32_t qv_next(void *ctx, QvItem *out);
 
+/* ABI 4: decode the next audio chunk while the caller has pictures enough.
+ * Video packets read on the way wait undecoded for qv_next, which goes on
+ * from them. Returns 1 with `out` filled, 0 when no sound is in reach (it
+ * ended, or too many packets wait: a qv_next has to take some first), < 0 on
+ * error. */
+QV_API int32_t qv_next_sound(void *ctx, QvItem *out);
+
 /* Seek so the next items start at `seconds` (frames before it are decoded
- * but not returned). Returns 0 on success. */
+ * but not returned). Past the last picture, that picture is returned at the
+ * end. Returns 0 on success. */
 QV_API int32_t qv_seek(void *ctx, double seconds);
 
 QV_API void qv_close(void *ctx);

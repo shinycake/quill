@@ -46,7 +46,7 @@ use gpui::{
     popup::PopupOptions,
     px, size,
 };
-use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig, wgpu};
+use gpui_wgpu::{CompositorGpuHint, Recovery, WgpuRenderer, WgpuSurfaceConfig, wgpu};
 
 #[derive(Default)]
 pub(crate) struct Callbacks {
@@ -134,6 +134,8 @@ pub struct WaylandWindowState {
     active: bool,
     hovered: bool,
     redraw_requested: bool,
+    // Quill: the GPU recovery attempt a timer is armed for.
+    recovery_retry_at: Option<Instant>,
     presentation: PresentationState,
     pending_frame_callback: Option<wl_callback::WlCallback>,
     in_progress_configure: Option<InProgressConfigure>,
@@ -636,6 +638,7 @@ impl WaylandWindowState {
             active: false,
             hovered: false,
             redraw_requested: false,
+            recovery_retry_at: None,
             presentation: PresentationState::Unpresented,
             pending_frame_callback: None,
             in_progress_window_controls: None,
@@ -972,6 +975,13 @@ impl WaylandWindowStatePtr {
             return;
         }
 
+        // Quill: the GPU recovery timer wakes the window when an attempt is
+        // due; nothing is drawn before then.
+        if state.recovery_retry_at.is_some() {
+            self.frame_loop.set(FrameLoop::Parked);
+            return;
+        }
+
         if state.presentation.requires_presentation() {
             // Before the first present, or when throttling skipped draw, a
             // callback may never arrive. Otherwise let the compositor pace
@@ -1054,6 +1064,40 @@ impl WaylandWindowStatePtr {
             // presented buffer guarantees a compositor frame callback.
             _ => {}
         }
+    }
+
+    /// Quill: look for the GPU while on the software renderer recovery fell
+    /// back to (`WgpuRenderer::probe_hardware`), and look again later.
+    pub fn probe_hardware(&self) {
+        let mut guard = self.state.borrow_mut();
+        let state = &mut *guard;
+        let Some(backend) = state.surface.backend().upgrade() else {
+            return;
+        };
+        let raw_window = RawWindow {
+            window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
+            display: backend.display_ptr().cast::<std::ffi::c_void>(),
+        };
+        let Some(renderer) = state.renderer.as_mut() else {
+            return;
+        };
+        let next = renderer.probe_hardware(&raw_window);
+        let redraw = renderer.needs_redraw();
+        let surface_id = state.surface.id();
+        let client = state.client.clone();
+        drop(guard);
+        if let Some(at) = next {
+            client.run_for_window_at(&surface_id, at, |window| window.probe_hardware());
+        }
+        if redraw {
+            self.request_redraw();
+        }
+    }
+
+    /// Quill: a GPU recovery attempt is due (`run_for_window_at`).
+    pub fn recovery_retry_due(&self) {
+        self.state.borrow_mut().recovery_retry_at = None;
+        self.request_redraw();
     }
 
     fn request_redraw(&self) {
@@ -2018,24 +2062,43 @@ impl PlatformWindow for WaylandWindow {
         };
 
         if renderer.device_lost() {
+            let Some(backend) = state.surface.backend().upgrade() else {
+                return;
+            };
             let raw_window = RawWindow {
                 window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
-                display: state
-                    .surface
-                    .backend()
-                    .upgrade()
-                    .unwrap()
-                    .display_ptr()
-                    .cast::<std::ffi::c_void>(),
+                display: backend.display_ptr().cast::<std::ffi::c_void>(),
             };
+            // Each attempt asks for one frame (`recovery_retry_due`), not a
+            // frame every refresh until the next.
+            state.redraw_requested = false;
             match renderer.recover(&raw_window) {
-                Ok(()) => {}
-                Err(err) => {
-                    log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                Recovery::Recovered => {
+                    state.recovery_retry_at = None;
+                    state.redraw_requested = true;
+                    if let Some(at) = renderer.hardware_probe_at() {
+                        let surface_id = state.surface.id();
+                        state
+                            .client
+                            .run_for_window_at(&surface_id, at, |window| window.probe_hardware());
+                    }
+                }
+                Recovery::RetryAt(at) if state.recovery_retry_at != Some(at) => {
+                    state.recovery_retry_at = Some(at);
+                    let surface_id = state.surface.id();
+                    state
+                        .client
+                        .run_for_window_at(&surface_id, at, |window| window.recovery_retry_due());
+                }
+                Recovery::RetryAt(_) => {}
+                Recovery::GaveUp => {}
+                Recovery::CloseWindow => {
+                    let surface_id = state.surface.id();
+                    state
+                        .client
+                        .run_for_window_at(&surface_id, Instant::now(), |window| window.close());
                 }
             }
-
-            state.redraw_requested = true;
             return;
         }
 

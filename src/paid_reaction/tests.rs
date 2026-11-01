@@ -181,3 +181,37 @@ fn the_slider_maps_to_amounts_and_back() {
     assert_eq!(amount_for_step(50, 2), 1);
     assert_eq!(amount_for_step(SLIDER_STEPS, 2), 2);
 }
+
+#[test]
+fn the_next_change_lands_where_the_countdown_shows_another_second() {
+    let mut paid = PaidReactions::default();
+    assert_eq!(paid.next_change_ms(0), None);
+    paid.add(1, 10, 1, None, 0);
+    let shown = |now_ms: u64| paid.toast().map(|p| p.seconds_left(now_ms));
+    let mut now_ms = 0;
+    let mut seconds = vec![shown(now_ms)];
+    while let Some(wait) = paid.next_change_ms(now_ms).filter(|wait| *wait > 0) {
+        assert_eq!(
+            shown(now_ms + wait - 1),
+            shown(now_ms),
+            "no change before it"
+        );
+        now_ms += wait;
+        seconds.push(shown(now_ms));
+    }
+    assert_eq!(now_ms, ACCUMULATE_MS, "the last one is the commit");
+    assert_eq!(
+        seconds,
+        [6, 5, 4, 3, 2, 1, 1].map(Some),
+        "the commit itself shows no new second"
+    );
+}
+
+#[test]
+fn the_next_change_is_the_soonest_of_every_waiting_reaction() {
+    let mut paid = PaidReactions::default();
+    paid.add(1, 10, 1, None, 0);
+    paid.add(1, 11, 1, None, 300);
+    assert_eq!(paid.next_change_ms(300), Some(200));
+    assert_eq!(paid.next_change_ms(ACCUMULATE_MS), Some(0));
+}

@@ -24,6 +24,7 @@ mod backend_live;
 #[cfg(feature = "demo-capture")]
 mod backend_still;
 pub(crate) mod controls;
+mod decoder_load;
 mod element;
 mod live_follow;
 mod live_picture;
@@ -45,6 +46,7 @@ mod live_view_tests;
 mod tests;
 
 pub(crate) use backend_live::STALL_AFTER;
+pub(crate) use decoder_load::{supported, warm_decoder};
 pub(crate) use element::{WidthReport, video_frame};
 pub(crate) use live_follow::{follow_live_feed, follow_live_slot, shows_feed};
 #[cfg(test)]
@@ -906,17 +908,6 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
     backend_ffmpeg::FfmpegBackend::open(path, purpose).map(|b| Box::new(b) as Box<dyn Backend>)
 }
 
-/// Whether clips can play in this process: always on macOS (AVPlayer);
-/// elsewhere once the bundled FFmpeg shim loads. In tests, also once the
-/// test scripted a backend (CI has no shim).
-pub(crate) fn supported() -> bool {
-    #[cfg(test)]
-    if tests::scripted_backends() {
-        return true;
-    }
-    cfg!(target_os = "macos") || quill::video_decode::available()
-}
-
 /// Whether pictures are decoded in software into BGRA images in this
 /// process (FFmpeg): inline tiles then decode at their own size, leave
 /// clips above 1080p still and share a memory budget. AVPlayer decodes in
@@ -928,8 +919,12 @@ pub(crate) fn decodes_in_process() -> bool {
 /// Whether a `.gif` file can play through the player: only through FFmpeg
 /// (AVPlayer does not read GIF).
 pub(crate) fn plays_gif_files() -> bool {
-    quill::video_decode::available()
-        && (cfg!(not(target_os = "macos")) || backend_ffmpeg::preferred_on_macos())
+    if cfg!(target_os = "macos") {
+        return backend_ffmpeg::preferred_on_macos();
+    }
+    // Read without loading the shim on the UI thread: a load still running
+    // counts as a success, and the player reports it if it fails.
+    quill::video_decode::available_now() != Some(false)
 }
 
 /// A process-unique player id (the `QUILL_TRACE_VIDEO` column).

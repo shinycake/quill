@@ -1,6 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre 0.3.9 (Apache-2.0):
 // `SurfaceFrame` (RGBA16F and NV12, `YuvColor`) and the non-Apple `PaintSurface::frame`;
-// primitives a window's paint filter refuses never enter the scene.
+// primitives a window's paint filter refuses never enter the scene; a replayed
+// range enters the bounds tree once.
 // See third_party/gpui-pre/QUILL-CHANGES.md.
 // todo("windows"): remove
 #![cfg_attr(windows, allow(dead_code))]
@@ -101,10 +102,8 @@ impl Scene {
         if self.suppressed {
             return;
         }
-        let mut primitive = primitive.into();
-        let clipped_bounds = primitive
-            .bounds()
-            .intersect(&primitive.content_mask().bounds);
+        let primitive = primitive.into();
+        let clipped_bounds = primitive.clipped_bounds();
 
         if clipped_bounds.is_empty() {
             return;
@@ -115,6 +114,10 @@ impl Scene {
             .last()
             .copied()
             .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        self.push_primitive(primitive, order);
+    }
+
+    fn push_primitive(&mut self, mut primitive: Primitive, order: DrawOrder) {
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;
@@ -158,13 +161,59 @@ impl Scene {
         if self.filtered {
             return;
         }
-        for operation in &prev_scene.paint_operations[range] {
+        let operations = &prev_scene.paint_operations[range];
+        if self.suppressed || !self.layer_stack.is_empty() {
+            self.repaint_operations(operations);
+        } else {
+            self.replay_as_one(operations);
+        }
+    }
+
+    fn repaint_operations(&mut self, operations: &[PaintOperation]) {
+        for operation in operations {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
         }
+    }
+
+    fn replay_as_one(&mut self, operations: &[PaintOperation]) {
+        let extent = operations
+            .iter()
+            .filter_map(|operation| match operation {
+                PaintOperation::Primitive(primitive) => {
+                    Some((primitive.clipped_bounds(), primitive.order(), primitive.order()))
+                }
+                PaintOperation::StartLayer(_) | PaintOperation::EndLayer => None,
+            })
+            .reduce(|(bounds, lowest, highest), (next, low, high)| {
+                (bounds.union(&next), lowest.min(low), highest.max(high))
+            });
+        let shift = extent.map_or(0, |(bounds, lowest, highest)| {
+            self.primitive_bounds
+                .insert_span(bounds, highest - lowest)
+                .wrapping_sub(lowest)
+        });
+        for operation in operations {
+            match operation {
+                PaintOperation::Primitive(primitive) => {
+                    self.push_primitive(primitive.clone(), primitive.order().wrapping_add(shift));
+                }
+                PaintOperation::StartLayer(bounds) => {
+                    self.paint_operations
+                        .push(PaintOperation::StartLayer(*bounds));
+                }
+                PaintOperation::EndLayer => self.paint_operations.push(PaintOperation::EndLayer),
+            }
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn refuse_paint_for_test(&mut self, filtered: bool, suppressed: bool) {
+        self.filtered = filtered;
+        self.suppressed = suppressed;
     }
 
     pub fn finish(&mut self) {
@@ -274,6 +323,23 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+        }
+    }
+
+    fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
+        self.bounds().intersect(&self.content_mask().bounds)
+    }
+
+    fn order(&self) -> DrawOrder {
+        match self {
+            Primitive::Shadow(shadow) => shadow.order,
+            Primitive::Quad(quad) => quad.order,
+            Primitive::Path(path) => path.order,
+            Primitive::Underline(underline) => underline.order,
+            Primitive::MonochromeSprite(sprite) => sprite.order,
+            Primitive::SubpixelSprite(sprite) => sprite.order,
+            Primitive::PolychromeSprite(sprite) => sprite.order,
+            Primitive::Surface(surface) => surface.order,
         }
     }
 }

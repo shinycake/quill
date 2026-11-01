@@ -225,15 +225,17 @@ fn write_result(path: PathBuf, release: &ReleaseInfo, failed: bool) -> std::io::
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let bytes = serde_json::to_vec(&InstallResult {
+        release: release.clone(),
+        failed,
+    })?;
     let temp = path.with_extension(format!("{}.tmp", std::process::id()));
-    write_private(
-        &temp,
-        &serde_json::to_vec(&InstallResult {
-            release: release.clone(),
-            failed,
-        })?,
-    )?;
-    fs::rename(temp, path)
+    let written = write_private(&temp, &bytes)
+        .and_then(|()| crate::fs_retry::rename_retrying(&temp, &path, crate::fs_retry::LONG));
+    if written.is_err() {
+        let _ = swap::retry(|| fs::remove_file(&temp));
+    }
+    written
 }
 
 fn digest_file(path: &Path) -> std::io::Result<String> {

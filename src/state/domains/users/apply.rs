@@ -16,12 +16,9 @@ impl Session {
             UsersPayload::UpdateUser { user_id, user } => {
                 // Phase 6: keep the full user object for the contacts list
                 // and info panels.
-                let old_photo_file_id = self
-                    .users
-                    .insert(user_id.0, user.clone())
-                    .map(|old| old.photo_small_file_id);
-                self.replace_avatar(old_photo_file_id, Some(user.photo_small_file_id));
-                if user.is_bot {
+                let is_bot = user.is_bot;
+                self.users.insert(user_id.0, user);
+                if is_bot {
                     self.bots.bot_user_ids.insert(user_id.0);
                 } else {
                     // No longer a bot: drop any cached bot info so the panel

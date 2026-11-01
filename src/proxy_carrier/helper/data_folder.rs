@@ -9,13 +9,17 @@
 //! touches the folder a newer host of the same account uses, and a second
 //! Quill on the same account root keeps its folder too.
 //!
-//! On Windows WebView2's browser process may still hold files for a
-//! moment after its helper exits, so the teardown retries for a while;
-//! whatever is still there is swept by the next start.
+//! On Windows WebView2's processes may still hold files after the helper
+//! exits, so the teardown ends them first ([`processes`]) and then retries
+//! for a while; whatever is still there is swept by the next start.
 
+mod processes;
+
+use processes::Processes;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -58,6 +62,7 @@ fn try_lock(file: &File) -> Result<(), TryLockError> {
 pub(super) struct Generation {
     dir: PathBuf,
     lock_path: PathBuf,
+    processes: Processes,
     _lock: File,
 }
 
@@ -114,6 +119,7 @@ impl Generation {
             Ok(()) => Ok(Self {
                 dir,
                 lock_path,
+                processes: Processes::new(),
                 _lock: lock,
             }),
             // A leftover folder without its lock: the sweep's.
@@ -126,10 +132,15 @@ impl Generation {
         &self.dir
     }
 
+    pub(super) fn hold(&self, child: &Child) {
+        self.processes.add(child);
+    }
+
     /// Delete the folder, retrying for up to `retry_for`, then its lock.
     /// Blocks: run it off the UI thread. What will not go is left to the
     /// next start's sweep.
-    pub(super) fn remove(self, retry_for: Duration) {
+    pub(super) fn tear_down(self, retry_for: Duration) {
+        self.processes.end_all();
         let started = Instant::now();
         while !remove_tree(&self.dir) && started.elapsed() < retry_for {
             std::thread::sleep(RETRY_EVERY);
@@ -145,11 +156,11 @@ impl Generation {
         let _ = std::fs::remove_file(&self.lock_path);
     }
 
-    /// [`Generation::remove`] on a thread of its own. Without a thread the
+    /// [`Generation::tear_down`] on a thread of its own. Without a thread the
     /// folder waits for the next start.
-    pub(super) fn remove_in_background(self, retry_for: Duration) {
+    pub(super) fn tear_down_in_background(self, retry_for: Duration) {
         let _ = crate::thread_guard::spawn_guarded("quill-carrier-sweep", move || {
-            self.remove(retry_for);
+            self.tear_down(retry_for);
         });
     }
 }

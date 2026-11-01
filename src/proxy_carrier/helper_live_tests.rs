@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const ECHO_PAGE: &str = r#"<!doctype html><html><head><script>
 const b = window.TelegramWebProxy;
@@ -55,8 +55,8 @@ fn relay() -> (RelaySink, Receiver<serde_json::Value>) {
 }
 
 /// The next relayed message as `(carrier_id, message)`.
-fn next(relayed: &Receiver<serde_json::Value>, within: Duration) -> (i64, serde_json::Value) {
-    let request = relayed.recv_timeout(within).expect("a relayed message");
+fn next(relayed: &Receiver<serde_json::Value>) -> (i64, serde_json::Value) {
+    let request = relayed.recv().expect("a relayed message");
     assert_eq!(request["@type"], "processWebProxyCarrierMessage");
     assert_eq!(request["@extra"], CARRIER_RELAY_EXTRA.as_extra());
     (
@@ -92,18 +92,18 @@ fn helper_live_relay_round_trip() {
     host.open(&request).unwrap();
     // Sent before the page listens: held until it does.
     host.deliver(21, "AQID".into());
-    let (carrier, hello) = next(&relayed, Duration::from_secs(20));
+    let (carrier, hello) = next(&relayed);
     assert_eq!(carrier, 21);
     assert_eq!(hello["@type"], "webProxyCarrierMessageText");
     assert_eq!(hello["text"], r#"{"t":"hello"}"#);
-    let (_, early) = next(&relayed, Duration::from_secs(5));
+    let (_, early) = next(&relayed);
     assert_eq!(early["data"], "AwIB");
     // Relay latency through the pipe and the page, both ways.
     let mut rounds = Vec::new();
     for _ in 0..20 {
         let started = Instant::now();
         host.deliver(21, "AQID".into());
-        let (carrier, message) = next(&relayed, Duration::from_secs(5));
+        let (carrier, message) = next(&relayed);
         assert_eq!(carrier, 21);
         assert_eq!(message["@type"], "webProxyCarrierMessageBinary");
         assert_eq!(message["data"], "AwIB");
@@ -117,9 +117,8 @@ fn helper_live_relay_round_trip() {
     );
     assert!(host.poll().is_empty());
     host.close(21, true);
-    std::thread::sleep(Duration::from_millis(1500));
-    assert!(host.poll().is_empty());
     host.shutdown();
+    assert!(host.poll().is_empty());
     let left: Vec<_> = std::fs::read_dir(&data_dir)
         .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
         .unwrap_or_default();

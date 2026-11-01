@@ -14,6 +14,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
+use quill::platform::OsOpen;
 use quill::updater::{DownloadProgress, UpdateControl, UpdateState, check_latest_release};
 use std::time::Duration;
 
@@ -416,15 +417,24 @@ impl QuillApp {
             .child(
                 Button::new("open-source-licenses")
                     .label(tr(keys::Q_OPS_OPEN_SOURCE_LICENSES))
-                    .on_click(cx.listener(|_, _, _, cx| {
-                        let opened = quill::about::bundled_notices()
-                            .is_some_and(|path| quill::platform::open_local_file(&path));
-                        if !opened {
-                            cx.open_url(quill::about::NOTICES_URL);
-                        }
-                    })),
+                    .on_click(cx.listener(|this, _, _, cx| this.open_license_notices(cx))),
             )
             .into_any_element()
+    }
+
+    fn open_license_notices(&mut self, cx: &mut Context<Self>) {
+        let open = quill::about::bundled_notices().map_or(OsOpen::Answered(false), |path| {
+            quill::platform::open_local_file(&path)
+        });
+        self.published_notices_unless_opened(open, cx);
+    }
+
+    pub(super) fn published_notices_unless_opened(&mut self, open: OsOpen, cx: &mut Context<Self>) {
+        self.when_os_answers(open, cx, |_, opened, cx| {
+            if !opened {
+                cx.open_url(quill::about::NOTICES_URL);
+            }
+        });
     }
 
     /// "Updated to Quill X" after an update, with its notes; the update

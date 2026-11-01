@@ -1,6 +1,9 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // the vsync thread skips idle windows and sleeps while all are idle; a lost
-// GPU device or a failed DirectX start no longer panics.
+// GPU device or a failed DirectX start no longer panics, and recovery sends
+// to windows without holding the window list. Sends go through `gpui_message`.
+// The file pickers free each path string and skip items without a file system
+// path.
 // See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     cell::{Cell, RefCell},
@@ -40,7 +43,7 @@ use windows::{
     core::*,
 };
 
-use crate::*;
+use crate::{window_list::for_each_after_unlock, *};
 use gpui::*;
 
 struct TrackedWindow {
@@ -85,7 +88,7 @@ struct WindowsPlatformInner {
     state: WindowsPlatformState,
     raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     // The below members will never change throughout the entire lifecycle of the app.
-    validation_number: usize,
+    validation_number: ValidationNumber,
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     dispatcher: Arc<WindowsDispatcher>,
 }
@@ -208,11 +211,11 @@ impl WindowsPlatform {
         };
 
         let (main_sender, main_receiver) = PriorityQueueReceiver::new();
-        let validation_number = if usize::BITS == 64 {
+        let validation_number = ValidationNumber::new(if usize::BITS == 64 {
             rand::random::<u64>() as usize
         } else {
             rand::random::<u32>() as usize
-        };
+        });
         let raw_window_handles = Arc::new(RwLock::new(SmallVec::new()));
 
         register_platform_window_class();
@@ -300,12 +303,12 @@ impl WindowsPlatform {
     }
 
     #[inline]
-    fn post_message(&self, message: u32, wparam: WPARAM, lparam: LPARAM) {
+    fn post_message(&self, message: GpuiMessage) {
         self.raw_window_handles
             .read()
             .iter()
             .for_each(|handle| unsafe {
-                PostMessageW(Some(handle.as_raw()), message, wparam, lparam).log_err();
+                message.post(handle.as_raw()).log_err();
             });
     }
 
@@ -498,18 +501,15 @@ impl WindowsPlatform {
                                 "DirectX device lost and could not be recreated, closing all \
                                  windows: {err:#}"
                             );
-                            destroy_all_windows_after_device_lost(&all_windows);
+                            destroy_all_windows_after_device_lost(&all_windows, validation_number);
                             // Quill: the platform drops the dead devices, so it reports
                             // itself headless until it is windowed again.
                             // SAFETY: PostMessageW only queues the message.
                             unsafe {
-                                PostMessageW(
-                                    Some(platform_window.as_raw()),
-                                    WM_GPUI_GPU_DEVICE_GONE,
-                                    WPARAM(validation_number),
-                                    LPARAM::default(),
-                                )
-                                .log_err();
+                                validation_number
+                                    .message(WM_GPUI_GPU_DEVICE_GONE, 0)
+                                    .post(platform_window.as_raw())
+                                    .log_err();
                             }
                             break;
                         }
@@ -1030,11 +1030,10 @@ impl Platform for WindowsPlatform {
     fn set_cursor_style(&self, style: CursorStyle) {
         let hcursor = load_cursor(style);
         if self.inner.state.current_cursor.get().map(|c| c.0) != hcursor.map(|c| c.0) {
-            self.post_message(
+            self.post_message(self.inner.validation_number.message(
                 WM_GPUI_CURSOR_STYLE_CHANGED,
-                WPARAM(self.inner.validation_number),
-                LPARAM(hcursor.map_or(0, |c| c.0 as isize)),
-            );
+                hcursor.map_or(0, |c| c.0 as isize),
+            ));
             self.inner.state.current_cursor.set(hcursor);
         }
     }
@@ -1175,13 +1174,11 @@ impl Platform for WindowsPlatform {
 
     fn perform_dock_menu_action(&self, action: usize) {
         unsafe {
-            PostMessageW(
-                Some(self.handle),
-                WM_GPUI_DOCK_MENU_ACTION,
-                WPARAM(self.inner.validation_number),
-                LPARAM(action as isize),
-            )
-            .log_err();
+            self.inner
+                .validation_number
+                .message(WM_GPUI_DOCK_MENU_ACTION, action as isize)
+                .post(self.handle)
+                .log_err();
         }
     }
 
@@ -1252,18 +1249,11 @@ impl WindowsPlatformInner {
         lparam: LPARAM,
     ) -> LRESULT {
         let handled = match msg {
-            WM_GPUI_CLOSE_ONE_WINDOW
-            | WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD
-            | WM_GPUI_DOCK_MENU_ACTION
-            | WM_GPUI_KEYBOARD_LAYOUT_CHANGED
-            | WM_GPUI_DISPLAYS_CHANGED
-            | WM_GPUI_GPU_DEVICE_LOST
-            | WM_GPUI_GPU_DEVICE_GONE => self.handle_gpui_events(msg, wparam, lparam),
             WM_POWERBROADCAST => self.handle_power_broadcast(wparam),
             WM_DISPLAYCHANGE => self.handle_display_change(handle),
             WM_QUERYENDSESSION => Some(1),
             WM_ENDSESSION if wparam.0 != 0 => self.handle_end_session(),
-            _ => None,
+            _ => self.handle_gpui_events(msg, wparam, lparam),
         };
         if let Some(result) = handled {
             LRESULT(result)
@@ -1273,8 +1263,9 @@ impl WindowsPlatformInner {
     }
 
     fn handle_gpui_events(&self, message: u32, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
-        if wparam.0 != self.validation_number {
-            log::error!("Wrong validation number while processing message: {message}");
+        let message = GpuiMessageId::from_raw(message)?;
+        if !self.validation_number.accepts(wparam.0) {
+            log::error!("Wrong validation number while processing message: {message:?}");
             return None;
         }
         match message {
@@ -1288,7 +1279,6 @@ impl WindowsPlatformInner {
             WM_GPUI_DISPLAYS_CHANGED => self.handle_displays_changed(),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(),
-            // Quill: `handle_msg` only routes the messages above here.
             _ => None,
         }
     }
@@ -1297,13 +1287,10 @@ impl WindowsPlatformInner {
         // Broadcasts can be delivered while the app is mid-update, e.g. inside a
         // COM call, so report the change from the message loop instead.
         unsafe {
-            PostMessageW(
-                Some(handle),
-                WM_GPUI_DISPLAYS_CHANGED,
-                WPARAM(self.validation_number),
-                LPARAM(0),
-            )
-            .log_err();
+            self.validation_number
+                .message(WM_GPUI_DISPLAYS_CHANGED, 0)
+                .post(handle)
+                .log_err();
         }
         Some(0)
     }
@@ -1390,12 +1377,11 @@ impl WindowsPlatformInner {
                     }
                     // Allow the main loop to process other gpui events before going back into `run_foreground_task`
                     unsafe {
-                        if let Err(_) = PostMessageW(
-                            Some(self.dispatcher.platform_window_handle.as_raw()),
-                            WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD,
-                            WPARAM(self.validation_number),
-                            LPARAM(0),
-                        ) {
+                        if let Err(_) = self
+                            .validation_number
+                            .message(WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD, 0)
+                            .post(self.dispatcher.platform_window_handle.as_raw())
+                        {
                             self.dispatcher.wake_posted.store(false, Ordering::Release);
                         };
                     }
@@ -1514,7 +1500,7 @@ pub(crate) struct WindowCreationInfo {
     pub(crate) current_cursor: Option<HCURSOR>,
     pub(crate) cursor_visible: Arc<AtomicBool>,
     pub(crate) drop_target_helper: IDropTargetHelper,
-    pub(crate) validation_number: usize,
+    pub(crate) validation_number: ValidationNumber,
     pub(crate) main_receiver: PriorityQueueReceiver<RunnableVariant>,
     pub(crate) platform_window_handle: HWND,
     pub(crate) disable_direct_composition: bool,
@@ -1529,7 +1515,7 @@ pub(crate) struct WindowCreationInfo {
 struct PlatformWindowCreateContext {
     inner: Option<Result<Rc<WindowsPlatformInner>>>,
     raw_window_handles: std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
-    validation_number: usize,
+    validation_number: ValidationNumber,
     main_sender: Option<PriorityQueueSender<RunnableVariant>>,
     main_receiver: Option<PriorityQueueReceiver<RunnableVariant>>,
     directx_devices: Option<DirectXDevices>,
@@ -1655,13 +1641,32 @@ fn file_open_dialog(
     }
 
     let mut paths = Vec::with_capacity(file_count as usize);
+    let mut skipped = None;
     for i in 0..file_count {
         let item = unsafe { results.GetItemAt(i)? };
-        let path = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH)?.to_string()? };
-        paths.push(PathBuf::from(path));
+        // An item with no file system path (a phone, a library) is skipped,
+        // not the whole selection.
+        match file_system_path(&item) {
+            Ok(path) => paths.push(path),
+            Err(error) => skipped = Some(error),
+        }
     }
 
-    Ok(Some(paths))
+    match skipped {
+        Some(error) if paths.is_empty() => Err(error),
+        _ => Ok(Some(paths)),
+    }
+}
+
+fn file_system_path(item: &IShellItem) -> Result<PathBuf> {
+    // SAFETY: `GetDisplayName` returns a NUL-terminated string allocated
+    // with CoTaskMemAlloc; it is copied out before being freed once here.
+    unsafe {
+        let pwstr = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let path = PathBuf::from(OsString::from_wide(pwstr.as_wide()));
+        CoTaskMemFree(Some(pwstr.0 as _));
+        Ok(path)
+    }
 }
 
 fn file_save_dialog(
@@ -1710,13 +1715,7 @@ fn file_save_dialog(
         }
     }
     let shell_item = unsafe { dialog.GetResult()? };
-    let file_path_string = unsafe {
-        let pwstr = shell_item.GetDisplayName(SIGDN_FILESYSPATH)?;
-        let string = pwstr.to_string()?;
-        CoTaskMemFree(Some(pwstr.0 as _));
-        string
-    };
-    Ok(Some(PathBuf::from(file_path_string)))
+    Ok(Some(file_system_path(&shell_item)?))
 }
 
 fn load_icon() -> Result<HICON> {
@@ -1809,7 +1808,7 @@ const DEVICE_LOST_RETRY_BACKOFF: [std::time::Duration; 3] = [
 fn recover_from_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
-    validation_number: usize,
+    validation_number: ValidationNumber,
     all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
@@ -1842,21 +1841,17 @@ fn recover_from_gpu_device_lost(
 /// (not `WM_CLOSE`) so an app that hides windows on close still releases them.
 fn destroy_all_windows_after_device_lost(
     all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
+    validation_number: ValidationNumber,
 ) {
     let Some(all_windows) = all_windows.upgrade() else {
         return;
     };
+    let destroy = validation_number.message(WM_GPUI_DESTROY_AFTER_DEVICE_LOST, 0);
     for window in all_windows.read().iter() {
         // SAFETY: PostMessageW only queues the message; a handle that was destroyed in the
         // meantime makes it fail, which is logged.
         unsafe {
-            PostMessageW(
-                Some(window.as_raw()),
-                WM_GPUI_DESTROY_AFTER_DEVICE_LOST,
-                WPARAM::default(),
-                LPARAM::default(),
-            )
-            .log_err();
+            destroy.post(window.as_raw()).log_err();
         }
     }
 }
@@ -1864,7 +1859,7 @@ fn destroy_all_windows_after_device_lost(
 fn handle_gpu_device_lost(
     directx_devices: &mut DirectXDevices,
     platform_window: HWND,
-    validation_number: usize,
+    validation_number: ValidationNumber,
     all_windows: &std::sync::Weak<RwLock<SmallVec<[TrackedWindow; 4]>>>,
     text_system: &std::sync::Weak<DirectWriteTextSystem>,
 ) -> Result<()> {
@@ -1877,41 +1872,34 @@ fn handle_gpu_device_lost(
     })?;
     log::info!("DirectX devices successfully recreated.");
 
-    let lparam = LPARAM(directx_devices as *const _ as _);
+    let device_lost = validation_number.message(
+        WM_GPUI_GPU_DEVICE_LOST,
+        directx_devices as *const DirectXDevices as isize,
+    );
     unsafe {
-        SendMessageW(
-            platform_window,
-            WM_GPUI_GPU_DEVICE_LOST,
-            Some(WPARAM(validation_number)),
-            Some(lparam),
-        );
+        device_lost.send(platform_window);
     }
 
     if let Some(text_system) = text_system.upgrade() {
         text_system.handle_gpu_lost(&directx_devices)?;
     }
     if let Some(all_windows) = all_windows.upgrade() {
-        for window in all_windows.read().iter() {
+        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+            // SAFETY: the message points at `directx_devices`, which outlives this synchronous
+            // call. A handle that is gone only makes the call fail.
             unsafe {
-                SendMessageW(
-                    window.as_raw(),
-                    WM_GPUI_GPU_DEVICE_LOST,
-                    Some(WPARAM(validation_number)),
-                    Some(lparam),
-                );
+                device_lost.send(window);
             }
-        }
+        });
         std::thread::sleep(std::time::Duration::from_millis(200));
-        for window in all_windows.read().iter() {
+        let force_update = validation_number.message(WM_GPUI_FORCE_UPDATE_WINDOW, 0);
+        for_each_after_unlock(all_windows.read(), TrackedWindow::as_raw, |window| {
+            // SAFETY: the message carries no pointer. A handle that is gone only makes the call
+            // fail.
             unsafe {
-                SendMessageW(
-                    window.as_raw(),
-                    WM_GPUI_FORCE_UPDATE_WINDOW,
-                    Some(WPARAM(validation_number)),
-                    None,
-                );
+                force_update.send(window);
             }
-        }
+        });
     }
     Ok(())
 }

@@ -76,6 +76,21 @@ fn a_tap_is_held_then_committed_after_the_window() {
 }
 
 #[test]
+fn a_held_tap_sets_the_poll_loops_next_deadline() {
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let now = std::time::Instant::now();
+    assert_eq!(driver.next_deadline(now, 1_000), None);
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, 1_000)
+        .unwrap();
+    assert_eq!(
+        driver.next_deadline(now, 1_000),
+        Some(std::time::Duration::from_millis(500)),
+        "the toast shows another second"
+    );
+}
+
+#[test]
 fn undo_removes_the_pending_stars_and_nothing_commits() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver

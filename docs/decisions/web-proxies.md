@@ -102,7 +102,11 @@ database and keys, and a crash there cannot take Quill down.
   outlives the helper and holds the whole profile (`lockfile`, `Local State`, `History`,
   `Login Data`, caches) until it exits. On the `carrier-live-windows` runner that took 173 to
   822 ms after the web view was dropped, and more than 1.3 s once (run 39712613845), so a delete
-  right after the helper exits can fail. In order:
+  right after the helper exits can fail. Over 56 later runs the median was 1 s, and in 5 of them
+  the folder was still held when the teardown gave up, 4 to 9 s after the close. So a generation
+  owns a Windows job that holds its helpers and everything they start, and the teardown ends
+  that job before it deletes the folder (`src/proxy_carrier/helper/data_folder/processes.rs`).
+  Nothing in there is worth a clean exit, since the folder goes next. In order:
   - Logout, quit or a closed client takes the host from the driver and runs its shutdown once,
     on a `quill-carrier-teardown` thread. The driver runs on the UI thread, so nothing there
     waits or deletes files. The session then says carriers cannot be hosted, so a later `open` is
@@ -110,7 +114,9 @@ database and keys, and a crash there cannot take Quill down.
     start, the host is dropped: its helpers are killed and its folder is deleted on a background
     thread.
   - Shutdown sends every running helper `close` with `last`, waits for the helpers still exiting
-    (`SHUTDOWN_WAIT`, 3.5 s at most in all), then deletes its generation, retrying for 2 s.
+    (`SHUTDOWN_WAIT`, 3.5 s at most in all), ends what is left in the job, then deletes its
+    generation, retrying for 2 s. Only a teardown ends the job: when one carrier closes, the
+    host's next carrier may share the same browser process.
   - A closing helper on Windows drops its web view and its environment. If Quill said this was
     the host's last carrier (`close` with `last`), it then waits up to `BROWSER_EXIT_WAIT` (2 s)
     for the browser process before it exits. Closing one carrier while another is open does not

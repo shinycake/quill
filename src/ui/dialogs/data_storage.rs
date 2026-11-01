@@ -51,7 +51,43 @@ pub(super) fn section_header(title: &'static str) -> impl IntoElement {
         .child(title)
 }
 
+pub(crate) struct StorageScroll {
+    pub(in crate::ui) page: ScrollHandle,
+    usage: ScrollAnchor,
+    pending: bool,
+}
+
+impl StorageScroll {
+    pub(crate) fn new() -> Self {
+        let page = ScrollHandle::new();
+        let usage = ScrollAnchor::for_handle(page.clone());
+        Self {
+            page,
+            usage,
+            pending: false,
+        }
+    }
+}
+
 impl QuillApp {
+    pub(crate) fn open_local_storage(&mut self, cx: &mut Context<Self>) {
+        self.open_data_storage(cx);
+        self.settings.storage_scroll.pending = true;
+    }
+
+    pub(in crate::ui) fn ensure_storage_scroll(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if std::mem::take(&mut self.settings.storage_scroll.pending) {
+            self.settings.storage_scroll.usage.scroll_to(window, cx);
+            // The offset changes on the next frame and paints nothing on
+            // its own.
+            window.on_next_frame(|window, _| window.refresh());
+        }
+    }
+
     /// Slice S4: open the Data & Storage dialog — reset the transient
     /// view state, clear the last "Cache cleared" note, and fire the
     /// storage + presets fetches (both guarded: once per session).
@@ -289,7 +325,12 @@ impl QuillApp {
         // --- Download folder (B13) ---
         body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
-        body = body.child(section_header(tr(keys::Q_OPS_STORAGE_USAGE)));
+        body = body.child(
+            div()
+                .id("storage-usage")
+                .anchor_scroll(Some(self.settings.storage_scroll.usage.clone()))
+                .child(section_header(tr(keys::Q_OPS_STORAGE_USAGE))),
+        );
         let stats = session
             .as_ref()
             .and_then(|s| s.settings.storage_stats.clone());

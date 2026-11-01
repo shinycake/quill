@@ -233,6 +233,18 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn story_area_open_map(&mut self, url: &str, label: String, cx: &mut Context<Self>) {
+        let open = quill::platform::open_external_url(url);
+        self.when_os_answers(open, cx, |this, opened, cx| {
+            this.connection.set_note(if opened {
+                StatusNote::info(label)
+            } else {
+                StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
+            });
+            cx.notify();
+        });
+    }
+
     /// Phase 9.8: a story area tap — the action each `StoryAreaType`
     /// performs. The tap actions follow the official clients' documented
     /// behavior: Telegram X implements the story tray only, so no
@@ -251,13 +263,7 @@ impl QuillApp {
             } => {
                 let url = location.open_street_map_url();
                 let label = Self::story_area_pin_label(&[address, &location.coords_label()]);
-                self.connection
-                    .set_note(if quill::platform::open_external_url(&url) {
-                        StatusNote::info(label)
-                    } else {
-                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
-                    });
-                cx.notify();
+                self.story_area_open_map(&url, label, cx);
             }
             StoryAreaKind::Venue {
                 title,
@@ -271,13 +277,7 @@ impl QuillApp {
                     label.push_str(" — ");
                     label.push_str(address);
                 }
-                self.connection
-                    .set_note(if quill::platform::open_external_url(&url) {
-                        StatusNote::info(label)
-                    } else {
-                        StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP))
-                    });
-                cx.notify();
+                self.story_area_open_map(&url, label, cx);
             }
             StoryAreaKind::SuggestedReaction { emoji, .. } => {
                 self.pick_story_reaction(emoji, cx);
