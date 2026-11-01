@@ -215,10 +215,6 @@ impl QuillApp {
         self.request_tick(target, fps, false, cx);
     }
 
-    /// [`Self::request_animation_tick`] for `view` in a window of its own,
-    /// such as the voice chat's: the tick redraws only that view, whatever
-    /// covers the main window, and that window being active counts as
-    /// Quill being active.
     #[track_caller]
     pub(super) fn request_window_view_tick(
         &self,

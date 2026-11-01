@@ -93,11 +93,10 @@ pub(super) fn member_look(
 }
 
 impl QuillApp {
-    /// The messages sit below every member row, so showing them scrolls there.
     pub(super) fn toggle_group_call_messages(&mut self, cx: &mut Context<Self>) {
         self.group_call.chat_shown = !self.group_call.chat_shown;
         if self.group_call.chat_shown {
-            self.group_call.members_scroll.scroll_to_bottom();
+            self.group_call.panel_scroll.scroll_to_bottom();
         }
         cx.notify();
     }

@@ -63,8 +63,7 @@ impl QuillApp {
         if self.story_reply_panel_active() {
             self.close_media_panel(cx);
         }
-        if self.story_reply_recording_active()
-            || self.recording.opening_for(CaptureFor::StoryReply)
+        if self.story_reply_recording_active() || self.recording.opening_for(CaptureFor::StoryReply)
         {
             self.cancel_recording(cx);
         }

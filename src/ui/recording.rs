@@ -18,9 +18,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::playback::PlaybackClock;
 use quill::send_rights::SendKind;
 use quill::telegram::client::copy_and_parse;
-use quill::voice::{
-    RecordBarFacts, RecordControl, format_voice_duration, record_controls,
-};
+use quill::voice::{RecordBarFacts, RecordControl, format_voice_duration, record_controls};
 use std::sync::Arc;
 /// MED2: the record button's mode (TGX `preferVideoMode`, persisted in
 /// `MediaPrefs`). Desktop mapping of TGX's hold-to-record / tap-to-switch:

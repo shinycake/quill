@@ -151,11 +151,8 @@ pub(super) fn picture(width: u32, height: u32, variant: usize) -> Vec<u8> {
     rgba
 }
 
-/// How far down `QUILL_DEMO_CALL_CROWD` opens the member list.
 const CROWD_SCROLL: f32 = 2000.;
 
-/// One more person in a crowded call: a user can be in the list twice, and
-/// the row number keeps the rows apart.
 fn listener(user_id: i64, row: usize) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         audio_source_id: 5_000 + row as i32,
@@ -241,7 +238,7 @@ impl QuillApp {
         });
         if crowd > 0 {
             self.group_call
-                .members_scroll
+                .panel_scroll
                 .set_offset(point(px(0.), px(-CROWD_SCROLL)));
         }
         // Your hidden window sent one frame before it paused; the other

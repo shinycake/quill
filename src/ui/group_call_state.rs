@@ -57,8 +57,7 @@ pub(crate) struct GroupCallUi {
     /// Each sounding member row's eased level, by audio source
     /// (`group_call_speaker.rs`).
     pub(super) row_levels: HashMap<i32, quill::calls::audio_level::LevelAnimation>,
-    /// The scrolled list of tiles, member rows and chat.
-    pub(super) members_scroll: ScrollHandle,
+    pub(super) panel_scroll: ScrollHandle,
     pub(super) rows_place: super::group_call_members_view::RowsPlace,
     /// The video tiles' live players, by feed (`(call, user, screen)`,
     /// or your camera), for the tracked call only.
@@ -110,7 +109,7 @@ impl GroupCallUi {
             ),
             level_seen: 0.0,
             row_levels: HashMap::new(),
-            members_scroll: ScrollHandle::new(),
+            panel_scroll: ScrollHandle::new(),
             rows_place: Default::default(),
             players: HashMap::new(),
             stream: Default::default(),

@@ -42,7 +42,6 @@ pub(super) const LEAVE_BG: u32 = 0xf75c5c7f;
 pub(super) const MEMBER_MUTED_ICON: u32 = 0xed7372;
 pub(super) const MEMBER_NOT_JOINED: u32 = call_chrome::GROUP_MUTED;
 
-/// The padding of the member rows' card, and its invite row's height.
 const CARD_PADDING: f32 = 4.;
 const INVITE_ROW_HEIGHT: f32 = 48.;
 
@@ -233,8 +232,8 @@ impl QuillApp {
         });
 
         self.group_call.rows_place = RowsPlace {
-            card: usize::from(tiles.is_some()),
-            head: CARD_PADDING + if can_invite { INVITE_ROW_HEIGHT } else { 0. },
+            card_child: usize::from(tiles.is_some()),
+            rows_top: CARD_PADDING + if can_invite { INVITE_ROW_HEIGHT } else { 0. },
         };
         let rows_height = call.participants.len() as f32 * ROW_HEIGHT;
 
@@ -244,7 +243,7 @@ impl QuillApp {
             .min_h_0()
             .mx(px(16.))
             .overflow_y_scroll()
-            .track_scroll(&self.group_call.members_scroll)
+            .track_scroll(&self.group_call.panel_scroll)
             .flex()
             .flex_col()
             .gap(px(8.))

@@ -23,8 +23,6 @@ impl QuillApp {
         self.recording.origin() == Some(self.windows.scope)
     }
 
-    /// Leaving this window's chat or opening its media panel ends what
-    /// records here, and a capture still starting here.
     pub(in crate::ui) fn cancel_recording_here(&mut self, cx: &mut Context<Self>) {
         let opening_here = self.recording.opening_origin() == Some(self.windows.scope);
         if self.recording_here() || opening_here {

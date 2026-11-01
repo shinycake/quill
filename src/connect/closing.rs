@@ -88,8 +88,6 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
     }
 }
 
-/// Send the `close` that [`begin_close`] held back, once the hang-up landed
-/// or [`HANG_UP_HOLD`] ran out.
 pub(crate) fn release_close<S: JsonSender>(driver: &mut ConnectDriver<S>, now: Instant) {
     let Some(until) = driver.close_held_until else {
         return;

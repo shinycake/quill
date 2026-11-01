@@ -146,8 +146,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// A hang-up or a leave went out and the server has not answered yet:
-    /// the terminal `updateCall`, or the `ok` to `leaveGroupCall`.
     pub(crate) fn hang_up_pending(&self) -> bool {
         let calls = &self.session.calls;
         let hanging_up = calls

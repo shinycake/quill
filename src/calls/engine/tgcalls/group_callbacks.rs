@@ -46,7 +46,6 @@ pub(super) struct GroupContext {
     /// A conference call's encryption and media channels; `None` for a
     /// video chat or a stream.
     pub(super) conference: Option<super::group_conference::Conference>,
-    /// The instance waits for the reaper: what it still sends is dropped.
     retired: AtomicBool,
 }
 
@@ -135,8 +134,6 @@ impl GroupContext {
     }
 }
 
-/// The instance's context behind `user`, unless the instance is retired.
-///
 /// # Safety
 /// `user` is the `GroupContext` the reaper keeps alive past
 /// `qc_group_destroy` (or past clearing the preview), or null.

@@ -27,8 +27,6 @@ pub(super) struct RoundPreview {
     stale: Vec<Arc<RenderImage>>,
 }
 
-/// The circle while the camera is being started (`recording.start`):
-/// the same frame the preview fills, so tapping record answers at once.
 fn starting_camera_circle(cx: &mut Context<QuillApp>) -> AnyElement {
     let theme = cx.theme();
     div()

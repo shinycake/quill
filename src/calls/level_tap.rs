@@ -48,7 +48,6 @@ impl LevelTap {
         let device = MicThread::open(
             "quill-level-tap",
             move || {
-                // Frames nobody sends anywhere: the sink keeps at most one.
                 let sink: FrameSink<AudioFrame> = FrameSink::new(1);
                 mic.start(None, sink.clone())
                     .map_err(|err: CaptureError| err.to_string())?;

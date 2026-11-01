@@ -167,7 +167,6 @@ impl Presentation {
         close_conference(&self.context);
     }
 
-    /// The library's side of ending the presentation, on the reaper.
     fn destroy(self, api: &Loader) {
         // SAFETY: the presentation's live handle, destroyed once and never
         // from its own callback; then Quill's reference to its screen
@@ -180,9 +179,6 @@ impl Presentation {
     }
 }
 
-/// Ends the call now for everyone but the library: a conference call's
-/// frames stop going to TDLib, no callback or feeder reaches it and its
-/// sound stops. The reaper does the rest.
 pub(super) fn retire_group(api: &'static Loader, mut call: GroupCall) {
     call.context.retire();
     close_conference(&call.context);
@@ -194,8 +190,6 @@ pub(super) fn retire_group(api: &'static Loader, mut call: GroupCall) {
     reaper::hand_off(move || destroy_group(api, &mut call));
 }
 
-/// The library's side of ending a group call, on the reaper: the
-/// presentation first, so screen capture stops before the call.
 fn destroy_group(api: &Loader, call: &mut GroupCall) {
     call.sound = None;
     if let Some(presentation) = call.presentation.take() {

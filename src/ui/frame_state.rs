@@ -14,8 +14,6 @@ pub(crate) struct FrameUi {
     /// What asked for the next tick: cached slices by entity id, `None`
     /// for `QuillApp` itself (see `frame_clock`).
     pub(super) animation_targets: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>>,
-    /// The targets among those that sit in a window of their own, which
-    /// the main window's state does not hold back (`frame_clock`).
     pub(super) window_views: std::cell::RefCell<std::collections::HashSet<EntityId>>,
     /// The next tick serves media playing with sound (allowed while the
     /// window is inactive).

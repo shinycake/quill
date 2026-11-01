@@ -149,8 +149,7 @@ pub struct ActiveGroupCall {
     pub loaded_all_participants: bool,
     /// Sorted: recent speakers first (in `recent_speakers` order),
     /// then by `order` descending (lexicographic — schema: "The
-    /// bigger is order, the higher is user in the list"). Shared so a
-    /// snapshot of the call for a render copies no list.
+    /// bigger is order, the higher is user in the list").
     pub participants: Arc<Vec<ParsedGroupCallParticipant>>,
     /// Recent speakers as last reported by `updateGroupCall` (drives
     /// the participant ordering above).

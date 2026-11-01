@@ -132,15 +132,10 @@ fn the_stage_shows_the_volume_of_anyone_but_you(cx: &mut TestAppContext) {
     assert!(find(call, "group-stage-volume").is_none(), "none for you");
 }
 
-/// `count` more people in the call, none of them with video.
 fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("the demo session");
-        let call = session
-            .calls
-            .active_group_call
-            .as_mut()
-            .expect("the call");
+        let call = session.calls.active_group_call.as_mut().expect("the call");
         let participants = Arc::make_mut(&mut call.participants);
         let listener = participants
             .iter()
@@ -214,14 +209,14 @@ fn the_wheel_builds_the_rows_it_brings_in(cx: &mut TestAppContext) {
 fn opening_the_chat_scrolls_past_a_long_list_to_it(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_share(cx);
     crowd(&app, 100, &mut call);
-    let offset = |app: &QuillApp| app.group_call.members_scroll.offset().y;
+    let offset = |app: &QuillApp| app.group_call.panel_scroll.offset().y;
     assert_eq!(app.read_with(&call, |app, _| offset(app)), px(0.));
 
     app.update(&mut call, |app, cx| app.toggle_group_call_messages(cx));
     frames(&mut call);
 
     let (at, end) = app.read_with(&call, |app, _| {
-        (offset(app), app.group_call.members_scroll.max_offset().y)
+        (offset(app), app.group_call.panel_scroll.max_offset().y)
     });
     assert!(end > px(0.));
     assert_eq!(at, -end);

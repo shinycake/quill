@@ -11,18 +11,12 @@ use gpui_kit::*;
 use std::ops::Range;
 use std::time::Instant;
 
-/// One member row.
 pub(super) const ROW_HEIGHT: f32 = 56.;
 
-/// Rows built past each end of the window, so a wheel notch shows no gap.
 const OVERSCAN_ROWS: usize = 2;
 
-/// Rows built while the list has not been laid out yet.
 const UNMEASURED_ROWS: usize = 16;
 
-/// The rows to build of a list of `count` that starts `top` pixels down a
-/// scrolled area, seen through a `viewport` tall window with `scrolled`
-/// pixels of the area above it.
 fn visible_rows(scrolled: f32, viewport: f32, top: f32, count: usize) -> Range<usize> {
     let first = ((scrolled - top) / ROW_HEIGHT).floor().max(0.) as usize;
     let end = ((scrolled + viewport - top) / ROW_HEIGHT).ceil().max(0.) as usize;
@@ -30,15 +24,12 @@ fn visible_rows(scrolled: f32, viewport: f32, top: f32, count: usize) -> Range<u
     first..end.saturating_add(OVERSCAN_ROWS).min(count)
 }
 
-/// Where the rows sit in the scrolled area: the child of the area that
-/// holds them, and how far below that child's top they start.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct RowsPlace {
-    pub(super) card: usize,
-    pub(super) head: f32,
+    pub(super) card_child: usize,
+    pub(super) rows_top: f32,
 }
 
-/// The cached view of the member rows.
 pub(super) struct GroupCallMembers {
     owner: WeakEntity<QuillApp>,
     _observe: Subscription,
@@ -69,16 +60,16 @@ impl QuillApp {
     /// renders during prepaint, after the area's own layout, so the
     /// numbers are this frame's.
     fn shown_member_rows(&self, count: usize) -> Range<usize> {
-        let scroll = &self.group_call.members_scroll;
+        let scroll = &self.group_call.panel_scroll;
         let place = self.group_call.rows_place;
-        let Some(card) = scroll.bounds_for_item(place.card) else {
+        let Some(card) = scroll.bounds_for_item(place.card_child) else {
             return 0..count.min(UNMEASURED_ROWS);
         };
         let viewport = scroll.bounds();
         visible_rows(
             -f32::from(scroll.offset().y),
             f32::from(viewport.size.height),
-            f32::from(card.top() - viewport.top()) + place.head,
+            f32::from(card.top() - viewport.top()) + place.rows_top,
             count,
         )
     }
@@ -139,7 +130,10 @@ mod tests {
     #[test]
     fn tiles_above_the_list_push_the_window_down_the_list() {
         let top = ROW_HEIGHT * 3.;
-        assert_eq!(visible_rows(0., ROW_HEIGHT * 5., top, 100), 0..2 + OVERSCAN_ROWS);
+        assert_eq!(
+            visible_rows(0., ROW_HEIGHT * 5., top, 100),
+            0..2 + OVERSCAN_ROWS
+        );
         let scrolled = visible_rows(ROW_HEIGHT * 6., ROW_HEIGHT * 5., top, 100);
         assert_eq!(scrolled, 3 - OVERSCAN_ROWS..8 + OVERSCAN_ROWS);
     }

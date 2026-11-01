@@ -17,8 +17,6 @@ pub(crate) enum CaptureMedia {
 }
 
 impl CaptureMedia {
-    /// End it and remove its file. Waits on the device and the disk, so the
-    /// UI runs this off the UI thread.
     pub(super) fn discard(self) {
         match self {
             Self::Voice(capture) => capture.discard(),
@@ -37,7 +35,6 @@ pub(super) enum CaptureStart {
         origin: Option<ChatId>,
         purpose: CaptureFor,
     },
-    /// Cancelled while opening: what arrives is dropped.
     Cancelled,
 }
 
@@ -68,7 +65,6 @@ pub(crate) struct RecordingUi {
     /// belongs to. One at a time, for the whole app.
     capture: Option<Capture>,
     pub(super) start: CaptureStart,
-    /// Opens the microphone. Runs off the UI thread.
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
     /// MED2: lock-to-record — a locked recording ignores Esc; only Send
     /// or Cancel (with confirmation) ends it.
@@ -114,12 +110,10 @@ impl RecordingUi {
         self.capture.is_some() || self.start != CaptureStart::Idle
     }
 
-    /// A round video's camera is being started.
     pub(super) fn opening_video(&self) -> bool {
         matches!(self.start, CaptureStart::Opening { video: true, .. })
     }
 
-    /// The window of a capture still on its way up.
     pub(super) fn opening_origin(&self) -> Option<Option<ChatId>> {
         match self.start {
             CaptureStart::Opening { origin, .. } => Some(origin),
@@ -127,19 +121,16 @@ impl RecordingUi {
         }
     }
 
-    /// A capture for `wanted` is still on its way up.
     pub(super) fn opening_for(&self, wanted: CaptureFor) -> bool {
         matches!(self.start, CaptureStart::Opening { purpose, .. } if purpose == wanted)
     }
 
-    /// The capture on its way up is no longer wanted.
     pub(super) fn cancel_start(&mut self) {
         if matches!(self.start, CaptureStart::Opening { .. }) {
             self.start = CaptureStart::Cancelled;
         }
     }
 
-    /// The start ended: whether what it brought is still wanted.
     pub(super) fn finish_start(&mut self) -> bool {
         std::mem::replace(&mut self.start, CaptureStart::Idle) != CaptureStart::Cancelled
     }
@@ -219,8 +210,6 @@ impl RecordingUi {
 }
 
 impl QuillApp {
-    /// A capture starts off the UI thread, for the window whose state is
-    /// in place.
     pub(super) fn begin_capture_start(&mut self, video: bool, purpose: CaptureFor) {
         self.recording.start = CaptureStart::Opening {
             video,

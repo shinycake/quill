@@ -1,9 +1,3 @@
-//! A voice message's microphone opens off the UI thread
-//! (`QuillApp::start_voice_capture`): pressing record returns before the
-//! device is asked for anything, the capture is held once it is up, and
-//! one no longer wanted is dropped. On a demo `QuillApp` with the opener
-//! replaced, so no microphone is touched.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,7 +12,6 @@ use crate::ui::recording_state::CaptureFor;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 
-/// "Demo chat A".
 const CHAT: ChatId = ChatId(11);
 
 fn open_chat(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -44,7 +37,6 @@ fn open_chat(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-/// Replace the microphone with a fixture capture; counts the opens.
 fn fake_microphone(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Arc<AtomicUsize> {
     let opens = Arc::new(AtomicUsize::new(0));
     let counted = opens.clone();

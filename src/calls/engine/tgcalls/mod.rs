@@ -52,7 +52,6 @@ pub fn preload_tgcalls() {
     let _ = library();
 }
 
-/// A pointer into the library, free to move between threads.
 struct Native<T>(NonNull<T>);
 
 // SAFETY: quill_calls.h lets every function be called from any thread, and
@@ -238,9 +237,6 @@ fn release_screen(api: &Loader, call: &mut P2pCall) {
 }
 
 impl P2pCall {
-    /// Retires the running instance and keeps the call for the next one,
-    /// which gets a context of its own: the old instance's last callbacks
-    /// must not reach it.
     fn retire_instance(&mut self, api: &'static Loader) {
         let Some(handle) = self.handle.take() else {
             return;
@@ -272,8 +268,6 @@ impl P2pCall {
     }
 }
 
-/// Ends the call now for everyone but the library: no callback or feeder
-/// reaches it and its sound stops. The reaper does the rest.
 fn retire(api: &'static Loader, mut call: P2pCall) {
     call.context.retire();
     call.gate.close();
@@ -281,7 +275,6 @@ fn retire(api: &'static Loader, mut call: P2pCall) {
     reaper::hand_off(move || destroy(api, &mut call));
 }
 
-/// The library's side of ending a call, on the reaper.
 fn destroy(api: &Loader, call: &mut P2pCall) {
     call.sound = None;
     if let Some(handle) = call.handle.take() {
@@ -307,7 +300,7 @@ impl Drop for TgcallsEngine {
             group::retire_group(self.api, call);
         }
         #[cfg(test)]
-        reaper::settle();
+        reaper::finish_teardowns_before_test_exit();
     }
 }
 

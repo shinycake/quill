@@ -36,13 +36,11 @@ pub trait LevelSource {
 /// After a failed open, try the microphone again after this long.
 const REOPEN_AFTER: Duration = Duration::from_secs(5);
 
-/// A level source a worker opened, or why it could not.
 type Opened = Result<Box<dyn LevelSource + Send>, String>;
 
 /// Driver-side state of the level tap and the speaking decision.
 pub struct CallAudio {
     source: Option<Box<dyn LevelSource>>,
-    /// A worker is opening the microphone; the pump picks up its answer.
     pub(crate) opening: Option<Receiver<Opened>>,
     pub(crate) open_microphone: Arc<dyn Fn() -> Opened + Send + Sync>,
     /// A source injected by tests or demos; used instead of opening
@@ -141,8 +139,6 @@ impl CallAudio {
         }
     }
 
-    /// Opening the device waits on the audio system, so a worker does it
-    /// and wakes the pump. A source nobody waits for any more closes there.
     fn open_on_worker(&self) -> Receiver<Opened> {
         let (answer, opened) = mpsc::channel();
         let open = self.open_microphone.clone();

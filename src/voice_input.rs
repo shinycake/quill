@@ -44,10 +44,7 @@ pub fn open_default(out: Sender<Vec<f32>>) -> Result<MicStream, String> {
     Ok(MicStream { device, error })
 }
 
-fn open_stream(
-    out: Sender<Vec<f32>>,
-    error: Arc<Mutex<Option<String>>>,
-) -> Result<Stream, String> {
+fn open_stream(out: Sender<Vec<f32>>, error: Arc<Mutex<Option<String>>>) -> Result<Stream, String> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()

@@ -463,8 +463,6 @@ fn call_discarded_json() -> String {
     )
 }
 
-/// A ready driver on the recording sender, its working folder removed on
-/// drop, with no client around it.
 struct CallingDriver {
     recorder: Arc<RecordingSender>,
     driver: ConnectDriver<Arc<RecordingSender>>,
@@ -505,7 +503,6 @@ impl CallingDriver {
         self
     }
 
-    /// The `@type` of everything sent, in order.
     fn sent(&self) -> Vec<String> {
         self.recorder
             .snapshot()
@@ -637,12 +634,21 @@ fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
             .iter()
             .any(|json| json.contains("\"@type\":\"close\""))
     };
-    assert!(handle.sent().iter().any(|json| json.contains("discardCall")));
+    assert!(
+        handle
+            .sent()
+            .iter()
+            .any(|json| json.contains("discardCall"))
+    );
     assert!(!sent_close(), "close waits for the hang-up");
 
     handle.tx.send(call_discarded_json()).expect("send");
     drop(handle.tx);
     let finished = set.close_all_within(Instant::now() + Duration::from_secs(60));
     assert_eq!(finished, 1, "the test's receive loop ends with no Closed");
-    assert!(sent_close(), "the poll sent close: {:?}", recorder.snapshot());
+    assert!(
+        sent_close(),
+        "the poll sent close: {:?}",
+        recorder.snapshot()
+    );
 }

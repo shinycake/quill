@@ -16,7 +16,6 @@ use std::time::Instant;
 
 type Job = Box<dyn FnOnce() + Send>;
 
-/// How many jobs were handed over and have not finished.
 #[derive(Default)]
 struct Backlog {
     count: Mutex<usize>,
@@ -40,7 +39,6 @@ impl Backlog {
         *self.count.lock_or_recover() == 0
     }
 
-    /// False when `deadline` passed with jobs left.
     fn wait_empty(&self, deadline: Instant) -> bool {
         let mut count = self.count.lock_or_recover();
         while *count > 0 {
@@ -68,7 +66,6 @@ impl Reaper {
         let (jobs, queue) = channel::<Job>();
         let backlog = Arc::new(Backlog::default());
         let finished = Arc::clone(&backlog);
-        // A failed spawn drops `queue`: `hand_off` then runs jobs in place.
         let _ = spawn_guarded("quill-call-reaper", move || {
             for job in queue {
                 ffi_boundary((), job);
@@ -80,8 +77,8 @@ impl Reaper {
 
     fn hand_off(&self, job: Job) {
         self.backlog.add();
-        if let Err(SendError(job)) = self.jobs.send(job) {
-            ffi_boundary((), job);
+        if let Err(SendError(no_thread_took_it)) = self.jobs.send(job) {
+            ffi_boundary((), no_thread_took_it);
             self.backlog.finish();
         }
     }
@@ -90,7 +87,6 @@ impl Reaper {
 static REAPER: OnceLock<Reaper> = OnceLock::new();
 static EXIT_HOOK: Once = Once::new();
 
-/// Runs `job` on the reaper thread, after the jobs handed over before it.
 pub(super) fn hand_off(job: impl FnOnce() + Send + 'static) {
     REAPER.get_or_init(Reaper::start).hand_off(Box::new(job));
 }
@@ -117,7 +113,10 @@ pub fn await_call_teardown(deadline: Instant) {
 /// locals.
 extern "C" fn leave_if_stuck() {
     ffi_boundary((), || {
-        if REAPER.get().is_some_and(|reaper| !reaper.backlog.is_empty()) {
+        if REAPER
+            .get()
+            .is_some_and(|reaper| !reaper.backlog.is_empty())
+        {
             // SAFETY: ends the process at once and skips the static
             // destructors the running teardown would crash in.
             unsafe { libc::_exit(0) };
@@ -125,9 +124,8 @@ extern "C" fn leave_if_stuck() {
     });
 }
 
-/// A test binary exits right after its last test, with no quit to wait.
 #[cfg(test)]
-pub(super) fn settle() {
+pub(super) fn finish_teardowns_before_test_exit() {
     if let Some(reaper) = REAPER.get() {
         let far = Instant::now() + std::time::Duration::from_secs(60);
         assert!(reaper.backlog.wait_empty(far), "a teardown never finished");

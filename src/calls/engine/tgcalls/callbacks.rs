@@ -21,8 +21,6 @@ pub(super) struct CallContext {
     pub(super) shared: Arc<CallbackShared>,
     /// Where the call's sound goes; `None` drops it (no output open).
     pub(super) sound: ArcSwapOption<StreamAudio>,
-    /// The call ended here while its instance waits for the reaper: what
-    /// the instance still sends is dropped.
     retired: AtomicBool,
 }
 
@@ -95,8 +93,6 @@ pub(super) fn live_rotation(degrees: i32) -> LiveRotation {
     }
 }
 
-/// The call behind `user`, unless it ended.
-///
 /// # Safety
 /// `user` is the `CallContext` the reaper keeps alive past `qc_p2p_destroy`
 /// (or past clearing the preview), or null.

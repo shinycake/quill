@@ -196,7 +196,6 @@ fn device_names_match_exactly_or_ignoring_case() {
     ));
 }
 
-/// A device that reports where and what it was told, and where it closed.
 struct FakeMic {
     events: Sender<(&'static str, ThreadId)>,
 }
@@ -276,5 +275,8 @@ fn a_mic_thread_that_panics_while_opening_reports_it() {
         || -> Result<(), String> { panic!("backend bug") },
         |_, ()| {},
     );
-    assert_eq!(opened.err().as_deref(), Some("The microphone thread stopped."));
+    assert_eq!(
+        opened.err().as_deref(),
+        Some("The microphone thread stopped.")
+    );
 }

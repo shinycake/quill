@@ -564,10 +564,8 @@ impl VoiceFinish {
 }
 
 impl Drop for VoiceCapture {
-    /// The microphone closes on its thread and the encoder ends after it;
-    /// nobody waits for either.
     fn drop(&mut self) {
-        let _ = self.stop_mic();
+        let _detached_encoder = self.stop_mic();
     }
 }
 

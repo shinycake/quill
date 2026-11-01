@@ -413,7 +413,6 @@ impl QuillApp {
                 };
                 self.connection.set_note(StatusNote::silent(tr(note)));
             }
-            // Cancelled, or another recording took the place meanwhile.
             Ok(capture) => {
                 cx.background_spawn(async move { capture.discard() })
                     .detach();
@@ -424,11 +423,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Start a voice capture for `purpose`. Opening the microphone waits on
-    /// the audio system, so it runs off the UI thread, and the recording
-    /// bar shows once the device is up. The capture is held by the window
-    /// that asked, or dropped (file removed) once that window closed or the
-    /// start was cancelled.
     pub(super) fn start_voice_capture(&mut self, purpose: CaptureFor, cx: &mut Context<Self>) {
         if self.recording_busy() {
             return;
