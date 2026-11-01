@@ -919,8 +919,12 @@ pub(crate) fn decodes_in_process() -> bool {
 /// Whether a `.gif` file can play through the player: only through FFmpeg
 /// (AVPlayer does not read GIF).
 pub(crate) fn plays_gif_files() -> bool {
-    quill::video_decode::available()
-        && (cfg!(not(target_os = "macos")) || backend_ffmpeg::preferred_on_macos())
+    if cfg!(target_os = "macos") {
+        return backend_ffmpeg::preferred_on_macos();
+    }
+    // Read without loading the shim on the UI thread: a load still running
+    // counts as a success, and the player reports it if it fails.
+    quill::video_decode::available_now() != Some(false)
 }
 
 /// A process-unique player id (the `QUILL_TRACE_VIDEO` column).

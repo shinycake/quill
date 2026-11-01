@@ -651,7 +651,12 @@ impl Player {
     /// [`Player::take_audio_tap`] become available then, or
     /// [`Player::error`]).
     pub fn open(path: &Path, options: OpenOptions) -> Result<Self, String> {
-        ffi::availability().map_err(str::to_string)?;
+        // Only a load that already failed is reported here: a first load
+        // (a dlopen of 20 to 90 ms) happens on the decode thread instead
+        // of the caller's, which is the UI thread for the players.
+        if ffi::loaded() == Some(false) {
+            ffi::availability().map_err(str::to_string)?;
+        }
         let path: PathBuf = path.to_path_buf();
         let opts = options.clone();
         Self::spawn(
