@@ -16,7 +16,6 @@ pub fn install_link_inbox(
         }
     })
     .detach();
-    quill::single_instance::UI.start();
     cx.spawn({
         let view = view.downgrade();
         let window_handle = window.window_handle();
@@ -42,11 +41,13 @@ pub fn install_link_inbox(
     .detach();
 }
 
-/// Runs `turn` each time `signal` wakes the loop, until it returns false.
-/// A second launch waits for `ui` to beat before it is acknowledged. The
-/// epoch the next sleep waits past is read before the beat: a launch marks
-/// after some beat and pokes after its mark, so its poke ends the next
-/// sleep even when it lands while `turn` runs.
+/// Runs `turn` once, then each time `signal` wakes the loop, until it
+/// returns false. A second launch waits for `ui` to beat before it is
+/// acknowledged. The epoch the next sleep waits past is read before the
+/// beat, and before `ui` starts: a launch marks after some beat (or before
+/// the start, and is answered at once) and pokes after its mark, so its
+/// poke ends the next sleep even when it lands while `turn` runs, and the
+/// first turn takes whatever came before.
 async fn answer_wakes(
     cx: &mut gpui_kit::AsyncApp,
     signal: &'static quill::wake::Signal,
@@ -54,7 +55,13 @@ async fn answer_wakes(
     mut turn: impl FnMut(&mut gpui_kit::AsyncApp) -> bool,
 ) {
     let mut seen = signal.epoch();
+    ui.start();
     loop {
+        ui.beat();
+        if !turn(cx) {
+            ui.stop();
+            return;
+        }
         // Asleep until a link, activation or quit request arrives (the OS
         // callback and the single-instance listener poke `signal`); links
         // waiting behind another flow are retried at the old cadence.
@@ -65,11 +72,6 @@ async fn answer_wakes(
         };
         super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
         seen = signal.epoch();
-        ui.beat();
-        if !turn(cx) {
-            ui.stop();
-            return;
-        }
     }
 }
 
