@@ -533,3 +533,12 @@ The Quill project also changed it in 2026 so the input can wrap a long line
 without shaping it (`third_party/gpui-base/QUILL-CHANGES.md`):
 
 - `src/text_system/line_wrapper.rs`: `LineWrapper::width_for_char` is public.
+
+The Quill project also changed it in 2026 so a video player can fill the
+same BGRA buffers again instead of allocating one per picture (sweep bundle
+B7, `docs/decisions/video-nv12-linux.md`):
+
+- `src/assets.rs`: `RenderImage::with_recycler` takes a callback that gets
+  the image's frames when the image is dropped. Images made without one drop
+  their frames as before. Tested from Quill
+  (`a_picture_hands_its_buffer_back_once_its_image_goes`).

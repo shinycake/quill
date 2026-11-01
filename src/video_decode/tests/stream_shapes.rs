@@ -220,6 +220,7 @@ impl Rig {
             first: true,
             last_pts: None,
             ended: false,
+            bgra: Default::default(),
             thread: None,
         };
         let tap = player.take_audio_tap();

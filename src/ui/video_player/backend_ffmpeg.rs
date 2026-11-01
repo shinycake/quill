@@ -23,7 +23,7 @@
 use super::surface;
 use super::transport::{BackendStatus, Correction, Engine, RATE_TOLERANCE, Want, reconcile};
 use super::{Backend, ErrorKind, Picture, PictureStats, PlayerError, Present, Pulled, Purpose};
-use quill::video_decode::{OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
+use quill::video_decode::{BgraPool, OpenOptions, PixelOutput, Pixels, Player, VideoFrame};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -174,7 +174,7 @@ impl FfmpegBackend {
             Ok(shown) => return Some(shown),
             Err(frame) => frame,
         };
-        let image = render_image(frame)?;
+        let image = render_image(frame, self.player.bgra_pool())?;
         self.show_image(image.clone());
         let stats = PictureStats {
             format: "bgra",
@@ -390,16 +390,22 @@ impl Drop for FfmpegBackend {
 }
 
 /// A decoded picture as a GPUI image (no copy for BGRA: the buffer moves
-/// in; NV12 is converted on the CPU first).
-pub(super) fn render_image(frame: VideoFrame) -> Option<Arc<RenderImage>> {
-    let frame = frame.into_bgra()?;
+/// in; NV12 is converted on the CPU first). The buffer goes back to `pool`
+/// when the image is dropped.
+pub(super) fn render_image(frame: VideoFrame, pool: &BgraPool) -> Option<Arc<RenderImage>> {
+    let frame = frame.into_bgra(pool)?;
     let Pixels::Bgra(bgra) = frame.pixels else {
         return None;
     };
     let buffer = image::RgbaImage::from_raw(frame.width, frame.height, bgra)?;
-    Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
-        image::Frame::new(buffer),
-    ]))))
+    let pool = pool.clone();
+    let image = RenderImage::new(smallvec::SmallVec::from_buf([image::Frame::new(buffer)]))
+        .with_recycler(move |frames| {
+            for frame in frames {
+                pool.give(frame.into_buffer().into_raw());
+            }
+        });
+    Some(Arc::new(image))
 }
 
 /// Open `path`, seek to `at`, and wait (at most two seconds) for the first
@@ -429,10 +435,11 @@ pub(super) fn first_picture(path: &Path, at: f64) -> Option<(VideoFrame, Option<
 #[cfg(test)]
 mod tests {
     use super::super::Backend;
-    use super::{FfmpegBackend, NV12_RETRY, nv12_allowed, output_for};
+    use super::{FfmpegBackend, NV12_RETRY, nv12_allowed, output_for, render_image};
     use crate::ui::audio::{SharedOutput, share_output_with_video};
     use quill::video_decode::{
-        AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Player,
+        AudioChunk, BgraPool, Demuxer, Item, MediaInfo, OpenOptions, PixelOutput, Player,
+        VideoFrame,
     };
     use std::path::Path;
     use std::sync::mpsc;
@@ -500,6 +507,20 @@ mod tests {
         output.settle_device();
         assert!(!backend.status().has_sound);
         assert!(!backend.player.has_sound(), "the wall clock is");
+    }
+
+    /// A BGRA picture's buffer goes back to its player once the image
+    /// showing it is gone, for the next picture to be turned into.
+    #[test]
+    fn a_picture_hands_its_buffer_back_once_its_image_goes() {
+        let pool = BgraPool::default();
+        // The spare byte tells this buffer from a new one.
+        let mut bgra = Vec::with_capacity(17);
+        bgra.resize(16, 0);
+        let image = render_image(VideoFrame::bgra(0.0, 2, 2, bgra), &pool).expect("image");
+        assert_eq!(pool.take(16).capacity(), 16, "the image still shows it");
+        drop(image);
+        assert_eq!(pool.take(16).capacity(), 17);
     }
 
     #[test]

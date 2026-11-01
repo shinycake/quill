@@ -19,11 +19,13 @@
 //!   picture is shown ([`Clock`]). The picture shown is the newest one due.
 #![deny(clippy::indexing_slicing)]
 
+mod bgra;
 mod decode_loop;
 mod ffi;
 mod nv12;
 mod present;
 
+pub use bgra::{BgraPool, rotate_bgra};
 pub use nv12::{PixelOutput, Pixels, YuvColor, YuvMatrix, nv12_len, nv12_to_bgra, pack_nv12};
 
 use std::collections::VecDeque;
@@ -94,8 +96,9 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
         hardware: true,
         ..OpenOptions::viewer()
     };
+    let pool = BgraPool::default();
     let mut demuxer = match ffi::FfiDemuxer::open(Path::new(path), &options) {
-        Ok(demuxer) => demuxer,
+        Ok(demuxer) => demuxer.with_bgra_pool(pool.clone()),
         Err(err) => {
             eprintln!("video-probe: {err}");
             return 1;
@@ -116,6 +119,10 @@ pub fn probe_cli(path: Option<&str>) -> i32 {
                 convert_total += u64::from(frame.convert_us);
                 convert_max = convert_max.max(frame.convert_us);
                 format = frame.pixels.trace_name();
+                // As the player's images do once they leave the screen.
+                if let Pixels::Bgra(bytes) = frame.pixels {
+                    pool.give(bytes);
+                }
             }
             Ok(Some(Item::Audio(chunk))) => samples += chunk.samples.len(),
             Ok(None) => break,
@@ -238,13 +245,23 @@ impl VideoFrame {
     }
 
     /// The picture as BGRA: as it is, or converted from NV12 on the CPU
-    /// (a renderer that can't draw NV12 after all). `None` when the NV12
-    /// bytes don't match the size.
-    pub fn into_bgra(self) -> Option<Self> {
+    /// (a renderer that can't draw NV12 after all) into a buffer from
+    /// `pool`. `None` when the NV12 bytes don't match the size.
+    pub fn into_bgra(self, pool: &BgraPool) -> Option<Self> {
         let pixels = match self.pixels {
             Pixels::Bgra(bytes) => Pixels::Bgra(bytes),
             Pixels::Nv12 { bytes, color } => {
-                Pixels::Bgra(nv12_to_bgra(&bytes, self.width, self.height, color)?)
+                let len = (self.width as usize)
+                    .saturating_mul(self.height as usize)
+                    .saturating_mul(4);
+                let out = pool.take(len);
+                Pixels::Bgra(nv12::nv12_to_bgra_into(
+                    &bytes,
+                    self.width,
+                    self.height,
+                    color,
+                    out,
+                )?)
             }
         };
         Some(Self { pixels, ..self })
@@ -281,40 +298,6 @@ pub trait Demuxer: Send {
     /// The picture layout wanted from the next picture on. Demuxers that
     /// only make BGRA ignore it.
     fn set_output(&mut self, _output: PixelOutput) {}
-}
-
-/// Turn a BGRA picture (`stride` bytes per row) upright by `rotation`
-/// clockwise degrees, packing rows tightly. Returns the pixels and size; an
-/// empty 0x0 picture when `src` is shorter than `stride` rows say.
-pub fn rotate_bgra(
-    src: &[u8],
-    width: u32,
-    height: u32,
-    stride: usize,
-    rotation: u32,
-) -> (Vec<u8>, u32, u32) {
-    // The image the picture becomes owns these bytes, so they can't come
-    // from a pool. Zeroed memory this large is fresh pages, not a memset.
-    let mut out = vec![
-        0u8;
-        (width as usize)
-            .saturating_mul(height as usize)
-            .saturating_mul(4)
-    ];
-    // The last row may stop at its pixels, without the padding.
-    if !nv12::turn_plane_into::<4>(
-        src,
-        (width as usize, height as usize),
-        stride,
-        rotation,
-        &mut out,
-    ) {
-        return (Vec::new(), 0, 0);
-    }
-    match rotation {
-        90 | 270 => (out, height, width),
-        _ => (out, width, height),
-    }
 }
 
 /// A wall clock that can be paused, seeked and sped up. It holds still
@@ -688,6 +671,7 @@ pub struct Player {
     /// The newest picture handed out, for the end position.
     last_pts: Option<f64>,
     ended: bool,
+    bgra: BgraPool,
     /// The decode thread. Dropping the player detaches it (it exits within
     /// one decode step); tests join it.
     #[cfg(test)]
@@ -733,20 +717,27 @@ impl Player {
         }
         let path: PathBuf = path.to_path_buf();
         let opts = options.clone();
+        let bgra = BgraPool::default();
+        let pool = bgra.clone();
         Self::spawn(
-            move || ffi::FfiDemuxer::open(&path, &opts).map(|d| Box::new(d) as Box<dyn Demuxer>),
+            move || {
+                ffi::FfiDemuxer::open(&path, &opts)
+                    .map(|d| Box::new(d.with_bgra_pool(pool)) as Box<dyn Demuxer>)
+            },
             options,
+            bgra,
         )
     }
 
     /// Run a player over any demuxer (tests use scripted ones).
     pub fn with_demuxer(demuxer: Box<dyn Demuxer>, options: OpenOptions) -> Result<Self, String> {
-        Self::spawn(move || Ok(demuxer), options)
+        Self::spawn(move || Ok(demuxer), options, BgraPool::default())
     }
 
     fn spawn(
         opener: impl FnOnce() -> Result<Box<dyn Demuxer>, String> + Send + 'static,
         options: OpenOptions,
+        bgra: BgraPool,
     ) -> Result<Self, String> {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -779,9 +770,16 @@ impl Player {
             first: true,
             last_pts: None,
             ended: false,
+            bgra,
             #[cfg(test)]
             thread: Some(thread),
         })
+    }
+
+    /// Where the clip's BGRA pictures come from: hand each buffer back
+    /// once its picture is off screen.
+    pub fn bgra_pool(&self) -> &BgraPool {
+        &self.bgra
     }
 
     /// Wait for the decode thread to end (tests); true when it returned
