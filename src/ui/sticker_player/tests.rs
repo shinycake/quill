@@ -604,9 +604,10 @@ fn a_tick_draws_a_view_only_when_its_frame_changes() {
     assert!(!view.changes_in(draw), "frame 1 is up");
     let frame = Duration::from_secs_f64(1.0 / FPS);
     let quarter_frame_slack = frame / 4;
-    let frame_2 = t0 + frame * 2 - quarter_frame_slack;
-    assert!(!view.changes_in(TickDraw::On(frame_2 - ms(1))));
-    assert!(view.changes_in(TickDraw::On(frame_2 + ms(1))));
+    let frame_2 = (frame * 2).saturating_sub(quarter_frame_slack);
+    let before_it = t0 + frame_2.saturating_sub(ms(1));
+    assert!(!view.changes_in(TickDraw::On(before_it)));
+    assert!(view.changes_in(TickDraw::On(t0 + frame_2 + ms(1))));
 }
 
 #[test]
