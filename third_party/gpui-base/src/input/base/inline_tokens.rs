@@ -123,6 +123,26 @@ impl InputContent {
         super::text_spans::normalize(&mut self.spans);
         Ok(self)
     }
+    /// Attach many formatting spans at once, leaving out the ones
+    /// [`Self::with_span`] refuses (Quill patch: that sorts all spans again
+    /// for each one).
+    pub fn with_spans(
+        mut self,
+        spans: impl IntoIterator<Item = (Range<usize>, SharedString)>,
+    ) -> Self {
+        for (range, tag) in spans {
+            if !range.is_empty()
+                && range.end <= self.text.len()
+                && !tag.is_empty()
+                && self.text.is_char_boundary(range.start)
+                && self.text.is_char_boundary(range.end)
+            {
+                self.spans.push(super::TextSpan::new(range, tag));
+            }
+        }
+        super::text_spans::normalize(&mut self.spans);
+        self
+    }
     /// The formatting spans, sorted by start.
     pub fn spans(&self) -> &[super::TextSpan] {
         &self.spans

@@ -328,6 +328,22 @@ fn a_mention_tag_survives_edits_around_and_inside_it() {
 }
 
 #[test]
+fn a_span_off_a_character_boundary_stays_out_of_the_field() {
+    let mut doc = ComposerDoc::plain("é!");
+    doc.spans = vec![
+        DocSpan::new(1..3, ComposerTag::Bold),
+        DocSpan::new(2..3, ComposerTag::Italic),
+    ];
+    let content = doc_content(&doc);
+    let tags: Vec<_> = content
+        .spans()
+        .iter()
+        .map(|span| span.tag().to_string())
+        .collect();
+    assert_eq!(tags, [ComposerTag::Italic.to_tag()]);
+}
+
+#[test]
 fn every_change_moves_the_document_revision() {
     with_field(|cx, handle, input| {
         cx.update_window(handle, |_, window, cx| {
