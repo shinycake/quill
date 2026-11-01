@@ -21,7 +21,7 @@ pub(super) struct GroupCall {
     /// A conference call's encryption, shared with its presentation.
     crypto: Option<Arc<dyn FrameCrypto>>,
     context: Arc<GroupContext>,
-    handle: NonNull<qc_group>,
+    handle: Native<qc_group>,
     /// Feeder threads' way in; cleared before the handles go away.
     gate: Arc<sender::Gate>,
     /// The join answer was applied (`connect_group_call`).
@@ -30,7 +30,7 @@ pub(super) struct GroupCall {
     muted: bool,
     /// The camera to send, by device id, and its source while it runs.
     camera_id: Option<String>,
-    camera: Option<NonNull<qc_video_capture>>,
+    camera: Option<Native<qc_video_capture>>,
     speaker: Option<String>,
     playback_muted: bool,
     sound: Option<StreamPlayer>,
@@ -49,19 +49,19 @@ pub(super) struct GroupCall {
 struct Presentation {
     /// What the instance's callbacks read; outlives `qc_group_destroy`.
     context: Arc<GroupContext>,
-    handle: NonNull<qc_group>,
+    handle: Native<qc_group>,
     /// The external screencast source Quill's screen capture feeds.
-    screen: NonNull<qc_video_capture>,
+    screen: Native<qc_video_capture>,
     connected: bool,
 }
 
 /// A new instance and its join payload; `None` (logged) when tgcalls
 /// refuses it.
 fn create_instance(
-    api: &Loader,
+    api: &'static Loader,
     context: &Arc<GroupContext>,
     video: *mut qc_video_capture,
-) -> Option<(NonNull<qc_group>, String)> {
+) -> Option<(Native<qc_group>, String)> {
     let config = match (context.presentation, context.conference.is_some()) {
         (false, false) => c"{\"presentation\":false}",
         (true, false) => c"{\"presentation\":true}",
@@ -70,10 +70,10 @@ fn create_instance(
     };
     let callbacks = context.callbacks();
     // SAFETY: NUL-ended config; the context behind `callbacks.user` lives
-    // in the engine until `qc_group_destroy` returns; the instance takes
+    // until `qc_group_destroy` returns; the instance takes
     // its own reference to `video` (or none for NULL).
     let handle = unsafe { (api.qc_group_create)(config.as_ptr(), &callbacks, video) };
-    let handle = NonNull::new(handle)?;
+    let handle = Native::new(handle)?;
     if let Some(conference) = context.conference.as_ref() {
         for (id, channels) in conference.attach(handle.as_ptr()) {
             conference.answer(api, id, &channels);
@@ -85,9 +85,15 @@ fn create_instance(
     match take_string(api, raw) {
         Some(payload) => Some((handle, payload)),
         None => {
+            context.retire();
             close_conference(context);
-            // SAFETY: the instance made above, destroyed once.
-            unsafe { (api.qc_group_destroy)(handle.as_ptr()) };
+            let context = Arc::clone(context);
+            reaper::hand_off(move || {
+                // SAFETY: the instance made above, destroyed once and never
+                // from its own callback; the context outlives it.
+                unsafe { (api.qc_group_destroy)(handle.as_ptr()) };
+                drop(context);
+            });
             None
         }
     }
@@ -109,7 +115,7 @@ fn close_conference(context: &GroupContext) {
 /// Applies a join answer the way tdesktop's
 /// `handlePossibleCreateOrJoinResponse` does: the connection mode first,
 /// then (for RTC) the answer itself.
-fn apply_answer(api: &Loader, handle: NonNull<qc_group>, answer: &CString, mode: GroupCallMode) {
+fn apply_answer(api: &Loader, handle: Native<qc_group>, answer: &CString, mode: GroupCallMode) {
     match mode {
         GroupCallMode::Rtc => {
             // SAFETY: a live instance; `answer` is NUL-ended and outlives
@@ -146,35 +152,59 @@ fn release_camera(api: &Loader, call: &mut GroupCall) {
 }
 
 /// Ends the presentation: no screen picture reaches it afterwards.
-fn stop_presentation(api: &Loader, call: &mut GroupCall) {
+fn stop_presentation(api: &'static Loader, call: &mut GroupCall) {
     let Some(presentation) = call.presentation.take() else {
         return;
     };
     call.gate.set_screen(None);
-    close_conference(&presentation.context);
-    // SAFETY: the presentation's live handle, destroyed once and never
-    // from its own callback; then Quill's reference to its screen source,
-    // which the gate no longer borrows. The context stays alive until
-    // both return.
-    unsafe {
-        (api.qc_group_destroy)(presentation.handle.as_ptr());
-        (api.qc_video_capture_free)(presentation.screen.as_ptr());
+    presentation.retire();
+    reaper::hand_off(move || presentation.destroy(api));
+}
+
+impl Presentation {
+    fn retire(&self) {
+        self.context.retire();
+        close_conference(&self.context);
+    }
+
+    /// The library's side of ending the presentation, on the reaper.
+    fn destroy(self, api: &Loader) {
+        // SAFETY: the presentation's live handle, destroyed once and never
+        // from its own callback; then Quill's reference to its screen
+        // source, which the gate no longer borrows. The context stays alive
+        // until both return.
+        unsafe {
+            (api.qc_group_destroy)(self.handle.as_ptr());
+            (api.qc_video_capture_free)(self.screen.as_ptr());
+        }
     }
 }
 
-/// Ends the call in the library: a conference call's frames stop going
-/// to TDLib first, then the presentation goes so screen capture stops
-/// before the call: no callback or feeder reaches it after.
-pub(super) fn destroy_group(api: &Loader, mut call: GroupCall) {
+/// Ends the call now for everyone but the library: a conference call's
+/// frames stop going to TDLib, no callback or feeder reaches it and its
+/// sound stops. The reaper does the rest.
+pub(super) fn retire_group(api: &'static Loader, mut call: GroupCall) {
+    call.context.retire();
     close_conference(&call.context);
-    stop_presentation(api, &mut call);
+    if let Some(presentation) = call.presentation.as_ref() {
+        presentation.retire();
+    }
     call.gate.close();
-    // SAFETY: a live instance destroyed once, never from its own callback
-    // (the engine runs on the connect driver).
-    unsafe { (api.qc_group_destroy)(call.handle.as_ptr()) };
-    release_camera(api, &mut call);
     call.context.sound.store(None);
+    reaper::hand_off(move || destroy_group(api, &mut call));
+}
+
+/// The library's side of ending a group call, on the reaper: the
+/// presentation first, so screen capture stops before the call.
+fn destroy_group(api: &Loader, call: &mut GroupCall) {
     call.sound = None;
+    if let Some(presentation) = call.presentation.take() {
+        presentation.destroy(api);
+    }
+    // SAFETY: a live instance destroyed once, never from its own callback
+    // (this runs on the reaper).
+    unsafe { (api.qc_group_destroy)(call.handle.as_ptr()) };
+    release_camera(api, call);
 }
 
 impl TgcallsEngine {
@@ -201,7 +231,7 @@ impl TgcallsEngine {
         crypto: Option<Arc<dyn FrameCrypto>>,
     ) -> Result<String, EngineError> {
         if let Some(old) = self.groups.remove(&group_call_id) {
-            destroy_group(self.api, old);
+            retire_group(self.api, old);
         }
         let mut context = GroupContext::new(group_call_id, chat_id, false, &self.callback);
         if let Some(crypto) = crypto.as_ref() {
@@ -341,7 +371,7 @@ impl TgcallsEngine {
                 let device = text("qc_video_capture_camera", &device)?;
                 // SAFETY: a NUL-ended id; the library returns a new source.
                 let capture = unsafe { (api.qc_video_capture_camera)(device.as_ptr()) };
-                let capture = NonNull::new(capture).ok_or(EngineError::NoCamera)?;
+                let capture = Native::new(capture).ok_or(EngineError::NoCamera)?;
                 // SAFETY: the context outlives the preview: it is cleared
                 // before the capture is freed (`release_camera`).
                 unsafe {
@@ -529,7 +559,7 @@ impl TgcallsEngine {
         stop_presentation(api, call);
         // SAFETY: returns a new external screencast source owned here.
         let screen = unsafe { (api.qc_video_capture_external)(1) };
-        let screen = NonNull::new(screen).ok_or(EngineError::NoScreenSource)?;
+        let screen = Native::new(screen).ok_or(EngineError::NoScreenSource)?;
         let mut context = GroupContext::new(group_call_id, call.chat_id, true, &shared);
         if let Some(crypto) = call.crypto.as_ref() {
             context = context.conference(Arc::clone(crypto));
@@ -603,7 +633,7 @@ impl TgcallsEngine {
             .remove(&from)
             .ok_or(EngineError::NoSuchCall(from))?;
         if let Some(old) = self.groups.remove(&to) {
-            destroy_group(self.api, old);
+            retire_group(self.api, old);
         }
         call.context.set_group_call_id(to);
         if let Some(presentation) = call.presentation.as_ref() {
@@ -636,7 +666,7 @@ impl TgcallsEngine {
             crate::advanced::debug_mode::call_log(&format!(
                 "[call] group {group_call_id} tgcalls leave"
             ));
-            destroy_group(self.api, call);
+            retire_group(self.api, call);
         }
     }
 

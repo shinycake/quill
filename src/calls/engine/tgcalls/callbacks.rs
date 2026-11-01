@@ -1,6 +1,6 @@
 //! What tgcalls tells Quill about a 1:1 call, from its own threads: the
 //! `qc_p2p_callbacks` trampolines and the per-call context they read.
-//! `qc_p2p_destroy` returns only once no callback can run, and the engine
+//! `qc_p2p_destroy` returns only once no callback can run, and the reaper
 //! keeps the context alive until then.
 use super::super::{CallbackShared, EngineEvent, RemoteVideoState, TransportState};
 use crate::calls::live_video::{LiveFrame, LiveKey, LiveRotation};
@@ -13,7 +13,7 @@ use quill_calls_sys::{
 };
 use std::ffi::c_void;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// One call's view of the engine's hooks, handed to tgcalls as `user`.
 pub(super) struct CallContext {
@@ -21,9 +21,25 @@ pub(super) struct CallContext {
     pub(super) shared: Arc<CallbackShared>,
     /// Where the call's sound goes; `None` drops it (no output open).
     pub(super) sound: ArcSwapOption<StreamAudio>,
+    /// The call ended here while its instance waits for the reaper: what
+    /// the instance still sends is dropped.
+    retired: AtomicBool,
 }
 
 impl CallContext {
+    pub(super) fn new(call_id: i32, shared: &Arc<CallbackShared>) -> Self {
+        Self {
+            call_id,
+            shared: Arc::clone(shared),
+            sound: ArcSwapOption::empty(),
+            retired: AtomicBool::new(false),
+        }
+    }
+
+    pub(super) fn retire(&self) {
+        self.retired.store(true, Ordering::SeqCst);
+    }
+
     pub(super) fn callbacks(self: &Arc<Self>) -> qc_p2p_callbacks {
         qc_p2p_callbacks {
             user: Arc::as_ptr(self).cast_mut().cast::<c_void>(),
@@ -79,12 +95,15 @@ pub(super) fn live_rotation(degrees: i32) -> LiveRotation {
     }
 }
 
+/// The call behind `user`, unless it ended.
+///
 /// # Safety
-/// `user` is the `CallContext` the engine keeps alive past
-/// `qc_p2p_destroy` (or past clearing the preview), or null.
+/// `user` is the `CallContext` the reaper keeps alive past `qc_p2p_destroy`
+/// (or past clearing the preview), or null.
 unsafe fn context<'a>(user: *mut c_void) -> Option<&'a CallContext> {
     // SAFETY: as the function's contract says.
-    unsafe { user.cast::<CallContext>().cast_const().as_ref() }
+    let call = unsafe { user.cast::<CallContext>().cast_const().as_ref() }?;
+    (!call.retired.load(Ordering::SeqCst)).then_some(call)
 }
 
 unsafe extern "C" fn on_state(user: *mut c_void, state: i32) {
@@ -297,6 +316,25 @@ unsafe fn i420_planes(frame: &qc_video_frame) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_retired_call_hears_nothing_more_from_its_instance() {
+        let shared = Arc::new(CallbackShared::new());
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&sent);
+        crate::calls::engine::set_hook(
+            &shared.hook,
+            Arc::new(move |call_id: i32, _: Vec<u8>| sink.lock().unwrap().push(call_id)) as _,
+        );
+        let call = Arc::new(CallContext::new(5, &shared));
+        let bytes = [1u8, 2, 3];
+        // SAFETY: the context and the bytes outlive the calls.
+        unsafe { on_signaling(call.as_user(), bytes.as_ptr(), bytes.len()) };
+        call.retire();
+        // SAFETY: as above.
+        unsafe { on_signaling(call.as_user(), bytes.as_ptr(), bytes.len()) };
+        assert_eq!(*sent.lock().unwrap(), vec![5]);
+    }
 
     #[test]
     fn tgcalls_states_map_to_transport_states() {

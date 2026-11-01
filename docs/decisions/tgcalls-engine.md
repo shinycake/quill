@@ -131,6 +131,16 @@ Where the build deliberately differs from tdesktop's:
   to its threads. Returning earlier left them running into process exit,
   where they used OpenSSL and WebRTC statics already torn down (the contract
   test crashed about every other run).
+- That wait has no limit, so no destroy runs on the UI thread. On hang-up the
+  engine retires the call at once: its context drops further callbacks, the
+  feeder gate closes and its sound stops. The destroy, the camera and screen
+  references, the sound output and the context go to one reaper thread
+  (`src/calls/engine/tgcalls/reaper.rs`). A rejoin or a retry creates its new
+  instance while the old one may still be going, as tdesktop's
+  `GroupCall::destroyController` does with `crl::async`. Quit waits for the
+  reaper inside `QUIT_CLOSE_DEADLINE`; if a teardown is still running when
+  `exit` starts, the process leaves through `_exit`, since static destructors
+  would crash under it.
 
 ## Group calls (`qc_group_*`)
 
@@ -143,8 +153,9 @@ Where the build deliberately differs from tdesktop's:
   Screencast content, no levels, no sound out, no media channel requests.
   Sound goes through the same AudioBridge as 1:1 calls.
 - `qc_group_join_payload` blocks until tgcalls' `emitJoinPayload` delivers,
-  so Quill gets joinGroupCall's payload (and its audio ssrc) as a return
-  value. The join response, connection mode (none, RTC, broadcast with
+  at most 2 seconds, so Quill gets joinGroupCall's payload (and its audio
+  ssrc) as a return value. A completion that never comes, or that tgcalls
+  dropped, returns NULL and fails the join. The join response, connection mode (none, RTC, broadcast with
   tdesktop's `keepBroadcastIfWasEnabled = true` and the RTMP
   `isUnifiedBroadcast` flag), mute, per-ssrc volume, removed ssrcs,
   requested video channels (JSON from `groupCallParticipantVideoInfo` plus the participant's audio ssrc for lip sync) and

@@ -1,7 +1,7 @@
 //! What tgcalls tells Quill about a group call or its presentation, from
 //! its own threads: the `qc_group_callbacks` trampolines and the context
 //! they read. `qc_group_destroy` returns only once no callback can run,
-//! and the engine keeps the context alive until then (and past clearing
+//! and the reaper keeps the context alive until then (and past clearing
 //! the camera preview).
 use super::super::{
     BroadcastChannel, BroadcastPartRequest, BroadcastRequestId, CallbackShared, EngineEvent,
@@ -18,7 +18,7 @@ use quill_calls_sys::{
 };
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Numbers every instance, so an answer meant for a replaced one (a
@@ -46,6 +46,8 @@ pub(super) struct GroupContext {
     /// A conference call's encryption and media channels; `None` for a
     /// video chat or a stream.
     pub(super) conference: Option<super::group_conference::Conference>,
+    /// The instance waits for the reaper: what it still sends is dropped.
+    retired: AtomicBool,
 }
 
 impl GroupContext {
@@ -64,7 +66,12 @@ impl GroupContext {
             sound: ArcSwapOption::empty(),
             endpoints: Mutex::new(HashMap::new()),
             conference: None,
+            retired: AtomicBool::new(false),
         }
+    }
+
+    pub(super) fn retire(&self) {
+        self.retired.store(true, Ordering::SeqCst);
     }
 
     /// The same context for a conference call: every frame goes through
@@ -128,12 +135,15 @@ impl GroupContext {
     }
 }
 
+/// The instance's context behind `user`, unless the instance is retired.
+///
 /// # Safety
-/// `user` is the `GroupContext` the engine keeps alive past
+/// `user` is the `GroupContext` the reaper keeps alive past
 /// `qc_group_destroy` (or past clearing the preview), or null.
 pub(super) unsafe fn context<'a>(user: *mut c_void) -> Option<&'a GroupContext> {
     // SAFETY: as the function's contract says.
-    unsafe { user.cast::<GroupContext>().cast_const().as_ref() }
+    let call = unsafe { user.cast::<GroupContext>().cast_const().as_ref() }?;
+    (!call.retired.load(Ordering::SeqCst)).then_some(call)
 }
 
 unsafe extern "C" fn on_network_state(user: *mut c_void, connected: i32, to_rtc: i32) {
