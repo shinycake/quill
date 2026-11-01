@@ -15,10 +15,10 @@
 
 use super::super::app::QuillApp;
 use super::super::group_call_stream_layout::StreamJoinIntent;
-use super::super::scheduled::{new_date_time_picker, picked_unix};
+use super::super::scheduled::{TimePicker, new_date_time_picker, picked_unix};
 use super::super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
+use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::{ActiveTheme, Sizable, WindowExt};
@@ -64,7 +64,7 @@ pub(crate) enum CreateStep {
 }
 
 pub(crate) struct ScheduleStep {
-    pub(crate) picker: Entity<DatePickerState>,
+    pub(crate) picker: TimePicker,
     /// The picked time is outside the allowed range.
     pub(crate) error: Option<&'static str>,
     /// Re-renders the countdown every ten seconds while the box shows.
@@ -719,7 +719,7 @@ fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>)
         .child(
             div()
                 .debug_selector(|| "group-call-schedule-picker".into())
-                .child(DatePicker::new(&step.picker).small()),
+                .child(DatePicker::new(&step.picker.state).small()),
         )
         .when_some(step.error, |this, error| {
             this.child(

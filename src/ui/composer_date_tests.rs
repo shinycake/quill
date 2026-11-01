@@ -71,6 +71,7 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
         let value = picker_value(TIME, cx).expect("value");
         dialog
             .picker
+            .state
             .update(cx, |state, cx| state.set_date_time(value, window, cx));
     });
     vcx.update(|window, cx| window.click("composer-date-save", cx));

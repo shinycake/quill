@@ -467,6 +467,29 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
 }
 
 #[gpui_kit::test]
+fn a_schedule_in_the_repeated_hour_confirmed_unchanged_keeps_its_pass(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        // The evening before, a message is set for 01:20 CST, the second
+        // showing of 01:20.
+        let second_pass = WallClock::CHICAGO_FALL_BACK + 1200;
+        cx.set_global(WallClock::chicago_at(
+            WallClock::CHICAGO_FALL_BACK - 6 * 3600,
+        ));
+        app.select_listed_chat(A, window, cx);
+        app.update_pending_send(|send| {
+            send.scheduling = ComposerScheduling::SendAtDate(second_pass)
+        });
+        app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
+        app.confirm_schedule_picker(window, cx);
+        assert_eq!(
+            app.pending_send().scheduling,
+            ComposerScheduling::SendAtDate(second_pass)
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn a_price_saved_after_a_chat_switch_goes_to_the_chat_the_box_opened_in(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {

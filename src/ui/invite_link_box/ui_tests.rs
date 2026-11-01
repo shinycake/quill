@@ -95,7 +95,9 @@ fn presets_and_a_custom_date_make_the_request(cx: &mut TestAppContext) {
                 app.invite_link_box().and_then(|b| b.custom.as_ref())
                 && let Some(value) = picker_value(date, cx)
             {
-                picker.update(cx, |state, cx| state.set_date_time(value, window, cx));
+                picker
+                    .state
+                    .update(cx, |state, cx| state.set_date_time(value, window, cx));
             }
         });
     });

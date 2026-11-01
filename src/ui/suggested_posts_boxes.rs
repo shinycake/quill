@@ -505,7 +505,7 @@ impl QuillApp {
                 .flex_col()
                 .gap_3()
                 .child(
-                    DatePicker::new(&time_box.picker)
+                    DatePicker::new(&time_box.picker.state)
                         .placeholder(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME_2)),
                 )
                 .children(

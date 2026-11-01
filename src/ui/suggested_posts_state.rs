@@ -4,7 +4,7 @@
 //! draft save can read it.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::component::date_picker::DatePickerState;
+use crate::ui::scheduled::TimePicker;
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
@@ -60,7 +60,7 @@ pub(crate) enum TimeTarget {
 pub(crate) struct TimeBox {
     pub(super) target: TimeTarget,
     pub(super) mode: SuggestMode,
-    pub(super) picker: Entity<DatePickerState>,
+    pub(super) picker: TimePicker,
     /// The picked time was out of range.
     pub(super) error: Option<String>,
 }

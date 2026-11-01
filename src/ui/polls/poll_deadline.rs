@@ -115,7 +115,7 @@ impl QuillApp {
                         .font_semibold()
                         .child(tr(keys::POLLS_CREATE_DEADLINE_TITLE)),
                 )
-                .child(DatePicker::new(&deadline.picker))
+                .child(DatePicker::new(&deadline.picker.state))
                 .child(
                     div()
                         .flex()

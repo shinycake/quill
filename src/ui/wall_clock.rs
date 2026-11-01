@@ -4,7 +4,7 @@
 
 use gpui_kit::{App, Global};
 use quill::local_time::{CivilTime, civil_at, now_unix, utc_offset_at};
-use quill::schedule::civil_to_unix_with;
+use quill::schedule::picked_instant;
 use std::rc::Rc;
 
 #[derive(Clone)]
@@ -33,9 +33,10 @@ impl WallClock {
         civil_at(unix, (self.offset_at)(unix))
     }
 
-    /// The instant a picked local time means (see [`civil_to_unix_with`]).
-    pub(crate) fn resolve(&self, civil: &CivilTime) -> i64 {
-        civil_to_unix_with(civil, &*self.offset_at, self.now())
+    /// The instant a picker that opened at `initial` means once it shows
+    /// `civil` (see [`picked_instant`]).
+    pub(crate) fn resolve(&self, civil: &CivilTime, initial: i64) -> i64 {
+        picked_instant(civil, initial, &*self.offset_at, self.now())
     }
 }
 
@@ -48,9 +49,14 @@ impl WallClock {
     /// 01:05 CST in Chicago on the night clocks go back: five minutes into
     /// the second pass of the repeated hour.
     pub(crate) fn chicago_repeated_hour() -> Self {
+        Self::chicago_at(Self::CHICAGO_FALL_BACK + 300)
+    }
+
+    /// Chicago around the night clocks go back, stopped at `now`.
+    pub(crate) fn chicago_at(now: i64) -> Self {
         let switch = Self::CHICAGO_FALL_BACK;
         Self {
-            now: Rc::new(move || switch + 300),
+            now: Rc::new(move || now),
             offset_at: Rc::new(move |t| if t < switch { -5 * 3600 } else { -6 * 3600 }),
         }
     }

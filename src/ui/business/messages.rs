@@ -4,7 +4,7 @@
 use super::{AwayDraft, GreetingDraft, Leave, MessageKind, ScheduleChoice};
 use crate::ui::app::QuillApp;
 use crate::ui::quick_replies::View as QuickRepliesView;
-use crate::ui::scheduled::{picked_unix, picker_value};
+use crate::ui::scheduled::{TimePicker, picked_unix};
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::switch::Switch;
@@ -33,20 +33,13 @@ fn offline_about() -> &'static str {
 
 /// A date and time picker for the custom away schedule. Unlike the
 /// message scheduler it allows past days (tdesktop's minimum is 2013).
-fn away_picker(
-    window: &mut Window,
-    cx: &mut Context<QuillApp>,
-    unix: i64,
-) -> Entity<DatePickerState> {
+fn away_picker(window: &mut Window, cx: &mut Context<QuillApp>, unix: i64) -> TimePicker {
     let state = cx.new(|cx| {
         DatePickerState::new(window, cx)
             .time_precision(TimePrecision::Minute)
             .hour_cycle(HourCycle::H23)
     });
-    if let Some(value) = picker_value(unix, cx) {
-        state.update(cx, |s, cx| s.set_date_time(value, window, cx));
-    }
-    state
+    TimePicker::open(state, unix, window, cx)
 }
 
 impl QuillApp {
@@ -356,7 +349,7 @@ impl QuillApp {
                         .child(div().text_sm().child(label))
                         .child(
                             div().w(px(240.)).child(
-                                DatePicker::new(&state)
+                                DatePicker::new(&state.state)
                                     .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
                             ),
                         ),

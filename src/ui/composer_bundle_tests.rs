@@ -74,7 +74,7 @@ fn schedule_with_repeat(
     let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
     let picker = app.composer_ui.schedule_picker.as_mut().expect("picker");
     picker.repeat = repeat;
-    let date = picker.date.clone();
+    let date = picker.date.state.clone();
     date.update(cx, |state, cx| state.set_date_time(value, window, cx));
     app.confirm_schedule_picker(window, cx);
 }
@@ -151,7 +151,7 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
             .expect("the picker");
         assert!(picker.send_after);
         // Confirming the time sends, as tdesktop's schedule box does.
-        let date = picker.date.clone();
+        let date = picker.date.state.clone();
         // 01:20, which went by once already as CDT.
         let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));

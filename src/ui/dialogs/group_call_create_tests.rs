@@ -357,6 +357,7 @@ fn the_schedule_demo_refuses_a_time_in_the_past(cx: &mut TestAppContext) {
             && let Some(value) = crate::ui::scheduled::picker_value(now_unix() - 3600, cx)
         {
             step.picker
+                .state
                 .update(cx, |state, cx| state.set_date_time(value, window, cx));
         }
     });

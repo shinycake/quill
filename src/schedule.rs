@@ -7,7 +7,7 @@
 //! "schedule".
 #![deny(clippy::indexing_slicing)]
 
-use crate::local_time::CivilTime;
+use crate::local_time::{CivilTime, civil_at};
 
 /// `kMinimalSchedule` in `choose_date_time.cpp`.
 pub const MIN_SCHEDULE_SECS: i64 = 10;
@@ -146,6 +146,25 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
         .unwrap_or(early)
 }
 
+/// The instant a picker means once it shows `civil`, having opened at
+/// `initial`. A time left as it opened keeps its own pass of a repeated
+/// hour; any other is resolved by [`civil_to_unix_with`].
+pub fn picked_instant(
+    civil: &CivilTime,
+    initial: i64,
+    offset_at: impl Fn(i64) -> i32,
+    now: i64,
+) -> i64 {
+    let shown = civil_at(initial, offset_at(initial));
+    let unchanged = (shown.year, shown.month, shown.day, shown.hour, shown.minute)
+        == (civil.year, civil.month, civil.day, civil.hour, civil.minute);
+    if unchanged {
+        initial
+    } else {
+        civil_to_unix_with(civil, offset_at, now)
+    }
+}
+
 /// Parses the `%Y-%m-%d %H:%M` text the date picker formats.
 pub fn parse_picker_stamp(text: &str) -> Option<CivilTime> {
     let (date, time) = text.split_once(' ')?;
@@ -231,7 +250,6 @@ impl ScheduleKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_time::civil_at;
 
     const NOW: i64 = 1_800_000_000;
 
@@ -379,6 +397,34 @@ mod tests {
             civil_to_unix_with(&one_thirty, &zone, FALL_BACK + 86_400),
             FALL_BACK - 1800
         );
+    }
+
+    #[test]
+    fn a_second_pass_time_reopened_before_the_switch_keeps_its_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // Scheduled for 01:20 CST, reopened the evening before.
+        let scheduled = FALL_BACK + 1200;
+        let now = FALL_BACK - 6 * 3600;
+        let shown = civil_at(scheduled, zone(scheduled));
+        assert_eq!(picked_instant(&shown, scheduled, &zone, now), scheduled);
+        // Moved to 01:25, it means the first pass again.
+        let moved = CivilTime {
+            minute: 25,
+            ..shown
+        };
+        assert_eq!(
+            picked_instant(&moved, scheduled, &zone, now),
+            FALL_BACK - 3600 + 1500
+        );
+    }
+
+    #[test]
+    fn a_first_pass_time_reopened_during_the_second_pass_keeps_its_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // An away schedule starting 01:30 CDT, saved again at 01:05 CST.
+        let start = FALL_BACK - 1800;
+        let shown = civil_at(start, zone(start));
+        assert_eq!(picked_instant(&shown, start, &zone, FALL_BACK + 300), start);
     }
 
     #[test]

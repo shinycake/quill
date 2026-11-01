@@ -13,7 +13,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{accent, bg_canvas};
 use super::composer_field::field_doc;
-use super::scheduled::{picked_unix, picker_value};
+use super::scheduled::{TimePicker, picked_unix};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
@@ -40,7 +40,7 @@ pub(super) struct ComposerDateDialog {
     range: Range<usize>,
     /// That text, to notice a draft that changed meanwhile.
     selected: String,
-    pub(super) picker: Entity<DatePickerState>,
+    pub(super) picker: TimePicker,
 }
 
 /// Midday today, local time: where a new date starts (tdesktop opens the
@@ -94,14 +94,12 @@ impl QuillApp {
         };
         let selected = selected.to_string();
         let initial = existing.map_or_else(|| midday_today(now_unix()), i64::from);
-        let picker = cx.new(|cx| {
+        let state = cx.new(|cx| {
             DatePickerState::new(window, cx)
                 .time_precision(TimePrecision::Minute)
                 .hour_cycle(HourCycle::H23)
         });
-        if let Some(value) = picker_value(initial, cx) {
-            picker.update(cx, |state, cx| state.set_date_time(value, window, cx));
-        }
+        let picker = TimePicker::open(state, initial, window, cx);
         self.composer_ui.date_dialog = Some(ComposerDateDialog {
             range,
             selected,
@@ -210,7 +208,7 @@ impl QuillApp {
                         .child(tr(keys::FORMATTING_DATE_TITLE)),
                 )
                 .child(
-                    DatePicker::new(&dialog.picker)
+                    DatePicker::new(&dialog.picker.state)
                         .placeholder(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME_2)),
                 )
                 .child(

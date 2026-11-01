@@ -446,7 +446,7 @@ impl QuillApp {
                 );
             if matches!(until, RestrictUntil::Custom(_)) {
                 body = body.child(
-                    DatePicker::new(&dialog_state.custom)
+                    DatePicker::new(&dialog_state.custom.state)
                         .placeholder(tr(keys::Q_PEOPLE_PICK_A_DATE_AND_TIME)),
                 );
             }

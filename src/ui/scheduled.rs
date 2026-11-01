@@ -86,7 +86,7 @@ pub(super) enum ScheduleTarget {
 /// The date+time picker popup (tdesktop's `ChooseDateTimeBox`).
 pub(super) struct SchedulePicker {
     pub target: ScheduleTarget,
-    pub date: Entity<DatePickerState>,
+    pub date: TimePicker,
     pub error: Option<&'static str>,
     /// The "Repeat" choice in seconds (zero: never), Premium only.
     pub repeat: i32,
@@ -131,6 +131,29 @@ fn local_day(unix: i64, clock: &WallClock) -> String {
     format!("{:04}-{:02}-{:02}", c.year, c.month, c.day)
 }
 
+/// A date picker and the instant it opened at, so a time left as it was
+/// keeps its own pass of a repeated hour.
+#[derive(Clone)]
+pub(crate) struct TimePicker {
+    pub(crate) state: Entity<DatePickerState>,
+    initial: i64,
+}
+
+impl TimePicker {
+    /// Shows `initial` in `state`.
+    pub(crate) fn open(
+        state: Entity<DatePickerState>,
+        initial: i64,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) -> Self {
+        if let Some(value) = picker_value(initial, cx) {
+            state.update(cx, |state, cx| state.set_date_time(value, window, cx));
+        }
+        Self { state, initial }
+    }
+}
+
 /// A date+time picker that opens at `initial` and allows days from today
 /// to `max_ahead_secs` ahead. Shared by the schedule popup and the
 /// restrict-until picker of the member dialogs.
@@ -139,7 +162,7 @@ pub(super) fn new_date_time_picker(
     cx: &mut Context<QuillApp>,
     initial: i64,
     max_ahead_secs: i64,
-) -> Entity<DatePickerState> {
+) -> TimePicker {
     let clock = WallClock::of(cx);
     let now = clock.now();
     // Days outside [today, today + max_ahead] cannot be picked.
@@ -154,21 +177,20 @@ pub(super) fn new_date_time_picker(
                 day < first_day || day > last_day
             }))
     });
-    if let Some(value) = picker_value(initial, cx) {
-        date.update(cx, |state, cx| state.set_date_time(value, window, cx));
-    }
-    date
+    TimePicker::open(date, initial, window, cx)
 }
 
 /// The unix time a date picker currently shows (local zone), if it holds
 /// a complete date and time.
-pub(super) fn picked_unix(date: &Entity<DatePickerState>, cx: &App) -> Option<i64> {
+pub(super) fn picked_unix(picker: &TimePicker, cx: &App) -> Option<i64> {
     let clock = WallClock::of(cx);
-    date.read(cx)
+    picker
+        .state
+        .read(cx)
         .date_time()
         .start()
         .and_then(|value| parse_picker_stamp(&value.format(tr(keys::Q_OPS_Y_M_D_H_M)).to_string()))
-        .map(|civil| clock.resolve(&civil))
+        .map(|civil| clock.resolve(&civil, picker.initial))
 }
 
 impl QuillApp {
@@ -495,7 +517,7 @@ impl QuillApp {
             .bg(cx.theme().popover)
             .child(div().text_sm().font_semibold().child(kind.picker_title()))
             .child(
-                DatePicker::new(&picker.date)
+                DatePicker::new(&picker.date.state)
                     .presets(presets)
                     .placeholder(tr(keys::Q_OPS_PICK_A_DATE_AND_TIME)),
             )

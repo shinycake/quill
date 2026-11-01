@@ -48,7 +48,7 @@ impl QuillApp {
             _ => now.saturating_add(i64::from(DAY)),
         };
         let picker = new_date_time_picker(window, cx, initial, CUSTOM_DATE_MAX_AHEAD);
-        cx.subscribe(&picker, |_, _, _: &DatePickerEvent, cx| cx.notify())
+        cx.subscribe(&picker.state, |_, _, _: &DatePickerEvent, cx| cx.notify())
             .detach();
         self.set_invite_link_custom(Some(CustomBox::Date(picker)), cx);
     }
@@ -157,7 +157,7 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title));
             let field = match this.invite_link_custom() {
-                Some(CustomBox::Date(picker)) => DatePicker::new(picker)
+                Some(CustomBox::Date(picker)) => DatePicker::new(&picker.state)
                     .placeholder(tr(keys::GROUP_INVITE_EXPIRE_AFTER))
                     .into_any_element(),
                 Some(CustomBox::Limit(input)) => Input::new(input).into_any_element(),
