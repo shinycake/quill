@@ -299,8 +299,6 @@ impl Drop for TgcallsEngine {
         for (_, call) in self.groups.drain() {
             group::retire_group(self.api, call);
         }
-        #[cfg(test)]
-        reaper::finish_teardowns_before_test_exit();
     }
 }
 
@@ -351,9 +349,35 @@ fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
 mod tests {
     use super::*;
 
-    fn engine() -> Option<TgcallsEngine> {
+    /// The engine for one test. Dropping it waits for the teardowns it
+    /// handed off: the test binary must not exit while one runs.
+    pub(super) struct TestEngine(Option<TgcallsEngine>);
+
+    impl std::ops::Deref for TestEngine {
+        type Target = TgcallsEngine;
+
+        fn deref(&self) -> &TgcallsEngine {
+            self.0.as_ref().expect("the engine lives until drop")
+        }
+    }
+
+    impl std::ops::DerefMut for TestEngine {
+        fn deref_mut(&mut self) -> &mut TgcallsEngine {
+            self.0.as_mut().expect("the engine lives until drop")
+        }
+    }
+
+    impl Drop for TestEngine {
+        fn drop(&mut self) {
+            if self.0.take().is_some() {
+                reaper::wait_for_teardowns_so_far();
+            }
+        }
+    }
+
+    pub(super) fn engine() -> Option<TestEngine> {
         match TgcallsEngine::load() {
-            Ok(engine) => Some(engine),
+            Ok(engine) => Some(TestEngine(Some(engine))),
             Err(_) => {
                 eprintln!("SKIP: libquill_calls not built; run scripts/build-tgcalls.sh");
                 None

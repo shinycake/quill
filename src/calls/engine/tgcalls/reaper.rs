@@ -39,6 +39,17 @@ impl Backlog {
         *self.count.lock_or_recover() == 0
     }
 
+    #[cfg(test)]
+    fn wait_drained(&self) {
+        let mut count = self.count.lock_or_recover();
+        while *count > 0 {
+            count = self
+                .empty
+                .wait(count)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
     fn wait_empty(&self, deadline: Instant) -> bool {
         let mut count = self.count.lock_or_recover();
         while *count > 0 {
@@ -132,12 +143,15 @@ extern "C" fn leave_if_stuck() {
     });
 }
 
+/// Blocks until every teardown handed off before this call has run: the
+/// reaper runs them in order, so a marker queued now runs after them.
 #[cfg(test)]
-pub(super) fn finish_teardowns_before_test_exit() {
-    if let Some(reaper) = REAPER.get() {
-        let far = Instant::now() + std::time::Duration::from_secs(60);
-        assert!(reaper.backlog.wait_empty(far), "a teardown never finished");
-    }
+pub(super) fn wait_for_teardowns_so_far() {
+    let (ran, marker) = std::sync::mpsc::channel::<()>();
+    hand_off(move || {
+        let _ = ran.send(());
+    });
+    let _ = marker.recv();
 }
 
 #[cfg(test)]
@@ -156,8 +170,7 @@ mod tests {
         assert!(!reaper.backlog.wait_empty(Instant::now()));
         assert!(!reaper.backlog.is_empty(), "exit would use _exit");
         drop(release);
-        let far = Instant::now() + std::time::Duration::from_secs(60);
-        assert!(reaper.backlog.wait_empty(far));
+        reaper.backlog.wait_drained();
         assert!(reaper.backlog.is_empty());
     }
 
@@ -221,7 +234,6 @@ mod tests {
             let _ = done.send(());
         }));
         assert_eq!(finished.recv(), Ok(()));
-        let far = Instant::now() + std::time::Duration::from_secs(60);
-        assert!(reaper.backlog.wait_empty(far));
+        reaper.backlog.wait_drained();
     }
 }
