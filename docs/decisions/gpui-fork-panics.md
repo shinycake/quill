@@ -145,6 +145,14 @@ platform. Each is fixed in its own commit:
   when they differ. Either the window was listed in time for recovery's
   read, or the platform already holds the new devices when it checks, so
   no window misses both.
+- `timer_thread.rs` had no test. Its decisions (stop, fire what is due,
+  sleep until woken, or sleep for the next deadline and whether to hold the
+  1 ms system timer), the waitable timer's relative due time and the
+  fallback wait's timeout moved to the std-only `timer_step.rs`, which
+  `scripts/test-timer-step.sh` builds with `timer_queue.rs` and runs on any
+  host, in CI's Linux job. `timer_thread.rs` keeps only the Win32 calls.
+  Moving the timeout found one edge: a wait of exactly `u32::MAX` ms became
+  `INFINITE`; it is now clamped below that.
 
 ### macOS (`gpui-pre-macos`)
 

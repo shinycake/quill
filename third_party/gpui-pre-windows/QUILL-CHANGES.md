@@ -451,3 +451,9 @@ Added in 2026, after an audit of the earlier panic pass
   window's device against the platform's current one and, when recovery
   replaced the devices meanwhile, sends the window `WM_GPUI_GPU_DEVICE_LOST`
   with the new ones (`hand_over_recovered_devices`).
+- `src/timer_step.rs` (new, std-only; unit tests run with
+  `scripts/test-timer-step.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the timer thread's next step from its state and the clock, the relative
+  `SetWaitableTimer` due time and the fallback wait's timeout.
+  `src/timer_thread.rs` uses it and keeps only the Win32 calls.
+  `src/gpui_windows.rs` declares the module.

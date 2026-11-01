@@ -1,7 +1,7 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // adds the frame_idle, gpui_message, notification_extras, native_frame, hdr_output,
-// refresh_interval, surface_support, window_list, timer_queue and timer_thread modules. See
-// third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// refresh_interval, surface_support, window_list, timer_queue, timer_step and timer_thread
+// modules. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 #![cfg(target_os = "windows")]
 
 mod clipboard;
@@ -21,12 +21,13 @@ pub mod hdr_output;
 mod keyboard;
 pub mod native_frame;
 pub mod notification_extras;
-mod surface_support;
 mod platform;
 mod refresh_interval;
+mod surface_support;
 mod system_notifications;
 mod system_settings;
 mod timer_queue;
+mod timer_step;
 mod timer_thread;
 mod util;
 mod vsync;

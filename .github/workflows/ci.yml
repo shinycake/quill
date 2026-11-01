@@ -109,6 +109,8 @@ jobs:
         run: bash scripts/test-window-list.sh
       - name: tests (vendored GPUI timer queue)
         run: bash scripts/test-timer-queue.sh
+      - name: tests (vendored GPUI timer thread steps)
+        run: bash scripts/test-timer-step.sh
       - name: tests (vendored GPUI window messages)
         run: bash scripts/test-gpui-message.sh
       - name: tests (vendored GPUI device recovery)

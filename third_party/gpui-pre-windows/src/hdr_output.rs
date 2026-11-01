@@ -65,8 +65,7 @@ impl HdrDisplayInfo {
     }
 }
 
-static WANTED: LazyLock<Mutex<HashMap<isize, bool>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static WANTED: LazyLock<Mutex<HashMap<isize, bool>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static INFO: LazyLock<Mutex<HashMap<isize, (Instant, HdrDisplayInfo)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
