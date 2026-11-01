@@ -547,7 +547,12 @@ pub fn open_mailto_url(url: &str) -> OsOpen {
 /// for the OS stays with the user, whichever link, button or file the
 /// agent reached. `what` is the verb phrase the refusal names.
 fn os_open(target: &std::ffi::OsStr, what: &str) -> OsOpen {
-    os_gate(what).unwrap_or_else(|| os_open_now(target))
+    if let Some(answer) = os_gate(what) {
+        return answer;
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    test_launches::note_target(target);
+    os_open_now(target)
 }
 
 /// The answer for a hand-off to the OS that must not go ahead: refused
@@ -670,6 +675,16 @@ mod test_launches {
     thread_local! {
         static LAUNCHES: Cell<usize> = const { Cell::new(0) };
         static NEXT_ANSWER: Cell<Option<OsOpen>> = const { Cell::new(None) };
+        static LAST_TARGET: std::cell::RefCell<Option<String>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    pub(super) fn note_target(target: &std::ffi::OsStr) {
+        LAST_TARGET.with(|last| *last.borrow_mut() = Some(target.to_string_lossy().into_owned()));
+    }
+
+    pub(super) fn last_target() -> Option<String> {
+        LAST_TARGET.with(|last| last.borrow().clone())
     }
 
     pub(super) fn script_answer(answer: OsOpen) {
@@ -695,6 +710,12 @@ mod test_launches {
 #[cfg(any(test, feature = "test-support"))]
 pub fn os_launch_attempts() -> usize {
     test_launches::count()
+}
+
+/// Test builds only: the last link or file this thread handed to the OS.
+#[cfg(any(test, feature = "test-support"))]
+pub fn os_opened_last() -> Option<String> {
+    test_launches::last_target()
 }
 
 /// The next open on this thread gets `answer`.
