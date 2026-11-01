@@ -16,7 +16,6 @@ use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -196,10 +195,17 @@ impl QuillApp {
         self.playback.gif_decodes.insert(message_id, cancel.clone());
         let max_edge = self.gif_decode_edge(message_id, cx);
         Self::spawn_main(cx, async move |this, cx| {
-            let decoded = cx
-                .background_executor()
-                .spawn(async move { GifClip::decode(&path, max_edge, &cancel) })
-                .await;
+            let (first, first_in) = futures_channel::oneshot::channel();
+            let decode = cx.background_executor().spawn(async move {
+                GifClip::decode(&path, max_edge, &cancel, |clip| {
+                    let _ = first.send(clip);
+                })
+            });
+            // The first picture plays while the rest decode.
+            if let Ok(clip) = first_in.await {
+                let _ = this.update(cx, |this, cx| this.gif_started(message_id, clip, cx));
+            }
+            let decoded = decode.await;
             let _ = this.update(cx, |this, cx| {
                 this.gif_decoded(message_id, file_id, decoded, cx);
             });
@@ -248,25 +254,42 @@ impl QuillApp {
         InlineTile::media(MediaFrameKind::Gif, width, height, caption).decode_edge(scale)
     }
 
+    /// The GIF's first picture is in: it plays from here.
+    fn gif_started(&mut self, message_id: MessageId, clip: Arc<GifClip>, cx: &mut Context<Self>) {
+        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
+            return;
+        }
+        self.playback.gif = Some(clip);
+        self.playback.gif_started_at = Some(Instant::now());
+        self.connection
+            .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
+        self.notify_conversation(cx);
+        cx.notify();
+    }
+
     fn gif_decoded(
         &mut self,
         message_id: MessageId,
         file_id: FileId,
-        decoded: Result<GifClip, GifError>,
+        decoded: Result<Arc<GifClip>, GifError>,
         cx: &mut Context<Self>,
     ) {
         self.playback.gif_decodes.remove(&message_id);
-        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
-            // Stopped or replaced meanwhile: the pictures were never shown.
+        if self.playback.playing_animation != Some(message_id) {
+            // Stopped or replaced meanwhile.
             return;
         }
         match decoded {
-            Ok(clip) => {
-                self.playback.gif = Some(Rc::new(clip));
-                self.playback.gif_started_at = Some(Instant::now());
-                self.connection
-                    .set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
-            }
+            // Already playing since its first picture: the rest is in.
+            Ok(clip)
+                if self
+                    .playback
+                    .gif
+                    .as_ref()
+                    .is_some_and(|playing| Arc::ptr_eq(playing, &clip)) => {}
+            // Another clip of the same GIF is playing.
+            _ if self.playback.gif.is_some() => return,
+            Ok(clip) => self.gif_started(message_id, clip, cx),
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
                 self.playback.playing_animation = None;
