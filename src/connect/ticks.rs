@@ -118,7 +118,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// tdesktop reads the OS proxy for each new connection, so ask while
-    /// TDLib is opening one.
+    /// TDLib is opening one, and while it waits for a network that a proxy
+    /// set just now could give it.
     fn reread_system_proxy(&mut self, now: Instant) {
         if self.wants_system_proxy()
             && crate::system_proxy::reread_due(

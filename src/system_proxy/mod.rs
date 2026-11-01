@@ -157,7 +157,9 @@ pub fn refresh() {
 pub fn reread_due(connection: ConnectionState, asked: Option<Instant>, now: Instant) -> bool {
     matches!(
         connection,
-        ConnectionState::Connecting | ConnectionState::ConnectingToProxy
+        ConnectionState::WaitingForNetwork
+            | ConnectionState::Connecting
+            | ConnectionState::ConnectingToProxy
     ) && asked.is_none_or(|at| now.saturating_duration_since(at) >= REREAD_EVERY)
 }
 

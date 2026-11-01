@@ -109,7 +109,6 @@ fn only_a_connection_being_opened_asks_again_and_not_too_often() {
     for quiet in [
         ConnectionState::Ready,
         ConnectionState::Updating,
-        ConnectionState::WaitingForNetwork,
         ConnectionState::Initial,
     ] {
         assert!(!reread_due(quiet, None, start));
@@ -117,6 +116,7 @@ fn only_a_connection_being_opened_asks_again_and_not_too_often() {
     let connecting = ConnectionState::Connecting;
     assert!(reread_due(connecting, None, start));
     assert!(reread_due(ConnectionState::ConnectingToProxy, None, start));
+    assert!(reread_due(ConnectionState::WaitingForNetwork, None, start));
     assert!(!reread_due(connecting, Some(start), start));
     assert!(!reread_due(
         connecting,

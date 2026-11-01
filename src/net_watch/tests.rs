@@ -1,4 +1,4 @@
-use super::{Path, Route, Tracker};
+use super::{NO_SUCH_IP_VERSION, Path, Route, Tracker};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -41,9 +41,16 @@ fn offline_takes_proof() {
     assert!(on(Path::Unknown, Path::Unknown).available());
     assert!(!on(Path::NoRoute, Path::NoRoute).available());
     assert!(
-        !on(Path::NoRoute, Path::Unknown).available(),
-        "a system with no IPv6 at all"
+        on(Path::Unknown, Path::NoRoute).available(),
+        "a firewall refusing UDP on a network with no IPv6"
     );
+    assert!(on(Path::NoRoute, Path::Unknown).available());
+}
+
+#[test]
+fn a_system_with_no_ipv6_has_no_route_over_it() {
+    let v6 = Path::of(Err(io::Error::from_raw_os_error(NO_SUCH_IP_VERSION)));
+    assert!(!on(Path::NoRoute, v6).available());
 }
 
 #[test]

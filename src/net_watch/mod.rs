@@ -26,6 +26,12 @@ const TELEGRAM_V6: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
     0,
 ));
 
+/// A kernel built or booted without IPv6 answers this to the socket call.
+#[cfg(unix)]
+const NO_SUCH_IP_VERSION: i32 = libc::EAFNOSUPPORT;
+#[cfg(windows)]
+const NO_SUCH_IP_VERSION: i32 = 10047; // WSAEAFNOSUPPORT
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Path {
     Via(IpAddr),
@@ -39,12 +45,13 @@ impl Path {
             Ok(local) if local.ip().is_unspecified() => Self::NoRoute,
             Ok(local) => Self::Via(local.ip()),
             Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::NetworkUnreachable
-                        | io::ErrorKind::HostUnreachable
-                        | io::ErrorKind::AddrNotAvailable
-                ) =>
+                error.raw_os_error() == Some(NO_SUCH_IP_VERSION)
+                    || matches!(
+                        error.kind(),
+                        io::ErrorKind::NetworkUnreachable
+                            | io::ErrorKind::HostUnreachable
+                            | io::ErrorKind::AddrNotAvailable
+                    ) =>
             {
                 Self::NoRoute
             }
@@ -60,11 +67,10 @@ struct Route {
 }
 
 impl Route {
-    /// Offline takes proof: TDLib stops trying on `networkTypeNone`, so an
-    /// odd failure must not read as "no network".
+    /// Offline takes proof on both IP versions: TDLib stops trying on
+    /// `networkTypeNone`, so an odd failure must not read as "no network".
     fn available(self) -> bool {
-        let paths = [self.v4, self.v6];
-        paths.iter().any(|path| matches!(path, Path::Via(_))) || !paths.contains(&Path::NoRoute)
+        self.v4 != Path::NoRoute || self.v6 != Path::NoRoute
     }
 }
 
