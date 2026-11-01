@@ -731,7 +731,7 @@ impl QuillApp {
                 {
                     // Plays once from its first frame, whatever the loop
                     // setting says.
-                    entry.view = Some((view, Instant::now()));
+                    entry.view = Some((view, now));
                     // tdesktop `stickerClearLoopPlayed` as an interaction
                     // starts: the lone emoji under it plays along.
                     if !entry.premium && entry.message.is_none() {
@@ -749,7 +749,7 @@ impl QuillApp {
                 a.message
                     .is_none_or(|play| play.missing.is_none_or(|at| badge_within_grace(now, at)))
                     && match &a.view {
-                        Some((view, given)) => still_playing(view, *given, Instant::now()),
+                        Some((view, given)) => still_playing(view, *given, now),
                         None => !sticker_wait_over(now, a.queued, a.wait),
                     }
             });
