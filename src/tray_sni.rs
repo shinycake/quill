@@ -10,7 +10,9 @@
 //!
 //! Registration happens on a short-lived worker thread so a slow or hung
 //! session bus can never stall the UI thread; [`TrayState::poll`] (called
-//! from the 1s tray sync) picks the result up. When no
+//! from the 1s tray sync) picks the result up. Each D-Bus step the workers
+//! wait on gives up after [`DBUS_LIMIT`], so a wedged bus leaves no thread
+//! behind and the tray registers again. When no
 //! `StatusNotifierWatcher` exists (stock GNOME without the AppIndicator
 //! extension) registration fails, `available()` stays false, and the
 //! close/minimize-to-tray switches stay hidden. Registration is retried
@@ -22,13 +24,29 @@ use crate::locks::LockExt;
 use crate::tray::{
     TrayAction, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label, tray_tooltip,
 };
-use ksni::blocking::{Handle, TrayMethods};
-use std::sync::Mutex;
+use ksni::{Handle, TrayMethods};
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Delay between registration attempts while the desktop has no tray host.
 pub const RETRY_EVERY: Duration = Duration::from_secs(10);
+
+/// How long a worker waits on the tray service before giving up.
+const DBUS_LIMIT: Duration = crate::child_timeout::DESKTOP_QUERY_LIMIT;
+
+/// Run `step` on this thread, or `None` when it has not finished within `limit`.
+fn within<T>(limit: Duration, step: impl Future<Output = T>) -> Option<T> {
+    async_io::block_on(futures_lite::future::or(
+        async { Some(step.await) },
+        async {
+            async_io::Timer::after(limit).await;
+            None
+        },
+    ))
+}
 
 /// Actions clicked in the tray menu, drained by [`take_actions`] on the UI
 /// thread (ksni calls the menu callbacks on its own thread).
@@ -149,29 +167,41 @@ type Shown = (u32, (bool, bool));
 /// task, which waits on the session bus, so calling it here could hang the
 /// UI thread on a wedged bus; the worker takes only the newest state.
 struct Publisher {
-    slot: std::sync::Arc<LatestSlot<Option<Shown>>>,
+    slot: Arc<LatestSlot<Option<Shown>>>,
+    /// The worker stopped: the service is gone or did not answer in time.
+    stopped: Arc<AtomicBool>,
 }
 
 impl Publisher {
-    /// `apply` returns false once the tray service is gone; the worker then
-    /// stops.
-    fn spawn(mut apply: impl FnMut(Shown) -> bool + Send + 'static) -> Self {
-        let slot = std::sync::Arc::new(LatestSlot::new());
+    /// `apply` answers false once the tray service is gone; it and an
+    /// `apply` still waiting after `limit` stop the worker.
+    fn spawn<F>(limit: Duration, mut apply: impl FnMut(Shown) -> F + Send + 'static) -> Self
+    where
+        F: Future<Output = bool>,
+    {
+        let slot = Arc::new(LatestSlot::new());
+        let stopped = Arc::new(AtomicBool::new(false));
         let worker = slot.clone();
+        let done = stopped.clone();
         // A worker that cannot spawn leaves the slot undrained, so the icon
         // keeps its old count until the next registration.
         let _ = crate::thread_guard::spawn_guarded("quill-tray-update", move || {
             while let Some(shown) = worker.take() {
-                if !apply(shown) {
-                    return;
+                if within(limit, apply(shown)) != Some(true) {
+                    break;
                 }
             }
+            done.store(true, Ordering::Release);
         });
-        Self { slot }
+        Self { slot, stopped }
     }
 
     fn publish(&self, shown: Shown) {
         self.slot.put(Some(shown));
+    }
+
+    fn stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
     }
 }
 
@@ -183,13 +213,17 @@ impl Drop for Publisher {
 
 fn spawn_publisher(handle: &Handle<SniTray>) -> Publisher {
     let handle = handle.clone();
-    Publisher::spawn(move |(unread, toggles)| {
-        handle
-            .update(|tray| {
-                tray.unread = unread;
-                tray.toggles = toggles;
-            })
-            .is_some()
+    Publisher::spawn(DBUS_LIMIT, move |(unread, toggles)| {
+        let handle = handle.clone();
+        async move {
+            handle
+                .update(|tray| {
+                    tray.unread = unread;
+                    tray.toggles = toggles;
+                })
+                .await
+                .is_some()
+        }
     })
 }
 
@@ -257,6 +291,10 @@ impl TrayState {
                 if handle.is_closed() {
                     // The watcher went away (shell restart): register again.
                     self.phase = Phase::Idle(Instant::now());
+                } else if publisher.stopped() {
+                    // The service stopped answering: start a fresh one.
+                    let _ = handle.shutdown();
+                    self.phase = Phase::Idle(Instant::now() + RETRY_EVERY);
                 } else if *shown != (unread, toggles) {
                     publisher.publish((unread, toggles));
                     *shown = (unread, toggles);
@@ -277,10 +315,8 @@ fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Han
     // If the thread cannot spawn, `sender` is dropped with the closure and
     // the receiver reports `Disconnected`, which schedules a retry.
     let _ = crate::thread_guard::spawn_guarded("quill-tray-sni", move || {
-        let handle = SniTray { unread, toggles }
-            .disable_dbus_name(sandboxed())
-            .spawn()
-            .ok();
+        let tray = SniTray { unread, toggles }.disable_dbus_name(sandboxed());
+        let handle = within(DBUS_LIMIT, tray.spawn()).and_then(Result::ok);
         let _ = sender.send(handle);
     });
     receiver
@@ -295,9 +331,9 @@ mod tests {
     fn publishing_never_waits_for_the_tray_service() {
         let (seen_tx, seen_rx) = channel();
         let (release_tx, release_rx) = sync_channel::<()>(0);
-        let publisher = Publisher::spawn(move |shown| {
+        let publisher = Publisher::spawn(Duration::MAX, move |shown| {
             seen_tx.send(shown).unwrap();
-            release_rx.recv().is_ok()
+            std::future::ready(release_rx.recv().is_ok())
         });
         publisher.publish((1, (true, true)));
         // The worker is now stuck inside the first update, like ksni on a
@@ -313,5 +349,21 @@ mod tests {
             seen_rx.recv().is_err(),
             "the worker stops with its publisher"
         );
+    }
+
+    /// A service that takes the update and never answers (a wedged bus)
+    /// stops the worker instead of keeping its thread, and the tray sees it.
+    #[test]
+    fn a_tray_service_that_never_answers_leaves_no_thread_behind() {
+        let (seen_tx, seen_rx) = channel();
+        let publisher = Publisher::spawn(Duration::from_millis(1), move |shown| {
+            seen_tx.send(shown).unwrap();
+            std::future::pending()
+        });
+        publisher.publish((1, (true, true)));
+        assert_eq!(seen_rx.recv().unwrap(), (1, (true, true)));
+        // The worker gave up and dropped `apply` with it.
+        assert!(seen_rx.recv().is_err());
+        assert!(publisher.stopped());
     }
 }

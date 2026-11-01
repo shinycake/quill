@@ -218,7 +218,7 @@ optional = true
 tray-icon = { version = "0.26", optional = true, default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io", "blocking"] }
+ksni = { version = "0.3", optional = true, default-features = false, features = ["async-io"] }
 # MPRIS (org.mpris.MediaPlayer2) on the session bus; same zbus GPUI and ksni already link.
 zbus = { version = "5", optional = true }
 # Passkeys from a phone: the BlueZ scan (src/webauthn/hybrid/ble_linux.rs)
