@@ -510,7 +510,6 @@ impl QuillApp {
 /// a quarter of the tile), rendered at twice the size for Retina edges, so
 /// one small image serves every tile with that radius: a mask of the whole
 /// tile cost MBs for each tile size and window width.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(super) fn corner_mask(
     corner: usize,
     radius: u32,
@@ -574,7 +573,6 @@ pub(super) fn corner_mask(
 
 /// The device-pixel size of a [`corner_mask`]: its radius square at twice
 /// the size, no more than half the tile.
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub(super) fn corner_mask_size(radius: u32, tile: (u32, u32)) -> (u32, u32) {
     (
         radius.saturating_mul(2).min(tile.0),

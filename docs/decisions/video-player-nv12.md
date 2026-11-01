@@ -38,7 +38,8 @@ That cuts the upload to 3 MB and removes the CPU conversion.
 - Per platform:
   - macOS still paints `CVPixelBuffer` surfaces.
   - The Linux wgpu renderer (registry crate, not vendored) still draws no
-    surfaces, so Linux stays on BGRA images.
+    surfaces, so Linux stays on BGRA images. Later superseded: the crate
+    is vendored now and Linux takes this path too (`video-nv12-linux.md`).
 
   The doc comment on `SurfaceFrame` says so.
 

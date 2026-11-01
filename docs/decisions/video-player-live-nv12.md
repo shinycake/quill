@@ -57,8 +57,8 @@ conversion and most of the upload could go.
   newest frame has not changed.
 - On Windows the picture is `Picture::Surface(Arc<SurfaceFrame>)`. The
   same surface element as file video paints it. macOS keeps its
-  `CVPixelBufferPool`. Linux keeps BGRA images, because its renderer
-  draws no surfaces.
+  `CVPixelBufferPool`. Linux joined Windows later
+  (`video-nv12-linux.md`).
 - `SURFACES_HELD` is 1 on Windows. Holding the frame on screen is
   enough, because a pool buffer is reused only when no frame holds it.
 - A refusal is handled as in the file backend:

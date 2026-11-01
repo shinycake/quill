@@ -3,6 +3,7 @@ mod device_recovery;
 mod wgpu_atlas;
 mod wgpu_context;
 mod wgpu_renderer;
+mod yuv_surfaces;
 
 pub use cosmic_text_system::*;
 pub use wgpu;

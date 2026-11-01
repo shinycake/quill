@@ -996,9 +996,8 @@ impl YuvColor {
 /// frame's pixels never change; its HDR headroom may.
 ///
 /// Which platforms draw them: Windows (the vendored DirectX renderer)
-/// draws both formats. Linux (the registry gpui-pre-wgpu renderer) draws
-/// no surfaces, and macOS draws CoreVideo buffers instead, so a producer
-/// hands these over only on Windows and keeps to images elsewhere. The
+/// draws both formats, Linux (the vendored gpui-pre-wgpu renderer) draws
+/// NV12, and macOS draws CoreVideo buffers instead. The
 /// renderer reports each frame's [`SurfaceDrawState`]; a producer replaces
 /// a refused frame with an image.
 #[derive(Debug)]

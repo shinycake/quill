@@ -1,26 +1,24 @@
 //! Surface pictures, per platform: an AVPlayer pixel buffer on macOS, and
-//! on Windows an NV12 picture from the FFmpeg decoder that the vendored
-//! DirectX renderer uploads as two textures and converts to RGB on the GPU
-//! (`docs/decisions/video-player-nv12.md`). Linux has none: its renderer
-//! (the registry `gpui-pre-wgpu`) draws no surfaces, so pictures stay BGRA
-//! images there.
+//! on Windows and Linux an NV12 picture from the FFmpeg decoder that the
+//! vendored DirectX or wgpu renderer uploads as two textures and converts
+//! to RGB on the GPU (`docs/decisions/video-player-nv12.md`).
 //!
 //! The NV12 helpers build on every platform (a `SurfaceFrame` is plain
-//! data), so their tests run on any machine; only Windows asks the decoder
+//! data), so their tests run on any machine; macOS doesn't ask the decoder
 //! for NV12 ([`NV12_SURFACES`]).
 #![deny(clippy::indexing_slicing)]
-// The NV12 frame helpers serve the Windows path only.
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+// The NV12 frame helpers serve the Windows and Linux path.
+#![cfg_attr(target_os = "macos", allow(dead_code))]
 
 use super::rotate;
 use gpui_kit::{RenderImage, SurfaceFormat, SurfaceFrame};
 use quill::video_decode::{Pixels, VideoFrame};
 use std::sync::Arc;
 
-/// Whether this platform's renderer draws NV12 surfaces: Windows only.
+/// Whether this platform's renderer draws NV12 surfaces: all but macOS.
 /// Each window's renderer then says per frame whether it drew it
 /// ([`draw_state`]); a refused frame is shown as an image.
-pub(super) const NV12_SURFACES: bool = cfg!(target_os = "windows");
+pub(super) const NV12_SURFACES: bool = cfg!(not(target_os = "macos"));
 
 /// The decoder's colour description as the GPUI core's.
 pub(super) fn gpui_color(color: quill::video_decode::YuvColor) -> gpui_kit::YuvColor {
@@ -131,7 +129,7 @@ pub(super) fn surface_size(surface: &super::SurfaceHandle) -> (u32, u32) {
     )
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "macos"))]
 pub(super) fn surface_size(surface: &super::SurfaceHandle) -> (u32, u32) {
     (surface.width(), surface.height())
 }
@@ -146,7 +144,7 @@ pub(super) fn turn_surface(
     rotate::turn_surface(surface, turns, mirror)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "macos"))]
 pub(super) fn turn_surface(
     surface: &super::SurfaceHandle,
     turns: u8,
@@ -163,7 +161,7 @@ pub(super) fn snapshot(_surface: &super::SurfaceHandle) -> Option<Arc<RenderImag
 }
 
 /// The surface as an image to copy out (converted on the CPU).
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "macos"))]
 pub(super) fn snapshot(surface: &super::SurfaceHandle) -> Option<Arc<RenderImage>> {
     frame_image(surface)
 }
@@ -175,7 +173,7 @@ pub(super) fn draw_state(_surface: &super::SurfaceHandle) -> gpui_kit::SurfaceDr
     gpui_kit::SurfaceDrawState::Drawn
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(not(target_os = "macos"))]
 pub(super) fn draw_state(surface: &super::SurfaceHandle) -> gpui_kit::SurfaceDrawState {
     surface.draw_state()
 }

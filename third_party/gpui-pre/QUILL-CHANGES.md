@@ -38,9 +38,9 @@ DirectX renderer as YUV instead of BGRA (`docs/decisions/video-player-nv12.md`):
   (`SurfaceFrame::with_yuv`, `yuv`); `YuvColor::rgb_rows` is the one place
   the matrix and range become the numbers a renderer uploads.
   `SurfaceFrame::nv12_planes` splits the two planes.
-- Only the vendored Windows renderer draws NV12. macOS keeps CoreVideo
-  surfaces and Linux (gpui-pre-wgpu) draws no surfaces, so Quill produces
-  NV12 frames on Windows only.
+- The vendored Windows and wgpu (Linux) renderers draw NV12 (the wgpu one
+  since `docs/decisions/video-nv12-linux.md`). macOS keeps CoreVideo
+  surfaces.
 - `SurfaceFrame::draw_state` / `mark_drawn` / `mark_refused` and
   `SurfaceDrawState { Pending, Drawn, Refused }`: the renderer that draws a
   frame says what happened to it, so the producer can replace a frame its

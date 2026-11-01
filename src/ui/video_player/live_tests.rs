@@ -442,8 +442,8 @@ fn a_mirrored_feed_converts_mirrored() {
     assert_ne!(plain, mirrored);
 }
 
-// Windows' NV12 path (`live_surface.rs`), forced on so it runs on every
-// machine. Off Windows no renderer draws NV12 frames, so a frame shown
+// The Windows and Linux NV12 path (`live_surface.rs`), forced on so it runs
+// on every machine. On macOS no renderer draws NV12 frames, so a frame shown
 // there is its CPU image; the NV12 state, the pause and the buffers are
 // the same code.
 
@@ -564,11 +564,11 @@ fn a_refused_frame_is_replaced_by_its_image_and_images_follow_for_the_pause() {
     source.push(frame(4, 64, 36, t0 + NV12_RETRY));
     assert_eq!(format(&backend.take_picture(&present())), Some("nv12"));
     // Every image of the pause leaves the atlas: the refused frame's and
-    // the two BGRA frames. On Windows the NV12 frame after them retires
-    // both kept images; elsewhere NV12 frames are images themselves.
+    // the two BGRA frames. Off macOS the NV12 frame after them retires
+    // both kept images; on macOS NV12 frames are images themselves.
     let retired = core.take_retired().len();
     let kept = core.take_all_images().len();
-    if cfg!(target_os = "windows") {
+    if cfg!(not(target_os = "macos")) {
         assert_eq!((retired, kept), (3, 0));
     } else {
         assert_eq!((retired, kept), (3, 2));
