@@ -526,3 +526,84 @@ fn a_live_view_that_painted_nothing_inside_another_shows_once(cx: &mut TestAppCo
         .collect();
     assert_eq!(hues, vec![FIRST, SECOND], "the inner view paints once");
 }
+
+struct CachedHost {
+    inner: Entity<Live>,
+}
+
+impl Render for CachedHost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.inner.clone().live())
+    }
+}
+
+/// A fill that notifies the page, beside a cached view holding a live one.
+struct CachedPage {
+    host: Entity<CachedHost>,
+    under: f32,
+}
+
+impl Render for CachedPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .relative()
+            .child(div().absolute().size(px(100.)).bg(color(self.under)))
+            .child(
+                div().absolute().size(px(50.)).child(
+                    self.host
+                        .clone()
+                        .cached(gpui_kit::StyleRefinement::default().size_full()),
+                ),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn a_live_view_in_a_cached_view_keeps_its_latest_paint_through_a_whole_frame(
+    cx: &mut TestAppContext,
+) {
+    cx.update(gpui_kit::init);
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Live {
+            hue: FIRST,
+            renders: Rc::default(),
+            kept: Rc::default(),
+        });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        CachedPage {
+            host: cx.new(|_| CachedHost { inner }),
+            under: UNDER,
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+
+    inner.update(&mut vcx, |live, cx| {
+        live.hue = SECOND;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    let page = handle.root(&mut vcx).expect("the page");
+    page.update(&mut vcx, |page, cx| {
+        page.under = THIRD;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+
+    let hues: Vec<_> = vcx
+        .update(|window, _| window.painted_quads())
+        .iter()
+        .filter_map(|quad| quad.background.as_solid())
+        .map(|color| color.h)
+        .collect();
+    assert_eq!(
+        hues,
+        vec![THIRD, SECOND],
+        "the live view keeps what it last drew"
+    );
+}

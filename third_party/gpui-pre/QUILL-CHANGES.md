@@ -456,6 +456,8 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   and nothing is sent.
 - A live view whose element path runs through another live view's is drawn by
   that one, so a patch skips it as a site of its own.
+- The whole frame after a patch marks every live view it drew dirty, so a cached
+  view holding one renders again instead of replaying an older paint.
 
 What a live view builds takes no clicks and no hover, so it suits content that only
 shows. `Window::frame_number` counts these frames like any other.

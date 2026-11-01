@@ -106,6 +106,21 @@ impl Window {
             .all_views(|view| sites.iter().any(|site| site.is(view)))
     }
 
+    /// A whole frame follows patches, which drew every live view of the last
+    /// whole frame again. A cached view holding one would replay its older
+    /// paint, so each renders again, and its ancestors with it.
+    pub(super) fn dirty_patched_live_views(&mut self) {
+        let views: SmallVec<[EntityId; 4]> = self
+            .rendered_frame
+            .live_views
+            .iter()
+            .map(|site| site.view.entity_id())
+            .collect();
+        for view in views {
+            self.mark_view_dirty(view);
+        }
+    }
+
     /// Draw this frame by rendering every live view again, the ones not
     /// notified too (the scene they were painted into may be older than
     /// what they last showed).

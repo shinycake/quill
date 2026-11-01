@@ -3525,7 +3525,8 @@ impl Window {
         if self.platform_window.prepare_frame() {
             self.refresh();
         }
-        if mem::take(&mut self.scene_patched) {
+        let after_patch = mem::take(&mut self.scene_patched);
+        if after_patch {
             self.next_frame.scene.clear();
         }
         if self.only_live_views_changed(cx) {
@@ -3533,6 +3534,9 @@ impl Window {
             #[cfg(feature = "profiler")]
             self.end_draw_profile(cx, frame_dirty);
             return arena_scope.exit(&cx.element_arena);
+        }
+        if after_patch {
+            self.dirty_patched_live_views();
         }
         self.invalidate_entities();
         cx.entities.clear_accessed();

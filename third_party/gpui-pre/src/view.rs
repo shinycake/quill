@@ -266,9 +266,10 @@ impl<T: Render> Entity<T> {
     /// included ([`Window::draw`]). So nothing around a live view may depend
     /// on its being rendered, and it can't change the window's layout, hit
     /// tests, focus or accessibility tree: those stay as the last whole frame
-    /// left them, and what it builds in such a frame only paints. A live
-    /// view in a cached view that replays takes the usual path through its
-    /// ancestors, and one inside another live view redraws with it.
+    /// left them, and what it builds in such a frame only paints. A cached
+    /// view holding a live view that redrew on its own renders again in the
+    /// next whole frame rather than replay, and a live view inside another
+    /// live view redraws with it.
     #[track_caller]
     pub fn live(self) -> ViewElement<Entity<T>> {
         let live = AnyView::from(self.clone());
