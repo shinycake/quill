@@ -2143,7 +2143,12 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         // Quill: GPUI's effect flushes call `schedule_frame` while the
-        // window is dirty, before the draw that cleans it.
+        // window is dirty, before the draw that cleans it. Clearing it here
+        // also drops a `schedule_frame` raised during paint; that is safe
+        // only because GPUI asks again after the draw from live state (the
+        // post-frame check in `Window::new` and the effect flush in
+        // `App::flush_effects`). A frame asked for only during paint would
+        // leave the display link stopped.
         self.2.demand.store(false, Ordering::Relaxed);
         self.2.drew.store(true, Ordering::Relaxed);
         let mut this = self.0.lock();
