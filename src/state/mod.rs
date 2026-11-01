@@ -113,6 +113,7 @@ mod session_forum;
 mod session_main_profile_tab;
 mod session_topic_load;
 mod session_video_chat_caps;
+mod unread_revision;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;

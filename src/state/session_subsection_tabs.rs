@@ -489,8 +489,7 @@ impl Session {
                 trace_topic_unread("markRead(local)", chat_id.0, topic);
             });
         if marked.is_some() {
-            // The unread badges recount on a revision change.
-            self.revision = self.revision.wrapping_add(1);
+            self.touch_unread();
         }
     }
 }

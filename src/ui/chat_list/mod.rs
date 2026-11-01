@@ -674,6 +674,7 @@ impl QuillApp {
                     chat.in_main_list
                 }
             });
+            session.touch_unread();
         }
         cx.notify();
     }

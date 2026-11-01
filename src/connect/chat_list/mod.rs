@@ -247,8 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(pending) = self.session.requests.pending_mut(extra) {
                 pending.rollback = Some(rollback);
             }
-            // The unread badges recount on a revision change.
-            self.session.revision = self.session.revision.wrapping_add(1);
+            self.session.touch_unread();
         }
         Ok(Some(extra))
     }

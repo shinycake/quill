@@ -138,3 +138,33 @@ fn badge_adds_forum_topic_unreads_on_top_of_totals() {
     session.chat_list.unread_totals.main.chats = Some(UnreadPair { all: 3, unmuted: 3 });
     assert_eq!(badge_count(&session, &chats), 4);
 }
+
+/// Statuses, typing and file progress cannot change the unread badge, so
+/// the badge memos keep their count; a read does.
+#[test]
+fn only_updates_that_feed_the_badge_move_the_unread_revision() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":3}}"#,
+    );
+    let before = session.chat_list.unread_revision;
+    for json in [
+        r#"{"@type":"updateUserStatus","user_id":7,"status":{"@type":"userStatusOnline","expires":1}}"#,
+        r#"{"@type":"updateChatAction","chat_id":7,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":7},"action":{"@type":"chatActionTyping"}}"#,
+        r#"{"@type":"updateFile","file":{"@type":"file","id":4,"size":10,"expected_size":10,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_active":true,"is_downloading_completed":false,"downloaded_size":4},"remote":{"@type":"remoteFile","id":"r","is_uploading_active":false}}}"#,
+    ] {
+        apply_json(&mut session, &seq, &sink, json);
+    }
+    assert_eq!(session.chat_list.unread_revision, before);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatReadInbox","chat_id":7,"last_read_inbox_message_id":9,"unread_count":0}"#,
+    );
+    assert_ne!(session.chat_list.unread_revision, before);
+}

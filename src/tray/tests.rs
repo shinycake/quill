@@ -419,8 +419,8 @@ fn badge_cache_follows_revision_and_prefs() {
         chat.unread_count = 10;
     }
     assert_eq!(cache.get(&session, &prefs), 7);
-    // An applied update bumps the revision: recounted.
-    session.revision += 1;
+    // A change to what the badge counts: recounted.
+    session.touch_unread();
     assert_eq!(cache.get(&session, &prefs), 14);
     // Preferences are part of the key.
     let no_messages = BadgePrefs {
