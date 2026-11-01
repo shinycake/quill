@@ -37,8 +37,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
+/// The handler alone: the test platform drops `on_reopen` callbacks, so
+/// the Dock wiring in `main.rs` and a hidden app are not covered.
 #[gpui_kit::test]
-fn a_dock_click_with_no_window_showing_brings_the_main_window_back(cx: &mut TestAppContext) {
+fn the_reopen_handler_raises_an_inactive_main_window(cx: &mut TestAppContext) {
     let (_app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     vcx.update(|window, cx| note_main_window(window, cx));
