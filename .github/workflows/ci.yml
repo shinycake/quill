@@ -262,6 +262,46 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # Temporary (cursor/sweep-b9 only): open 20 toast windows on main and on
+  # this branch, release builds, and print how long each open took.
+  toast-timing:
+    name: toast-timing
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/cursor/')
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: toast timing, main then branch
+        shell: pwsh
+        run: |
+          cargo test -p gpui-pre-windows -p quill --lib --features quill/demo-capture --locked shared_shader_tests
+          $env:QUILL_DEBUG_NOTIFICATION = '1'
+          $env:QUILL_DEBUG_NOTIFICATION_CUSTOM = '20'
+          $env:QUILL_TRACE_TOASTS = '1'
+          $env:QUILL_DEMO_LINGER_MS = '2000'
+          function Time-Toasts([string]$label) {
+            cargo build --release --features demo-capture --locked --bin quill
+            if ($LASTEXITCODE) { exit 1 }
+            $out = Join-Path $env:RUNNER_TEMP $label
+            New-Item -ItemType Directory -Force $out | Out-Null
+            $env:QUILL_DEMO_CAPTURE = Join-Path $out 'shot.png'
+            $p = Start-Process target/release/quill.exe -ArgumentList @('--screenshot-demo', 'ready-chats', $out) -RedirectStandardError "$out/err.log" -RedirectStandardOutput "$out/out.log" -PassThru -NoNewWindow
+            if (-not $p.WaitForExit(240000)) { $p.Kill() }
+            Write-Host "== $label"
+            Select-String -Path "$out/err.log" -Pattern 'toast window opened|QUILL_DEBUG_NOTIFICATION' | ForEach-Object { $_.Line }
+          }
+          git diff origin/main HEAD -- src/ui/notify_windows/mod.rs src/ui/notifications/debug_notification.rs > "$env:RUNNER_TEMP/trace.patch"
+          Time-Toasts 'branch'
+          git checkout origin/main -- .
+          git apply "$env:RUNNER_TEMP/trace.patch"
+          Time-Toasts 'main'
+
   # Windows zip (docs/decisions/codex-windows-package.md).
   windows:
     name: windows
