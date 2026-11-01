@@ -249,6 +249,8 @@ impl QuillApp {
         self.sound_starts(cx);
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.resume(position);
+        // The progress tick sleeps while the track is paused.
+        quill::wake::CHROME.poke();
         quill::wake::CHROME.poke();
     }
 
@@ -287,6 +289,7 @@ impl QuillApp {
         }
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.seek(offset, was_playing);
+        quill::wake::CHROME.poke();
         if was_playing {
             self.connection.set_note(StatusNote::silent(format!(
                 "{} — seek {}",
@@ -304,7 +307,7 @@ impl QuillApp {
     /// so the seek bar follows the sound and the track ends when the sound
     /// ran out. A paused track waits for `wake::CHROME` alone: a media key
     /// (`media_session`), a change to the chat list that may move Previous
-    /// or Next, or a resume or seek (`AudioEngine`).
+    /// or Next, or a resume or seek.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
         if self.playback.tick {
             // A new track on a paused tick: it plays now.
