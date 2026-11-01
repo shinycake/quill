@@ -101,6 +101,12 @@ jobs:
         run: bash scripts/test-bgra-layout.sh
       - name: decoder tests against the built FFmpeg
         run: QUILL_REQUIRE_VIDEO_LIB=1 QUILL_VIDEO_LIB="$PWD/vendor/ffmpeg/prefix/lib/libquillvideo.so" cargo test --no-default-features --locked --lib video_decode -- --nocapture
+      # The receive thread sleeps in td_receive and counts on the pinned TDLib
+      # answering a client id it never made at once, and exit counts on
+      # skipping TDLib's teardown while a client is open. A pin bump that
+      # breaks either fails here.
+      - name: hub tests against the built TDLib
+        run: QUILL_TDJSON_PATH="$PWD/native/prefix/lib/libtdjson.so" QUILL_TEST_HUB_EXIT_RUNS=50 cargo test --no-default-features --locked --lib -- --ignored --nocapture blocked_receive live_exit
       # The call library (docs/decisions/tgcalls-engine.md), built against
       # this same FFmpeg by quill-calls.yml earlier in the run.
       - name: download libquill_calls

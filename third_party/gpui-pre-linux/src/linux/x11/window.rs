@@ -44,7 +44,7 @@ use std::{
 
 use super::present_retry::PresentRetry;
 use super::{
-    FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
+    Frame, FrameIdle, X11Display, XINPUT_ALL_DEVICE_GROUPS, XINPUT_ALL_DEVICES, idle_frames_enabled,
 };
 
 x11rb::atom_manager! {
@@ -338,11 +338,13 @@ pub(crate) struct X11WindowStatePtr {
 /// refresh rate forever. The timer now parks after `FRAME_IDLE_AFTER` of
 /// frames that neither drew, presented nor asked for another frame: it drops
 /// itself, so an idle window has no timer at all, and the frame waker starts
-/// a new one at once. All of it runs on the main thread.
+/// a new one at once, which parks again after one frame unless `FrameIdle`
+/// sees a burst. All of it runs on the main thread.
 pub(crate) struct X11FrameIdle {
-    /// Something drew, presented or asked for another frame since the
-    /// refresh timer last ran.
-    activity: Cell<bool>,
+    /// Something drew or presented since the refresh timer last ran.
+    drew: Cell<bool>,
+    /// GPUI asked for another frame since the refresh timer last ran.
+    asked: Cell<bool>,
     idle: Cell<FrameIdle>,
     /// Wakes the event loop, whose handler restarts the refresh timer at the
     /// refresh rate. Unset if the ping could not be created; the window then
@@ -359,7 +361,8 @@ pub(crate) struct X11FrameIdle {
 impl X11FrameIdle {
     fn new() -> Self {
         Self {
-            activity: Cell::new(false),
+            drew: Cell::new(false),
+            asked: Cell::new(false),
             idle: Cell::new(FrameIdle::new(Instant::now())),
             resume: OnceCell::new(),
             timer: Cell::new(0),
@@ -367,8 +370,20 @@ impl X11FrameIdle {
         }
     }
 
-    fn mark_activity(&self) {
-        self.activity.set(true);
+    fn mark_drawn(&self) {
+        self.drew.set(true);
+    }
+
+    fn mark_asked(&self) {
+        self.asked.set(true);
+    }
+
+    /// Before the refresh timer's frame request. A woken frame counts only
+    /// what GPUI asks for during it, not the request that woke it.
+    pub(crate) fn before_frame(&self) {
+        if self.idle.get().awaits_woken_frame() {
+            self.asked.set(false);
+        }
     }
 
     /// The frame waker: GPUI has a frame to draw.
@@ -386,12 +401,15 @@ impl X11FrameIdle {
     fn after_frame(&self, keep_running: bool) -> bool {
         // Never parks with the kill switch (`QUILL_IDLE_FRAMES=0`) or
         // without a way to resume.
-        let active = self.activity.take()
-            || keep_running
-            || self.resume.get().is_none()
-            || !idle_frames_enabled();
+        let frame = Frame {
+            drew: self.drew.take(),
+            asked: self.asked.take()
+                || keep_running
+                || self.resume.get().is_none()
+                || !idle_frames_enabled(),
+        };
         let mut idle = self.idle.get();
-        idle.frame(active, Instant::now());
+        idle.frame(frame, Instant::now());
         self.idle.set(idle);
         idle.is_parked()
     }
@@ -1889,7 +1907,7 @@ impl PlatformWindow for X11Window {
     // Quill: GPUI asks for another frame (the window is still dirty, or
     // next-frame callbacks are queued): keep the refresh timer running.
     fn schedule_frame(&self) {
-        self.0.frame.mark_activity();
+        self.0.frame.mark_asked();
     }
 
     // Quill: GPUI calls this when the window becomes dirty or queues a
@@ -1951,7 +1969,7 @@ impl PlatformWindow for X11Window {
 
     fn draw(&self, scene: &Scene) {
         // Quill: a drawn (or presented) frame keeps the refresh timer running.
-        self.0.frame.mark_activity();
+        self.0.frame.mark_drawn();
         let mut inner = self.0.state.borrow_mut();
         let inner = &mut *inner;
         let Some(renderer) = &mut inner.renderer else {

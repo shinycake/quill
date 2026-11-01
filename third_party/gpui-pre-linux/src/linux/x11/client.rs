@@ -2181,6 +2181,7 @@ impl X11ClientState {
                         if let Some(window) = state.windows.get_mut(&x_window) {
                             let window = window.window.clone();
                             drop(state);
+                            window.frame.before_frame();
                             window.refresh(RequestFrameOptions {
                                 require_presentation: false,
                                 force_render: false,

@@ -1441,7 +1441,7 @@ impl WindowsWindowInner {
             // at most one vsync late.
             // Quill: unpark the window if its vsync frames were parked, so
             // that re-invalidation happens.
-            self.demand_frames();
+            self.keep_frames_running();
             unsafe { ValidateRect(Some(handle), None).ok().log_err() };
             return Some(0);
         };
@@ -1469,6 +1469,7 @@ impl WindowsWindowInner {
             (None, FrameRequestSource::NativeCallback),
             |(at, source)| (Some(at), source),
         );
+        self.frames_before_draw();
         request_frame(RequestFrameOptions {
             require_presentation: false,
             force_render,
