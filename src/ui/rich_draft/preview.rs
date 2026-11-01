@@ -7,7 +7,7 @@ use super::super::bg_canvas;
 use super::super::message_text::rich_block_element;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
-use quill::rich::RichBlock;
+use quill::rich::{PreviewBlocks, RichBlock};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -22,41 +22,42 @@ const LISTED_BLOCKS: usize = 32;
 
 const OVERDRAW: Pixels = px(200.);
 
-#[derive(Clone)]
+#[derive(Default)]
 struct Parsed {
-    revision: u64,
-    blocks: Rc<Vec<RichBlock>>,
+    revision: Option<u64>,
+    source: PreviewBlocks,
+    blocks: Rc<Vec<Rc<RichBlock>>>,
 }
 
 pub(in crate::ui) struct RichPreview {
-    parsed: RefCell<Option<Parsed>>,
+    parsed: RefCell<Parsed>,
     list: ListState,
 }
 
 impl Default for RichPreview {
     fn default() -> Self {
         Self {
-            parsed: RefCell::new(None),
+            parsed: RefCell::default(),
             list: ListState::new(0, ListAlignment::Top, OVERDRAW),
         }
     }
 }
 
 impl RichPreview {
-    fn blocks(&self, revision: u64, text: &str) -> Rc<Vec<RichBlock>> {
-        let known = self.parsed.borrow().clone();
-        if let Some(parsed) = known
-            && parsed.revision == revision
-        {
-            return parsed.blocks;
+    fn blocks(&self, revision: u64, text: &str) -> Rc<Vec<Rc<RichBlock>>> {
+        let changed = {
+            let mut parsed = self.parsed.borrow_mut();
+            (parsed.revision != Some(revision)).then(|| {
+                let change = parsed.source.update(text);
+                parsed.blocks = Rc::new(parsed.source.shown().to_vec());
+                parsed.revision = Some(revision);
+                change
+            })
+        };
+        if let Some((replaced, count)) = changed {
+            self.list.splice(replaced, count);
         }
-        let blocks = Rc::new(quill::rich::preview_blocks(text));
-        self.list.splice(0..self.list.item_count(), blocks.len());
-        *self.parsed.borrow_mut() = Some(Parsed {
-            revision,
-            blocks: blocks.clone(),
-        });
-        blocks
+        self.parsed.borrow().blocks.clone()
     }
 }
 
@@ -81,8 +82,9 @@ impl QuillApp {
         let text = composer.value().to_string();
         let preview = &self.composer_ui.rich_draft.preview;
         let blocks = preview.blocks(revision, &text);
-        let shows =
-            |block: &RichBlock| !matches!(block, RichBlock::Empty | RichBlock::Unsupported { .. });
+        let shows = |block: &Rc<RichBlock>| {
+            !matches!(**block, RichBlock::Empty | RichBlock::Unsupported { .. })
+        };
         if !blocks.iter().any(shows) {
             return None;
         }

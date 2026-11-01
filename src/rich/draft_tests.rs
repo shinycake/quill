@@ -39,6 +39,121 @@ fn a_draft_from_tdlib_keeps_its_inline_formatting_through_the_editor() {
     assert_eq!(blocks[1]["text"]["texts"][1]["@type"], "richTextBold");
 }
 
+fn list_item(blocks: Value) -> Value {
+    json!({"@type": "pageBlockListItem", "label": "", "blocks": blocks,
+        "has_checkbox": false, "is_checked": false})
+}
+
+fn bold(text: &str) -> Value {
+    json!({"@type": "richTextBold", "text": {"@type": "richTextPlain", "text": text}})
+}
+
+#[test]
+fn a_received_list_item_keeps_its_formatting_across_its_blocks() {
+    let RichBlock::List { ordered, items } = parse_page_block(&json!({
+        "@type": "pageBlockList",
+        "items": [{
+            "@type": "pageBlockListItem", "label": "3.", "value": 3, "type": "1", "has_checkbox": false, "is_checked": false,
+            "blocks": [
+                paragraph(json!({"@type": "richTexts", "texts": [
+                    {"@type": "richTextPlain", "text": "日本 "}, bold("first"),
+                ]})),
+                paragraph(json!({"@type": "richTextFixed",
+                    "text": {"@type": "richTextPlain", "text": "second"}})),
+            ],
+        }],
+    })) else {
+        panic!("a list");
+    };
+    assert!(ordered);
+    let item = items.first().expect("an item");
+    assert_eq!(item.label, "3.");
+    assert_eq!(item.text, "日本 first\nsecond");
+    let styled: Vec<(&str, &TextEntityKind)> = item
+        .entities
+        .iter()
+        .map(|entity| {
+            let text = item.text.get(entity.utf8_start..entity.utf8_end);
+            (text.expect("a range of the text"), &entity.kind)
+        })
+        .collect();
+    assert_eq!(
+        styled,
+        [
+            ("first", &TextEntityKind::Bold),
+            ("second", &TextEntityKind::Code)
+        ]
+    );
+}
+
+#[test]
+fn a_nested_list_keeps_its_formatting_in_the_item_that_holds_it() {
+    let RichBlock::List { items, .. } = parse_page_block(&json!({
+        "@type": "pageBlockList",
+        "items": [list_item(json!([
+            paragraph(json!({"@type": "richTextPlain", "text": "outer"})),
+            {"@type": "pageBlockList", "items": [
+                list_item(json!([paragraph(json!({"@type": "richTextPlain", "text": "a"}))])),
+                list_item(json!([paragraph(bold("b"))])),
+            ]},
+        ]))],
+    })) else {
+        panic!("a list");
+    };
+    let item = items.first().expect("an item");
+    assert_eq!(item.text, "outer\na\nb");
+    let [entity] = item.entities.as_slice() else {
+        panic!("one span: {:?}", item.entities);
+    };
+    assert_eq!(item.text.get(entity.utf8_start..entity.utf8_end), Some("b"));
+}
+
+#[test]
+fn a_typed_ordered_list_sends_its_numbers() {
+    let input = input_rich_message(&markup_to_blocks("1. a\n2. b")).expect("a message");
+    let items = &input["source"]["blocks"][0]["items"];
+    assert_eq!(items[1]["value"], 2);
+    assert_eq!(items[1]["type"], "1");
+    let input = input_rich_message(&markup_to_blocks("- a")).expect("a message");
+    let item = &input["source"]["blocks"][0]["items"][0];
+    assert_eq!(item["value"], 0);
+    assert_eq!(item["type"], "");
+}
+
+#[test]
+fn a_typed_list_item_sends_its_formatting() {
+    let blocks = markup_to_blocks("- **a** b");
+    let input = input_rich_message(&blocks).expect("a message");
+    let item = &input["source"]["blocks"][0]["items"][0]["blocks"][0]["text"];
+    assert_eq!(item["texts"][0]["@type"], "richTextBold");
+    assert_eq!(item["texts"][0]["text"]["text"], "a");
+}
+
+#[test]
+fn a_list_from_tdlib_keeps_its_formatting_through_the_editor() {
+    let draft = server_draft(json!([{"@type": "pageBlockList", "items": [
+        list_item(json!([paragraph(json!({"@type": "richTexts", "texts": [
+            bold("buy"),
+            {"@type": "richTextPlain", "text": " 2*3*4 milk"},
+        ]}))])),
+    ]}]));
+    let input = draft.input().expect("every block has an input form");
+    let texts = &input["source"]["blocks"][0]["items"][0]["blocks"][0]["text"]["texts"];
+    assert_eq!(texts[0]["@type"], "richTextBold");
+    assert_eq!(texts[0]["text"]["text"], "buy");
+    assert_eq!(texts[1]["text"], " 2*3*4 milk");
+
+    // The editor's markup is what reopens and sends the draft.
+    let reopened = RichDraft::from_markup(&draft.markup()).expect("a list");
+    assert_eq!(reopened.input(), draft.input());
+    let Some(RichBlock::List { items, .. }) = reopened.preview_blocks().into_iter().next() else {
+        panic!("a list");
+    };
+    let item = items.first().expect("an item");
+    assert_eq!(item.text, "buy 2*3*4 milk");
+    assert_eq!(item.entities.len(), 1);
+}
+
 #[test]
 fn a_task_list_keeps_its_checkboxes_through_the_editor() {
     let draft = server_draft(json!([{"@type": "pageBlockList", "items": [

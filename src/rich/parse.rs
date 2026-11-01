@@ -173,30 +173,75 @@ fn heading(level: u8, value: &Value, field: &str) -> RichBlock {
     }
 }
 
+/// Text joined by lines, with entity offsets moved to where each part lands.
+#[derive(Default)]
+struct JoinedLines {
+    text: String,
+    entities: Vec<TextEntity>,
+    started: bool,
+}
+
+impl JoinedLines {
+    fn push(&mut self, text: &str, entities: Vec<TextEntity>) {
+        if self.started {
+            self.text.push('\n');
+        }
+        self.started = true;
+        let shift = self.text.len();
+        self.text.push_str(text);
+        self.entities
+            .extend(entities.into_iter().map(|entity| TextEntity {
+                utf8_start: entity.utf8_start + shift,
+                utf8_end: entity.utf8_end + shift,
+                ..entity
+            }));
+    }
+
+    fn push_block(&mut self, block: RichBlock) {
+        match block {
+            RichBlock::Paragraph { text, entities, .. }
+            | RichBlock::Heading { text, entities, .. } => self.push(&text, entities),
+            RichBlock::Collapsible { header, .. } => self.push(&header, Vec::new()),
+            RichBlock::List { items, .. } => {
+                let mut lines = JoinedLines::default();
+                for item in items {
+                    lines.push(&item.text, item.entities);
+                }
+                self.push(&lines.text, lines.entities);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn join_blocks(blocks: &Value) -> JoinedLines {
+    let mut lines = JoinedLines::default();
+    for block in blocks.as_array().into_iter().flatten() {
+        lines.push_block(parse_page_block(block));
+    }
+    lines
+}
+
 fn join_blocks_text(blocks: &Value) -> String {
-    blocks
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .map(parse_page_block)
-                .filter_map(|block| match block {
-                    RichBlock::Paragraph { text, .. }
-                    | RichBlock::Heading { text, .. }
-                    | RichBlock::Collapsible { header: text, .. } => Some(text),
-                    RichBlock::List { items, .. } => Some(
-                        items
-                            .iter()
-                            .map(|item| item.text.clone())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default()
+    join_blocks(blocks).text
+}
+
+fn list_item(item: &Value) -> RichListItem {
+    let lines = join_blocks(item.get("blocks").unwrap_or(&Value::Null));
+    RichListItem {
+        label: field_str(item, "label"),
+        text: lines.text,
+        entities: lines.entities,
+        checked: item
+            .get("has_checkbox")
+            .and_then(Value::as_bool)
+            .filter(|has| *has)
+            .map(|_| {
+                item.get("is_checked")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            }),
+    }
 }
 
 /// Parse one incoming `pageBlock*` object.
@@ -254,41 +299,12 @@ pub fn parse_page_block(value: &Value) -> RichBlock {
         "pageBlockDivider" => RichBlock::Divider,
         "pageBlockAnchor" => RichBlock::Empty,
         "pageBlockList" => {
-            let items = value
-                .get("items")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .map(|item| {
-                            let mut text = field_str(item, "label");
-                            let rest = join_blocks_text(item.get("blocks").unwrap_or(&Value::Null));
-                            if !rest.is_empty() {
-                                if !text.is_empty() {
-                                    text.push('\n');
-                                }
-                                text.push_str(&rest);
-                            }
-                            RichListItem {
-                                text,
-                                checked: item
-                                    .get("has_checkbox")
-                                    .and_then(Value::as_bool)
-                                    .filter(|has| *has)
-                                    .map(|_| {
-                                        item.get("is_checked")
-                                            .and_then(Value::as_bool)
-                                            .unwrap_or(false)
-                                    }),
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            // Schema `pageBlockList` carries no ordered flag — render bullets.
+            let items = value.get("items").and_then(Value::as_array);
+            let items = items.map(Vec::as_slice).unwrap_or_default();
             RichBlock::List {
-                ordered: false,
-                items,
+                // Schema `pageBlockListItem`: `type` is empty for unordered lists.
+                ordered: items.iter().any(|item| !field_str(item, "type").is_empty()),
+                items: items.iter().map(list_item).collect(),
             }
         }
         "pageBlockBlockQuote" => {

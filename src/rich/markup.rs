@@ -85,16 +85,16 @@ pub fn markup_to_blocks(text: &str) -> Vec<RichBlock> {
 ///
 /// Inverse of the editor's block markers (`#` / `##` / `###`, `-` and
 /// `1.` lists, `[ ]` / `[x]` checkboxes, `>>` collapsible blocks, `---`).
-/// Rich AI answers are written back through this so the rich send path
-/// rebuilds the same structure. Clipboard
+/// The rich send path rebuilds the same structure from it. Clipboard
 /// [`crate::telegram::envelope::RichMessageContent::copy_text`] drops those
 /// markers, and the send path then sees flat paragraph(s).
 ///
-/// Inline `TextEntity` spans stay plain text: the editor stores styling as
-/// markup characters inside the block text, and incoming entity spans have
-/// no marker here. Tables, captions, and document names have no block
-/// marker either — their text is kept as paragraphs so the words are not
-/// dropped. Button rows, anchors, and unsupported blocks contribute nothing.
+/// These are editor blocks: styling is markup characters inside the block
+/// text. Parsed blocks go through [`RichDraft::from_message`] first, which
+/// writes their entities as markup. Tables, captions, and document names
+/// have no block marker, so their text is kept as paragraphs and the words
+/// are not dropped. Button rows, anchors, and unsupported blocks contribute
+/// nothing.
 pub fn blocks_to_markup(blocks: &[RichBlock]) -> String {
     let mut parts: Vec<String> = Vec::new();
     for block in blocks {
@@ -263,12 +263,10 @@ fn markup_preview_text(text: &str) -> (String, Vec<TextEntity>) {
 }
 
 /// M2: editor preview — `markup_to_blocks` with inline markup resolved to
-/// clean text + `TextEntity` spans. Paragraphs and headings keep their
-/// styling (the history renderer paints entities there); list items and
-/// collapsible header/body render plain throughout Quill (same as incoming
-/// `pageBlock*`, whose list labels are plain strings), so their markers
-/// are stripped without entities. The send path is untouched — it
-/// re-parses markup itself via `block_rich_text`.
+/// clean text + `TextEntity` spans. Paragraphs, headings and list items keep
+/// their styling; collapsible header/body render plain throughout Quill, so
+/// their markers are stripped without entities. The send path is untouched:
+/// it re-parses markup itself via `block_rich_text`.
 pub fn preview_blocks(text: &str) -> Vec<RichBlock> {
     markup_to_blocks(text)
         .into_iter()
@@ -308,9 +306,13 @@ pub fn preview_block(block: RichBlock) -> RichBlock {
             ordered,
             items: items
                 .into_iter()
-                .map(|item| RichListItem {
-                    text: markup_preview_text(&item.text).0,
-                    ..item
+                .map(|item| {
+                    let (text, entities) = markup_preview_text(&item.text);
+                    RichListItem {
+                        text,
+                        entities,
+                        ..item
+                    }
                 })
                 .collect(),
         },
@@ -342,7 +344,9 @@ fn parse_list_marker(trimmed: &str) -> Option<(RichListItem, bool)> {
             let (checked, text) = parse_checkbox(rest.trim());
             return Some((
                 RichListItem {
+                    label: String::new(),
                     text: text.to_string(),
+                    entities: Vec::new(),
                     checked,
                 },
                 false,
@@ -363,7 +367,9 @@ fn parse_list_marker(trimmed: &str) -> Option<(RichListItem, bool)> {
         let (checked, text) = parse_checkbox(rest);
         return Some((
             RichListItem {
+                label: String::new(),
                 text: text.to_string(),
+                entities: Vec::new(),
                 checked,
             },
             true,
@@ -459,9 +465,8 @@ mod tests {
     #[test]
     fn preview_blocks_resolves_markup_to_entities() {
         // M2: the editor preview shows clean text + entity spans for
-        // paragraphs/headings (no raw `**` markers); list items and
-        // collapsible text is marker-stripped, matching how Quill renders
-        // those blocks everywhere.
+        // paragraphs/headings/list items (no raw `**` markers); collapsible
+        // text is marker-stripped, matching how Quill renders it everywhere.
         let blocks = preview_blocks(
             "# **Club** night\n\nPick **one**:\n\n- **a**\n\n>> **More**\n**body**\n",
         );
@@ -480,6 +485,8 @@ mod tests {
             panic!("expected list, got {:?}", blocks[2]);
         };
         assert_eq!(items[0].text, "a");
+        assert_eq!(items[0].entities.len(), 1);
+        assert!(matches!(items[0].entities[0].kind, TextEntityKind::Bold));
         let RichBlock::Collapsible { header, body, .. } = &blocks[3] else {
             panic!("expected collapsible, got {:?}", blocks[3]);
         };

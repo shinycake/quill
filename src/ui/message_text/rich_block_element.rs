@@ -104,6 +104,7 @@ pub(in crate::ui) fn rich_block_element(
                 let marker = match item.checked {
                     Some(true) => "☑",
                     Some(false) => "☐",
+                    None if !item.label.is_empty() => &item.label,
                     None if *ordered => &format!("{}.", item_index + 1),
                     None => "•",
                 };
@@ -112,8 +113,18 @@ pub(in crate::ui) fn rich_block_element(
                         .id(format!("rich-list-item-{row_id}-{index}-{item_index}"))
                         .flex()
                         .gap_2()
-                        .child(div().text_sm().child(marker.to_string()))
-                        .child(div().text_sm().child(item.text.clone())),
+                        .child(div().text_size(font).child(marker.to_string()))
+                        .child(div().flex_1().min_w_0().child(rich_text_line(
+                            &item.text,
+                            &item.entities,
+                            msg_key,
+                            false,
+                            revealed,
+                            font,
+                            // Instant View richText* has no custom emoji entities.
+                            &HashMap::new(),
+                            cx,
+                        ))),
                 );
             }
             Some(col.into_any_element())
