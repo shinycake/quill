@@ -647,6 +647,10 @@ fn a_late_answer_failure_for_an_earlier_call_still_hangs_up_the_answered_one() {
         r#"{{"@type":"error","code":400,"message":"CALL_ALREADY_DECLINED","@extra":"{}","@client_id":{CLIENT_ID}}}"#,
         first.0
     ));
+    assert_eq!(
+        client.driver.session.calls.error, None,
+        "not this call's note"
+    );
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(
         client.sent(),

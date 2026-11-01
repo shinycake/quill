@@ -6,6 +6,26 @@ use crate::thread_guard::spawn_guarded;
 use crate::wake::Signal;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
+/// Where a device on a [`DeviceThread`] is: its open is running, or it
+/// answered and `T` is what runs on it.
+pub enum DeviceRun<T> {
+    Opening,
+    Running(T),
+}
+
+impl<T> DeviceRun<T> {
+    pub fn is_opening(&self) -> bool {
+        matches!(self, Self::Opening)
+    }
+
+    pub fn running(&self) -> Option<&T> {
+        match self {
+            Self::Opening => None,
+            Self::Running(running) => Some(running),
+        }
+    }
+}
+
 pub struct DeviceThread {
     answer: Receiver<Result<(), CaptureError>>,
     _closing: Sender<()>,

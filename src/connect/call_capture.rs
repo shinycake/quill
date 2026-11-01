@@ -20,7 +20,8 @@ use crate::calls::capture::feeder::AUDIO_SINK_FRAMES;
 use crate::calls::capture::system_audio::SystemAudioMix;
 use crate::calls::capture::{
     AudioFrame, CaptureError, CaptureEvent, CaptureFeeder, FrameSink, LevelCell, MicCapture,
-    MicControls, device_thread::DeviceThread,
+    MicControls,
+    device_thread::{DeviceRun, DeviceThread},
 };
 use crate::calls::engine::{
     CaptureTarget, ExternalFrameSender, MediaDeviceKind, TransportState, external_capture_enabled,
@@ -59,8 +60,8 @@ pub struct CallCapture {
     /// Why the microphone could not be opened or stopped, for the call
     /// window's note.
     pub error: Option<String>,
-    /// Poked when the microphone has news; the poll loop's by default.
-    wake: Option<&'static Signal>,
+    /// Poked when the open microphone has news; the poll loop's by default.
+    sink_wake: Option<&'static Signal>,
 }
 
 struct ActiveCapture {
@@ -70,7 +71,7 @@ struct ActiveCapture {
     sink: FrameSink<AudioFrame>,
     sender: Arc<dyn ExternalFrameSender>,
     mic: DeviceThread,
-    feeder: Option<CaptureFeeder>,
+    run: DeviceRun<CaptureFeeder>,
 }
 
 impl CallCapture {
@@ -80,13 +81,11 @@ impl CallCapture {
         self.opener = Some(opener);
     }
 
-    /// Poke `wake` instead of the poll loop's signal (tests).
-    pub fn inject_wake(&mut self, wake: &'static Signal) {
-        self.wake = Some(wake);
-    }
-
-    fn wake(&self) -> &'static Signal {
-        self.wake.unwrap_or(&crate::wake::UPDATES)
+    /// Have the microphone's sink poke `wake` instead of the poll loop's
+    /// signal (tests). The device thread keeps its own, so a test sees the
+    /// sink's poke alone.
+    pub fn inject_sink_wake(&mut self, wake: &'static Signal) {
+        self.sink_wake = Some(wake);
     }
 
     /// Whether Quill captures the call microphone at all. Unit tests
@@ -100,14 +99,14 @@ impl CallCapture {
     pub fn target(&self) -> Option<CaptureTarget> {
         self.active
             .as_ref()
-            .filter(|active| active.feeder.is_some())
+            .filter(|active| !active.run.is_opening())
             .map(|active| active.target)
     }
 
     pub fn opening(&self) -> bool {
         self.active
             .as_ref()
-            .is_some_and(|active| active.feeder.is_none())
+            .is_some_and(|active| active.run.is_opening())
     }
 
     /// The level written by the running capture.
@@ -119,7 +118,7 @@ impl CallCapture {
     pub fn frames_sent(&self) -> u64 {
         self.active
             .as_ref()
-            .and_then(|active| active.feeder.as_ref())
+            .and_then(|active| active.run.running())
             .map_or(0, |feeder| feeder.stats().sent())
     }
 
@@ -186,11 +185,12 @@ impl CallCapture {
         let controls = Arc::new(MicControls::new(noise_suppression, self.level.clone()));
         controls.set_muted(muted);
         controls.set_system_audio(self.system_audio.clone());
-        let sink = FrameSink::waking(AUDIO_SINK_FRAMES, self.wake());
+        let sink_wake = self.sink_wake.unwrap_or(&crate::wake::UPDATES);
+        let sink = FrameSink::waking(AUDIO_SINK_FRAMES, sink_wake);
         let opener = self.opener.clone();
         let mic = DeviceThread::open(
             "quill-call-mic",
-            self.wake(),
+            &crate::wake::UPDATES,
             {
                 let device = device.clone();
                 let controls = controls.clone();
@@ -209,7 +209,7 @@ impl CallCapture {
             sink,
             sender,
             mic,
-            feeder: None,
+            run: DeviceRun::Opening,
         });
     }
 
@@ -217,7 +217,7 @@ impl CallCapture {
         let Some(active) = self
             .active
             .as_mut()
-            .filter(|active| active.feeder.is_none())
+            .filter(|active| active.run.is_opening())
         else {
             return;
         };
@@ -227,7 +227,7 @@ impl CallCapture {
         let failure = match answer {
             Ok(()) => match CaptureFeeder::start(active.sink.clone(), active.sender.clone()) {
                 Ok(feeder) => {
-                    active.feeder = Some(feeder);
+                    active.run = DeviceRun::Running(feeder);
                     self.failed_at = None;
                     self.error = None;
                     return;
@@ -301,6 +301,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .map(|device| device.name.clone())
     }
 
+    /// Per poll: the call's devices and what they reported. Returns whether
+    /// the UI should redraw.
     pub(crate) fn pump_call_media(&mut self, now: Instant) -> bool {
         let shown = |driver: &Self| {
             (
@@ -313,9 +315,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let before = shown(self);
         self.warm_call_devices();
+        let listed = self.take_listed_call_devices();
+        let landed = self.land_group_offers();
         self.pump_call_capture(now);
         self.pump_call_screen();
-        before != shown(self)
+        listed || landed || before != shown(self)
     }
 
     fn warm_call_devices(&mut self) {
@@ -330,8 +334,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.call_devices_warmed || !coming {
             return;
         }
-        if let Some(engine) = self.call_engine.as_deref() {
-            engine.warm_devices();
+        if self.call_engine.is_some() {
+            self.refresh_call_devices();
             self.call_devices_warmed = true;
         }
     }

@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::telegram::envelope::{CallState, CallsPayload, Envelope, EnvelopePayload};
 use crate::telegram::group_call_crypto::GroupCallCrypto;
-use crate::telegram::requests::{create_group_call, search_chats_on_server, search_public_chats};
+use crate::telegram::requests::{search_chats_on_server, search_public_chats};
 use std::sync::Arc;
 
 /// The engine key of a conference call whose join hasn't answered yet:
@@ -24,7 +24,7 @@ pub(crate) struct ConferenceCrypto {
     pub(crate) crypto: Arc<GroupCallCrypto>,
 }
 
-fn input_ref(input: ConferenceInput) -> InputGroupCallRef {
+pub(super) fn input_ref(input: ConferenceInput) -> InputGroupCallRef {
     match input {
         ConferenceInput::Link(link) => InputGroupCallRef::Link(link),
         ConferenceInput::Message {
@@ -46,18 +46,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: i64,
         message_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        let joined = self.join_conference(
+        self.join_conference(
             ConferenceOrigin::Invitation {
                 chat_id,
                 message_id,
             },
             false,
-        )?;
-        self.session.forget_conference_invite(
-            crate::ids::ChatId(chat_id),
-            &[crate::ids::MessageId(message_id)],
-        );
-        Ok(joined)
+        )
     }
 
     /// Join a conference call by its link (`internalLinkTypeGroupCall`).
@@ -113,7 +108,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `joinGroupCall` or `createGroupCall` for a conference call. The
     /// engine instance is made first, under [`PENDING_CONFERENCE_KEY`], so
-    /// the request carries its tgcalls offer. Refused without an engine
+    /// the request goes out with its tgcalls offer when that lands. Refused without an engine
     /// (no media would flow), while another join is in flight, while you
     /// are in a group call, and during a 1:1 call unless it is the one
     /// being taken into the conference. A conference whose rejoins are
@@ -182,83 +177,44 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.forget_conference_crypto();
         let crypto = Arc::new(GroupCallCrypto::new(link));
-        let params = match self.conference_join_params(PENDING_CONFERENCE_KEY, &crypto, muted) {
-            Ok(params) => params,
-            Err(err) => {
-                self.session.calls.group_call_error =
-                    Some(format!("Could not join the call: {err}"));
-                return Err(ConnectSendError::CallsUnavailable);
-            }
-        };
         let extra = self.session.request(RequestPurpose::JoinConference, None);
-        let json = match &origin {
-            ConferenceOrigin::Create { .. } => create_group_call(extra, Some(&params)),
-            ConferenceOrigin::Invitation {
-                chat_id,
-                message_id,
-            } => join_group_call(
-                extra,
-                &InputGroupCallRef::Message {
-                    chat_id: *chat_id,
-                    message_id: *message_id,
-                },
-                &params,
-            ),
-            ConferenceOrigin::Link { link } => {
-                join_group_call(extra, &InputGroupCallRef::Link(link.clone()), &params)
-            }
-        };
-        if let Err(err) = self.sender.send_json(&json) {
-            self.session.requests.take(extra);
-            if let Some(engine) = self.call_engine.as_deref_mut() {
-                let _ = engine.leave_group_call(PENDING_CONFERENCE_KEY);
-            }
-            return Err(err);
-        }
         self.conference_crypto = Some(ConferenceCrypto {
             key: PENDING_CONFERENCE_KEY,
-            crypto,
+            crypto: crypto.clone(),
         });
         self.session.begin_conference(extra, origin, muted);
+        let started = self.start_conference_instance(PENDING_CONFERENCE_KEY, crypto);
+        self.wait_for_offer(
+            GroupOfferKey::Call(PENDING_CONFERENCE_KEY),
+            extra,
+            OfferSend::Conference,
+            started,
+        );
         Ok(extra)
     }
 
-    /// The engine instance for a conference call under `key`, and the join
-    /// parameters carrying its offer. A conference call never starts with
-    /// the camera on (tdesktop joins it with the 1:1 call's camera; Quill
-    /// turns it on from the panel).
-    fn conference_join_params(
+    /// A conference call never starts with the camera on (tdesktop joins
+    /// it with the 1:1 call's camera; Quill turns it on from the panel).
+    fn start_conference_instance(
         &mut self,
         key: i32,
-        crypto: &Arc<GroupCallCrypto>,
-        is_muted: bool,
-    ) -> Result<GroupCallJoinParams, crate::calls::engine::EngineError> {
-        let output = self.selected_devices.1.clone();
+        crypto: Arc<GroupCallCrypto>,
+    ) -> Result<(), crate::calls::engine::EngineError> {
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return Err(crate::calls::engine::EngineError::Unavailable);
         };
-        let crypto: Arc<dyn crate::calls::engine::FrameCrypto> = crypto.clone();
-        let payload = engine.create_conference_call(key, crypto)?;
-        if let Err(err) = engine.set_group_playback(key, output.as_deref(), false) {
-            eprintln!("quill: conference call output device not set: {err}");
-        }
-        Ok(GroupCallJoinParams {
-            audio_source_id: group_offer_audio_source_id(&payload),
-            payload,
-            is_muted,
-            is_my_video_enabled: false,
-        })
+        let crypto: Arc<dyn crate::calls::engine::FrameCrypto> = crypto;
+        engine.create_conference_call(key, crypto)
     }
 
     /// A conference rejoin (`need_rejoin`): a fresh instance under the
     /// call's id, joined by its link (or how it was first reached).
-    pub(super) fn conference_rejoin_request(
+    pub(super) fn start_conference_rejoin(
         &mut self,
         extra: RequestId,
         group_call_id: i32,
-        input: ConferenceInput,
-        is_muted: bool,
-    ) -> String {
+        send: OfferSend,
+    ) {
         let crypto = match &self.conference_crypto {
             Some(known) if known.key == group_call_id => known.crypto.clone(),
             _ => {
@@ -275,18 +231,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 crypto
             }
         };
-        let params = match self.conference_join_params(group_call_id, &crypto, is_muted) {
-            Ok(params) => params,
-            Err(err) => {
-                if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                    call.transport_error = Some(err.to_string());
-                }
-                let mut params = GroupCallJoinParams::honest_no_device();
-                params.is_muted = is_muted;
-                params
-            }
-        };
-        join_group_call(extra, &input_ref(input), &params)
+        let started = self.start_conference_instance(group_call_id, crypto);
+        self.wait_for_offer(GroupOfferKey::Call(group_call_id), extra, send, started);
     }
 
     /// Before the reducer sees it: the answer to a conference join names
@@ -345,13 +291,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Unbinds the crypto (waking every frame waiting on TDLib), then
     /// drops a join's instance still under the provisional key.
-    fn forget_conference_crypto(&mut self) {
+    pub(super) fn forget_conference_crypto(&mut self) {
         if let Some(known) = self.conference_crypto.take() {
             known.crypto.unbind();
-            if known.key == PENDING_CONFERENCE_KEY
-                && let Some(engine) = self.call_engine.as_deref_mut()
-            {
-                let _ = engine.leave_group_call(PENDING_CONFERENCE_KEY);
+            if known.key == PENDING_CONFERENCE_KEY {
+                self.drop_group_offers(PENDING_CONFERENCE_KEY);
+                if let Some(engine) = self.call_engine.as_deref_mut() {
+                    let _ = engine.leave_group_call(PENDING_CONFERENCE_KEY);
+                }
             }
         }
     }

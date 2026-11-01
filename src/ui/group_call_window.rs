@@ -99,6 +99,7 @@ impl QuillApp {
             (None, Some(handle)) => {
                 self.group_call.window = None;
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
+                self.sync_group_call_large_tile();
             }
             // Sized for the other layout: reopen.
             (Some((_, stream)), Some(handle))
@@ -106,6 +107,7 @@ impl QuillApp {
             {
                 self.group_call.window = None;
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
+                self.sync_group_call_large_tile();
                 self.open_group_call_window(stream, cx);
             }
             _ => {}
@@ -221,6 +223,7 @@ impl QuillApp {
                         app.group_call.window = Some(handle.into());
                         app.group_call.window_visible = true;
                         app.group_call.stream.window_is_stream = stream;
+                        app.sync_group_call_large_tile();
                     }
                     Err(_) => app.connection.set_note(StatusNote::error(tr(
                         keys::Q_AV_COULDNT_OPEN_THE_VIDEO_CHAT,
@@ -236,7 +239,7 @@ impl QuillApp {
         self.group_call.pin.pinned().filter(|_| seen)
     }
 
-    fn sync_group_call_large_tile(&mut self) {
+    pub(super) fn sync_group_call_large_tile(&mut self) {
         let tile = self.group_call_large_tile();
         if let Some(live) = self.live.as_mut() {
             live.driver.set_group_call_large_tile(tile);
@@ -384,7 +387,6 @@ impl Render for GroupCallPanel {
             app.frame.tick_view.set(None);
             body
         });
-        owner.update(cx, |app, _| app.sync_group_call_large_tile());
         if animating {
             window.request_animation_frame();
         }

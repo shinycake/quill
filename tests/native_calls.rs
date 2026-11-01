@@ -1,5 +1,6 @@
 //! Opt-in checks of the real call engine (`libquill_calls`). Never contacts Telegram or captures media.
-use quill::calls::engine::{CallEngine, MediaDeviceKind, TgcallsEngine};
+use quill::calls::engine::{CallEngine, MediaDeviceKind, TgcallsEngine, await_call_teardown};
+use std::time::{Duration, Instant};
 
 #[test]
 fn native_protocol_and_device_enumeration() {
@@ -40,4 +41,9 @@ fn native_p2p_creation_and_teardown() {
         engine.accept_call(call_id).expect("Find created transport");
         engine.hangup(call_id).expect("Destroy P2P transport");
     }
+    // A process that exits during a teardown crashes in static destructors.
+    assert!(
+        await_call_teardown(Instant::now() + Duration::from_secs(60)),
+        "the transports were destroyed"
+    );
 }

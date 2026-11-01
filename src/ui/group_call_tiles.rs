@@ -172,6 +172,12 @@ impl QuillApp {
     }
 
     /// The video area: the pinned tile large, the rest in a wrapped strip.
+    fn retain_group_call_pin(&mut self, keys: &[TileKey]) {
+        if self.group_call.pin.retain_available(keys) {
+            self.sync_group_call_large_tile();
+        }
+    }
+
     pub(super) fn group_call_tiles(
         &mut self,
         call: &ActiveGroupCall,
@@ -180,7 +186,7 @@ impl QuillApp {
         let built = self.collect_group_tiles(call, false, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
         // The pin lasts only as long as its stream does.
-        self.group_call.pin.retain_available(&keys);
+        self.retain_group_call_pin(&keys);
         if built.is_empty() {
             return None;
         }
@@ -216,7 +222,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let built = self.collect_group_tiles(call, true, cx);
         let keys: Vec<TileKey> = built.iter().map(|t| t.key).collect();
-        self.group_call.pin.retain_available(&keys);
+        self.retain_group_call_pin(&keys);
         let stage = stage_tile(&self.group_call.pin, &keys)?;
         let tile = built.into_iter().find(|t| t.key == stage)?;
         let volume = (!tile.own)

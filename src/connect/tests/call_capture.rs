@@ -368,7 +368,7 @@ fn talking_while_muted_shows_the_hint_until_you_unmute() {
 fn a_lost_microphone_needs_no_telegram_update() {
     static WAKE: crate::wake::Signal = crate::wake::Signal::new();
     let (dir, mut driver, _engine, mics) = group_driver();
-    driver.call_capture.inject_wake(&WAKE);
+    driver.call_capture.inject_sink_wake(&WAKE);
     driver.session.calls.active_group_call = Some(joined_group_call(false));
     let t0 = Instant::now();
     pump_until_mic_answers(&mut driver);
@@ -464,15 +464,51 @@ fn a_microphone_that_opens_after_you_left_closes() {
 fn a_call_you_are_in_warms_the_devices_once() {
     let (dir, mut driver, engine, _mics) = group_driver();
     driver.request_tick(Instant::now());
-    assert_eq!(engine.device_warms(), 0, "no call, no frameworks loaded");
+    assert_eq!(engine.device_lists(), 0, "no call, no frameworks loaded");
     let mut call = joined_group_call(false);
     call.is_joined = false;
     driver.session.calls.active_group_call = Some(call);
     driver.request_tick(Instant::now());
-    assert_eq!(engine.device_warms(), 0, "a chat you only look at");
+    assert_eq!(engine.device_lists(), 0, "a chat you only look at");
     driver.session.calls.active_group_call = Some(joined_group_call(false));
     driver.request_tick(Instant::now());
     driver.request_tick(Instant::now());
-    assert_eq!(engine.device_warms(), 1);
+    assert_eq!(engine.device_lists(), 1);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+fn a_camera() -> Vec<MediaDevice> {
+    vec![MediaDevice {
+        id: "cam".into(),
+        name: "Camera".into(),
+        kind: MediaDeviceKind::Camera,
+    }]
+}
+
+#[test]
+fn a_slow_device_list_holds_nobody_and_redraws_when_it_lands() {
+    let (dir, mut driver, engine, _mics) = group_driver();
+    engine.set_devices(a_camera());
+    engine.hold_device_lists();
+
+    driver.refresh_call_devices();
+    driver.refresh_call_devices();
+    assert_eq!(engine.device_lists(), 1, "one list at a time");
+    assert!(driver.call_devices().is_empty());
+    assert!(!driver.pump_call_media(Instant::now()));
+
+    engine.release_device_lists();
+    assert!(driver.pump_call_media(Instant::now()));
+    assert_eq!(driver.call_devices(), a_camera());
+    assert!(!driver.pump_call_media(Instant::now()));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_camera_wanted_before_the_first_list_lands_is_not_refused() {
+    let (dir, mut driver, engine, _mics) = group_driver();
+    engine.set_devices(a_camera());
+    engine.hold_device_lists();
+    assert_eq!(driver.camera_to_turn_on(), Ok("cam".to_string()));
     std::fs::remove_dir_all(dir).ok();
 }

@@ -308,6 +308,7 @@ impl QuillApp {
     /// Pin or unpin a video tile (local only, like tdesktop).
     pub(super) fn toggle_group_call_tile_pin(&mut self, key: TileKey, cx: &mut Context<Self>) {
         self.group_call.pin.toggle(key);
+        self.sync_group_call_large_tile();
         cx.notify();
     }
 
