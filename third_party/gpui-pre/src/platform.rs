@@ -364,6 +364,17 @@ bitflags::bitflags! {
 
 pub use platform_info::{OperatingSystem, PlatformInfo, PlatformTarget};
 
+/// Quill: the app's answer to a quit the OS started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitAnswer {
+    /// The quit goes ahead.
+    Allow,
+    /// The quit is cancelled.
+    Refuse,
+    /// The app is busy further up the stack and cannot be asked now.
+    Later,
+}
+
 #[expect(missing_docs)]
 pub trait Platform: 'static {
     /// Returns the host OS and application target reported by this backend.
@@ -465,8 +476,9 @@ pub trait Platform: 'static {
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>);
     /// Quill: registers the callback asked before a quit the OS started goes
     /// ahead: a Dock Quit or log out on macOS, the end of the session on
-    /// Windows. False refuses it. `App::quit` never asks.
-    fn on_quit_request(&self, _callback: Box<dyn FnMut() -> bool>) {}
+    /// Windows. `App::quit` never asks. [`QuitAnswer::Later`] makes the
+    /// platform hold the quit and ask again from its event loop.
+    fn on_quit_request(&self, _callback: Box<dyn FnMut() -> QuitAnswer>) {}
     fn on_reopen(&self, callback: Box<dyn FnMut()>);
     /// Registers the callback invoked when the system is about to sleep.
     fn on_system_sleep(&self, callback: Box<dyn FnMut()>);
@@ -1326,6 +1338,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
         false
     }
     fn set_edited(&mut self, _edited: bool) {}
+    /// Quill: the reason Windows shows while this window holds back the end
+    /// of the session, or `None` to stop showing it. Other platforms have no
+    /// such text.
+    fn set_shutdown_block_reason(&self, _reason: Option<&str>) {}
     fn set_document_path(&self, _path: Option<&std::path::Path>) {}
     fn toggle_simple_fullscreen(&self) {}
     fn is_simple_fullscreen(&self) -> bool {

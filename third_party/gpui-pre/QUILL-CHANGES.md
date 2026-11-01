@@ -481,9 +481,15 @@ The Quill project also changed it in 2026 so an app can refuse a quit the OS
 started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
 `third_party/gpui-pre-windows/QUILL-CHANGES.md`):
 
-- `src/platform.rs`: `Platform::on_quit_request`, by default never called.
-  Linux has no session-end hook to call it from.
+- `src/platform.rs`: `Platform::on_quit_request`, by default never called,
+  whose callback answers a `QuitAnswer`: `Allow`, `Refuse`, or `Later` when
+  the app is busy further up the stack. Linux has no session-end hook to call
+  it from.
 - `src/app.rs`: `App::on_quit_request`. A request that finds the app borrowed
-  goes ahead, as it would with no callback.
+  answers `Later`, so the platform holds the quit and asks again from its
+  event loop instead of letting it through unasked.
 - `src/platform/test/platform.rs`, `src/app/test_context.rs`:
-  `TestAppContext::simulate_quit_request`.
+  `TestAppContext::simulate_quit_request`, which returns the answer.
+- `src/platform.rs`, `src/window.rs`: `PlatformWindow::set_shutdown_block_reason`
+  (a no-op by default) and `Window::set_shutdown_block_reason`, the text
+  Windows shows while the window holds back the end of the session.

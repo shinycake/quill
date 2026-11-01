@@ -5,7 +5,9 @@ use super::super::keybindings::bind_keys;
 use super::super::screenshot_demo::ScreenshotDemo;
 use super::super::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualContext, VisualTestContext, px, size};
+use gpui_kit::{
+    AppContext, Entity, QuitAnswer, TestAppContext, VisualContext, VisualTestContext, px, size,
+};
 use quill::export::account::{AccountSettings, Section, Sections};
 use quill::export::{AccountExport, ChatExport, ExportSettings};
 use quill::rich_html::{PageLabels, RichHtmlExport, RichHtmlRequest};
@@ -255,9 +257,43 @@ fn an_os_quit_goes_ahead_when_nothing_holds_it(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app_wide_actions(&app, vcx);
     settle(vcx);
-    assert!(vcx.cx.simulate_quit_request());
+    assert_eq!(vcx.cx.simulate_quit_request(), QuitAnswer::Allow);
     settle(vcx);
     assert!(!box_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn an_os_quit_that_finds_the_app_busy_is_asked_again_later(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    settle(vcx);
+    let os = vcx.cx.clone();
+    let answer = vcx.cx.update(|_| os.simulate_quit_request());
+    assert_eq!(answer, QuitAnswer::Later, "never let through unasked");
+}
+
+#[gpui_kit::test]
+fn an_os_quit_with_the_main_window_gone_is_refused_during_an_export(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    let dir = scratch("os-quit-no-window");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    vcx.update(|window, _| window.remove_window());
+    settle(vcx);
+    assert_eq!(vcx.cx.simulate_quit_request(), QuitAnswer::Refuse);
+    let export = app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.chat_export.take().unwrap()
+    });
+    export.cancel();
+    wait_for_the_end(|| export.progress().is_settled());
+    drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[gpui_kit::test]
@@ -271,10 +307,14 @@ fn an_os_quit_during_an_export_is_refused_and_stop_ends_the_app(cx: &mut TestApp
         app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
     });
     settle(vcx);
-    assert!(!vcx.cx.simulate_quit_request(), "refused");
+    assert_eq!(vcx.cx.simulate_quit_request(), QuitAnswer::Refuse);
     settle(vcx);
     assert!(box_open(&app, vcx), "asked instead");
-    assert!(!vcx.cx.simulate_quit_request(), "a Dock Quit again");
+    assert_eq!(
+        vcx.cx.simulate_quit_request(),
+        QuitAnswer::Refuse,
+        "a Dock Quit again"
+    );
     settle(vcx);
     assert!(box_open(&app, vcx));
     assert!(!vcx.cx.windows().is_empty(), "still running");

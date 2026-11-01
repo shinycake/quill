@@ -394,7 +394,7 @@ impl Platform for ZoomPlatform {
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
         self.inner.on_quit(callback)
     }
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> gpui_kit::QuitAnswer>) {
         self.inner.on_quit_request(callback)
     }
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
@@ -735,6 +735,9 @@ impl PlatformWindow for ZoomWindow {
     }
     fn set_edited(&mut self, edited: bool) {
         self.inner.set_edited(edited)
+    }
+    fn set_shutdown_block_reason(&self, reason: Option<&str>) {
+        self.inner.set_shutdown_block_reason(reason)
     }
     fn set_document_path(&self, path: Option<&Path>) {
         self.inner.set_document_path(path)

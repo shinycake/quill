@@ -495,3 +495,13 @@ device gets shaders made on it and the old device's are dropped. Run it on
 Windows with `cargo test -p gpui-pre-windows -p quill --lib --features
 quill/demo-capture shared_shader_tests` (the crate is not a workspace member,
 so its `test-support` feature comes through Quill's `demo-capture`).
+
+  and answers 0 when it refuses. A request with `ENDSESSION_CRITICAL` set
+  asks nothing, because that session ends whatever the answer. When the app
+  cannot be asked (broadcasts arrive mid-update, for example inside a COM
+  call), it answers 0 and posts `WM_GPUI_QUIT_REQUEST_LATER`
+  (`src/gpui_message.rs`), which asks from the message loop and quits if the
+  app then allows it.
+- `src/window.rs`: `set_shutdown_block_reason` calls
+  `ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy` (the
+  `Win32_System_Shutdown` feature in `Cargo.toml`).

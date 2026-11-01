@@ -183,15 +183,23 @@ pub(crate) fn query<T: Tdlib>(tdlib: &mut T, request: Value) -> Result<Value, Ex
 }
 
 pub(crate) struct Fetched {
-    file_id: i32,
+    file: FileOf,
     path: PathBuf,
     only_for_export: bool,
+}
+
+/// A TDLib file and the chat whose message holds it, if any. The driver
+/// holds back the delete of a file whose chat is on screen.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FileOf {
+    pub id: i32,
+    pub chat: Option<i64>,
 }
 
 impl Fetched {
     pub(crate) fn release<T: Tdlib>(&self, tdlib: &mut T) -> Result<(), ExportError> {
         if self.only_for_export {
-            release_if_untouched(tdlib, self.file_id, &self.path)?;
+            release_if_untouched(tdlib, self.file, &self.path)?;
         }
         Ok(())
     }
@@ -202,10 +210,14 @@ impl Fetched {
 /// can ask for it while the export downloads, and TDLib merges the two.
 fn release_if_untouched<T: Tdlib>(
     tdlib: &mut T,
-    file_id: i32,
+    file: FileOf,
     downloaded: &Path,
 ) -> Result<(), ExportError> {
-    let delete = json!({"@type": "deleteFile", "file_id": file_id});
+    let file_id = file.id;
+    let mut delete = json!({"@type": "deleteFile", "file_id": file_id});
+    if let Some(chat) = file.chat {
+        crate::json_access::set(&mut delete, "chat_id", json!(chat));
+    }
     // After a cancel the worker's calls send nothing, and the copy would
     // stay in the cache for good; the driver still keeps the view's files.
     let call = |tdlib: &mut T, request: Value| match tdlib.call(request, QUERY_TIMEOUT) {
@@ -262,9 +274,10 @@ fn nothing_held(file: &Value) -> bool {
 pub(crate) fn fetch_file<T: Tdlib>(
     tdlib: &mut T,
     files_root: &Path,
-    file_id: i32,
+    file: FileOf,
     limit: Option<i64>,
 ) -> Result<Result<Fetched, Skip>, ExportError> {
+    let file_id = file.id;
     if file_id == 0 {
         return Ok(Err(Skip::Unavailable));
     }
@@ -311,7 +324,7 @@ pub(crate) fn fetch_file<T: Tdlib>(
         && answer.at("size").as_i64().unwrap_or(0) > limit
     {
         match (only_for_export, &path) {
-            (true, Some(path)) => release_if_untouched(tdlib, file_id, path)?,
+            (true, Some(path)) => release_if_untouched(tdlib, file, path)?,
             _ => drop_entry(tdlib),
         }
         return Ok(Err(Skip::TooLarge));
@@ -326,7 +339,7 @@ pub(crate) fn fetch_file<T: Tdlib>(
         return Ok(Err(Skip::Unavailable));
     }
     Ok(Ok(Fetched {
-        file_id,
+        file,
         path,
         only_for_export,
     }))
@@ -394,7 +407,11 @@ fn save_once<T: Tdlib>(
     if let Some(saved) = job.loaded.find(file_id) {
         return Ok(Ok(out.folder_path(&saved)));
     }
-    let source = match fetch_file(tdlib, job.files_root, file_id, limit)? {
+    let file = FileOf {
+        id: file_id,
+        chat: Some(job.settings.chat_id),
+    };
+    let source = match fetch_file(tdlib, job.files_root, file, limit)? {
         Ok(source) => source,
         Err(skip) => return Ok(Err(skip)),
     };

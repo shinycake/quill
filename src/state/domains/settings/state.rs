@@ -238,17 +238,10 @@ impl SettingsState {
             .chain(self.rich_html_exports.iter().map(|export| &export.link))
     }
 
-    pub(crate) fn export_links_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut crate::export::handle::WorkerLink> {
-        let chat = self.chat_export.iter_mut().map(|export| &mut export.link);
-        let account = self
-            .account_export
-            .iter_mut()
-            .map(|export| &mut export.link);
-        let rich_html = self.rich_html_exports.iter_mut();
-        chat.chain(account)
-            .chain(rich_html.map(|export| &mut export.link))
+    /// Whether an export still runs: neither stopped nor ended.
+    pub fn exporting(&self) -> bool {
+        self.export_links()
+            .any(|link| !link.is_cancelled() && !link.worker_ended())
     }
 
     pub(crate) fn new() -> Self {

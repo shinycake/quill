@@ -1,16 +1,23 @@
 //! The session's side of the cache copies exports download for themselves
-//! (`export::leftovers`): the deletes and checks in flight, and which entry
-//! each one clears when TDLib answers.
+//! (`export::leftovers`): the files the view asked for, the deletes held
+//! back for a chat on screen, the deletes and checks in flight, and which
+//! entry each one clears when TDLib answers.
 use crate::export::leftovers::{Earlier, Leftovers};
 use crate::ids::RequestId;
 use crate::json_access::JsonExt;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct ExportFiles {
     leftovers: Option<Leftovers>,
+    /// Files the view asked for while an export ran. Their cache copy
+    /// stays even when an export downloaded them first.
+    view_files: HashSet<i32>,
+    /// Deletes held back while their chat is on screen: (chat, file). A
+    /// row that loads meanwhile finds the file in the cache.
+    held: Vec<(i64, i32)>,
     /// `getRemoteFile` for an entry an earlier run left.
     checks: HashMap<RequestId, Earlier>,
     /// A `deleteFile` in flight and the entry its answer clears.
@@ -54,6 +61,52 @@ impl ExportFiles {
     pub(crate) fn kept(&self, file_id: i32) {
         if let Some(leftovers) = &self.leftovers {
             leftovers.forget(&leftovers.name(file_id));
+        }
+    }
+
+    pub(crate) fn note_view_file(&mut self, file_id: i32) {
+        self.view_files.insert(file_id);
+    }
+
+    pub(crate) fn view_keeps(&self, file_id: i32) -> bool {
+        self.view_files.contains(&file_id)
+    }
+
+    pub(crate) fn holds_any(&self) -> bool {
+        !self.held.is_empty()
+    }
+
+    pub(crate) fn hold(&mut self, chat: i64, file_id: i32) {
+        self.held.push((chat, file_id));
+    }
+
+    /// The held deletes that go now: each whose chat left the screen, or
+    /// every one once no export runs. A file the view asked for meanwhile
+    /// stays in the cache and leaves the list.
+    pub(crate) fn release_held(
+        &mut self,
+        shown: impl Fn(i64) -> bool,
+        exporting: bool,
+    ) -> Vec<i32> {
+        let (keep, release): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held)
+            .into_iter()
+            .partition(|(chat, _)| exporting && shown(*chat));
+        self.held = keep;
+        let (kept, gone): (Vec<_>, Vec<_>) = release
+            .into_iter()
+            .map(|(_, file_id)| file_id)
+            .partition(|file_id| self.view_files.contains(file_id));
+        for file_id in kept {
+            self.kept(file_id);
+        }
+        gone
+    }
+
+    /// With no export left and nothing held, what the view asked for no
+    /// longer matters.
+    pub(crate) fn forget_view_files(&mut self) {
+        if self.held.is_empty() {
+            self.view_files.clear();
         }
     }
 

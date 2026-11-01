@@ -123,7 +123,9 @@ pub(crate) struct WindowsPlatformState {
 struct PlatformCallbacks {
     open_urls: Cell<Option<Box<dyn FnMut(Vec<String>)>>>,
     quit: Cell<Option<Box<dyn FnMut() -> bool>>>,
-    quit_request: Cell<Option<Box<dyn FnMut() -> bool>>>,
+    quit_request: Cell<Option<Box<dyn FnMut() -> QuitAnswer>>>,
+    /// `quit_request` was registered; an empty slot then means it runs.
+    quit_request_set: Cell<bool>,
     reopen: Cell<Option<Box<dyn FnMut()>>>,
     app_menu_action: Cell<Option<Box<dyn FnMut(&dyn Action)>>>,
     will_open_app_menu: Cell<Option<Box<dyn FnMut()>>>,
@@ -1008,8 +1010,10 @@ impl Platform for WindowsPlatform {
         self.inner.state.callbacks.quit.set(Some(callback));
     }
 
-    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
-        self.inner.state.callbacks.quit_request.set(Some(callback));
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> QuitAnswer>) {
+        let callbacks = &self.inner.state.callbacks;
+        callbacks.quit_request.set(Some(callback));
+        callbacks.quit_request_set.set(true);
     }
 
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
@@ -1347,7 +1351,7 @@ impl WindowsPlatformInner {
         let handled = match msg {
             WM_POWERBROADCAST => self.handle_power_broadcast(wparam),
             WM_DISPLAYCHANGE => self.handle_display_change(handle),
-            WM_QUERYENDSESSION => self.handle_query_end_session(lparam),
+            WM_QUERYENDSESSION => self.handle_query_end_session(handle, lparam),
             WM_ENDSESSION if wparam.0 != 0 => self.handle_end_session(),
             _ => self.handle_gpui_events(msg, wparam, lparam),
         };
@@ -1373,6 +1377,7 @@ impl WindowsPlatformInner {
             WM_GPUI_DOCK_MENU_ACTION => self.handle_dock_action_event(lparam.0 as _),
             WM_GPUI_KEYBOARD_LAYOUT_CHANGED => self.handle_keyboard_layout_change(),
             WM_GPUI_DISPLAYS_CHANGED => self.handle_displays_changed(),
+            WM_GPUI_QUIT_REQUEST_LATER => self.handle_quit_request_later(),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             WM_GPUI_GPU_DEVICE_GONE => self.handle_device_gone(lparam),
             _ => None,
@@ -1399,17 +1404,57 @@ impl WindowsPlatformInner {
         Some(0)
     }
 
-    fn handle_query_end_session(&self, lparam: LPARAM) -> Option<isize> {
-        let mut allowed = true;
+    fn handle_query_end_session(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         // A critical end of session happens whatever this answers, so
         // nothing is asked.
-        if lparam.0 as u32 & ENDSESSION_CRITICAL == 0 {
-            self.with_callback(
-                |callbacks| &callbacks.quit_request,
-                |callback| allowed = callback(),
-            );
+        if lparam.0 as u32 & ENDSESSION_CRITICAL != 0 {
+            return Some(1);
         }
-        Some(isize::from(allowed))
+        match self.ask_quit_request() {
+            QuitAnswer::Allow => Some(1),
+            QuitAnswer::Refuse => Some(0),
+            QuitAnswer::Later => {
+                self.ask_quit_request_later(handle);
+                Some(0)
+            }
+        }
+    }
+
+    fn ask_quit_request(&self) -> QuitAnswer {
+        if !self.state.callbacks.quit_request_set.get() {
+            return QuitAnswer::Allow;
+        }
+        let mut answer = QuitAnswer::Later;
+        self.with_callback(
+            |callbacks| &callbacks.quit_request,
+            |callback| answer = callback(),
+        );
+        answer
+    }
+
+    // Broadcasts can arrive while the app is mid-update, so the app is
+    // asked from the message loop. The end of the session is refused
+    // meanwhile.
+    fn ask_quit_request_later(&self, handle: HWND) {
+        unsafe {
+            self.validation_number
+                .message(WM_GPUI_QUIT_REQUEST_LATER, 0)
+                .post(handle)
+                .log_err();
+        }
+    }
+
+    // A quit the app allows now ends it, and a shutdown that waits on it
+    // goes on.
+    fn handle_quit_request_later(&self) -> Option<isize> {
+        match self.ask_quit_request() {
+            QuitAnswer::Allow => unsafe { PostQuitMessage(0) },
+            QuitAnswer::Refuse => {}
+            QuitAnswer::Later => {
+                self.ask_quit_request_later(self.dispatcher.platform_window_handle.as_raw())
+            }
+        }
+        Some(0)
     }
 
     fn handle_end_session(&self) -> Option<isize> {

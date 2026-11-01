@@ -343,13 +343,24 @@ fn an_export_leaves_a_file_the_view_asked_for_in_the_cache() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Sent {
     deletes: usize,
     downloads: usize,
 }
 
-fn open_chat_shows_a_file_the_export_holds(active: bool, done: bool, path: &str) -> Sent {
+/// When the chat's page arrives, against the export's own steps.
+#[derive(Clone, Copy)]
+enum PageArrives {
+    WhileDownloading,
+    BeforeTheDelete,
+    AfterTheDelete,
+}
+
+/// Chat 7 is open while its export downloads, copies and deletes file 1,
+/// and a page showing the file arrives. Returns what went to TDLib while
+/// the chat was open, and the deletes after it closed.
+fn open_chat_shows_a_file_the_export_holds(arrives: PageArrives, photo: &str) -> (Sent, usize) {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -364,6 +375,12 @@ fn open_chat_shows_a_file_the_export_holds(active: bool, done: bool, path: &str)
         .unwrap();
     driver.pump_chat_export();
 
+    let downloading = matches!(arrives, PageArrives::WhileDownloading);
+    let (active, done, path) = if downloading {
+        (true, false, "")
+    } else {
+        (false, true, photo)
+    };
     let file = format!(
         r#"{{"@type":"file","id":1,"size":4,"expected_size":4,"local":{{"@type":"localFile","path":"{path}","can_be_downloaded":true,"can_be_deleted":true,"is_downloading_active":{active},"is_downloading_completed":{done},"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":4}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":4}}}}"#
     );
@@ -372,48 +389,120 @@ fn open_chat_shows_a_file_the_export_holds(active: bool, done: bool, path: &str)
         extra = history.0,
     );
     let seq = AtomicU64::new(100);
-    driver
-        .ingest(copy_and_parse(&page, &seq, &sink).unwrap())
-        .unwrap();
+    let mut page = Some(page);
+    let mut page_arrives = |driver: &mut ConnectDriver<Arc<RecordingSender>>| {
+        if let Some(page) = page.take() {
+            driver
+                .ingest(copy_and_parse(&page, &seq, &sink).unwrap())
+                .unwrap();
+        }
+    };
+    if !matches!(arrives, PageArrives::AfterTheDelete) {
+        page_arrives(&mut driver);
+    }
 
     let link = &mut driver.session.settings.chat_export.as_mut().unwrap().link;
     let download = link.pending.expect("the export's download went out");
     link.reply(download, serde_json::json!({"@type": "ok"}));
     worker
-        .send(serde_json::json!({"@type": "deleteFile", "file_id": 1}))
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 1, "chat_id": 7}))
         .unwrap();
     driver.pump_chat_export();
+    page_arrives(&mut driver);
+    driver.pump_exports();
     let count = |method: &str| {
         let sent = recorder.snapshot().into_iter();
         sent.filter(|json| json.contains(method)).count()
     };
-    let sent = Sent {
+    let open = Sent {
         deletes: count("deleteFile"),
         downloads: count("downloadFile"),
     };
+
+    driver.session.leave_open_chat();
+    driver.pump_exports();
+    let closed = count("deleteFile");
+    drop(worker);
     let _ = std::fs::remove_dir_all(&dir);
-    sent
+    (open, closed)
 }
 
 #[test]
-fn an_export_leaves_a_file_the_open_chat_rides_along_on() {
+fn an_export_leaves_a_file_the_open_chat_shows_until_the_chat_closes() {
+    let dir = crate::scratch::unique_dir("quill-export-finished");
+    let photo = dir.join("photo.jpg");
+    std::fs::write(&photo, b"jpeg").unwrap();
+    let photo = photo.to_string_lossy();
     let one_download = Sent {
         deletes: 0,
         downloads: 1,
     };
-    assert_eq!(
-        open_chat_shows_a_file_the_export_holds(true, false, ""),
-        one_download,
-        "no delete, and only the export's own downloadFile"
+    for (arrives, case) in [
+        (
+            PageArrives::WhileDownloading,
+            "the row loads while the export downloads",
+        ),
+        (
+            PageArrives::BeforeTheDelete,
+            "the row shows the finished file",
+        ),
+        (
+            PageArrives::AfterTheDelete,
+            "the row loads after the export let go",
+        ),
+    ] {
+        assert_eq!(
+            open_chat_shows_a_file_the_export_holds(arrives, &photo),
+            (one_download, 1),
+            "{case}: no delete and only the export's own download while the chat \
+             is open, the delete once it closes"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_held_delete_goes_when_the_export_stops_and_stays_for_a_file_the_view_asked_for() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let chat = r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#;
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[chat]);
+    let _ = driver.select_chat(ChatId(7)).unwrap();
+    let (export, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(export);
+    let deleted = |recorder: &RecordingSender| -> Vec<i64> {
+        let sent = recorder.snapshot().into_iter();
+        sent.map(|json| serde_json::from_str::<Value>(&json).unwrap())
+            .filter(|request| request["@type"] == "deleteFile")
+            .map(|request| request["file_id"].as_i64().unwrap())
+            .collect()
+    };
+
+    for file_id in [1, 2] {
+        worker
+            .send(serde_json::json!({"@type": "deleteFile", "file_id": file_id, "chat_id": 7}))
+            .unwrap();
+        driver.pump_chat_export();
+    }
+    let _ = driver.download_file(crate::ids::FileId(2), 1);
+    driver.pump_exports();
+    assert!(
+        deleted(&recorder).is_empty(),
+        "both held while the chat is open"
     );
-    let dir = crate::scratch::unique_dir("quill-export-finished");
-    let photo = dir.join("photo.jpg");
-    std::fs::write(&photo, b"jpeg").unwrap();
-    assert_eq!(
-        open_chat_shows_a_file_the_export_holds(false, true, &photo.to_string_lossy()),
-        one_download,
-        "already finished, the row showing it"
-    );
+
+    driver
+        .session
+        .settings
+        .chat_export
+        .as_ref()
+        .unwrap()
+        .cancel();
+    driver.pump_exports();
+    assert_eq!(deleted(&recorder), [1], "the view asked for file 2");
+    drop(worker);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
