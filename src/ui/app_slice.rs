@@ -252,7 +252,7 @@ impl QuillApp {
                     for (images, active) in windows {
                         images.update(cx, |images, cx| images.idle_trim(!active, cx));
                     }
-                    let _ = cx.update(|cx| super::glyph_sweep::begin_for(&sweeping, cx));
+                    cx.update(|cx| super::glyph_sweep::begin_for(&sweeping, cx));
                     break;
                 }
                 cx.background_executor().timer(due - now).await;
