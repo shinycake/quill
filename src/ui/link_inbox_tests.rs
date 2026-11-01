@@ -126,3 +126,39 @@ fn quit_works_with_no_window_open(cx: &mut TestAppContext) {
     assert!(vcx.cx.windows().is_empty());
     assert!(vcx.cx.update(|cx| cx.is_action_available(&QuitApp)));
 }
+
+#[gpui_kit::test]
+fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    let main = vcx.window_handle();
+    let weak = app.downgrade();
+    vcx.update(|_, cx| crate::ui::os_menus::register_actions(main, weak, cx));
+    let dir = quill::scratch::process_dir("quill-link-inbox-export");
+    let _ = std::fs::create_dir_all(&dir);
+    let settings = quill::export::ExportSettings::new(16, "Export Chat".into(), dir.clone());
+    let Ok(export) = quill::export::ChatExport::start(settings, dir.clone()) else {
+        panic!("the export did not start");
+    };
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.chat_export = Some(export);
+        }
+    });
+    vcx.run_until_parked();
+    close_main_window(vcx);
+    vcx.cx.update(|cx| cx.dispatch_action(&QuitApp));
+    vcx.run_until_parked();
+    assert!(!vcx.cx.windows().is_empty(), "still running");
+    assert!(app.read_with(vcx, |app, _| app.dialogs.export_stop_open));
+    assert!(
+        vcx.update(|window, _| window.is_window_active()),
+        "back with the prompt"
+    );
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.chat_export = None;
+        }
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
