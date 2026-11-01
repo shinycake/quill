@@ -52,6 +52,8 @@ impl QuillApp {
         // more leave the atlas, then this frame counts (`image_budget`).
         super::image_budget::begin_main_frame(window, draw, cx);
         self.note_frame_timing(window, cx);
+        let display = self.frame.clock_timing.get().map(|timing| timing.display);
+        super::sticker_player::note_display(None, display, window, cx);
         super::glyph_sweep::start_frame(window, cx);
         super::spoiler_fx::release_media_tile(Some(window), cx);
         if let Some(cache) = self.slices.image_cache() {

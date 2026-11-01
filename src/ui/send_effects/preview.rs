@@ -210,8 +210,7 @@ impl QuillApp {
                     .child(
                         canvas(
                             |_, _, _| {},
-                            move |bounds, _, window, cx| {
-                                super::super::sticker_player::note_display(window, cx);
+                            move |bounds, _, window, _| {
                                 view.paint(bounds, window);
                             },
                         )

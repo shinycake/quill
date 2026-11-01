@@ -1,7 +1,7 @@
 //! A view of a clip: one place it shows, with its own play head.
 #![deny(clippy::indexing_slicing)]
 
-use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_hz, high_rate};
+use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_of, high_rate};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{PlayMode, edge_for};
@@ -72,7 +72,7 @@ impl StickerView {
             self.head,
             self.mode,
             edge,
-            high_rate(active),
+            high_rate(self.window, active),
             self.window,
             self.player.now(),
         );
@@ -89,7 +89,7 @@ impl StickerView {
             self.head,
             self.mode,
             self.edge,
-            high_rate(self.active),
+            high_rate(self.window, self.active),
             self.window,
             self.player.now(),
         )
@@ -115,7 +115,7 @@ impl StickerView {
         let head = inner.heads.get(&(self.head, key.file));
         // A clip held to its file's rate still ticks at the display's, so
         // each of its frames stays up for the same number of refreshes.
-        let display_high = high_rate(self.active);
+        let display_high = high_rate(self.window, self.active);
         ViewState::Open(Open {
             head: head.map(|head| head.state).unwrap_or_default(),
             shown: head.and_then(|head| head.shown),
@@ -136,23 +136,18 @@ impl StickerView {
             ViewState::Open(open) => open,
         };
         let timeline = open.timeline;
+        let hz = display_of(self.window).hz;
         let pick = match self.mode {
             PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                 Duration::ZERO,
                 self.mode,
                 timeline,
                 open.high,
-                display_hz(),
+                hz,
             ),
             _ => {
                 let mut head = open.head;
-                head.advance(
-                    self.player.now(),
-                    self.mode,
-                    timeline,
-                    open.high,
-                    display_hz(),
-                )
+                head.advance(self.player.now(), self.mode, timeline, open.high, hz)
             }
         };
         match pick {
@@ -178,7 +173,7 @@ impl StickerView {
                 self.mode,
                 open.timeline,
                 open.high,
-                display_hz(),
+                display_of(self.window).hz,
             ),
         }
     }

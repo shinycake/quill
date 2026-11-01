@@ -482,10 +482,8 @@ fn a_covered_main_window_leaves_windows_and_views_that_do_not_follow_the_app_alo
 }
 
 /// A tick of the main window's layer draws whenever one of its stickers
-/// comes to a new frame before the main window's next refresh, also when a
-/// window on a faster display painted a sticker last: there a tick would
-/// look only that display's shorter refresh ahead, skip, and show the
-/// frame a refresh late.
+/// comes to a new frame before the main window's next refresh: a skipped
+/// tick would show the frame a refresh late.
 #[gpui_kit::test]
 fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mut TestAppContext) {
     use std::time::Duration;
@@ -495,7 +493,6 @@ fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mu
         let (_, painter) = app.slices.conversation_ids().expect("its layer");
         (painter, app.slices.conversation_layer().expect("its layer"))
     });
-    crate::ui::sticker_player::note_display_hz(120.0);
     // 1 ms steps up to the stickers' next frame: whether a tick at each
     // would draw.
     let mut draws = Vec::new();

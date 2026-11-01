@@ -147,7 +147,9 @@ impl Render for ChatWindowView {
         let active = window.is_window_active();
         let bounds = window.bounds();
         let moved = self.bounds_seen.replace(bounds) != Some(bounds);
-        let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
+        let display = window.display(cx).map(|display| display.id());
+        let place = WindowPlace::of(window, display);
+        crate::ui::sticker_player::note_display(Some(chat_id), display.map(u64::from), window, cx);
         let view_id = cx.entity_id();
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.

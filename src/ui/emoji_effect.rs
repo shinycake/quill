@@ -569,8 +569,7 @@ impl QuillApp {
         Some(
             canvas(
                 |_, _, _| {},
-                move |_, _, window, cx| {
-                    super::sticker_player::note_display(window, cx);
+                move |_, _, window, _| {
                     for (key, outgoing, seed, premium, message, view) in &drawn {
                         let (side, (x, y)) = if *message {
                             let Some(badge) = super::message_effect_badge::seen(*key) else {

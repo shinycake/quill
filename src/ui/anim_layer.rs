@@ -542,9 +542,6 @@ impl Element for Layered {
             UNDER_LAYER.with(|flag| flag.set(outer));
         }
         if !drawn_by_layer {
-            if matches!(self.content, Content::Frames(_)) {
-                super::sticker_player::note_display(window, cx);
-            }
             self.content.paint_inline(bounds, window);
         }
     }
@@ -726,7 +723,6 @@ impl Element for LayerPainter {
         window: &mut Window,
         cx: &mut App,
     ) {
-        super::sticker_player::note_display(window, cx);
         self.layer.paint(built, window, cx);
         // Keep the frame clock going while anything here animates (also
         // the first frame after new content appeared).

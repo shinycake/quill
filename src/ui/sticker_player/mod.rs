@@ -18,12 +18,15 @@
 #![deny(clippy::indexing_slicing)]
 
 mod app;
+mod display;
 mod spec;
 mod view;
 
 #[cfg(test)]
 pub(super) use app::sidebar_emoji_head;
 pub(super) use app::{EmojiSide, PreviewEmoji, ViewAsk, mirrors, panel_sticker_head};
+pub(super) use display::note_display;
+use display::{display_of, forget_display};
 pub(super) use spec::{ClipSpec, HeadId, Part};
 pub(super) use view::StickerView;
 
@@ -59,43 +62,16 @@ const WANT_TTL: Duration = Duration::from_millis(120);
 /// Tick rate while a clip opens.
 const OPENING_FPS: u32 = 30;
 
-thread_local! {
-    /// The scale factor and refresh rate of the window that last painted a
-    /// sticker, for views resolved while rendering (before paint).
-    static DISPLAY: Cell<(f32, f64)> = const { Cell::new((2.0, 60.0)) };
-}
-
-/// The refresh rate of the window that last painted a sticker.
-pub(super) fn display_hz() -> f64 {
-    DISPLAY.with(Cell::get).1
-}
-
-/// Note the scale factor and refresh rate of the window painting now;
-/// called by what paints views (the animation layer, effect overlays).
-pub(super) fn note_display(window: &Window, cx: &App) {
-    let hz = window
-        .refresh_interval(cx)
-        .map(|interval| 1.0 / interval.as_secs_f64())
-        .filter(|hz| hz.is_finite() && *hz > 0.0)
-        .unwrap_or(60.0);
-    DISPLAY.with(|display| display.set((window.scale_factor(), hz)));
-}
-
-/// Note that a window refreshing at `hz` painted a sticker last (a test).
-#[cfg(test)]
-pub(super) fn note_display_hz(hz: f64) {
-    DISPLAY.with(|display| display.set((display.get().0, hz)));
-}
-
 fn trace_stickers() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_STICKERS").is_some_and(|v| v == "1"))
 }
 
-/// Whether views may play on the fine grid now.
-fn high_rate(window_active: bool) -> bool {
+/// Whether views in `window` (`None`: the main window) may play on the
+/// fine grid now.
+fn high_rate(window: Option<ChatId>, window_active: bool) -> bool {
     window_active
-        && display_hz() > 61.0
+        && display_of(window).hz > 61.0
         && !quill::power_saving::on(quill::power_saving::Flag::Animations)
 }
 
@@ -508,6 +484,7 @@ impl Player {
         now: Instant,
     ) -> Option<Arc<RenderImage>> {
         self.drain();
+        let display = display_of(window);
         let now = match window {
             None => super::frame_clock::content_now(now),
             Some(_) => now,
@@ -561,9 +538,9 @@ impl Player {
                             mode,
                             timeline,
                             high_rate,
-                            display_hz(),
+                            display.hz,
                         ),
-                        _ => head_state.advance(now, mode, timeline, high_rate, display_hz()),
+                        _ => head_state.advance(now, mode, timeline, high_rate, display.hz),
                     };
                     pick.and_then(|pick| {
                         let exact = clip
@@ -865,7 +842,7 @@ impl Player {
             stats.store_bytes as f64 / 1_048_576.0,
             stats.source_bytes as f64 / 1_048_576.0,
             stats.evicted,
-            display_hz().round(),
+            display_of(None).hz.round(),
         );
     }
 
@@ -879,6 +856,9 @@ impl Player {
     /// chat list keeps its emoji where they are, on their frames).
     /// Returns the frames of the clips it closed, each once.
     pub(super) fn leave(&self, window: Option<ChatId>, what: Leaving) -> Vec<Arc<RenderImage>> {
+        if what == Leaving::Window {
+            forget_display(window);
+        }
         let Ok(mut guard) = self.inner.try_borrow_mut() else {
             return Vec::new();
         };

@@ -2,7 +2,8 @@
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
 use super::super::image_budget::{begin_frame, take_unshowable};
-use super::{CLOSE_AFTER, ClipSpec, DISPLAY, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use super::display::{WindowDisplay, display_of, set_display};
+use super::{CLOSE_AFTER, ClipSpec, HeadId, Leaving, Part, Place, Player, ViewAsk};
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
 use quill::sticker_playback::player::{DecodedFrames, PlayMode, Rest, edge_for};
@@ -159,12 +160,40 @@ fn a_clip_is_drawn_at_its_box_times_the_scale_factor() {
         PlayMode::Loop,
         22.0,
     );
-    let before = DISPLAY.with(std::cell::Cell::get);
-    DISPLAY.with(|display| display.set((2.0, 60.0)));
-    assert_eq!(ask.key().edge, edge_for(44.0));
-    DISPLAY.with(|display| display.set((1.0, 60.0)));
-    assert_eq!(ask.key().edge, edge_for(22.0));
-    DISPLAY.with(|display| display.set(before));
+    let window = Some(ChatId(92));
+    let on = |scale| WindowDisplay {
+        scale,
+        hz: 60.0,
+        id: None,
+    };
+    set_display(window, on(2.0));
+    assert_eq!(ask.key(window).edge, edge_for(44.0));
+    set_display(window, on(1.0));
+    assert_eq!(ask.key(window).edge, edge_for(22.0));
+}
+
+#[test]
+fn each_window_plays_for_its_own_display() {
+    let (main, chat) = (None, Some(ChatId(93)));
+    let ask = ViewAsk::sticker(
+        FileId(7),
+        StickerFormat::Tgs,
+        head("windows"),
+        PlayMode::Loop,
+        112.0,
+    );
+    let before = display_of(main);
+    let at = |hz| WindowDisplay {
+        scale: 2.0,
+        hz,
+        id: None,
+    };
+    set_display(chat, at(120.0));
+    set_display(main, at(60.0));
+    assert_eq!((ask.key(main).hz, ask.key(chat).hz), (60, 120));
+    assert!(!super::high_rate(main, true));
+    assert!(super::high_rate(chat, true));
+    set_display(main, before);
 }
 
 /// The emoji panel closed over a chat of text: no view draws its clips any
