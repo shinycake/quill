@@ -41,6 +41,9 @@ pub struct EngineStats {
 }
 
 pub(super) struct Clip {
+    /// Tells this opening of its key from one closed before: work handed
+    /// out for that one must not land in this one.
+    pub(super) id: u64,
     pub(super) worker: usize,
     /// Set until a worker takes it to open the clip.
     pub(super) origin: Option<Origin>,
@@ -120,9 +123,14 @@ const COARSE_SHARE: f64 = 0.4;
 
 pub(super) enum Job {
     /// Open a TGS clip (decoded clips open on the opener threads).
-    Open { key: ClipKey, path: PathBuf },
+    Open {
+        key: ClipKey,
+        id: u64,
+        path: PathBuf,
+    },
     Frame {
         key: ClipKey,
+        id: u64,
         index: u32,
         /// The frame's stored data, if it was drawn before.
         stored: Option<StoredFrame>,
@@ -143,6 +151,8 @@ pub(super) struct State {
     pub(super) store_bytes: usize,
     pub(super) stats: EngineStats,
     served: u64,
+    /// The last clip id handed out.
+    opened: u64,
     /// Frames each worker drew in a row while one of its clips waited to
     /// open.
     frames_in_a_row: Vec<u32>,
@@ -187,6 +197,7 @@ impl Engine {
                 store_bytes: 0,
                 stats: EngineStats::default(),
                 served: 0,
+                opened: 0,
                 frames_in_a_row: vec![0; workers],
             }),
             work: Condvar::new(),
@@ -246,9 +257,12 @@ impl Engine {
             .min_by_key(|index| load.get(*index).copied().unwrap_or(0))
             .unwrap_or(0);
         let store_only = matches!(origin, Origin::Decoded(_));
+        state.opened += 1;
+        let id = state.opened;
         state.clips.insert(
             key,
             Clip {
+                id,
                 worker,
                 origin: Some(origin),
                 state: ClipState::Opening,
@@ -395,6 +409,11 @@ impl Drop for Engine {
 }
 
 impl State {
+    /// `key`'s clip, if it is still the opening `id` names.
+    pub(super) fn clip_mut(&mut self, key: &ClipKey, id: u64) -> Option<&mut Clip> {
+        self.clips.get_mut(key).filter(|clip| clip.id == id)
+    }
+
     pub(super) fn close(&mut self, key: &ClipKey) {
         let Some(clip) = self.clips.remove(key) else {
             return;
@@ -513,7 +532,11 @@ impl State {
             return None;
         };
         clip.busy = true;
-        Some(Job::Open { key, path })
+        Some(Job::Open {
+            key,
+            id: clip.id,
+            path,
+        })
     }
 
     /// The soonest frame worker `me` has to draw, of its clip served
@@ -538,11 +561,17 @@ impl State {
         clip.drawing = Some(index);
         clip.served = served;
         let stored = clip.store.get(index);
-        Some(Job::Frame { key, index, stored })
+        Some(Job::Frame {
+            key,
+            id: clip.id,
+            index,
+            stored,
+        })
     }
 
-    /// The next clip for an opener to decode, with what stops it.
-    pub(super) fn next_decode(&mut self) -> Option<(ClipKey, DecodeAll, Cancel)> {
+    /// The next clip for an opener to decode, with its id and what stops
+    /// it.
+    pub(super) fn next_decode(&mut self) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
         let (key, clip) = self
             .clips
             .iter_mut()
@@ -551,6 +580,6 @@ impl State {
             return None;
         };
         clip.busy = true;
-        Some((*key, decode, clip.cancel.clone()))
+        Some((*key, clip.id, decode, clip.cancel.clone()))
     }
 }

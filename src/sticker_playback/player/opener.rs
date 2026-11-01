@@ -13,7 +13,7 @@ use crate::locks::lock_or_recover;
 pub(super) fn run(shared: &Shared) {
     let mut scratch = Scratch::default();
     loop {
-        let (key, decode, cancel) = {
+        let (key, id, decode, cancel) = {
             let mut state = lock_or_recover(&shared.state);
             loop {
                 if state.stop {
@@ -28,13 +28,20 @@ pub(super) fn run(shared: &Shared) {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         };
-        open(shared, &mut scratch, key, decode, &cancel);
+        open(shared, &mut scratch, key, id, decode, &cancel);
         shared.wake();
         shared.work.notify_all();
     }
 }
 
-fn open(shared: &Shared, scratch: &mut Scratch, key: ClipKey, decode: DecodeAll, cancel: &Cancel) {
+fn open(
+    shared: &Shared,
+    scratch: &mut Scratch,
+    key: ClipKey,
+    id: u64,
+    decode: DecodeAll,
+    cancel: &Cancel,
+) {
     let mut packed = Store::default();
     let opened = decode(cancel)
         .and_then(|decoded| source::decoded(key, decoded))
@@ -47,7 +54,7 @@ fn open(shared: &Shared, scratch: &mut Scratch, key: ClipKey, decode: DecodeAll,
             Ok(timeline)
         });
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state.clips.get_mut(&key) else {
+    let Some(clip) = state.clip_mut(&key, id) else {
         state.freed.push(packed);
         return;
     };

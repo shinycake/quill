@@ -46,13 +46,16 @@ pub(super) fn run(me: usize, shared: &Shared) {
         // The UI is woken when a clip opened or failed and for a clip's
         // first frame; later frames are picked up as views paint.
         let wake = match job {
-            Job::Open { key, path } => {
-                open(shared, &mut sources, key, &path);
+            Job::Open { key, id, path } => {
+                open(shared, &mut sources, key, id, &path);
                 true
             }
-            Job::Frame { key, index, stored } => {
-                frame(shared, &mut sources, &mut scratch, key, index, stored)
-            }
+            Job::Frame {
+                key,
+                id,
+                index,
+                stored,
+            } => frame(shared, &mut sources, &mut scratch, (key, id), index, stored),
         };
         if wake {
             shared.wake();
@@ -68,10 +71,16 @@ fn wait<'a>(shared: &Shared, state: MutexGuard<'a, State>) -> MutexGuard<'a, Sta
 }
 
 /// Opens a TGS clip on this worker, which keeps its canvas.
-fn open(shared: &Shared, sources: &mut HashMap<ClipKey, Source>, key: ClipKey, path: &Path) {
+fn open(
+    shared: &Shared,
+    sources: &mut HashMap<ClipKey, Source>,
+    key: ClipKey,
+    id: u64,
+    path: &Path,
+) {
     let opened = Source::lottie(path, key);
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state.clips.get_mut(&key) else {
+    let Some(clip) = state.clip_mut(&key, id) else {
         // Closed meanwhile.
         return;
     };
@@ -104,7 +113,7 @@ fn frame(
     shared: &Shared,
     sources: &mut HashMap<ClipKey, Source>,
     scratch: &mut Scratch,
-    key: ClipKey,
+    (key, id): (ClipKey, u64),
     index: u32,
     stored: Option<StoredFrame>,
 ) -> bool {
@@ -131,7 +140,7 @@ fn frame(
     // Its block may take new frames again.
     drop(stored);
     let mut state = lock_or_recover(&shared.state);
-    let Some(clip) = state.clips.get_mut(&key) else {
+    let Some(clip) = state.clip_mut(&key, id) else {
         return false;
     };
     clip.busy = false;

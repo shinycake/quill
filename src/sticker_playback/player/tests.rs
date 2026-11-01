@@ -814,3 +814,47 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
         std::thread::yield_now();
     }
 }
+
+#[test]
+fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
+    use std::sync::mpsc;
+    let engine = Engine::new(2, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<Option<String>>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(std::thread::current().name().map(str::to_owned));
+    }));
+    let len = 16 * 16 * 4;
+    let key = key(1, 16);
+    let (started, decoding) = mpsc::channel::<Option<String>>();
+    let (release, released) = mpsc::channel::<()>();
+    engine.open(
+        key,
+        Origin::Decoded(Box::new(move |cancel: &Cancel| {
+            let _ = started.send(std::thread::current().name().map(str::to_owned));
+            let _ = released.recv();
+            if cancel.flag.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("Sticker playback cancelled".to_string());
+            }
+            Ok(DecodedFrames {
+                frames: vec![vec![1; len]; 3],
+                fps: 30.0,
+            })
+        })),
+    );
+    let old_opener = decoding.recv().unwrap();
+    // Scrolled away and back while it decodes: the same key opens again,
+    // and the other opener finishes it.
+    engine.close(&key);
+    engine.open(key, synthetic(16, 3));
+    while engine.info(&key).is_none() {
+        assert!(!matches!(engine.state(&key), Some(ClipState::Failed(_))));
+        wakes.recv().unwrap();
+    }
+    release.send(()).unwrap();
+    while wakes.recv().unwrap() != old_opener {}
+    assert!(
+        matches!(engine.state(&key), Some(ClipState::Ready(_))),
+        "{:?}",
+        engine.state(&key)
+    );
+}
