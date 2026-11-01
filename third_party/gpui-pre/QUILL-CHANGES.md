@@ -468,6 +468,15 @@ content painted away from its place in the tree keeps the opacity it was given t
 
 `src/ui/layer_tick_tests.rs` holds the tests.
 
+The Quill project also changed it in 2026 so `Scene::finish` stops allocating a
+sort buffer each frame:
+
+- `src/scene.rs`: `sort_primitives` leaves a sorted list alone and otherwise
+  sorts `(key, position)` pairs in a kept buffer, then moves the primitives by
+  swaps. `sort_by_key` took a scratch buffer of whole structs, up to 128 bytes
+  each, from `malloc`'s large path on every frame. Test:
+  `src/ui/scene_replay_tests.rs`.
+
 The Quill project also changed it in 2026 so a warning logged during a quit
 reaches the log:
 
