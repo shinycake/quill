@@ -166,9 +166,8 @@ impl PolledRedraw {
     }
 
     /// A full redraw now, whatever is pending and however recently the
-    /// window drew: for what only a render hands out (desktop
-    /// notifications, their sounds, forced replies), which must not wait
-    /// for the inactive window's interval.
+    /// window drew: for what only a render hands out (a forced reply),
+    /// which must not wait for the inactive window's interval.
     pub(super) fn drawn(&mut self, now: std::time::Instant) -> PolledAction {
         self.full = RedrawNeed::Nothing;
         self.list = false;
@@ -286,10 +285,17 @@ impl QuillApp {
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
         let settings_open = self.settings.open;
+        // Asked of the platform: a hidden or minimized main window does not
+        // draw, so its last render may predate its deactivation.
+        let main_active = self
+            .windows
+            .main
+            .is_some_and(|main| cx.active_window() == Some(main));
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
             return false;
         };
+        live.driver.session.app_active = main_active;
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = live
             .driver
@@ -374,19 +380,9 @@ impl QuillApp {
         if ticks.redraw_now {
             need = RedrawNeed::Now;
         }
-        // A desktop notification, its sound or a forced reply is handed
-        // out by the next render (`flush_notifications`): draw it now,
-        // whatever the updates were and whether or not the window is in
-        // front.
-        let deliver = !live
-            .driver
-            .session
-            .settings
-            .pending_notifications
-            .is_empty()
-            || live.driver.session.bots.pending_force_reply.is_some()
-            || !live.driver.session.settings.pending_sound_plays.is_empty()
-            || live.driver.session.settings.tone_upload.is_settled();
+        // A forced reply arms the composer at the next render
+        // (`flush_notifications`): draw it now, whatever the updates were.
+        let deliver = live.driver.session.bots.pending_force_reply.is_some();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folders.tab
@@ -737,6 +733,7 @@ impl QuillApp {
         if progressed {
             self.progress_inline_mode(cx);
         }
+        self.deliver_notifications(None, cx);
         self.redraw_polled(need, deliver, cx);
         self.discard_stopped_media_playback(cx);
         self.resume_play_intent(cx);
@@ -765,9 +762,9 @@ impl QuillApp {
         self.start_connection(cx);
     }
 
-    /// Phase 8.1: drain notification click callbacks (focus the chat) and
-    /// dispatch newly queued notifications on worker threads. Runs from
-    /// `render`, which is the only UI path with a `&mut Window`.
+    /// Phase 8.1: run notification clicks and a forced reply, which open
+    /// things in the window, then hand out what is still queued. Runs
+    /// from `render`, which is the only UI path with a `&mut Window`.
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
@@ -791,19 +788,7 @@ impl QuillApp {
         }
         // Other accounts: switches asked for by their notifications.
         self.flush_background_accounts(window, cx);
-        self.flush_call_notifications(window, cx);
-        // Notifications whose chat was read elsewhere (or removed by TDLib)
-        // are withdrawn from the OS notification center.
-        let clears: Vec<ChatId> = self
-            .live
-            .as_mut()
-            .map(|live| {
-                std::mem::take(&mut live.driver.session.settings.pending_notification_clears)
-            })
-            .unwrap_or_default();
-        for chat_id in clears {
-            self.dismiss_os_notification(chat_id, cx);
-        }
+        self.answer_call_picks(window, cx);
         // B1: force-reply — an incoming message demanded a reply; drain
         // from the live or demo session and arm the composer.
         let force_target = self
@@ -818,20 +803,49 @@ impl QuillApp {
         if let Some(target) = force_target {
             self.drain_force_reply(target, window, cx);
         }
-        let queued: Vec<QueuedNotification> = self
+        self.deliver_notifications(Some(window), cx);
+    }
+
+    /// Hand out what the account on screen queued for the OS: withdrawn
+    /// notifications, banners, sounds, the Dock bounce, the incoming-call
+    /// toast and a settled tone upload. Each poll runs this, because a
+    /// hidden, minimized or covered main window does not draw (tdesktop's
+    /// notification manager runs on data events too). `window`: the main
+    /// window, when its render runs this.
+    pub(super) fn deliver_notifications(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(drain) = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_notifications))
-            .unwrap_or_default();
+            .map(|live| quill::notify_accounts::drain_on_screen(&mut live.driver.session))
+        {
+            self.hand_out_notifications(drain, window, cx);
+        }
+        self.announce_ringing_call(cx);
+        self.settle_tone_upload(cx);
+    }
+
+    /// Show one drain of the account on screen (`deliver_notifications`).
+    pub(super) fn hand_out_notifications(
+        &mut self,
+        drain: quill::notify_accounts::NotifyDrain,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        // Notifications whose chat was read elsewhere (or removed by TDLib)
+        // are withdrawn from the OS notification center.
+        for chat_id in drain.clears {
+            self.dismiss_os_notification(chat_id, cx);
+        }
         // tdesktop skips its own sound and the Dock bounce / taskbar flash
         // while the system is in Do Not Disturb; the OS banner is the OS's.
-        let wants_attention = self.live.as_mut().is_some_and(|live| {
-            std::mem::take(&mut live.driver.session.settings.pending_attention)
-        });
         // Only probe the OS when there is something to decide about.
-        let dnd = quill::notify_focus::needs_probe(wants_attention, queued.len())
+        let dnd = quill::notify_focus::needs_probe(drain.attention, drain.notifications.len())
             && quill::notify_focus::dnd_active();
-        if wants_attention
+        if drain.attention
             && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
                 flash_enabled: true,
                 sound_wanted: false,
@@ -839,9 +853,16 @@ impl QuillApp {
             })
             .flash
         {
-            window.request_attention();
+            match window {
+                Some(window) => window.request_attention(),
+                None => {
+                    if let Some(main) = self.windows.main {
+                        let _ = main.update(cx, |_, window, _| window.request_attention());
+                    }
+                }
+            }
         }
-        for queued in queued {
+        for queued in drain.notifications {
             let plan = quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
                 flash_enabled: false,
                 sound_wanted: queued.sound.is_some(),
@@ -853,41 +874,33 @@ impl QuillApp {
             self.spawn_os_notification(queued, cx);
         }
         // Parity slice: custom sounds whose downloads just completed.
-        let plays: Vec<PathBuf> = self
-            .live
-            .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_sound_plays))
-            .unwrap_or_default();
-        for path in plays {
+        for path in drain.sound_plays {
             self.notify
                 .notification_sounds
                 .play(NotificationSound::File(path));
         }
-        self.settle_tone_upload(cx);
     }
 
-    /// Incoming-call notifications: answer the picks, then announce a new
-    /// ringing call when no Quill window is in front, and withdraw the
-    /// notification once the call stops ringing.
-    fn flush_call_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The incoming call ringing on the account on screen: `(call id,
+    /// caller user id, video)`.
+    fn ringing_call(&self) -> Option<(i32, i64, bool)> {
+        self.session()
+            .and_then(quill::notify_accounts::ringing_incoming_call)
+    }
+
+    /// Picks on the incoming-call notification. A stale pick (the call
+    /// already ended or was answered) is ignored: accepting must never act
+    /// on a different call.
+    fn answer_call_picks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
             .calls
             .notify_clicks
             .lock_or_recover()
             .drain(..)
             .collect();
-        let ringing = self.session().and_then(|s| {
-            let call = s.calls.active_call.as_ref()?;
-            (matches!(
-                call.state,
-                quill::telegram::envelope::CallState::Pending { .. }
-            ) && !call.is_outgoing)
-                .then_some((call.id, call.user_id, call.is_video))
-        });
+        let ringing = self.ringing_call().map(|(call_id, ..)| call_id);
         for (call_id, action) in picks {
-            // A stale pick (the call already ended or was answered) is
-            // ignored: accepting must never act on a different call.
-            if ringing.map(|r| r.0) != Some(call_id) {
+            if ringing != Some(call_id) {
                 continue;
             }
             match action {
@@ -903,7 +916,12 @@ impl QuillApp {
                 }
             }
         }
-        let Some((call_id, user_id, is_video)) = ringing else {
+    }
+
+    /// Announce a new ringing call when no Quill window is in front, and
+    /// withdraw the notification once the call stops ringing.
+    fn announce_ringing_call(&mut self, cx: &mut Context<Self>) {
+        let Some((call_id, user_id, is_video)) = self.ringing_call() else {
             // Not ringing any more: take the toast down (macOS and Windows;
             // a Linux `notify-send` toast expires on its own).
             if let Some(call_id) = self.calls.notified.take()

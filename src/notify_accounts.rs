@@ -170,9 +170,9 @@ pub fn total_unread(active: Option<&Session>) -> AccountUnread {
         .combine(other_accounts_unread())
 }
 
-/// What one poll of a background account hands the UI.
+/// What one poll of an account hands the UI.
 #[derive(Debug, Default)]
-pub struct BackgroundDrain {
+pub struct NotifyDrain {
     /// Notifications to show (empty when "All accounts" is off).
     pub notifications: Vec<QueuedNotification>,
     /// Chats read elsewhere: withdraw their shown notifications.
@@ -183,6 +183,18 @@ pub struct BackgroundDrain {
     pub attention: bool,
 }
 
+/// Take what the session of the account on screen queued for the OS. A
+/// force-reply request stays: it arms the composer, which needs the window.
+pub fn drain_on_screen(session: &mut Session) -> NotifyDrain {
+    let settings = &mut session.settings;
+    NotifyDrain {
+        notifications: std::mem::take(&mut settings.pending_notifications),
+        clears: std::mem::take(&mut settings.pending_notification_clears),
+        sound_plays: std::mem::take(&mut settings.pending_sound_plays),
+        attention: std::mem::take(&mut settings.pending_attention),
+    }
+}
+
 /// Take what a background account's session queued for the screen. The
 /// session keeps no chat open and no window shows it, so its notification
 /// decisions are the ones tdesktop makes for an account that is not on
@@ -190,25 +202,16 @@ pub struct BackgroundDrain {
 /// notification), but the queues are still emptied so nothing piles up
 /// or pops out after a switch. A force-reply request never applies to an
 /// account that is not on screen.
-pub fn drain_background(session: &mut Session, notify_from_all: bool) -> BackgroundDrain {
-    let settings = &mut session.settings;
-    let notifications = std::mem::take(&mut settings.pending_notifications);
-    let sound_plays = std::mem::take(&mut settings.pending_sound_plays);
-    let attention = std::mem::take(&mut settings.pending_attention);
-    let clears = std::mem::take(&mut settings.pending_notification_clears);
+pub fn drain_background(session: &mut Session, notify_from_all: bool) -> NotifyDrain {
+    let drain = drain_on_screen(session);
     session.bots.pending_force_reply = None;
     if !account_may_notify(notify_from_all, false) {
-        return BackgroundDrain {
-            clears,
-            ..BackgroundDrain::default()
+        return NotifyDrain {
+            clears: drain.clears,
+            ..NotifyDrain::default()
         };
     }
-    BackgroundDrain {
-        notifications,
-        clears,
-        sound_plays,
-        attention,
-    }
+    drain
 }
 
 /// The incoming call still ringing in `session`: `(call id, caller user id,

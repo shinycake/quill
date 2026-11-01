@@ -11,11 +11,6 @@ impl QuillApp {
     pub(super) fn frame_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(feature = "frame-profiler")]
         self.frame_profile_tick(window);
-        // Phase 8.1: feed OS window focus into the notification decision, then
-        // dispatch any notifications the reducer queued since the last frame.
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.app_active = window.is_window_active();
-        }
         self.flush_notifications(window, cx);
         self.sync_history_holds();
         self.fetch_missing_reply_target();

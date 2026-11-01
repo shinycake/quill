@@ -25,7 +25,7 @@ use quill::ids::{AccountKey, ChatId};
 use quill::lang::{keys, tr};
 use quill::notify::NotificationAction;
 use quill::notify_accounts::{
-    AccountUnread, BackgroundDrain, BackgroundStatus, background_status, drain_background,
+    AccountUnread, BackgroundStatus, NotifyDrain, background_status, drain_background,
     set_other_accounts_unread,
 };
 use quill::settings::{
@@ -435,7 +435,7 @@ impl QuillApp {
         let now = Instant::now();
         let mut backlog = false;
         let mut changed = false;
-        let mut drained: Vec<(AccountKey, BackgroundDrain)> = Vec::new();
+        let mut drained: Vec<(AccountKey, NotifyDrain)> = Vec::new();
         let proxy_target = self.app_proxy_list();
         // Clients on their way out: one non-blocking drain each.
         self.reap_closing(cx);
