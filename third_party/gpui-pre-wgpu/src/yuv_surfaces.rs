@@ -19,15 +19,16 @@ use std::ops::Range;
 use bytemuck::{Pod, Zeroable};
 use gpui::{Bounds, PaintSurface, ScaledPixels, SurfaceFormat, SurfaceFrame};
 
-/// Texture pairs kept at most (one per clip on screen).
-const MAX_SLOTS: usize = 16;
-
-/// A slot not drawn for this many frames is freed (its clip went away).
-const IDLE_FRAMES: u64 = 2;
-
 /// Surfaces drawn in one renderer frame at most: the uniform buffer holds
 /// this many draws' parameters.
 const MAX_DRAWS: usize = 64;
+
+/// Texture pairs kept at most (one per clip on screen), so every surface
+/// of a frame can have its own.
+const MAX_SLOTS: usize = MAX_DRAWS;
+
+/// A slot not drawn for this many frames is freed (its clip went away).
+const IDLE_FRAMES: u64 = 2;
 
 /// `SurfaceParams` in `shaders.wgsl`.
 #[repr(C)]
@@ -235,25 +236,28 @@ impl YuvSurfaces {
             .map(|(index, _)| index);
         let index = match reusable {
             Some(index) => index,
-            None => {
-                if self.slots.len() >= MAX_SLOTS {
-                    // The least recently drawn goes, one outside the scene
-                    // if there is one.
-                    let evict = |pick_in_scene: bool| {
-                        self.slots
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, slot)| pick_in_scene || !in_scene.contains(&slot.frame_id))
-                            .min_by_key(|(_, slot)| slot.drawn)
-                            .map(|(index, _)| index)
-                    };
-                    if let Some(oldest) = evict(false).or_else(|| evict(true)) {
-                        self.slots.swap_remove(oldest);
-                    }
-                }
+            None if self.slots.len() < MAX_SLOTS => {
                 let slot = self.new_slot(device, layout, width, height);
                 self.slots.push(slot);
                 self.slots.len().checked_sub(1)?
+            }
+            None => {
+                // Replaced in place: the indices this frame's earlier draws
+                // recorded must keep naming their own textures, so a slot
+                // drawn this frame never goes. None left: refused.
+                let evict = |pick_in_scene: bool| {
+                    self.slots
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, slot)| slot.drawn != frame_now)
+                        .filter(|(_, slot)| pick_in_scene || !in_scene.contains(&slot.frame_id))
+                        .min_by_key(|(_, slot)| slot.drawn)
+                        .map(|(index, _)| index)
+                };
+                let index = evict(false).or_else(|| evict(true))?;
+                let slot = self.new_slot(device, layout, width, height);
+                *self.slots.get_mut(index)? = slot;
+                index
             }
         };
         let slot = self.slots.get_mut(index)?;
@@ -481,6 +485,32 @@ mod tests {
         // The viewer closed: nothing is kept.
         renderer.render_scene(&scene_with(&[]), size(32, 16))?;
         assert_eq!(renderer.yuv_slot_count(), 0);
+        Ok(())
+    }
+
+    /// More clips than the old 16 texture pairs: each tile shows its own
+    /// picture, frame after frame, without new textures every frame.
+    #[test]
+    fn seventeen_clips_each_show_their_own_picture() -> anyhow::Result<()> {
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let lumas: Vec<u8> = (0..17u8).map(|n| 16 + n * 12).collect();
+        let clips: Vec<(Arc<SurfaceFrame>, f32)> = lumas
+            .iter()
+            .zip(0u8..)
+            .map(|(&luma, n)| (frame(16, 8, (luma, luma), (128, 128)), f32::from(n) * 32.0))
+            .collect();
+        let scene = scene_with(&clips);
+        for _ in 0..2 {
+            let image = renderer.render_scene_to_image(&scene, size(17 * 32, 16))?;
+            for (&luma, n) in lumas.iter().zip(0u32..) {
+                let grey = ((f32::from(luma) - 16.0) * 255.0 / 219.0).round().min(255.0) as u8;
+                assert_near(&image, n * 32 + 16, 8, [grey, grey, grey]);
+            }
+            assert_eq!(renderer.yuv_slot_count(), 17);
+        }
+        for (clip, _) in &clips {
+            assert_eq!(clip.draw_state(), SurfaceDrawState::Drawn);
+        }
         Ok(())
     }
 

@@ -153,9 +153,12 @@ on the GPU, as gpui-pre-windows does (`docs/decisions/video-nv12-linux.md`):
 
 - `src/yuv_surfaces.rs` (new): `PrimitiveBatch::Surfaces` is drawn. Each
   `SurfaceFormat::Nv12` frame is uploaded into an `R8Unorm` luma and an
-  `Rg8Unorm` chroma texture, kept per clip (at most 16 pairs) and filled
-  again in place while the size stays the same; a pair not drawn for two
-  frames, and every pair once no surface is on screen, is freed. Each draw's
+  `Rg8Unorm` chroma texture, kept per clip (at most 64 pairs, one per draw)
+  and filled again in place while the size stays the same. A pair drawn in
+  the current frame is never replaced, so the slot each draw recorded keeps
+  naming its own textures; with none to replace, the frame is refused. A
+  pair not drawn for two frames, and every pair once no surface is on
+  screen, is freed. Each draw's
   bounds, mask and `YuvColor::rgb_rows` go into one uniform buffer at
   dynamic offsets (at most 64 draws a frame). Frames are marked drawn or
   refused (other formats, too large for a texture). Tests run on lavapipe.
