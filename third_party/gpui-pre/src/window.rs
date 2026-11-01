@@ -5698,8 +5698,7 @@ impl Window {
     /// the screen is not read, so no other window can appear in it. An
     /// error where the platform's renderer has no readback.
     pub fn capture_frame(&self) -> anyhow::Result<image::RgbaImage> {
-        self.platform_window
-            .capture_image(&self.rendered_frame.scene)
+        self.platform_window.capture_image(self.shown_scene())
     }
 
     /// Quill, paint-time: the element that owns tooltip `id` is being
