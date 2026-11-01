@@ -61,7 +61,8 @@ impl Drop for Folder {
 #[gpui_kit::test]
 fn a_many_frame_gif_loads_as_its_first_frame_at_display_size(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let folder = Folder(std::env::temp_dir().join(format!("quill-gif-still-{}", std::process::id())));
+    let folder =
+        Folder(std::env::temp_dir().join(format!("quill-gif-still-{}", std::process::id())));
     std::fs::create_dir_all(&folder.0).expect("a folder for the picture");
     let path = folder.0.join("many-frames.gif");
     std::fs::write(&path, many_frame_gif()).expect("write the GIF");
