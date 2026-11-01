@@ -61,20 +61,23 @@ const ARENA_BYTES: usize = CLASSES * CLASS_SPAN;
 /// Rounding for dropping the unused tail of a block shrunk in place: the
 /// arm64 page, and a multiple of the x86 one.
 const PAGE: usize = 16 << 10;
-/// `ARENA` before the reservation was tried.
+/// `LargeAlloc::base` before the reservation was tried.
 const UNRESERVED: usize = 0;
-/// `ARENA` once the reservation failed: everything goes to `System`.
+/// `LargeAlloc::base` once the reservation failed: everything goes to
+/// `System`.
 const UNAVAILABLE: usize = 1;
 
 /// The process allocator on macOS.
-pub struct LargeAlloc;
+pub struct LargeAlloc {
+    /// The arena's first byte (aligned to `LARGE`), or `UNRESERVED` /
+    /// `UNAVAILABLE`.
+    base: AtomicUsize,
+    /// One bit per slot, set while the slot holds a block.
+    used: [AtomicU64; first_word(CLASSES)],
+}
 
 #[global_allocator]
-static GLOBAL: LargeAlloc = LargeAlloc;
-
-/// The arena's first byte (aligned to `LARGE`), or `UNRESERVED` /
-/// `UNAVAILABLE`.
-static ARENA: AtomicUsize = AtomicUsize::new(UNRESERVED);
+static GLOBAL: LargeAlloc = LargeAlloc::new();
 
 /// Slots in size class `class`.
 const fn slots(class: usize) -> usize {
@@ -86,7 +89,7 @@ const fn words(class: usize) -> usize {
     slots(class).div_ceil(64)
 }
 
-/// Index of size class `class`'s first word in `USED`.
+/// Index of size class `class`'s first word in `LargeAlloc::used`.
 const fn first_word(class: usize) -> usize {
     let mut word = 0;
     let mut earlier = 0;
@@ -96,9 +99,6 @@ const fn first_word(class: usize) -> usize {
     }
     word
 }
-
-/// One bit per slot, set while the slot holds a block.
-static USED: [AtomicU64; first_word(CLASSES)] = [const { AtomicU64::new(0) }; first_word(CLASSES)];
 
 /// The size class serving `size` bytes, if the arena serves that size.
 fn class_of(size: usize) -> Option<usize> {
@@ -140,10 +140,6 @@ impl Slot {
         slot_len(self.class)
     }
 
-    fn word(self) -> Option<&'static AtomicU64> {
-        USED.get(first_word(self.class) + self.index / 64)
-    }
-
     fn mask(self) -> u64 {
         1 << (self.index % 64)
     }
@@ -163,33 +159,49 @@ impl Slot {
     }
 }
 
-/// The arena's base address, reserving it on first use. `None` when the
-/// reservation failed (now or before).
-fn arena() -> Option<usize> {
-    match ARENA.load(Ordering::Acquire) {
-        UNRESERVED => {}
-        UNAVAILABLE => return None,
-        base => return Some(base),
-    }
-    let reserved = reserve(ARENA_BYTES + LARGE);
-    let value = reserved.map_or(UNAVAILABLE, |raw| raw.next_multiple_of(LARGE));
-    match ARENA.compare_exchange(UNRESERVED, value, Ordering::AcqRel, Ordering::Acquire) {
-        Ok(_) => (value != UNAVAILABLE).then_some(value),
-        Err(winner) => {
-            // Another thread reserved first: give ours back, use theirs.
-            if let Some(raw) = reserved {
-                unmap(raw, ARENA_BYTES + LARGE);
-            }
-            (winner != UNAVAILABLE).then_some(winner)
+impl LargeAlloc {
+    const fn new() -> Self {
+        Self {
+            base: AtomicUsize::new(UNRESERVED),
+            used: [const { AtomicU64::new(0) }; first_word(CLASSES)],
         }
     }
-}
 
-/// The arena's base if it was reserved, without reserving it.
-fn arena_if_reserved() -> Option<usize> {
-    match ARENA.load(Ordering::Acquire) {
-        UNRESERVED | UNAVAILABLE => None,
-        base => Some(base),
+    /// The arena's base address, reserving it on first use. `None` when the
+    /// reservation failed (now or before).
+    fn arena(&self) -> Option<usize> {
+        match self.base.load(Ordering::Acquire) {
+            UNRESERVED => {}
+            UNAVAILABLE => return None,
+            base => return Some(base),
+        }
+        let reserved = reserve(ARENA_BYTES + LARGE);
+        let value = reserved.map_or(UNAVAILABLE, |raw| raw.next_multiple_of(LARGE));
+        match self
+            .base
+            .compare_exchange(UNRESERVED, value, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => (value != UNAVAILABLE).then_some(value),
+            Err(winner) => {
+                // Another thread reserved first: give ours back, use theirs.
+                if let Some(raw) = reserved {
+                    unmap(raw, ARENA_BYTES + LARGE);
+                }
+                (winner != UNAVAILABLE).then_some(winner)
+            }
+        }
+    }
+
+    /// The arena's base if it was reserved, without reserving it.
+    fn arena_if_reserved(&self) -> Option<usize> {
+        match self.base.load(Ordering::Acquire) {
+            UNRESERVED | UNAVAILABLE => None,
+            base => Some(base),
+        }
+    }
+
+    fn word(&self, slot: Slot) -> Option<&AtomicU64> {
+        self.used.get(first_word(slot.class) + slot.index / 64)
     }
 }
 
@@ -251,76 +263,78 @@ fn unmap(addr: usize, len: usize) {
     }
 }
 
-/// Claim a free slot of size class `class`.
-fn claim(class: usize) -> Option<Slot> {
-    let count = slots(class);
-    for word_index in 0..words(class) {
-        let word = USED.get(first_word(class) + word_index)?;
-        // Bits past the class's last slot (classes of under 64 slots).
-        let valid = match count.saturating_sub(word_index * 64) {
-            n if n >= 64 => u64::MAX,
-            n => (1_u64 << n) - 1,
-        };
-        loop {
-            let free = !word.load(Ordering::Relaxed) & valid;
-            if free == 0 {
-                break;
-            }
-            let bit = free.trailing_zeros() as usize;
-            let mask = 1_u64 << bit;
-            if word.fetch_or(mask, Ordering::AcqRel) & mask == 0 {
-                return Some(Slot {
-                    class,
-                    index: word_index * 64 + bit,
-                });
+impl LargeAlloc {
+    /// Claim a free slot of size class `class`.
+    fn claim(&self, class: usize) -> Option<Slot> {
+        let count = slots(class);
+        for word_index in 0..words(class) {
+            let word = self.used.get(first_word(class) + word_index)?;
+            // Bits past the class's last slot (classes of under 64 slots).
+            let valid = match count.saturating_sub(word_index * 64) {
+                n if n >= 64 => u64::MAX,
+                n => (1_u64 << n) - 1,
+            };
+            loop {
+                let free = !word.load(Ordering::Relaxed) & valid;
+                if free == 0 {
+                    break;
+                }
+                let bit = free.trailing_zeros() as usize;
+                let mask = 1_u64 << bit;
+                if word.fetch_or(mask, Ordering::AcqRel) & mask == 0 {
+                    return Some(Slot {
+                        class,
+                        index: word_index * 64 + bit,
+                    });
+                }
             }
         }
-    }
-    None
-}
-
-/// Give a slot's bit back. Its mapping must already be inaccessible.
-fn release(slot: Slot) {
-    if let Some(word) = slot.word() {
-        word.fetch_and(!slot.mask(), Ordering::Release);
-    }
-}
-
-/// A block of size class `class` from the arena: fresh zero pages. `None`
-/// when the arena, a slot or the mapping is not available.
-fn arena_alloc(class: usize) -> Option<*mut u8> {
-    let base = arena()?;
-    let slot = claim(class)?;
-    let addr = slot.addr(base);
-    if remap(addr, slot.len(), libc::PROT_READ | libc::PROT_WRITE) {
-        Some(addr as *mut u8)
-    } else {
-        // The slot is still inaccessible (XNU restored its old mapping,
-        // see `remap`); nothing to undo but the bit.
-        release(slot);
         None
     }
-}
 
-/// Free `slot` (starting at `addr`): drop its pages, then let it be
-/// claimed again.
-fn arena_free(slot: Slot, addr: usize) {
-    if remap(addr, slot.len(), libc::PROT_NONE) {
-        release(slot);
+    /// Give a slot's bit back. Its mapping must already be inaccessible.
+    fn release(&self, slot: Slot) {
+        if let Some(word) = self.word(slot) {
+            word.fetch_and(!slot.mask(), Ordering::Release);
+        }
     }
-    // Else the pages stay mapped (XNU restored the old mapping, see
-    // `remap`) and the slot stays claimed: a leak, never a slot handed out
-    // twice.
-}
 
-/// The arena slot holding `ptr`, if `ptr` is an arena block. `Err(())`
-/// when `ptr` is inside the arena but not at a slot's start: a caller bug.
-/// `dealloc` leaks it; `realloc` returns null, which the caller treats as
-/// allocation failure (Rust's collections abort).
-fn owner(ptr: *mut u8) -> Option<Result<Slot, ()>> {
-    let base = arena_if_reserved()?;
-    let (slot, at_start) = Slot::containing(base, ptr as usize)?;
-    Some(if at_start { Ok(slot) } else { Err(()) })
+    /// A block of size class `class` from the arena: fresh zero pages.
+    /// `None` when the arena, a slot or the mapping is not available.
+    fn arena_alloc(&self, class: usize) -> Option<*mut u8> {
+        let base = self.arena()?;
+        let slot = self.claim(class)?;
+        let addr = slot.addr(base);
+        if remap(addr, slot.len(), libc::PROT_READ | libc::PROT_WRITE) {
+            Some(addr as *mut u8)
+        } else {
+            // The slot is still inaccessible (XNU restored its old mapping,
+            // see `remap`); nothing to undo but the bit.
+            self.release(slot);
+            None
+        }
+    }
+
+    /// Free `slot` (starting at `addr`): drop its pages, then let it be
+    /// claimed again.
+    fn arena_free(&self, slot: Slot, addr: usize) {
+        if remap(addr, slot.len(), libc::PROT_NONE) {
+            self.release(slot);
+        }
+        // Else the pages stay mapped (XNU restored the old mapping, see
+        // `remap`) and the slot stays claimed: a leak, never a slot handed
+        // out twice.
+    }
+
+    /// The arena slot holding `ptr`, if `ptr` is an arena block. `Err(())`
+    /// when `ptr` is inside the arena but not at a slot's start: a caller
+    /// bug. `dealloc` leaks it; `realloc` returns null, which the caller
+    /// treats as allocation failure (Rust's collections abort).
+    fn owner(&self, ptr: *mut u8) -> Option<Result<Slot, ()>> {
+        let base = self.arena_if_reserved()?;
+        let (slot, at_start) = Slot::containing(base, ptr as usize)?;
+        Some(if at_start { Ok(slot) } else { Err(()) })
+    }
 }
 
 // SAFETY: arena blocks are whole slots of at least the requested size,
@@ -333,7 +347,7 @@ fn owner(ptr: *mut u8) -> Option<Result<Slot, ()>> {
 // outside the arena, which means `System` allocated it.
 unsafe impl GlobalAlloc for LargeAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if let Some(ptr) = served(layout).and_then(arena_alloc) {
+        if let Some(ptr) = served(layout).and_then(|class| self.arena_alloc(class)) {
             return ptr;
         }
         // SAFETY: forwarded with the caller's guarantees.
@@ -342,7 +356,7 @@ unsafe impl GlobalAlloc for LargeAlloc {
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         // Arena blocks are fresh mappings, which are zero.
-        if let Some(ptr) = served(layout).and_then(arena_alloc) {
+        if let Some(ptr) = served(layout).and_then(|class| self.arena_alloc(class)) {
             return ptr;
         }
         // SAFETY: forwarded with the caller's guarantees.
@@ -350,8 +364,8 @@ unsafe impl GlobalAlloc for LargeAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        match owner(ptr) {
-            Some(Ok(slot)) => arena_free(slot, ptr as usize),
+        match self.owner(ptr) {
+            Some(Ok(slot)) => self.arena_free(slot, ptr as usize),
             Some(Err(())) => {}
             // SAFETY: outside the arena, so `System` allocated `ptr`, and
             // the caller passes the layout it was allocated with.
@@ -364,13 +378,13 @@ unsafe impl GlobalAlloc for LargeAlloc {
         // alignment, does not overflow `isize`, which makes this valid.
         let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
         let new_class = served(new_layout);
-        let old = match owner(ptr) {
+        let old = match self.owner(ptr) {
             Some(Ok(slot)) => slot,
             Some(Err(())) => return std::ptr::null_mut(),
             None => {
                 // A `System` block. Moves into the arena when it grows
                 // past `LARGE`; otherwise stays with `System`.
-                if let Some(new) = new_class.and_then(arena_alloc) {
+                if let Some(new) = new_class.and_then(|class| self.arena_alloc(class)) {
                     // SAFETY: `ptr` holds `layout.size()` bytes and `new`
                     // at least `new_size`; they are distinct blocks.
                     unsafe {
@@ -407,7 +421,7 @@ unsafe impl GlobalAlloc for LargeAlloc {
             // SAFETY: `ptr` is a live slot of `old.len()` bytes, `new` a
             // distinct block of at least `new_size`.
             unsafe { std::ptr::copy_nonoverlapping(ptr, new, copy) };
-            arena_free(old, ptr as usize);
+            self.arena_free(old, ptr as usize);
         }
         new
     }

@@ -157,26 +157,45 @@ impl Session {
         self.media.files.get(&file_id)?.usable_path()
     }
 
+    /// The user's downloaded small avatar. A missing one is claimed for
+    /// download, the way tdesktop loads a userpic when it paints it.
     pub fn user_photo_path(&self, user_id: i64) -> Option<&str> {
         let file_id = self.users.get(&user_id)?.photo_small_file_id;
-        self.media.files.get(&file_id)?.usable_path()
+        let path = self
+            .media
+            .files
+            .get(&file_id)
+            .and_then(ParsedFile::usable_path);
+        if path.is_none()
+            && file_id != 0
+            && let Ok(mut claims) = self.media.avatar_claims.try_borrow_mut()
+        {
+            claims.insert(file_id);
+        }
+        path
+    }
+
+    /// The claimed user avatars that still need a download; drains the
+    /// claims.
+    pub fn take_avatar_claims(&mut self) -> Vec<FileId> {
+        let claims = std::mem::take(self.media.avatar_claims.get_mut());
+        claims
+            .into_iter()
+            .map(FileId)
+            .filter(|id| self.should_download(*id))
+            .collect()
     }
 
     /// Parity slice: `chat.photo.small` file ids for every known chat that
     /// still needs a download — the driver's chat-list avatar hook. Like
     /// the history-thumb hook, this is deduped by `should_download`
     /// (in-flight + local), and the `small` variant is the cheap 160px
-    /// thumbnail, so one pass over all chats stays cheap.
+    /// thumbnail, so one pass over all chats stays cheap. Users' avatars
+    /// are claimed by the views that show them (`user_photo_path`).
     pub fn chat_list_photo_file_ids(&self) -> Vec<FileId> {
         self.chats
             .values()
             .filter_map(|chat| chat.photo_file_id)
-            .chain(
-                self.users
-                    .values()
-                    .map(|user| user.photo_small_file_id)
-                    .filter(|id| *id != 0),
-            )
             .filter(|id| self.should_download(FileId(*id)))
             .map(FileId)
             .collect()
@@ -202,7 +221,7 @@ impl Session {
             .collect()
     }
 
-    /// A chat or user avatar changed from `old` to `new` (0 / `None` =
+    /// A chat avatar changed from `old` to `new` (0 / `None` =
     /// no photo): keep `avatar_file_refs` and queue the new one.
     pub(crate) fn replace_avatar(&mut self, old: Option<i32>, new: Option<i32>) {
         let old = old.filter(|id| *id != 0);

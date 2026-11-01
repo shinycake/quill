@@ -111,11 +111,15 @@ impl QuillApp {
             )
             .on_click(cx.listener(move |this, _, _, cx| match &url {
                 Some(url) => {
-                    if !quill::platform::open_external_url(url) {
-                        this.connection
-                            .set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP)));
-                        cx.notify();
-                    }
+                    let open = quill::platform::open_external_url(url);
+                    this.when_os_answers(open, cx, |this, opened, cx| {
+                        if !opened {
+                            this.connection.set_note(StatusNote::error(tr(
+                                keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP,
+                            )));
+                            cx.notify();
+                        }
+                    });
                 }
                 None => this.copy_profile_text(
                     &address,
