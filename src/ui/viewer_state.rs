@@ -17,6 +17,9 @@ pub(crate) struct ViewerUi {
     pub(super) extra: super::media_viewer::ViewerExtra,
     /// The photo editor over a pending photo attachment, when open.
     pub(super) photo_editor: Option<super::photo_editor::PhotoEditor>,
+    /// The render whose photo the editor opens on once it lands: opening a
+    /// photo mid-render shows its pending edit, not the original.
+    pub(super) photo_editor_after: Option<u64>,
     /// Parity slice 5: zoom/pan of the viewer visual (reset on open/step).
     pub(super) zoom: ViewerZoom,
     /// The viewer's media frame for the current window size (zoom/pan
@@ -98,6 +101,7 @@ impl ViewerUi {
             state: MediaViewer::closed(),
             extra: Default::default(),
             photo_editor: None,
+            photo_editor_after: None,
             zoom: ViewerZoom::new(),
             frame: (720.0, 480.0),
             drag: None,

@@ -361,6 +361,30 @@ impl QuillApp {
         let Some(item) = self.tray_item(index) else {
             return;
         };
+        let render = self
+            .pending_attachments()
+            .get(index)
+            .and_then(|attachment| attachment.extras.photo_render);
+        self.viewer.photo_editor_after = render;
+        if render.is_some() {
+            cx.notify();
+            return;
+        }
+        self.open_photo_editor_for(item, cx);
+    }
+
+    /// Open the editor on the open tray's photo at `path`.
+    pub(super) fn open_photo_editor_on(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let index = self
+            .pending_attachments()
+            .iter()
+            .position(|attachment| attachment.path == path);
+        if let Some(item) = index.and_then(|index| self.tray_item(index)) {
+            self.open_photo_editor_for(item, cx);
+        }
+    }
+
+    fn open_photo_editor_for(&mut self, item: TrayItem, cx: &mut Context<Self>) {
         let path = item.path.clone();
         self.decode_image_then(
             path,

@@ -87,6 +87,12 @@ impl QuillApp {
             let landed = app.update_in(cx, |this, window, cx| {
                 let landed = this.land_attachment_edit(&item.slot, render, saved, cx);
                 let here = this.send_slot().as_ref() == Some(&item.slot);
+                if this.viewer.photo_editor_after == Some(render) {
+                    this.viewer.photo_editor_after = None;
+                    if here && let Some(path) = &landed.path {
+                        this.open_photo_editor_on(path, cx);
+                    }
+                }
                 match landed.held {
                     Some(text) if here => this.submit_composer(text, window, cx),
                     Some(_) => this.note_held_send_dropped(),
@@ -150,7 +156,10 @@ impl QuillApp {
             let Some(saved) = &saved else {
                 // The held Send would carry the unedited photo.
                 send.held_send = None;
-                return Some(Landed::default());
+                return Some(Landed {
+                    held: None,
+                    path: Some(attachment.path.clone()),
+                });
             };
             let stem = attachment
                 .path
@@ -164,7 +173,10 @@ impl QuillApp {
             let held = (!send.renders_an_edit())
                 .then(|| send.held_send.take())
                 .flatten();
-            Some(Landed { held })
+            Some(Landed {
+                held,
+                path: Some(saved.clone()),
+            })
         });
         match (found, saved) {
             (None, Some(saved)) => {
@@ -189,4 +201,6 @@ impl QuillApp {
 struct Landed {
     /// The held Send, once nothing in that tray renders.
     held: Option<String>,
+    /// The photo's file now, while it is still in the tray.
+    path: Option<PathBuf>,
 }

@@ -277,6 +277,27 @@ fn an_edit_lands_on_its_photo_after_an_earlier_card_is_removed(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn reopening_the_editor_during_the_render_opens_the_pending_edit(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("reopen.png", 67, 15);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        app.open_photo_editor(0, cx);
+        assert!(app.viewer.photo_editor.is_none(), "not on the original");
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, _| {
+        let editor = app.viewer.photo_editor.as_ref().expect("opened");
+        assert_eq!(editor.dimensions(), (15, 67), "on the rotated photo");
+    });
+    if let Some(edited) = tray_path(&app, &mut vcx) {
+        let _ = std::fs::remove_file(edited);
+    }
+}
+
+#[gpui_kit::test]
 fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let original = picture("left.png", 71, 17);
