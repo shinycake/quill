@@ -4108,7 +4108,9 @@ impl Window {
                     })
                 })
             } else {
-                self.reuse_paint(deferred_draw.paint_range.clone());
+                let replayed = deferred_draw.paint_range.clone();
+                self.reuse_paint(replayed.clone());
+                self.replay_live_views(&deferred_draw.element_id_stack, &replayed, &paint_start);
             }
             let paint_end = self.paint_index();
             deferred_draw.paint_range = paint_start..paint_end;

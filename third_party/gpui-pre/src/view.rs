@@ -668,7 +668,9 @@ fn paint_view(
                         element.paint(window, cx);
                         window.refreshing = refreshing;
                     } else {
-                        window.reuse_paint(element_state.paint_range.clone());
+                        let replayed = element_state.paint_range.clone();
+                        window.reuse_paint(replayed.clone());
+                        window.replay_live_views(&global_id.unwrap()[..], &replayed, &paint_start);
                     }
 
                     let paint_end = window.paint_index();

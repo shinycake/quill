@@ -12,7 +12,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyElement, App, AppContext, Bounds, Context, Entity, Hsla, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Pixels, Point, Quad, Render, Styled, TestAppContext,
-    VisualTestContext, Window, canvas, div, hsla, point, px, size,
+    VisualTestContext, Window, canvas, deferred, div, hsla, point, px, size,
 };
 use quill::sticker_playback::player::DecodedFrames;
 use std::cell::{Cell, RefCell};
@@ -1024,4 +1024,173 @@ fn a_hover_tile_shows_the_pointer_in_patches(cx: &mut TestAppContext) {
         assert_eq!(probe_hues(vcx), vec![hue]);
     }
     assert_eq!(renders.get(), page, "its page stayed");
+}
+
+struct CountedHost {
+    inner: Entity<Live>,
+    /// It draws the live view deferred.
+    deferred: bool,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for CountedHost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        let live = self.inner.clone().live();
+        let live = if self.deferred {
+            deferred(live).into_any_element()
+        } else {
+            live.into_any_element()
+        };
+        div().size_full().child(live)
+    }
+}
+
+struct CountedPage {
+    host: Entity<CountedHost>,
+    under: f32,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for CountedPage {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        div()
+            .size_full()
+            .relative()
+            .child(div().absolute().size(px(100.)).bg(color(self.under)))
+            .child(
+                div().absolute().size(px(50.)).child(
+                    self.host
+                        .clone()
+                        .cached(gpui_kit::StyleRefinement::default().size_full()),
+                ),
+            )
+    }
+}
+
+/// A cached view holding a live one beside a page's fill, and what counts
+/// their renders.
+struct CachedScene {
+    page: Entity<CountedPage>,
+    inner: Entity<Live>,
+    page_renders: Rc<Cell<u32>>,
+    host_renders: Rc<Cell<u32>>,
+    vcx: VisualTestContext,
+}
+
+impl CachedScene {
+    fn open(cx: &mut TestAppContext) -> Self {
+        Self::open_with(cx, false)
+    }
+
+    fn open_with(cx: &mut TestAppContext, deferred: bool) -> Self {
+        cx.update(gpui_kit::init);
+        let (page_renders, host_renders) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let (page_in, host_in) = (page_renders.clone(), host_renders.clone());
+        let slot = Rc::new(RefCell::new(None));
+        let slot_in = slot.clone();
+        let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+            let inner = cx.new(|_| Live {
+                hue: FIRST,
+                renders: Rc::default(),
+                kept: Rc::default(),
+            });
+            *slot_in.borrow_mut() = Some(inner.clone());
+            CountedPage {
+                host: cx.new(|_| CountedHost {
+                    inner,
+                    deferred,
+                    renders: host_in,
+                }),
+                under: UNDER,
+                renders: page_in,
+            }
+        });
+        let page = handle.root(cx).expect("the page");
+        let inner = slot.borrow().clone().expect("the inner view");
+        let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+        vcx.update(|window, cx| window.render_frame(cx));
+        vcx.run_until_parked();
+        Self {
+            page,
+            inner,
+            page_renders,
+            host_renders,
+            vcx,
+        }
+    }
+
+    fn tick(&mut self, hue: f32) {
+        self.inner.update(&mut self.vcx, |live, cx| {
+            live.hue = hue;
+            cx.notify();
+        });
+        self.vcx.run_until_parked();
+    }
+
+    fn set_under(&mut self, hue: f32) {
+        self.page.update(&mut self.vcx, |page, cx| {
+            page.under = hue;
+            cx.notify();
+        });
+        self.vcx.run_until_parked();
+    }
+
+    fn hues(&mut self) -> Vec<f32> {
+        probe_hues(&mut self.vcx)
+    }
+
+    /// Whole frames, and renders of the cached view, since `before`.
+    fn renders(&self) -> (u32, u32) {
+        (self.page_renders.get(), self.host_renders.get())
+    }
+}
+
+/// With no patch before it, a whole frame replays the cached view: the live
+/// view it holds stays a live view, so its ticks stay patches.
+#[gpui_kit::test]
+fn a_live_view_in_a_replayed_cached_view_keeps_ticking_alone(cx: &mut TestAppContext) {
+    let mut scene = CachedScene::open(cx);
+    let (_, hosts) = scene.renders();
+    scene.set_under(THIRD);
+    assert_eq!(scene.renders().1, hosts, "the whole frame replayed it");
+    assert_eq!(scene.hues(), vec![THIRD, FIRST]);
+    let renders = scene.renders();
+    for hue in [SECOND, FIRST, SECOND] {
+        scene.tick(hue);
+        assert_eq!(scene.hues(), vec![THIRD, hue]);
+    }
+    assert_eq!(scene.renders(), renders, "ticks after it stay patches");
+    scene.set_under(UNDER);
+    assert_eq!(scene.hues(), vec![UNDER, SECOND]);
+}
+
+/// A deferred draw replays with the cached view that holds it, later in the
+/// frame.
+#[gpui_kit::test]
+fn a_deferred_live_view_in_a_replayed_cached_view_keeps_ticking_alone(cx: &mut TestAppContext) {
+    let mut scene = CachedScene::open_with(cx, true);
+    let (_, hosts) = scene.renders();
+    scene.set_under(THIRD);
+    assert_eq!(scene.renders().1, hosts, "the whole frame replayed it");
+    let renders = scene.renders();
+    scene.tick(SECOND);
+    assert_eq!(scene.hues(), vec![THIRD, SECOND]);
+    assert_eq!(scene.renders(), renders, "the tick stayed a patch");
+}
+
+/// The same after patches, whose whole frame renders the cached view.
+#[gpui_kit::test]
+fn a_live_view_in_a_cached_view_ticks_alone_after_a_whole_frame(cx: &mut TestAppContext) {
+    let mut scene = CachedScene::open(cx);
+    scene.tick(SECOND);
+    scene.set_under(THIRD);
+    assert_eq!(scene.hues(), vec![THIRD, SECOND]);
+    let renders = scene.renders();
+    for hue in [FIRST, SECOND] {
+        scene.tick(hue);
+        assert_eq!(scene.hues(), vec![THIRD, hue]);
+    }
+    assert_eq!(scene.renders(), renders);
 }

@@ -462,6 +462,10 @@ were notified, `Window::draw` renders those and nothing else, in `window/live_vi
   whole frame, since a tick that draws nothing would stop asking for the next.
 - The whole frame after a patch marks every live view it drew dirty, so a cached
   view holding one renders again instead of replaying an older paint.
+- A whole frame with no patch before it replays such a cached view: the live views
+  in that paint stay in the frame with it, their operations moved, so their next tick
+  is a patch too (`Window::replay_live_views`, in `paint_view` and for a replayed
+  deferred draw).
 
 A hit test answers only for a whole frame's hitboxes, so a live view that builds
 any (a hover, a click, a tooltip) never patches: a notify of it draws a whole frame,

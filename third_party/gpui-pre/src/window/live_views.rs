@@ -18,11 +18,12 @@
 //! in place, which that frame painted.
 
 use super::{
-    AnyImageCache, AnyView, App, Bounds, ContentMask, DrawPhase, ElementIdStack, EntityId, Pixels,
-    Range, Scene, SmallVec, TextStyleRefinement, Window,
+    AnyImageCache, AnyView, App, Bounds, ContentMask, DrawPhase, ElementId, ElementIdStack,
+    EntityId, PaintIndex, Pixels, Range, Scene, SmallVec, TextStyleRefinement, Window,
 };
 use crate::{AnyElement, IntoElement as _};
 
+#[derive(Clone)]
 pub(crate) struct LiveView {
     view: AnyView,
     /// Its own id included, which comes back when it prepaints in a patch.
@@ -102,6 +103,35 @@ impl Window {
         if let Some(site) = self.next_frame.live_views.get_mut(site) {
             site.scene = Some(start..end);
         }
+    }
+
+    /// This frame replayed the paint in `from` of what `outer` holds, from
+    /// `start` in the scene. Prepaint didn't reach the live views in it, and
+    /// they stay in the frame, their paint moved.
+    pub(crate) fn replay_live_views(
+        &mut self,
+        outer: &[ElementId],
+        from: &Range<PaintIndex>,
+        start: &PaintIndex,
+    ) {
+        let from = from.start.scene_index..from.end.scene_index;
+        let start = start.scene_index;
+        // A scene that refuses paint took none of it.
+        if self.next_frame.scene.len() - start != from.len() {
+            return;
+        }
+        let replayed = self.rendered_frame.live_views.iter().filter_map(|site| {
+            let scene = site.scene.as_ref()?;
+            let inside = site.id_stack.len() > outer.len()
+                && site.id_stack.starts_with(outer)
+                && from.start <= scene.start
+                && scene.end <= from.end;
+            inside.then(|| LiveView {
+                scene: Some(scene.start - from.start + start..scene.end - from.start + start),
+                ..site.clone()
+            })
+        });
+        self.next_frame.live_views.extend(replayed);
     }
 
     /// The scene this window last drew.
