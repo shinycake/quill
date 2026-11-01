@@ -57,9 +57,9 @@ fn warm_with(started: &'static AtomicBool, load: fn() -> bool, loaded: fn(&mut A
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use gpui_kit::TestAppContext;
-    use std::sync::atomic::AtomicUsize;
+    use super::{supported_from, warm_with};
+    use gpui_kit::{App, TestAppContext};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     #[test]
     fn a_load_still_running_shows_the_still() {
