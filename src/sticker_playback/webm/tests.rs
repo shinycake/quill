@@ -1,4 +1,7 @@
-use super::{FramePlan, Placement, WebmFrames, center_into, decode_in_process, sample_fps};
+use super::{
+    FramePlan, Placement, WebmFrame, WebmFrames, WebmStep, center_into, decode_in_process,
+    sample_fps,
+};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -124,13 +127,48 @@ fn frames_center_on_a_square() {
     assert_eq!(center_into(&wide, 3, 1, 1, 1), vec![2, 0, 0, 0]);
     // Truncated input never panics.
     assert_eq!(center_into(&[], 2, 2, 2, 2), vec![0; 16]);
-    let frames = WebmFrames {
+    let picture = WebmFrame {
         width: 2,
         height: 1,
-        frames: vec![frame.to_vec()],
-        fps: 24.0,
+        bgra: frame.to_vec(),
     };
-    assert_eq!(frames.into_squares(4), vec![square]);
+    assert_eq!(picture.into_square(4), square);
+}
+
+#[test]
+fn gathered_steps_hold_each_picture_as_long_as_it_says() {
+    let picture = |n| {
+        WebmStep::Frame(WebmFrame {
+            width: 1,
+            height: 1,
+            bgra: vec![n; 4],
+        })
+    };
+    let mut frames = WebmFrames::default();
+    frames.keep(WebmStep::Repeat(3));
+    for step in [picture(1), WebmStep::Repeat(2), picture(2)] {
+        frames.keep(step);
+    }
+    assert_eq!((frames.width, frames.height), (1, 1));
+    let held: Vec<u8> = frames
+        .frames
+        .iter()
+        .filter_map(|f| f.first().copied())
+        .collect();
+    assert_eq!(held, [1, 1, 1, 2]);
+}
+
+fn gathered(
+    path: &Path,
+    edge: usize,
+    cancelled: &AtomicBool,
+) -> Result<Option<WebmFrames>, String> {
+    let mut frames = WebmFrames::default();
+    let fps = decode_in_process(path, edge, 120, cancelled, &mut |step| {
+        frames.keep(step);
+        Ok(())
+    })?;
+    Ok(fps.map(|fps| WebmFrames { fps, ..frames }))
 }
 
 // ---- The real decoder: skipped where the quillvideo library (with its
@@ -144,8 +182,7 @@ fn video_decode_webm_sticker_keeps_vp9_alpha() {
     let path = fixture("sticker-vp9-alpha.webm");
     // 64x48, 12 fps, 0.5 s (six pictures); the left half is transparent,
     // the right half opaque (R 200, G 40 * frame, B 60).
-    let Some(decoded) = decode_in_process(&path, 64, 120, &cancelled).expect("decode fixture")
-    else {
+    let Some(decoded) = gathered(&path, 64, &cancelled).expect("decode fixture") else {
         eprintln!("skipping: the quillvideo sticker decoder is not installed");
         return;
     };
@@ -177,23 +214,19 @@ fn video_decode_webm_sticker_keeps_vp9_alpha() {
 
     // Fit into a smaller box (and a larger one: enlarged, as ffmpeg's
     // `scale` did).
-    let small = decode_in_process(&path, 32, 120, &cancelled)
-        .unwrap()
-        .unwrap();
+    let small = gathered(&path, 32, &cancelled).unwrap().unwrap();
     assert_eq!((small.width, small.height), (32, 24));
     assert_eq!(small.frames.len(), 12);
-    let large = decode_in_process(&path, 128, 120, &cancelled)
-        .unwrap()
-        .unwrap();
+    let large = gathered(&path, 128, &cancelled).unwrap().unwrap();
     assert_eq!((large.width, large.height), (128, 96));
     assert!(px_at(&small.frames[0], 32, 1, 12)[3] < 16);
     assert!(px_at(&small.frames[0], 32, 30, 12)[3] > 240);
 
     // Cancelled before the first picture.
     let stop = AtomicBool::new(true);
-    assert!(decode_in_process(&path, 64, 120, &stop).is_err());
+    assert!(gathered(&path, 64, &stop).is_err());
     // Not a sticker.
-    assert!(decode_in_process(&fixture("clip-h264-aac.mp4"), 64, 120, &cancelled).is_err());
+    assert!(gathered(&fixture("clip-h264-aac.mp4"), 64, &cancelled).is_err());
 }
 
 fn px_at(frame: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
@@ -243,9 +276,8 @@ fn webm_decode_bench() {
                     path, &cache, edge, max, &child, &cancel,
                 )
                 .unwrap();
-                let squares = decoded.into_squares(edge as u32);
                 times.push(start.elapsed().as_secs_f64() * 1000.0);
-                count = squares.len();
+                count = decoded.frames.len();
             }
             times.sort_by(f64::total_cmp);
             println!(

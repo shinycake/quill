@@ -95,6 +95,16 @@ impl Store {
         );
     }
 
+    /// Keeps frame `index` as every frame from it up to `end` too, for no
+    /// more bytes.
+    pub(super) fn repeat(&mut self, index: u32, end: u32) {
+        let Some(span) = self.frames.get(&index).copied() else {
+            return;
+        };
+        self.frames
+            .extend((index.saturating_add(1)..end).map(|at| (at, span)));
+    }
+
     pub(super) fn get(&self, index: u32) -> Option<StoredFrame> {
         let span = self.frames.get(&index)?;
         Some(StoredFrame {

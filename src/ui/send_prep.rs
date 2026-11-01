@@ -443,8 +443,8 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        DraftClear, PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup,
-        SplitText, plan_cleanup, prepare_snapshots, unsent_text,
+        DraftClear, PrepareError, PreparedMedia, SendOrigin, SendPrepState, SentCleanup, SplitText,
+        plan_cleanup, prepare_snapshots, unsent_text,
     };
     use crate::ui::composer_sends::SendSlot;
     use quill::composer::{AttachmentKind, ComposerAttachment, ComposerSnapshot, DraftTopic};

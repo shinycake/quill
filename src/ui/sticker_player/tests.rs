@@ -1,13 +1,13 @@
 //! The UI half of the player: views of one clip share its frames and keep
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
+use super::super::frame_clock::TickDraw;
 use super::super::image_budget::{
     BoundedImageCache, WindowDraw, begin_chat_frame, begin_frame, slice_rendered, slice_shown,
     take_unshowable,
 };
-use super::{
-    CLOSE_AFTER, ClipSpec, DISPLAY, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk,
-};
+use super::display::{WindowDisplay, display_of, set_display};
+use super::{CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk};
 use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
@@ -172,12 +172,40 @@ fn a_clip_is_drawn_at_its_box_times_the_scale_factor() {
         PlayMode::Loop,
         22.0,
     );
-    let before = DISPLAY.with(std::cell::Cell::get);
-    DISPLAY.with(|display| display.set((2.0, 60.0)));
-    assert_eq!(ask.key().edge, edge_for(44.0));
-    DISPLAY.with(|display| display.set((1.0, 60.0)));
-    assert_eq!(ask.key().edge, edge_for(22.0));
-    DISPLAY.with(|display| display.set(before));
+    let window = Some(ChatId(92));
+    let on = |scale| WindowDisplay {
+        scale,
+        hz: 60.0,
+        id: None,
+    };
+    set_display(window, on(2.0));
+    assert_eq!(ask.key(window).edge, edge_for(44.0));
+    set_display(window, on(1.0));
+    assert_eq!(ask.key(window).edge, edge_for(22.0));
+}
+
+#[test]
+fn each_window_plays_for_its_own_display() {
+    let (main, chat) = (None, Some(ChatId(93)));
+    let ask = ViewAsk::sticker(
+        FileId(7),
+        StickerFormat::Tgs,
+        head("windows"),
+        PlayMode::Loop,
+        112.0,
+    );
+    let before = display_of(main);
+    let at = |hz| WindowDisplay {
+        scale: 2.0,
+        hz,
+        id: None,
+    };
+    set_display(chat, at(120.0));
+    set_display(main, at(60.0));
+    assert_eq!((ask.key(main).hz, ask.key(chat).hz), (60, 120));
+    assert!(!super::high_rate(main, true));
+    assert!(super::high_rate(chat, true));
+    set_display(main, before);
 }
 
 /// The emoji panel closed over a chat of text: no view draws its clips any
@@ -565,10 +593,50 @@ fn a_tick_draws_a_view_only_when_its_frame_changes() {
     let refresh = ms(8);
     let t0 = player.now();
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, t0), 0);
-    assert!(!view.changes_within(refresh), "frame 0 stays up");
+    let draw = TickDraw::Within(refresh);
+    assert!(!view.changes_in(draw), "frame 0 stays up");
+    assert!(view.plays_on(draw));
     player.skip(ms(20));
-    assert!(view.changes_within(refresh), "frame 1 is due by 28 ms");
+    assert!(view.changes_in(draw), "frame 1 is due by 28 ms");
+    assert!(!view.plays_on(draw));
     let at = player.now() + refresh;
     assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, at), 1);
-    assert!(!view.changes_within(refresh), "frame 1 is up");
+    assert!(!view.changes_in(draw), "frame 1 is up");
+    let frame = Duration::from_secs_f64(1.0 / FPS);
+    let quarter_frame_slack = frame / 4;
+    let frame_2 = (frame * 2).saturating_sub(quarter_frame_slack);
+    let before_it = t0 + frame_2.saturating_sub(ms(1));
+    assert!(!view.changes_in(TickDraw::On(before_it)));
+    assert!(view.changes_in(TickDraw::On(t0 + frame_2 + ms(1))));
+}
+
+#[test]
+fn a_view_with_no_frame_up_never_lets_a_tick_pass() {
+    let (player, spec) = player(8);
+    let other = ClipSpec {
+        file: FileId(8),
+        ..spec
+    };
+    player.set_fixture(
+        8,
+        Arc::new(|edge| DecodedFrames {
+            frames: vec![vec![1; (edge as usize).pow(2) * 4]],
+            fps: FPS,
+        }),
+    );
+    let view = super::StickerView {
+        player: std::rc::Rc::new(player),
+        spec: std::rc::Rc::new(other.clone()),
+        head: head("opening"),
+        mode: PlayMode::Loop,
+        edge: EDGE,
+        max_fps: 120,
+        active: false,
+        window: None,
+    };
+    let draw = TickDraw::Within(ms(8));
+    assert!(!view.plays_on(draw), "not open");
+    view.player
+        .prepare(&other, EDGE, Place::of(view.head, None));
+    assert!(!view.plays_on(draw), "open, or opening, with no frame up");
 }

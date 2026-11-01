@@ -8,7 +8,11 @@
 //! MTProto on `availableChanges` (`mtp_instance.cpp`).
 #![deny(clippy::indexing_slicing)]
 
+#[cfg(any(windows, test))]
+mod coalesce;
 mod link;
+#[cfg(target_os = "linux")]
+mod netlink;
 mod platform;
 #[cfg(test)]
 mod tests;
@@ -48,6 +52,28 @@ struct Hop {
 }
 
 impl Path {
+    /// `self`, keeping the gateway's link-layer address from `before` when
+    /// the system has not resolved it yet: an entry the cache dropped, or
+    /// one not learned yet, is no new network. A different address is.
+    fn settled(self, before: Self) -> Self {
+        match (self, before) {
+            (Self::Via(mut now), Self::Via(then))
+                if now.link.gateway_hardware.is_none()
+                    && Hop {
+                        link: link::Link {
+                            gateway_hardware: None,
+                            ..then.link
+                        },
+                        ..then
+                    } == now =>
+            {
+                now.link.gateway_hardware = then.link.gateway_hardware;
+                Self::Via(now)
+            }
+            _ => self,
+        }
+    }
+
     fn of(lookup: io::Result<SocketAddr>, link: impl FnOnce(IpAddr) -> link::Link) -> Self {
         match lookup {
             Ok(local) if local.ip().is_unspecified() => Self::NoRoute,
@@ -78,6 +104,23 @@ struct Route {
 }
 
 impl Route {
+    fn settled(self, before: Self) -> Self {
+        Self {
+            v4: self.v4.settled(before.v4),
+            v6: self.v6.settled(before.v6),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn gateways(self) -> impl Iterator<Item = IpAddr> {
+        [self.v4, self.v6]
+            .into_iter()
+            .filter_map(|path| match path {
+                Path::Via(hop) => hop.link.gateway,
+                _ => None,
+            })
+    }
+
     /// Offline takes proof on both IP versions: TDLib stops trying on
     /// `networkTypeNone`, so an odd failure must not read as "no network".
     fn available(self) -> bool {
@@ -121,6 +164,7 @@ impl Tracker {
     }
 
     fn observe(&mut self, route: Route) -> bool {
+        let route = route.settled(self.route);
         let moved = route != self.route;
         self.route = route;
         self.epoch += u64::from(moved);
@@ -129,7 +173,7 @@ impl Tracker {
 
     /// Connections do not survive a sleep, even when the route is the same.
     fn woke(&mut self, route: Route) {
-        self.route = route;
+        self.route = route.settled(self.route);
         self.epoch += 1;
     }
 
@@ -166,6 +210,15 @@ pub fn system_woke() {
     lock_or_recover(tracker()).woke(route);
     crate::wake::UPDATES.poke();
     crate::system_proxy::refresh();
+}
+
+/// Whether `ip` is a gateway Telegram traffic leaves through.
+#[cfg(target_os = "linux")]
+fn is_gateway(ip: IpAddr) -> bool {
+    lock_or_recover(tracker())
+        .route
+        .gateways()
+        .any(|gateway| gateway == ip)
 }
 
 fn network_changed() {

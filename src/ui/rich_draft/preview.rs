@@ -81,9 +81,8 @@ impl QuillApp {
         let text = composer.value().to_string();
         let preview = &self.composer_ui.rich_draft.preview;
         let blocks = preview.blocks(revision, &text);
-        let shows = |block: &RichBlock| {
-            !matches!(block, RichBlock::Empty | RichBlock::Unsupported { .. })
-        };
+        let shows =
+            |block: &RichBlock| !matches!(block, RichBlock::Empty | RichBlock::Unsupported { .. });
         if !blocks.iter().any(shows) {
             return None;
         }
@@ -101,10 +100,7 @@ impl QuillApp {
                 let row = app.update(cx, |app, cx| {
                     block.and_then(|block| app.rich_preview_block(index, block, font, cx))
                 });
-                div()
-                    .pb_1()
-                    .children(row.ok().flatten())
-                    .into_any_element()
+                div().pb_1().children(row.ok().flatten()).into_any_element()
             })
             .size_full();
             return Some(frame.h(PREVIEW_HEIGHT).child(rows).into_any_element());

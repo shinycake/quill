@@ -152,7 +152,10 @@ fn edits_on_a_long_line_wrap_like_a_fresh_field() {
 const LONG_TEXT: usize = 256 * 1024;
 
 fn log_lines(len: usize) -> String {
-    repeated("12:00:01 [INFO] [worker-3] a request came in from the proxy\n", len)
+    repeated(
+        "12:00:01 [INFO] [worker-3] a request came in from the proxy\n",
+        len,
+    )
 }
 
 #[test]

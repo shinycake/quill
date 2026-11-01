@@ -124,9 +124,8 @@ impl QuillApp {
         {
             return None;
         }
-        let parts_label = |parts: &str| {
-            tr_with(keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES, &[("parts", parts)])
-        };
+        let parts_label =
+            |parts: &str| tr_with(keys::Q_CHAT_WILL_BE_SENT_AS_MESSAGES, &[("parts", parts)]);
         let (label, color) = match self.text_limit_note(editing.is_some(), cx) {
             TextLimitNote::Fits => return None,
             TextLimitNote::Counting if editing.is_some() => {

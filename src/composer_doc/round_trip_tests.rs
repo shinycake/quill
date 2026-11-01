@@ -162,9 +162,8 @@ fn nothing_in_final_text_reads_as_a_marker() {
 fn spans_inside_an_italic_span_read_back_wherever_they_start() {
     const WORDS: &str = "aa bb cc dd ee";
     let word = |at: usize| at * 3;
-    let span = |from: usize, to: usize, tag: ComposerTag| {
-        DocSpan::new(word(from)..word(to) - 1, tag)
-    };
+    let span =
+        |from: usize, to: usize, tag: ComposerTag| DocSpan::new(word(from)..word(to) - 1, tag);
     let mut failed = Vec::new();
     for bold in 0..4 {
         for bold_end in bold + 1..=5 {

@@ -46,11 +46,16 @@ jobs:
         run: cargo test --no-default-features --locked -- --nocapture
       # The netlink watcher against a real kernel, in a fresh network
       # namespace (src/net_watch/watcher_tests.rs). Ubuntu's AppArmor keeps
-      # user namespaces from holding capabilities unless this is off.
+      # user namespaces from holding capabilities unless this is off. A
+      # kernel without the key has no such restriction; a failed write
+      # fails here, where the cause is.
       - name: tests (network watcher, Linux namespace)
         timeout-minutes: 10
         run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          key=kernel.apparmor_restrict_unprivileged_userns
+          if sysctl -n "$key" >/dev/null 2>&1; then
+            sudo sysctl -w "$key=0"
+          fi
           cargo test --no-default-features --locked --lib net_watch -- --ignored --nocapture
       # UI integration tests: windows, dialogs and clicks against the demo
       # app. GPUI's test platform is headless (no display, no-op text
