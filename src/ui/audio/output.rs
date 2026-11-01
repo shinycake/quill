@@ -134,12 +134,11 @@ pub(in crate::ui) struct Outlet {
 impl Outlet {
     pub(in crate::ui) fn player(&self) -> OutputPlayer {
         let (player, queue) = Player::new();
-        let id = self.output.0.players.fetch_add(1, Ordering::Relaxed);
-        self.output.connect(queue, id);
         OutputPlayer {
             player,
             output: self.output.clone(),
-            id,
+            id: self.output.0.players.fetch_add(1, Ordering::Relaxed),
+            queue: Mutex::new(Some(queue)),
         }
     }
 }
@@ -152,6 +151,10 @@ pub(in crate::ui) struct OutputPlayer {
     output: SharedOutput,
     /// Names its parked sound ([`Parked`]).
     id: u64,
+    /// Connects with its first sound. The mixer reads a player's rate and
+    /// channels once, as it connects, for its first 512 samples, and an
+    /// empty queue answers 48 kHz mono.
+    queue: Mutex<Option<SourcesQueueOutput>>,
 }
 
 impl Drop for OutputPlayer {
@@ -192,6 +195,10 @@ impl OutputPlayer {
             heard: self.output.0.heard.clone(),
             starts_by,
         });
+        let queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(queue) = queue {
+            self.output.connect(queue, self.id);
+        }
     }
 
     /// False when no device opened lately. True when one is up or opening
@@ -1016,6 +1023,37 @@ mod tests {
         assert!(!quiet.long_enough(false, at(800)));
         assert!(!quiet.long_enough(false, at(1200)));
         assert!(quiet.long_enough(false, at(1300)));
+    }
+
+    /// A device already up pulls a new player's sound from the first
+    /// sample, so nothing may read the player's layout before it has one.
+    #[test]
+    fn a_new_player_keeps_its_sounds_rate_from_the_first_sample() {
+        let (channels, rate) = mono(8000);
+        let (mixer, mut device) = mixer(channels, rate);
+        let player = SharedOutput::for_test(Some(mixer))
+            .outlet()
+            .unwrap()
+            .player();
+        let ramp: Vec<f32> = (0..1024u16).map(f32::from).collect();
+        player.append(SamplesBuffer::new(channels, rate, ramp.clone()));
+        let heard: Vec<f32> = device.by_ref().take(ramp.len()).collect();
+        assert_eq!(heard, ramp);
+    }
+
+    #[test]
+    fn a_new_player_keeps_its_sounds_channels_from_the_first_sample() {
+        let channels = ChannelCount::new(2).unwrap();
+        let rate = SampleRate::new(48_000).unwrap();
+        let (mixer, mut device) = mixer(channels, rate);
+        let player = SharedOutput::for_test(Some(mixer))
+            .outlet()
+            .unwrap()
+            .player();
+        let left_right: Vec<f32> = [1.0, -1.0].repeat(512);
+        player.append(SamplesBuffer::new(channels, rate, left_right.clone()));
+        let heard: Vec<f32> = device.by_ref().take(left_right.len()).collect();
+        assert_eq!(heard, left_right);
     }
 
     /// Only a player that pulls its sound counts as playing: not one that
