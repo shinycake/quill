@@ -66,7 +66,10 @@ impl Leftovers {
         let written = fs::create_dir_all(self.dir.join(PARTS))
             .and_then(|()| fs::write(&entry, part.as_os_str().as_encoded_bytes()));
         if let Err(err) = written {
-            log::warn!("export: could not list {} for cleanup: {err}", part.display());
+            log::warn!(
+                "export: could not list {} for cleanup: {err}",
+                part.display()
+            );
         }
         Copying(entry)
     }

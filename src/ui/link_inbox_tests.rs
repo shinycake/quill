@@ -295,5 +295,9 @@ fn a_launch_that_pokes_before_the_inbox_first_runs_is_answered_at_once(cx: &mut 
     // queues its activation and pokes before the inbox task has run.
     SIGNAL.poke();
     cx.run_until_parked();
-    assert_eq!(turns.get(), 1, "the launch's activation is handled, not left for 60 s");
+    assert_eq!(
+        turns.get(),
+        1,
+        "the launch's activation is handled, not left for 60 s"
+    );
 }

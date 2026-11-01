@@ -187,9 +187,20 @@ fn a_new_router_on_the_same_address_is_looked_up_at_once_and_only_once() {
         "the failed lookup's own event asks no more"
     );
     tracker.observe(unresolved);
-    assert_eq!(tracker.to_resolve(on(Path::Via(WIFI), Path::NoRoute)), Vec::<IpAddr>::new());
+    assert_eq!(
+        tracker.to_resolve(on(Path::Via(WIFI), Path::NoRoute)),
+        Vec::<IpAddr>::new()
+    );
     tracker.observe(on(Path::Via(WIFI), Path::NoRoute));
-    assert_eq!(tracker.to_resolve(unresolved), vec![ROUTER], "a later loss asks again");
+    assert_eq!(
+        tracker.to_resolve(unresolved),
+        vec![ROUTER],
+        "a later loss asks again"
+    );
     let cafe = on(Path::Via(CAFE), Path::NoRoute);
-    assert_eq!(tracker.to_resolve(cafe), Vec::<IpAddr>::new(), "already a new network");
+    assert_eq!(
+        tracker.to_resolve(cafe),
+        Vec::<IpAddr>::new(),
+        "already a new network"
+    );
 }

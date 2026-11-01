@@ -571,7 +571,12 @@ fn a_still_decoding_behind_a_later_animated_pick_opens_no_editor(cx: &mut TestAp
     choose(&app, vcx, pick, still);
     choose(&app, vcx, pick, &animated);
     app.update(vcx, |app, cx| {
-        app.land_still_pick(pick, still.file_id, Some(image::RgbaImage::new(100, 100)), cx);
+        app.land_still_pick(
+            pick,
+            still.file_id,
+            Some(image::RgbaImage::new(100, 100)),
+            cx,
+        );
     });
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_none()));

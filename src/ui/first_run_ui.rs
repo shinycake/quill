@@ -127,11 +127,9 @@ fn write_clip(
     write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
 ) -> Option<PathBuf> {
     let _one_at_a_time = quill::locks::lock_or_recover(writing);
-    let hash = bytes
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-        });
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    });
     let path = dir.join(format!("intro-{hash:016x}.mp4"));
     if std::fs::metadata(&path).is_ok_and(|meta| meta.len() == bytes.len() as u64) {
         return Some(path);

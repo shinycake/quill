@@ -232,7 +232,11 @@ impl Resolving {
     }
 
     fn begin(&'static self, gateway: IpAddr) -> Option<Resolve> {
-        let flag = if gateway.is_ipv6() { &self.v6 } else { &self.v4 };
+        let flag = if gateway.is_ipv6() {
+            &self.v6
+        } else {
+            &self.v4
+        };
         (!flag.swap(true, std::sync::atomic::Ordering::AcqRel)).then_some(Resolve(flag))
     }
 }
@@ -373,7 +377,9 @@ mod tests {
         let v6: std::net::IpAddr = "fe80::1".parse().unwrap();
         let arp = RESOLVING.begin(v4).expect("the IPv4 resolve starts");
         assert!(RESOLVING.begin(v4).is_none(), "one IPv4 resolve at a time");
-        let nd = RESOLVING.begin(v6).expect("the IPv6 resolve starts as well");
+        let nd = RESOLVING
+            .begin(v6)
+            .expect("the IPv6 resolve starts as well");
         drop(arp);
         assert!(RESOLVING.begin(v4).is_some(), "free again once it ends");
         drop(nd);
