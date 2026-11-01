@@ -43,6 +43,8 @@ pub(crate) struct DiskUi {
     full_notices: u32,
     /// The on-screen account's cached files, while that folder exists.
     cache_folder: Option<PathBuf>,
+    /// The on-screen account's message database, for Manage local storage.
+    pub(super) database_bytes: Option<u64>,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -68,6 +70,7 @@ impl DiskUi {
             held_for_call: false,
             full_notices: 0,
             cache_folder: None,
+            database_bytes: None,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -106,7 +109,7 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
         let mut device = None;
         loop {
             let folder = root.clone();
-            let (reading, floors, seen_on, cache) = cx
+            let (reading, floors, seen_on, account) = cx
                 .background_executor()
                 .spawn(async move {
                     let reading = match demo_reading() {
@@ -121,13 +124,13 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
                         reading,
                         floors,
                         data_root_device(&folder),
-                        cache_folder(&folder),
+                        account_files(&folder),
                     )
                 })
                 .await;
             device = seen_on.or(device);
             let Ok(wait) = this.update(cx, |this, cx| {
-                this.disk.cache_folder = cache;
+                (this.disk.cache_folder, this.disk.database_bytes) = account;
                 this.apply_data_reading(reading, floors, cx)
             }) else {
                 break;
@@ -138,10 +141,16 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
     .detach();
 }
 
-fn cache_folder(root: &std::path::Path) -> Option<PathBuf> {
+/// The on-screen account's cache folder, while it exists, and the size of
+/// its message database.
+fn account_files(root: &std::path::Path) -> (Option<PathBuf>, Option<u64>) {
     let active = quill::settings::active_account(root);
-    let files = quill::settings::AccountPaths::for_root(root, &active).tdlib_files;
-    files.is_dir().then_some(files)
+    let paths = quill::settings::AccountPaths::for_root(root, &active);
+    let database = paths
+        .database_exists()
+        .then(|| quill::disk_guard::database_size(&paths.tdlib_database));
+    let files = paths.tdlib_files;
+    (files.is_dir().then_some(files), database)
 }
 
 /// `QUILL_DEMO_DISK_FREE_MB` stands in for the disk in a capture build. It

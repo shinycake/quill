@@ -88,7 +88,8 @@ fn has_database(tdlib: &Path) -> bool {
     tdlib.join("db.sqlite").exists() || tdlib.join("td.binlog").exists()
 }
 
-fn database_size(tdlib: &Path) -> u64 {
+/// The bytes of the message database in `tdlib`: `db.sqlite` and its WAL.
+pub fn database_size(tdlib: &Path) -> u64 {
     ["db.sqlite", "db.sqlite-wal"]
         .into_iter()
         .filter_map(|name| std::fs::metadata(tdlib.join(name)).ok())

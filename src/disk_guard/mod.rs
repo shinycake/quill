@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod folders;
+pub use folders::database_size;
 #[cfg(target_os = "linux")]
 mod linux;
 mod probe;

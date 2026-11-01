@@ -437,3 +437,20 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
         "the rows pushed the list down and the page followed: {before:?} -> {after:?}"
     );
 }
+
+#[gpui_kit::test]
+fn manage_local_storage_shows_the_message_database_size(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, _, cx| app.open_local_storage(cx));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(vcx.debug_bounds("storage-database-size").is_none());
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.disk.database_bytes = Some(3 << 20);
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(vcx.debug_bounds("storage-database-size").is_some());
+}

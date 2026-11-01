@@ -378,6 +378,19 @@ impl QuillApp {
                 body = body.child(self.local_storage_section(cx, &stats));
             }
         }
+        // Telegram Desktop keeps no message database; TDLib's stays and
+        // is not part of the cache above, so its size is shown apart.
+        if let Some(bytes) = self.disk.database_bytes {
+            let size = format_storage_bytes(i64::try_from(bytes).unwrap_or(i64::MAX));
+            body = body.child(
+                div()
+                    .id("storage-database-size")
+                    .debug_selector(|| "storage-database-size".into())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr_with(keys::Q_DISK_DATABASE_SIZE, &[("size", &size)])),
+            );
+        }
         // --- Network usage (B13) ---
         body = body.child(self.network_usage_section(cx));
         body

@@ -12,3 +12,4 @@
 "qll_disk_unwritable_notice" = "Quill disconnected to keep your data safe. The disk that holds its data is missing or can only be read.";
 "qll_disk_show_cached_files" = "Show cached files";
 "qll_disk_download_no_room" = "Not enough disk space to finish this download. Free up space and it resumes by itself.";
+"qll_disk_database_size" = "Message database: {size}. Kept so chats open without the network; clearing the cache leaves it.";
