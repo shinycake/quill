@@ -1080,7 +1080,7 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
         .map(|entries| {
             entries
                 .flatten()
-                .map(|entry| entry.path())
+                .filter_map(|entry| std::fs::canonicalize(entry.path()).ok())
                 .filter(|path| image::image_dimensions(path).ok() == Some((13, 53)))
                 .collect()
         })
