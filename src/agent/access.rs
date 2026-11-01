@@ -315,7 +315,7 @@ pub(crate) fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()>
     file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
-    std::fs::rename(&temp, path)
+    crate::fs_retry::rename_retrying(&temp, path, crate::fs_retry::SHORT)
 }
 
 /// Whether the switch is on in the settings under `root`, read from disk

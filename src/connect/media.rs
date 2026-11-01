@@ -136,7 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let ids = self.session.take_due_chat_list_photos();
         let mut extras = Vec::new();
         for (index, file_id) in ids.iter().enumerate() {
-            match self.download_file(*file_id, THUMB_DOWNLOAD_PRIORITY) {
+            match self.download_file(*file_id, CHAT_LIST_PHOTO_PRIORITY) {
                 Ok(Some(extra)) => extras.push(extra),
                 Ok(None) => {}
                 Err(err) => {
@@ -150,6 +150,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
         }
         Ok(extras)
+    }
+
+    /// The user avatars views looked up and found missing
+    /// (`Session::take_avatar_claims`), at thumbnail priority: they are on
+    /// screen. A claim that fails to send is made again by the next frame.
+    pub fn download_claimed_avatars(&mut self) -> bool {
+        if !self.chats_path_active() {
+            return false;
+        }
+        let ids = self.session.take_avatar_claims();
+        if self.session.settings.media_prefs.data_saver {
+            return false;
+        }
+        let mut sent = false;
+        for file_id in ids {
+            sent |= matches!(
+                self.download_file(file_id, THUMB_DOWNLOAD_PRIORITY),
+                Ok(Some(_))
+            );
+        }
+        sent
     }
 
     /// Send one-shot `downloadFile` (`synchronous: false`) for automatic

@@ -421,6 +421,7 @@ mod notifications;
 mod notify_windows;
 mod onboarding;
 mod os_menus;
+mod os_open;
 mod ownership;
 mod paid_messages_channel;
 mod paid_messages_privacy;

@@ -3,7 +3,7 @@
 //! package (next to the binary or in its `lib/`), `QUILL_VIDEO_LIB`, or a
 //! development build under `vendor/ffmpeg/prefix`.
 
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -357,8 +357,7 @@ impl FfiDemuxer {
 
     fn open_with(path: &Path, options: &OpenOptions, hw: i32) -> Result<Self, String> {
         let api = api().map_err(str::to_string)?;
-        let utf8 = path.to_str().ok_or("video path is not valid UTF-8")?;
-        let c_path = CString::new(utf8).map_err(|_| "invalid video path")?;
+        let c_path = crate::ffi_path::c_path(path).ok_or("invalid video path")?;
         let opts = QvOptions {
             max_width: i32::try_from(options.max_width).unwrap_or(i32::MAX),
             max_height: i32::try_from(options.max_height).unwrap_or(i32::MAX),

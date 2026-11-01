@@ -36,8 +36,12 @@ pub const OUTGOING_TYPING_INTERVAL_MS: u64 = 4_000;
 pub const MAIN_CHAT_LOAD_LIMIT: i32 = 100;
 /// Page size for `getChatHistory`.
 pub const HISTORY_PAGE_SIZE: i32 = 50;
-/// `downloadFile.priority` for automatic photo thumbs (schema: 1–32).
-pub const THUMB_DOWNLOAD_PRIORITY: i32 = 1;
+/// `downloadFile.priority` for chat-list avatars, fetched for every chat
+/// whether or not the list shows it (schema: 1–32).
+pub const CHAT_LIST_PHOTO_PRIORITY: i32 = 1;
+/// `downloadFile.priority` for automatic photo thumbs and the avatars a
+/// view is showing: above the chat-list avatars.
+pub const THUMB_DOWNLOAD_PRIORITY: i32 = 2;
 /// `downloadFile.priority` for automatic full-media downloads (MED3: above
 /// thumbs so enabled media actually arrives, far below explicit user
 /// downloads).
