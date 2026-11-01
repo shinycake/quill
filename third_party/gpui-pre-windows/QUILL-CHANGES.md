@@ -430,3 +430,49 @@ refused like a Dock Quit on macOS:
 - `src/platform.rs`: `WM_QUERYENDSESSION` asks `Platform::on_quit_request`
   and answers 0 when it says no. A request with `ENDSESSION_CRITICAL` set
   asks nothing, because that session ends whatever the answer.
+
+## The Windows platform never panics on its own threads
+
+Added in 2026, after an audit of the earlier panic pass
+(`docs/decisions/gpui-fork-panics.md`, "Windows, second pass"):
+
+- `src/directx_devices.rs`: `get_device` returns an error for a device
+  `D3D11CreateDevice` did not hand back, `get_adapter` skips an adapter
+  that fails to cast or has no device or context, stops at
+  `DXGI_ERROR_NOT_FOUND`, and returns an error naming the last adapter's
+  failure, and
+  `DirectXDevices::new` logs an unexpected feature level. No `unwrap` or
+  `unreachable!` is left in the file.
+- `src/platform.rs`: `begin_vsync_thread` returns the thread's spawn error
+  instead of unwrapping it. `attach_gpu` then detaches the GPU again and
+  returns the error, so launch fails with the startup alert and
+  `request_windowing(Windowed)` fails, instead of the app panicking.
+- `src/platform.rs`: the vsync thread's body runs under
+  `panic_guard::guarded` (`quill-panic-guard`, a new dependency, so Quill's
+  panic hook knows the panic is caught). On a panic it logs and posts
+  `WM_GPUI_GPU_DEVICE_GONE` to the platform window, which drops the devices
+  and destroys every window, instead of leaving them without frames.
+- `src/platform.rs`: each vsync thread has a `VsyncGeneration`, moved on by
+  every start (`begin_vsync_thread`) and stop (`detach_gpu`).
+  `WM_GPUI_GPU_DEVICE_GONE` carries it in `lparam`, and the platform's
+  `WM_GPUI_GPU_DEVICE_LOST` now points at a `RecoveredDevices` that carries
+  it. The platform ignores both from an older generation, and answers
+  `HANDED_OVER` only when it took the devices; otherwise the thread stops
+  without sending them to the windows.
+- `src/platform.rs`: `open_window` replaces devices the GPU removed before
+  it builds the window (`replace_removed_devices`), instead of failing.
+- `src/window_list.rs`: `WindowList` replaces the bare `RwLock` and the
+  `for_each_after_unlock` / `for_each_open_after_unlock` helpers. Callers get
+  copies only (`snapshot`, `find`) or change it under its own lock (`push`,
+  `remove`), so none can hold the lock across `SendMessageW`. `src/platform.rs`
+  and `src/vsync.rs` use it; `TrackedWindow` is `Clone`.
+- `src/platform.rs`: after `open_window` lists a new window, it checks the
+  window's device against the platform's current one and, when recovery
+  replaced the devices meanwhile, sends the window `WM_GPUI_GPU_DEVICE_LOST`
+  with the new ones (`hand_over_recovered_devices`).
+- `src/timer_step.rs` (new, std-only; unit tests run with
+  `scripts/test-timer-step.sh`, which CI's `linux-fmt-clippy-test` job runs):
+  the timer thread's next step from its state and the clock, the relative
+  `SetWaitableTimer` due time and the fallback wait's timeout.
+  `src/timer_thread.rs` uses it and keeps only the Win32 calls.
+  `src/gpui_windows.rs` declares the module.

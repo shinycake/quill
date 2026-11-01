@@ -123,6 +123,7 @@ pub(super) fn summary(missing: &Missing) -> &'static str {
 }
 
 /// Read the machine's Vulkan setup.
+#[cfg(target_os = "linux")]
 pub(super) fn probe() -> Setup {
     Setup {
         loader: loader_installed(),
@@ -134,6 +135,7 @@ pub(super) fn probe() -> Setup {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn loader_installed() -> bool {
     // SAFETY: the name is a NUL-terminated literal, and a non-null handle is
     // closed right away; wgpu has already loaded and initialised the library
