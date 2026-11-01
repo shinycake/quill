@@ -248,7 +248,8 @@ impl TrayState {
     /// next `poll` after the switch comes back on registers again.
     pub fn hide(&mut self) {
         if let Phase::Ready { handle, .. } = &self.phase {
-            let _ = handle.shutdown();
+            // The call sends the request; the awaiter only waits for it.
+            drop(handle.shutdown());
         }
         if !matches!(self.phase, Phase::Idle(_)) {
             self.phase = Phase::Idle(Instant::now());
@@ -293,7 +294,7 @@ impl TrayState {
                     self.phase = Phase::Idle(Instant::now());
                 } else if publisher.stopped() {
                     // The service stopped answering: start a fresh one.
-                    let _ = handle.shutdown();
+                    drop(handle.shutdown());
                     self.phase = Phase::Idle(Instant::now() + RETRY_EVERY);
                 } else if *shown != (unread, toggles) {
                     publisher.publish((unread, toggles));
