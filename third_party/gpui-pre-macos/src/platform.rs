@@ -33,9 +33,10 @@ use objc2::{
 use objc2_app_kit::{
     NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSAppearanceNameVibrantDark,
     NSAppearanceNameVibrantLight, NSApplication, NSApplicationActivationPolicy,
-    NSControlStateValueOn, NSCursor, NSDocumentController, NSEventModifierFlags, NSMenu,
-    NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel, NSSavePanel, NSScroller,
-    NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification, NSWorkspaceWillSleepNotification,
+    NSApplicationTerminateReply, NSControlStateValueOn, NSCursor, NSDocumentController,
+    NSEventModifierFlags, NSMenu, NSMenuItem, NSModalResponse, NSModalResponseOK, NSOpenPanel,
+    NSSavePanel, NSScroller, NSScrollerStyle, NSWorkspace, NSWorkspaceDidWakeNotification,
+    NSWorkspaceWillSleepNotification,
 };
 use objc2_foundation::{
     NSActivityOptions, NSArray, NSBundle, NSError, NSInteger, NSProcessInfo, NSString, NSURL,
@@ -91,6 +92,11 @@ unsafe fn build_classes() {
             decl.add_method(
                 sel!(applicationDidBecomeActive:),
                 did_become_active as extern "C-unwind" fn(_, Sel, *mut AnyObject),
+            );
+            decl.add_method(
+                sel!(applicationShouldTerminate:),
+                should_terminate
+                    as extern "C-unwind" fn(_, Sel, *mut AnyObject) -> NSApplicationTerminateReply,
             );
             decl.add_method(
                 sel!(applicationWillTerminate:),
@@ -188,6 +194,9 @@ pub(crate) struct MacPlatformState {
     on_system_wake: Option<Box<dyn FnMut()>>,
     system_power_observers_registered: bool,
     quit: Option<Box<dyn FnMut() -> bool>>,
+    quit_request: Option<Box<dyn FnMut() -> bool>>,
+    /// `Platform::quit` ran: the app decided, so `terminate:` asks nothing.
+    quit_decided: bool,
     menu_command: Option<Box<dyn FnMut(&dyn Action)>>,
     validate_menu_command: Option<Box<dyn FnMut(&dyn Action) -> bool>>,
     will_open_menu: Option<Box<dyn FnMut()>>,
@@ -252,6 +261,8 @@ impl MacPlatform {
             reopen: None,
             app_lifecycle: None,
             quit: None,
+            quit_request: None,
+            quit_decided: false,
             menu_command: None,
             validate_menu_command: None,
             will_open_menu: None,
@@ -587,6 +598,7 @@ impl Platform for MacPlatform {
         // this, we make quitting the application asynchronous so that we aren't holding borrows to
         // the app state on the stack when we actually terminate the app.
 
+        self.0.lock().quit_decided = true;
         unsafe {
             DispatchQueue::main().exec_async_f(ptr::null_mut(), quit);
         }
@@ -1045,6 +1057,10 @@ impl Platform for MacPlatform {
         self.0.lock().quit = Some(callback);
     }
 
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
+        self.0.lock().quit_request = Some(callback);
+    }
+
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.0.lock().reopen = Some(callback);
     }
@@ -1402,6 +1418,29 @@ extern "C-unwind" fn did_become_active(this: &AnyObject, _: Sel, _: *mut AnyObje
             callback(AppLifecyclePhase::Active);
             platform.0.lock().app_lifecycle.get_or_insert(callback);
         }
+    }
+}
+
+extern "C-unwind" fn should_terminate(
+    this: &AnyObject,
+    _: Sel,
+    _: *mut AnyObject,
+) -> NSApplicationTerminateReply {
+    let platform = unsafe { get_mac_platform(this) };
+    let mut lock = platform.0.lock();
+    if lock.quit_decided {
+        return NSApplicationTerminateReply::TerminateNow;
+    }
+    let Some(mut callback) = lock.quit_request.take() else {
+        return NSApplicationTerminateReply::TerminateNow;
+    };
+    drop(lock);
+    let allowed = callback();
+    platform.0.lock().quit_request.get_or_insert(callback);
+    if allowed {
+        NSApplicationTerminateReply::TerminateNow
+    } else {
+        NSApplicationTerminateReply::TerminateCancel
     }
 }
 

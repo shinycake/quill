@@ -1370,6 +1370,23 @@ impl App {
         self.platform.quit();
     }
 
+    /// Quill: `callback` decides whether a quit the OS started goes ahead:
+    /// a Dock Quit or log out on macOS, the end of the session on Windows.
+    /// [`App::quit`] never asks. A request that finds the app borrowed goes
+    /// ahead, as it would with no callback.
+    pub fn on_quit_request(&self, mut callback: impl FnMut(&mut App) -> bool + 'static) {
+        let this = self.this.clone();
+        self.platform.on_quit_request(Box::new(move || {
+            let Some(app) = this.upgrade() else {
+                return true;
+            };
+            match app.try_borrow_mut() {
+                Ok(mut cx) => cx.update(|cx| callback(cx)),
+                Err(_) => true,
+            }
+        }));
+    }
+
     /// Switches the platform between headless and windowed modes.
     ///
     /// On Linux, headless means no display server: windows opened afterwards lay out and handle

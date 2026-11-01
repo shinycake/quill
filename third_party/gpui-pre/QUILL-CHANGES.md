@@ -438,3 +438,14 @@ emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
 
 - `src/app.rs`, `src/platform.rs`: the docs of `App::on_app_lifecycle` and
   `Platform::on_app_lifecycle` say macOS emits `AppLifecyclePhase::Active`.
+
+The Quill project also changed it in 2026 so an app can refuse a quit the OS
+started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
+`third_party/gpui-pre-windows/QUILL-CHANGES.md`):
+
+- `src/platform.rs`: `Platform::on_quit_request`, by default never called.
+  Linux has no session-end hook to call it from.
+- `src/app.rs`: `App::on_quit_request`. A request that finds the app borrowed
+  goes ahead, as it would with no callback.
+- `src/platform/test/platform.rs`, `src/app/test_context.rs`:
+  `TestAppContext::simulate_quit_request`.

@@ -5,7 +5,7 @@ use super::super::keybindings::bind_keys;
 use super::super::screenshot_demo::ScreenshotDemo;
 use super::super::shell::QuillShell;
 use gpui_kit::component::Root;
-use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use gpui_kit::{AppContext, Entity, TestAppContext, VisualContext, VisualTestContext, px, size};
 use quill::export::account::{AccountSettings, Section, Sections};
 use quill::export::{AccountExport, ChatExport, ExportSettings};
 use quill::rich_html::{PageLabels, RichHtmlExport, RichHtmlRequest};
@@ -90,6 +90,12 @@ fn ask(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Rc<Cell<bool>> {
     });
     settle(vcx);
     exited
+}
+
+fn app_wide_actions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    let main = vcx.window_handle();
+    let weak = app.downgrade();
+    vcx.update(|_, cx| crate::ui::os_menus::register_actions(main, weak, cx));
 }
 
 fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
@@ -239,6 +245,48 @@ fn a_running_save_as_html_asks_and_stop_ends_it(cx: &mut TestAppContext) {
         session.settings.rich_html_exports.remove(0)
     });
     wait_for_the_end(|| export.outcome().is_some());
+    drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn an_os_quit_goes_ahead_when_nothing_holds_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    settle(vcx);
+    assert!(vcx.cx.simulate_quit_request());
+    settle(vcx);
+    assert!(!box_open(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn an_os_quit_during_an_export_is_refused_and_stop_ends_the_app(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    let dir = scratch("os-quit");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    settle(vcx);
+    assert!(!vcx.cx.simulate_quit_request(), "refused");
+    settle(vcx);
+    assert!(box_open(&app, vcx), "asked instead");
+    assert!(!vcx.cx.simulate_quit_request(), "a Dock Quit again");
+    settle(vcx);
+    assert!(box_open(&app, vcx));
+    assert!(!vcx.cx.windows().is_empty(), "still running");
+
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert!(vcx.cx.windows().is_empty(), "Stop ends the app");
+    let export = app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.chat_export.take().unwrap()
+    });
+    wait_for_the_end(|| export.progress().is_settled());
     drop(export);
     let _ = std::fs::remove_dir_all(&dir);
 }

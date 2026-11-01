@@ -394,6 +394,9 @@ impl Platform for ZoomPlatform {
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
         self.inner.on_quit(callback)
     }
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
+        self.inner.on_quit_request(callback)
+    }
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.inner.on_reopen(callback)
     }

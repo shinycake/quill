@@ -137,3 +137,12 @@ close button comes back the way Telegram Desktop's does:
   the main queue. The other phases stay unused on macOS.
 - `src/window.rs`: public `is_exiting_fullscreen`, so Quill can wait out the
   animation before it hides a full screen window.
+
+The Quill project also changed it in 2026 so a Dock Quit or a log out can be
+refused, as Telegram Desktop refuses them through Qt while an export runs:
+
+- `src/platform.rs`: `applicationShouldTerminate:` asks the new
+  `Platform::on_quit_request` callback and answers `NSTerminateCancel` when it
+  says no. Upstream has no such method, so AppKit terminated at once.
+  `Platform::quit` sets `quit_decided`, so the app's own quit, `restart`
+  included, reaches `terminate:` without asking.

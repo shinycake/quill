@@ -463,6 +463,10 @@ pub trait Platform: 'static {
     fn open_with_system(&self, path: &Path);
 
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>);
+    /// Quill: registers the callback asked before a quit the OS started goes
+    /// ahead: a Dock Quit or log out on macOS, the end of the session on
+    /// Windows. False refuses it. `App::quit` never asks.
+    fn on_quit_request(&self, _callback: Box<dyn FnMut() -> bool>) {}
     fn on_reopen(&self, callback: Box<dyn FnMut()>);
     /// Registers the callback invoked when the system is about to sleep.
     fn on_system_sleep(&self, callback: Box<dyn FnMut()>);

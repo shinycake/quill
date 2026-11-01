@@ -123,6 +123,7 @@ pub(crate) struct WindowsPlatformState {
 struct PlatformCallbacks {
     open_urls: Cell<Option<Box<dyn FnMut(Vec<String>)>>>,
     quit: Cell<Option<Box<dyn FnMut() -> bool>>>,
+    quit_request: Cell<Option<Box<dyn FnMut() -> bool>>>,
     reopen: Cell<Option<Box<dyn FnMut()>>>,
     app_menu_action: Cell<Option<Box<dyn FnMut(&dyn Action)>>>,
     will_open_app_menu: Cell<Option<Box<dyn FnMut()>>>,
@@ -924,6 +925,10 @@ impl Platform for WindowsPlatform {
         self.inner.state.callbacks.quit.set(Some(callback));
     }
 
+    fn on_quit_request(&self, callback: Box<dyn FnMut() -> bool>) {
+        self.inner.state.callbacks.quit_request.set(Some(callback));
+    }
+
     fn on_reopen(&self, callback: Box<dyn FnMut()>) {
         self.inner.state.callbacks.reopen.set(Some(callback));
     }
@@ -1261,7 +1266,7 @@ impl WindowsPlatformInner {
         let handled = match msg {
             WM_POWERBROADCAST => self.handle_power_broadcast(wparam),
             WM_DISPLAYCHANGE => self.handle_display_change(handle),
-            WM_QUERYENDSESSION => Some(1),
+            WM_QUERYENDSESSION => self.handle_query_end_session(lparam),
             WM_ENDSESSION if wparam.0 != 0 => self.handle_end_session(),
             _ => self.handle_gpui_events(msg, wparam, lparam),
         };
@@ -1311,6 +1316,19 @@ impl WindowsPlatformInner {
             |callback| callback(),
         );
         Some(0)
+    }
+
+    fn handle_query_end_session(&self, lparam: LPARAM) -> Option<isize> {
+        let mut allowed = true;
+        // A critical end of session happens whatever this answers, so
+        // nothing is asked.
+        if lparam.0 as u32 & ENDSESSION_CRITICAL == 0 {
+            self.with_callback(
+                |callbacks| &callbacks.quit_request,
+                |callback| allowed = callback(),
+            );
+        }
+        Some(isize::from(allowed))
     }
 
     fn handle_end_session(&self) -> Option<isize> {
