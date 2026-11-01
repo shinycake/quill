@@ -244,6 +244,19 @@ fn the_accept_terms_date_reads_the_pickers_clock(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_history_block_time_reads_the_pickers_clock(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(WallClock::chicago_repeated_hour());
+        // 01:20 CST, fifteen minutes ahead on the Chicago clock.
+        let send_date = i32::try_from(WallClock::CHICAGO_FALL_BACK + 1200).unwrap_or(0);
+        assert_eq!(
+            crate::ui::history::suggested_post_block::block_time(send_date, cx),
+            "today at 01:20"
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn declining_takes_a_reason(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
