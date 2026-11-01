@@ -82,6 +82,8 @@ impl EngineClock {
 #[derive(Debug, Default)]
 struct Probe {
     frames: AtomicU64,
+    /// Of `frames`, those the speed stretcher has read but not yet played.
+    lag: Arc<AtomicU64>,
     rate: AtomicU32,
     /// Tests: stands in for a decoder that cannot seek.
     #[cfg(test)]
@@ -94,7 +96,11 @@ struct Probe {
 impl Probe {
     fn secs(&self) -> f64 {
         let rate = self.rate.load(Ordering::Relaxed).max(1);
-        self.frames.load(Ordering::Relaxed) as f64 / f64::from(rate)
+        let played = self
+            .frames
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.lag.load(Ordering::Relaxed));
+        played as f64 / f64::from(rate)
     }
 }
 
@@ -103,7 +109,8 @@ impl Probe {
 const PUBLISH_FRAMES: u64 = 256;
 
 /// Counts the frames pulled through it. Sits below the speed stretcher, so
-/// the count is in track time whatever the speed.
+/// the count is in track time whatever the speed, and the stretcher reports
+/// how far it has read ahead ([`Probe::lag`]).
 struct Counted<S: Source> {
     inner: S,
     probe: Arc<Probe>,
@@ -442,7 +449,8 @@ fn build_player(
     } else {
         0.0
     };
-    let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone());
+    let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone())
+        .reporting_lag(probe.lag.clone());
     let player = outlet.player();
     player.set_volume(volume);
     if hold {
@@ -917,8 +925,8 @@ pub(in crate::ui) mod test_support {
 
     pub(in crate::ui) const RATE: u32 = 8000;
 
-    fn wav(seconds: u32) -> Vec<u8> {
-        let samples = RATE * seconds;
+    fn wav(seconds: u32, rate: u32) -> Vec<u8> {
+        let samples = rate * seconds;
         let data_len = samples * 2;
         let mut out = Vec::new();
         out.extend(b"RIFF");
@@ -927,8 +935,8 @@ pub(in crate::ui) mod test_support {
         out.extend(16u32.to_le_bytes());
         out.extend(1u16.to_le_bytes());
         out.extend(1u16.to_le_bytes());
-        out.extend(RATE.to_le_bytes());
-        out.extend((RATE * 2).to_le_bytes());
+        out.extend(rate.to_le_bytes());
+        out.extend((rate * 2).to_le_bytes());
         out.extend(2u16.to_le_bytes());
         out.extend(16u16.to_le_bytes());
         out.extend(b"data");
@@ -942,18 +950,26 @@ pub(in crate::ui) mod test_support {
 
     /// A mono 8 kHz wav of `seconds` in the temp dir.
     pub(in crate::ui) fn track(name: &str, seconds: u32) -> PathBuf {
+        track_at(name, seconds, RATE)
+    }
+
+    pub(in crate::ui) fn track_at(name: &str, seconds: u32, rate: u32) -> PathBuf {
         let dir = quill::scratch::process_dir("quill-engine-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
-        std::fs::write(&path, wav(seconds)).unwrap();
+        std::fs::write(&path, wav(seconds, rate)).unwrap();
         path
     }
 
     /// A fake output plus the "device" that pulls frames from it.
     pub(in crate::ui) fn device() -> (SharedOutput, MixerSource) {
+        device_at(RATE)
+    }
+
+    pub(in crate::ui) fn device_at(rate: u32) -> (SharedOutput, MixerSource) {
         let (mixer, source): (Mixer, MixerSource) = mixer(
             ChannelCount::new(1).unwrap(),
-            SampleRate::new(RATE).unwrap(),
+            SampleRate::new(rate).unwrap(),
         );
         (SharedOutput::for_test(Some(mixer)), source)
     }
@@ -968,7 +984,7 @@ pub(in crate::ui) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{RATE, device, pull, track};
+    use super::test_support::{RATE, device, device_at, pull, track, track_at};
     use super::{AudioEngine, AudioError, EngineState, SeekBoard, Simulation};
     use crate::ui::audio::SharedOutput;
     use rodio::mixer::MixerSource;
@@ -1549,6 +1565,30 @@ mod tests {
             later - before > 0.3 && later - before < 0.7,
             "got {before} then {later}"
         );
+    }
+
+    /// What a saved position resumes from: the sound the device played,
+    /// not what the speed stretcher read ahead of it. At 48 kHz, as devices
+    /// run: the mixer converts a new player's first 512 samples from its
+    /// still-empty queue's 48 kHz, so an 8 kHz rig pulls 340 frames more
+    /// than it plays.
+    #[test]
+    fn position_is_what_was_played_within_a_block_at_1x_and_1_5x() {
+        const RATE: u32 = 48_000;
+        for speed in [1.0, 1.5] {
+            let (output, mut device) = device_at(RATE);
+            let mut engine = AudioEngine::new(output);
+            let path = track_at("played.wav", 4, RATE);
+            engine.start(&path, 0.0, 1.0, speed, 4.0).unwrap();
+            pull(&mut device, usize::try_from(RATE).unwrap() / 2);
+            let played = 0.5 * speed;
+            let block = 0.04 * speed;
+            let secs = engine.position_secs();
+            assert!(
+                (secs - played).abs() <= block,
+                "at {speed}x played {played} s, position read {secs}"
+            );
+        }
     }
 
     #[test]
