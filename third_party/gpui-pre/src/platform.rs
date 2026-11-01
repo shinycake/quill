@@ -477,7 +477,7 @@ pub trait Platform: 'static {
     /// phase changes. See [`AppLifecyclePhase`] for the phase vocabulary and
     /// its mapping onto iOS and Android.
     ///
-    /// Desktop platforms never invoke this.
+    /// Of the desktop platforms only macOS invokes this, with `Active`.
     fn on_app_lifecycle(&self, _callback: Box<dyn FnMut(AppLifecyclePhase)>) {}
 
     /// Registers a callback invoked when the OS signals memory pressure
