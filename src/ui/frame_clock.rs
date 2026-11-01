@@ -271,6 +271,11 @@ impl QuillApp {
         if self.frame.main_covered.get() && target.is_some_and(|id| self.slices.owns(id)) {
             return;
         }
+        // Nor in a chat window the active window hides whole: it skips ticks
+        // as it skips the app's redraws (`follow_app_unless_held`).
+        if target.is_some_and(|id| self.windows.holds_view(id, cx)) {
+            return;
+        }
         // `QUILL_TRACE_TICKS=1`: log who keeps the clock running (once a
         // second per call site), to hunt idle redraws.
         if trace_ticks() {
@@ -336,6 +341,7 @@ impl QuillApp {
                                         .into_iter()
                                         .flatten()
                                         .filter(|id| !covered || !this.slices.owns(*id))
+                                        .filter(|id| !this.windows.holds_view(*id, cx))
                                         .collect();
                                     let app: &mut App = cx;
                                     for id in views {
@@ -785,7 +791,7 @@ impl AppGate {
     }
 
     /// Whether `window` is hidden whole behind the active window.
-    fn holds(cx: &App, window: WindowId) -> bool {
+    pub(super) fn holds(cx: &App, window: WindowId) -> bool {
         cx.try_global::<AppGate>()
             .is_some_and(|gate| gate.held.contains(&window))
     }
