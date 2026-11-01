@@ -6,9 +6,10 @@
 //! system may show again at any time. So a sweep asks every open window
 //! what its latest frame can show:
 //!
-//! - the main window: what `QuillApp` drew in its latest frame
-//!   ([`frame`](super::frame)) and what the slices it replayed last
-//!   rendered, as of that frame however long ago it was drawn;
+//! - the main window: what `QuillApp` drew in its latest whole frame and
+//!   what the slices that frame replayed last rendered, as of that frame
+//!   however long ago it was drawn, plus what its animation layers drew
+//!   last (they count as slices);
 //! - every other window (chat windows, Picture-in-Picture, calls): its
 //!   latest frame, by GPUI's count of the frames it began.
 //!
@@ -21,7 +22,7 @@
 //! ([`start_sweeper`]), so retired images also go with no window drawing,
 //! or none open.
 
-use super::{SLICES, frame, next_image_id};
+use super::{MainDraw, SLICES, WHOLE, WholeFrames, frame, next_image_id};
 use futures_channel::oneshot;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
@@ -84,8 +85,10 @@ struct MainFrame {
 impl MainFrame {
     /// Between frames: the main window's latest frame is done.
     fn now() -> Self {
-        let frame = frame();
-        let images_below = close_main_frame();
+        close_main_frame();
+        let whole = WHOLE.get();
+        let frame = whole.latest;
+        let images_below = whole.images_below;
         let slices = SLICES.with(|slices| {
             slices
                 .borrow()
@@ -128,6 +131,13 @@ pub(super) fn close_main_frame() -> usize {
     }
     let below = next_image_id();
     MAIN_DONE.set(Some((frame, below)));
+    let whole = WHOLE.get();
+    if whole.latest == frame {
+        WHOLE.set(WholeFrames {
+            images_below: below,
+            ..whole
+        });
+    }
     SLICES.with(|slices| {
         for slice in slices.borrow_mut().values_mut() {
             if slice.rendered == frame && slice.images_below.is_none() {
@@ -179,10 +189,13 @@ pub(super) fn wake() {
 
 /// The main window starts a frame: its last frame is done, so sweep first
 /// (dropping from `window`'s atlas too), then count the new frame.
-pub(in crate::ui) fn begin_main_frame(window: &mut Window, cx: &mut App) -> u64 {
+pub(in crate::ui) fn begin_main_frame(window: &mut Window, draw: MainDraw, cx: &mut App) -> u64 {
     MAIN.set(Some(window.window_handle().window_id()));
     sweep(Some(window), cx);
-    super::begin_frame()
+    match draw {
+        MainDraw::Whole => super::begin_frame(),
+        MainDraw::Patch => super::begin_patch_frame(),
+    }
 }
 
 /// Marks an app whose sweeper runs; holds its watch on windows closing.
