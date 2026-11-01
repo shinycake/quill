@@ -423,3 +423,14 @@ give-up:
   listed until its `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a post to it fails.
 - `src/window_list.rs`: `for_each_open_after_unlock` skips destroyed windows.
   It is std-only, tested by `scripts/test-window-list.sh`.
+
+## The Windows platform never panics on its own threads
+
+Added in 2026, after an audit of the earlier panic pass
+(`docs/decisions/gpui-fork-panics.md`, "Windows, second pass"):
+
+- `src/directx_devices.rs`: `get_device` returns an error for a device
+  `D3D11CreateDevice` did not hand back, `get_adapter` skips an adapter
+  without a device context and returns an error after the last adapter, and
+  `DirectXDevices::new` logs an unexpected feature level. No `unwrap` or
+  `unreachable!` is left in the file.

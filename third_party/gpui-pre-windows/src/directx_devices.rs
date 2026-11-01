@@ -1,5 +1,5 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
-// device-loss retries no longer unwrap. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
+// device creation and device-loss retries no longer panic. See third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use anyhow::{Context, Result};
 use gpui_util::ResultExt;
 use windows::Win32::{
@@ -61,7 +61,7 @@ impl DirectXDevices {
             D3D_FEATURE_LEVEL_10_1 => {
                 log::info!("Created device with Direct3D 10.1 feature level.")
             }
-            _ => unreachable!(),
+            other => log::info!("Created device with Direct3D feature level {:#x}.", other.0),
         }
 
         Ok(Self {
@@ -125,19 +125,20 @@ fn get_adapter(
         // the device if it does.
         let mut context: Option<ID3D11DeviceContext> = None;
         let mut feature_level = D3D_FEATURE_LEVEL::default();
-        if let Some(device) = get_device(
+        let device = get_device(
             &adapter,
             Some(&mut context),
             Some(&mut feature_level),
             debug_layer_available,
         )
-        .log_err()
-        {
-            return Ok((adapter, device, context.unwrap(), feature_level));
+        .log_err();
+        // Quill: an adapter whose device came back without a context is skipped, not unwrapped.
+        if let (Some(device), Some(context)) = (device, context) {
+            return Ok((adapter, device, context, feature_level));
         }
     }
 
-    unreachable!()
+    Err(anyhow::anyhow!("No GPU adapter supports Direct3D 11"))
 }
 
 #[inline]
@@ -171,7 +172,7 @@ fn get_device(
             context,
         )?;
     }
-    let device = device.unwrap();
+    let device = device.context("D3D11CreateDevice succeeded without a device")?;
     let mut data = D3D11_FEATURE_DATA_D3D10_X_HARDWARE_OPTIONS::default();
     unsafe {
         device

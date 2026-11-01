@@ -100,6 +100,20 @@ end state (process gone) plus a crash report. Follow-ups worth doing:
   should be closed as well, or the main window reopened. Today Quill keeps
   running with only the PiP window.
 
+### Windows, second pass
+
+A later audit found panics and gaps the first pass left in the Windows
+platform. Each is fixed in its own commit:
+
+- `directx_devices.rs`: device creation no longer panics. A device that
+  `D3D11CreateDevice` reports without a device or without a context is an
+  error, so the adapter is skipped, and running out of adapters returns
+  "No GPU adapter supports Direct3D 11". An unexpected feature level is
+  logged instead of `unreachable!()`. Both callers already handle the
+  error: `attach_gpu` at launch (the startup alert) and
+  `try_to_recover_from_device_lost` after a device loss (retry, then close
+  the windows).
+
 ### macOS (`gpui-pre-macos`)
 
 - `display.rs`: `MacDisplay::all` returns an empty list (and logs) when
