@@ -195,13 +195,15 @@ impl Render for QuillApp {
                 if guard::refuse_hard_if_injecting(HardSurface::Window) {
                     return;
                 }
-                #[cfg(target_os = "macos")]
-                if this.appearance.minimize_to_tray && quill::tray::tray_available() {
-                    cx.hide();
-                    return;
+                if quill::tray::minimize_hides_main_window(
+                    this.minimize_to_tray(),
+                    quill::tray::tray_available(),
+                    cfg!(target_os = "macos"),
+                ) {
+                    crate::ui::link_inbox::hide_main_window(window, cx);
+                } else {
+                    window.minimize_window();
                 }
-                let _ = (this, cx);
-                window.minimize_window();
             }))
             .on_action(cx.listener(|this, _: &ZoomWindow, window, _| {
                 let _ = this;

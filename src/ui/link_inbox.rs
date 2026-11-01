@@ -148,7 +148,7 @@ const LEFT_FULLSCREEN_POLLS: u32 = 30;
 
 /// Hide the main window, tdesktop's `closeWithoutDestroy`: on a Mac it
 /// leaves full screen first, because hiding it there leaves a black Space.
-fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+pub(super) fn hide_main_window(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
     if cx.has_global::<MainWindow>() {
         cx.global_mut::<MainWindow>().closed_by_user = true;
     }
