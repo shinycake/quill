@@ -95,6 +95,54 @@ fn a_clip_too_slow_for_the_fine_grid_drops_to_its_files_rate() {
     assert!(!too_slow_for_grid(ms(50), timeline(60, 60.0, 1)));
 }
 
+/// Feeds `draws` (ms) to a fresh cost for a 60 fps file on a 120 grid;
+/// the draw that first reads as too slow, if one does.
+fn first_coarse(draws: &[f64]) -> Option<usize> {
+    let fine = timeline(120, 60.0, 2);
+    let mut cost = super::engine::DrawCost::default();
+    draws
+        .iter()
+        .position(|draw| cost.note(Duration::from_secs_f64(draw / 1000.0), fine))
+}
+
+#[test]
+fn a_cold_first_draw_keeps_a_fast_clip_on_the_fine_grid() {
+    let mut draws = vec![6.0];
+    draws.extend([0.8; 200]);
+    assert_eq!(first_coarse(&draws), None);
+}
+
+#[test]
+fn one_slow_draw_keeps_a_fast_clip_on_the_fine_grid() {
+    for at in [1, 2, 5, 9, 40] {
+        let mut draws = vec![0.8; 200];
+        if let Some(draw) = draws.get_mut(at) {
+            *draw = 14.0;
+        }
+        assert_eq!(first_coarse(&draws), None, "spike at draw {at}");
+    }
+}
+
+#[test]
+fn a_clip_slow_from_the_start_drops_to_its_files_rate_within_16_draws() {
+    // The 672 px tap effect: median 2.6 ms, p90 6.0 ms.
+    let draws: Vec<f64> = [2.6, 6.0, 3.1, 2.6, 4.4, 2.8, 6.0, 2.6]
+        .iter()
+        .copied()
+        .cycle()
+        .take(40)
+        .collect();
+    let at = first_coarse(&draws);
+    assert!(at.is_some_and(|at| at < 16), "{at:?}");
+}
+
+#[test]
+fn a_coarse_clip_ticks_twice_per_file_frame() {
+    assert_eq!(timeline(120, 30.0, 4).tick_fps(true, true), 60.0);
+    assert_eq!(timeline(120, 60.0, 2).tick_fps(true, true), 120.0);
+    assert_eq!(timeline(120, 30.0, 4).tick_fps(false, true), 30.0);
+}
+
 #[test]
 fn a_low_rate_shows_only_the_files_own_frames() {
     // A 60 fps file on a 120 frame grid (step 2).
@@ -104,8 +152,8 @@ fn a_low_rate_shows_only_the_files_own_frames() {
     assert_eq!(high.index, 3, "120 fps: an in-between frame");
     assert_eq!(low.index, 2, "60 fps: whole file frames only");
     assert_eq!(low.ahead, [Some(4), Some(6), Some(8)]);
-    assert_eq!(tl.tick_fps(true), 120.0);
-    assert_eq!(tl.tick_fps(false), 60.0);
+    assert_eq!(tl.tick_fps(true, false), 120.0);
+    assert_eq!(tl.tick_fps(false, false), 60.0);
     assert_eq!(tl.duration(), Duration::from_secs(1));
 }
 

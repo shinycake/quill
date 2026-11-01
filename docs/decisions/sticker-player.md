@@ -175,6 +175,24 @@ Before: the second half of the effect late, frames held for 1, 2 or 3
 refreshes (35, 72 and 29 times). After: 1 late paint out of 358, and
 146 of 150 frames held for exactly 2 refreshes (the rest at the switch).
 
+### Follow-up: one slow draw demoted a fast sticker (2026-11-01)
+
+The smoothed draw time started from the first draw and was tested on
+every draw, and a demotion never cleared. The first draw runs cold, and a
+worker preempted for 10 ms in the first loop lifts the average past the
+3.33 ms a 120 Hz grid allows from a 0.8 ms norm. That explains the 3 of
+about 24 runs where a normal sticker played at its file's rate: 107 window
+frames a second for 30 pictures.
+
+- The first draw is left out. The average is the plain mean of the next
+  draws until there are 8, then a running eighth, and it is tested only
+  from the 8th on. The 672 px effect still drops by its 9th draw (75 ms
+  at 120 Hz). One 14 ms draw among 0.8 ms ones never does.
+- A clip at its file's rate ticks at twice that rate, capped at the grid:
+  a 30 fps file ticks 60 times a second, a 60 fps file still 120.
+- `QUILL_TRACE_STICKERS` prints how many open clips play at their file's
+  rate (`coarse`).
+
 ## Verification
 
 `/verify` captures at 2x, before and after: a sticker message in history,

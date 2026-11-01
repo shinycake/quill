@@ -816,7 +816,7 @@ impl Player {
             }
         };
         eprintln!(
-            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
+            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} coarse {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
             screen.shown,
             screen.late,
             stats.drawn,
@@ -825,6 +825,7 @@ impl Player {
             stats.unpacked,
             avg(stats.unpack_time, stats.unpacked),
             stats.clips,
+            stats.coarse,
             stats.store_bytes as f64 / 1_048_576.0,
             stats.source_bytes as f64 / 1_048_576.0,
             stats.evicted,

@@ -33,6 +33,8 @@ pub struct EngineStats {
     pub clips: usize,
     /// Stores dropped to stay under the budget.
     pub evicted: u64,
+    /// Open clips held to their file's rate.
+    pub coarse: usize,
 }
 
 pub(super) struct Clip {
@@ -56,8 +58,8 @@ pub(super) struct Clip {
     /// Round-robin order among a worker's clips.
     pub(super) served: u64,
     pub(super) cancel: Cancel,
-    /// How long its frames take to draw, smoothed.
-    pub(super) draw_cost: Duration,
+    /// How long its frames take to draw.
+    pub(super) draw_cost: DrawCost,
     /// Its frames draw too slowly for the fine grid: it plays at its
     /// file's own rate from then on, so it never falls behind.
     pub(super) coarse: bool,
@@ -66,14 +68,37 @@ pub(super) struct Clip {
 impl Clip {
     /// Notes that one of its frames took `draw` to draw.
     pub(super) fn note_draw(&mut self, draw: Duration) {
-        self.draw_cost = if self.draw_cost.is_zero() {
-            draw
-        } else {
-            (self.draw_cost * 3 + draw) / 4
-        };
         if let ClipState::Ready(info) = &self.state {
-            self.coarse |= too_slow_for_grid(self.draw_cost, info.timeline);
+            self.coarse |= self.draw_cost.note(draw, info.timeline);
         }
+    }
+}
+
+/// Draws averaged before a clip may drop to its file's rate.
+const SETTLED: u32 = 8;
+
+/// How long a clip's frames take to draw, averaged slowly enough that one
+/// cold or preempted draw can't pass for a slow clip.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct DrawCost {
+    /// Draws seen, the first included.
+    seen: u32,
+    average: Duration,
+}
+
+impl DrawCost {
+    /// Notes one draw; true once the average settled too slow for
+    /// `timeline`'s fine grid. The first draw is left out: it opens the
+    /// canvas and runs cold.
+    pub(super) fn note(&mut self, draw: Duration, timeline: Timeline) -> bool {
+        self.seen = self.seen.saturating_add(1);
+        let Some(averaged) = self.seen.checked_sub(1).filter(|n| *n > 0) else {
+            return false;
+        };
+        // The plain mean of the first draws, then a running eighth.
+        let weight = averaged.min(SETTLED);
+        self.average = (self.average * (weight - 1) + draw) / weight;
+        averaged >= SETTLED && too_slow_for_grid(self.average, timeline)
     }
 }
 
@@ -230,7 +255,7 @@ impl Engine {
                 used: Instant::now(),
                 served: 0,
                 cancel: Cancel::default(),
-                draw_cost: Duration::ZERO,
+                draw_cost: DrawCost::default(),
                 coarse: false,
             },
         );
@@ -337,6 +362,7 @@ impl Engine {
         stats.store_bytes = state.store_bytes;
         stats.source_bytes = state.clips.values().map(|clip| clip.source_bytes).sum();
         stats.clips = state.clips.len();
+        stats.coarse = state.clips.values().filter(|clip| clip.coarse).count();
         stats
     }
 
