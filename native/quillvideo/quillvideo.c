@@ -495,10 +495,12 @@ static int emit_nv12(Ctx *c, const AVFrame *f, int ow, int oh, int cs,
         c->nsws_fmt != f->format || c->nsws_ow != ow || c->nsws_oh != oh ||
         c->nsws_cs != cs || c->nsws_range != range) {
       sws_freeContext(c->nsws);
+      /* No SWS_ACCURATE_RND: it selects swscale's slower exact-rounding
+       * scalers, and tdesktop passes no such flag either. */
       c->nsws = sws_getContext(f->width, f->height,
                                (enum AVPixelFormat)f->format, ow, oh,
-                               AV_PIX_FMT_NV12, SWS_BILINEAR | SWS_ACCURATE_RND,
-                               NULL, NULL, NULL);
+                               AV_PIX_FMT_NV12, SWS_BILINEAR, NULL, NULL,
+                               NULL);
       c->nsws_fmt = -1;
       if (!c->nsws)
         return 0;

@@ -231,7 +231,6 @@ fn has_radius(radii: Corners<Pixels>) -> bool {
     .any(|radius| *radius > px(0.0))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
     match picture {
         Picture::Surface(buffer) => gpui_kit::surface(buffer)
@@ -240,12 +239,6 @@ fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> 
             .into_any_element(),
         Picture::Image(image) => image_element(image, fit, radii),
     }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn picture_element(picture: Picture, fit: ObjectFit, radii: Corners<Pixels>) -> AnyElement {
-    let Picture::Image(image) = picture;
-    image_element(image, fit, radii)
 }
 
 fn image_element(
@@ -264,7 +257,6 @@ fn image_element(
 }
 
 /// Paint `colors` over the outsides of the rounded corners.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn paint_corner_mask(
     bounds: Bounds<Pixels>,
     radii: Corners<Pixels>,
@@ -303,9 +295,6 @@ fn paint_corner_mask(
         let _ = window.paint_image(at, at, Corners::default(), mask, 0, false);
     }
 }
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn paint_corner_mask(_: Bounds<Pixels>, _: Corners<Pixels>, _: [Hsla; 4], _: &mut Window) {}
 
 /// What [`present_hint`] reports: the next present time (with its host
 /// ticks), the refresh period, and the display with its content grid.

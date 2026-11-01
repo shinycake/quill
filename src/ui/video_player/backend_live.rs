@@ -6,12 +6,11 @@
 //! the [`LiveSink`]. A waker task arms the sink after each wake and, when
 //! a frame lands, redraws the one view the element draws in, so nothing
 //! polls and an idle feed costs nothing. A frame is converted once, into
-//! the platform picture (`live_picture.rs`): on macOS and Windows on the
-//! UI thread for small tiles (NV12, a few microseconds) and on the
-//! background executor above [`INLINE_MAX_EDGE`]; a frame that becomes
-//! BGRA (Linux, about 0.5 ms for a 640 × 360 tile; on Windows an odd size
-//! or the pause after a refused surface, `live_surface.rs`) always on the
-//! background executor. One conversion at a time; the newest frame wins.
+//! the platform picture (`live_picture.rs`): on the UI thread for small
+//! tiles (NV12, a few microseconds) and on the background executor above
+//! [`INLINE_MAX_EDGE`]; a frame that becomes BGRA (about 0.5 ms for a
+//! 640 × 360 tile: the pause after a refused surface, `live_surface.rs`)
+//! always on the background executor. One conversion at a time; the newest frame wins.
 //!
 //! The transport is live ([`TransportMachine::live`]): Opening until the
 //! first frame, Playing while frames come, Buffering once none came for
@@ -76,8 +75,9 @@ const UNSEEN_PROBE_PICTURE: Duration = Duration::from_millis(250);
 /// one a frame still in flight may read: GPUI's Metal renderer drops the
 /// plane textures once encoded (`metal_renderer.rs`, `draw_surfaces`) and
 /// keeps up to three drawables (`set_maximum_drawable_count(3)`). A
-/// Windows NV12 frame is never written again once made (its pool buffer
-/// is reused only when no frame holds it), so the one on screen is enough.
+/// Windows or Linux NV12 frame is never written again once made (its pool
+/// buffer is reused only when no frame holds it), so the one on screen is
+/// enough.
 const SURFACES_HELD: usize = if cfg!(target_os = "macos") { 3 } else { 1 };
 /// The paused picture (and the live story's backdrop) is made again at
 /// most this often.
@@ -207,8 +207,8 @@ pub(super) struct LiveCore {
     /// over another one (your camera's corner preview) rounds its own
     /// corners, which a surface can't do over a picture.
     images_only: Cell<bool>,
-    /// Pictures are NV12 surface frames (Windows, `live_surface.rs`).
-    #[cfg(any(target_os = "windows", test))]
+    /// Pictures are NV12 surface frames (Windows, Linux: `live_surface.rs`).
+    #[cfg(any(not(target_os = "macos"), test))]
     nv12: Cell<bool>,
     track: RefCell<Track>,
     /// The view the element draws in, redrawn when a frame lands. A live
@@ -234,7 +234,7 @@ struct Track {
     surfaces: Surfaces,
     /// NV12 buffers, the pause after a refused frame and the NV12 frame
     /// on screen (Windows).
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(not(target_os = "macos"), test))]
     nv12: super::live_surface::LiveNv12,
     /// A large frame converted off the UI thread, not drawn yet.
     ready: Option<Landed>,
@@ -283,7 +283,7 @@ impl LiveCore {
             mirrored: Cell::new(false),
             scratch: Cell::default(),
             images_only: Cell::new(false),
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(not(target_os = "macos"), test))]
             nv12: Cell::new(super::live_surface::nv12_live()),
             track: RefCell::new(Track::default()),
             view: Cell::new(None),
@@ -366,12 +366,12 @@ impl LiveCore {
         }
         // As `target` decides: NV12 first (off unless the platform draws
         // it, `live_surface::nv12_live`).
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         if self.nv12.get() {
             let (width, height) = frame.shown_size();
             return !track.nv12.takes(width, height, self.time(Instant::now()));
         }
-        #[cfg(not(any(target_os = "windows", test)))]
+        #[cfg(all(target_os = "macos", not(test)))]
         let _ = (track, frame);
         live_picture::bgra_only()
     }
@@ -382,7 +382,7 @@ impl LiveCore {
             return Target::Bgra;
         }
         let (width, height) = frame.shown_size();
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         if self.nv12.get() {
             let now = self.time(Instant::now());
             return track
@@ -424,7 +424,7 @@ impl LiveCore {
         }
         let shown = landed.prepared.into_picture()?;
         track.shown_seq = Some(landed.seq);
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         track.nv12.shown(shown.nv12);
         let picture = shown.picture;
         match shown.image {
@@ -448,7 +448,7 @@ impl LiveCore {
     /// (`gone`): its NV12 buffers go.
     fn release_buffers(&self, gone: bool) {
         self.scratch.take();
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         if let Ok(mut track) = self.track.try_borrow_mut() {
             if gone {
                 track.nv12.release();
@@ -456,7 +456,7 @@ impl LiveCore {
                 track.nv12.feed_ended();
             }
         }
-        #[cfg(not(any(target_os = "windows", test)))]
+        #[cfg(all(target_os = "macos", not(test)))]
         let _ = gone;
     }
 
@@ -633,14 +633,14 @@ impl Backend for LiveBackend {
     fn next_due(&self, now: Instant, _interval: Duration) -> Option<Instant> {
         // The renderer has not answered for the NV12 frame on screen yet:
         // the next display frame looks (and replaces it if refused).
-        #[cfg(any(target_os = "windows", test))]
+        #[cfg(any(not(target_os = "macos"), test))]
         if self.core.nv12_unsettled() {
             return None;
         }
         self.core.status(now).1
     }
 
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(not(target_os = "macos"), test))]
     fn replace_refused(&mut self, now: Instant) -> Option<Picture> {
         self.core.replace_refused(now)
     }
@@ -867,7 +867,7 @@ fn spawn_waker(
     })
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(not(target_os = "macos"), test))]
 #[path = "live_nv12.rs"]
 mod nv12;
 
