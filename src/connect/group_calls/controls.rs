@@ -33,6 +33,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
         if sharing {
+            let key = GroupOfferKey::Screen(group_call_id);
+            if let Some(extra) = self.drop_group_offer(key) {
+                // Nothing went out yet, so there is nothing to end.
+                if let Some(engine) = self.call_engine.as_deref_mut() {
+                    let _ = engine.stop_screen_share(group_call_id);
+                }
+                if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                    call.screen_share_pending = false;
+                }
+                return Ok(extra);
+            }
             let extra = self.session.request(
                 RequestPurpose::Calls(CallsPurpose::EndGroupCallScreenSharing { group_call_id }),
                 None,
@@ -68,34 +79,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(engine) = self.call_engine.as_deref_mut() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let offer = match engine.start_screen_share(group_call_id) {
-            Ok(offer) => offer,
-            Err(err) => {
-                if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                    call.transport_error = Some(err.to_string());
-                }
-                return Err(ConnectSendError::InvalidRequest);
+        if let Err(err) = engine.start_screen_share(group_call_id) {
+            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                call.transport_error = Some(err.to_string());
             }
-        };
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.session.request(
             RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing { group_call_id }),
             None,
         );
-        if let Err(err) = self.sender.send_json(&start_group_call_screen_sharing(
-            extra,
-            group_call_id,
-            crate::calls::engine::group_offer_audio_source_id(&offer),
-            &offer,
-        )) {
-            self.session.requests.take(extra);
-            if let Some(engine) = self.call_engine.as_deref_mut() {
-                let _ = engine.stop_screen_share(group_call_id);
-            }
-            return Err(err);
-        }
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
             call.screen_share_pending = true;
         }
+        self.wait_for_offer(
+            GroupOfferKey::Screen(group_call_id),
+            extra,
+            OfferSend::Screen,
+            Ok(()),
+        );
         Ok(extra)
     }
 
@@ -139,8 +141,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let me = me_row.map(|p| p.participant_id);
         // Before the transport is up the engine only stores the state for
         // the connect; with it up the call is real and may fail.
+        let making = self
+            .offer_waiting(GroupOfferKey::Call(group_call_id))
+            .is_some();
         let applied = match self.call_engine.as_deref_mut() {
-            Some(engine) if engine.is_available() => {
+            Some(engine) if engine.is_available() && !making => {
                 Some(engine.set_group_muted(group_call_id, muted))
             }
             _ => None,

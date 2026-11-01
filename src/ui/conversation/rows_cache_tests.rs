@@ -530,3 +530,6 @@ mod vanish;
 
 #[path = "paragraph_cache_scroll_tests.rs"]
 mod paragraph_cache_scroll;
+
+#[path = "file_album_tests.rs"]
+mod file_album;

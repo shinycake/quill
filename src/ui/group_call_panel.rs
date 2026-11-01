@@ -28,7 +28,6 @@ use quill::state::ActiveGroupCall;
 
 use crate::ui::app_theme::call_chrome;
 use quill::lang::{keys, tr, tr_with};
-use std::time::Duration;
 
 /// lib_ui `colors.palette`.
 pub(super) const BG: u32 = call_chrome::GROUP_SURFACE;
@@ -130,6 +129,12 @@ fn mute_state(call: &ActiveGroupCall) -> MuteState {
     }
 }
 
+/// How far the mute button's halo has breathed out at `now_ms`, 0 to 1.
+fn breath_at(now_ms: u64, state: MuteState) -> f32 {
+    let period = if state == MuteState::Live { 1100 } else { 2600 };
+    pulsating_between(0.0, 1.0)((now_ms % period) as f32 / period as f32)
+}
+
 impl QuillApp {
     /// The group call window's content, built with the app's context.
     pub(super) fn group_call_panel_body(
@@ -149,21 +154,22 @@ impl QuillApp {
                 .into_any_element();
         };
         let state = mute_state(&call);
-        // Your own microphone: the halo follows the level while live.
+        let now = self.group_call_now_ms();
+        let still = quill::power_saving::on(quill::power_saving::Flag::Calls);
+        if !still {
+            self.request_window_view_tick(panel, window, 30, cx);
+        }
+        let breath = (!still).then(|| breath_at(now, state));
+        // Your own microphone: the ring follows the level while live.
         let (self_level, _) = self.group_call_self_level();
         let level_reach = (state == MuteState::Live).then(|| {
-            let now = self.group_call_now_ms();
             if (self_level - self.group_call.level_seen).abs() > f32::EPSILON {
                 self.group_call.level_seen = self_level;
                 self.group_call
                     .level_anim
                     .retarget(self_level.clamp(0.0, 1.0), now);
             }
-            let value = self.group_call.level_anim.value(now);
-            if self.group_call.level_anim.is_running(now) || value > 0.0 {
-                self.request_window_view_tick(panel, window, 30, cx);
-            }
-            quill::calls::audio_level::halo_reach(value)
+            quill::calls::audio_level::halo_reach(self.group_call.level_anim.value(now))
         });
         let title = if call.title.is_empty() {
             if call.is_conference() {
@@ -453,7 +459,7 @@ impl QuillApp {
             .children(stream)
             .children(self.group_call_join_as_row(&call, cx))
             .child(members)
-            .child(self.group_call_controls(&call, state, level_reach, cx))
+            .child(self.group_call_controls(&call, state, level_reach, breath, cx))
             .children(invite)
             .children(self.group_call_share_overlay(&call, cx))
             .children(rename)
@@ -525,6 +531,7 @@ impl QuillApp {
         call: &ActiveGroupCall,
         state: MuteState,
         level_reach: Option<f32>,
+        breath: Option<f32>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (from, to) = state.colors();
@@ -644,22 +651,12 @@ impl QuillApp {
                     .child({
                         let halo = div().absolute().inset_0().rounded_full().bg(rgb(to));
                         // Battery and animations: a still halo.
-                        if quill::power_saving::on(quill::power_saving::Flag::Calls) {
-                            halo.opacity(0.24).into_any_element()
-                        } else {
-                            halo.with_animation(
-                                "group-mute-halo",
-                                Animation::new(Duration::from_millis(
-                                    if state == MuteState::Live { 1100 } else { 2600 },
-                                ))
-                                .repeat()
-                                .with_easing(pulsating_between(0.0, 1.0)),
-                                move |halo, delta| {
-                                    let reach = if state == MuteState::Live { 14. } else { 6. };
-                                    halo.opacity(0.18 + 0.12 * delta).inset(px(-reach * delta))
-                                },
-                            )
-                            .into_any_element()
+                        match breath {
+                            None => halo.opacity(0.24),
+                            Some(delta) => {
+                                let reach = if state == MuteState::Live { 14. } else { 6. };
+                                halo.opacity(0.18 + 0.12 * delta).inset(px(-reach * delta))
+                            }
                         }
                     })
                     .children(muted_hint)

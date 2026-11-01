@@ -45,7 +45,10 @@ impl StillBackend {
 fn still_picture(path: &Path, at: f64) -> Option<(Arc<RenderImage>, Option<f64>)> {
     if quill::video_decode::available() {
         let (frame, duration) = super::backend_ffmpeg::first_picture(path, at)?;
-        return Some((super::backend_ffmpeg::render_image(frame)?, duration));
+        return Some((
+            super::backend_ffmpeg::render_image(frame, &Default::default())?,
+            duration,
+        ));
     }
     #[cfg(target_os = "macos")]
     {

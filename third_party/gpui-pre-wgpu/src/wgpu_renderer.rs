@@ -3,7 +3,7 @@
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back; NV12 video
 // surfaces (`yuv_surfaces`). See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
-    Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+    install_once_built, Adapters, Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
 use crate::yuv_surfaces::{SURFACE_PARAMS_SIZE, YuvSurfaces};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
@@ -2400,7 +2400,7 @@ impl WgpuRenderer {
         let shared = match lost {
             None => Shared::Healthy,
             Some(was_software) => Shared::Lost {
-                was_software: was_software == Some(true) || losses == Losses::KeepsDying,
+                adapters: losses.adapters(was_software),
             },
         };
         if self.recovering.begin(now, shared) {
@@ -2450,7 +2450,7 @@ impl WgpuRenderer {
     pub fn hardware_probe_at(&self) -> Option<Instant> {
         let slot = self.context.as_ref()?;
         let probe = slot.recovery.borrow().probe();
-        probe.map(|probe| probe.due())
+        probe.map(|probe| probe.next_at())
     }
 
     /// Quill: on a CPU adapter that recovery fell back to, look for the GPU
@@ -2487,14 +2487,19 @@ impl WgpuRenderer {
             ProbeStep::Wait(due) => return Some(due),
             ProbeStep::Look => {
                 *gpu_context.look.borrow_mut() = Some(look_for_gpu());
-                probe.started();
+                probe.started(now);
                 gpu_context.recovery.borrow_mut().set_probe(Some(probe));
-                return probe.step(now).at();
+                return Some(probe.next_at());
             }
-            ProbeStep::Await(again) => {
+            ProbeStep::Await(check) if now < check => return Some(check),
+            ProbeStep::Await(_) => {
                 let mut look = gpu_context.look.borrow_mut();
                 match look.as_ref().map(|answer| answer.try_recv()) {
-                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => return Some(again),
+                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                        probe.polled(now);
+                        gpu_context.recovery.borrow_mut().set_probe(Some(probe));
+                        return Some(probe.next_at());
+                    }
                     Some(Ok(seen)) => {
                         *look = None;
                         seen
@@ -2518,7 +2523,7 @@ impl WgpuRenderer {
         let software = gpu_context.borrow_mut().take();
         self.state = RendererState::Released;
         let hardware = Attempt::Recreate {
-            allow_software: false,
+            adapters: Adapters::HardwareOnly,
         };
         match self.try_recover(window, &gpu_context, hardware) {
             Ok(()) => {
@@ -2549,11 +2554,7 @@ impl WgpuRenderer {
     }
 
     /// One attempt: adopt the context another window recreated, or make a
-    /// new one, with or without CPU adapters. A new context becomes the
-    /// shared one only once this window's renderer is built on it. Installed
-    /// before, a failed build left a context that looked recovered: this
-    /// window's next call switched to adopting it, with its failures reset,
-    /// and the other windows adopted it too.
+    /// new one on the adapters the attempt admits ([`install_once_built`]).
     #[cfg(not(target_family = "wasm"))]
     fn try_recover<W>(
         &mut self,
@@ -2576,17 +2577,15 @@ impl WgpuRenderer {
             preferred_present_mode: Some(self.surface_config.present_mode),
         };
 
-        if let Attempt::Recreate { allow_software } = attempt {
+        if let Attempt::Recreate { adapters } = attempt {
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
-            let context = if allow_software {
-                WgpuContext::new(instance, &surface, self.compositor_gpu)?
-            } else {
-                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?
-            };
-            self.rebuild(gpu_context, &context, surface, config)?;
-            *gpu_context.borrow_mut() = Some(context);
-            return Ok(());
+            let context = WgpuContext::new_on(instance, &surface, self.compositor_gpu, adapters)?;
+            return install_once_built(
+                context,
+                |context| self.rebuild(gpu_context, context, surface, config),
+                |context| *gpu_context.borrow_mut() = Some(context),
+            );
         }
 
         let gpu_context = Rc::clone(gpu_context);

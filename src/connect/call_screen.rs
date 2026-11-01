@@ -33,7 +33,8 @@ use crate::calls::capture::system_audio::{
     SystemAudioCapture, SystemAudioMix, system_audio_supported,
 };
 use crate::calls::capture::{
-    CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame, device_thread::DeviceThread,
+    CaptureError, CaptureEvent, CaptureFeeder, FrameSink, VideoFrame,
+    device_thread::{DeviceRun, DeviceThread},
 };
 use crate::calls::engine::{
     CaptureTarget, ExternalFrameSender, TransportState, external_screen_capture_enabled,
@@ -90,13 +91,13 @@ struct ActiveScreen {
     /// The system audio shared with it, while running.
     audio: Option<SharedAudio>,
     capture: DeviceThread,
-    feeder: Option<CaptureFeeder>,
+    run: DeviceRun<CaptureFeeder>,
 }
 
 struct SharedAudio {
     mix: Arc<SystemAudioMix>,
     capture: DeviceThread,
-    opening: bool,
+    run: DeviceRun<()>,
 }
 
 impl SharedAudio {
@@ -117,7 +118,7 @@ impl SharedAudio {
         Self {
             mix,
             capture,
-            opening: true,
+            run: DeviceRun::Opening,
         }
     }
 }
@@ -159,7 +160,7 @@ impl CallScreen {
         self.active
             .as_ref()
             .and_then(|active| active.audio.as_ref())
-            .is_some_and(|audio| !audio.opening)
+            .is_some_and(|audio| !audio.run.is_opening())
     }
 
     /// The source being shared right now.
@@ -176,13 +177,17 @@ impl CallScreen {
     pub fn target(&self) -> Option<CaptureTarget> {
         self.active
             .as_ref()
-            .filter(|active| active.feeder.is_some())
+            .filter(|active| !active.run.is_opening())
             .map(|active| active.target)
     }
 
     pub fn opening(&self) -> bool {
         self.active.as_ref().is_some_and(|active| {
-            active.feeder.is_none() || active.audio.as_ref().is_some_and(|audio| audio.opening)
+            active.run.is_opening()
+                || active
+                    .audio
+                    .as_ref()
+                    .is_some_and(|audio| audio.run.is_opening())
         })
     }
 
@@ -195,7 +200,7 @@ impl CallScreen {
     pub fn frames_sent(&self) -> u64 {
         self.active
             .as_ref()
-            .and_then(|active| active.feeder.as_ref())
+            .and_then(|active| active.run.running())
             .map_or(0, |feeder| feeder.stats().sent())
     }
 
@@ -236,7 +241,7 @@ impl CallScreen {
             paused: false,
             audio: None,
             capture,
-            feeder: None,
+            run: DeviceRun::Opening,
         });
     }
 
@@ -246,7 +251,7 @@ impl CallScreen {
         let active = self
             .active
             .as_mut()
-            .filter(|active| active.feeder.is_none())?;
+            .filter(|active| active.run.is_opening())?;
         let started = active
             .capture
             .opened()?
@@ -257,7 +262,7 @@ impl CallScreen {
             });
         Some(match started {
             Ok(feeder) => {
-                active.feeder = Some(feeder);
+                active.run = DeviceRun::Running(feeder);
                 let paused = active.paused;
                 self.error = None;
                 Ok(paused)
@@ -352,15 +357,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let running = screen
             .active
             .as_mut()
-            .filter(|active| active.feeder.is_some());
+            .filter(|active| !active.run.is_opening());
         let mix = match running {
             Some(active) if wanted => {
                 let audio = active
                     .audio
                     .get_or_insert_with(|| SharedAudio::open(opener));
-                if audio.opening {
+                if audio.run.is_opening() {
                     match audio.capture.opened() {
-                        Some(Ok(())) => audio.opening = false,
+                        Some(Ok(())) => audio.run = DeviceRun::Running(()),
                         Some(Err(err)) => failed = Some(err.to_string()),
                         None => {}
                     }
@@ -481,7 +486,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let changed = active.paused != paused;
         active.paused = paused;
-        if let Some(feeder) = active.feeder.as_ref() {
+        if let Some(feeder) = active.run.running() {
             feeder.set_forwarding(!paused);
         }
         let CaptureTarget::Group(group_call_id) = active.target else {

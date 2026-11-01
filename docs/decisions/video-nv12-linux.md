@@ -72,9 +72,14 @@ With pictures on the GPU path, what each one still cost:
   once no picture holds them, so a playing clip allocates nothing per
   picture and copies once in Rust. Windows gains the same.
 - `rotate_bgra` (pictures that stay BGRA: 10-bit, 4:2:2, odd sides,
-  BT.2020, and the pause after a refused surface) writes into a zeroed
-  `Vec` of the right size instead of growing one. The `Vec` can't come
-  from a pool: the `RenderImage` it becomes owns it.
+  BT.2020, and the pause after a refused surface) writes into a buffer
+  from the player's `BgraPool` (8 at most), and so does the CPU NV12
+  conversion of `VideoFrame::into_bgra`. The `RenderImage` a picture
+  becomes owns its buffer, so the vendored GPUI core gained
+  `RenderImage::with_recycler`: the image hands its frames back when it is
+  dropped (after it left the screen and the atlas), and the next picture
+  of that size fills the same buffer. A playing BGRA clip stops
+  allocating 8 MB a picture at 1080p.
 - The shim's NV12 resize (a picture larger than the viewer's box) no
   longer passes `SWS_ACCURATE_RND`, which selects swscale's slower
   exact-rounding paths. Telegram Desktop passes no flag
@@ -104,6 +109,13 @@ two runs each:
 | 1920x1080 | NV12, copied | 2.62 ms | 0.70 ms | 0.71 ms |
 | 2560x1440 scaled to 1920x1080, 150 pictures | NV12, scaled | 6.39 ms | 5.64 ms | 3.99 ms |
 
+The BGRA pool, measured the same way afterwards (release builds, the
+same 1920x1080 clip of 300 pictures, MPEG-4 Part 2 yuv420p, three runs
+each; `--video-probe` hands each BGRA buffer back as the player's images
+do): 2.03 ms a picture before (1.99, 2.01, 2.08), 1.64 ms after (1.78,
+1.58, 1.57). The worst picture stays near 10 ms either way (the first
+pictures, and the decoder).
+
 Before the pool, NV12 at 1080p cost more than BGRA here: the allocation
 and the extra copy outweighed swscale's SIMD BGRA conversion. BGRA's
 two runs vary by about 0.3 ms between builds, so its change is noise.
@@ -122,7 +134,9 @@ a stream needs it.
   as the atlas tests were (`QUILL-CHANGES.md`).
 - `wgpu_atlas::tests` the same way, with
   `video_pictures_take_turns_in_two_textures`; `video_decode::tests`
-  (with the real shim) for the pool and the packing into a buffer.
+  (with the real shim) for the pool and the packing into a buffer, and
+  `ffmpeg_turns_bgra_pictures_into_handed_back_buffers` and
+  `a_picture_hands_its_buffer_back_once_its_image_goes` for the BGRA pool.
 - `cargo test --features demo-capture --bin quill video_player`: the NV12
   backend tests that ran only on Windows now take the surface branch on
   Linux.

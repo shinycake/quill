@@ -616,7 +616,7 @@ impl QuillApp {
                     this.close_rich_editor(window, cx);
                 })),
         );
-        let mut bar = div()
+        let bar = div()
             .id("rich-editor-bar")
             .flex()
             .flex_col()
@@ -624,49 +624,7 @@ impl QuillApp {
             .px_1()
             .py_1()
             .child(buttons);
-        // Live preview of the parsed blocks (editor blocks never carry
-        // buttons, so the callback ids are unused).
-        let text = self.composer.read(cx).value().to_string();
-        let blocks = quill::rich::preview_blocks(&text);
-        if blocks.iter().any(|block| {
-            !matches!(
-                block,
-                quill::rich::RichBlock::Empty | quill::rich::RichBlock::Unsupported { .. }
-            )
-        }) {
-            let empty: std::collections::HashSet<(i64, u64, u64, bool)> =
-                std::collections::HashSet::new();
-            let mut preview = div()
-                .id("rich-editor-preview")
-                .flex()
-                .flex_col()
-                .gap_1()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .bg(bg_canvas())
-                // Cap the preview so a long draft can't squeeze the history
-                // to zero height on short windows.
-                .max_h(px(320.))
-                .overflow_y_scroll();
-            for (index, block) in blocks.iter().enumerate() {
-                if let Some(child) = rich_block_element(
-                    index,
-                    block,
-                    (0, 0),
-                    ChatId(0),
-                    MessageId(0),
-                    &empty,
-                    // Settings → Appearance: message font size.
-                    self.msg_font(),
-                    cx,
-                ) {
-                    preview = preview.child(child);
-                }
-            }
-            bar = bar.child(preview);
-        }
-        bar
+        bar.children(self.rich_editor_preview(cx))
     }
 
     /// M1: start a reply to a message from the context menu — the reply

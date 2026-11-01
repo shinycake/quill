@@ -9,6 +9,16 @@ use serde_json::Value;
 /// connect to.
 const RTC_ANSWER: &str = r#"{"transport":{"ufrag":"abcd","pwd":"0123456789abcdef0123456789","fingerprints":[{"hash":"sha-256","setup":"active","fingerprint":"00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF"}],"candidates":[]}}"#;
 
+fn made(engine: &mut TgcallsEngine, id: i32, chat_id: i64, role: GroupCallRole) -> String {
+    engine.create_group_call(id, chat_id, role).unwrap();
+    engine.wait_group_offer(id).unwrap()
+}
+
+fn shared(engine: &mut TgcallsEngine, id: i32) -> String {
+    engine.start_screen_share(id).unwrap();
+    engine.wait_screen_offer(id).unwrap()
+}
+
 fn source(user_id: i64, endpoint: &str, screen: bool) -> GroupVideoSource {
     GroupVideoSource {
         user_id,
@@ -54,9 +64,7 @@ fn outputs(engine: &TgcallsEngine, group_call_id: i32) -> Vec<String> {
 #[test]
 fn the_join_payload_is_tdesktops_and_names_the_audio_ssrc() {
     let Some(mut engine) = engine() else { return };
-    let payload = engine
-        .create_group_call(1, -100, GroupCallRole::Member)
-        .unwrap();
+    let payload = made(&mut engine, 1, -100, GroupCallRole::Member);
     let json: Value = serde_json::from_str(&payload).unwrap();
     assert!(!json["ufrag"].as_str().unwrap().is_empty());
     assert!(json["fingerprints"].is_array());
@@ -76,9 +84,7 @@ fn the_join_payload_is_tdesktops_and_names_the_audio_ssrc() {
 #[test]
 fn a_group_call_is_joined_fed_and_left() {
     let Some(mut engine) = engine() else { return };
-    engine
-        .create_group_call(2, -200, GroupCallRole::Member)
-        .unwrap();
+    made(&mut engine, 2, -200, GroupCallRole::Member);
     engine.set_group_playback(2, None, false).unwrap();
     engine.set_group_muted(2, false).unwrap();
     engine.connect_group_call(2, RTC_ANSWER, None).unwrap();
@@ -108,9 +114,7 @@ fn a_group_call_is_joined_fed_and_left() {
 #[test]
 fn incoming_videos_follow_the_participants() {
     let Some(mut engine) = engine() else { return };
-    engine
-        .create_group_call(3, -300, GroupCallRole::Member)
-        .unwrap();
+    made(&mut engine, 3, -300, GroupCallRole::Member);
     engine.connect_group_call(3, RTC_ANSWER, None).unwrap();
     let both = [
         source(42, "camera-42", false),
@@ -148,9 +152,7 @@ fn incoming_videos_follow_the_participants() {
 #[test]
 fn the_screen_is_shared_through_the_presentation() {
     let Some(mut engine) = engine() else { return };
-    engine
-        .create_group_call(4, -400, GroupCallRole::Member)
-        .unwrap();
+    made(&mut engine, 4, -400, GroupCallRole::Member);
     engine.connect_group_call(4, RTC_ANSWER, None).unwrap();
     let sender = engine
         .external_frame_sender(CaptureTarget::Group(4))
@@ -160,7 +162,7 @@ fn the_screen_is_shared_through_the_presentation() {
         "no presentation to connect"
     );
 
-    let payload = engine.start_screen_share(4).unwrap();
+    let payload = shared(&mut engine, 4);
     let json: Value = serde_json::from_str(&payload).unwrap();
     assert_ne!(json["ssrc"].as_i64().unwrap(), 0);
     assert!(engine.presentation_active(4));
@@ -176,7 +178,7 @@ fn the_screen_is_shared_through_the_presentation() {
     microphone(&sender).unwrap();
 
     // Leaving stops a running presentation with the call.
-    engine.start_screen_share(4).unwrap();
+    shared(&mut engine, 4);
     engine.connect_screen_share(4, RTC_ANSWER).unwrap();
     engine.leave_group_call(4).unwrap();
     assert!(!engine.presentation_active(4));
@@ -186,9 +188,7 @@ fn the_screen_is_shared_through_the_presentation() {
 #[test]
 fn a_stream_is_received_only() {
     let Some(mut engine) = engine() else { return };
-    engine
-        .create_group_call(5, -500, GroupCallRole::Viewer)
-        .unwrap();
+    made(&mut engine, 5, -500, GroupCallRole::Viewer);
     engine
         .connect_group_call(5, r#"{"stream":true,"rtmp":true}"#, Some("camera"))
         .unwrap();
@@ -230,9 +230,7 @@ fn a_stream_is_received_only() {
 #[test]
 fn an_mtproto_stream_shows_one_video_on_the_stream() {
     let Some(mut engine) = engine() else { return };
-    engine
-        .create_group_call(7, -700, GroupCallRole::Viewer)
-        .unwrap();
+    made(&mut engine, 7, -700, GroupCallRole::Viewer);
     // Asked for before the connect: routed again once it says stream.
     engine
         .sync_group_video(7, &[source(42, "camera-42", false)])
@@ -262,13 +260,9 @@ fn an_mtproto_stream_shows_one_video_on_the_stream() {
 #[test]
 fn a_rejoin_replaces_the_instance_and_its_presentation() {
     let Some(mut engine) = engine() else { return };
-    let first = engine
-        .create_group_call(6, -600, GroupCallRole::Member)
-        .unwrap();
-    engine.start_screen_share(6).unwrap();
-    let second = engine
-        .create_group_call(6, -600, GroupCallRole::Member)
-        .unwrap();
+    let first = made(&mut engine, 6, -600, GroupCallRole::Member);
+    shared(&mut engine, 6);
+    let second = made(&mut engine, 6, -600, GroupCallRole::Member);
     assert_ne!(first, second);
     assert!(!engine.presentation_active(6));
     assert!(!engine.groups[&6].connected);
@@ -308,9 +302,10 @@ impl FrameCrypto for Refusing {
 #[test]
 fn a_conference_call_is_made_renamed_joined_and_left() {
     let Some(mut engine) = engine() else { return };
-    let payload = engine
+    engine
         .create_conference_call(-1, Arc::new(Refusing))
         .unwrap();
+    let payload = engine.wait_group_offer(-1).unwrap();
     assert_ne!(group_offer_audio_source_id(&payload), 0);
     // The join answer names the call.
     assert_eq!(
@@ -331,7 +326,7 @@ fn a_conference_call_is_made_renamed_joined_and_left() {
         .unwrap();
     microphone(&sender).unwrap();
     // The presentation is encrypted too.
-    engine.start_screen_share(8).unwrap();
+    shared(&mut engine, 8);
     assert!(
         engine.groups[&8]
             .presentation
@@ -340,4 +335,44 @@ fn a_conference_call_is_made_renamed_joined_and_left() {
     );
     engine.leave_group_call(8).unwrap();
     assert_eq!(microphone(&sender), Err(EngineError::Unavailable));
+}
+
+#[test]
+fn leaving_while_the_instance_is_made_leaves_no_call() {
+    let Some(mut engine) = engine() else { return };
+    engine
+        .create_group_call(11, -1100, GroupCallRole::Member)
+        .unwrap();
+    engine.leave_group_call(11).unwrap();
+    assert!(
+        engine.take_group_offers().is_empty(),
+        "no answer ever comes"
+    );
+    assert!(!engine.groups.contains_key(&11));
+    engine.reaper.wait_drained();
+}
+
+#[test]
+fn a_new_offer_replaces_the_one_still_being_made() {
+    let Some(mut engine) = engine() else { return };
+    engine
+        .create_group_call(12, -1200, GroupCallRole::Member)
+        .unwrap();
+    let payload = made(&mut engine, 12, -1200, GroupCallRole::Member);
+    assert_ne!(group_offer_audio_source_id(&payload), 0);
+    assert!(engine.take_group_offers().is_empty());
+    engine.leave_group_call(12).unwrap();
+    engine.reaper.wait_drained();
+}
+
+#[test]
+fn stopping_a_share_being_made_leaves_the_call_as_it_was() {
+    let Some(mut engine) = engine() else { return };
+    made(&mut engine, 13, -1300, GroupCallRole::Member);
+    engine.start_screen_share(13).unwrap();
+    engine.stop_screen_share(13).unwrap();
+    assert!(engine.take_group_offers().is_empty());
+    assert!(!engine.presentation_active(13));
+    engine.leave_group_call(13).unwrap();
+    engine.reaper.wait_drained();
 }

@@ -167,9 +167,10 @@ impl ComposerAttachment {
     }
 
     /// Append an explicit OS file drop (or pasted files), preserving the
-    /// draft on failure. Like Telegram Desktop, a drop of only photos and
-    /// videos becomes media (an album); anything else is sent as files,
-    /// since albums can't mix documents with media.
+    /// draft on failure. Like Telegram Desktop, photos and videos stay
+    /// media next to other files, and the send splits the tray into one
+    /// album per type ([`Self::split_for_send`]); a tray switched to
+    /// "send without compression" takes them as files.
     pub fn append_dropped_files(
         list: &mut Vec<Self>,
         paths: &[PathBuf],
@@ -177,26 +178,21 @@ impl ComposerAttachment {
         if paths.is_empty() {
             return Ok(0);
         }
-        let media: Option<Vec<AttachmentKind>> = paths.iter().map(|p| media_kind_for(p)).collect();
-        let media = media.filter(|_| {
-            list.iter().all(|att| {
-                matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video) && !att.extras.gif
-            })
-        });
+        let as_files = list
+            .iter()
+            .any(|att| att.kind == AttachmentKind::Document && media_kind_for(&att.path).is_some());
         // A lone `.gif` goes out as a GIF (an animation, with a caption
         // like any media); next to other files it stays a file.
         let gif_alone =
             list.is_empty() && paths.len() == 1 && paths.first().is_some_and(|p| is_gif_path(p));
         let planned: Vec<(PathBuf, AttachmentKind)> = paths
             .iter()
-            .enumerate()
-            .map(|(ix, path)| {
+            .map(|path| {
                 let kind = if gif_alone {
                     AttachmentKind::Video
                 } else {
-                    media
-                        .as_ref()
-                        .and_then(|kinds| kinds.get(ix).copied())
+                    media_kind_for(path)
+                        .filter(|_| !as_files)
                         .unwrap_or(AttachmentKind::Document)
                 };
                 (path.clone(), kind)
@@ -387,14 +383,16 @@ mod tests {
         ComposerAttachment::set_send_as_files(&mut list, false);
         assert_eq!(list[0].kind, AttachmentKind::Video);
         assert!(list[0].extras.gif);
-        // Another file turns the GIF into a file.
+        // Another file turns the GIF into a file; the photo stays a photo.
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
-        assert!(list.iter().all(|att| att.kind == AttachmentKind::Document));
+        let kinds: Vec<_> = list.iter().map(|att| att.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
         assert!(list.iter().all(|att| !att.extras.gif));
         // Dropped together with a photo, it is a file too.
         let mut both = Vec::new();
         ComposerAttachment::append_dropped_files(&mut both, &[gif, photo]).unwrap();
-        assert!(both.iter().all(|att| att.kind == AttachmentKind::Document));
+        let kinds: Vec<_> = both.iter().map(|att| att.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -611,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn dropped_photos_and_videos_become_media_and_mixed_drops_files() {
+    fn dropped_photos_and_videos_stay_media_next_to_files() {
         let root = scratch("media-drop");
         let (photo, clip, doc) = (root.join("a.JPG"), root.join("b.mov"), root.join("c.pdf"));
         for path in [&photo, &clip, &doc] {
@@ -623,7 +621,13 @@ mod tests {
         let kinds: Vec<_> = list.iter().map(|att| att.kind).collect();
         assert_eq!(kinds, [AttachmentKind::Photo, AttachmentKind::Video]);
         let mut mixed = Vec::new();
-        ComposerAttachment::append_dropped_files(&mut mixed, &[photo, doc]).unwrap();
+        ComposerAttachment::append_dropped_files(&mut mixed, &[photo.clone(), doc.clone()])
+            .unwrap();
+        let kinds: Vec<_> = mixed.iter().map(|att| att.kind).collect();
+        assert_eq!(kinds, [AttachmentKind::Photo, AttachmentKind::Document]);
+        // A tray sent without compression takes a new picture as a file.
+        ComposerAttachment::set_send_as_files(&mut mixed, true);
+        ComposerAttachment::append_dropped_files(&mut mixed, &[clip]).unwrap();
         assert!(mixed.iter().all(|att| att.kind == AttachmentKind::Document));
         let _ = fs::remove_dir_all(&root);
     }
@@ -654,11 +658,9 @@ mod tests {
         );
         assert_eq!(list.len(), 3);
         assert_eq!(list[0], before[0]);
-        assert!(
-            list[1..]
-                .iter()
-                .all(|att| att.kind == AttachmentKind::Document && att.send_path_str().is_some())
-        );
+        assert!(list[1..].iter().all(|att| att.send_path_str().is_some()));
+        assert_eq!(list[1].kind, AttachmentKind::Document);
+        assert_eq!(list[2].kind, AttachmentKind::Photo);
         assert_eq!(list[1].path, fs::canonicalize(file).unwrap());
         assert_eq!(list[2].path, fs::canonicalize(photo).unwrap());
         fs::remove_dir_all(root).unwrap();

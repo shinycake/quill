@@ -52,13 +52,16 @@ impl TilePin {
         self.pinned = None;
     }
 
-    /// Drop the pin when its stream is no longer available.
-    pub fn retain_available(&mut self, available: &[TileKey]) {
+    /// Drop the pin when its stream is no longer available. Says whether
+    /// it went.
+    pub fn retain_available(&mut self, available: &[TileKey]) -> bool {
         if let Some(pinned) = self.pinned
             && !available.contains(&pinned)
         {
             self.pinned = None;
+            return true;
         }
+        false
     }
 
     /// Split `tiles`: the pinned one (if present) leads, the rest keep order.
@@ -134,9 +137,9 @@ mod tests {
     fn a_vanished_stream_drops_the_pin() {
         let mut pin = TilePin::default();
         pin.toggle(key(2, true));
-        pin.retain_available(&[key(1, false), key(2, true)]);
+        assert!(!pin.retain_available(&[key(1, false), key(2, true)]));
         assert!(pin.is_pinned(key(2, true)));
-        pin.retain_available(&[key(1, false)]);
+        assert!(pin.retain_available(&[key(1, false)]));
         assert_eq!(pin.pinned(), None);
         pin.retain_available(&[key(2, true)]);
         assert_eq!(pin.pinned(), None, "does not come back by itself");

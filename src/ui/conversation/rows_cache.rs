@@ -81,7 +81,7 @@ fn same_place(old: &HistoryMessage, new: &HistoryMessage) -> bool {
         && old.is_outgoing == new.is_outgoing
         && old.date == new.date
         && old.media_album_id == new.media_album_id
-        && quill::album::is_album_media(&old.content) == quill::album::is_album_media(&new.content)
+        && quill::album::album_kind(&old.content) == quill::album::album_kind(&new.content)
 }
 
 impl QuillApp {

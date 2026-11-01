@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 use super::nv12::{
     BufferPool, PixelOutput, Pixels, YuvColor, YuvMatrix, nv12_len, pack_nv12, plane_span,
 };
-use super::{AudioChunk, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotate_bgra};
+use super::{AudioChunk, BgraPool, Demuxer, Item, MediaInfo, OpenOptions, VideoFrame, rotate_bgra};
 
 /// `QV_ABI_VERSION` in `quillvideo.h`.
 const ABI_VERSION: i32 = 4;
@@ -368,6 +368,8 @@ pub(super) struct FfiDemuxer {
     info: MediaInfo,
     /// Buffers NV12 pictures are packed into.
     nv12_pool: BufferPool,
+    /// Buffers BGRA pictures are turned upright into.
+    bgra_pool: BgraPool,
 }
 
 // SAFETY: a context is used by one thread at a time (the decode thread
@@ -460,7 +462,14 @@ impl FfiDemuxer {
             ctx,
             info,
             nv12_pool: BufferPool::default(),
+            bgra_pool: BgraPool::default(),
         })
+    }
+
+    /// Turn BGRA pictures into `pool`'s buffers.
+    pub(super) fn with_bgra_pool(mut self, pool: BgraPool) -> Self {
+        self.bgra_pool = pool;
+        self
     }
 
     fn refresh_hardware_flag(&mut self) {
@@ -590,7 +599,8 @@ impl FfiDemuxer {
                 // apart (`len` spans them) that stay valid until the next
                 // call on this context.
                 let rows = unsafe { std::slice::from_raw_parts(item.data, len) };
-                let (bgra, w, h) = rotate_bgra(rows, width, height, stride, rotation);
+                let (bgra, w, h) =
+                    rotate_bgra(rows, width, height, stride, rotation, &self.bgra_pool);
                 (Pixels::Bgra(bgra), w, h)
             }
             PictureLayout::Nv12 {

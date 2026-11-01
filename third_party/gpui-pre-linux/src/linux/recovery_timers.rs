@@ -113,6 +113,12 @@ mod tests {
         assert!(timers.arm_probe(Some(second)));
         assert!(!timers.probe_fired(first));
         assert!(timers.probe_fired(second));
+        // A look runs: the poll arms its check, and every draw until then
+        // asks for that same check (`HardwareProbe::next_at`).
+        let check = second + Duration::from_millis(250);
+        assert!(timers.arm_probe(Some(check)));
+        assert_eq!((0..15).filter(|_| timers.arm_probe(Some(check))).count(), 0);
+        assert!(timers.probe_fired(check));
         assert!(!timers.arm_probe(None));
     }
 

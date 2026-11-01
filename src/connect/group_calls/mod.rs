@@ -1,6 +1,8 @@
 //! Connect driver: group calls and video chats.
 use super::*;
-use crate::calls::engine::{GroupCallRole, GroupVideoSource, group_offer_audio_source_id};
+use crate::calls::engine::{
+    GroupCallRole, GroupOfferKey, GroupVideoSource, group_offer_audio_source_id,
+};
 use crate::calls::tile_pin::TileKey;
 use crate::ids::RequestId;
 use crate::locks::LockExt;
@@ -28,6 +30,9 @@ mod conference;
 pub(crate) use conference::ConferenceCrypto;
 mod controls;
 pub use controls::SelfMuteError;
+mod offers;
+use offers::OfferSend;
+pub(crate) use offers::WaitingOffer;
 mod join;
 pub(crate) mod levels;
 mod link;
@@ -88,6 +93,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !engine_available {
             return Ok(());
         }
+        // The instance isn't there yet: nothing to drive until it lands.
+        if self
+            .offer_waiting(GroupOfferKey::Call(group_call_id))
+            .is_some()
+        {
+            return Ok(());
+        }
         let connected = self
             .session
             .calls
@@ -118,7 +130,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // The device list as of joining, for the camera and for the
             // screen-share availability gate.
             self.refresh_call_devices();
-            let camera = video_enabled.then(|| self.call_camera_device()).flatten();
+            let camera = video_enabled.then(|| self.camera_to_join_with()).flatten();
             let Some(engine) = self.call_engine.as_deref_mut() else {
                 return Ok(());
             };

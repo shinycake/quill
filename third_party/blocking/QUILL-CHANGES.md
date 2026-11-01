@@ -24,3 +24,13 @@ Measured with a program that calls `unblock` once and reads
 switched 19 times in 10 s and stayed; after, the thread is gone 1 s after its
 task. Test: `an_idle_thread_under_the_limit_stops_after_the_timeout`, run with
 `scripts/test-blocking-pool.sh` (the crate's own tests pass too).
+
+Measured in Quill too: the `ready-chats` demo window idle under Xvfb with
+Mesa lavapipe and a private session bus (zbus connected), counted with
+`scripts/ci-idle-wakeups.py` over 60 s and `/proc/<pid>/task` read every
+second. With 1.7.0's `&&`: one `blocking-1` thread, which woke 120 times
+(2 a second), all threads 139 wakeups. With `||`: no `blocking-*` thread at
+any sample, so none was started in the 60 s, all threads 19 wakeups. An idle
+Quill calls `unblock` too rarely for the restarted thread to cost anything.
+Not measured: an active session, where TDLib and the network keep zbus and
+async-fs busier.

@@ -75,11 +75,12 @@ impl CallEngine for TgcallsEngine {
     fn connect(&mut self, call_id: i32, params: &ConnectParams) -> Result<(), EngineError> {
         let api = self.api;
         let max_layer = self.protocol.max_layer;
+        let reaper = Arc::clone(&self.reaper);
         let call = self.call_mut(call_id)?;
         if call.handle.is_some() {
             // A retry: tgcalls can't connect a call twice, so start over
             // with a fresh instance and the same choices.
-            call.retire_instance(api);
+            call.retire_instance(api, &reaper);
         } else {
             // A share turned on before connect carries into the call.
             call.media = retained_call_media(params, Some(&call.media));
@@ -151,7 +152,7 @@ impl CallEngine for TgcallsEngine {
 
     fn hangup(&mut self, call_id: i32) -> Result<(), EngineError> {
         if let Some(call) = self.calls.remove(&call_id) {
-            retire(self.api, call);
+            retire(self.api, &self.reaper, call);
         }
         Ok(())
     }
@@ -224,15 +225,19 @@ impl CallEngine for TgcallsEngine {
         group_call_id: i32,
         chat_id: i64,
         role: GroupCallRole,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
         self.create_group(group_call_id, chat_id, role, None)
+    }
+
+    fn take_group_offers(&mut self) -> Vec<GroupOffer> {
+        self.land_group_offers()
     }
 
     fn create_conference_call(
         &mut self,
         key: i32,
         crypto: Arc<dyn FrameCrypto>,
-    ) -> Result<String, EngineError> {
+    ) -> Result<(), EngineError> {
         // A conference call is in no chat: no stream is ever keyed by it.
         self.create_group(key, 0, GroupCallRole::Member, Some(crypto))
     }
@@ -270,7 +275,7 @@ impl CallEngine for TgcallsEngine {
         self.set_group_camera_device(group_call_id, camera)
     }
 
-    fn start_screen_share(&mut self, group_call_id: i32) -> Result<String, EngineError> {
+    fn start_screen_share(&mut self, group_call_id: i32) -> Result<(), EngineError> {
         self.start_presentation(group_call_id)
     }
 
@@ -357,14 +362,16 @@ impl CallEngine for TgcallsEngine {
     fn call_sound_health(&self, call_id: i32) -> Option<PlaybackHealth> {
         self.calls
             .get(&call_id)?
+            .context
             .sound
+            .audio()
             .as_ref()
-            .map(|player| player.audio().health())
+            .map(|audio| audio.health())
     }
 
     fn reopen_call_sound(&mut self, call_id: i32) -> Result<(), EngineError> {
         // There is no device output inside the library: reopen Quill's. A
-        // failed open leaves no player, so `call_sound_health` is `None`.
+        // failed open leaves no output, so `call_sound_health` is `None`.
         self.open_sound(call_id)
     }
 
@@ -392,11 +399,13 @@ impl CallEngine for TgcallsEngine {
         Ok(devices)
     }
 
-    fn warm_devices(&self) {
+    fn list_media_devices(&self, answer: std::sync::mpsc::Sender<Vec<MediaDevice>>) {
         let api = self.api;
         let _ = crate::thread_guard::spawn_guarded("quill-call-devices", move || {
-            let _ = devices::cameras(api);
-            let _ = devices::sound_devices();
+            let mut devices = devices::sound_devices();
+            devices.extend(devices::cameras(api));
+            let _ = answer.send(devices);
+            crate::wake::UPDATES.poke();
         });
     }
 

@@ -201,7 +201,9 @@ the numbers.
   before itself and stops at the first row start the old wrap shares
   (`Resume`). Each row works in a window of text seeded by summed character
   widths and shapes only to settle the last few characters. A line of
-  `LONG_LINE` bytes or more trusts the sum and shapes nothing.
+  `LONG_LINE` bytes or more, or any line of a text of `LONG_TEXT` bytes or
+  more, trusts the sum and shapes nothing. `TextWrapper::update` wraps every
+  line again when an edit takes the text across `LONG_TEXT`.
 - `src/input/editor/display_map/text_wrapper.rs`: `TextWrapper::update` goes
   through `wrap_rows` for every line, so tokens, spans and tabs share one path.
   The `LineFragment` token path, the plain path and the `WrappingIndent::None`

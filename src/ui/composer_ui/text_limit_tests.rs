@@ -77,19 +77,48 @@ fn the_line_follows_the_text(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_keystroke_never_counts_on_the_ui_thread(cx: &mut TestAppContext) {
+fn a_long_text_shows_no_count_until_its_own_count_returns(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
     let vcx = &mut vcx;
     let text = "12:00:01 [INFO] [worker-3] a request came in\n".repeat(1_000);
     fill(&app, vcx, &text);
-    let before = note(&app, vcx, false);
+    assert!(matches!(note(&app, vcx, false), TextLimitNote::Parts(_)));
     let count = quill::text_split::split_markup_text(&format!("{text}y"), LIMIT).len();
     app.update_in(vcx, |app, window, cx| {
         let end = app.composer.read(cx).text().len();
         app.replace_composer_text(end..end, "y", window, cx);
-        assert_eq!(app.text_limit_note(false, cx), before);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Counting);
     });
     assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(count));
+}
+
+#[gpui_kit::test]
+fn another_text_in_the_field_never_shows_the_last_count(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let first = "12:00:01 [INFO] [worker-3] a request came in\n".repeat(1_000);
+    fill(&app, vcx, &first);
+    let first_count = note(&app, vcx, false);
+    let second = "another chat holds another draft\n".repeat(3_000);
+    let second_count = quill::text_split::split_markup_text(&second, LIMIT).len();
+    app.update_in(vcx, |app, window, cx| {
+        app.set_composer_markup(&second, window, cx);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Counting);
+    });
+    assert_ne!(first_count, TextLimitNote::Parts(second_count));
+    assert_eq!(note(&app, vcx, false), TextLimitNote::Parts(second_count));
+}
+
+#[gpui_kit::test]
+fn a_text_near_the_limit_is_counted_in_the_frame(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let text = "x".repeat(LIMIT as usize + 1);
+    fill(&app, vcx, &text);
+    app.update_in(vcx, |app, window, cx| {
+        app.set_composer_markup(&format!("{text}y"), window, cx);
+        assert_eq!(app.text_limit_note(false, cx), TextLimitNote::Parts(2));
+    });
 }
 
 #[gpui_kit::test]

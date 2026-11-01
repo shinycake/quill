@@ -8,6 +8,7 @@
 
 mod dialogs;
 mod paste;
+mod preview;
 
 #[cfg(feature = "demo-capture")]
 mod demo;
@@ -41,6 +42,7 @@ pub(in crate::ui) struct RichDraftUi {
     premium_choice: Option<String>,
     preview_scroll: ScrollHandle,
     paste: paste::PasteNotice,
+    pub(in crate::ui) preview: preview::RichPreview,
 }
 
 /// tdesktop `historyComposeField.heightMax` (the preview's height cap is

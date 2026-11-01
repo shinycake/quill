@@ -52,6 +52,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub fn set_call_engine(&mut self, mut engine: Box<dyn CallEngine>) {
+        self.forget_all_group_offers();
         let outbox = self.signaling_outbox.clone();
         // Each hook wakes the poll loop, which applies the report at once
         // (`pump_call_engine_reports`) instead of after its idle sleep.
@@ -128,14 +129,58 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    /// Phase C2c: best-effort device re-enumeration. A missing or
-    /// unavailable engine leaves the cache untouched.
+    /// Phase C2c: best-effort device re-enumeration, off this thread: the
+    /// list lands in the cache when it is ready. A missing or unavailable
+    /// engine leaves the cache untouched.
     pub fn refresh_call_devices(&mut self) {
-        if let Some(engine) = self.call_engine.as_deref()
+        self.take_listed_call_devices();
+        if self.call_devices_listing.is_some() {
+            return;
+        }
+        if let Some(engine) = self.call_engine.as_deref() {
+            let (answer, listed) = std::sync::mpsc::channel();
+            engine.list_media_devices(answer);
+            self.call_devices_listing = Some(listed);
+            self.take_listed_call_devices();
+        }
+    }
+
+    /// The list [`Self::refresh_call_devices`] asked for, when it is ready.
+    /// Says whether the cache changed.
+    pub(crate) fn take_listed_call_devices(&mut self) -> bool {
+        let Some(listing) = self.call_devices_listing.as_ref() else {
+            return false;
+        };
+        match listing.try_recv() {
+            Ok(devices) => {
+                self.call_devices_listing = None;
+                let changed = devices != self.call_devices_cache;
+                self.call_devices_cache = devices;
+                changed
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.call_devices_listing = None;
+                false
+            }
+        }
+    }
+
+    /// Lists the devices here when no camera is known yet, so a camera that
+    /// is wanted now is not refused while the first list is on its way.
+    fn list_cameras_if_unknown(&mut self) {
+        if pick_camera(None, &self.call_devices_cache).is_none()
+            && let Some(engine) = self.call_engine.as_deref()
             && let Ok(devices) = engine.media_devices()
         {
             self.call_devices_cache = devices;
         }
+    }
+
+    /// The camera a join starts with.
+    pub(crate) fn camera_to_join_with(&mut self) -> Option<String> {
+        self.list_cameras_if_unknown();
+        self.call_camera_device()
     }
 
     /// Phase C2g: whether the engine enumerates a screen-capture
@@ -242,7 +287,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(EngineError::Unavailable);
         }
         self.refresh_call_devices();
-        self.call_camera_device().ok_or(EngineError::NoCamera)
+        self.camera_to_join_with().ok_or(EngineError::NoCamera)
     }
 
     /// The camera calls send from now, by device id, from the cached
@@ -470,8 +515,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                         Some("call became ready without an encryption key".into());
                 }
             } else {
-                // Refresh devices before connecting so the native engine
-                // sees the current device ids.
+                // The list warmed when the call began serves this connect;
+                // the refresh keeps it current for the call.
                 self.refresh_call_devices();
                 let params = self.call_connect_params(is_outgoing, ready);
                 self.call_connect_params = Some(params.clone());
