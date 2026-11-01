@@ -377,10 +377,11 @@ impl QuillApp {
         }
     }
 
-    /// Note the main window's display and how far ahead of its present
-    /// time this frame started (`QuillApp::render`), for the clock's
-    /// content grid ([`ClockTiming::sample`]).
+    /// Note the main window's display, its refresh period and how far
+    /// ahead of its present time this frame started (`QuillApp::render`),
+    /// for the clock's content grid ([`ClockTiming::sample`]).
     pub(super) fn note_frame_timing(&self, window: &Window, cx: &App) {
+        self.frame.main_refresh.set(window.refresh_interval(cx));
         let Some(display) = window.display(cx).map(|display| u64::from(display.id())) else {
             return;
         };

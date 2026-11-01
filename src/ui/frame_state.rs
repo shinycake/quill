@@ -45,6 +45,9 @@ pub(crate) struct FrameUi {
     /// The main window's display and frame lead, for the frame clock's
     /// content grid (`frame_clock::ClockTiming`).
     pub(super) clock_timing: std::cell::Cell<Option<super::frame_clock::ClockTiming>>,
+    /// The main window's refresh period as its display reports it, as of
+    /// its last frame (`QuillApp::note_frame_timing`).
+    pub(super) main_refresh: std::cell::Cell<Option<std::time::Duration>>,
     /// What the main window's animation layers drew since their ticks
     /// (`QuillApp::note_layer_drawn`).
     pub(super) layers_drawn: std::cell::RefCell<super::layer_draws::LayerDraws>,
@@ -93,6 +96,7 @@ impl FrameUi {
             media_roots_frame: Default::default(),
             frame_clock_running: Default::default(),
             clock_timing: Default::default(),
+            main_refresh: Default::default(),
             layers_drawn: Default::default(),
             motion: Default::default(),
             sidebar_width: px(

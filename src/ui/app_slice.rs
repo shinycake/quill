@@ -124,6 +124,13 @@ impl Slices {
             .map(|parts| (parts.slice.entity_id(), parts.painter.entity_id()))
     }
 
+    /// The conversation's animation layer, for tests.
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
+    pub(super) fn conversation_layer(&self) -> Option<Layer> {
+        self.conversation.as_ref().map(|parts| parts.layer.clone())
+    }
+
     /// What covers the conversation's animations, for tests.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
@@ -397,7 +404,7 @@ impl QuillApp {
 
     /// The rate to keep ticking `target` at when a tick would draw nothing
     /// new: it is an animation layer whose content shows the same frames
-    /// through the next refresh. `None`: draw it.
+    /// through the main window's next refresh. `None`: draw it.
     pub(super) fn idle_layer_tick(&self, target: EntityId) -> Option<u32> {
         let parts = [
             self.slices.sidebar.as_ref(),
@@ -407,7 +414,14 @@ impl QuillApp {
         .flatten()
         .find(|parts| parts.painter.entity_id() == target)?;
         let (layer, _) = parts.layer.demand();
-        let refresh = Duration::from_secs_f64(1.0 / super::sticker_player::display_hz());
+        // A skipped tick's draw would have shown within one refresh of the
+        // main window, whichever window painted a sticker last. Unknown, a
+        // 60 Hz one, the longest look-ahead, skips least.
+        let refresh = self
+            .frame
+            .main_refresh
+            .get()
+            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
         (layer > 0 && !parts.layer.changes_within(refresh)).then_some(layer)
     }
 

@@ -81,6 +81,12 @@ pub(super) fn note_display(window: &Window, cx: &App) {
     DISPLAY.with(|display| display.set((window.scale_factor(), hz)));
 }
 
+/// Note that a window refreshing at `hz` painted a sticker last (a test).
+#[cfg(test)]
+pub(super) fn note_display_hz(hz: f64) {
+    DISPLAY.with(|display| display.set((display.get().0, hz)));
+}
+
 fn trace_stickers() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_STICKERS").is_some_and(|v| v == "1"))
