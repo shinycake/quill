@@ -2,7 +2,7 @@
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
 use crate::device_recovery::{
-    Attempt, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
+    Attempt, Losses, Next, ProbeStep, Recovering, Shared, SharedRecovery, Target,
 };
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
@@ -2380,14 +2380,32 @@ impl WgpuRenderer {
             return Recovery::GaveUp;
         };
         let now = Instant::now();
-        // Check if another window already recovered the context
-        let shared = match gpu_context.borrow().as_ref() {
-            Some(ctx) if !ctx.device_lost() => Shared::Healthy,
-            Some(ctx) => Shared::Lost {
-                was_software: is_software(ctx),
-            },
-            None => Shared::Lost {
-                was_software: false,
+        // Check if another window already recovered the context. `lost`:
+        // whether the lost context is still in the slot, and was a CPU one.
+        let lost = match gpu_context.borrow().as_ref() {
+            Some(ctx) if !ctx.device_lost() => None,
+            Some(ctx) => Some(Some(is_software(ctx))),
+            None => Some(None),
+        };
+        // The first window to see the context lost counts the loss.
+        let counting = matches!(lost, Some(Some(_)));
+        let losses = if counting {
+            gpu_context.recovery.borrow_mut().lost(now)
+        } else {
+            gpu_context.recovery.borrow().losses_now()
+        };
+        if lost.is_some() && losses == Losses::GiveUp {
+            self.state = RendererState::Released;
+            *gpu_context.borrow_mut() = None;
+            if counting {
+                device_gone("the GPU device keeps getting lost");
+            }
+            return Recovery::GaveUp;
+        }
+        let shared = match lost {
+            None => Shared::Healthy,
+            Some(was_software) => Shared::Lost {
+                was_software: was_software == Some(true) || losses == Losses::KeepsDying,
             },
         };
         if self.recovering.begin(now, shared) {
@@ -2395,7 +2413,6 @@ impl WgpuRenderer {
             // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
             self.state = RendererState::Released;
             *gpu_context.borrow_mut() = None;
-            gpu_context.recovery.borrow_mut().lost();
         }
         let attempt = match self.recovering.next(now) {
             Next::Wait(at) => return Recovery::RetryAt(at),

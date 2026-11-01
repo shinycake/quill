@@ -120,3 +120,14 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   away, made an instance and a surface on the UI thread. Test:
   `a_look_for_the_gpu_runs_off_the_ui_thread`. Not measured: there is no
   display or GPU loss here to time a look against.
+- A GPU that keeps dying is not recovered onto forever (sweep bundle B13,
+  L10): `SharedRecovery` counts the shared context's losses (once per
+  context, by the window that sees it lost first) over 10 minutes. From the
+  3rd, recovery accepts a CPU adapter at once and does not look for the GPU
+  again; at the 6th it gives up (`on_device_gone`: Quill's alert and exit).
+  Before, each successful recovery started afresh, so a card or driver that
+  failed again after every recovery flashed the windows through recoveries
+  for the rest of the session, and the probe moved them back onto it.
+  `Target::Recreate`'s field is now `software_at_once`. Tests:
+  `a_gpu_that_keeps_dying_is_left_and_then_given_up_on`,
+  `losses_far_apart_are_each_recovered_from_afresh`.

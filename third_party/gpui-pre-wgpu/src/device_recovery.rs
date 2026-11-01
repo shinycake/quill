@@ -13,6 +13,11 @@
 //! once when the lost device was already one, since no real GPU is coming),
 //! and after [`GIVE_UP_AFTER`] failures the renderer gives up.
 //!
+//! A GPU that keeps dying is not recovered onto forever ([`SharedRecovery`]):
+//! from the [`SOFTWARE_AFTER_LOSSES`]th loss within [`LOSS_WINDOW`] recovery
+//! goes straight to a CPU adapter and stops looking for the GPU, and at the
+//! [`GIVE_UP_AFTER_LOSSES`]th it gives up.
+//!
 //! A real GPU can take a while to return after a resume or driver reset,
 //! so attempts stay hardware-only for about 27 s. When recovery still had
 //! to fall back to a CPU adapter the windows keep looking for the GPU on a
@@ -40,14 +45,20 @@ const GIVE_UP_AFTER: u32 = 9;
 /// the longest gap between looks.
 const PROBE_FIRST: Duration = Duration::from_secs(10);
 const PROBE_MAX: Duration = Duration::from_secs(120);
+/// Losses of the shared context counted together, and how many of them make
+/// recovery stay on a CPU adapter or give up.
+const LOSS_WINDOW: Duration = Duration::from_secs(600);
+const SOFTWARE_AFTER_LOSSES: usize = 3;
+const GIVE_UP_AFTER_LOSSES: usize = 6;
 /// While a look runs on its thread: how often a window checks for its answer.
 const PROBE_POLL: Duration = Duration::from_millis(250);
 
 /// What a recovery is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
-    /// Make a new shared context: no window has one.
-    Recreate { lost_was_software: bool },
+    /// Make a new shared context: no window has one. `software_at_once`:
+    /// the lost device was a CPU adapter, or the GPU keeps dying.
+    Recreate { software_at_once: bool },
     /// Use the shared context another window recreated.
     Adopt,
 }
@@ -96,8 +107,8 @@ impl RecoveryPolicy {
             return RecoveryStep::Wait(due);
         }
         RecoveryStep::Attempt(match self.target {
-            Target::Recreate { lost_was_software } => Attempt::Recreate {
-                allow_software: lost_was_software || self.failures >= SOFTWARE_AFTER,
+            Target::Recreate { software_at_once } => Attempt::Recreate {
+                allow_software: software_at_once || self.failures >= SOFTWARE_AFTER,
             },
             Target::Adopt => Attempt::Adopt,
         })
@@ -123,7 +134,8 @@ impl RecoveryPolicy {
 pub(crate) enum Shared {
     /// Another window recreated it.
     Healthy,
-    /// Lost or already dropped; whether it was a CPU adapter, as far as known.
+    /// Lost or already dropped; whether it was a CPU adapter, as far as
+    /// known, or the GPU keeps dying: either way no GPU is worth waiting for.
     Lost { was_software: bool },
 }
 
@@ -160,7 +172,7 @@ impl Recovering {
                 self.0 = Some(RecoveryPolicy::new(
                     now,
                     Target::Recreate {
-                        lost_was_software: was_software,
+                        software_at_once: was_software,
                     },
                 ));
                 true
@@ -238,7 +250,7 @@ impl HardwareProbe {
     ) -> Option<Self> {
         let from_gpu = target
             == Some(Target::Recreate {
-                lost_was_software: false,
+                software_at_once: false,
             });
         (from_gpu && landed_on_software).then_some(Self {
             looks: 0,
@@ -281,12 +293,37 @@ impl HardwareProbe {
 #[derive(Debug, Default)]
 pub(crate) struct SharedRecovery {
     probe: Option<HardwareProbe>,
+    /// When the shared context was lost, within [`LOSS_WINDOW`] of the last.
+    losses: Vec<Instant>,
+}
+
+/// How a loss of the shared context counts against the GPU.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Losses {
+    Few,
+    /// Recover onto a CPU adapter, and do not look for the GPU again.
+    KeepsDying,
+    GiveUp,
 }
 
 impl SharedRecovery {
-    /// The context was lost: whatever was looked for on it is moot.
-    pub(crate) fn lost(&mut self) {
+    /// The context was lost: whatever was looked for on it is moot. Called
+    /// once per context, by the window that releases it.
+    pub(crate) fn lost(&mut self, now: Instant) -> Losses {
         self.probe = None;
+        self.losses
+            .retain(|at| now.saturating_duration_since(*at) < LOSS_WINDOW);
+        self.losses.push(now);
+        self.losses_now()
+    }
+
+    /// The count as of the last loss.
+    pub(crate) fn losses_now(&self) -> Losses {
+        match self.losses.len() {
+            n if n >= GIVE_UP_AFTER_LOSSES => Losses::GiveUp,
+            n if n >= SOFTWARE_AFTER_LOSSES => Losses::KeepsDying,
+            _ => Losses::Few,
+        }
     }
 
     /// A window's recovery that reached `target` succeeded. Only a
@@ -315,15 +352,16 @@ impl SharedRecovery {
 #[cfg(test)]
 mod tests {
     use super::{
-        Attempt, FIRST_DELAY, GIVE_UP_AFTER, HardwareProbe, MAX_DELAY, Next, PROBE_FIRST,
-        PROBE_MAX, PROBE_POLL, ProbeStep, Recovering, RecoveryPolicy, RecoveryStep,
-        SOFTWARE_AFTER, Shared, SharedRecovery, Target,
+        Attempt, FIRST_DELAY, GIVE_UP_AFTER, GIVE_UP_AFTER_LOSSES, HardwareProbe, LOSS_WINDOW,
+        Losses, MAX_DELAY, Next, PROBE_FIRST, PROBE_MAX, PROBE_POLL, ProbeStep, Recovering,
+        RecoveryPolicy, RecoveryStep, SOFTWARE_AFTER, SOFTWARE_AFTER_LOSSES, Shared,
+        SharedRecovery, Target,
     };
     use std::time::{Duration, Instant};
 
     fn hardware() -> Target {
         Target::Recreate {
-            lost_was_software: false,
+            software_at_once: false,
         }
     }
 
@@ -394,7 +432,7 @@ mod tests {
             &mut RecoveryPolicy::new(
                 start,
                 Target::Recreate {
-                    lost_was_software: true,
+                    software_at_once: true,
                 },
             ),
             start,
@@ -543,7 +581,7 @@ mod tests {
             None
         );
         let lost_software = Target::Recreate {
-            lost_was_software: true,
+            software_at_once: true,
         };
         assert_eq!(
             HardwareProbe::after_recovery(now, Some(lost_software), true),
@@ -568,7 +606,7 @@ mod tests {
             shared.probe().map(|probe| probe.due()),
             Some(start + PROBE_FIRST)
         );
-        shared.lost();
+        shared.lost(start);
         assert_eq!(shared.probe(), None);
     }
 
@@ -590,5 +628,39 @@ mod tests {
         probe.missed(answered);
         assert_eq!(probe.step(answered), ProbeStep::Wait(probe.due()));
         assert!(probe.due() > answered);
+    }
+
+    /// A GPU that dies again after every recovery (a failing card, a driver
+    /// that resets in a loop): recovery moves to a CPU adapter and stays
+    /// there, then gives up, instead of flashing the windows forever.
+    #[test]
+    fn a_gpu_that_keeps_dying_is_left_and_then_given_up_on() {
+        let start = Instant::now();
+        let mut shared = SharedRecovery::default();
+        let minute = Duration::from_secs(60);
+        let mut counted = Vec::new();
+        for n in 0..GIVE_UP_AFTER_LOSSES {
+            counted.push(shared.lost(start + minute * n as u32));
+        }
+        let mut expected = vec![Losses::Few; SOFTWARE_AFTER_LOSSES - 1];
+        expected.resize(GIVE_UP_AFTER_LOSSES - 1, Losses::KeepsDying);
+        expected.push(Losses::GiveUp);
+        assert_eq!(counted, expected);
+        // The fallback a dying GPU forced does not look for it again.
+        let forced = Target::Recreate {
+            software_at_once: true,
+        };
+        shared.recovered(start, Some(forced), true);
+        assert_eq!(shared.probe(), None);
+    }
+
+    #[test]
+    fn losses_far_apart_are_each_recovered_from_afresh() {
+        let start = Instant::now();
+        let mut shared = SharedRecovery::default();
+        for n in 0..10 {
+            let at = start + LOSS_WINDOW * n;
+            assert_eq!(shared.lost(at), Losses::Few);
+        }
     }
 }
