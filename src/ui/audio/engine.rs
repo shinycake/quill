@@ -298,8 +298,9 @@ fn build_paused_player(
             Ok(())
         }
     };
+    check()?;
     let probe = Arc::new(Probe::default());
-    let mut decoded = open_decoded(path)?;
+    let mut decoded = open_decoded(path, cancelled)?;
     check()?;
     // Seeked below `Counted`, so its `try_seek` answers only the player's
     // seeks. A source that can't seek starts from the top.
