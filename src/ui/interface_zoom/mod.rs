@@ -196,7 +196,7 @@ pub(crate) struct ZoomPlatform {
 impl ZoomPlatform {
     pub(crate) fn new(inner: Rc<dyn Platform>) -> Self {
         super::platform_cursor::remember(&inner);
-        super::startup_failure::watch_gpu_loss();
+        super::startup_failure::watch_gpu_loss(&inner);
         Self { inner }
     }
 }
@@ -257,7 +257,8 @@ impl Platform for ZoomPlatform {
         self.inner.text_system()
     }
     fn run(&self, on_finish_launching: Box<dyn 'static + FnOnce()>) {
-        self.inner.run(on_finish_launching)
+        self.inner.run(on_finish_launching);
+        super::startup_failure::report_gpu_gone();
     }
     fn quit(&self) {
         self.inner.quit()
