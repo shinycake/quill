@@ -62,8 +62,6 @@ fn work(doc: &Value) -> Result<u64, Malformed> {
     Ok(cost.work)
 }
 
-/// Everything below reads keys and strings as `serde_json` decoded them, and
-/// ThorVG has to read the same ones, so this holds for the whole document.
 fn check_text(value: &Value) -> Result<(), Malformed> {
     let plain = |text: &str| !text.contains('\0');
     match value {
@@ -192,8 +190,6 @@ struct Asset<'a> {
 
 struct Walk<'a> {
     assets: Vec<Asset<'a>>,
-    /// Assets by ThorVG's key for their id, first one wins, as in its
-    /// lookup, so this walks the graph ThorVG will build.
     by_key: HashMap<c_ulong, usize>,
     layers_seen: usize,
 }
