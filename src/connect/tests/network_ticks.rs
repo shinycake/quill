@@ -65,6 +65,34 @@ fn nothing_is_said_until_something_changes_and_then_once() {
 }
 
 #[test]
+fn a_change_that_could_not_be_sent_is_sent_on_the_next_poll() {
+    use super::flood_retry_lost::SwitchSender;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let down = Arc::new(AtomicBool::new(false));
+    let sender = SwitchSender {
+        inner: recorder.clone(),
+        down: down.clone(),
+    };
+    let session = Session::new(AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(session, sender, test_credentials(), prepared);
+    driver.kickoff().unwrap();
+    let now = Instant::now();
+    driver.poll_ticks(TickScope::Background, now, network(0, true));
+
+    down.store(true, Ordering::SeqCst);
+    driver.poll_ticks(TickScope::Background, now, network(1, false));
+    assert!(told(&recorder).is_empty());
+
+    down.store(false, Ordering::SeqCst);
+    driver.poll_ticks(TickScope::Background, now, network(1, false));
+    assert_eq!(told(&recorder), ["networkTypeNone"]);
+}
+
+#[test]
 fn a_client_started_offline_is_told_at_once() {
     let (mut driver, recorder) = driver();
     let scope = TickScope::OnScreen {

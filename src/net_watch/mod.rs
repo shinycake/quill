@@ -8,6 +8,7 @@
 //! MTProto on `availableChanges` (`mtp_instance.cpp`).
 #![deny(clippy::indexing_slicing)]
 
+mod link;
 mod platform;
 #[cfg(test)]
 mod tests;
@@ -34,16 +35,26 @@ const NO_SUCH_IP_VERSION: i32 = 10047; // WSAEAFNOSUPPORT
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Path {
-    Via(IpAddr),
+    Via(Hop),
     NoRoute,
     Unknown,
 }
 
+/// Where traffic to Telegram leaves this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Hop {
+    local: IpAddr,
+    link: link::Link,
+}
+
 impl Path {
-    fn of(lookup: io::Result<SocketAddr>) -> Self {
+    fn of(lookup: io::Result<SocketAddr>, link: impl FnOnce(IpAddr) -> link::Link) -> Self {
         match lookup {
             Ok(local) if local.ip().is_unspecified() => Self::NoRoute,
-            Ok(local) => Self::Via(local.ip()),
+            Ok(local) => Self::Via(Hop {
+                local: local.ip(),
+                link: link(local.ip()),
+            }),
             Err(error)
                 if error.raw_os_error() == Some(NO_SUCH_IP_VERSION)
                     || matches!(
@@ -82,9 +93,12 @@ fn local_address(bind: IpAddr, to: SocketAddr) -> io::Result<SocketAddr> {
 }
 
 fn route_now() -> Route {
+    let path = |bind: IpAddr, to: SocketAddr| {
+        Path::of(local_address(bind, to), |local| link::of(local, to.ip()))
+    };
     Route {
-        v4: Path::of(local_address(Ipv4Addr::UNSPECIFIED.into(), TELEGRAM_V4)),
-        v6: Path::of(local_address(Ipv6Addr::UNSPECIFIED.into(), TELEGRAM_V6)),
+        v4: path(Ipv4Addr::UNSPECIFIED.into(), TELEGRAM_V4),
+        v6: path(Ipv6Addr::UNSPECIFIED.into(), TELEGRAM_V6),
     }
 }
 

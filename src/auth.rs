@@ -30,6 +30,27 @@ pub fn is_device_login_qr(link: &str) -> bool {
 use crate::lang::{keys, tr};
 use crate::telegram::envelope::{AuthorizationState, ErrorClass};
 
+/// TDLib's message about a database or file it could not open
+/// (`TdDb.cpp`, `Binlog.cpp`), with every quoted part removed: those are
+/// paths, which name the user. Any other message gives `None`, since free
+/// text can carry secrets.
+pub fn database_error_detail(message: &str) -> Option<String> {
+    let about_storage = message.starts_with("File \"")
+        || ["database", "binlog", "PosixError"]
+            .iter()
+            .any(|word| message.contains(word));
+    if !about_storage {
+        return None;
+    }
+    let unquoted: String = message.split('"').step_by(2).collect::<Vec<_>>().join("");
+    let detail = unquoted
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" :", ":");
+    (!detail.is_empty()).then_some(detail)
+}
+
 /// Sign-in errors whose raw message is dropped later but which the UI
 /// needs to tell apart (tdesktop `PhoneWidget::phoneSubmitFail`).
 pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
@@ -230,6 +251,14 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
     }
 }
 
+/// The startup card with TDLib's own words on a line under the reason.
+pub fn with_detail(mut view: AuthView, detail: Option<&str>) -> AuthView {
+    if let Some(detail) = detail {
+        view.body = format!("{}\n{detail}", view.body);
+    }
+    view
+}
+
 /// TDLib 1.8.67 permits switching these login states to QR authentication.
 pub fn can_request_qr_login(state: &AuthorizationState) -> bool {
     matches!(
@@ -407,5 +436,21 @@ mod device_login_qr_tests {
             "tg://login?token={}",
             "A".repeat(1404)
         )));
+    }
+
+    #[test]
+    fn only_storage_messages_reach_the_card_and_without_their_paths() {
+        assert_eq!(
+            super::database_error_detail(
+                "Can't open database \"/home/ana/.local/share/quill/db.sqlite\": disk I/O error"
+            )
+            .as_deref(),
+            Some("Can't open database: disk I/O error")
+        );
+        assert_eq!(super::database_error_detail("PHONE_CODE_INVALID"), None);
+        assert_eq!(
+            super::database_error_detail("Invalid phone number +44 7700 900123"),
+            None
+        );
     }
 }

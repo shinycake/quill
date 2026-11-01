@@ -1,5 +1,5 @@
 //! Failed requests for sign-in, registration and the TDLib session lifecycle.
-use crate::auth::StartupFailure;
+use crate::auth::{StartupFailure, view_for, with_detail};
 use crate::state::requests::LOST_REQUEST_ERROR_CODE;
 use crate::state::*;
 
@@ -44,11 +44,15 @@ impl Session {
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.
             Some(RequestPurpose::SetParameters) if err.code != LOST_REQUEST_ERROR_CODE => {
-                self.set_auth(AuthorizationState::StartupFailed(if err.code == 401 {
-                    StartupFailure::WrongKey
+                if err.code == 401 {
+                    self.set_auth(AuthorizationState::StartupFailed(StartupFailure::WrongKey));
                 } else {
-                    StartupFailure::DataFolder
-                }));
+                    self.set_auth(AuthorizationState::StartupFailed(
+                        StartupFailure::DataFolder,
+                    ));
+                    self.auth_view =
+                        with_detail(view_for(&self.auth), err.database_detail.as_deref());
+                }
             }
             _ => {}
         }
