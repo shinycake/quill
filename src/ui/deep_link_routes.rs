@@ -18,12 +18,13 @@ use quill::lang::{keys, tr};
 use quill::state::DeepLinkAction;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 /// How many chats the share chooser lists.
 const SHARE_CHOICES: usize = 14;
-/// Polls (about 8 per second) to wait for a linked message to load before
-/// giving up on its media timestamp.
-const SEEK_POLLS: u32 = 100;
+/// How long to wait for a linked message to load before giving up on its
+/// media timestamp.
+const SEEK_WAIT: Duration = Duration::from_secs(12);
 
 /// The navigation a settings link opens, `None` for the settings list.
 fn settings_action(target: SettingsTarget) -> Option<NavigationAction> {
@@ -146,8 +147,9 @@ impl QuillApp {
     }
 
     /// Seek a linked media timestamp once the message has loaded.
-    pub(super) fn tick_media_seek(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, message_id, seconds, polls)) = self.playback.pending_media_seek else {
+    pub(super) fn tick_media_seek(&mut self, now: Instant, cx: &mut Context<Self>) {
+        let Some((chat_id, message_id, seconds, give_up_at)) = self.playback.pending_media_seek
+        else {
             return;
         };
         let loaded = self.session().is_some_and(|session| {
@@ -159,10 +161,8 @@ impl QuillApp {
         if loaded {
             self.playback.pending_media_seek = None;
             self.seek_media_timestamp(chat_id, message_id, seconds, cx);
-        } else if polls >= SEEK_POLLS {
+        } else if now >= give_up_at {
             self.playback.pending_media_seek = None;
-        } else {
-            self.playback.pending_media_seek = Some((chat_id, message_id, seconds, polls + 1));
         }
     }
 
@@ -198,8 +198,10 @@ impl QuillApp {
                 if let Some(seconds) = media_timestamp
                     && *message_id > 0
                 {
+                    let give_up_at = Instant::now() + SEEK_WAIT;
                     self.playback.pending_media_seek =
-                        Some((chat_id, MessageId(*message_id), *seconds, 0));
+                        Some((chat_id, MessageId(*message_id), *seconds, give_up_at));
+                    quill::wake::UPDATES.poke();
                 }
                 if let Some(thread) = thread_id {
                     self.open_thread_view(chat_id, MessageId(*thread), window, cx);
@@ -323,3 +325,8 @@ mod routes_tests {
         assert!(settings_action(SettingsTarget::Unsupported).is_none());
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "deep_link_routes_tests.rs"]
+mod seek_tests;

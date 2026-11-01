@@ -124,6 +124,8 @@ pub(super) struct TranslateUi {
     offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
     /// What `pump_translation` tested last (`pump_scan`).
     pub(super) pump: pump_scan::PumpScan,
+    #[cfg(test)]
+    asked: Vec<(MessageId, &'static str)>,
 }
 
 impl TranslateUi {
@@ -135,6 +137,8 @@ impl TranslateUi {
             toast_seq: 0,
             offer: RefCell::new(None),
             pump: Default::default(),
+            #[cfg(test)]
+            asked: Vec::new(),
         }
     }
 }
@@ -165,6 +169,7 @@ impl QuillApp {
             &Self::appearance_paths(),
             &self.settings.translate.prefs,
         );
+        quill::wake::UPDATES.poke();
         cx.notify();
     }
 
@@ -898,3 +903,8 @@ crate::ui::shell::register_dialogs! {
 mod demo;
 mod pump_scan;
 mod translate_bar_view;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "pump_tests.rs"]
+mod pump_tests;

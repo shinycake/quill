@@ -22,7 +22,7 @@ foreach ($name in 'tdjson.dll', 'quill_calls.dll', 'quillvideo.dll') {
         }
     }
     if ($name -eq 'quillvideo.dll') {
-        foreach ($sym in 'qv_abi_version', 'qv_open', 'qv_next', 'qv_seek', 'qv_close') {
+        foreach ($sym in 'qv_abi_version', 'qv_open', 'qv_next', 'qv_next_sound', 'qv_seek', 'qv_close') {
             $addr = [System.Runtime.InteropServices.NativeLibrary]::GetExport($handle, $sym)
             if ($addr -eq [IntPtr]::Zero) { throw "quillvideo.dll does not export $sym" }
         }

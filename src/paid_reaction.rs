@@ -296,6 +296,21 @@ impl PaidReactions {
     pub fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
+
+    /// How long until a countdown shows another second or a reaction is
+    /// due. `None` when none is waiting.
+    pub fn next_change_ms(&self, now_ms: u64) -> Option<u64> {
+        self.pending
+            .iter()
+            .map(|paid| {
+                let left = paid.commit_at_ms.saturating_sub(now_ms);
+                match left % 1000 {
+                    0 if left > 0 => 1000,
+                    into_second => into_second,
+                }
+            })
+            .min()
+    }
 }
 
 #[cfg(test)]
