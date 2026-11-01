@@ -2,8 +2,8 @@
 //! like page loads.
 use super::common::session;
 use super::{
-    ChatId, FileId, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, MessageContent, MessageId,
-    ParsedFile, ParsedMessage, Session, WindowEnd, history_message,
+    ChatId, FileId, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
+    MessageContent, MessageId, ParsedFile, ParsedMessage, Session, WindowEnd, history_message,
 };
 use crate::telegram::LocalFileState;
 
@@ -146,6 +146,62 @@ fn a_trim_at_the_tail_never_takes_a_send_in_flight() {
     let history = &session.histories[&7];
     assert!(history.contains(MessageId(cap + 1)));
     assert_eq!(history.messages.len() as i64, cap + 2, "tried again later");
+}
+
+#[test]
+fn reply_strips_stay_near_the_window_while_paging_through_a_long_chat() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let page = 100;
+    let replied = |session: &mut Session, id: i64| {
+        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+    };
+    let mut newest = 0;
+    for _ in 0..200 {
+        for id in newest + 1..=newest + page {
+            session.upsert_message(live(7, id, Vec::new()), false);
+            replied(&mut session, id);
+        }
+        newest += page;
+        session.trim_history_window(ChatId(7), WindowEnd::Oldest);
+    }
+    let window = session.histories[&7].messages.len();
+    assert!(window <= HISTORY_WINDOW_CAP);
+    let kept = session.messages.reply_targets.len();
+    assert!(
+        kept <= window + MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
+        "{kept} kept"
+    );
+
+    let oldest = session.histories[&7].oldest_id().unwrap().0;
+    let above = oldest - 1;
+    assert!(session.messages.reply_targets.contains_key(&(7, above)));
+    let far = oldest - MAX_REPLY_TARGETS_OUTSIDE_WINDOW as i64 - 1;
+    assert!(!session.messages.reply_targets.contains_key(&(7, far)));
+}
+
+#[test]
+fn reply_strips_of_a_loaded_topic_stay() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let topic_row = 5;
+    let total = HISTORY_WINDOW_CAP as i64 + 2000;
+    session
+        .topic_history_entry(ChatId(7), 3)
+        .upsert(history_message(live(7, topic_row, Vec::new()), false));
+    for id in 1..=MAX_REPLY_TARGETS_OUTSIDE_WINDOW as i64 + 10 {
+        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+    }
+    for id in 1_000..=1_000 + total {
+        session.upsert_message(live(7, id, Vec::new()), false);
+    }
+    session.trim_history_window(ChatId(7), WindowEnd::Oldest);
+    let kept = &session.messages.reply_targets;
+    assert!(
+        kept.contains_key(&(7, topic_row)),
+        "the topic still shows it"
+    );
+    assert_eq!(kept.len(), MAX_REPLY_TARGETS_OUTSIDE_WINDOW + 1);
 }
 
 #[test]

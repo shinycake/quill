@@ -21,8 +21,9 @@
 //!   translations, its pinned list and sponsored messages (fetched again
 //!   whenever the chat opens; the ads the user reported stay hidden), the
 //!   index of its poll rows, and what its info panel loaded. A kept tail
-//!   keeps them all, so rows paged back in show their reply strips and
-//!   translations at once.
+//!   keeps them, so rows paged back in show their reply strips and
+//!   translations at once; of the replied-to messages only those of rows
+//!   near the window stay ([`Session::prune_reply_targets`]).
 //!
 //! A history is never pruned while any view shows it (the main window, a
 //! chat window, a topic or comment thread of it) or while the UI holds it
@@ -366,6 +367,7 @@ impl Session {
         }
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
             history.trim_to_tail(CLOSED_TAIL_KEEP);
+            self.prune_reply_targets(chat_id);
             self.history_pruning.touch_chat(chat_id.0);
         }
         // Sorted, so the LRU order (and with it the eviction victim) does
@@ -454,8 +456,7 @@ impl Session {
     /// (`reply_targets`), the pinned list, the sponsored messages and the
     /// index of its poll rows, and what its info panel loaded (member
     /// lists, media counts). Opening the chat or its panel fetches them
-    /// again. While a tail is kept they stay, so rows paged back in show
-    /// their reply strips at once.
+    /// again.
     fn forget_side_tables_once_unloaded(&mut self, chat_id: ChatId) {
         let kept = self.histories.contains_key(&chat_id.0)
             || self
@@ -549,7 +550,11 @@ impl Session {
             return;
         }
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.trim_window_end(WindowEnd::Oldest, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP);
+            let dropped =
+                history.trim_window_end(WindowEnd::Oldest, CLOSED_TAIL_CAP, CLOSED_TAIL_KEEP);
+            if dropped > 0 {
+                self.prune_reply_targets(chat_id);
+            }
             self.history_pruning.touch_chat(chat_id.0);
             self.enforce_closed_bounds(None);
         }

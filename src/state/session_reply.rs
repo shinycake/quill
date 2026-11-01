@@ -17,6 +17,8 @@ pub enum ReplyTarget {
     Missing,
 }
 
+pub const MAX_REPLY_TARGETS_OUTSIDE_WINDOW: usize = 256;
+
 /// How far a reply strip got in resolving its target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyState {
@@ -544,6 +546,46 @@ impl Session {
             (chat_id.0, message_id.0),
             ReplyTarget::Loaded(Box::new(history_message(message, false))),
         );
+    }
+
+    pub(crate) fn prune_reply_targets(&mut self, chat_id: ChatId) {
+        let Some((oldest, newest)) = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| Some((history.oldest_id()?.0, history.newest_id()?.0)))
+        else {
+            return;
+        };
+        let topics = self.threads.topic_histories.iter();
+        let topics: Vec<&TopicHistory> = topics
+            .filter(|((chat, _), _)| *chat == chat_id.0)
+            .map(|(_, topic)| topic)
+            .chain(
+                self.threads
+                    .thread
+                    .iter()
+                    .filter(|thread| thread.chat_id == chat_id)
+                    .map(|thread| &thread.history),
+            )
+            .collect();
+        let mut outside: Vec<(i64, i64)> = self
+            .messages
+            .reply_targets
+            .keys()
+            .filter(|(chat, id)| {
+                *chat == chat_id.0
+                    && !(oldest..=newest).contains(id)
+                    && !topics.iter().any(|topic| topic.messages.contains_key(id))
+            })
+            .map(|(_, id)| ((oldest - id).max(id - newest), *id))
+            .collect();
+        if outside.len() <= MAX_REPLY_TARGETS_OUTSIDE_WINDOW {
+            return;
+        }
+        outside.sort_unstable();
+        for (_, id) in outside.split_off(MAX_REPLY_TARGETS_OUTSIDE_WINDOW) {
+            self.messages.reply_targets.remove(&(chat_id.0, id));
+        }
     }
 
     /// `getRepliedMessage` failed: the original is gone or unreachable.

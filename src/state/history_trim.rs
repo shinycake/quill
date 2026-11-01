@@ -175,16 +175,21 @@ impl Session {
     /// Apply the window cap to `chat_id`'s main history after a page
     /// landed at the opposite `end`'s far side (see the module docs).
     pub(crate) fn trim_history_window(&mut self, chat_id: ChatId, end: WindowEnd) -> usize {
-        self.histories.get_mut(&chat_id.0).map_or(0, |history| {
+        let dropped = self.histories.get_mut(&chat_id.0).map_or(0, |history| {
             history.trim_window_end(end, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO)
-        })
+        });
+        if dropped > 0 {
+            self.prune_reply_targets(chat_id);
+        }
+        dropped
     }
 
     pub(crate) fn trim_live_windows(&mut self, chat_id: ChatId, topic_id: Option<i32>) {
         if self.chat_is_shown(chat_id)
             && let Some(history) = self.histories.get_mut(&chat_id.0)
+            && history.trim_live() > 0
         {
-            history.trim_live();
+            self.prune_reply_targets(chat_id);
         }
         if let Some(topic) =
             topic_id.and_then(|topic| self.threads.topic_histories.get_mut(&(chat_id.0, topic)))
