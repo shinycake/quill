@@ -107,7 +107,11 @@ impl WorkerLink {
     }
 
     pub fn idle_or_cancelled(&self) -> bool {
-        self.pending.is_none() || self.cancelled.load(Ordering::Acquire)
+        self.pending.is_none() || self.is_cancelled()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
     }
 
     /// The next request for TDLib, if the worker has one waiting.

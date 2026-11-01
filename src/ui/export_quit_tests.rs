@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::task::{Context, Wake, Waker};
 use std::thread::Thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -288,5 +288,54 @@ fn an_os_quit_during_an_export_is_refused_and_stop_ends_the_app(cx: &mut TestApp
     });
     wait_for_the_end(|| export.progress().is_settled());
     drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn a_quit_waits_for_a_stopped_export_to_end(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("quit-wait");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    let far_off = Instant::now() + Duration::from_secs(600);
+    app.update(vcx, |app, _| app.stop_exports_and_wait(far_off));
+    let settled = app.read_with(vcx, |app, _| {
+        let session = app.session().unwrap();
+        let export = session.settings.chat_export.as_ref().unwrap();
+        export.progress().is_settled()
+    });
+    assert!(settled, "the worker ended before the wait did");
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = None;
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn closing_for_quit_stops_every_export(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = scratch("quit-stop");
+    let chat = running_chat_export(&dir);
+    let account = running_account_export(&dir);
+    let rich_html = running_rich_html_export(&dir);
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.chat_export = Some(chat);
+        session.settings.account_export = Some(account);
+        session.settings.rich_html_exports.push(rich_html);
+    });
+    app.update(vcx, |app, _| app.close_all_for_quit(Instant::now()));
+    app.update(vcx, |app, _| {
+        let settings = &mut app.demo_session.as_mut().unwrap().settings;
+        assert_eq!(settings.export_links().count(), 3);
+        assert!(settings.export_links().all(|link| link.is_cancelled()));
+        settings.chat_export = None;
+        settings.account_export = None;
+        settings.rich_html_exports.clear();
+    });
     let _ = std::fs::remove_dir_all(&dir);
 }

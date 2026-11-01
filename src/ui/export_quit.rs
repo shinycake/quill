@@ -8,6 +8,7 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::state::Session;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 fn exporting(session: &Session) -> bool {
     let settings = &session.settings;
@@ -27,16 +28,15 @@ impl QuillApp {
     }
 
     fn stop_exports(&self) {
-        for session in self.all_sessions() {
-            if let Some(export) = &session.settings.chat_export {
-                export.cancel();
-            }
-            if let Some(export) = &session.settings.account_export {
-                export.cancel();
-            }
-            for export in &session.settings.rich_html_exports {
-                export.link.cancel();
-            }
+        self.all_sessions()
+            .flat_map(|session| session.settings.export_links())
+            .for_each(|link| link.cancel());
+    }
+
+    pub(in crate::ui) fn stop_exports_and_wait(&self, until: Instant) {
+        self.stop_exports();
+        while self.all_sessions().any(exporting) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 

@@ -229,6 +229,13 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    pub fn export_links(&self) -> impl Iterator<Item = &crate::export::handle::WorkerLink> {
+        let chat = self.chat_export.iter().map(|export| &export.link);
+        let account = self.account_export.iter().map(|export| &export.link);
+        chat.chain(account)
+            .chain(self.rich_html_exports.iter().map(|export| &export.link))
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             quick_replies: QuickRepliesState::default(),

@@ -56,6 +56,11 @@ pub enum CloseProgress {
     Lost,
 }
 
+/// Most time a quit waits for stopped exports to leave their last requests,
+/// inside [`QUIT_CLOSE_DEADLINE`]. A worker sees the stop within 100 ms; one
+/// copying a large file is left behind.
+pub const EXPORT_STOP_HOLD: Duration = Duration::from_millis(400);
+
 /// A client that can be closed in steps.
 pub trait Closable {
     /// Announce going offline and send `close` (called once).
@@ -77,6 +82,7 @@ pub(crate) fn begin_close<S: JsonSender>(driver: &mut ConnectDriver<S>) {
     if matches!(driver.session.auth, AuthorizationState::Closed) {
         return;
     }
+    driver.flush_export_requests();
     if matches!(driver.session.auth, AuthorizationState::Ready) {
         driver.hang_up_for_close();
         let _ = driver.set_online(false);

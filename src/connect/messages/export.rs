@@ -27,15 +27,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Forward the account export worker's next TDLib request, if any.
-    /// Called from the app's poll loop; a no-op without an export.
-    pub fn pump_account_export(&mut self) {
+    /// Called from the app's poll loop; a no-op without an export. Returns
+    /// whether one was taken.
+    pub fn pump_account_export(&mut self) -> bool {
         self.pump_export(RequestPurpose::ExportAccount, |session| {
             session
                 .settings
                 .account_export
                 .as_mut()
                 .map(|export| &mut export.link)
-        });
+        })
     }
 
     /// `parity:data-chat-export-html` — start exporting a chat's history to
@@ -69,15 +70,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Forward the chat export worker's next TDLib request, if any. Called
-    /// from the app's poll loop; a no-op without an export.
-    pub fn pump_chat_export(&mut self) {
+    /// from the app's poll loop; a no-op without an export. Returns whether
+    /// one was taken.
+    pub fn pump_chat_export(&mut self) -> bool {
         self.pump_export(RequestPurpose::ExportChat, |session| {
             session
                 .settings
                 .chat_export
                 .as_mut()
                 .map(|export| &mut export.link)
-        });
+        })
     }
 
     /// The view asked for `file_id`: a running export must not delete it
@@ -92,25 +94,32 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    pub(crate) fn pump_exports(&mut self) {
-        self.pump_chat_export();
-        self.pump_account_export();
-        self.pump_rich_html_exports();
+    pub(crate) fn pump_exports(&mut self) -> bool {
+        let chat = self.pump_chat_export();
+        let account = self.pump_account_export();
+        chat | account | self.pump_rich_html_exports()
+    }
+
+    /// `close` comes next and TDLib takes nothing after it, so what the
+    /// workers left queued goes now: a cancelled download, the cache delete
+    /// of a file just saved.
+    pub(crate) fn flush_export_requests(&mut self) {
+        while self.pump_exports() {}
     }
 
     pub(super) fn pump_export(
         &mut self,
         purpose: RequestPurpose,
         link: impl Fn(&mut Session) -> Option<&mut WorkerLink>,
-    ) {
+    ) -> bool {
         let Some(mut request) = link(&mut self.session)
             .filter(|link| link.idle_or_cancelled())
             .and_then(|link| link.next_request())
         else {
-            return;
+            return false;
         };
         if link(&mut self.session).is_some_and(|link| link.keep_view_file(&request)) {
-            return;
+            return true;
         }
         let extra = self.session.request(purpose, None);
         crate::json_access::set(
@@ -127,5 +136,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 link.fail_send(extra);
             }
         }
+        true
     }
 }
