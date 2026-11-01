@@ -63,8 +63,7 @@ use crate::{open_type::apply_features_and_fallbacks, sized_fonts::SizedFonts};
 #[allow(non_upper_case_globals)]
 const kCGImageAlphaOnly: u32 = 7;
 
-/// QUILL: how many sized fonts `layout_line` keeps. Every font at every size
-/// the UI shows, twice (see `break_ligature`), fits well within this.
+/// QUILL: how many sized fonts `layout_line` keeps.
 const MAX_SIZED_FONTS: usize = 256;
 
 /// Apple text system using CoreText for font shaping.
@@ -825,7 +824,6 @@ mod tests {
         assert!(!layout.runs.is_empty());
     }
 
-    /// What a line shapes to, with positions in hundredths of a pixel.
     fn shaped(layout: &LineLayout) -> Vec<(FontId, GlyphId, i32, usize, bool)> {
         layout
             .runs
@@ -844,8 +842,6 @@ mod tests {
             .collect()
     }
 
-    /// A kept font shapes what a new one does: same glyphs, fallbacks and
-    /// positions, for a line of emoji and Latin, at each size.
     #[test]
     fn test_kept_fonts_shape_like_new_ones() {
         let kept = AppleTextSystem::new();

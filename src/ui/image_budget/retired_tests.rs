@@ -345,9 +345,6 @@ mod windows {
         assert!(!in_atlas(cx, chat.into(), &shown_probe));
     }
 
-    /// A sweep runs on the UI thread at the start of a frame, and freeing a
-    /// picture's pixels is a system call per picture on macOS: the sweep
-    /// takes the picture out of the atlas and a background task frees it.
     #[gpui_kit::test]
     fn a_sweep_frees_pixels_off_the_ui_thread(cx: &mut TestAppContext) {
         cx.update(|cx| gpui_kit::init(cx));

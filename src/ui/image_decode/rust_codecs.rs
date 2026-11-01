@@ -69,9 +69,6 @@ fn finish(
     image.into_rgba8()
 }
 
-/// Shrink a three- or four-channel picture with a triangle filter, which
-/// shows no moire on fine patterns. The `image` crate's own filter takes
-/// about four times as long, and is what a failure here falls back to.
 fn shrink<P>(
     image: &ImageBuffer<P, Vec<u8>>,
     (width, height): (u32, u32),

@@ -1,15 +1,8 @@
 //! QUILL: one CTFont per font and size for `layout_line`.
-//!
-//! A new CTFont starts with empty shaping and fallback caches, so building one
-//! for every run rebuilt them for every line that missed GPUI's two-frame line
-//! cache. Std-only, so `scripts/test-sized-fonts.sh` runs these tests anywhere.
 
 use std::collections::HashMap;
 use std::hash::Hash;
 
-/// Values built on first use and kept. Past `limit` keys it starts over, so a
-/// tween through font sizes costs what building a font each time does, and no
-/// memory.
 pub(crate) struct SizedFonts<K, V> {
     built: HashMap<K, V>,
     limit: usize,

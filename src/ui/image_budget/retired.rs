@@ -244,14 +244,10 @@ fn sweep(current: Option<&mut Window>, cx: &mut App) {
         };
         windows.push((id, frame));
     }
-    drop_images(take_unshowable(main_open, &windows), current, cx);
+    drop_images_off_ui_thread(take_unshowable(main_open, &windows), current, cx);
 }
 
-/// Take `images` out of every window's atlas (`current` is the window being
-/// updated, if any), then let go of them on a background thread. The last
-/// reference frees the pixels, a system call per image on macOS
-/// (`large_alloc`), and this runs on the UI thread at the start of a frame.
-pub(in crate::ui) fn drop_images(
+pub(in crate::ui) fn drop_images_off_ui_thread(
     images: Vec<Arc<RenderImage>>,
     mut current: Option<&mut Window>,
     cx: &mut App,

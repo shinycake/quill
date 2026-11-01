@@ -712,7 +712,7 @@ fn drop_frames(frames: Vec<Arc<RenderImage>>, cx: &mut App) {
     let (alone, held) = frames
         .into_iter()
         .partition(|image| Arc::strong_count(image) == 1);
-    super::super::image_budget::drop_images(alone, None, cx);
+    super::super::image_budget::drop_images_off_ui_thread(alone, None, cx);
     super::super::image_budget::retire_all(held);
 }
 

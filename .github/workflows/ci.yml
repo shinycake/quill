@@ -116,7 +116,6 @@ jobs:
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh
-      # The macOS text system's font map is std-only, so Linux runs its tests.
       - name: tests (vendored GPUI sized fonts)
         run: bash scripts/test-sized-fonts.sh
       # The vendored opus-decoder is not a workspace member; its FFT is

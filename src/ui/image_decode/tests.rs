@@ -138,8 +138,6 @@ fn display_p3_png_is_converted_to_srgb() {
     assert_eq!(pixel[3], 255);
 }
 
-/// Every channel of `shrunk` within `tolerance` of the `image` crate's
-/// triangle filter over `source`.
 fn assert_triangle_filtered<P>(
     shrunk: &image::RgbaImage,
     source: &image::ImageBuffer<P, Vec<u8>>,
@@ -169,8 +167,6 @@ fn png(picture: &image::DynamicImage) -> Vec<u8> {
     bytes.into_inner()
 }
 
-/// Colour that moves across the picture with a fine pattern on top, as a
-/// photo's detail does.
 fn busy_pixel(x: u32, y: u32) -> [u8; 3] {
     [
         (x / 4) as u8,
@@ -190,7 +186,6 @@ fn a_shrunk_opaque_picture_matches_the_triangle_filter() {
     }
 }
 
-/// The alpha channel is filtered like the colours, not multiplied in.
 #[test]
 fn a_shrunk_transparent_picture_matches_the_triangle_filter() {
     let picture = image::RgbaImage::from_fn(900, 600, |x, y| {
@@ -202,8 +197,6 @@ fn a_shrunk_transparent_picture_matches_the_triangle_filter() {
     assert_triangle_filtered(&shrunk, &picture, 2);
 }
 
-/// A pattern finer than the target pixels turns to its average grey, with no
-/// bands of moire in it.
 #[test]
 fn a_shrunk_checkerboard_stays_flat() {
     let board =
