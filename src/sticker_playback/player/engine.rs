@@ -122,11 +122,19 @@ pub(super) fn too_slow_for_grid(draw_cost: Duration, timeline: Timeline) -> bool
 const COARSE_SHARE: f64 = 0.4;
 
 pub(super) enum Job {
-    /// Open a TGS clip (decoded clips open on the opener threads).
+    /// Open a TGS clip.
     Open {
         key: ClipKey,
         id: u64,
         path: PathBuf,
+    },
+    /// Decode a clip whose frames all come up front: on the opener
+    /// threads, or on its worker when none started.
+    Decode {
+        key: ClipKey,
+        id: u64,
+        decode: DecodeAll,
+        cancel: Cancel,
     },
     Frame {
         key: ClipKey,
@@ -153,6 +161,8 @@ pub(super) struct State {
     served: u64,
     /// The last clip id handed out.
     opened: u64,
+    /// No opener thread started: workers decode their own clips.
+    workers_decode: bool,
     /// Frames each worker drew in a row while one of its clips waited to
     /// open.
     frames_in_a_row: Vec<u32>,
@@ -174,17 +184,28 @@ impl Shared {
     }
 }
 
+/// Starts a named thread running the body.
+pub(super) type Spawn = dyn Fn(String, Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
+
 /// The player's engine. Cheap to share; dropping the last handle stops
 /// the workers.
 pub struct Engine {
     shared: Arc<Shared>,
-    workers: usize,
+    /// The workers that started, by index.
+    live: Vec<usize>,
 }
 
 impl Engine {
     /// An engine with `workers` threads (at least one) and `budget` bytes
     /// for stores and sources together.
     pub fn new(workers: usize, budget: usize) -> Self {
+        Self::start(workers, budget, &|name, body| {
+            crate::thread_guard::spawn_guarded(name, body).map(drop)
+        })
+    }
+
+    /// [`Self::new`], starting its threads with `spawn`.
+    pub(super) fn start(workers: usize, budget: usize, spawn: &Spawn) -> Self {
         let workers = workers.max(1);
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -198,31 +219,32 @@ impl Engine {
                 stats: EngineStats::default(),
                 served: 0,
                 opened: 0,
+                workers_decode: false,
                 frames_in_a_row: vec![0; workers],
             }),
             work: Condvar::new(),
             waker: Mutex::new(None),
         });
-        let mut started = 0;
+        let mut live = Vec::new();
+        let mut openers = 0;
         for index in 0..workers {
             let opener = shared.clone();
-            let _ = crate::thread_guard::spawn_guarded(
+            let spawned = spawn(
                 format!("quill-sticker-open-{index}"),
-                move || super::opener::run(&opener),
+                Box::new(move || super::opener::run(&opener)),
             );
-            let shared = shared.clone();
-            let spawned =
-                crate::thread_guard::spawn_guarded(format!("quill-sticker-{index}"), move || {
-                    super::worker::run(index, &shared)
-                });
+            openers += usize::from(spawned.is_ok());
+            let worker = shared.clone();
+            let spawned = spawn(
+                format!("quill-sticker-{index}"),
+                Box::new(move || super::worker::run(index, &worker)),
+            );
             if spawned.is_ok() {
-                started += 1;
+                live.push(index);
             }
         }
-        Self {
-            shared,
-            workers: started.max(1),
-        }
+        lock_or_recover(&shared.state).workers_decode = openers == 0;
+        Self { shared, live }
     }
 
     /// Worker threads for this machine: three with eight or more cores,
@@ -247,15 +269,17 @@ impl Engine {
             clip.used = Instant::now();
             return;
         }
-        let mut load = vec![0usize; self.workers];
-        for clip in state.clips.values() {
-            if let Some(count) = load.get_mut(clip.worker) {
-                *count += 1;
-            }
-        }
-        let worker = (0..self.workers)
-            .min_by_key(|index| load.get(*index).copied().unwrap_or(0))
-            .unwrap_or(0);
+        let Some(worker) = self.live.iter().copied().min_by_key(|index| {
+            state
+                .clips
+                .values()
+                .filter(|clip| clip.worker == *index)
+                .count()
+        }) else {
+            // No worker started: left unopened, the clip reads as failed
+            // and its views rest.
+            return;
+        };
         let store_only = matches!(origin, Origin::Decoded(_));
         state.opened += 1;
         let id = state.opened;
@@ -507,12 +531,18 @@ impl State {
     }
 
     /// The next job for worker `me`: the soonest frame of its clip served
-    /// longest ago, else a TGS clip to open. A clip waiting to open goes
-    /// first once [`FRAMES_BEFORE_OPEN`] frames went before it.
+    /// longest ago, else a TGS clip to open (any clip when no opener
+    /// started). A clip waiting to open goes first once
+    /// [`FRAMES_BEFORE_OPEN`] frames went before it.
     pub(super) fn next_job(&mut self, me: usize) -> Option<Job> {
+        let workers_decode = self.workers_decode;
         let opening = self.clips.iter().find_map(|(key, clip)| {
-            let tgs = matches!(clip.origin, Some(Origin::Lottie(_)));
-            (clip.worker == me && !clip.busy && tgs).then_some(*key)
+            let own = match clip.origin {
+                Some(Origin::Lottie(_)) => true,
+                Some(Origin::Decoded(_)) => workers_decode,
+                None => false,
+            };
+            (clip.worker == me && !clip.busy && own).then_some(*key)
         });
         let in_a_row = self.frames_in_a_row.get(me).copied().unwrap_or(0);
         let frames_first = opening.is_none() || in_a_row < FRAMES_BEFORE_OPEN;
@@ -528,15 +558,17 @@ impl State {
         }
         let key = opening?;
         let clip = self.clips.get_mut(&key)?;
-        let Some(Origin::Lottie(path)) = clip.origin.take() else {
-            return None;
-        };
         clip.busy = true;
-        Some(Job::Open {
-            key,
-            id: clip.id,
-            path,
-        })
+        let id = clip.id;
+        match clip.origin.take()? {
+            Origin::Lottie(path) => Some(Job::Open { key, id, path }),
+            Origin::Decoded(decode) => Some(Job::Decode {
+                key,
+                id,
+                decode,
+                cancel: clip.cancel.clone(),
+            }),
+        }
     }
 
     /// The soonest frame worker `me` has to draw, of its clip served
@@ -572,6 +604,9 @@ impl State {
     /// The next clip for an opener to decode, with its id and what stops
     /// it.
     pub(super) fn next_decode(&mut self) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
+        if self.workers_decode {
+            return None;
+        }
         let (key, clip) = self
             .clips
             .iter_mut()

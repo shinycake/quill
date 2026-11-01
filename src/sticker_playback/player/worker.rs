@@ -1,5 +1,5 @@
-//! A worker thread: opens its TGS clips and draws or unpacks the frames
-//! of the clips it owns.
+//! A worker thread: opens its TGS clips (and its decoded ones when no
+//! opener thread runs) and draws or unpacks the frames of the clips it owns.
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::{Job, Shared, State};
@@ -48,6 +48,15 @@ pub(super) fn run(me: usize, shared: &Shared) {
         let wake = match job {
             Job::Open { key, id, path } => {
                 open(shared, &mut sources, key, id, &path);
+                true
+            }
+            Job::Decode {
+                key,
+                id,
+                decode,
+                cancel,
+            } => {
+                super::opener::open(shared, &mut scratch, key, id, decode, &cancel);
                 true
             }
             Job::Frame {

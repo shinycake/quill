@@ -34,7 +34,7 @@ pub(super) fn run(shared: &Shared) {
     }
 }
 
-fn open(
+pub(super) fn open(
     shared: &Shared,
     scratch: &mut Scratch,
     key: ClipKey,
