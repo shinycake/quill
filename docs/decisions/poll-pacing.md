@@ -1,7 +1,8 @@
 # Poll loop pacing
 
-Supersedes the cadence in `codex-adaptive-poll.md` and the "busy cadence" note in
-`codex-ingest-budget.md`. The 8 ms budget itself stays.
+Supersedes the cadence in `codex-adaptive-poll.md`, the "busy cadence" note in
+`codex-ingest-budget.md` and the `next_poll_delay` rules in `sweep-idle-app-timers.md`. The 8 ms
+budget itself stays.
 
 ## What the loops do now
 
@@ -53,5 +54,13 @@ it is left as a follow-up.
 
 ## Trade-off
 
-A long backlog drains at about 8 ms of work per 18 ms, instead of holding the thread until it is
-done. It takes longer in wall time and the window stays alive for all of it.
+A long backlog drains at about 8 ms of work per 18 ms. The old loop ran passes back to back for
+as long as updates kept arriving, which was faster only because nothing else ran. 300,000 updates
+arriving in 2 s took 10.6 s to apply instead of 6.7 s, and the window stayed at 60 frames a second
+for all of it.
+
+## Why 10 ms
+
+It is the old busy cadence. A 2 ms gap drained that flood 17% faster, because frames took most of
+the time it freed: passes only rose from 49 to 64 a second. Under a steady 2,000 updates a second
+the same gap tripled the passes, from 70 to 218 a second, for updates nobody can see 8 ms sooner.
