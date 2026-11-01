@@ -52,6 +52,34 @@ impl QuillApp {
                     refs.first().and_then(|first| first.sender),
                     cx,
                 );
+                let kind = refs
+                    .first()
+                    .and_then(|first| quill::album::album_kind(&first.content));
+                if kind != Some(quill::album::AlbumKind::Media) {
+                    let seek_bars = refs
+                        .iter()
+                        .map(|message| self.history_row_seek_bar(message))
+                        .collect();
+                    return crate::ui::history::file_album_history_row(
+                        crate::ui::history::FileAlbum {
+                            album_id: *album_id,
+                            messages: &refs,
+                            seek_bars,
+                            sender: chrome.sender.clone(),
+                            sender_status,
+                            receipt: chrome.receipt,
+                            sender_avatar: avatar,
+                            look,
+                        },
+                        files,
+                        downloading,
+                        &shared.media_roots,
+                        session,
+                        &self.message_ui.spoiler_revealed,
+                        corner,
+                        cx,
+                    );
+                }
                 album_history_row(
                     *album_id,
                     &refs,

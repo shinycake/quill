@@ -518,6 +518,9 @@ mod album_tile;
 pub(in crate::ui) use album_tile::album_tile;
 mod community_rows;
 mod fast_share;
+mod file_album;
+mod file_album_demo;
+pub(super) use file_album::{FileAlbum, file_album_history_row};
 mod session_history_row;
 mod wrap;
 #[allow(unused_imports)]
