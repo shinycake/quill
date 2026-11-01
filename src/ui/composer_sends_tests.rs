@@ -10,6 +10,7 @@ use crate::ui::keybindings::bind_keys;
 use crate::ui::scheduled::ScheduleTarget;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
+use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
@@ -439,6 +440,8 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
 ) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
+        // The picker opens at 01:15, which went by once already as CDT.
+        cx.set_global(WallClock::chicago_repeated_hour());
         app.select_listed_chat(A, window, cx);
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
@@ -456,10 +459,10 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
         ));
         assert_eq!(history_len(app, B), before, "B's text was not sent");
         app.select_listed_chat(A, window, cx);
-        assert!(matches!(
+        assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(_)
-        ));
+            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 900)
+        );
     });
 }
 

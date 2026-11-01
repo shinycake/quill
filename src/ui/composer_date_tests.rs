@@ -68,7 +68,7 @@ fn the_date_box_turns_the_selection_into_a_date(cx: &mut TestAppContext) {
 
     app.update_in(vcx, |app, window, cx| {
         let dialog = app.composer_ui.date_dialog.as_ref().expect("box");
-        let value = picker_value(TIME).expect("value");
+        let value = picker_value(TIME, cx).expect("value");
         dialog
             .picker
             .update(cx, |state, cx| state.set_date_time(value, window, cx));

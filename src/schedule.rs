@@ -7,7 +7,7 @@
 //! "schedule".
 #![deny(clippy::indexing_slicing)]
 
-use crate::local_time::{CivilTime, utc_offset_at};
+use crate::local_time::CivilTime;
 
 /// `kMinimalSchedule` in `choose_date_time.cpp`.
 pub const MIN_SCHEDULE_SECS: i64 = 10;
@@ -143,11 +143,6 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
         .find(|t| *t > now)
         .or(showings.last().copied())
         .unwrap_or(early)
-}
-
-/// [`civil_to_unix_with`] in the OS zone.
-pub fn civil_to_unix(civil: &CivilTime, now: i64) -> i64 {
-    civil_to_unix_with(civil, utc_offset_at, now)
 }
 
 /// Parses the `%Y-%m-%d %H:%M` text the date picker formats.

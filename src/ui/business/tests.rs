@@ -382,13 +382,11 @@ fn an_away_message_needs_messages_and_a_valid_range(cx: &mut TestAppContext) {
         let away = app.business_mut().unwrap().away.as_mut().unwrap();
         away.schedule = ScheduleChoice::Custom;
         let (start, end) = (away.start.clone(), away.end.clone());
-        let value = |unix| crate::ui::scheduled::picker_value(unix).unwrap();
-        start.update(cx, |s, cx| {
-            s.set_date_time(value(1_900_000_000), window, cx)
-        });
-        end.update(cx, |s, cx| {
-            s.set_date_time(value(1_800_000_000), window, cx)
-        });
+        let value =
+            |unix, cx: &gpui_kit::App| crate::ui::scheduled::picker_value(unix, cx).unwrap();
+        let (late, early) = (value(1_900_000_000, cx), value(1_800_000_000, cx));
+        start.update(cx, |s, cx| s.set_date_time(late, window, cx));
+        end.update(cx, |s, cx| s.set_date_time(early, window, cx));
     });
     back(&app, vcx);
     assert_eq!(view(&app, vcx), View::Away);

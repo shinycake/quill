@@ -99,7 +99,7 @@ impl QuillApp {
                 .time_precision(TimePrecision::Minute)
                 .hour_cycle(HourCycle::H23)
         });
-        if let Some(value) = picker_value(initial) {
+        if let Some(value) = picker_value(initial, cx) {
             picker.update(cx, |state, cx| state.set_date_time(value, window, cx));
         }
         self.composer_ui.date_dialog = Some(ComposerDateDialog {

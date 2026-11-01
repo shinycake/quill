@@ -43,7 +43,7 @@ fn away_picker(
             .time_precision(TimePrecision::Minute)
             .hour_cycle(HourCycle::H23)
     });
-    if let Some(value) = picker_value(unix) {
+    if let Some(value) = picker_value(unix, cx) {
         state.update(cx, |s, cx| s.set_date_time(value, window, cx));
     }
     state

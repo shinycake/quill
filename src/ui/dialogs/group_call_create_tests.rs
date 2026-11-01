@@ -354,7 +354,7 @@ fn the_schedule_demo_refuses_a_time_in_the_past(cx: &mut TestAppContext) {
             step: CreateStep::Schedule(step),
             ..
         }) = app.group_call.start_dialog.as_ref()
-            && let Some(value) = crate::ui::scheduled::picker_value(now_unix() - 3600)
+            && let Some(value) = crate::ui::scheduled::picker_value(now_unix() - 3600, cx)
         {
             step.picker
                 .update(cx, |state, cx| state.set_date_time(value, window, cx));
