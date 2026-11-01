@@ -5,7 +5,9 @@ use super::super::image_budget::{
     BoundedImageCache, WindowDraw, begin_chat_frame, begin_frame, slice_rendered, slice_shown,
     take_unshowable,
 };
-use super::{CLOSE_AFTER, ClipSpec, DISPLAY, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use super::{
+    CLOSE_AFTER, ClipSpec, DISPLAY, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk,
+};
 use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
@@ -356,6 +358,45 @@ fn a_head_at_rest_keeps_its_frame_while_another_head_plays_the_clip() {
     let late = player.screen_stats().late;
     assert_eq!(shown(&player, &spec, resting, once, t1 + ms(102)), 11);
     assert_eq!(player.screen_stats().late, late, "its frame was still there");
+}
+
+/// A quiet window draws nothing, however long, so its heads were forgotten
+/// by any other window's draw and its rested stickers played again.
+#[test]
+fn a_head_outlives_a_quiet_window_that_still_shows_it() {
+    let (player, spec) = player(3);
+    let (resting, elsewhere) = (head("resting"), head("elsewhere"));
+    let once = PlayMode::Once(Rest::Last);
+    let chat = ChatId(11);
+    let t0 = Instant::now();
+    begin_frame();
+    for step in 0..=3 {
+        let _ = shown(&player, &spec, resting, once, t0 + ms(34) * step);
+    }
+    chat_frame(&player, chat);
+    let t1 = t0 + HEAD_TTL + ms(1000);
+    let _ = player.frame(&spec, elsewhere, PlayMode::Loop, EDGE, false, Some(chat), t1);
+    let _ = player.close_stale(t1);
+    assert_eq!(shown(&player, &spec, resting, once, t1), 2);
+    assert_eq!(
+        player.head_progress(resting, 7).map(|(pos, _)| pos >= ms(100)),
+        Some(true),
+        "it stayed played"
+    );
+}
+
+/// A head off screen for that long goes: the sticker plays as new.
+#[test]
+fn a_head_off_screen_for_long_is_forgotten() {
+    let (player, spec) = player(3);
+    let gone = head("gone");
+    let once = PlayMode::Once(Rest::Last);
+    let t0 = Instant::now();
+    begin_frame();
+    let _ = shown(&player, &spec, gone, once, t0);
+    begin_frame();
+    let _ = player.close_stale(t0 + HEAD_TTL + ms(1000));
+    assert_eq!(player.head_known(gone, 7), None);
 }
 
 /// A window lets go of its chat (the main window opens another one): the

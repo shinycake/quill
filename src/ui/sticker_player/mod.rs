@@ -50,7 +50,7 @@ const CLOSE_AFTER: Duration = Duration::from_secs(5);
 /// past a clip's due time: a burst of frames, or clips due close
 /// together, cost one look.
 const CLOSE_SLACK: Duration = Duration::from_secs(1);
-/// Heads not drawn for this long are forgotten (a sticker seen again
+/// Heads off screen for this long are forgotten (a sticker seen again
 /// after that plays as if new).
 const HEAD_TTL: Duration = Duration::from_secs(600);
 const MAX_HEADS: usize = 4096;
@@ -623,9 +623,9 @@ impl Player {
         }
     }
 
-    /// Forget heads not drawn lately, once a second. Clips close between
-    /// frames (`close_stale`): in the middle of one, a view at rest that
-    /// the frame has not painted yet would look gone.
+    /// Keep the heads in check, once a second. What is off screen goes
+    /// between frames (`close_stale`): in the middle of one, a view at rest
+    /// that the frame has not painted yet would look gone.
     fn trim(&self, now: Instant) {
         let Ok(mut inner) = self.inner.try_borrow_mut() else {
             return;
@@ -637,9 +637,6 @@ impl Player {
             return;
         }
         inner.trimmed = Some(now);
-        inner
-            .heads
-            .retain(|_, head| now.saturating_duration_since(head.seen) < HEAD_TTL);
         if inner.heads.len() > MAX_HEADS {
             let mut seen: Vec<Instant> = inner.heads.values().map(|head| head.seen).collect();
             seen.sort_unstable();
@@ -659,7 +656,9 @@ impl Player {
     /// window drew it, or replays a slice render that did (a view at rest
     /// is not drawn again while nothing changes, and closing its clip
     /// would show the still at the next draw). No window shows what the
-    /// closed clips held, so their frames can leave the atlas now.
+    /// closed clips held, so their frames can leave the atlas now. Heads go
+    /// the same way: a window with nothing to draw for ten minutes still
+    /// shows its stickers, played and at rest.
     pub(super) fn close_stale(&self, now: Instant) -> Closed {
         #[cfg(test)]
         self.looks.set(self.looks.get() + 1);
@@ -674,11 +673,13 @@ impl Player {
         let inner = &mut *guard;
         let mut next: Option<Duration> = None;
         let mut stale = Vec::new();
+        let mut on_screen: SmallVec<[i32; 16]> = SmallVec::new();
         for (key, clip) in &mut inner.clips {
             clip.drawn
                 .retain(|drawn| super::image_budget::shows_now(*drawn));
             if !clip.drawn.is_empty() {
                 clip.seen = Some(now);
+                on_screen.push(key.file);
                 continue;
             }
             let idle = clip
@@ -690,6 +691,12 @@ impl Player {
                 None => stale.push(*key),
             }
         }
+        inner.heads.retain(|(_, file), head| {
+            if on_screen.contains(file) {
+                head.seen = now;
+            }
+            now.saturating_duration_since(head.seen) < HEAD_TTL
+        });
         let mut frames: Vec<Arc<RenderImage>> = Vec::new();
         for key in &stale {
             if let Some(clip) = inner.clips.remove(key) {
