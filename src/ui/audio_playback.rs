@@ -256,7 +256,6 @@ impl QuillApp {
         let _ = self.playback.audio.resume(position);
         // The progress tick sleeps while the track is paused.
         quill::wake::CHROME.poke();
-        quill::wake::CHROME.poke();
     }
 
     /// `SliderEvent` sink for the active row's seek slider.
