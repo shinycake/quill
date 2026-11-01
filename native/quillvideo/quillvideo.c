@@ -28,6 +28,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Quill's limits. tdesktop's kMaxQueuedPackets is a flush batch, not a limit. */
+#define HELD_MAX_PACKETS 1024
+#define HELD_MAX_BYTES (64 * 1024 * 1024)
+/* tdesktop's kSkipInvalidDataPackets. */
+#define SKIP_INVALID_PACKETS 10
+
 typedef struct Ctx {
   AVFormatContext *fmt;
   AVCodecContext *vdec;
@@ -48,13 +54,20 @@ typedef struct Ctx {
   double start;
   int max_w;
   int max_h;
-  /* Reading finished and both decoders were sent the flush packet. */
-  int eof_sent;
+  int read_done;
+  int vflushed;
   int vdone;
   int adone;
   /* Seek in progress: drop items that end before these times (< 0: none). */
   double vskip;
   double askip;
+  int keep_skipped;
+  AVFrame *skipped;
+  int bad_packets_in_a_row;
+  AVPacket *held[HELD_MAX_PACKETS];
+  int held_first;
+  int held_count;
+  size_t held_bytes;
   /* Where the next frame starts when a frame carries no timestamp. */
   double vnext;
   double anext;
@@ -520,6 +533,13 @@ static int emit_nv12(Ctx *c, const AVFrame *f, int ow, int oh, int cs,
   return 1;
 }
 
+static void save_skipped(Ctx *c, const AVFrame *f) {
+  if (!c->skipped && !(c->skipped = av_frame_alloc()))
+    return;
+  av_frame_unref(c->skipped);
+  av_frame_ref(c->skipped, f);
+}
+
 /* Convert the decoded picture; 0 when it is skipped (seeking past it). */
 static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
   AVStream *st = c->fmt->streams[c->vidx];
@@ -527,9 +547,13 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
   double pts = frame_pts(c, st, f, c->vnext);
   c->vnext = pts + dur;
   if (c->vskip >= 0) {
-    if (pts + dur <= c->vskip + 1e-6)
+    if (pts + dur <= c->vskip + 1e-6) {
+      if (c->keep_skipped)
+        save_skipped(c, f);
       return 0;
+    }
     c->vskip = -1.0;
+    av_frame_unref(c->skipped);
   }
   if (f->width <= 0 || f->height <= 0)
     return 0;
@@ -679,6 +703,22 @@ static int emit_audio(Ctx *c, QvItem *out) {
   return 1;
 }
 
+static AVPacket *take_held(Ctx *c) {
+  AVPacket *pkt = c->held[c->held_first];
+  c->held[c->held_first] = NULL;
+  c->held_first = (c->held_first + 1) % HELD_MAX_PACKETS;
+  c->held_count--;
+  c->held_bytes -= (size_t)pkt->size;
+  return pkt;
+}
+
+static void drop_held(Ctx *c) {
+  while (c->held_count > 0) {
+    AVPacket *pkt = take_held(c);
+    av_packet_free(&pkt);
+  }
+}
+
 static int restart(Ctx *c, double target, double vskip, double askip) {
   int64_t ts = (int64_t)((target + c->start) * AV_TIME_BASE);
   int r = av_seek_frame(c->fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
@@ -694,9 +734,14 @@ static int restart(Ctx *c, double target, double vskip, double askip) {
     /* Drop any samples the resampler held from before the seek. */
     swr_free(&c->swr);
   }
-  c->eof_sent = 0;
+  drop_held(c);
+  c->read_done = 0;
+  c->vflushed = 0;
   c->vdone = 0;
   c->adone = 0;
+  c->bad_packets_in_a_row = 0;
+  c->keep_skipped = 0;
+  av_frame_unref(c->skipped);
   c->vskip = c->vdec ? vskip : -1.0;
   c->askip = c->adec ? askip : -1.0;
   c->vnext = vskip;
@@ -748,20 +793,27 @@ static int picture_in_memory(Ctx *c, const AVFrame **pic) {
   return 0;
 }
 
+static int emit_skipped(Ctx *c, QvItem *out) {
+  if (c->vskip < 0 || !c->skipped || !c->skipped->buf[0])
+    return 0;
+  c->vskip = -1.0;
+  int k = emit_video(c, c->skipped, out);
+  av_frame_unref(c->skipped);
+  return k;
+}
+
 /* Pull one frame from a decoder: 1 emitted, 0 none ready (or skipped), < 0
  * error. Marks the decoder done once it is drained after the end. */
 static int drain(Ctx *c, int video, QvItem *out) {
   int *done = video ? &c->vdone : &c->adone;
+  int flushed = video ? c->vflushed : c->read_done;
   for (;;) {
     int r = avcodec_receive_frame(video ? c->vdec : c->adec, c->frame);
-    if (r == AVERROR(EAGAIN)) {
-      if (c->eof_sent)
-        *done = 1;
+    if (r == AVERROR(EAGAIN) && !flushed)
       return 0;
-    }
-    if (r == AVERROR_EOF) {
+    if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) {
       *done = 1;
-      return 0;
+      return video ? emit_skipped(c, out) : 0;
     }
     if (r < 0)
       return video && c->info.hw ? fall_back_to_software(c) : r;
@@ -786,6 +838,27 @@ static int drain(Ctx *c, int video, QvItem *out) {
   }
 }
 
+static int send_video(Ctx *c, const AVPacket *pkt) {
+  int sent = avcodec_send_packet(c->vdec, pkt);
+  if (sent >= 0) {
+    c->bad_packets_in_a_row = 0;
+    return 0;
+  }
+  if (sent == AVERROR(EAGAIN))
+    return 0;
+  if (c->info.hw)
+    return fall_back_to_software(c);
+  if (sent == AVERROR_INVALIDDATA && ++c->bad_packets_in_a_row < SKIP_INVALID_PACKETS)
+    return 0;
+  return sent;
+}
+
+static void end_reading(Ctx *c) {
+  c->read_done = 1;
+  if (c->adec)
+    avcodec_send_packet(c->adec, NULL);
+}
+
 int32_t qv_next(void *ctx, QvItem *out) {
   Ctx *c = ctx;
   if (!c || !out)
@@ -801,34 +874,77 @@ int32_t qv_next(void *ctx, QvItem *out) {
       if (r != 0)
         return r;
     }
-    if (c->eof_sent) {
-      if ((!c->vdec || c->vdone) && (!c->adec || c->adone))
+    if (c->held_count > 0) {
+      AVPacket *pkt = take_held(c);
+      int r = send_video(c, pkt);
+      av_packet_free(&pkt);
+      if (r < 0)
+        return r;
+      continue;
+    }
+    if (c->read_done) {
+      if (c->vdec && !c->vflushed) {
+        avcodec_send_packet(c->vdec, NULL);
+        c->vflushed = 1;
+      } else if ((!c->vdec || c->vdone) && (!c->adec || c->adone)) {
         return 0;
+      }
       continue;
     }
     int r = av_read_frame(c->fmt, c->pkt);
     if (r == AVERROR(EAGAIN))
       continue;
     if (r < 0) {
-      /* The end, or a truncated file: flush what the decoders hold. */
-      if (c->vdec)
-        avcodec_send_packet(c->vdec, NULL);
-      if (c->adec)
-        avcodec_send_packet(c->adec, NULL);
-      c->eof_sent = 1;
+      end_reading(c);
       continue;
     }
-    /* A corrupt packet is dropped; decoding carries on with the next. */
     if (c->pkt->stream_index == c->vidx && c->vdec) {
-      int sent = avcodec_send_packet(c->vdec, c->pkt);
-      if (sent < 0 && sent != AVERROR(EAGAIN) && c->info.hw) {
+      r = send_video(c, c->pkt);
+      av_packet_unref(c->pkt);
+      if (r < 0)
+        return r;
+      continue;
+    }
+    if (c->pkt->stream_index == c->aidx && c->adec)
+      avcodec_send_packet(c->adec, c->pkt);
+    av_packet_unref(c->pkt);
+  }
+}
+
+int32_t qv_next_sound(void *ctx, QvItem *out) {
+  Ctx *c = ctx;
+  if (!c || !out)
+    return AVERROR(EINVAL);
+  for (;;) {
+    if (!c->adec || c->adone)
+      return 0;
+    int r = drain(c, 0, out);
+    if (r != 0)
+      return r;
+    if (c->read_done)
+      continue;
+    if (c->held_count >= HELD_MAX_PACKETS || c->held_bytes >= HELD_MAX_BYTES)
+      return 0;
+    r = av_read_frame(c->fmt, c->pkt);
+    if (r == AVERROR(EAGAIN))
+      continue;
+    if (r < 0) {
+      end_reading(c);
+      continue;
+    }
+    if (c->pkt->stream_index == c->vidx && c->vdec) {
+      AVPacket *pkt = av_packet_alloc();
+      if (!pkt) {
         av_packet_unref(c->pkt);
-        int k = fall_back_to_software(c);
-        if (k < 0)
-          return k;
-        continue;
+        return AVERROR(ENOMEM);
       }
-    } else if (c->pkt->stream_index == c->aidx && c->adec)
+      av_packet_move_ref(pkt, c->pkt);
+      c->held[(c->held_first + c->held_count) % HELD_MAX_PACKETS] = pkt;
+      c->held_count++;
+      c->held_bytes += (size_t)pkt->size;
+      continue;
+    }
+    if (c->pkt->stream_index == c->aidx)
       avcodec_send_packet(c->adec, c->pkt);
     av_packet_unref(c->pkt);
   }
@@ -840,7 +956,9 @@ int32_t qv_seek(void *ctx, double seconds) {
     return AVERROR(EINVAL);
   if (seconds < 0)
     seconds = 0;
-  return restart(c, seconds, seconds, seconds);
+  int r = restart(c, seconds, seconds, seconds);
+  c->keep_skipped = 1;
+  return r;
 }
 
 void qv_close(void *ctx) {
@@ -850,9 +968,11 @@ void qv_close(void *ctx) {
   avcodec_free_context(&c->vdec);
   avcodec_free_context(&c->adec);
   avformat_close_input(&c->fmt);
+  drop_held(c);
   av_packet_free(&c->pkt);
   av_frame_free(&c->frame);
   av_frame_free(&c->sw_frame);
+  av_frame_free(&c->skipped);
   sws_freeContext(c->sws);
   swr_free(&c->swr);
   av_free(c->rgb);

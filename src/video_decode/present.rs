@@ -23,7 +23,10 @@ impl Player {
     /// of the frame being drawn), when it changed since the last call.
     /// Older due pictures are dropped: they would be late.
     pub fn take_frame_at(&mut self, present: Instant) -> Option<VideoFrame> {
-        let now = Instant::now();
+        self.take_frame_for(present, Instant::now())
+    }
+
+    pub(super) fn take_frame_for(&mut self, present: Instant, now: Instant) -> Option<VideoFrame> {
         // With sound, pull the wall clock back to it when they drifted
         // apart (the sound is the master; the wall clock only smooths it).
         if !self.clock.held && self.clock.is_playing() {
