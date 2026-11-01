@@ -408,3 +408,13 @@ Added in 2026:
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
+
+The Quill project also changed it in 2026 so a window can't survive a device
+give-up:
+
+- `src/platform.rs`: `handle_device_gone` posts
+  `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` to every tracked window once more after
+  dropping the devices. The vsync thread's broadcast reads the window list
+  before `WM_GPUI_GPU_DEVICE_GONE` arrives, so a window opened in between
+  missed it. `open_window` fails from this point on, so no window can miss
+  this one.

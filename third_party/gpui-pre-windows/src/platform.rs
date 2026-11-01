@@ -1453,11 +1453,14 @@ impl WindowsPlatformInner {
 
     /// Quill: the vsync thread could not recreate the GPU device and has stopped. Drop the dead
     /// devices so `is_windowed` reports false and `open_window` says why; a later
-    /// `request_windowing(Windowed)` attaches fresh devices.
+    /// `request_windowing(Windowed)` attaches fresh devices. A window opened after the vsync
+    /// thread's list read missed its broadcast, and none can open from here on, so this one
+    /// reaches every window that is left.
     fn handle_device_gone(&self) -> Option<isize> {
         self.state.directx_devices.borrow_mut().take();
         *self.state.gpu_error.borrow_mut() =
             Some("the GPU device was lost and could not be recreated".to_owned());
+        destroy_all_windows_after_device_lost(&self.raw_window_handles, self.validation_number);
         Some(0)
     }
 
