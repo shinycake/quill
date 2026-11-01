@@ -104,7 +104,7 @@ mod linux {
         bring_loopback_up();
 
         let mut wakes = 0;
-        listen(&watcher, || {
+        listen(&watcher, |_| {
             wakes += 1;
             ControlFlow::Break(())
         });
@@ -124,28 +124,72 @@ mod linux {
         if std::env::var_os(CHILD).is_none() {
             return;
         }
-        bring_loopback_up();
-        // SAFETY: a NUL-terminated name.
-        let lo = unsafe { libc::if_nametoindex(c"lo".as_ptr()) };
         let socket = netlink::open(0).unwrap();
+        // A bridge with no ports: a link with a neighbour table, which
+        // loopback has not, and no way out of the namespace.
+        let link = add_bridge(&socket, c"quill0");
         let ip = |last| Ipv4Addr::new(192, 0, 2, last);
-        add_address(&socket, lo, ip(2));
+        add_address(&socket, link, ip(2));
         // The main table says .1; a rule sends Telegram's range to .9, as a
         // VPN or a split tunnel does.
-        add_route(&socket, lo, libc::RT_TABLE_MAIN, None, ip(1));
+        add_route(&socket, link, libc::RT_TABLE_MAIN, None, ip(1));
         let telegram = (Ipv4Addr::new(149, 154, 0, 0), 16);
-        add_route(&socket, lo, 100, Some(telegram), ip(9));
+        add_route(&socket, link, 100, Some(telegram), ip(9));
         add_rule(&socket, telegram, 100);
-        assert_eq!(
-            super::super::super::route_now().v4,
+        let hop = |gateway_hardware| {
             Path::Via(Hop {
                 local: ip(2).into(),
                 link: Link {
-                    interface: lo,
+                    interface: link,
                     gateway: Some(ip(9).into()),
+                    gateway_hardware,
                 },
             })
-        );
+        };
+        assert_eq!(super::super::super::route_now().v4, hop(None));
+        // The gateway's link-layer address, once the kernel knows it.
+        let router = [0x02, 0, 0, 0, 0, 0x09];
+        add_neighbour(&socket, link, ip(9), router);
+        assert_eq!(super::super::super::route_now().v4, hop(Some(router)));
+    }
+
+    /// `ip neigh add <address> lladdr <hardware> dev <interface> nud permanent`.
+    fn add_neighbour(socket: &OwnedFd, interface: u32, address: Ipv4Addr, hardware: [u8; 6]) {
+        let mut header = vec![libc::AF_INET as u8, 0, 0, 0];
+        header.extend_from_slice(&interface.to_ne_bytes());
+        header.extend_from_slice(&libc::NUD_PERMANENT.to_ne_bytes());
+        header.extend_from_slice(&[0, 0]);
+        let flags = (libc::NLM_F_CREATE | libc::NLM_F_REPLACE) as u16;
+        Request::new(libc::RTM_NEWNEIGH, flags, &header)
+            .attribute(libc::NDA_DST, &address.octets())
+            .attribute(libc::NDA_LLADDR, &hardware)
+            .send(socket)
+            .unwrap();
+    }
+
+    /// `ip link add <name> up type bridge`, and its index.
+    fn add_bridge(socket: &OwnedFd, name: &std::ffi::CStr) -> u32 {
+        const IFLA_IFNAME: u16 = 3;
+        const IFLA_LINKINFO: u16 = 18;
+        const IFLA_INFO_KIND: u16 = 1;
+        let up = libc::IFF_UP as u32;
+        let mut header = vec![libc::AF_UNSPEC as u8, 0, 0, 0, 0, 0, 0, 0];
+        header.extend_from_slice(&up.to_ne_bytes());
+        header.extend_from_slice(&up.to_ne_bytes());
+        let mut kind = Vec::new();
+        kind.extend_from_slice(&(4u16 + 6).to_ne_bytes());
+        kind.extend_from_slice(&IFLA_INFO_KIND.to_ne_bytes());
+        kind.extend_from_slice(b"bridge\0\0");
+        let flags = (libc::NLM_F_CREATE | libc::NLM_F_EXCL) as u16;
+        Request::new(libc::RTM_NEWLINK, flags, &header)
+            .attribute(IFLA_IFNAME, name.to_bytes_with_nul())
+            .attribute(IFLA_LINKINFO, &kind)
+            .send(socket)
+            .unwrap();
+        // SAFETY: a NUL-terminated name.
+        let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
+        assert_ne!(index, 0);
+        index
     }
 
     fn add_address(socket: &OwnedFd, interface: u32, local: Ipv4Addr) {

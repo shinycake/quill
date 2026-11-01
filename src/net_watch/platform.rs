@@ -63,9 +63,12 @@ mod backend {
             CFString::new("State:/Network/Global/IPv6"),
             CFString::new("State:/Network/Global/Proxies"),
         ]);
+        // A service's IPv4 key also changes when its router's link-layer
+        // address is resolved (`net_watch::link`).
         let patterns = CFArray::from_CFTypes(&[
             CFString::new("State:/Network/Interface/[^/]+/IPv4"),
             CFString::new("State:/Network/Interface/[^/]+/IPv6"),
+            CFString::new("State:/Network/Service/[^/]+/IPv4"),
         ]);
         // SAFETY: both arrays are live CFArrays of CFStrings for the call.
         let watching = unsafe {
@@ -101,6 +104,7 @@ mod backend {
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
 
     const GROUPS: libc::c_int = libc::RTMGRP_LINK
+        | libc::RTMGRP_NEIGH
         | libc::RTMGRP_IPV4_IFADDR
         | libc::RTMGRP_IPV6_IFADDR
         | libc::RTMGRP_IPV4_ROUTE
@@ -112,17 +116,21 @@ mod backend {
 
     pub(in crate::net_watch) fn watch() {
         if let Ok(socket) = subscribe() {
-            listen(&socket, || {
-                super::super::network_changed();
+            listen(&socket, |batch| {
+                // A gateway's entry tells two routers on one address apart.
+                if !super::super::netlink::only_other_neighbours(batch, super::super::is_gateway) {
+                    super::super::network_changed();
+                }
                 ControlFlow::Continue(())
             });
         }
     }
 
-    /// Calls `changed` after every read until it breaks or the socket fails.
+    /// Calls `changed` with every read until it breaks or the socket fails.
+    /// Lost events come as an empty read.
     pub(in crate::net_watch) fn listen(
         socket: &OwnedFd,
-        mut changed: impl FnMut() -> ControlFlow<()>,
+        mut changed: impl FnMut(&[u8]) -> ControlFlow<()>,
     ) {
         let mut buffer = [0u8; 8192];
         loop {
@@ -138,15 +146,16 @@ mod backend {
             if read == 0 {
                 return;
             }
-            if read < 0 {
-                match io::Error::last_os_error().raw_os_error() {
+            let batch = match usize::try_from(read) {
+                Ok(read) => buffer.get(..read).unwrap_or_default(),
+                Err(_) => match io::Error::last_os_error().raw_os_error() {
                     Some(libc::EINTR) => continue,
                     // Events were lost, so something happened.
-                    Some(libc::ENOBUFS) => {}
+                    Some(libc::ENOBUFS) => &[],
                     _ => return,
-                }
-            }
-            if changed().is_break() {
+                },
+            };
+            if changed(batch).is_break() {
                 return;
             }
         }

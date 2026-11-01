@@ -8,6 +8,15 @@ const HEADER: usize = size_of::<libc::nlmsghdr>();
 /// `rtmsg`: family, the two prefix lengths, tos, table, protocol, scope,
 /// type, then 32 bits of flags.
 const ROUTE_HEADER: usize = 12;
+/// `ndmsg`: family, padding, the interface index, state, flags and type.
+const NEIGHBOUR_HEADER: usize = 12;
+/// The neighbour states that hold a link-layer address (`NUD_VALID`).
+const NUD_VALID: u16 = libc::NUD_PERMANENT
+    | libc::NUD_NOARP
+    | libc::NUD_REACHABLE
+    | libc::NUD_PROBE
+    | libc::NUD_STALE
+    | libc::NUD_DELAY;
 
 /// A `NETLINK_ROUTE` socket that hears `groups` (0 for requests only).
 pub(super) fn open(groups: u32) -> io::Result<OwnedFd> {
@@ -105,15 +114,27 @@ impl Request {
         self
     }
 
-    /// The kind and body of every message in the answer.
-    pub(super) fn send(mut self, socket: &OwnedFd) -> io::Result<Vec<(u16, Vec<u8>)>> {
+    /// The message as it goes on the wire.
+    fn finished(mut self) -> Vec<u8> {
         let length = u32::try_from(self.0.len()).unwrap_or(u32::MAX);
         if let Some(head) = self.0.get_mut(..4) {
             head.copy_from_slice(&length.to_ne_bytes());
         }
+        self.0
+    }
+
+    /// The kind and body of every message in the answer.
+    pub(super) fn send(self, socket: &OwnedFd) -> io::Result<Vec<(u16, Vec<u8>)>> {
+        let request = self.finished();
         // SAFETY: the request is live and readable for the length passed.
-        let sent =
-            unsafe { libc::send(socket.as_raw_fd(), self.0.as_ptr().cast(), self.0.len(), 0) };
+        let sent = unsafe {
+            libc::send(
+                socket.as_raw_fd(),
+                request.as_ptr().cast(),
+                request.len(),
+                0,
+            )
+        };
         if sent < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -215,4 +236,79 @@ pub(super) fn route_to(socket: &OwnedFd, to: IpAddr) -> Option<(u32, Option<IpAd
         }
     }
     Some((interface?, gateway))
+}
+
+/// The link-layer address of `address` on `interface`, when the kernel has
+/// resolved it.
+pub(super) fn neighbour(socket: &OwnedFd, interface: u32, address: IpAddr) -> Option<[u8; 6]> {
+    let header: [u8; NEIGHBOUR_HEADER] = [family(address), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let answer = Request::new(libc::RTM_GETNEIGH, libc::NLM_F_DUMP as u16, &header)
+        .send(socket)
+        .ok()?;
+    answer.iter().find_map(|(kind, body)| {
+        let index = u32::from_ne_bytes(body.get(4..8)?.try_into().ok()?);
+        let state = u16::from_ne_bytes(body.get(8..10)?.try_into().ok()?);
+        if *kind != libc::RTM_NEWNEIGH || index != interface || state & NUD_VALID == 0 {
+            return None;
+        }
+        let mut destination = None;
+        let mut hardware = None;
+        for (kind, value) in attributes(body, NEIGHBOUR_HEADER) {
+            match kind {
+                libc::NDA_DST => destination = ip_from(value),
+                libc::NDA_LLADDR => hardware = <[u8; 6]>::try_from(value).ok(),
+                _ => {}
+            }
+        }
+        (destination == Some(address)).then_some(hardware).flatten()
+    })
+}
+
+/// Whether `batch` holds only neighbour news, none of it about an address
+/// `wanted` asks for: the neighbour cache changes all the time, and only
+/// the gateways' entries matter here.
+pub(super) fn only_other_neighbours(batch: &[u8], wanted: impl Fn(IpAddr) -> bool) -> bool {
+    let mut any = false;
+    let others = messages(batch).all(|message| {
+        any = true;
+        matches!(message.kind, libc::RTM_NEWNEIGH | libc::RTM_DELNEIGH)
+            && !attributes(message.body, NEIGHBOUR_HEADER)
+                .any(|(kind, value)| kind == libc::NDA_DST && ip_from(value).is_some_and(&wanted))
+    });
+    any && others
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NEIGHBOUR_HEADER, Request, only_other_neighbours};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    const GATEWAY: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1));
+
+    fn neighbour(kind: u16, address: Ipv4Addr) -> Vec<u8> {
+        Request::new(kind, 0, &[0; NEIGHBOUR_HEADER])
+            .attribute(libc::NDA_DST, &address.octets())
+            .finished()
+    }
+
+    #[test]
+    fn only_news_about_a_gateway_neighbour_wakes_the_watcher() {
+        let is_gateway = |ip| ip == GATEWAY;
+        let printer = neighbour(libc::RTM_NEWNEIGH, Ipv4Addr::new(192, 168, 0, 20));
+        let router = neighbour(libc::RTM_NEWNEIGH, Ipv4Addr::new(192, 168, 0, 1));
+        let gone = neighbour(libc::RTM_DELNEIGH, Ipv4Addr::new(192, 168, 0, 1));
+        let route = Request::new(libc::RTM_NEWROUTE, 0, &[0; 12]).finished();
+        assert!(only_other_neighbours(&printer, is_gateway));
+        assert!(!only_other_neighbours(&router, is_gateway));
+        assert!(!only_other_neighbours(&gone, is_gateway));
+        assert!(!only_other_neighbours(
+            &[printer.clone(), router].concat(),
+            is_gateway
+        ));
+        assert!(!only_other_neighbours(
+            &[printer, route].concat(),
+            is_gateway
+        ));
+        assert!(!only_other_neighbours(&[], is_gateway), "lost events");
+    }
 }

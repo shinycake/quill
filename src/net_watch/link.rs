@@ -1,6 +1,7 @@
 //! Which interface and gateway carry traffic to Telegram. Two networks can
-//! hand out the same local address (two home routers on 192.168.0.x), and
-//! TDLib's connections do not survive the move between them.
+//! hand out the same local address and even the same gateway address (two
+//! home routers on 192.168.0.1), and TDLib's connections do not survive the
+//! move between them. The gateway's link-layer address tells them apart.
 
 use std::net::IpAddr;
 
@@ -9,6 +10,9 @@ pub(super) struct Link {
     /// The OS interface index; 0 when unknown.
     pub(super) interface: u32,
     pub(super) gateway: Option<IpAddr>,
+    /// The gateway's link-layer address; `None` until the system has
+    /// resolved it, which is no change of network ([`super::Path::settled`]).
+    pub(super) gateway_hardware: Option<[u8; 6]>,
 }
 
 /// The link `local` sends to `to` from.
@@ -86,7 +90,12 @@ mod backend {
         let Some((interface, gateway)) = netlink::route_to(&socket, to) else {
             return Link::default();
         };
-        Link { interface, gateway }
+        Link {
+            interface,
+            gateway,
+            gateway_hardware: gateway
+                .and_then(|gateway| netlink::neighbour(&socket, interface, gateway)),
+        }
     }
 }
 
@@ -108,47 +117,81 @@ mod backend {
         let Some((name, interface)) = super::unix::interface_of(local) else {
             return Link::default();
         };
-        Link {
-            interface,
-            gateway: router(&name, local.is_ipv4()),
-        }
-    }
-
-    /// The primary service's router, when `name` is its interface.
-    fn router(name: &str, v4: bool) -> Option<IpAddr> {
-        let key = CFString::new(if v4 {
+        let Some(global) = store_value(if local.is_ipv4() {
             "State:/Network/Global/IPv4"
         } else {
             "State:/Network/Global/IPv6"
-        });
+        }) else {
+            return Link {
+                interface,
+                ..Link::default()
+            };
+        };
+        // Only the primary service's router is known here.
+        if text(&global, "PrimaryInterface").as_deref() != Some(name.as_str()) {
+            return Link {
+                interface,
+                ..Link::default()
+            };
+        }
+        // configd records the router's address once ARP has resolved it,
+        // and IPv4 only (`kSCPropNetIPv4ARPResolvedHardwareAddress`).
+        let gateway_hardware = text(&global, "PrimaryService")
+            .filter(|_| local.is_ipv4())
+            .and_then(|service| store_value(&format!("State:/Network/Service/{service}/IPv4")))
+            .and_then(|service| text(&service, "ARPResolvedHardwareAddress"))
+            .and_then(|text| super::hardware_from_text(&text));
+        Link {
+            interface,
+            gateway: text(&global, "Router").and_then(|router| router.parse().ok()),
+            gateway_hardware,
+        }
+    }
+
+    fn store_value(key: &str) -> Option<CFDictionary<CFString, CFType>> {
+        let key = CFString::new(key);
         // SAFETY: a null store uses a session of its own; `key` is live.
         let value = unsafe { SCDynamicStoreCopyValue(std::ptr::null(), key.as_concrete_TypeRef()) };
         if value.is_null() {
             return None;
         }
         // SAFETY: a non-null dictionary from a Copy call, owned from here on.
-        let global: CFDictionary<CFString, CFType> =
-            unsafe { CFDictionary::wrap_under_create_rule(value) };
-        let text = |key: &str| {
-            global
-                .find(CFString::new(key))
-                .and_then(|value| value.downcast::<CFString>())
-                .map(|text| text.to_string())
-        };
-        if text("PrimaryInterface")? != name {
+        Some(unsafe { CFDictionary::wrap_under_create_rule(value) })
+    }
+
+    fn text(dictionary: &CFDictionary<CFString, CFType>, key: &str) -> Option<String> {
+        dictionary
+            .find(CFString::new(key))
+            .and_then(|value| value.downcast::<CFString>())
+            .map(|text| text.to_string())
+    }
+}
+
+/// `0:1b:63:a:b:c` as configd writes it, leading zeros left out.
+#[cfg(any(target_os = "macos", test))]
+fn hardware_from_text(text: &str) -> Option<[u8; 6]> {
+    let mut out = [0u8; 6];
+    let mut parts = text.split(':');
+    for byte in &mut out {
+        let part = parts.next()?;
+        if part.is_empty() || part.len() > 2 {
             return None;
         }
-        text("Router")?.parse().ok()
+        *byte = u8::from_str_radix(part, 16).ok()?;
     }
+    parts.next().is_none().then_some(out)
 }
 
 #[cfg(windows)]
 mod backend {
     use super::Link;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use windows_sys::Win32::Foundation::NO_ERROR;
-    use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
-    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, SOCKADDR_INET};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetBestRoute2, GetIpNetEntry2, MIB_IPFORWARD_ROW2, MIB_IPNET_ROW2, ResolveIpNetEntry2,
+    };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, NlnsProbe, SOCKADDR_INET};
 
     pub(super) fn of(_local: IpAddr, to: IpAddr) -> Link {
         let destination = socket_address(to);
@@ -170,9 +213,53 @@ mod backend {
         if status != NO_ERROR {
             return Link::default();
         }
+        let gateway = ip_of(&route.NextHop).filter(|hop| !hop.is_unspecified());
         Link {
             interface: route.InterfaceIndex,
-            gateway: ip_of(&route.NextHop).filter(|hop| !hop.is_unspecified()),
+            gateway,
+            gateway_hardware: gateway.and_then(|gateway| hardware(route.InterfaceIndex, gateway)),
+        }
+    }
+
+    /// The gateway's entry in the neighbour cache. Windows has no
+    /// notification for that cache, so a missing entry is resolved in the
+    /// background and the network looked at again once it is there.
+    fn hardware(interface: u32, gateway: IpAddr) -> Option<[u8; 6]> {
+        let mut row = MIB_IPNET_ROW2 {
+            Address: socket_address(gateway),
+            InterfaceIndex: interface,
+            ..MIB_IPNET_ROW2::default()
+        };
+        // SAFETY: `row` is live and names the entry to read.
+        let found = unsafe { GetIpNetEntry2(&raw mut row) } == NO_ERROR && row.State >= NlnsProbe;
+        if !found {
+            resolve_later(row);
+            return None;
+        }
+        if row.PhysicalAddressLength != 6 {
+            return None;
+        }
+        row.PhysicalAddress.get(..6)?.try_into().ok()
+    }
+
+    static RESOLVING: AtomicBool = AtomicBool::new(false);
+
+    fn resolve_later(mut row: MIB_IPNET_ROW2) {
+        if RESOLVING.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let spawned = crate::thread_guard::spawn_guarded("quill-net-neighbour", move || {
+            // SAFETY: `row` is live and names the entry; a null source lets
+            // Windows pick one. The call blocks until ARP or ND answers.
+            let resolved =
+                unsafe { ResolveIpNetEntry2(&raw mut row, std::ptr::null()) } == NO_ERROR;
+            RESOLVING.store(false, Ordering::Release);
+            if resolved {
+                super::super::network_changed();
+            }
+        });
+        if spawned.is_err() {
+            RESOLVING.store(false, Ordering::Release);
         }
     }
 
@@ -213,5 +300,18 @@ mod backend {
 
     pub(super) fn of(_local: IpAddr, _to: IpAddr) -> Link {
         Link::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_hardware_address_reads_with_or_without_leading_zeros() {
+        let router = Some([0x00, 0x1b, 0x63, 0x0a, 0xbc, 0xde]);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:de"), router);
+        assert_eq!(super::hardware_from_text("00:1b:63:0a:bc:de"), router);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc"), None);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:de:f"), None);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:xyz"), None);
     }
 }
