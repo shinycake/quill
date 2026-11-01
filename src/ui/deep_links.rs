@@ -45,7 +45,31 @@ fn queued_by_agent(agent_link: &mut Option<String>, link: &str) -> bool {
     agent_link.take().is_some_and(|queued| queued == link)
 }
 
+thread_local! {
+    /// The user's link a dropped app had not opened yet, for the app
+    /// Windows opens after a lost GPU.
+    static LEFT_BY_DROPPED_APP: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The link the next app opens, if a dropped app left one.
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+pub(crate) fn take_left_by_dropped_app() -> Option<String> {
+    LEFT_BY_DROPPED_APP.with(|left| left.borrow_mut().take())
+}
+
 impl QuillApp {
+    /// Hand the link still waiting to the next app. An agent's link is not
+    /// handed on: the next app would take it for the user's.
+    pub(super) fn leave_pending_deep_link(&mut self) {
+        let Some(link) = self.pending_deep_link.take() else {
+            return;
+        };
+        if !queued_by_agent(&mut self.links.agent_pending_link, &link) {
+            LEFT_BY_DROPPED_APP.with(|left| *left.borrow_mut() = Some(link));
+        }
+    }
+
     /// Driver-facing half of the deep-link flow, run from `poll_live`.
     /// Fires `getDeepLinkInfo` once auth is Ready, then turns each
     /// terminal session state into the next step: follow-up request,

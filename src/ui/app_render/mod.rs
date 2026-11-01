@@ -210,9 +210,6 @@ impl Render for QuillApp {
                 }
                 if this.close_main_window(window, cx) {
                     window.remove_window();
-                    // Elsewhere closing the only window quits.
-                    #[cfg(not(target_os = "macos"))]
-                    cx.quit();
                 }
             }))
             .on_action(cx.listener(|this, _: &MinimizeWindow, window, cx| {

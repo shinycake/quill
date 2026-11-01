@@ -43,12 +43,15 @@ impl<W: Clone> WindowList<W> {
         }
     }
 
-    /// A copy of the list as it is now.
-    pub(crate) fn snapshot(&self) -> Vec<W> {
+    /// A copy of the list as it is now, in whatever collection the caller picks
+    /// (`WindowList::snapshot` in `platform.rs` keeps a few windows off the heap).
+    pub(crate) fn collect<C: FromIterator<W>>(&self) -> C {
         self.windows
             .read()
             .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+            .iter()
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn find(&self, matches: impl Fn(&W) -> bool) -> Option<W> {
@@ -76,7 +79,7 @@ mod tests {
         let list = list(&[1, 2, 3]);
         let mut sent = Vec::new();
 
-        for window in list.snapshot() {
+        for window in list.collect::<Vec<_>>() {
             sent.push(window);
             if window == 1 {
                 list.remove(|listed| *listed == 2);
@@ -85,17 +88,17 @@ mod tests {
         }
 
         assert_eq!(sent, [1, 2, 3]);
-        assert_eq!(list.snapshot(), [1, 3, 4]);
+        assert_eq!(list.collect::<Vec<_>>(), [1, 3, 4]);
     }
 
     #[test]
     fn a_window_opened_later_is_in_the_next_copy() {
         let list = list(&[1]);
-        let before = list.snapshot();
+        let before = list.collect::<Vec<_>>();
         list.push(2);
 
         assert_eq!(before, [1]);
-        assert_eq!(list.snapshot(), [1, 2]);
+        assert_eq!(list.collect::<Vec<_>>(), [1, 2]);
     }
 
     #[test]
@@ -129,7 +132,7 @@ mod tests {
                 now_empty: false
             }
         );
-        assert_eq!(list.snapshot(), [1]);
+        assert_eq!(list.collect::<Vec<_>>(), [1]);
     }
 
     #[test]

@@ -108,14 +108,14 @@ mod tests {
     fn opening_a_player_starts_the_load(cx: &mut TestAppContext) {
         use super::Warmed;
         cx.update(|cx| {
-            assert!(!cx.has_global::<Warmed>());
+            assert!(!cx.has_global::<super::Warmed>());
             let _ = super::super::VideoPlayer::open(
                 std::path::Path::new("/nonexistent/clip.mp4"),
                 super::super::Purpose::Inline { max_edge: 64 },
                 None,
                 cx,
             );
-            assert!(cx.global::<Warmed>().0);
+            assert!(cx.global::<super::Warmed>().0);
         });
     }
 }

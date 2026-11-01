@@ -285,3 +285,21 @@ fn the_quit_observer_closes_clients_within_the_quit_deadline(cx: &mut TestAppCon
     assert!(fakes.iter().all(Fake::finished));
     assert!(took < QUIT_CLOSE_DEADLINE * 3, "took {took:?}");
 }
+
+#[gpui_kit::test]
+fn an_account_a_closed_window_left_unconfirmed_stays_shut_in_the_next(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let lost = Fake::default();
+    lost.lose();
+    app.update_in(&mut vcx, |app, _, _| {
+        app.background.closing.push(account(1), lost.boxed(), false);
+    });
+    vcx.update(|window, _| window.remove_window());
+    drop(app);
+    // GPUI drops released entities when it next flushes its effects.
+    vcx.cx.update(|_| {});
+    assert!(lost.finished(), "the old app is gone");
+    let (next, mut vcx) = new_app(cx);
+    let wait = next.update_in(&mut vcx, |app, _, _| app.open_wait(&account(1)));
+    assert_eq!(wait, CloseWait::Never);
+}
