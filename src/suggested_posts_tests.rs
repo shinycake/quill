@@ -401,7 +401,7 @@ fn date_labels() {
         "yesterday at 09:05"
     );
     assert_eq!(block_time_label(&at(2026, 10, 20), &now), "Oct 20 at 09:05");
-    assert_eq!(time_value(0, 0), "Anytime");
+    assert_eq!(time_value(0, 0, |_| now), "Anytime");
 }
 
 #[test]

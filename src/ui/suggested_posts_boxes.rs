@@ -16,11 +16,10 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::local_time::now_unix;
 use quill::suggested_posts::{
     DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms, SuggestedPrice,
     currency_tabs, field_text, price_about_member, price_section_title, price_submit_label,
-    shortfall, time_value,
+    shortfall,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -415,7 +414,7 @@ impl QuillApp {
                             .child(
                                 div()
                                     .text_color(super::chat_theme::accent())
-                                    .child(time_value(send_date, now_unix())),
+                                    .child(super::suggested_posts_ui::time_label(send_date, cx)),
                             ),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {

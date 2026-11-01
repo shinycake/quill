@@ -331,6 +331,20 @@ fn the_schedule_link_opens_the_schedule_box_on_the_next_hour(cx: &mut TestAppCon
         }
     });
     assert_eq!(picked, Some(WallClock::CHICAGO_FALL_BACK - 2 * 3600));
+    // 00:00 is an hour and twenty minutes off on the box's clock.
+    let line = app.read_with(&main, |app, cx| {
+        match app.group_call.start_dialog.as_ref() {
+            Some(GroupCallCreate {
+                step: CreateStep::Schedule(step),
+                ..
+            }) => super::notified_line(step, false, cx),
+            _ => None,
+        }
+    });
+    assert_eq!(
+        line.as_deref(),
+        Some("Members of the group will be notified that the video chat will start in 1 hour.")
+    );
     assert!(
         main.debug_bounds("group-call-schedule-notified").is_some(),
         "members are told when it starts"

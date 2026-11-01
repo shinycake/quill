@@ -19,7 +19,6 @@ use quill::local_time::now_unix;
 use quill::suggested_posts::{
     DECLINE_REASON_MAX, DirectMessagesRole, LOW_TON_BUTTON, LOW_TON_TEXT, LOW_TON_URL, SuggestMode,
     SuggestTerms, SuggestedPostInfo, SuggestedPostState, accept_text, decline_text, low_ton_title,
-    time_value,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -91,7 +90,7 @@ impl QuillApp {
             .session()
             .map(|session| session.payments.suggested_posts.limits)
             .unwrap_or_default();
-        let date = (send_date > 0).then(|| time_value(send_date, now_unix()));
+        let date = (send_date > 0).then(|| super::suggested_posts_ui::time_label(send_date, cx));
         let text = accept_text(
             suggestion.admin,
             &suggestion.from,
