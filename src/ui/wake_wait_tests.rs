@@ -124,6 +124,28 @@ fn a_backlog_comes_back_after_the_gap_without_a_poke(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_backlog_holds_app_nap_off_once_until_the_loop_rests(cx: &mut TestAppContext) {
     static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Cell::new(0);
+    let pass = move || {
+        passes.set(passes.get() + 1);
+        Some(if passes.get() < 3 { BACKLOG } else { IDLE })
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 1));
+    cx.background_executor.advance_clock(PACE.gap);
+    cx.run_until_parked();
+    assert_eq!(state(), (1, 0));
+}
+
+/// Counts holds begun and holds still held.
+fn counted_hold() -> (impl Fn() -> ActivityGuard, impl Fn() -> (usize, usize)) {
     let begun = Arc::new(AtomicUsize::new(0));
     let held = Arc::new(AtomicUsize::new(0));
     let hold = {
@@ -137,24 +159,62 @@ fn a_backlog_holds_app_nap_off_once_until_the_loop_rests(cx: &mut TestAppContext
             })
         }
     };
-    let passes = Cell::new(0);
-    let pass = move || {
-        passes.set(passes.get() + 1);
-        Some(if passes.get() < 3 { BACKLOG } else { IDLE })
+    let state = move || (begun.load(Ordering::SeqCst), held.load(Ordering::SeqCst));
+    (hold, state)
+}
+
+/// Updates that arrive just slower than each pass drains them: a poke ends
+/// every rest early, so the update it brought waits out the gap. App Nap
+/// would run that gap's timer up to 200 ms late.
+#[gpui_kit::test]
+fn a_poke_after_a_short_rest_waits_its_gap_under_the_hold(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Rc::new(Cell::new(0));
+    let pass = {
+        let passes = passes.clone();
+        move || {
+            passes.set(passes.get() + 1);
+            Some(IDLE)
+        }
     };
     let executor = cx.background_executor.clone();
     cx.foreground_executor
         .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
         .detach();
     cx.run_until_parked();
-    let state = || (begun.load(Ordering::SeqCst), held.load(Ordering::SeqCst));
-    assert_eq!(state(), (1, 1));
-    cx.background_executor.advance_clock(PACE.gap);
+    assert_eq!((passes.get(), state()), (1, (0, 0)), "at rest, no hold");
+    cx.background_executor.advance_clock(ms(3));
+    SIGNAL.poke();
     cx.run_until_parked();
-    assert_eq!(state(), (1, 1));
-    cx.background_executor.advance_clock(PACE.gap);
+    assert_eq!((passes.get(), state()), (1, (1, 1)), "the gap runs held");
+    cx.background_executor.advance_clock(ms(7));
     cx.run_until_parked();
-    assert_eq!(state(), (1, 0));
+    assert_eq!((passes.get(), state()), (2, (1, 0)), "resting again lets go");
+}
+
+/// A poke after a full gap of rest runs at once, and takes no hold.
+#[gpui_kit::test]
+fn a_poke_after_a_long_rest_takes_no_hold(cx: &mut TestAppContext) {
+    static SIGNAL: Signal = Signal::new();
+    let (hold, state) = counted_hold();
+    let passes = Rc::new(Cell::new(0));
+    let pass = {
+        let passes = passes.clone();
+        move || {
+            passes.set(passes.get() + 1);
+            Some(IDLE)
+        }
+    };
+    let executor = cx.background_executor.clone();
+    cx.foreground_executor
+        .spawn(run_poll_loop(executor, &SIGNAL, PACE, hold, pass))
+        .detach();
+    cx.run_until_parked();
+    cx.background_executor.advance_clock(ms(500));
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!((passes.get(), state()), (2, (0, 0)));
 }
 
 #[gpui_kit::test]

@@ -141,7 +141,12 @@ pub(super) async fn run_poll_loop(
                 let began = executor.now();
                 timer.rest(&executor, signal, seen, longest).await;
                 let rested = executor.now().saturating_duration_since(began);
-                executor.timer(pace.gap_left(rested)).await;
+                let gap = pace.gap_left(rested);
+                if !gap.is_zero() {
+                    // A poke cut the rest short, so its update waits out the gap.
+                    held.get_or_insert_with(&hold);
+                    executor.timer(gap).await;
+                }
             }
         }
     }
