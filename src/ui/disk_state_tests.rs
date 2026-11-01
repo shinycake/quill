@@ -76,8 +76,10 @@ fn a_full_disk_shows_the_screen_with_what_is_free_and_what_is_needed(cx: &mut Te
     assert!(!shown(&app, &mut vcx).0, "the screen replaces the bar");
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
     assert_eq!(view.title, tr(keys::Q_DISK_FULL_TITLE));
-    assert!(view.body.contains("Available: 80.0 MB"), "{}", view.body);
-    assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
+    let available = format!("Available: {}", super::disk_size(FLOORS.close / 2));
+    assert!(view.body.contains(&available), "{}", view.body);
+    let needed = format!("Needed: {}", super::disk_size(FLOORS.open));
+    assert!(view.body.contains(&needed), "{}", view.body);
 }
 
 #[gpui_kit::test]
@@ -88,7 +90,8 @@ fn a_refusal_before_the_first_reading_says_only_what_is_needed(cx: &mut TestAppC
     });
     let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
     assert!(!view.body.contains("Available"), "{}", view.body);
-    assert!(view.body.contains("Needed: 288.0 MB"), "{}", view.body);
+    let needed = format!("Needed: {}", super::disk_size(FLOORS.open));
+    assert!(view.body.contains(&needed), "{}", view.body);
 }
 
 #[gpui_kit::test]
@@ -243,4 +246,21 @@ fn a_client_opened_on_a_low_disk_holds_automatic_downloads_at_once(cx: &mut Test
     app.read_with(&vcx, |app, _| app.disk.seed(&mut driver));
     assert!(driver.session.media.disk_holds_auto_downloads);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn more_accounts_need_more_room_on_the_full_screen(cx: &mut TestAppContext) {
+    use quill::disk_guard::{DataUse, DiskFloors};
+    let (app, mut vcx) = new_app(cx);
+    let six = DiskFloors::for_data(DataUse { accounts: 6 });
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.apply_data_reading(Some(FLOORS.close), six, cx)
+    });
+    let view = app.update_in(&mut vcx, |app, _, _| app.disk_full_view().unwrap());
+    assert!(
+        view.body
+            .contains(&format!("Needed: {}", super::disk_size(six.open))),
+        "{}",
+        view.body
+    );
 }

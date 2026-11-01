@@ -270,3 +270,36 @@ mod linux {
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
+
+#[test]
+fn the_close_floor_grows_by_each_account_that_closes() {
+    use super::{DataUse, DiskFloors, MIB};
+    let one = DiskFloors::for_data(DataUse::ONE);
+    let six = DiskFloors::for_data(DataUse { accounts: 6 });
+    assert_eq!(six.close - one.close, 5 * 14 * MIB);
+    assert_eq!(six.open - six.close, one.open - one.close);
+    assert_eq!(DiskFloors::for_data(DataUse { accounts: 0 }), one);
+    assert_eq!(super::FLOORS, one);
+}
+
+#[test]
+fn only_accounts_with_a_database_count() {
+    let root = crate::scratch::unique_dir("quill-disk-accounts");
+    for (name, file) in [
+        ("a", Some("db.sqlite")),
+        ("b", Some("td.binlog")),
+        ("c", None),
+    ] {
+        let tdlib = root.join("accounts").join(name).join("tdlib");
+        std::fs::create_dir_all(&tdlib).unwrap();
+        if let Some(file) = file {
+            std::fs::write(tdlib.join(file), b"x").unwrap();
+        }
+    }
+    assert_eq!(super::folders::data_use(&root).accounts, 2);
+    assert_eq!(
+        data_floors(&root),
+        super::DiskFloors::for_data(super::DataUse { accounts: 2 })
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

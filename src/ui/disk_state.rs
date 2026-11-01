@@ -13,13 +13,17 @@ use gpui_kit::{
     transparent_black,
 };
 use quill::auth::{AuthAction, AuthView};
-use quill::disk_guard::{DiskClients, DiskState, DiskStep, FLOORS, data_free_bytes, next_read_in};
+use quill::disk_guard::{
+    DiskClients, DiskFloors, DiskState, DiskStep, FLOORS, data_floors, data_free_bytes,
+    next_read_in,
+};
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 
 pub(crate) struct DiskUi {
     state: DiskState,
     free: Option<u64>,
+    floors: DiskFloors,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -37,6 +41,7 @@ impl DiskUi {
         Self {
             state: DiskState::default(),
             free: None,
+            floors: FLOORS,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -56,7 +61,7 @@ impl DiskUi {
         &self,
         driver: &mut quill::connect::ConnectDriver<S>,
     ) {
-        let _ = driver.note_disk(self.state, self.free, &FLOORS);
+        let _ = driver.note_disk(self.state, self.free, &self.floors);
     }
 
     pub(super) fn refused_start(&mut self) {
@@ -68,18 +73,21 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
     QuillApp::spawn_main(cx, async move |this, cx| {
         loop {
             let folder = root.clone();
-            let free = cx
+            let (free, floors) = cx
                 .background_executor()
-                .spawn(async move { demo_reading().or_else(|| data_free_bytes(&folder)) })
+                .spawn(async move {
+                    let free = demo_reading().or_else(|| data_free_bytes(&folder));
+                    (free, data_floors(&folder))
+                })
                 .await;
             if this
-                .update(cx, |this, cx| this.apply_disk_reading(free, cx))
+                .update(cx, |this, cx| this.apply_data_reading(free, floors, cx))
                 .is_err()
             {
                 break;
             }
             cx.background_executor()
-                .timer(next_read_in(free, &FLOORS))
+                .timer(next_read_in(free, &floors))
                 .await;
         }
     })
@@ -101,17 +109,29 @@ fn demo_reading() -> Option<u64> {
 }
 
 impl QuillApp {
+    /// A reading with the floors for what the data folders hold now.
+    pub(super) fn apply_data_reading(
+        &mut self,
+        free: Option<u64>,
+        floors: DiskFloors,
+        cx: &mut Context<Self>,
+    ) {
+        self.disk.floors = floors;
+        self.apply_disk_reading(free, cx);
+    }
+
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
         let shown = self.disk.free;
-        let after = self.disk.state.next(free, &FLOORS);
+        let floors = self.disk.floors;
+        let after = self.disk.state.next(free, &floors);
         self.disk.free = free.or(shown);
         let mut running = false;
         let background = self.background.clients_mut();
         for live in self.live.iter_mut().chain(background) {
             running = true;
-            let _ = live.driver.note_disk(after, free, &FLOORS);
+            let _ = live.driver.note_disk(after, free, &floors);
         }
-        let retry_starts = self.disk.start_refused && free.is_some_and(|free| free >= FLOORS.open);
+        let retry_starts = self.disk.start_refused && free.is_some_and(|free| free >= floors.open);
         let before = self.enter_disk_state(after, cx);
         match before.step(
             after,
@@ -169,7 +189,7 @@ impl QuillApp {
 
     pub(super) fn disk_full_view(&self) -> Option<AuthView> {
         self.disk.is_full().then(|| {
-            let needed = disk_size(FLOORS.open);
+            let needed = disk_size(self.disk.floors.open);
             let sizes = match self.disk.free {
                 Some(free) => tr_with(
                     keys::Q_DISK_FULL_SIZES,

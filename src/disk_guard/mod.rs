@@ -19,6 +19,11 @@ pub fn data_free_bytes(root: &Path) -> Option<u64> {
     folders::tightest(&folders::data_folders(root), available_bytes)
 }
 
+/// The floors for what is under the data root `root` now.
+pub fn data_floors(root: &Path) -> DiskFloors {
+    DiskFloors::for_data(folders::data_use(root))
+}
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -32,23 +37,46 @@ pub struct DiskFloors {
     pub open: u64,
 }
 
-/// TDLib's close flushes each binlog and checkpoints each SQLite WAL, and
-/// until a binlog closes any new event can start a reindex, which writes a
-/// copy of its live events.
-const CLOSE_WRITES: u64 = 64 * MIB;
+/// What one account's close can write: TDLib's close flushes the binlog
+/// and checkpoints the SQLite WAL (about 4 MiB at SQLite's default 1000
+/// pages), and until the binlog closes any new event can start a reindex,
+/// which writes a copy of its live events (logged as large past 10 MiB).
+const CLOSE_WRITES_PER_ACCOUNT: u64 = 14 * MIB;
 /// Free space `statfs` reports and APFS will not hand out: a new file failed
 /// with 32.1 MiB reported free on 2, 4 and 8 GiB volumes.
 const APFS_RESERVE: u64 = 32 * MIB;
 const CATCH_UP_ROOM: u64 = 128 * MIB;
 const WRITTEN_IN_SHORTEST_READ: u64 = FASTEST_WRITER_PER_SEC * SHORTEST_READ.as_secs();
-const CLOSE_FLOOR: u64 = CLOSE_WRITES + WRITTEN_IN_SHORTEST_READ + APFS_RESERVE;
+const CLOSE_FIXED: u64 = WRITTEN_IN_SHORTEST_READ + APFS_RESERVE;
 
-pub const FLOORS: DiskFloors = DiskFloors {
-    warn: 1024 * MIB,
-    warn_clear: 1280 * MIB,
-    close: CLOSE_FLOOR,
-    open: CLOSE_FLOOR + CATCH_UP_ROOM,
-};
+/// What the data folders hold that the floors scale with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataUse {
+    /// Accounts with a database: each one's client closes at Full.
+    pub accounts: u64,
+}
+
+impl DataUse {
+    /// One account: the least any reading can mean.
+    pub const ONE: Self = Self { accounts: 1 };
+}
+
+impl DiskFloors {
+    pub const fn for_data(data: DataUse) -> Self {
+        let accounts = if data.accounts == 0 { 1 } else { data.accounts };
+        let close = CLOSE_FIXED.saturating_add(CLOSE_WRITES_PER_ACCOUNT.saturating_mul(accounts));
+        Self {
+            warn: 1024 * MIB,
+            warn_clear: 1280 * MIB,
+            close,
+            open: close.saturating_add(CATCH_UP_ROOM),
+        }
+    }
+}
+
+/// The floors for one account: what a reading that knows nothing about the
+/// data folders, and the crash breadcrumb, go by.
+pub const FLOORS: DiskFloors = DiskFloors::for_data(DataUse::ONE);
 
 const FASTEST_WRITER_PER_SEC: u64 = 64 * MIB;
 const SHORTEST_READ: Duration = Duration::from_secs(1);

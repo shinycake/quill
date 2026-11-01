@@ -3,6 +3,7 @@
 //! disk, and the tightest volume is the one that fills first.
 #![deny(clippy::indexing_slicing)]
 
+use super::DataUse;
 use std::path::{Path, PathBuf};
 
 /// The data root, `accounts`, and each account folder with its `tdlib` and
@@ -33,4 +34,23 @@ pub(super) fn data_folders(root: &Path) -> Vec<PathBuf> {
 /// The least free space over `folders`, read by `read`.
 pub(super) fn tightest(folders: &[PathBuf], read: impl Fn(&Path) -> Option<u64>) -> Option<u64> {
     folders.iter().filter_map(|folder| read(folder)).min()
+}
+
+/// The accounts under `root` that have a database.
+pub(super) fn data_use(root: &Path) -> DataUse {
+    let accounts = std::fs::read_dir(root.join("accounts"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| has_database(&entry.path().join("tdlib")))
+                .count()
+        })
+        .unwrap_or(0);
+    DataUse {
+        accounts: u64::try_from(accounts).unwrap_or(u64::MAX),
+    }
+}
+
+fn has_database(tdlib: &Path) -> bool {
+    tdlib.join("db.sqlite").exists() || tdlib.join("td.binlog").exists()
 }
