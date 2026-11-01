@@ -95,6 +95,7 @@ mod backend {
 #[cfg(target_os = "linux")]
 mod backend {
     use std::io;
+    use std::ops::ControlFlow;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
     pub(in crate::net_watch) const EVENTS_COVER_PROXY: bool = false;
@@ -105,7 +106,7 @@ mod backend {
         | libc::RTMGRP_IPV4_ROUTE
         | libc::RTMGRP_IPV6_ROUTE;
 
-    fn subscribe() -> io::Result<OwnedFd> {
+    pub(in crate::net_watch) fn subscribe() -> io::Result<OwnedFd> {
         // SAFETY: constant arguments; the result is checked before use.
         let raw = unsafe {
             libc::socket(
@@ -138,9 +139,19 @@ mod backend {
     }
 
     pub(in crate::net_watch) fn watch() {
-        let Ok(socket) = subscribe() else {
-            return;
-        };
+        if let Ok(socket) = subscribe() {
+            listen(&socket, || {
+                super::super::network_changed();
+                ControlFlow::Continue(())
+            });
+        }
+    }
+
+    /// Calls `changed` after every read until it breaks or the socket fails.
+    pub(in crate::net_watch) fn listen(
+        socket: &OwnedFd,
+        mut changed: impl FnMut() -> ControlFlow<()>,
+    ) {
         let mut buffer = [0u8; 8192];
         loop {
             // SAFETY: `buffer` is writable for the length passed.
@@ -163,7 +174,9 @@ mod backend {
                     _ => return,
                 }
             }
-            super::super::network_changed();
+            if changed().is_break() {
+                return;
+            }
         }
     }
 }
@@ -291,3 +304,7 @@ mod backend {
 }
 
 pub(super) use backend::{EVENTS_COVER_PROXY, watch};
+
+#[cfg(test)]
+#[path = "watcher_tests.rs"]
+mod watcher_tests;

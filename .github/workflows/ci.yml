@@ -44,6 +44,14 @@ jobs:
       - name: tests (core + replay)
         timeout-minutes: 30
         run: cargo test --no-default-features --locked -- --nocapture
+      # The netlink watcher against a real kernel, in a fresh network
+      # namespace (src/net_watch/watcher_tests.rs). Ubuntu's AppArmor keeps
+      # user namespaces from holding capabilities unless this is off.
+      - name: tests (network watcher, Linux namespace)
+        timeout-minutes: 10
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          cargo test --no-default-features --locked --lib net_watch -- --ignored --nocapture
       # UI integration tests: windows, dialogs and clicks against the demo
       # app. GPUI's test platform is headless (no display, no-op text
       # system), so no Xvfb; the packages are what the UI binary links.
@@ -215,6 +223,22 @@ jobs:
           QUILL_WEBVIEW_DEBUG: "1"
           QUILL_WEBVIEW_CARRIER_LOOPBACK: "1"
         run: cargo test --no-default-features --locked --lib helper_live -- --ignored --nocapture
+
+  # The Windows network watcher (src/net_watch/watcher_tests.rs) and the
+  # rest of net_watch on a Windows kernel.
+  net-watch-windows:
+    name: net-watch-windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: tests (network watcher, Windows)
+        timeout-minutes: 10
+        run: cargo test --no-default-features --locked --lib net_watch -- --nocapture
 
   # Not required checks, main only. The packaging jobs live in reusable workflows shared
   # with release.yml (docs/decisions/codex-release-pipeline.md); CI never passes
