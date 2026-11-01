@@ -24,7 +24,6 @@ impl PresentRetry {
     pub(crate) fn after_draw(&mut self, presented: bool) -> bool {
         let chained = std::mem::take(&mut self.requested);
         if presented {
-            self.failures = 0;
             return false;
         }
         self.failures = if chained {
