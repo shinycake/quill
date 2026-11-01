@@ -37,3 +37,12 @@ reply strip's thumbnail then downloads on the next shown-chat update.
 
 The two remaining linear scans of the custom emoji cache in
 `session_files.rs` use `CustomEmojiStickers::lookup`.
+
+## Background account ticks and the forum walk
+
+The 40 ms background gap the finding asked for landed with `poll-pacing.md`.
+What remained is the badge: `forum_topics_extra` walked every chat to add
+forum topics, once per list and up to twice per `AccountUnread::of`. It now
+walks only the chats with loaded topics (`threads.forum_topics`), which are
+the only ones `forum_topics_unread` can count, so an account without forums
+pays nothing. A chat window's title uses the window title's `BadgeCache`.
