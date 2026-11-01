@@ -7,7 +7,6 @@ use super::actions::{
 };
 use super::app::{PaneMode, QuillApp};
 use super::demo::demo_media_allowlist;
-use super::message_text::rich_block_element;
 use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
 use super::*;
@@ -311,13 +310,15 @@ impl QuillApp {
                     // R8: tdesktop cuts a text over the length limit into
                     // several messages (`ApiWrap::sendMessage` + `CutPart`);
                     // the reply rides the first part only.
+                    let mut split = None;
                     if let [only] = snaps.as_slice()
                         && only.attachment.is_none()
                         && only.album.is_empty()
                     {
                         let limit = self.text_length_limit();
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {
-                            let parts = quill::text_split::split_markup_text(&only.text, limit);
+                            let mut cut = quill::text_split::SplitText::of(&only.text, limit);
+                            let parts = std::mem::take(&mut cut.parts);
                             if parts.is_empty() {
                                 self.connection.set_note(StatusNote::silent(tr(
                                     keys::Q_CHAT_MESSAGE_TOO_LONG_TO_SEND,
@@ -338,6 +339,7 @@ impl QuillApp {
                                     snap
                                 })
                                 .collect();
+                            split = Some(std::sync::Arc::new(cut));
                         }
                     }
                     // Phase A1: slow-mode gate (centralized in
@@ -355,12 +357,13 @@ impl QuillApp {
                     let Some(slot) = self.send_slot() else {
                         return;
                     };
-                    let origin = super::send_prep::SendOrigin::new(
+                    let mut origin = super::send_prep::SendOrigin::new(
                         slot,
                         chat_id,
                         self.composer_markup(cx),
                         &snaps,
                     );
+                    origin.split = split;
                     if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
                         self.begin_media_prep(origin, snaps, window, cx);
                     } else {

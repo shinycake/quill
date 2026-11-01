@@ -9,7 +9,7 @@ mod bots_profile;
 mod chat_list;
 mod code_highlight;
 mod common_groups;
-mod composer;
+pub(in crate::ui) mod composer;
 mod derived_state;
 mod dice;
 mod emoji_tap;

@@ -157,3 +157,35 @@ fn nothing_in_final_text_reads_as_a_marker() {
         assert_eq!(ComposerDoc::from_markup(&doc.to_final_markup()), doc);
     }
 }
+
+#[test]
+fn spans_inside_an_italic_span_read_back_wherever_they_start() {
+    const WORDS: &str = "aa bb cc dd ee";
+    let word = |at: usize| at * 3;
+    let span =
+        |from: usize, to: usize, tag: ComposerTag| DocSpan::new(word(from)..word(to) - 1, tag);
+    let mut failed = Vec::new();
+    for bold in 0..4 {
+        for bold_end in bold + 1..=5 {
+            for underline in 0..4 {
+                for underline_end in underline + 1..=5 {
+                    let mut doc = ComposerDoc::plain(WORDS);
+                    doc.spans = vec![
+                        span(0, 5, ComposerTag::Italic),
+                        span(bold, bold_end, ComposerTag::Bold),
+                        span(underline, underline_end, ComposerTag::Underline),
+                    ];
+                    doc.normalize();
+                    let markup = doc.to_markup();
+                    let back = ComposerDoc::from_markup(&markup);
+                    if back != doc {
+                        failed.push(format!("{markup:?}\n  {doc:?}\n  {back:?}"));
+                    }
+                }
+            }
+        }
+    }
+    let count = failed.len();
+    failed.truncate(8);
+    assert!(count == 0, "{count} failed\n{}", failed.join("\n"));
+}

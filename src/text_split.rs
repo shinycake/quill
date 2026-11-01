@@ -136,53 +136,87 @@ fn next_cut(text: &str, from: usize, limit: usize, cuts: &Cuts) -> Cut {
     Cut::RestFits
 }
 
-/// Split composer markup into messages of at most `limit` units each,
-/// cutting the parsed text as tdesktop's `CutPart` does, so formatting carries
-/// over a cut and no marker is left behind. Whitespace at the seams is
-/// trimmed. Falls back to a hard cut at the limit for text without any usable
-/// break.
-///
-/// Returns the input unchanged (one element) when it already fits, and an
-/// empty vector for blank input or a non-positive `limit`.
-pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
-    let Ok(limit) = usize::try_from(limit) else {
-        return Vec::new();
-    };
-    let markup = markup.trim();
-    if limit == 0 || markup.is_empty() {
-        return Vec::new();
-    }
-    let doc = ComposerDoc::from_markup(markup);
-    if utf16_len(&doc.text) <= limit {
-        return vec![markup.to_string()];
-    }
-    let cuts = Cuts::of(&doc);
-    let text = doc.text.as_str();
-    let skip_space = |at: usize| {
-        let rest = text.get(at..).unwrap_or_default();
-        text.len() - rest.trim_start().len()
-    };
-    let mut ranges = Vec::new();
-    let mut from = skip_space(0);
-    while from < text.len() {
-        match next_cut(text, from, limit, &cuts) {
-            Cut::At(cut) => {
-                let head = text.get(from..cut).unwrap_or_default();
-                ranges.push(from..from + head.trim_end().len());
-                from = skip_space(cut);
-            }
-            Cut::RestFits => {
-                let rest = text.get(from..).unwrap_or_default();
-                ranges.push(from..from + rest.trim_end().len());
-                break;
-            }
-            Cut::Stuck => break,
+/// Composer markup cut into messages of at most `limit` units each, cutting
+/// the parsed text as tdesktop's `CutPart` does, so formatting carries over a
+/// cut and no marker is left behind. Whitespace at the seams is trimmed. Falls
+/// back to a hard cut at the limit for text without any usable break.
+#[derive(Debug, Default)]
+pub struct SplitText {
+    /// The input unchanged when it already fits, and nothing for blank input
+    /// or a non-positive limit.
+    pub parts: Vec<String>,
+    doc: ComposerDoc,
+    /// Where each part starts in the text of `doc`.
+    starts: Vec<usize>,
+}
+
+impl SplitText {
+    pub fn of(markup: &str, limit: i32) -> Self {
+        let Ok(limit) = usize::try_from(limit) else {
+            return Self::default();
+        };
+        let markup = markup.trim();
+        if limit == 0 || markup.is_empty() {
+            return Self::default();
         }
+        let doc = ComposerDoc::from_markup(markup);
+        if utf16_len(&doc.text) <= limit {
+            return Self {
+                parts: vec![markup.to_string()],
+                doc,
+                starts: vec![0],
+            };
+        }
+        let cuts = Cuts::of(&doc);
+        let text = doc.text.as_str();
+        let skip_space = |at: usize| {
+            let rest = text.get(at..).unwrap_or_default();
+            text.len() - rest.trim_start().len()
+        };
+        let mut ranges = Vec::new();
+        let mut from = skip_space(0);
+        while from < text.len() {
+            match next_cut(text, from, limit, &cuts) {
+                Cut::At(cut) => {
+                    let head = text.get(from..cut).unwrap_or_default();
+                    ranges.push(from..from + head.trim_end().len());
+                    from = skip_space(cut);
+                }
+                Cut::RestFits => {
+                    let rest = text.get(from..).unwrap_or_default();
+                    ranges.push(from..from + rest.trim_end().len());
+                    break;
+                }
+                Cut::Stuck => break,
+            }
+        }
+        let parts = doc
+            .slices(&ranges)
+            .iter()
+            .map(ComposerDoc::to_final_markup)
+            .collect();
+        let starts = ranges.iter().map(|range| range.start).collect();
+        Self { parts, doc, starts }
     }
-    doc.slices(&ranges)
-        .iter()
-        .map(ComposerDoc::to_final_markup)
-        .collect()
+
+    /// What is left after the first `sent` parts went out: tdesktop's `left`,
+    /// the rest of the parsed text with its formatting and inner whitespace.
+    pub fn left_after(&self, sent: usize) -> String {
+        let Some(&start) = self.starts.get(sent) else {
+            return String::new();
+        };
+        let range = start..self.doc.text.len();
+        self.doc
+            .slices(std::slice::from_ref(&range))
+            .first()
+            .map(ComposerDoc::to_final_markup)
+            .unwrap_or_default()
+    }
+}
+
+/// The parts of [`SplitText`] alone.
+pub fn split_markup_text(markup: &str, limit: i32) -> Vec<String> {
+    SplitText::of(markup, limit).parts
 }
 
 #[cfg(test)]
@@ -191,9 +225,26 @@ mod scale_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{markup_text_units, split_markup_text, units_over_limit, utf16_len};
+    use super::{SplitText, markup_text_units, split_markup_text, units_over_limit, utf16_len};
     use crate::composer::parse_format_markup;
     use crate::composer_doc::{ComposerDoc, ComposerTag};
+
+    #[test]
+    fn what_is_left_keeps_its_seams_and_its_formatting() {
+        let split = SplitText::of("aaaa bbbb\n\ncccc", 5);
+        assert_eq!(split.parts, ["aaaa", "bbbb", "cccc"]);
+        assert_eq!(split.left_after(1), "bbbb\n\ncccc");
+        assert_eq!(split.left_after(2), "cccc");
+        assert_eq!(split.left_after(3), "");
+
+        let bold = format!("**{}**", "word ".repeat(10).trim_end());
+        let split = SplitText::of(&bold, 20);
+        assert!(split.parts.len() > 1);
+        let left = crate::composer_doc::ComposerDoc::from_markup(&split.left_after(1));
+        assert!(!left.text.contains('*'));
+        assert_eq!(left.spans.len(), 1, "one bold span over the rest");
+        assert_eq!(left.spans[0].range, 0..left.text.len());
+    }
 
     #[test]
     fn short_text_is_untouched() {

@@ -28,8 +28,8 @@ fn block_caption(value: &Value) -> String {
 #[derive(Default)]
 struct RichWalk {
     text: String,
-    /// (utf16_start, utf16_end, kind) over the final text.
-    entities: Vec<(i32, i32, TextEntityKind)>,
+    /// (start, end, kind) in bytes of the final text.
+    entities: Vec<(usize, usize, TextEntityKind)>,
     buttons: Vec<InlineKeyboardButton>,
 }
 
@@ -38,15 +38,11 @@ impl RichWalk {
         self.text.push_str(s);
     }
 
-    fn utf16_len(&self) -> i32 {
-        self.text.encode_utf16().count() as i32
-    }
-
     /// Walk `inner`, then wrap the appended range in `kind`.
     fn styled(&mut self, value: &Value, field: &str, kind: TextEntityKind) {
-        let start = self.utf16_len();
+        let start = self.text.len();
         walk_rich_text(value.get(field).unwrap_or(&Value::Null), self);
-        let end = self.utf16_len();
+        let end = self.text.len();
         if end > start {
             self.entities.push((start, end, kind));
         }
@@ -76,21 +72,16 @@ fn walk_rich_text(value: &Value, w: &mut RichWalk) {
         }
         "richTextUrl" => {
             let url = field_str(value, "url");
-            let start_text = w.text.clone();
+            let start = w.text.len();
             walk_rich_text(value.get("text").unwrap_or(&Value::Null), w);
-            let label: String = w
-                .text
-                .get(start_text.len()..)
-                .unwrap_or_default()
-                .to_string();
+            let label = w.text.get(start..).unwrap_or_default();
             let kind = if url == label {
                 TextEntityKind::Url
             } else {
                 TextEntityKind::TextUrl { url }
             };
-            let start = start_text.encode_utf16().count() as i32;
-            let end = w.utf16_len();
-            if end > start && !label.is_empty() {
+            let end = w.text.len();
+            if end > start {
                 w.entities.push((start, end, kind));
             }
         }
@@ -135,22 +126,17 @@ fn walk_rich_text(value: &Value, w: &mut RichWalk) {
 }
 
 /// Flatten a `RichText` tree to (plain text, entities, inline buttons).
-/// Entity offsets are converted from UTF-16 to UTF-8; unconvertible
-/// entities are dropped, never fatal.
+/// Entity offsets are bytes of the plain text.
 pub fn rich_text_to_parts(value: &Value) -> (String, Vec<TextEntity>, Vec<InlineKeyboardButton>) {
     let mut w = RichWalk::default();
     walk_rich_text(value, &mut w);
     let entities = w
         .entities
         .into_iter()
-        .filter_map(|(start16, end16, kind)| {
-            let start = utf16_to_utf8_offset(&w.text, start16).ok()?;
-            let end = utf16_to_utf8_offset(&w.text, end16).ok()?;
-            (end > start).then_some(TextEntity {
-                utf8_start: start,
-                utf8_end: end,
-                kind,
-            })
+        .map(|(utf8_start, utf8_end, kind)| TextEntity {
+            utf8_start,
+            utf8_end,
+            kind,
         })
         .collect();
     (w.text, entities, w.buttons)

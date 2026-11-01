@@ -161,3 +161,12 @@ fn the_rich_preview_grows_with_the_text() {
         crate::rich::preview_blocks(text);
     });
 }
+
+#[test]
+fn a_rich_send_grows_with_the_text() {
+    assert_linear(|text| {
+        for block in crate::rich::preview_blocks(text) {
+            crate::rich::input_page_block_json(&block);
+        }
+    });
+}

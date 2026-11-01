@@ -38,6 +38,11 @@ The wrap moved to `display_map/row_wrap.rs`, which also keeps the text metrics.
 - Arrows on a caret scrolled away from its row step logically, and a click on a left-out row lands
   on the nearest laid-out one, which is what the viewport shows.
 
+A text of at least `LONG_TEXT` bytes (256 KB) measures every line this way. Short lines cost a
+shaped measure each however few are on screen, so a 1 MB paste of log lines spent 90% of a 600 ms
+stall there. This regime is a function of the text's length alone: crossing the mark wraps every
+line again, once.
+
 The sum of isolated widths ignores kerning and shaping, so a long-line row can end at a different
 column than a shaped row would. Text stays inside the field because the layout of the row wraps at
 the same boundaries; in the worst case an Arabic row, whose joined forms differ from the isolated
@@ -67,9 +72,23 @@ gets the same markup as before, so a draft echoed by TDLib still compares equal 
 
 ## Counting off the UI thread
 "Will be sent as N messages" needs a parse and a split, in proportion to the text. On 100 KB this
-was 80% of a keystroke. Text whose byte length fits is `Fits` at once, with no parse. Otherwise the
-count runs on a background thread for the latest revision, and the note on screen stays until it
-returns. tdesktop has no such label, so there is nothing to match on timing.
+was 80% of a keystroke. Text whose byte length fits is `Fits` at once, with no parse. Up to 16 KB is
+counted in the frame, a few milliseconds, so ordinary long messages never show anything but their
+own count. Longer text is counted on a background thread, and until the count of this revision
+returns the note reads "Will be sent as … messages". A count only ever answers for the field and
+revision it was made for, so another chat's count can't show. tdesktop has no such label. The rich
+editor sends one message, so it shows no note.
+
+## A send that stops partway
+tdesktop queues every part as a local message at once, so nothing returns to the field; `left` in
+`ApiWrap::sendMessage` is the rest of the parsed text at each step. When Quill's driver refuses a
+part, the field keeps that same `left`: `SplitText::left_after` slices the parsed text from where
+the first unsent part starts and writes it as final markup. Seams and formatting stay.
+
+## Rich editor preview
+A frame built an element for every block, which cost 100 ms a keystroke at 100 KB and 2 s at 1 MB.
+The blocks are now parsed once per revision, and from 32 blocks, which always fill the preview's
+320 px, they go in a `list` that lays out what is in view.
 
 ## Kit tests
 `cargo test -p gpui-base` is refused outside the workspace and CI does not run the kit's tests. The
