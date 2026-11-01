@@ -404,9 +404,6 @@ impl QuillApp {
         (shift, indicator, listener)
     }
 
-    /// The capture-phase wheel listener over the history. It runs before
-    /// the views over the history (the media panel), so it asks the hit test
-    /// whether the wheel is the history's, as the list under it does.
     fn pull_listener(&self, cx: &mut Context<Self>) -> AnyElement {
         let app = cx.weak_entity();
         canvas(

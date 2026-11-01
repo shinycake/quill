@@ -403,8 +403,6 @@ fn a_sticker_tick_renders_the_layers_alone(cx: &mut TestAppContext) {
     let _ = take_slice_renders();
 }
 
-/// A patch, then a frame something else asks for: the slices around the
-/// layers replay.
 #[gpui_kit::test]
 fn a_composer_frame_after_a_patch_leaves_the_conversation_alone(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_stickers(cx);

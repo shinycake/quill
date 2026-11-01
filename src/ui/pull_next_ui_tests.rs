@@ -97,10 +97,8 @@ fn pull(cx: &mut VisualTestContext, at: Point<Pixels>, steps: usize) {
     }
 }
 
-/// The viewer owns the channel, so it has a composer, and the emoji tab open
-/// over the history. Returns a point on the tab's grid.
-fn over_the_panel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<Pixels> {
-    app.update(cx, |app, cx| {
+fn own_the_channel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    app.update(cx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
         let seq = AtomicU64::new(9_100);
         let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -108,8 +106,11 @@ fn over_the_panel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<P
         if let Some(owned) = quill::telegram::client::copy_and_parse(json, &seq, &sink) {
             session.apply(owned);
         }
-        app.open_media_panel(PanelTab::Emoji, cx);
     });
+}
+
+fn open_emoji_panel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<Pixels> {
+    app.update(cx, |app, cx| app.open_media_panel(PanelTab::Emoji, cx));
     frames(cx);
     app.read_with(cx, |app, _| {
         let history = app.history.viewport.get().expect("history painted");
@@ -123,7 +124,8 @@ fn a_wheel_over_the_media_panel_is_the_panels_alone(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     frames(vcx);
     open_channel_with_a_next_one(&app, vcx);
-    let at = over_the_panel(&app, vcx);
+    own_the_channel(&app, vcx);
+    let at = open_emoji_panel(&app, vcx);
     let panel_top = |app: &QuillApp| app.pickers.media_panel.list.logical_scroll_top();
     let before = app.read_with(vcx, |app, _| panel_top(app));
 
@@ -139,8 +141,6 @@ fn a_wheel_over_the_media_panel_is_the_panels_alone(cx: &mut TestAppContext) {
     });
 }
 
-/// At the end of the history no row moves, and the wheel still has to clear
-/// what the slice's last frame showed (the hint of a row).
 #[gpui_kit::test]
 fn a_wheel_over_the_history_redraws_it_with_no_row_to_move(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, 1100.);
