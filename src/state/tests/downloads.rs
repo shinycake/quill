@@ -246,6 +246,18 @@ fn auto_download_gate_respects_data_saver_and_chat_kind() {
 }
 
 #[test]
+fn a_low_disk_holds_every_automatic_download() {
+    use crate::settings::AUTO_DOWNLOAD_PHOTO;
+    let (mut session, _sink) = session();
+    session.chats.insert(13, placeholder_chat(ChatId(13)));
+    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+    session.media.disk_holds_auto_downloads = true;
+    assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+    session.media.disk_holds_auto_downloads = false;
+    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+}
+
+#[test]
 fn auto_download_media_ids_follow_per_type_flags() {
     // MED3: full-media auto-download honors the per-media-type flags —
     // voice on by default (TGX 0x63), video/file off; data saver and

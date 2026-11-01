@@ -1,5 +1,6 @@
 //! Driver tests: automatic photo and chat-photo downloads.
 use super::*;
+use crate::disk_guard::{DiskState, FLOORS};
 
 #[test]
 fn photo_history_auto_downloads_thumb_and_full_photo() {
@@ -422,6 +423,62 @@ fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
         Ok(Some(_))
     ));
     assert!(downloads(&driver));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn file_update(id: i32, size: i64, done: i64) -> String {
+    format!(
+        r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":{size},"expected_size":{size},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":{done},"downloaded_size":{done}}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":{size}}}}}}}"#
+    )
+}
+
+#[test]
+fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
+    const MIB: u64 = 1 << 20;
+    const CLOSE: u64 = FLOORS.close;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    driver
+        .download_user_file(FileId(51), Some((ChatId(7), 99)))
+        .unwrap();
+    driver
+        .download_user_file(FileId(52), Some((ChatId(7), 98)))
+        .unwrap();
+    let big = 900 * MIB as i64;
+    ingest(&mut driver, &file_update(51, big, 100 * MIB as i64));
+    ingest(&mut driver, &file_update(52, 10 * MIB as i64, 0));
+    let base = recorder.snapshot().len();
+
+    driver
+        .note_disk(DiskState::Low, Some(CLOSE + 500 * MIB), &FLOORS)
+        .unwrap();
+    assert!(driver.session.media.disk_holds_auto_downloads);
+    let sent = recorder.snapshot();
+    assert_eq!(sent.len(), base + 1, "the 10 MiB file fits: {sent:?}");
+    let pause: Value = serde_json::from_str(&sent[base]).unwrap();
+    assert_eq!(pause["@type"], "toggleDownloadIsPaused");
+    assert_eq!(pause["file_id"], 51);
+    assert_eq!(pause["is_paused"], true);
+
+    driver
+        .note_disk(DiskState::Healthy, Some(CLOSE + 900 * MIB), &FLOORS)
+        .unwrap();
+    assert!(!driver.session.media.disk_holds_auto_downloads);
+    assert_eq!(recorder.snapshot().len(), base + 1, "nothing to pause");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

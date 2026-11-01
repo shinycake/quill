@@ -25,13 +25,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let state = self.current_auth();
-        let auth = &self.signin_view(auth, &state);
+        let disk_full = self.disk_full_view();
+        let signin_open = disk_full.is_none();
+        let auth = &disk_full.unwrap_or_else(|| self.signin_view(auth, &state));
         // "Wrong number?" swaps the code form for the phone form.
-        let editing_phone = self.signin_phone_visible(&state) && !show_phone;
+        let editing_phone = signin_open && self.signin_phone_visible(&state) && !show_phone;
         let show_phone = show_phone || editing_phone;
         let show_code = show_code && !editing_phone;
         let busy = self.session().is_some_and(|s| s.requests.has_auth_submit());
-        let can_qr = quill::auth::can_request_qr_login(&self.current_auth())
+        let can_qr = signin_open
+            && quill::auth::can_request_qr_login(&self.current_auth())
             && (self.live.is_some() || self.auth_ui.demo_inputs);
         let live_or_demo = self.live.is_some() || self.auth_ui.demo_inputs;
         let show_retry = matches!(auth.action, AuthAction::StartupFailed)

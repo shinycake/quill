@@ -5,6 +5,7 @@ use crate::calls::engine::{CallEngine, ConnectParams, MediaDevice};
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{AccountKey, ChatId, RequestId};
+use crate::lang::{keys, tr};
 use crate::lifecycle::RestoreBlocker;
 use crate::platform::DatabaseKey;
 use crate::settings::AccountPaths;
@@ -138,14 +139,16 @@ pub enum ConnectBlocker {
     /// The OS refused to start the TDLib receive thread.
     ReceiveThread,
     DataFolder,
+    DiskFull,
 }
 
 impl ConnectBlocker {
     /// What the failure card says. `None` for a build with no API
-    /// credentials, where trying again cannot help.
+    /// credentials, where trying again cannot help, and for a full disk,
+    /// which has its own screen.
     pub fn startup_failure(&self) -> Option<StartupFailure> {
         match self {
-            ConnectBlocker::MissingCredentials => None,
+            ConnectBlocker::MissingCredentials | ConnectBlocker::DiskFull => None,
             ConnectBlocker::MissingTdjson
             | ConnectBlocker::TdjsonLoad
             | ConnectBlocker::TdjsonVersion => Some(StartupFailure::Library),
@@ -180,6 +183,7 @@ impl ConnectBlocker {
                 "tdjson is a different TDLib version than this build of Quill needs — rebuild it with scripts/build-tdlib.sh"
             }
             ConnectBlocker::DataFolder => "the account's data folder could not be used",
+            ConnectBlocker::DiskFull => tr(keys::Q_DISK_FULL_TITLE),
         }
     }
 
@@ -195,6 +199,7 @@ impl ConnectBlocker {
             ConnectBlocker::TdjsonVersion => "tdjson-version",
             ConnectBlocker::ReceiveThread => "receive-thread",
             ConnectBlocker::DataFolder => "data-folder",
+            ConnectBlocker::DiskFull => "disk-full",
         }
     }
 }

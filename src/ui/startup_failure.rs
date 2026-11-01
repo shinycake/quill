@@ -3,13 +3,25 @@
 //! platform has one, write the error to stderr, and exit with a failure code
 //! instead of panicking. On Linux, when nothing can draw the window, the
 //! alert says which Vulkan piece is missing and what to install.
+//!
+//! A GPU that stops working mid-session on Linux ends the app through a
+//! normal quit instead, and the alert follows once the quit has finished.
 #![deny(clippy::indexing_slicing)]
 
 #[cfg(any(test, target_os = "linux"))]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod vulkan;
 
+#[cfg(target_os = "linux")]
+use gpui_kit::ForegroundExecutor;
+use gpui_kit::Platform;
 use quill::lang::{keys, tr};
+#[cfg(target_os = "linux")]
+use std::cell::RefCell;
+use std::rc::Rc;
+#[cfg(target_os = "linux")]
+use std::rc::Weak;
+
 /// Report `error` from opening the main window and end the process.
 #[expect(
     clippy::exit,
@@ -34,6 +46,62 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
 /// stderr.
 pub(crate) fn tell(title: &str, body: &str) {
     show_alert(title, body, body);
+}
+
+/// A GPU lost mid-session that the renderer could not recreate (Linux):
+/// quit the normal way, so the quit observers close the TDLib clients and
+/// save state, and say why once they have run ([`report_gpu_gone`]).
+pub(crate) fn watch_gpu_loss(platform: &Rc<dyn Platform>) {
+    #[cfg(target_os = "linux")]
+    {
+        let quit = (platform.foreground_executor(), Rc::downgrade(platform));
+        QUIT.with(|slot| *slot.borrow_mut() = Some(quit));
+        gpui_wgpu::on_device_gone(gpu_gone);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = platform;
+}
+
+#[cfg(target_os = "linux")]
+thread_local! {
+    static QUIT: RefCell<Option<(ForegroundExecutor, Weak<dyn Platform>)>> =
+        const { RefCell::new(None) };
+    static GPU_GONE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Called by the renderer inside a window's draw, so the quit is queued
+/// on the main thread's executor and runs once the draw has returned.
+#[cfg(target_os = "linux")]
+fn gpu_gone(detail: &str) {
+    let first = GPU_GONE.with(|gone| gone.borrow_mut().replace(detail.to_owned()).is_none());
+    let quit = QUIT.with(|slot| slot.borrow().clone());
+    let (true, Some((executor, platform))) = (first, quit) else {
+        return;
+    };
+    executor
+        .spawn(async move {
+            if let Some(platform) = platform.upgrade() {
+                platform.quit();
+            }
+        })
+        .detach();
+}
+
+/// Called after the app's `run` returns: the alert for a GPU that stopped
+/// working mid-session, if one did.
+pub(crate) fn report_gpu_gone() {
+    #[cfg(target_os = "linux")]
+    if let Some(detail) = GPU_GONE.with(|gone| gone.borrow_mut().take()) {
+        eprintln!("quill: the GPU stopped working: {detail}");
+        show_alert(
+            tr(keys::Q_MISC_GPU_STOPPED_WORKING),
+            &quill::lang::tr_with(
+                keys::Q_MISC_GPU_STOPPED_WORKING_DETAIL,
+                &[("detail", &detail)],
+            ),
+            tr(keys::Q_MISC_GPU_STOPPED_WORKING_SUMMARY),
+        );
+    }
 }
 
 /// The alert's body, and a short version for a desktop notification (which

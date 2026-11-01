@@ -17,6 +17,7 @@
 //! every [`RETRY_EVERY`], so a desktop that finishes starting later wins.
 #![deny(clippy::indexing_slicing)]
 
+use crate::icon_badge::LatestSlot;
 use crate::locks::LockExt;
 use crate::tray::{
     TrayAction, notifications_label, render_tray_icon, rgba_to_argb32, sounds_label, tray_tooltip,
@@ -137,8 +138,59 @@ enum Phase {
     /// Registered and showing.
     Ready {
         handle: Handle<SniTray>,
+        publisher: Publisher,
         shown: (u32, (bool, bool)),
     },
+}
+
+type Shown = (u32, (bool, bool));
+
+/// Hands tray changes to a worker. `Handle::update` waits for ksni's service
+/// task, which waits on the session bus, so calling it here could hang the
+/// UI thread on a wedged bus; the worker takes only the newest state.
+struct Publisher {
+    slot: std::sync::Arc<LatestSlot<Option<Shown>>>,
+}
+
+impl Publisher {
+    /// `apply` returns false once the tray service is gone; the worker then
+    /// stops.
+    fn spawn(mut apply: impl FnMut(Shown) -> bool + Send + 'static) -> Self {
+        let slot = std::sync::Arc::new(LatestSlot::new());
+        let worker = slot.clone();
+        // A worker that cannot spawn leaves the slot undrained, so the icon
+        // keeps its old count until the next registration.
+        let _ = crate::thread_guard::spawn_guarded("quill-tray-update", move || {
+            while let Some(shown) = worker.take() {
+                if !apply(shown) {
+                    return;
+                }
+            }
+        });
+        Self { slot }
+    }
+
+    fn publish(&self, shown: Shown) {
+        self.slot.put(Some(shown));
+    }
+}
+
+impl Drop for Publisher {
+    fn drop(&mut self) {
+        self.slot.put(None);
+    }
+}
+
+fn spawn_publisher(handle: &Handle<SniTray>) -> Publisher {
+    let handle = handle.clone();
+    Publisher::spawn(move |(unread, toggles)| {
+        handle
+            .update(|tray| {
+                tray.unread = unread;
+                tray.toggles = toggles;
+            })
+            .is_some()
+    })
 }
 
 /// Tray lifecycle owned by the UI thread (see `tray::sync_tray`).
@@ -187,6 +239,7 @@ impl TrayState {
             Phase::Connecting(result) => match result.try_recv() {
                 Ok(Some(handle)) => {
                     self.phase = Phase::Ready {
+                        publisher: spawn_publisher(&handle),
                         handle,
                         shown: (unread, toggles),
                     }
@@ -196,18 +249,16 @@ impl TrayState {
                 }
                 Err(TryRecvError::Empty) => {}
             },
-            Phase::Ready { handle, shown } => {
+            Phase::Ready {
+                handle,
+                publisher,
+                shown,
+            } => {
                 if handle.is_closed() {
                     // The watcher went away (shell restart): register again.
                     self.phase = Phase::Idle(Instant::now());
-                } else if *shown != (unread, toggles)
-                    && handle
-                        .update(|tray| {
-                            tray.unread = unread;
-                            tray.toggles = toggles;
-                        })
-                        .is_some()
-                {
+                } else if *shown != (unread, toggles) {
+                    publisher.publish((unread, toggles));
                     *shown = (unread, toggles);
                 }
             }
@@ -233,4 +284,34 @@ fn start_registration(unread: u32, toggles: (bool, bool)) -> Receiver<Option<Han
         let _ = sender.send(handle);
     });
     receiver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::sync_channel;
+
+    #[test]
+    fn publishing_never_waits_for_the_tray_service() {
+        let (seen_tx, seen_rx) = channel();
+        let (release_tx, release_rx) = sync_channel::<()>(0);
+        let publisher = Publisher::spawn(move |shown| {
+            seen_tx.send(shown).unwrap();
+            release_rx.recv().is_ok()
+        });
+        publisher.publish((1, (true, true)));
+        // The worker is now stuck inside the first update, like ksni on a
+        // wedged bus; the UI thread still publishes without waiting.
+        assert_eq!(seen_rx.recv().unwrap(), (1, (true, true)));
+        publisher.publish((2, (true, true)));
+        publisher.publish((3, (false, true)));
+        release_tx.send(()).unwrap();
+        assert_eq!(seen_rx.recv().unwrap(), (3, (false, true)));
+        release_tx.send(()).unwrap();
+        drop(publisher);
+        assert!(
+            seen_rx.recv().is_err(),
+            "the worker stops with its publisher"
+        );
+    }
 }
