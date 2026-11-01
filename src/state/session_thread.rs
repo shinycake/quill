@@ -201,7 +201,9 @@ impl Session {
             thread.status = ThreadStatus::Ready;
         }
         if trimmed {
+            let chat_id = thread.chat_id;
             self.drop_thread_pages_past(&[far_end]);
+            self.prune_reply_targets(chat_id);
         }
     }
 
@@ -351,8 +353,12 @@ impl Session {
         if let Some(thread) = self.threads.thread.as_mut()
             && thread.note_live(row)
         {
+            let chat_id = thread.chat_id;
             let moved = thread.trim_live();
             self.drop_thread_pages_past(&moved);
+            if !moved.is_empty() {
+                self.prune_reply_targets(chat_id);
+            }
         }
     }
 

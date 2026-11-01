@@ -291,3 +291,25 @@ fn a_forum_topic_on_screen_drops_only_rows_above_its_reader() {
         "the reader keeps their rows"
     );
 }
+
+#[test]
+fn reply_strips_of_trimmed_topic_rows_go_when_only_the_topic_is_loaded() {
+    let (mut session, _sink) = session();
+    session.topic_history_entry(ChatId(7), 3);
+    let total = HISTORY_WINDOW_CAP as i64 * 2;
+    for id in 1_000_000..1_000_000 + total {
+        let mut message = live(7, id, Vec::new());
+        message.topic_id = Some(3);
+        session.apply_update_new_message(message);
+        session.histories.remove(&7);
+        session.accept_replied_message(ChatId(7), MessageId(id - 500_000), live(7, 1, Vec::new()));
+    }
+    let window = session.threads.topic_histories[&(7, 3)].messages.len();
+    assert!(window <= HISTORY_WINDOW_CAP);
+    assert!(
+        session.messages.reply_targets.len()
+            <= MAX_REPLY_TARGETS_OUTSIDE_WINDOW + HISTORY_WINDOW_CAP - HISTORY_WINDOW_TRIM_TO,
+        "at most the bound plus the rows since the last trim: {} strips kept",
+        session.messages.reply_targets.len()
+    );
+}

@@ -218,8 +218,9 @@ impl Session {
         }
         if let Some(topic) =
             topic_id.and_then(|topic| self.threads.topic_histories.get_mut(&(chat_id.0, topic)))
+            && topic.trim_live() > 0
         {
-            topic.trim_live();
+            self.prune_reply_targets(chat_id);
         }
     }
 

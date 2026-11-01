@@ -548,36 +548,54 @@ impl Session {
         );
     }
 
+    /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s
+    /// reply targets outside its loaded windows (the main history, its
+    /// topics and the open thread), nearest first.
     pub(crate) fn prune_reply_targets(&mut self, chat_id: ChatId) {
-        let Some((oldest, newest)) = self
+        let server = |messages: &HistoryMessages| {
+            let mut ids = messages
+                .values()
+                .filter(|message| !message.pending && !message.failed)
+                .map(|message| message.id.0);
+            let oldest = ids.next()?;
+            Some((oldest, ids.next_back().unwrap_or(oldest)))
+        };
+        let main = self
             .histories
             .get(&chat_id.0)
-            .and_then(|history| Some((history.oldest_id()?.0, history.newest_id()?.0)))
-        else {
-            return;
-        };
+            .map(|history| &history.messages);
         let topics = self.threads.topic_histories.iter();
-        let topics: Vec<&TopicHistory> = topics
+        let topics = topics
             .filter(|((chat, _), _)| *chat == chat_id.0)
-            .map(|(_, topic)| topic)
-            .chain(
-                self.threads
-                    .thread
-                    .iter()
-                    .filter(|thread| thread.chat_id == chat_id)
-                    .map(|thread| &thread.history),
-            )
+            .map(|(_, topic)| &topic.messages);
+        let thread = self.threads.thread.iter();
+        let thread = thread
+            .filter(|thread| thread.chat_id == chat_id)
+            .map(|thread| &thread.history.messages);
+        let windows: Vec<&HistoryMessages> = main.into_iter().chain(topics).chain(thread).collect();
+        let spans: Vec<(i64, i64)> = windows
+            .iter()
+            .filter_map(|messages| server(messages))
             .collect();
+        if spans.is_empty() {
+            return;
+        }
+        let distance = |id: i64| {
+            spans
+                .iter()
+                .map(|&(oldest, newest)| oldest.saturating_sub(id).max(id.saturating_sub(newest)))
+                .min()
+                .unwrap_or(i64::MAX)
+        };
         let mut outside: Vec<(i64, i64)> = self
             .messages
             .reply_targets
             .keys()
             .filter(|(chat, id)| {
-                *chat == chat_id.0
-                    && !(oldest..=newest).contains(id)
-                    && !topics.iter().any(|topic| topic.messages.contains_key(id))
+                *chat == chat_id.0 && !windows.iter().any(|window| window.contains_key(id))
             })
-            .map(|(_, id)| ((oldest - id).max(id - newest), *id))
+            .map(|&(_, id)| (distance(id), id))
+            .filter(|&(distance, _)| distance > 0)
             .collect();
         if outside.len() <= MAX_REPLY_TARGETS_OUTSIDE_WINDOW {
             return;
