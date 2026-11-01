@@ -47,6 +47,7 @@ fn an_account_off_screen_still_forwards_its_exports_requests() {
     driver.poll_ticks(
         crate::connect::TickScope::Background,
         std::time::Instant::now(),
+        ONLINE,
     );
 
     let sent = recorder.snapshot();

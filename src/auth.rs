@@ -27,6 +27,7 @@ pub fn is_device_login_qr(link: &str) -> bool {
         .is_ok_and(|bytes| !bytes.is_empty() && bytes.len() <= 1024)
 }
 
+use crate::lang::{keys, tr};
 use crate::telegram::envelope::{AuthorizationState, ErrorClass};
 
 /// Sign-in errors whose raw message is dropped later but which the UI
@@ -38,6 +39,41 @@ pub fn classify_sign_in_message(message: &str) -> Option<ErrorClass> {
         "PHONE_NUMBER_FLOOD" => Some(ErrorClass::PhoneFlood),
         "TASK_ALREADY_EXISTS" => Some(ErrorClass::TaskAlreadyExists),
         _ => None,
+    }
+}
+
+/// Why an account's client could not start. TDLib has no state for this: it
+/// answers an error and stays in `WaitTdlibParameters`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupFailure {
+    /// The system did not hand over the database key: its prompt was
+    /// cancelled, or the store is locked.
+    KeyLocked,
+    KeyUnreadable,
+    /// There is a database and no key for it.
+    KeyMissing,
+    /// TDLib refused the database key.
+    WrongKey,
+    /// The data folder could not be opened or created. TDLib's messages do
+    /// not tell a read-only folder from a full disk or a missing volume.
+    DataFolder,
+    /// libtdjson is missing, damaged or the wrong version.
+    Library,
+    /// The system refused the receive thread.
+    NoThread,
+}
+
+impl StartupFailure {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::KeyLocked => tr(keys::Q_STARTUP_KEY_LOCKED),
+            Self::KeyUnreadable => tr(keys::Q_STARTUP_KEY_UNREADABLE),
+            Self::KeyMissing => tr(keys::Q_STARTUP_KEY_MISSING),
+            Self::WrongKey => tr(keys::Q_STARTUP_WRONG_KEY),
+            Self::DataFolder => tr(keys::Q_STARTUP_DATA_FOLDER),
+            Self::Library => tr(keys::Q_STARTUP_LIBRARY),
+            Self::NoThread => tr(keys::Q_STARTUP_NO_THREAD),
+        }
     }
 }
 
@@ -71,6 +107,8 @@ pub enum AuthAction {
     /// on its own and never lands here).
     Closed,
     Closing,
+    /// The client could not start: say why and offer Retry.
+    StartupFailed,
 }
 
 pub fn view_for(state: &AuthorizationState) -> AuthView {
@@ -181,6 +219,12 @@ pub fn view_for(state: &AuthorizationState) -> AuthView {
             title: "Connection closed",
             body: "The connection to Telegram was closed.".into(),
             action: AuthAction::Closed,
+            blocking: true,
+        },
+        AuthorizationState::StartupFailed(failure) => AuthView {
+            title: tr(keys::Q_STARTUP_FAILED_TITLE),
+            body: failure.reason().into(),
+            action: AuthAction::StartupFailed,
             blocking: true,
         },
     }
