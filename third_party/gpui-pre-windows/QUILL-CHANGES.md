@@ -465,7 +465,10 @@ Added in 2026, after an audit of the earlier panic pass
   `for_each_after_unlock` / `for_each_open_after_unlock` helpers. Callers get
   copies only (`snapshot`, `find`) or change it under its own lock (`push`,
   `remove`), so none can hold the lock across `SendMessageW`. `src/platform.rs`
-  and `src/vsync.rs` use it; `TrackedWindow` is `Clone`.
+  and `src/vsync.rs` use it; `TrackedWindow` is `Clone`. `WindowList::collect`
+  copies into the caller's collection so the module stays std-only, and
+  `WindowList::snapshot` in `src/platform.rs` copies into a `SmallVec<[W; 4]>`,
+  so the vsync thread's copy on each tick takes no heap for up to 4 windows.
 - `src/platform.rs`: after `open_window` lists a new window, it checks the
   window's device against the platform's current one and, when recovery
   replaced the devices meanwhile, sends the window `WM_GPUI_GPU_DEVICE_LOST`
