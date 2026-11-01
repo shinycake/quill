@@ -195,7 +195,11 @@ impl OutputPlayer {
             heard: self.output.0.heard.clone(),
             starts_by,
         });
-        let queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let queue = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         if let Some(queue) = queue {
             self.output.connect(queue, self.id);
         }

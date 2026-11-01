@@ -15,9 +15,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quill::playback::PlaybackClock;
@@ -430,7 +430,10 @@ impl AudioEngine {
         let waited = |building: &Building| self.clock.now().saturating_sub(building.asked_at);
         self.state() == EngineState::Loading
             && (self.sim_clock.is_some()
-                || self.building.as_ref().is_some_and(|b| waited(b) >= LOADING_SHOWS_AFTER))
+                || self
+                    .building
+                    .as_ref()
+                    .is_some_and(|b| waited(b) >= LOADING_SHOWS_AFTER))
     }
 
     /// Where the track is, in seconds of the track: frames the mixer took,
@@ -452,7 +455,11 @@ impl AudioEngine {
     /// is its target until then.
     #[cfg(test)]
     pub(in crate::ui) fn seek_pending(&self) -> bool {
-        self.building.is_some() || self.track.as_ref().is_some_and(|t| t.seeks.target().is_some())
+        self.building.is_some()
+            || self
+                .track
+                .as_ref()
+                .is_some_and(|t| t.seeks.target().is_some())
     }
 
     /// Tests: the audio side owes an answer to a seek it was handed.

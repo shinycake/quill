@@ -35,11 +35,13 @@ fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn is_showing_pause(app: &QuillApp) -> bool {
-    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS).is_playing
+    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS)
+        .is_playing
 }
 
 fn shows_loading(app: &QuillApp) -> bool {
-    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS).loading
+    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS)
+        .loading
 }
 
 #[gpui_kit::test]

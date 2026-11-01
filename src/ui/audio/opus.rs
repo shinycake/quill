@@ -206,7 +206,10 @@ impl OpusSource {
     fn refill(&mut self) -> bool {
         let ch = usize::from(self.channels);
         while self.remaining > 0 {
-            let from = self.next_packet.checked_sub(1).and_then(|i| self.ends.get(i));
+            let from = self
+                .next_packet
+                .checked_sub(1)
+                .and_then(|i| self.ends.get(i));
             let from = from.copied().unwrap_or(0);
             let packet = self.ends.get(self.next_packet);
             let Some(packet) = packet.and_then(|&to| self.bytes.get(from..to)) else {
