@@ -10,7 +10,7 @@ use quill::locks::LockExt;
 impl QuillApp {
     /// Hand out what the account on screen queued for the OS: withdrawn
     /// notifications, banners, sounds, the Dock bounce, the incoming-call
-    /// toast and a settled tone upload. Each poll runs this, because a
+    /// toast and ringtone, and a settled tone upload. Each poll runs this, because a
     /// hidden, minimized or covered main window does not draw (tdesktop's
     /// notification manager runs on data events too). `window`: the main
     /// window, when its render runs this.
@@ -27,6 +27,10 @@ impl QuillApp {
             self.hand_out_notifications(drain, window, cx);
         }
         self.announce_ringing_call(cx);
+        // The ringtone follows the call's state, as tdesktop's
+        // `Calls::Instance` does, not a paint; the call tick keeps it looping.
+        self.ensure_call_tick(cx);
+        self.sync_call_sounds();
         self.settle_tone_upload(cx);
     }
 

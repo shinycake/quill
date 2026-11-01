@@ -844,6 +844,8 @@ mod linux_dbus;
 pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod photo_preview;
+#[cfg(all(test, feature = "demo-capture"))]
+mod ringtone_tests;
 mod spawn_call_notification;
 #[cfg(all(test, feature = "demo-capture"))]
 mod viewer_progress_tests;
