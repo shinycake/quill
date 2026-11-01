@@ -1068,8 +1068,6 @@ mod tests {
         assert!(may_be_visible(None, Some(slice), whole));
     }
 
-    /// Between frames only the latest frame is on screen: what the frame
-    /// before drew and the latest did not (a closed panel) is gone.
     #[test]
     fn what_a_chat_windows_slice_replays_stays_on_screen() {
         let chat = ChatId(5);
@@ -1136,6 +1134,8 @@ mod tests {
         assert!(!may_still_show(own) && !may_still_show(in_slice));
     }
 
+    /// Between frames only the latest frame is on screen: what the frame
+    /// before drew and the latest did not (a closed panel) is gone.
     #[test]
     fn shows_now_is_the_latest_frame_or_the_slice_it_replays() {
         let slice = EntityId::from((1_u64 << 32) | 17);

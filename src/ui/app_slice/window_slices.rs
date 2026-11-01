@@ -86,9 +86,6 @@ impl WindowSlices {
             .into_iter()
             .flatten()
             .map(|parts| parts.painter.entity_id());
-        self.slice_ids()
-            .chain(painters)
-            .collect::<Vec<_>>()
-            .into_iter()
+        self.slice_ids().chain(painters)
     }
 }
