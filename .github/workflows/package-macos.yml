@@ -128,6 +128,8 @@ jobs:
           QUILL_RELEASE_VERSION: ${{ inputs.version }}
           QUILL_BUILD_TELEGRAM_API_ID: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_ID || '' }}
           QUILL_BUILD_TELEGRAM_API_HASH: ${{ inputs.embed_credentials && secrets.TELEGRAM_API_HASH || '' }}
+          # Fail rather than ship shaders that compile on the user's first launch.
+          QUILL_REQUIRE_METALLIB: '1'
         run: cargo build --release --features ui --locked
       - name: build mini-app helper
         run: cargo build --release --locked -p quill-webview

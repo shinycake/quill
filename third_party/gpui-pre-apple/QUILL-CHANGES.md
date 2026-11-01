@@ -110,3 +110,17 @@ window, not the app:
   Tests: `shaders_that_do_not_compile_are_an_error`,
   `a_library_without_our_functions_is_an_error`,
   `one_failed_library_build_is_retried`.
+
+The Quill project also changed it in 2026 so a new user's first launch doesn't
+compile the shaders on the main thread:
+
+- `build.rs`: gpui-kit forces `runtime_shaders` on, which turned the metallib
+  off. The script now tries `xcrun metal` whatever the feature says and sets
+  `cfg(quill_metallib)` on success. A machine without the Metal toolchain
+  carries on with the source, unless `QUILL_REQUIRE_METALLIB` is set, as it is
+  in `.github/workflows/package-macos.yml`.
+- `src/metal_renderer.rs`: `built_in_library` loads the metallib under that cfg
+  and falls back to compiling the source if it doesn't load. Test:
+  `the_precompiled_shaders_build_every_pipeline`, which needs the toolchain.
+  Redo this at each GPUI re-vendor. The metallib's minimum version stays the
+  crate's `10.15.7`.

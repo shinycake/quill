@@ -40,7 +40,7 @@ use std::{
 // Exported to metal
 pub(crate) type PointF = gpui::Point<f32>;
 
-#[cfg(not(feature = "runtime_shaders"))]
+#[cfg(quill_metallib)]
 const SHADERS_METALLIB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shaders.metallib"));
 #[cfg(feature = "runtime_shaders")]
 const SHADERS_SOURCE_FILE: &str = include_str!(concat!(env!("OUT_DIR"), "/stitched_shaders.metal"));
@@ -1777,10 +1777,15 @@ fn half_to_f32(bits: u16) -> f32 {
 }
 
 fn built_in_library(device: &metal::DeviceRef) -> Result<metal::Library> {
-    #[cfg(feature = "runtime_shaders")]
-    let library = device.new_library_with_source(SHADERS_SOURCE_FILE, &metal::CompileOptions::new());
-    #[cfg(not(feature = "runtime_shaders"))]
+    #[cfg(quill_metallib)]
     let library = device.new_library_with_data(SHADERS_METALLIB);
+    #[cfg(all(quill_metallib, feature = "runtime_shaders"))]
+    let library = library.or_else(|error| {
+        log::warn!("the precompiled shaders did not load: {error}");
+        device.new_library_with_source(SHADERS_SOURCE_FILE, &metal::CompileOptions::new())
+    });
+    #[cfg(not(quill_metallib))]
+    let library = device.new_library_with_source(SHADERS_SOURCE_FILE, &metal::CompileOptions::new());
     library
         .map_err(anyhow::Error::msg)
         .context("building the Metal shader library")
@@ -2199,6 +2204,17 @@ mod tests {
             .err()
             .expect("the renderer needs its shader functions");
         assert!(format!("{error:#}").contains("locating shader function"));
+    }
+
+    #[cfg(quill_metallib)]
+    #[test]
+    fn the_precompiled_shaders_build_every_pipeline() {
+        renderer_from(|device| {
+            device
+                .new_library_with_data(SHADERS_METALLIB)
+                .map_err(anyhow::Error::msg)
+        })
+        .unwrap();
     }
 
     #[test]
