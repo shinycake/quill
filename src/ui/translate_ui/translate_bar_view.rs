@@ -419,11 +419,17 @@ impl QuillApp {
             found.into_iter().take(room).collect()
         };
         self.settings.translate.pump = scan;
+        let Some(live) = self.live.as_mut() else {
+            #[cfg(test)]
+            self.settings
+                .translate
+                .asked
+                .extend(wanted.into_iter().map(|id| (id, model.to)));
+            return false;
+        };
         let mut sent = false;
-        if let Some(live) = self.live.as_mut() {
-            for id in wanted {
-                sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
-            }
+        for id in wanted {
+            sent |= live.driver.translate_message(chat_id, id, model.to).is_ok();
         }
         sent
     }

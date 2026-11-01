@@ -108,6 +108,8 @@ impl QuillApp {
         };
         let wanted = self.viewer.state.strip_downloads(lane);
         let Some(live) = self.live.as_mut() else {
+            #[cfg(test)]
+            self.viewer.extra.strip_asked.extend(wanted);
             return;
         };
         for file_id in wanted {

@@ -11,7 +11,9 @@ use gpui_kit::component::Root;
 use gpui_kit::test::TestQueryExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{FileId, MessageId};
+use quill::media_viewer::{MediaViewer, MediaViewerItem, thumb_file_ids};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
+use quill::wake::UPDATES;
 use std::time::Duration;
 
 /// A 160 x 100 photo, in album `album` (0: none).
@@ -147,9 +149,8 @@ fn the_strip_follows_the_arrows_and_a_lone_photo_has_none(cx: &mut TestAppContex
     assert!(vcx.debug_bounds("media-viewer-group-thumbs").is_none());
 }
 
-/// The `ready-info-group-photos` demo with its group's photos open in the
-/// viewer from the info panel's avatar.
-fn group_photos(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+/// The `ready-info-group-photos` demo, its info panel open.
+fn group_info(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
@@ -165,9 +166,20 @@ fn group_photos(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext
     let Some(app) = slot.borrow().clone() else {
         panic!("the window opened");
     };
+    (app, vcx)
+}
+
+fn click_the_avatar(vcx: &mut VisualTestContext) {
     let avatar = vcx.update(|window, _| window.find_by_label("View photos").bounds());
     vcx.simulate_click(avatar.center(), Modifiers::default());
-    settle(&mut vcx);
+    settle(vcx);
+}
+
+/// The `ready-info-group-photos` demo with its group's photos open in the
+/// viewer from the info panel's avatar.
+fn group_photos(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, mut vcx) = group_info(cx);
+    click_the_avatar(&mut vcx);
     (app, vcx)
 }
 
@@ -223,6 +235,50 @@ fn a_group_photo_gallery_shows_a_strip_and_a_thumb_opens_its_photo(cx: &mut Test
     assert_eq!(header(&app, vcx).as_deref(), Some("Photo 2 of 3"));
     let second = vcx.debug_bounds(THUMBS[1]).expect("thumb 2");
     assert!((f32::from(second.size.width) - PHOTO_WIDTH).abs() < 1.0);
+}
+
+/// The first file of each of `items`, the one its thumb shows.
+fn thumb_files(items: &[MediaViewerItem]) -> Vec<FileId> {
+    items
+        .iter()
+        .filter_map(|item| thumb_file_ids(item).first().copied())
+        .collect()
+}
+
+#[gpui_kit::test]
+fn a_photo_that_lands_has_its_thumb_asked_for_by_the_same_pass(cx: &mut TestAppContext) {
+    let (app, mut vcx) = group_photos(cx);
+    let vcx = &mut vcx;
+    let (asked, gallery) = app.update(vcx, |app, cx| {
+        let gallery = app.viewer.state.items().to_vec();
+        app.viewer.state = MediaViewer::open_profile(gallery[..2].to_vec(), 0, 2);
+        app.viewer.extra.strip_asked.clear();
+        app.pump_profile_gallery(cx);
+        (app.viewer.extra.strip_asked.clone(), gallery)
+    });
+    assert_eq!(gallery.len(), 3);
+    assert_eq!(asked, thumb_files(&gallery), "every tile the pass drew");
+}
+
+#[gpui_kit::test]
+fn the_first_frame_of_a_viewer_wakes_the_pass_that_asks_for_its_thumbs(cx: &mut TestAppContext) {
+    let (app, mut vcx) = group_info(cx);
+    let vcx = &mut vcx;
+    let woke = UPDATES.epoch();
+    click_the_avatar(vcx);
+    assert!(
+        app.read_with(vcx, |app, _| app.viewer.extra.strip_asked.is_empty()),
+        "the open had no width to lay the strip out in"
+    );
+    assert_ne!(UPDATES.epoch(), woke, "a resting poll loop runs a pass");
+    let (asked, gallery) = app.update(vcx, |app, cx| {
+        app.pump_profile_gallery(cx);
+        (
+            app.viewer.extra.strip_asked.clone(),
+            app.viewer.state.items().to_vec(),
+        )
+    });
+    assert_eq!(asked, thumb_files(&gallery));
 }
 
 /// Past the idle wait on both clocks: the wall clock the viewer measures

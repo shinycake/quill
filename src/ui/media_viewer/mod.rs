@@ -90,6 +90,9 @@ pub(super) struct ViewerExtra {
     /// The width the last frame laid the thumbnail strip out in, which
     /// says which profile photo thumbs to fetch.
     pub strip_lane: Option<f32>,
+    /// The thumbs the demo would have fetched: it has no driver to ask.
+    #[cfg(test)]
+    pub strip_asked: Vec<quill::ids::FileId>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
 }
