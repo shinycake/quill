@@ -6,8 +6,9 @@
 //! conversation would rebuild the whole slice on every frame. Instead, the
 //! slice only reports where its animated content sits, and a small layer
 //! view rendered right after the slice (its sibling) draws that content
-//! at the current time. A frame-clock tick notifies only the layer; the
-//! slice replays its cached frame (`app_slice`).
+//! at the current time. A frame-clock tick notifies only the layer, a live
+//! view (`Entity::live`): it renders alone, and all the rest of the window,
+//! `QuillApp` and the slices included, stays as the last whole frame drew it.
 //!
 //! How it fits GPUI's frame (`Window::draw_roots`): every element of the
 //! window is prepainted, then everything is painted, in tree order.
@@ -27,6 +28,11 @@
 //!
 //! When the slice replays, none of that runs: the items of its last real
 //! frame stay, which is exactly what the replay shows.
+//!
+//! On a tick the layers render, prepaint and paint on their own, and only
+//! their paint reaches the screen: what a layer builds takes no clicks, no
+//! hover and no part in the accessibility tree, as the slice under it has
+//! all of those.
 //!
 //! The layer paints after the whole slice, so something the slice paints
 //! over an item must be an [`Occluder`] (the item then falls back to the
@@ -138,9 +144,16 @@ struct Item {
     /// Paint order once painted (0: registered by a prepaint that was
     /// discarded, or not painted yet).
     seq: Cell<u64>,
+    /// The opacity it was painted at (a dimmed cell).
+    opacity: Cell<f32>,
 }
 
 impl Item {
+    fn painted(&self, window: &Window) {
+        self.seq.set(next_seq());
+        self.opacity.set(window.element_opacity());
+    }
+
     /// The part of it that can show.
     fn visible(&self) -> Option<Bounds<Pixels>> {
         let visible = self.bounds.intersect(&self.mask.bounds);
@@ -189,6 +202,7 @@ impl Layer {
             text,
             inline: Cell::new(false),
             seq: Cell::new(0),
+            opacity: Cell::new(1.),
         });
         items.len() - 1
     }
@@ -225,7 +239,7 @@ impl Layer {
         let items = self.0.items.borrow();
         if let Some(item) = items.get(index) {
             item.inline.set(inline);
-            item.seq.set(next_seq());
+            item.painted(window);
         }
     }
 
@@ -330,16 +344,19 @@ impl Layer {
             if item.visible().is_none() {
                 continue;
             }
-            window.with_content_mask(Some(item.mask), |window| match &item.content {
-                Content::Frames(view) => view.paint(item.bounds, window),
-                Content::Paint { paint, .. } => paint(item.bounds, window),
-                Content::Tile { .. } | Content::Mirror { .. } => {
-                    if let Some(element) = built.get_mut(ix).and_then(Option::as_mut) {
-                        window.with_text_style(item.text.clone(), |window| {
-                            element.paint(window, cx);
-                        });
+            let opacity = Some(item.opacity.get());
+            window.with_element_opacity(opacity, |window| {
+                window.with_content_mask(Some(item.mask), |window| match &item.content {
+                    Content::Frames(view) => view.paint(item.bounds, window),
+                    Content::Paint { paint, .. } => paint(item.bounds, window),
+                    Content::Tile { .. } | Content::Mirror { .. } => {
+                        if let Some(element) = built.get_mut(ix).and_then(Option::as_mut) {
+                            window.with_text_style(item.text.clone(), |window| {
+                                element.paint(window, cx);
+                            });
+                        }
                     }
-                }
+                });
             });
         }
     }
@@ -486,7 +503,7 @@ impl Element for Layered {
         let inline = self.layer.as_ref().zip(*index).and_then(|(layer, index)| {
             let items = layer.0.items.borrow();
             let item = items.get(index)?;
-            item.seq.set(next_seq());
+            item.painted(window);
             Some(item.inline.get())
         });
         // Without a layer, or covered: the slice draws it. A mirror the
@@ -597,13 +614,29 @@ impl AnimationLayer {
 }
 
 impl Render for AnimationLayer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         super::frame_clock::trace_slice_render("animation layer");
-        LayerPainter {
+        let id = cx.entity_id();
+        let painter = LayerPainter {
             layer: self.layer.clone(),
             app: self.app.clone(),
-            painter: cx.entity_id(),
-        }
+            painter: id,
+        };
+        let Some(app) = self.app.upgrade() else {
+            return painter.into_any_element();
+        };
+        // A patch can land while input in a chat window has its state in
+        // place; the layer is the main window's, as in `QuillApp::render`.
+        let content = app.update(cx, |app, cx| {
+            let outer_scope = app.windows.scope;
+            app.set_window_scope(None);
+            app.main_frame_starts(window, super::image_budget::MainDraw::Patch, cx);
+            super::image_budget::slice_rendered(id);
+            let content = app.slices.painter_scope(id, painter);
+            app.set_window_scope(outer_scope);
+            content
+        });
+        super::chat_window::WindowScope::new(self.app.clone(), None, content).into_any_element()
     }
 }
 
@@ -682,6 +715,11 @@ impl Element for LayerPainter {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "layer_tick_tests.rs"]
+mod layer_tick_tests;
 
 #[cfg(test)]
 mod tests {
