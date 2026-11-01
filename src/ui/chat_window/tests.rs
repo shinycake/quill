@@ -1003,8 +1003,8 @@ fn a_chat_windows_pictures_go_through_a_cache_of_its_own(cx: &mut TestAppContext
     );
     let images = h
         .app
-        .read_with(cx, |app, cx| {
-            app.windows.image_cache_for(chat_window.window_id(), cx)
+        .read_with(cx, |app, _| {
+            app.windows.image_cache_for(chat_window.window_id())
         })
         .expect("the window's cache");
     let loaded = images.read_with(cx, |images, _| images.loaded_images());

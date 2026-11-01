@@ -18,8 +18,9 @@
 //! notifications, playback, dialogs and preferences). Each chat window is a
 //! [`view::ChatWindowView`] whose [`slot::WindowSlot`] owns what is per
 //! window: the history view state, the compose field and its state, the
-//! message menu and selection, the pickers, the media viewer, and the
-//! session's view of the chat. `QuillApp::set_window_scope` swaps a slot
+//! message menu and selection, the pickers, the media viewer, the slices
+//! and animation layers that draw them, its pictures, and the session's
+//! view of the chat. `QuillApp::set_window_scope` swaps a slot
 //! in while its window is drawn or handles input, so the app's own
 //! conversation, composer and overlay code serves every window; work that
 //! finishes later runs in the window it started in (`scoped`); kit
@@ -86,6 +87,8 @@ struct OpenChatWindow {
     handle: AnyWindowHandle,
     view: WeakEntity<ChatWindowView>,
     slot: slot::SharedSlot,
+    /// Its slices and layer painters, wherever the swap has them.
+    views: Vec<EntityId>,
 }
 
 impl ChatWindows {
@@ -145,13 +148,12 @@ impl ChatWindows {
     /// active (for the idle trim).
     pub(super) fn image_caches(
         &self,
-        cx: &App,
     ) -> Vec<(Entity<super::image_budget::BoundedImageCache>, bool)> {
         self.open
             .iter()
-            .filter_map(|open| {
-                let images = open.view.upgrade()?.read(cx).images.clone();
-                Some((images, open.slot.borrow().active))
+            .map(|open| {
+                let slot = open.slot.borrow();
+                (slot.images.clone(), slot.active)
             })
             .collect()
     }
@@ -160,13 +162,20 @@ impl ChatWindows {
     pub(super) fn image_cache_for(
         &self,
         id: WindowId,
-        cx: &App,
     ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
         let open = self
             .open
             .iter()
             .find(|open| open.handle.window_id() == id)?;
-        Some(open.view.upgrade()?.read(cx).images.clone())
+        Some(open.slot.borrow().images.clone())
+    }
+
+    /// The image cache of the chat window whose state is in place.
+    pub(super) fn image_cache_in_place(
+        &self,
+    ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
+        let slot = self.slot_for(self.scope?)?;
+        Some(slot.borrow().images.clone())
     }
 
     fn slot_for(&self, chat_id: ChatId) -> Option<slot::SharedSlot> {
@@ -188,12 +197,33 @@ impl ChatWindows {
             .and_then(|open| open.view.upgrade())
     }
 
-    pub(super) fn view_ids(&self) -> Vec<EntityId> {
-        self.open.iter().map(|open| open.view.entity_id()).collect()
-    }
-
     pub(super) fn view_id_for(&self, chat_id: ChatId) -> Option<EntityId> {
         self.window_for(chat_id).map(|open| open.view.entity_id())
+    }
+
+    /// The view of the chat window whose state is in place.
+    pub(super) fn view_in_place(&self) -> Option<EntityId> {
+        self.view_id_for(self.scope?)
+    }
+
+    /// The conversation slices the slots hold: every chat window's but the
+    /// one in place, and the main window's while one is.
+    pub(super) fn slice_ids(&self) -> Vec<EntityId> {
+        self.open
+            .iter()
+            .filter_map(|open| open.slot.try_borrow().ok())
+            .flat_map(|slot| slot.slices.slice_ids().collect::<Vec<_>>())
+            .collect()
+    }
+
+    /// Whether every window the slots hold showed its conversation at its
+    /// last render.
+    pub(super) fn all_conversations_shown(&self) -> bool {
+        self.open.iter().all(|open| {
+            open.slot
+                .try_borrow()
+                .is_ok_and(|slot| slot.slices.conversation_shown())
+        })
     }
 
     /// Whether a chat window's state is in place.
@@ -277,6 +307,16 @@ impl QuillApp {
     pub(in crate::ui) fn window_scope_of(&self, window: &Window) -> Option<ChatId> {
         self.windows
             .chat_for_window(window.window_handle().window_id())
+    }
+
+    /// The image cache of the window whose state is in place.
+    pub(super) fn image_cache_in_place(
+        &self,
+    ) -> Option<Entity<super::image_budget::BoundedImageCache>> {
+        match self.windows.scope {
+            Some(_) => self.windows.image_cache_in_place(),
+            None => self.slices.image_cache(),
+        }
     }
 
     /// The open forum topic of the content being built now.
@@ -379,11 +419,13 @@ impl QuillApp {
                 }
             };
             owner.update(cx, |app, cx| {
+                let views = slot.borrow().slices.view_ids().collect();
                 app.windows.open.push(OpenChatWindow {
                     chat_id,
                     handle,
                     view,
                     slot,
+                    views,
                 });
                 app.schedule_chat_windows_save(cx);
                 cx.notify();

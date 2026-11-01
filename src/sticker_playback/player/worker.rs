@@ -35,6 +35,7 @@ pub(super) fn run(me: usize, shared: &Shared) {
                 if let Some(job) = state.next_job(me) {
                     break (Some(job), Vec::new());
                 }
+                shared.drained.notify_all();
                 state = wait(shared, state);
             }
         };

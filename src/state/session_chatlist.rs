@@ -24,7 +24,7 @@ impl Session {
             chat.unread_count = 0;
             chat.is_marked_as_unread = false;
         }
-        self.revision = self.revision.wrapping_add(1);
+        self.touch_unread();
     }
 
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {

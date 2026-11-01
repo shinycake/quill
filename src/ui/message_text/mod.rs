@@ -304,8 +304,6 @@ pub(super) struct FooterMeta {
     pub(super) forward_drag: Option<quill::forward_drag::ForwardDrag>,
 }
 
-impl FooterMeta {}
-
 /// The time footer of a message: author signature, pin, view count (eye
 /// icon), "edited" / "imported" and the time/receipt, on one row.
 pub(super) fn message_footer_meta(meta: &FooterMeta) -> Option<AnyElement> {
