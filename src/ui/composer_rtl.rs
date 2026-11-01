@@ -43,6 +43,11 @@ pub(super) mod tests {
         static SHAPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     }
 
+    /// The strings shaped since the last call, in order.
+    pub(in crate::ui) fn take_shaped() -> Vec<String> {
+        SHAPED.with(|shaped| shaped.take())
+    }
+
     impl gpui_kit::PlatformTextSystem for BidiTextSystem {
         fn add_fonts(&self, fonts: Vec<std::borrow::Cow<'static, [u8]>>) -> gpui_kit::Result<()> {
             gpui_kit::NoopTextSystem.add_fonts(fonts)

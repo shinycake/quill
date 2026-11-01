@@ -476,3 +476,8 @@ emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
 
 - `src/app.rs`, `src/platform.rs`: the docs of `App::on_app_lifecycle` and
   `Platform::on_app_lifecycle` say macOS emits `AppLifecyclePhase::Active`.
+
+The Quill project also changed it in 2026 so the input can wrap a long line
+without shaping it (`third_party/gpui-base/QUILL-CHANGES.md`):
+
+- `src/text_system/line_wrapper.rs`: `LineWrapper::width_for_char` is public.

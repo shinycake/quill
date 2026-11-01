@@ -24,7 +24,8 @@ use crate::{
         RopeExt as _,
         blink_cursor::CURSOR_WIDTH,
         display_map::{
-            BidiLine, InputLine, LineLayout, Paragraph, fragment_from_shaped, mirror_neutral_run,
+            BidiLine, InputLine, LineLayout, LineWindow, Paragraph, fragment_from_shaped,
+            mirror_neutral_run, starts_rtl,
         },
     },
 };
@@ -57,6 +58,8 @@ fn diagnostic_highlight_style(
 }
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
+/// Rows shaped past a screenful of rows on each side of the viewport of a long line.
+const ROW_MARGIN: usize = 8;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
@@ -902,18 +905,20 @@ impl<M: InputModeKind> TextElement<M> {
             .iter()
             .zip(last_layout.lines.iter())
         {
-            let mut offset = line_offset;
+            let line_top = y;
+            let mut offset = line_offset + line.first_offset();
             for (row, shaped) in line.wrapped_lines.iter().enumerate() {
                 let alignment = line.sub_line_offset(row, last_layout);
                 let end = offset + shaped.len;
                 let start_ix = range.start.max(offset);
                 let end_ix = range.end.min(end);
-                let is_last = row + 1 == line.wrapped_lines.len();
+                let is_last = line.ends_line(row);
+                let y = line_top + line.row_top(row, last_layout.line_height);
                 // A selected newline has a one-space cell, including empty lines.
                 // A wrap boundary is not a newline and must not get such a cell.
                 let newline = is_last && range.start <= end && range.end > end;
                 if start_ix < end_ix || newline {
-                    let indent = if row == 0 { px(0.) } else { line.wrap_indent };
+                    let indent = line.line_indent(row);
                     let spans: Vec<(Pixels, Pixels)> = if shaped.is_bidi() {
                         // A logical range can cover several visual pieces when it crosses a
                         // direction change; the newline cell sits past the logical end of the
@@ -953,8 +958,8 @@ impl<M: InputModeKind> TextElement<M> {
                     }
                 }
                 offset = end;
-                y += last_layout.line_height;
             }
+            y = line_top + line.size(last_layout.line_height).height;
         }
         (!corners.is_empty()).then_some(corners)
     }
@@ -1189,18 +1194,18 @@ impl<M: InputModeKind> TextElement<M> {
         state: &InputBaseState<M>,
         line_height: Pixels,
         input_height: Pixels,
-    ) -> (Range<usize>, Vec<usize>, Pixels) {
+    ) -> (Range<usize>, Vec<usize>, Pixels, Range<usize>) {
         // Add extra rows to avoid showing empty space when scroll to bottom.
         let extra_rows = 1;
         if state.is_single_line() {
-            return (0..1, vec![0], px(0.));
+            return (0..1, vec![0], px(0.), 0..1);
         }
 
         let total_lines = state.display_map.wrap_row_count();
         let display_count = state.display_map.display_row_count();
         let buffer_line_count = state.display_map.buffer_line_count();
         if display_count == 0 || buffer_line_count == 0 {
-            return (0..0, Vec::new(), px(0.));
+            return (0..0, Vec::new(), px(0.), 0..0);
         }
 
         let mut scroll_top = if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
@@ -1220,15 +1225,9 @@ impl<M: InputModeKind> TextElement<M> {
             );
         scroll_top = clamp_vertical_scroll_offset(scroll_top, scroll_height, input_height);
 
-        // Display rows are uniformly `line_height` tall, so the visible window maps
-        // directly to a display-row range.
-        let viewport_top = (-scroll_top).max(px(0.));
-        let viewport_bottom = viewport_top + input_height;
-        let line_height_f = f32::from(line_height);
-        let first_display =
-            ((f32::from(viewport_top) / line_height_f).floor() as usize).min(display_count - 1);
-        let last_display =
-            ((f32::from(viewport_bottom) / line_height_f).ceil() as usize).min(display_count - 1);
+        let viewport = viewport_rows(scroll_top, input_height, line_height, display_count);
+        let first_display = viewport.start;
+        let last_display = viewport.end.saturating_sub(1);
 
         let start_line = state.display_map.display_row_to_buffer_line(first_display);
         let end_line = state.display_map.display_row_to_buffer_line(last_display);
@@ -1252,7 +1251,7 @@ impl<M: InputModeKind> TextElement<M> {
             }
         }
 
-        (visible_range, visible_buffer_lines, visible_top)
+        (visible_range, visible_buffer_lines, visible_top, viewport)
     }
 
     /// Return (line_number_width, line_number_len)
@@ -1850,7 +1849,7 @@ impl<M: InputModeKind> TextElement<M> {
                     .iter()
                     .any(|span| !cache.widths.contains_key(span.token()))
         });
-        let (visible, _, _) = self.calculate_visible_range(state, line_height, viewport);
+        let (visible, _, _, _) = self.calculate_visible_range(state, line_height, viewport);
         let start = state.text.line_start_offset(visible.start);
         let end = state.text.line_end_offset(visible.end.saturating_sub(1));
         let spans = state.token_spans();
@@ -1980,6 +1979,7 @@ impl<M: InputModeKind> TextElement<M> {
     fn layout_token_lines(
         state: &InputBaseState<M>,
         last_layout: &LastLayout,
+        wanted_rows: &Range<usize>,
         font_size: Pixels,
         runs: &[TextRun],
         window: &mut Window,
@@ -1995,23 +1995,34 @@ impl<M: InputModeKind> TextElement<M> {
             .visible_buffer_lines
             .iter()
             .map(|&row| {
-                let line_start = state.text.line_start_offset(row);
-                let text: String = state.text.slice_line(row).into();
-                let ranges = if state.is_single_line() {
+                let buffer_line_start = state.text.line_start_offset(row);
+                let line_item = state.display_map.line(row);
+                let part = line_item.filter(|_| !state.is_single_line()).map(|item| {
+                    item.window(state.display_map.buffer_line_to_display_row(row), wanted_rows)
+                });
+                let part = part.filter(|part| !part.is_whole());
+                let skipped = part.as_ref().map_or(0, |part| part.bytes.start);
+                // Offsets below are relative to the laid-out part of the line.
+                let line_start = buffer_line_start + skipped;
+                let text = laid_out_text(&state.text, row, part.as_ref());
+                let ranges: SmallVec<[Range<usize>; 1]> = if state.is_single_line() {
                     smallvec::smallvec![0..text.len()]
                 } else {
-                    state
-                        .display_map
-                        .line(row)
-                        .expect("prepared line")
-                        .wrapped_lines
-                        .clone()
+                    let item = line_item.expect("prepared line");
+                    let rows = part.as_ref().map_or(0..item.lines_len(), |p| p.rows.clone());
+                    item.wrapped_lines
+                        .get(rows)
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|r| r.start - skipped..r.end - skipped)
+                        .collect()
                 };
                 let mut lines: SmallVec<[InputLine; 1]> = SmallVec::new();
                 // Right-to-left content takes the bidi path with the tokens as
                 // inline objects (Quill patch).
-                let paragraph = Paragraph::analyze(&text);
+                let paragraph = laid_out_paragraph(&text, &state.text, row, part.as_ref());
                 let paragraph_rtl = paragraph.as_ref().is_some_and(|p| p.is_rtl());
+                let run_offset_of_part = run_offset + skipped;
                 let mut line_has_background = false;
                 let line_tokens: Vec<(Range<usize>, Pixels)> = spans
                     [spans.partition_point(|s| s.range().end <= line_start)..]
@@ -2031,7 +2042,7 @@ impl<M: InputModeKind> TextElement<M> {
                             &text,
                             range,
                             &line_tokens,
-                            run_offset,
+                            run_offset_of_part,
                             runs,
                             font_size,
                             window,
@@ -2052,7 +2063,7 @@ impl<M: InputModeKind> TextElement<M> {
                         let local = span.range().start - line_start..span.range().end - line_start;
                         if offset < local.start {
                             let part = offset..local.start;
-                            let part_runs = runs_for_range(runs, run_offset, &part);
+                            let part_runs = runs_for_range(runs, run_offset_of_part, &part);
                             line_has_background |= has_background(&part_runs);
                             let shaped = window.text_system().shape_line(
                                 text[part.clone()].to_owned().into(),
@@ -2081,7 +2092,7 @@ impl<M: InputModeKind> TextElement<M> {
                     }
                     if offset < range.end {
                         let part = offset..range.end;
-                        let part_runs = runs_for_range(runs, run_offset, &part);
+                        let part_runs = runs_for_range(runs, run_offset_of_part, &part);
                         line_has_background |= has_background(&part_runs);
                         let shaped = window.text_system().shape_line(
                             text[part.clone()].to_owned().into(),
@@ -2099,19 +2110,12 @@ impl<M: InputModeKind> TextElement<M> {
                     }
                     lines.push(InputLine::inline(text[range].to_owned().into(), fragments));
                 }
-                let indent = state.display_map.line(row).map_or(0, |line| line.indent);
-                let wrap_indent = if indent > 0 && lines.len() > 1 {
-                    let bytes = text
-                        .char_indices()
-                        .nth(indent as usize)
-                        .map_or(text.len(), |(ix, _)| ix);
-                    lines[0].x_for_index(bytes)
-                } else {
-                    px(0.)
-                };
-                run_offset += text.len() + 1;
+                let indent = line_item.map_or(0, |line| line.indent) as usize;
+                let wrap_indent = wrapped_indent(indent, &lines, part.as_ref(), font_size, window);
+                run_offset += line_item.map_or(text.len(), |line| line.len()) + 1;
                 LineLayout::new()
                     .inline_lines(lines)
+                    .omitting(part.map(|part| part.omitted).unwrap_or_default())
                     .rtl(paragraph_rtl)
                     .with_background(line_has_background)
                     .wrap_indent(wrap_indent)
@@ -2358,6 +2362,7 @@ impl<M: InputModeKind> TextElement<M> {
         state: &InputBaseState<M>,
         display_text: &Rope,
         last_layout: &LastLayout,
+        wanted_rows: &Range<usize>,
         font_size: Pixels,
         runs: &[TextRun],
         bg_segments: &[(Range<usize>, Hsla)],
@@ -2366,7 +2371,14 @@ impl<M: InputModeKind> TextElement<M> {
     ) -> Vec<LineLayout> {
         let is_single_line = state.is_single_line();
         if state.tokens_visible() {
-            return Self::layout_token_lines(state, last_layout, font_size, runs, window);
+            return Self::layout_token_lines(
+                state,
+                last_layout,
+                wanted_rows,
+                font_size,
+                runs,
+                window,
+            );
         }
 
         let tab_stop = tab_stop_width(
@@ -2424,31 +2436,40 @@ impl<M: InputModeKind> TextElement<M> {
         let mut run_offset = 0;
 
         for (vi, &buffer_line) in last_layout.visible_buffer_lines.iter().enumerate() {
-            let line_text: String = display_text.slice_line(buffer_line).into();
             let line_item = state
                 .display_map
                 .line(buffer_line)
                 .expect("line should exists in wrapper");
-
-            debug_assert_eq!(line_item.len(), line_text.len());
+            let part = line_item.window(
+                state.display_map.buffer_line_to_display_row(buffer_line),
+                wanted_rows,
+            );
+            let part = (!part.is_whole()).then_some(part);
+            let skipped = part.as_ref().map_or(0, |part| part.bytes.start);
+            let rows = part.as_ref().map_or(0..line_item.lines_len(), |p| p.rows.clone());
+            let line_text = laid_out_text(display_text, buffer_line, part.as_ref());
+            // Offsets below are relative to the laid-out part of the line.
+            let part_run_offset = run_offset + skipped;
+            let part_byte_offset = last_layout.visible_line_byte_offsets[vi] + skipped;
 
             let mut wrapped_lines: SmallVec<[InputLine; 1]> = SmallVec::with_capacity(1);
             let mut line_has_background = false;
             // Right-to-left content: the paragraph is analysed once and each wrapped row is
             // shaped run by run in visual order (see `display_map::bidi`).
-            let paragraph = Paragraph::analyze(&line_text);
+            let paragraph = laid_out_paragraph(&line_text, display_text, buffer_line, part.as_ref());
             let paragraph_rtl = paragraph.as_ref().is_some_and(|p| p.is_rtl());
 
-            for range in &line_item.wrapped_lines {
+            for range in line_item.wrapped_lines.get(rows).unwrap_or_default() {
+                let range = range.start - skipped..range.end - skipped;
                 if let Some(paragraph) = &paragraph {
                     let (row, has_bg) = Self::layout_bidi_row(
                         paragraph,
                         &line_text,
                         range.clone(),
-                        run_offset,
+                        part_run_offset,
                         runs,
                         bg_segments,
-                        last_layout.visible_line_byte_offsets[vi],
+                        part_byte_offset,
                         font_size,
                         window,
                     );
@@ -2456,15 +2477,11 @@ impl<M: InputModeKind> TextElement<M> {
                     wrapped_lines.push(row);
                     continue;
                 }
-                let line_runs = runs_for_range(runs, run_offset, &range);
+                let line_runs = runs_for_range(runs, part_run_offset, &range);
                 let line_runs = if bg_segments.is_empty() {
                     line_runs
                 } else {
-                    split_runs_by_bg_segments(
-                        last_layout.visible_line_byte_offsets[vi] + (range.start),
-                        &line_runs,
-                        bg_segments,
-                    )
+                    split_runs_by_bg_segments(part_byte_offset + range.start, &line_runs, bg_segments)
                 };
 
                 let sub_line: SharedString = line_text[range.clone()].to_string().into();
@@ -2480,19 +2497,17 @@ impl<M: InputModeKind> TextElement<M> {
             }
 
             // Use the first visual line's indentation width for continuation lines.
-            let wrap_indent = if line_item.indent > 0 && wrapped_lines.len() > 1 {
-                let indent_byte_len = line_text
-                    .char_indices()
-                    .nth(line_item.indent as usize)
-                    .map(|(ix, _)| ix)
-                    .unwrap_or(line_text.len());
-                wrapped_lines[0].x_for_index(indent_byte_len)
-            } else {
-                px(0.)
-            };
+            let wrap_indent = wrapped_indent(
+                line_item.indent as usize,
+                &wrapped_lines,
+                part.as_ref(),
+                font_size,
+                window,
+            );
 
             let line_layout = LineLayout::new()
                 .inline_lines(wrapped_lines)
+                .omitting(part.map(|part| part.omitted).unwrap_or_default())
                 .rtl(paragraph_rtl)
                 .wrap_indent(wrap_indent)
                 .with_background(line_has_background)
@@ -2500,7 +2515,7 @@ impl<M: InputModeKind> TextElement<M> {
             lines.push(line_layout);
 
             // +1 for the `\n`
-            run_offset += line_text.len() + 1;
+            run_offset += line_item.len() + 1;
         }
 
         lines
@@ -2734,6 +2749,92 @@ struct CursorRenderInfo {
     is_active: bool,
     /// The caret sits on a right-to-left paragraph (Quill bidi patch).
     rtl: bool,
+}
+
+/// The display rows that a scroll offset shows, as far as the last row that is
+/// partly in view. Display rows are uniformly `line_height` tall.
+fn viewport_rows(
+    scroll_top: Pixels,
+    input_height: Pixels,
+    line_height: Pixels,
+    display_count: usize,
+) -> Range<usize> {
+    let viewport_top = (-scroll_top).max(px(0.));
+    let viewport_bottom = viewport_top + input_height;
+    let line_height = f32::from(line_height);
+    let last_row = display_count.saturating_sub(1);
+    let first = ((f32::from(viewport_top) / line_height).floor() as usize).min(last_row);
+    let last = ((f32::from(viewport_bottom) / line_height).ceil() as usize).min(last_row);
+    first..last + 1
+}
+
+/// The display rows of a long line to shape: the viewport and as much again on each
+/// side, so a page step or a small scroll lands on rows that are ready. Everything
+/// when the input keeps per-row state in its gutter.
+fn rows_to_lay_out(viewport: &Range<usize>, lays_out_rows: bool) -> Range<usize> {
+    if !lays_out_rows {
+        return 0..usize::MAX;
+    }
+    let margin = viewport.len() + ROW_MARGIN;
+    viewport.start.saturating_sub(margin)..viewport.end.saturating_add(margin)
+}
+
+/// The text of buffer line `row`, or of its laid-out part.
+fn laid_out_text(text: &Rope, row: usize, part: Option<&LineWindow>) -> String {
+    match part {
+        Some(part) => {
+            let start = text.line_start_offset(row);
+            text.slice(start + part.bytes.start..start + part.bytes.end)
+                .to_string()
+        }
+        None => text.slice_line(row).into(),
+    }
+}
+
+/// The bidi analysis of `text`, which is buffer line `row` or its laid-out part. A
+/// part takes its base direction from the start of the line.
+fn laid_out_paragraph<'a>(
+    text: &'a str,
+    rope: &Rope,
+    row: usize,
+    part: Option<&LineWindow>,
+) -> Option<Paragraph<'a>> {
+    if part.is_none() {
+        return Paragraph::analyze(text);
+    }
+    let start = rope.line_start_offset(row);
+    let line = rope.slice(start..rope.line_end_offset(row));
+    Paragraph::analyze_part(text, starts_rtl(line.chars()))
+}
+
+/// The left offset of a continuation row: the width of the `indent` spaces that
+/// start the line, read off its first row when that row was laid out.
+fn wrapped_indent(
+    indent: usize,
+    rows: &[InputLine],
+    part: Option<&LineWindow>,
+    font_size: Pixels,
+    window: &mut Window,
+) -> Pixels {
+    let continues = part.is_some() || rows.len() > 1;
+    if indent == 0 || !continues {
+        return px(0.);
+    }
+    if let Some(first) = rows.first().filter(|_| part.is_none_or(|p| p.rows.start == 0)) {
+        return first.x_for_index(indent);
+    }
+    let run = TextRun {
+        len: indent,
+        font: window.text_style().font(),
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(" ".repeat(indent).into(), font_size, &[run], None)
+        .width
 }
 
 pub(super) struct PrepaintState {
@@ -3119,7 +3220,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
         let state = self.state.read(cx);
 
-        let (visible_range, visible_buffer_lines, visible_top) =
+        let (visible_range, visible_buffer_lines, visible_top, viewport) =
             self.calculate_visible_range(&state, line_height, bounds.size.height);
         let visible_start_offset = state.text.line_start_offset(visible_range.start);
         let visible_end_offset = state
@@ -3243,14 +3344,17 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let whitespace_indicators =
             Self::layout_whitespace_indicators(&state, text_size, &text_style, window, cx);
 
+        let lays_out_rows = !state.is_code_editor() && !state.masked;
+        let wanted_rows = rows_to_lay_out(&viewport, lays_out_rows);
         let lines = Self::layout_lines(
             &state,
             &display_text,
             &last_layout,
+            &wanted_rows,
             text_size,
             &runs,
             &document_colors,
-            whitespace_indicators,
+            whitespace_indicators.clone(),
             window,
         );
 
@@ -3412,8 +3516,40 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // text, its carets, selections, and gutter contents are displaced.
         bounds.origin.y += px(stretch);
 
-        let (cursor_infos, cursor_scroll_offset, current_row, resize_reveal_owned) =
+        let unscrolled_bounds = bounds;
+        let (mut cursor_infos, mut cursor_scroll_offset, mut current_row, mut resize_reveal_owned) =
             self.layout_cursors(&last_layout, &mut bounds, scroll_size, window, cx);
+        // A caret far down a long line scrolls this frame to rows that were not shaped:
+        // shape them now, or the frame shows a blank field and a caret at the left edge.
+        if last_layout.lines.iter().any(LineLayout::is_partial) {
+            let state = self.state.read(cx);
+            let viewport = viewport_rows(
+                cursor_scroll_offset.y,
+                input_bounds.size.height,
+                line_height,
+                state.display_map.display_row_count(),
+            );
+            if viewport.start < wanted_rows.start || viewport.end > wanted_rows.end {
+                last_layout.lines = Rc::new(Self::layout_lines(
+                    &state,
+                    &display_text,
+                    &last_layout,
+                    &rows_to_lay_out(&viewport, lays_out_rows),
+                    text_size,
+                    &runs,
+                    &document_colors,
+                    whitespace_indicators,
+                    window,
+                ));
+                bounds = unscrolled_bounds;
+                (
+                    cursor_infos,
+                    cursor_scroll_offset,
+                    current_row,
+                    resize_reveal_owned,
+                ) = self.layout_cursors(&last_layout, &mut bounds, scroll_size, window, cx);
+            }
+        }
         // Completion/code-action menus position at the active caret.
         last_layout.cursor_bounds = cursor_infos
             .iter()
