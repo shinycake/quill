@@ -115,6 +115,10 @@ window, not the app:
   `a_failed_edr_switch_leaves_edr_and_still_draws`,
   `a_format_that_failed_is_not_built_again`,
   `a_failed_switch_keeps_the_stashed_pipelines`.
+- `src/metal_renderer.rs`: `new_renderer` drops its `_native_window` and
+  `_native_view` parameters and its `unsafe`. `MacWindow::open` now builds the
+  renderer before those objects exist, so a re-vendor whose `new_renderer` uses
+  them must fail to compile here instead of dereferencing null at window open.
 - `Cargo.toml`, `src/thermal.rs`, `src/metal_renderer.rs`: so CI can run
   `cargo test -p gpui-pre-apple` on its own, `runtime_shaders` is a default
   feature (Quill always builds with it, through gpui-kit), and the thermal test

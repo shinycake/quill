@@ -122,4 +122,5 @@ window, not the app:
 
 - `src/window.rs`: `MacWindow::open` returns `Result` and builds the renderer
   before any AppKit object, so a renderer error leaves no half-made window.
+  gpui-pre-apple's `new_renderer` no longer takes the window and view.
   `src/platform.rs` passes the error on from `open_window`.

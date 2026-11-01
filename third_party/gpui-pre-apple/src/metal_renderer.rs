@@ -69,10 +69,8 @@ unsafe impl objc2::encode::Encode for SurfaceRef {
 pub type Context = Arc<Mutex<InstanceBufferPool>>;
 pub type Renderer = MetalRenderer;
 
-pub unsafe fn new_renderer(
+pub fn new_renderer(
     context: self::Context,
-    _native_window: *mut c_void,
-    _native_view: *mut c_void,
     _bounds: gpui::Size<f32>,
     transparent: bool,
     use_display_p3: bool,

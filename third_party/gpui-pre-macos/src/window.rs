@@ -1012,8 +1012,6 @@ impl MacWindow {
             // be built leaves no half-made window behind.
             let renderer = renderer::new_renderer(
                 renderer_context,
-                ptr::null_mut(),
-                ptr::null_mut(),
                 bounds.size.map(|pixels| pixels.as_f32()),
                 false,
                 use_display_p3,
