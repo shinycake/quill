@@ -194,6 +194,9 @@ mod tests {
         assert_ne!(ran[0].1, thread::current().id());
     }
 
+    // Windows exits through ExitProcess, which has stopped the reaper's thread
+    // and runs no `atexit` hook, so nothing can race the destructors there.
+    #[cfg(unix)]
     #[test]
     fn a_quit_with_a_stuck_teardown_does_not_report_success() {
         if std::env::var_os("QUILL_TEST_STUCK_TEARDOWN_CHILD").is_some() {
@@ -212,6 +215,7 @@ mod tests {
         assert_eq!(status.code(), Some(STUCK_TEARDOWN_STATUS));
     }
 
+    #[cfg(unix)]
     #[expect(
         clippy::exit,
         reason = "the child reports through its exit status, as a quit does"
