@@ -365,6 +365,44 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
     quill::update_install::force_self_update_available(None);
 }
 
+#[gpui_kit::test]
+fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppContext) {
+    use quill::disk_guard::FLOORS;
+    use quill::updater::{RELEASES_URL, ReleaseAsset, ReleaseInfo, UpdateState};
+    let _guard = AUTO_UPDATE_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let release = ReleaseInfo {
+        version: "999.0.0".into(),
+        notes: String::new(),
+        url: format!("{RELEASES_URL}/tag/v999.0.0"),
+        asset: Some(ReleaseAsset {
+            url: format!(
+                "{RELEASES_URL}/download/v999.0.0/{}",
+                quill::updater::update_asset_name()
+            ),
+            size: 100,
+            sha256: "a".repeat(64),
+        }),
+    };
+    quill::update_install::force_self_update_available(Some(Ok(())));
+    app.update_in(vcx, |app, _, cx| {
+        app.apply_disk_reading(Some(FLOORS.warn - 1), cx);
+        app.apply_check_result(UpdateState::Available(release.clone()), cx);
+        assert!(
+            matches!(app.settings.update_state, UpdateState::Available(_)),
+            "the disk bar holds it"
+        );
+        app.apply_disk_reading(Some(FLOORS.warn_clear), cx);
+        assert!(
+            matches!(&app.settings.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            "a healthy disk starts it"
+        );
+    });
+    vcx.run_until_parked();
+    quill::update_install::force_self_update_available(None);
+}
+
 fn shown(vcx: &mut VisualTestContext, id: &'static str) -> bool {
     vcx.update(|window, cx| window.render_frame(cx));
     vcx.update(|window, _| window.try_find(id).is_some())

@@ -204,6 +204,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
+    /// TDLib keeps every cached file until the optimizer runs, and it only
+    /// runs with a limit set. The first Ready of an account that never had
+    /// limits sets tdesktop's starting ones, once: the flag stays, so a
+    /// later "No limit" is never overwritten.
+    pub(crate) fn maybe_seed_storage_limits(&mut self) -> Result<(), ConnectSendError> {
+        if self.session.settings.data_storage.storage_limits_seeded {
+            return Ok(());
+        }
+        if !self.session.settings.storage_limits.chosen() {
+            self.set_storage_limits(
+                Some(crate::storage_limits::DEFAULT_SIZE),
+                Some(crate::storage_limits::DEFAULT_KEEP),
+            )?;
+        }
+        self.session.settings.data_storage.storage_limits_seeded = true;
+        let _ = self.save_data_storage_prefs();
+        Ok(())
+    }
+
     /// Slice S4: persist the per-network auto-download settings
     /// (`data_storage.json`) next to the account.
     pub fn save_data_storage_prefs(&mut self) -> std::io::Result<()> {

@@ -699,6 +699,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // Quick reply shortcuts, so the first `/` already lists them
             // (tdesktop preloads them with the dialogs).
             let _ = self.ensure_quick_reply_shortcuts();
+            let _ = self.maybe_seed_storage_limits();
         }
         // Parity slice: `updateSavedNotificationSounds` may have marked the
         // list stale between ingests.

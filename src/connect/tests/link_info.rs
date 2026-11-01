@@ -164,6 +164,7 @@ fn language_pack_link_only_reads_the_pack_info() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    recorder.sent.lock().unwrap().clear();
     let extra = driver.request_language_pack_info("pt").unwrap();
     assert_eq!(
         sent_request(&recorder, "getLanguagePackInfo")["language_pack_id"],

@@ -426,6 +426,12 @@ fn a_transfer_tdlib_runs_on_its_own_can_be_cancelled() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn paused_update(id: i32, paused: bool) -> String {
+    format!(
+        r#"{{"@type":"updateFileDownload","file_id":{id},"complete_date":0,"is_paused":{paused},"counts":{{"@type":"downloadedFileCounts","being_downloaded":1,"recently_downloaded":0}}}}"#
+    )
+}
+
 fn file_update(id: i32, size: i64, done: i64) -> String {
     format!(
         r#"{{"@type":"updateFile","file":{{"@type":"file","id":{id},"size":{size},"expected_size":{size},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":true,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":{done},"downloaded_size":{done}}},"remote":{{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":{size}}}}}}}"#
@@ -474,11 +480,63 @@ fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
     assert_eq!(pause["file_id"], 51);
     assert_eq!(pause["is_paused"], true);
 
+    assert!(
+        !driver.download_fits_disk(FileId(51)),
+        "a resume is refused"
+    );
+    assert!(driver.download_fits_disk(FileId(52)));
+    ingest(&mut driver, &paused_update(51, true));
+
     driver
         .note_disk(DiskState::Healthy, Some(CLOSE + 900 * MIB), &FLOORS)
         .unwrap();
     assert!(!driver.session.media.disk_holds_auto_downloads);
-    assert_eq!(recorder.snapshot().len(), base + 1, "nothing to pause");
+    assert!(driver.download_fits_disk(FileId(51)));
+    let sent = recorder.snapshot();
+    assert_eq!(
+        sent.len(),
+        base + 2,
+        "only the disk's pause is undone: {sent:?}"
+    );
+    let resume: Value = serde_json::from_str(&sent[base + 1]).unwrap();
+    assert_eq!(resume["@type"], "toggleDownloadIsPaused");
+    assert_eq!(resume["file_id"], 51);
+    assert_eq!(resume["is_paused"], false);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_download_resumed_on_a_low_disk_is_paused_again_and_said_so() {
+    const MIB: u64 = 1 << 20;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+    );
+    driver
+        .download_user_file(FileId(51), Some((ChatId(7), 99)))
+        .unwrap();
+    ingest(&mut driver, &file_update(51, 900 * MIB as i64, 0));
+    let low = Some(FLOORS.close + 500 * MIB);
+    assert_eq!(driver.note_disk(DiskState::Low, low, &FLOORS).unwrap(), 0);
+    ingest(&mut driver, &paused_update(51, true));
+    ingest(&mut driver, &paused_update(51, false));
+    assert_eq!(
+        driver.note_disk(DiskState::Low, low, &FLOORS).unwrap(),
+        1,
+        "resumed elsewhere, paused again"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

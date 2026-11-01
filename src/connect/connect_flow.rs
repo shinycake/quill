@@ -3,7 +3,7 @@ use super::*;
 use crate::calls::engine::{GroupVideoSource, GroupVideoSourceGroup};
 use crate::calls::tile_pin::TileKey;
 use crate::credentials::TelegramCredentials;
-use crate::disk_guard::{FLOORS, available_bytes, refuses_open};
+use crate::disk_guard::{data_floors, data_free_bytes, refuses_open};
 use crate::ids::AccountKey;
 use crate::lifecycle::plan_restore;
 use crate::platform::{DatabaseKey, KeyDecision, SecretStore, load_or_create_key};
@@ -31,7 +31,7 @@ pub fn prepare_connect<S: SecretStore + ?Sized>(
     store: &S,
     credentials: &TelegramCredentials,
 ) -> Result<PreparedConnect, ConnectBlocker> {
-    if refuses_open(available_bytes(app_root), &FLOORS) {
+    if refuses_open(data_free_bytes(app_root), &data_floors(app_root)) {
         return Err(ConnectBlocker::DiskFull);
     }
     let plan = plan_restore(

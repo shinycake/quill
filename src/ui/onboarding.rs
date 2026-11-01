@@ -87,7 +87,8 @@ impl QuillApp {
                                 .text_color(cx.theme().muted_foreground)
                                 .child(auth.body.clone()),
                         )
-                    }),
+                    })
+                    .children(self.disk_full_reveal()),
             );
         let mut form = div().w_full().flex().flex_col().gap_3();
         if matches!(auth.action, AuthAction::Register) && self.live.is_some() {
