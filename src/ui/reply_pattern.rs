@@ -5,6 +5,7 @@
 //! 20 px are placed along the right edge at fixed offsets and opacities.
 #![deny(clippy::indexing_slicing)]
 
+use super::render_decode::{OffRender, made_or_start};
 use gpui_kit::*;
 use image::RgbaImage;
 use smallvec::SmallVec;
@@ -92,28 +93,15 @@ pub(super) type Copies = [Arc<RenderImage>; 3];
 type Key = (PathBuf, [u8; 3]);
 
 thread_local! {
-    /// Most recently used last. A pattern is a handful of emoji and
-    /// colors, so a short list is plenty.
-    static CACHE: RefCell<Vec<(Key, Copies)>> = const { RefCell::new(Vec::new()) };
+    /// A pattern is a handful of emoji and colors, so a short list is
+    /// plenty.
+    static CACHE: RefCell<OffRender<Key, Copies>> =
+        RefCell::new(OffRender::new(16, super::image_budget::retire_all));
 }
 
-const CACHE_LEN: usize = 16;
-
-/// The three tinted copies of the emoji at `path` in `rgb`, made on first
-/// use. `None` when the file cannot be decoded.
-pub(super) fn copies(path: &Path, rgb: [u8; 3]) -> Option<Copies> {
-    let key: Key = (path.to_path_buf(), rgb);
-    let hit = CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        let at = cache.iter().position(|(k, _)| *k == key)?;
-        let entry = cache.remove(at);
-        let found = entry.1.clone();
-        cache.push(entry);
-        Some(found)
-    });
-    if hit.is_some() {
-        return hit;
-    }
+/// The three tinted copies of the emoji at `path` in `rgb`. `None` when
+/// the file cannot be decoded.
+fn make_copies(path: &Path, rgb: [u8; 3]) -> Option<Copies> {
     let mask = image::open(path).ok()?.into_rgba8();
     let make = |size: u32| {
         let mut image = tinted(&mask, rgb, size * SCALE);
@@ -125,20 +113,24 @@ pub(super) fn copies(path: &Path, rgb: [u8; 3]) -> Option<Copies> {
             image,
         )])))
     };
-    let made: Copies = [make(SIZES[0]), make(SIZES[1]), make(SIZES[2])];
-    CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        cache.push((key, made.clone()));
-        if cache.len() > CACHE_LEN {
-            let (_, old) = cache.remove(0);
-            super::image_budget::retire_all(old);
-        }
-    });
-    Some(made)
+    Some([make(SIZES[0]), make(SIZES[1]), make(SIZES[2])])
 }
 
-/// The pattern as a layer filling its (clipping, relative) parent.
-pub(super) fn layer(copies: &Copies, quote: bool) -> AnyElement {
+/// The copy of size index `size`: made off the UI thread on first use, so
+/// it draws nothing until then.
+fn copy_source(key: Key, size: usize) -> ImageSource {
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        let (path, rgb) = key.clone();
+        let make = move || make_copies(&path, rgb);
+        let copies = made_or_start(&CACHE, key.clone(), make, window, cx)?;
+        copies.get(size).cloned().map(Ok)
+    }))
+}
+
+/// The pattern of the emoji at `path` tinted `rgb`, as a layer filling its
+/// (clipping, relative) parent.
+pub(super) fn layer(path: PathBuf, rgb: [u8; 3], quote: bool) -> AnyElement {
+    let key: Key = (path, rgb);
     div()
         .absolute()
         .top_0()
@@ -146,9 +138,8 @@ pub(super) fn layer(copies: &Copies, quote: bool) -> AnyElement {
         .size_full()
         .children(glyphs(quote).into_iter().filter_map(|g| {
             let side = *SIZES.get(g.size)?;
-            let copy = copies.get(g.size)?;
             Some(
-                img(copy.clone())
+                img(copy_source(key.clone(), g.size))
                     .absolute()
                     .top(px(g.y as f32))
                     .right(px((g.x - side as i32) as f32))

@@ -293,7 +293,7 @@ fn the_photo_editor_takes_the_box_aside_until_it_closes(cx: &mut TestAppContext)
             .photo_editor
             .take()
             .expect("editor")
-            .set_render_job();
+            .into_set_render_job();
         app.finish_set_image(
             78,
             quill::sticker_set_box::SetKind::Stickers,
@@ -420,6 +420,46 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
         && app.sticker_box.encoding.is_none()));
     assert!(shell.read_with(vcx, |shell, _| shell.open_dialog
         == Some(DialogKind::StickerSet)));
+}
+
+/// "Adapt from a Sticker" on a still sticker: the pick returns before the
+/// sticker is decoded, and the photo editor opens on it once the worker
+/// is done.
+#[gpui_kit::test]
+fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut TestAppContext) {
+    use crate::ui::sticker_set_box::state::PickExisting;
+    use quill::sticker_set_box::SetKind;
+    use quill::telegram::envelope::StickerFormat;
+    let (app, _shell, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.sticker_box.pick = Some(PickExisting {
+            set_id: 78,
+            kind: SetKind::Emoji,
+            adapt: true,
+        });
+        cx.notify();
+    });
+    frames(vcx);
+    let mut item = app
+        .read_with(vcx, |app, _| {
+            app.demo_session
+                .as_ref()
+                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|stickers| stickers.first().cloned())
+        })
+        .expect("a demo sticker");
+    item.format = StickerFormat::Webp;
+    let opened_at_pick = vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.pick_existing_sticker(&item, window, cx);
+            app.viewer.photo_editor.is_some()
+        })
+    });
+    assert!(!opened_at_pick, "the decode waits for the worker");
+    assert!(app.read_with(vcx, |app, _| app.sticker_box.pick.is_none()));
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.viewer.photo_editor.is_some()));
 }
 
 #[gpui_kit::test]

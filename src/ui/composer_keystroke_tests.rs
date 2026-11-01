@@ -98,3 +98,31 @@ fn an_emoji_keystroke_keeps_the_text_and_the_previous_text_in_step(cx: &mut Test
     let prev = app.read_with(vcx, |app, _| app.composer_ui.prev_text.clone());
     assert_eq!(prev, "ok \u{1f600}");
 }
+
+/// A finished background spell check redraws the composer slice, where
+/// the underlines are, not the whole app.
+#[gpui_kit::test]
+fn a_spell_check_result_redraws_only_the_composer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        app.chat_prefs.spellcheck_enabled = true;
+        app.spell.checker = std::sync::Arc::new(quill::spellcheck::SpellChecker::wordlist());
+    });
+    focus_composer(&app, vcx);
+    vcx.simulate_input("qzxvb");
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let underlined = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| !app.spell.misspellings.is_empty())
+    };
+    assert!(!underlined(&app, vcx), "the check waits for the pause");
+    let _ = crate::ui::frame_clock::take_slice_renders();
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(underlined(&app, vcx));
+    let renders = crate::ui::frame_clock::take_slice_renders();
+    assert!(renders.contains_key("composer"), "{renders:?}");
+    assert!(!renders.contains_key("(app notified)"), "{renders:?}");
+}

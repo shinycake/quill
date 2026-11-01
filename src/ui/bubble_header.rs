@@ -55,9 +55,9 @@ pub(super) fn reply_header_strip(
     let story = header.story;
     let (target_chat, target_id) = (header.target_chat, header.target_id);
     let rgb = color.to_rgb();
-    let pattern = pattern.and_then(|path| {
+    let pattern = pattern.map(|path| {
         let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
-        super::reply_pattern::copies(&path, [channel(rgb.r), channel(rgb.g), channel(rgb.b)])
+        (path, [channel(rgb.r), channel(rgb.g), channel(rgb.b)])
     });
     let external = header.external_chat.is_some();
     let clickable = header.clickable;
@@ -99,8 +99,8 @@ pub(super) fn reply_header_strip(
         .border_l_2()
         .border_color(color)
         .bg(color.opacity(0.1))
-        .when_some(pattern, |this, copies| {
-            this.child(super::reply_pattern::layer(&copies, header.is_quote))
+        .when_some(pattern, |this, (path, rgb)| {
+            this.child(super::reply_pattern::layer(path, rgb, header.is_quote))
         })
         .when(clickable, |this| {
             this.tab_index(0)

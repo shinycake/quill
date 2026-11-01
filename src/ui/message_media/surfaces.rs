@@ -2,6 +2,7 @@
 //! spoiler covers and blurred previews.
 
 use super::*;
+use crate::ui::render_decode::{OffRender, made_or_start};
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::MessageContent;
 
@@ -250,9 +251,8 @@ pub(in crate::ui) fn spoiler_surface(
 ) -> Stateful<Div> {
     let preview = minithumbnail
         .filter(|mini| !mini.data.is_empty())
-        .and_then(|mini| blurred_preview(row_id, &mini.data))
-        .map(|blurred| {
-            img(ImageSource::Render(blurred))
+        .map(|mini| {
+            img(blurred_preview(row_id, Arc::from(mini.data.as_slice())))
                 .absolute()
                 .inset_0()
                 .size_full()
@@ -289,16 +289,22 @@ pub(in crate::ui) fn spoiler_surface(
         .child(dust)
 }
 
-/// The minithumbnail scaled up and Gaussian-blurred, cached per message.
-fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
-    use crate::ui::lru::Lru;
-    use std::cell::RefCell;
-    thread_local! {
-        static CACHE: RefCell<Lru<u64, Arc<RenderImage>>> = RefCell::new(Lru::new(256));
-    }
-    if let Some(hit) = CACHE.with(|cache| cache.borrow_mut().get(&row_id)) {
-        return Some(hit);
-    }
+thread_local! {
+    static BLURRED: std::cell::RefCell<OffRender<u64, Arc<RenderImage>>> = std::cell::RefCell::new(
+        OffRender::new(256, |old| crate::ui::image_budget::retire_all([old])),
+    );
+}
+
+/// The minithumbnail scaled up and Gaussian-blurred off the UI thread,
+/// cached per message.
+fn blurred_preview(row_id: u64, jpeg: Arc<[u8]>) -> ImageSource {
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        let jpeg = jpeg.clone();
+        made_or_start(&BLURRED, row_id, move || blur(&jpeg), window, cx).map(Ok)
+    }))
+}
+
+fn blur(jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     let small = image::load_from_memory(jpeg).ok()?.to_rgba8();
     let (w, h) = small.dimensions();
     let scale = 160.0 / w.max(h).max(1) as f32;
@@ -312,13 +318,7 @@ fn blurred_preview(row_id: u64, jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     for pixel in blurred.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
-    let render = Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
+    Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(blurred),
-    ])));
-    CACHE.with(|cache| {
-        if let Some(old) = cache.borrow_mut().insert(row_id, render.clone()) {
-            crate::ui::image_budget::retire_all([old]);
-        }
-    });
-    Some(render)
+    ]))))
 }

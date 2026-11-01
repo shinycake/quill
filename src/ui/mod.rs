@@ -81,7 +81,7 @@ mod frame_grid;
 mod free_heap;
 pub mod link_inbox;
 mod wake_wait;
-pub use wake_wait::sleep_or_wake;
+pub use wake_wait::{PassEnd, run_chrome_loop};
 mod drag_start_tests;
 #[cfg(feature = "frame-profiler")]
 mod frame_profile;
@@ -468,6 +468,7 @@ pub(crate) mod reduce_motion_probe;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod remote_draft_tests;
+mod render_decode;
 mod reply_guard_tests;
 mod reply_options_ui;
 mod reply_pattern;

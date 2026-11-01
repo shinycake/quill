@@ -1,7 +1,8 @@
 // Modified by the Quill project (2026) from gpui-pre-windows 0.3.9 (Apache-2.0):
 // drawing returns an error instead of panicking when device-loss recovery
 // failed, and every recovery attempt keeps DirectComposition; HDR stills and the scRGB
-// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`). See
+// swap chain (`hdr_surfaces`); NV12 video surfaces (`yuv_surfaces`); shaders shared
+// by every window on a device (`shared_shaders`). See
 // third_party/gpui-pre-windows/QUILL-CHANGES.md.
 use std::{
     slice,
@@ -1207,14 +1208,7 @@ impl<T> PipelineState<T> {
         buffer_size: usize,
         blend_state: ID3D11BlendState,
     ) -> Result<Self> {
-        let vertex = {
-            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Vertex)?;
-            create_vertex_shader(device, raw_shader.as_bytes())?
-        };
-        let fragment = {
-            let raw_shader = RawShaderBytes::new(shader_module, ShaderTarget::Fragment)?;
-            create_fragment_shader(device, raw_shader.as_bytes())?
-        };
+        let (vertex, fragment) = shared_shaders(device, shader_module)?;
         let buffer = create_buffer(device, std::mem::size_of::<T>(), buffer_size)?;
         let view = create_buffer_view(device, &buffer)?;
 
@@ -1673,6 +1667,54 @@ fn create_blend_state_for_path_sprite(device: &ID3D11Device) -> Result<ID3D11Ble
         device.CreateBlendState(&desc, Some(&mut state))?;
         Ok(state.unwrap())
     }
+}
+
+/// Quill: the shaders made on one D3D device, shared by every window that
+/// draws with it. Upstream made all of them again for each window, so each
+/// notification toast (a window of its own) had the driver build about ten
+/// shader pairs on the UI thread. Blend and sampler states need no cache:
+/// D3D11 hands back the existing object for an identical description. The
+/// cache follows the device: after a device loss the new device gets its
+/// own shaders.
+struct SharedShaders {
+    device: ID3D11Device,
+    pairs: Vec<(ShaderModule, ID3D11VertexShader, ID3D11PixelShader)>,
+}
+
+thread_local! {
+    static SHARED_SHADERS: std::cell::RefCell<Option<SharedShaders>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn shared_shaders(
+    device: &ID3D11Device,
+    module: ShaderModule,
+) -> Result<(ID3D11VertexShader, ID3D11PixelShader)> {
+    SHARED_SHADERS.with_borrow_mut(|shared| {
+        if shared.as_ref().is_some_and(|shared| shared.device != *device) {
+            *shared = None;
+        }
+        let shared = shared.get_or_insert_with(|| SharedShaders {
+            device: device.clone(),
+            pairs: Vec::new(),
+        });
+        if let Some((_, vertex, fragment)) = shared.pairs.iter().find(|(made, ..)| *made == module)
+        {
+            return Ok((vertex.clone(), fragment.clone()));
+        }
+        let vertex = {
+            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Vertex)?;
+            create_vertex_shader(device, raw_shader.as_bytes())?
+        };
+        let fragment = {
+            let raw_shader = RawShaderBytes::new(module, ShaderTarget::Fragment)?;
+            create_fragment_shader(device, raw_shader.as_bytes())?
+        };
+        shared
+            .pairs
+            .push((module, vertex.clone(), fragment.clone()));
+        Ok((vertex, fragment))
+    })
 }
 
 #[inline]

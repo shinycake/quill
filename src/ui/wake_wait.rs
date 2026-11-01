@@ -66,11 +66,11 @@ impl RestTimer {
 
 /// What a pass of a poll loop left for the next one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct PassEnd {
+pub struct PassEnd {
     /// More is waiting, so the loop must not rest.
-    pub(super) work_left: bool,
+    pub work_left: bool,
     /// When timed work next comes due, if any.
-    pub(super) due: Option<Duration>,
+    pub due: Option<Duration>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +145,22 @@ pub(super) async fn run_poll_loop(
             }
         }
     }
+}
+
+/// The pace of the tray and app icon badge loop: an update after a quiet
+/// spell lands at once, a burst of `wake::CHROME` pokes (one per applied
+/// update batch) syncs at most four times a second, like the menu loop's
+/// one-second guard, and a tray host that appears late is noticed within
+/// ten seconds.
+pub(super) const CHROME_PACE: PollPace = PollPace {
+    gap: Duration::from_millis(250),
+    ceiling: Duration::from_secs(10),
+};
+
+/// Run the tray and badge `pass` on [`quill::wake::CHROME`] at
+/// [`CHROME_PACE`], with one fallback timer kept across rests.
+pub async fn run_chrome_loop(executor: BackgroundExecutor, pass: impl FnMut() -> Option<PassEnd>) {
+    run_poll_loop(executor, &quill::wake::CHROME, CHROME_PACE, pass).await;
 }
 
 #[cfg(test)]

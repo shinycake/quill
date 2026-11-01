@@ -112,6 +112,12 @@ The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything
   and the one a refused surface falls back to
   (`docs/decisions/video-player-live-nv12.md`).
 
+## Notification diagnostics
+
+- `QUILL_TRACE_TOASTS=1` prints `toast window opened in <ms> ms` to stderr
+  for each of Quill's own notification windows: how long opening it held
+  the UI thread. On Windows that includes building the window's renderer.
+
 ## Native TDLib (optional)
 
 Ordinary `cargo test` / `cargo run` do **not** fetch or execute tdjson. To build the pinned runtime:

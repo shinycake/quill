@@ -280,7 +280,8 @@ impl QuillApp {
                     && this.spell.misspellings != found
                 {
                     this.spell.misspellings = found;
-                    cx.notify();
+                    // The underlines are drawn in the composer.
+                    this.notify_composer(cx);
                 }
             });
         }));
