@@ -878,7 +878,7 @@ mod tests {
             },
         ];
         let before = kept.layout_line(line, px(16.), &runs);
-        for extra in 0..MAX_SIZED_FONTS {
+        for extra in 0..super::MAX_SIZED_FONTS {
             let size = px(100. + extra as f32);
             kept.layout_line("x", size, &[FontRun { font_id, len: 1 }]);
         }

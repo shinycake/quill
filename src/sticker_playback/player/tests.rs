@@ -500,25 +500,16 @@ fn synthetic(edge: u32, count: u8) -> Origin {
     }))
 }
 
-/// Waits for `want` of `key` to be drawn.
+/// Asks for `want` of `key` until it is drawn, or a round draws nothing.
 fn frames_of(engine: &Engine, key: ClipKey, want: &[u32]) -> Vec<Rendered> {
-    let deadline = Instant::now() + Duration::from_secs(20);
     let mut got: Vec<Rendered> = Vec::new();
-    while Instant::now() < deadline {
-        if engine.info(&key).is_some() {
-            let missing: Vec<u32> = want
-                .iter()
-                .copied()
-                .filter(|i| !got.iter().any(|r| r.index == *i))
-                .collect();
-            if missing.is_empty() {
-                break;
-            }
-            engine.want(&key, &missing);
-        }
+    let mut asked = false;
+    loop {
+        engine.wait_idle();
         if let Some(ClipState::Failed(error)) = engine.state(&key) {
             panic!("{error}");
         }
+        let before = got.len();
         for frame in engine.take_rendered() {
             assert!(
                 frame.key != key || !got.iter().any(|r| r.index == frame.index),
@@ -529,12 +520,46 @@ fn frames_of(engine: &Engine, key: ClipKey, want: &[u32]) -> Vec<Rendered> {
                 got.push(frame);
             }
         }
-        std::thread::sleep(ms(2));
+        let missing: Vec<u32> = want
+            .iter()
+            .copied()
+            .filter(|i| !got.iter().any(|r| r.index == *i))
+            .collect();
+        if missing.is_empty() || (asked && got.len() == before) {
+            break;
+        }
+        engine.want(&key, &missing);
+        asked = true;
     }
     // A clip draws its first frame on open, asked for or not.
     got.retain(|r| want.contains(&r.index));
     got.sort_by_key(|r| r.index);
     got
+}
+
+/// Frames asked of a clip that failed are never drawn.
+#[test]
+fn the_workers_go_idle_with_frames_asked_of_a_failed_clip() {
+    let engine = Engine::new(1, 1 << 20);
+    let key = key(1, 16);
+    engine.open(key, Origin::Decoded(Box::new(|_, _| Err("no".to_string()))));
+    engine.wait_idle();
+    engine.want(&key, &[0, 1]);
+    engine.wait_idle();
+    assert_eq!(
+        engine.state(&key),
+        Some(ClipState::Failed("no".to_string()))
+    );
+}
+
+/// A worker that panics leaves its clip busy for good.
+#[test]
+fn waiting_for_the_workers_ends_when_one_panics() {
+    let engine = Engine::new(1, 1 << 20);
+    let key = key(1, 16);
+    engine.open(key, Origin::Decoded(Box::new(|_, _| panic!("decoder"))));
+    engine.wait_idle();
+    assert_eq!(engine.state(&key), Some(ClipState::Opening));
 }
 
 #[test]

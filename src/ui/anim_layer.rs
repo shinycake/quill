@@ -32,19 +32,27 @@
 //! On a tick the layers render, prepaint and paint on their own, and only
 //! their paint reaches the screen: what a layer builds takes no clicks, no
 //! hover and no part in the accessibility tree, as the slice under it has
-//! all of those.
+//! all of those. It must build no hitboxes either (GPUI draws a live view
+//! holding any in whole frames): a [`hover_tile`] that shows the pointer
+//! asks the slice's hit test instead.
 //!
 //! The layer paints after the whole slice, so something the slice paints
 //! over an item must be an [`Occluder`] (the item then falls back to the
 //! slice) or a [`mirror`] (redrawn by the layer above the item). Anything
 //! painted after the slice (menus, dialogs, the media viewer, tooltips,
 //! deferred popovers) covers the layer as it covered the slice.
+//!
+//! A layer draws its own window: on a tick no window's state need be in
+//! place, so it enters its window's scope and image cache itself, and draws
+//! nothing when that window can't be entered.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::frame_clock::TickDraw;
+use super::image_budget::WindowDraw;
 use super::sticker_player::StickerView;
 use gpui_kit::*;
+use quill::ids::ChatId;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -87,8 +95,9 @@ fn next_seq() -> u64 {
 
 /// Paints time-driven content into the given bounds.
 pub(super) type PaintFn = Rc<dyn Fn(Bounds<Pixels>, &mut Window)>;
-/// Builds the element the layer draws, afresh each frame.
-pub(super) type BuildFn = Rc<dyn Fn() -> Option<AnyElement>>;
+/// Builds the element the layer draws, afresh each frame, told whether
+/// the pointer is on the item.
+pub(super) type BuildFn = Rc<dyn Fn(bool) -> Option<AnyElement>>;
 
 /// What a layered item draws.
 #[derive(Clone)]
@@ -155,6 +164,8 @@ struct Item {
     seq: Cell<u64>,
     /// The opacity it was painted at (a dimmed cell).
     opacity: Cell<f32>,
+    /// Its place in the slice's hit test (a [`hover_tile`]).
+    hitbox: Option<Hitbox>,
 }
 
 impl Item {
@@ -202,6 +213,7 @@ impl Layer {
         bounds: Bounds<Pixels>,
         mask: ContentMask<Pixels>,
         text: Option<TextStyleRefinement>,
+        hitbox: Option<Hitbox>,
     ) -> usize {
         let mut items = self.0.items.borrow_mut();
         items.push(Item {
@@ -212,6 +224,7 @@ impl Layer {
             inline: Cell::new(false),
             seq: Cell::new(0),
             opacity: Cell::new(1.),
+            hitbox,
         });
         items.len() - 1
     }
@@ -244,7 +257,7 @@ impl Layer {
         if inline {
             content.paint_inline(bounds, window);
         }
-        let index = self.register(content, bounds, mask, None);
+        let index = self.register(content, bounds, mask, None, None);
         let items = self.0.items.borrow();
         if let Some(item) = items.get(index) {
             item.inline.set(inline);
@@ -331,7 +344,11 @@ impl Layer {
                     Content::Tile { build: element, .. } | Content::Mirror { build: element }
                         if build =>
                     {
-                        element()
+                        let hovered = item
+                            .hitbox
+                            .as_ref()
+                            .is_some_and(|hitbox| hitbox.is_hovered(window));
+                        element(hovered)
                     }
                     _ => None,
                 };
@@ -359,6 +376,7 @@ impl Layer {
             })
             .collect();
         order.sort_by_key(|&ix| items.get(ix).map_or(0, |item| item.seq.get()));
+        let painter_opacity = window.element_opacity();
         for ix in order {
             let Some(item) = items.get(ix) else {
                 continue;
@@ -366,7 +384,7 @@ impl Layer {
             if item.visible().is_none() {
                 continue;
             }
-            let opacity = Some(item.opacity.get());
+            let opacity = (painter_opacity > 0.).then(|| item.opacity.get() / painter_opacity);
             window.with_element_opacity(opacity, |window| {
                 window.with_content_mask(Some(item.mask), |window| match &item.content {
                     Content::Frames(view) => view.paint(item.bounds, window),
@@ -391,6 +409,7 @@ pub(super) struct Layered {
     content: Content,
     child: Option<AnyElement>,
     style: StyleRefinement,
+    hover: bool,
 }
 
 /// An animated sticker or custom emoji, sized by its style.
@@ -416,13 +435,25 @@ pub(super) fn tile(
     fps: u32,
     build: impl Fn() -> Option<AnyElement> + 'static,
 ) -> Layered {
-    Layered::new(
+    hover_tile(child, fps, move |_| build())
+}
+
+/// A [`tile`] that `build` draws differently under the pointer. The hover
+/// shows from the tile's next frame.
+pub(super) fn hover_tile(
+    child: impl IntoElement,
+    fps: u32,
+    build: impl Fn(bool) -> Option<AnyElement> + 'static,
+) -> Layered {
+    let mut tile = Layered::new(
         Content::Tile {
             build: Rc::new(build),
             fps,
         },
         Some(child.into_any_element()),
-    )
+    );
+    tile.hover = true;
+    tile
 }
 
 /// `child`, which the slice paints over layered content: the layer redraws
@@ -430,7 +461,7 @@ pub(super) fn tile(
 pub(super) fn mirror(child: impl IntoElement, build: impl Fn() -> AnyElement + 'static) -> Layered {
     Layered::new(
         Content::Mirror {
-            build: Rc::new(move || Some(build())),
+            build: Rc::new(move |_| Some(build())),
         },
         Some(child.into_any_element()),
     )
@@ -443,6 +474,7 @@ impl Layered {
             content,
             child,
             style: StyleRefinement::default(),
+            hover: false,
         }
     }
 }
@@ -509,7 +541,16 @@ impl Element for Layered {
                     .text_style()
                     .subtract(&TextStyleRefinement::default())
             });
-        Some(layer.register(self.content.clone(), bounds, window.content_mask(), text))
+        let hitbox = self
+            .hover
+            .then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
+        Some(layer.register(
+            self.content.clone(),
+            bounds,
+            window.content_mask(),
+            text,
+            hitbox,
+        ))
     }
 
     fn paint(
@@ -624,38 +665,51 @@ impl Element for Occluder {
 pub(super) struct AnimationLayer {
     layer: Layer,
     app: WeakEntity<QuillApp>,
+    /// The chat window it draws in (`None`: the main window).
+    window: Option<ChatId>,
 }
 
 impl AnimationLayer {
-    pub(super) fn new(layer: Layer, app: WeakEntity<QuillApp>) -> Self {
-        Self { layer, app }
+    pub(super) fn new(layer: Layer, app: WeakEntity<QuillApp>, window: Option<ChatId>) -> Self {
+        Self { layer, app, window }
     }
 }
 
 impl Render for AnimationLayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        super::frame_clock::trace_slice_render("animation layer");
+        let target = self.window;
+        super::frame_clock::trace_slice_render(match target {
+            None => "animation layer",
+            Some(_) => "chat window layer",
+        });
         let id = cx.entity_id();
         let painter = LayerPainter {
             layer: self.layer.clone(),
             app: self.app.clone(),
             painter: id,
+            window: target,
         };
         let Some(app) = self.app.upgrade() else {
             return painter.into_any_element();
         };
-        // A patch can land while input in a chat window has its state in
-        // place; the layer is the main window's, as in `QuillApp::render`.
         let content = app.update(cx, |app, cx| {
             let outer_scope = app.windows.scope;
-            app.set_window_scope(None);
-            app.main_frame_starts(window, super::image_budget::MainDraw::Patch, cx);
-            super::image_budget::slice_rendered(id);
-            let content = app.slices.painter_scope(id, painter);
+            let content = app.set_window_scope(target).then(|| {
+                match target {
+                    None => app.main_frame_starts(window, WindowDraw::Patch, cx),
+                    Some(chat) => app.chat_frame_starts(chat, WindowDraw::Patch, window, cx),
+                }
+                super::image_budget::slice_rendered(id, target);
+                let cache = app.image_cache_in_place();
+                app.slices.painter_scope(id, cache, painter)
+            });
             app.set_window_scope(outer_scope);
             content
         });
-        super::chat_window::WindowScope::new(self.app.clone(), None, content).into_any_element()
+        let Some(content) = content else {
+            return Empty.into_any_element();
+        };
+        super::chat_window::WindowScope::new(self.app.clone(), target, content).into_any_element()
     }
 }
 
@@ -664,6 +718,7 @@ struct LayerPainter {
     app: WeakEntity<QuillApp>,
     /// The [`AnimationLayer`] view, the frame-clock target.
     painter: EntityId,
+    window: Option<ChatId>,
 }
 
 impl IntoElement for LayerPainter {
@@ -726,9 +781,13 @@ impl Element for LayerPainter {
         // the first frame after new content appeared).
         let (layer, inline) = self.layer.demand();
         if layer > 0 || inline > 0 {
-            let (app, painter) = (self.app.clone(), self.painter);
+            let (app, painter, scope) = (self.app.clone(), self.painter, self.window);
             cx.defer(move |cx| {
-                let _ = app.update(cx, |app, cx| app.tick_animation_layer(painter, cx));
+                let _ = app.update(cx, |app, cx| {
+                    app.in_window_scope(scope, cx, |app, cx| {
+                        app.tick_animation_layer(painter, cx);
+                    })
+                });
             });
         }
     }
@@ -765,14 +824,14 @@ mod tests {
 
     fn tile() -> Content {
         Content::Tile {
-            build: Rc::new(|| None),
+            build: Rc::new(|_| None),
             fps: 30,
         }
     }
 
     fn mirror() -> Content {
         Content::Mirror {
-            build: Rc::new(|| None),
+            build: Rc::new(|_| None),
         }
     }
 
@@ -789,8 +848,8 @@ mod tests {
         let layer = Layer::default();
         layer.begin_frame();
         layer.0.occluders.borrow_mut().push(rect(0., 0., 50., 50.));
-        layer.register(frames(), rect(40., 40., 20., 20.), mask(), None);
-        layer.register(frames(), rect(100., 100., 20., 20.), mask(), None);
+        layer.register(frames(), rect(40., 40., 20., 20.), mask(), None, None);
+        layer.register(frames(), rect(100., 100., 20., 20.), mask(), None, None);
         // Hidden by its mask: neither drawn nor ticking.
         layer.register(
             frames(),
@@ -798,6 +857,7 @@ mod tests {
             ContentMask {
                 bounds: rect(0., 0., 10., 10.),
             },
+            None,
             None,
         );
         layer.plan();
@@ -815,9 +875,9 @@ mod tests {
     fn mirrors_are_built_only_over_layered_tiles() {
         let layer = Layer::default();
         layer.begin_frame();
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
-        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None);
-        layer.register(mirror(), rect(500., 500., 10., 10.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
+        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None, None);
+        layer.register(mirror(), rect(500., 500., 10., 10.), mask(), None, None);
         assert_eq!(layer.plan(), vec![true, true, false]);
         {
             // The pill over the video is the layer's alone (the slice skips
@@ -830,8 +890,8 @@ mod tests {
         // Covered, the tile is the slice's: no copy of the pill either.
         layer.begin_frame();
         layer.0.occluders.borrow_mut().push(rect(0., 0., 10., 10.));
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
-        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
+        layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None, None);
         assert_eq!(layer.plan(), vec![false, false]);
     }
 
@@ -839,11 +899,11 @@ mod tests {
     fn a_replay_keeps_what_the_slice_painted() {
         let layer = Layer::default();
         layer.begin_frame();
-        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None);
+        layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
         layer.plan();
         paint_all(&layer);
         // A prepaint the slice discarded left an item it never painted.
-        layer.register(tile(), rect(200., 0., 100., 100.), mask(), None);
+        layer.register(tile(), rect(200., 0., 100., 100.), mask(), None, None);
         assert_eq!(layer.plan(), vec![true, false]);
         assert_eq!(layer.demand(), (30, 0));
         // Nothing animates once the slice prepaints an empty frame.

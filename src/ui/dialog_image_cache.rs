@@ -20,12 +20,12 @@ use gpui_kit::*;
 
 /// `dialog`, drawing its surface through the cache of the window it opens
 /// in: the main window's or a chat window's.
-pub(super) fn cover(dialog: Dialog, app: &QuillApp, window: &Window, cx: &App) -> Dialog {
+pub(super) fn cover(dialog: Dialog, app: &QuillApp, window: &Window) -> Dialog {
     let id = window.window_handle().window_id();
     let cache = if app.windows.main.is_some_and(|main| main.window_id() == id) {
         app.slices.image_cache()
     } else {
-        app.windows.image_cache_for(id, cx)
+        app.windows.image_cache_for(id)
     };
     match cache {
         Some(cache) => {

@@ -2,19 +2,30 @@
 //! their own heads; a frame not drawn yet counts as late; every frame shown
 //! leaves the atlas; a clip's size follows the window's scale.
 use super::super::frame_clock::TickDraw;
-use super::super::image_budget::{begin_frame, take_unshowable};
+use super::super::image_budget::{
+    BoundedImageCache, WindowDraw, begin_chat_frame, begin_frame, slice_rendered, slice_shown,
+    take_unshowable,
+};
 use super::display::{WindowDisplay, display_of, set_display};
-use super::{CLOSE_AFTER, ClipSpec, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use super::{CLOSE_AFTER, ClipSpec, HEAD_TTL, HeadId, Leaving, Part, Place, Player, ViewAsk};
+use gpui_kit::EntityId;
 use quill::ids::{ChatId, FileId};
 use quill::sticker_playback::FitzType;
 use quill::sticker_playback::player::{DecodedFrames, PlayMode, Rest, edge_for};
 use quill::telegram::envelope::StickerFormat;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const EDGE: u32 = 16;
 /// 30 frames a second: one frame every 33.3 ms.
 const FPS: f64 = 30.0;
+
+fn chat_frame(player: &Player, chat: ChatId) {
+    player.frame_starts();
+    begin_chat_frame(chat, WindowDraw::Whole);
+}
 
 /// A player whose file 7 has `count` frames, frame `i` filled with `i`.
 fn player(count: u8) -> (Player, ClipSpec) {
@@ -263,7 +274,7 @@ fn a_clip_waits_its_full_time_from_the_frame_that_left_it_out() {
     assert!(player.close_stale(t0).open);
     let mut next_frame = player.next_frame();
     player.skip(ms(60_000));
-    player.frame_starts(None);
+    player.frame_starts();
     begin_frame();
     assert_eq!(next_frame.try_recv(), Ok(Some(())), "the closer wakes");
     let left = player.now();
@@ -301,7 +312,7 @@ fn each_window_judges_the_clips_it_drew_by_its_own_frames() {
     let (player, spec) = player(4);
     let (chat, rest) = (ChatId(11), PlayMode::Once(Rest::First));
     let t0 = Instant::now();
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     let _ = player.frame(&spec, head("chat"), rest, EDGE, false, Some(chat), t0);
     player.settle();
     // The main window draws on: the chat window still shows it.
@@ -314,16 +325,120 @@ fn each_window_judges_the_clips_it_drew_by_its_own_frames() {
         "on screen in its window"
     );
     // The main window stops; the chat window draws a frame without it.
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     let closed = player.close_stale(t0 + ms(60_000));
     assert_eq!((closed.clips, closed.next), (0, Some(CLOSE_AFTER)));
     assert_eq!(player.close_stale(t0 + ms(65_000)).clips, 1);
     // Drawn in a window that then closed: nothing shows it.
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     let _ = player.frame(&spec, head("chat"), rest, EDGE, false, Some(chat), t0);
     player.window_closed(chat);
     let closed = player.close_stale(t0 + ms(1_000));
     assert_eq!((closed.clips, closed.next), (0, Some(ms(4_000))));
+}
+
+#[test]
+fn a_clip_in_a_chat_windows_replaying_slice_stays_open() {
+    let (player, spec) = player(4);
+    let (chat, rest) = (ChatId(11), PlayMode::Once(Rest::First));
+    let slice = EntityId::from(0x71_u64);
+    let scope = Rc::new(Cell::new(Some(slice)));
+    let _cache = BoundedImageCache::new(scope);
+    let t0 = Instant::now();
+    chat_frame(&player, chat);
+    slice_rendered(slice, Some(chat));
+    let _ = player.frame(&spec, head("chat"), rest, EDGE, false, Some(chat), t0);
+    player.settle();
+    for _ in 0..3 {
+        chat_frame(&player, chat);
+        slice_shown(slice, Some(chat));
+    }
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!((closed.clips, closed.next), (0, None), "it replays");
+    chat_frame(&player, chat);
+    slice_rendered(slice, Some(chat));
+    chat_frame(&player, chat);
+    slice_shown(slice, Some(chat));
+    let closed = player.close_stale(t0 + ms(60_000));
+    assert_eq!((closed.clips, closed.next), (0, Some(CLOSE_AFTER)));
+}
+
+/// A sticker at rest asks for nothing while its window stays quiet. Another
+/// window playing the same clip leaves its frame alone: the quiet window's
+/// next draw (a caret blink) showed the frame the other head had reached, so
+/// a rested sticker moved each time the main window opened a chat with it.
+#[test]
+fn a_head_at_rest_keeps_its_frame_while_another_head_plays_the_clip() {
+    let (player, spec) = player(12);
+    let (resting, playing) = (head("resting"), head("playing"));
+    let once = PlayMode::Once(Rest::Last);
+    let t0 = Instant::now();
+    for step in 0..=12 {
+        let _ = shown(&player, &spec, resting, once, t0 + ms(34) * step);
+    }
+    assert_eq!(shown(&player, &spec, resting, once, t0 + ms(442)), 11);
+    let t1 = t0 + ms(1000);
+    let _ = shown(&player, &spec, playing, once, t1);
+    for step in 0..3 {
+        let at = t1 + ms(34) * step;
+        assert_eq!(shown(&player, &spec, playing, once, at), step as u8);
+    }
+    let late = player.screen_stats().late;
+    assert_eq!(shown(&player, &spec, resting, once, t1 + ms(102)), 11);
+    assert_eq!(
+        player.screen_stats().late,
+        late,
+        "its frame was still there"
+    );
+}
+
+/// A quiet window draws nothing, however long, so its heads were forgotten
+/// by any other window's draw and its rested stickers played again.
+#[test]
+fn a_head_outlives_a_quiet_window_that_still_shows_it() {
+    let (player, spec) = player(3);
+    let (resting, elsewhere) = (head("resting"), head("elsewhere"));
+    let once = PlayMode::Once(Rest::Last);
+    let chat = ChatId(11);
+    let t0 = Instant::now();
+    begin_frame();
+    for step in 0..=3 {
+        let _ = shown(&player, &spec, resting, once, t0 + ms(34) * step);
+    }
+    chat_frame(&player, chat);
+    let t1 = t0 + HEAD_TTL + ms(1000);
+    let _ = player.frame(
+        &spec,
+        elsewhere,
+        PlayMode::Loop,
+        EDGE,
+        false,
+        Some(chat),
+        t1,
+    );
+    let _ = player.close_stale(t1);
+    assert_eq!(shown(&player, &spec, resting, once, t1), 2);
+    assert_eq!(
+        player
+            .head_progress(resting, 7)
+            .map(|(pos, _)| pos >= ms(100)),
+        Some(true),
+        "it stayed played"
+    );
+}
+
+/// A head off screen for that long goes: the sticker plays as new.
+#[test]
+fn a_head_off_screen_for_long_is_forgotten() {
+    let (player, spec) = player(3);
+    let gone = head("gone");
+    let once = PlayMode::Once(Rest::Last);
+    let t0 = Instant::now();
+    begin_frame();
+    let _ = shown(&player, &spec, gone, once, t0);
+    begin_frame();
+    let _ = player.close_stale(t0 + HEAD_TTL + ms(1000));
+    assert_eq!(player.head_known(gone, 7), None);
 }
 
 /// A window lets go of its chat (the main window opens another one): the
@@ -340,7 +455,7 @@ fn a_window_leaving_its_chat_keeps_what_another_window_uses() {
     let main_only = head("main-only");
     let t0 = Instant::now();
     begin_frame();
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     // One clip both windows draw, one only the main window draws, and one
     // the chat window is opening.
     let views = [
@@ -401,7 +516,7 @@ fn a_window_leaving_its_chat_keeps_the_rest_of_it() {
     let window_list = HeadId::of(Part::Chrome, "window-list");
     let t0 = Instant::now();
     begin_frame();
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     // A clip only the chat draws, one only the chat list draws, one both
     // draw, and one the chat window's chrome draws.
     let views = [
@@ -442,7 +557,7 @@ fn a_window_leaving_its_chat_keeps_the_rest_of_it() {
     // Nothing shows the chat list's clips any more: they close in time.
     begin_frame();
     begin_frame();
-    player.frame_starts(Some(chat));
+    chat_frame(&player, chat);
     assert_eq!(player.close_stale(t0 + ms(1_000)).clips, 0, "not at once");
     let closed = player.close_stale(t0 + CLOSE_AFTER + ms(1_000));
     assert_eq!(

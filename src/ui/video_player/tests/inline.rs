@@ -145,6 +145,24 @@ fn inline_tiles_play_muted_on_the_layer_and_stop_with_the_chat(cx: &mut TestAppC
     }
 }
 
+/// What a clip's layer draws over it (its picture, the time pill above
+/// it) builds no hitboxes: GPUI would draw a layer holding any in whole
+/// frames, and the whole window would render at the clip's rate.
+#[gpui_kit::test]
+fn a_clips_layer_builds_no_hitboxes(cx: &mut TestAppContext) {
+    let scripts = [ready_script(), ready_script()];
+    for script in &scripts {
+        queue_backend(script);
+    }
+    let (app, mut vcx) = new_app(cx);
+    vcx.update(|window, _| window.activate_window());
+    settle(&mut vcx);
+    let tile = app.read_with(&vcx, |app, _| app.playback.inline_videos.player(TILE));
+    assert!(tile.is_some_and(|tile| tile.state().animates()));
+    let interactive = vcx.update(|window, _| window.interactive_live_views());
+    assert_eq!(interactive, 0);
+}
+
 /// Re-render the conversation (a history pass) `times` times.
 fn history_passes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, times: usize) {
     for _ in 0..times {

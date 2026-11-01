@@ -167,7 +167,7 @@ impl QuillApp {
     /// a row in which nothing asked.
     #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
-        let target = self.frame.tick_view.get().or(self.slices.current());
+        let target = self.slices.current().or(self.frame.tick_view.get());
         self.request_animation_tick_for(target, fps, cx);
     }
 
