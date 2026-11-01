@@ -335,9 +335,12 @@ impl QuillApp {
         // window. Those not painted in view this pass pause once it has
         // painted.
         let target = self.history_redraw_target();
-        self.playback
-            .inline_videos
-            .begin_render(self.windows.scope, target, cx);
+        self.playback.inline_videos.begin_render(
+            self.windows.scope,
+            target,
+            self.history.width.get(),
+            cx,
+        );
         let surface = self.history_userpic_surface();
         self.playback
             .userpic_videos
