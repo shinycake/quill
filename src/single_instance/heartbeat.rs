@@ -4,7 +4,20 @@
 //! tdesktop checks its main thread before it answers too (`sandbox.cpp`).
 
 use std::sync::{Condvar, Mutex};
-use std::time::Duration;
+use std::time::Instant;
+
+/// Where [`Heartbeat::answered_by`] reads the time, so a test can move it.
+pub(super) trait Clock: Sync {
+    fn now(&self) -> Instant;
+}
+
+pub(super) struct SystemClock;
+
+impl Clock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
 
 pub struct Heartbeat {
     beats: Mutex<Option<u64>>,
@@ -54,15 +67,34 @@ impl Heartbeat {
         *crate::locks::lock_or_recover(&self.beats)
     }
 
-    /// Whether the UI beat after `mark` within `wait`, or does not beat at all.
-    pub(super) fn answered_since(&self, mark: Option<u64>, wait: Duration) -> bool {
-        let beats = crate::locks::lock_or_recover(&self.beats);
-        let Ok((beats, _)) = self
-            .beat
-            .wait_timeout_while(beats, wait, |beats| beats.is_some() && *beats == mark)
-        else {
-            return true;
-        };
-        beats.is_none() || mark.is_none() || *beats != mark
+    /// Whether the UI beat after `mark` by `deadline` on `clock`, or does
+    /// not beat at all.
+    pub(super) fn answered_by(
+        &self,
+        mark: Option<u64>,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> bool {
+        let mut beats = crate::locks::lock_or_recover(&self.beats);
+        loop {
+            if beats.is_none() || mark.is_none() || *beats != mark {
+                return true;
+            }
+            let left = deadline.saturating_duration_since(clock.now());
+            if left.is_zero() {
+                return false;
+            }
+            beats = match self.beat.wait_timeout(beats, left) {
+                Ok((beats, _)) => beats,
+                Err(_) => return true,
+            };
+        }
+    }
+
+    /// Wakes [`Self::answered_by`] to read its clock again.
+    #[cfg(test)]
+    pub(super) fn recheck(&self) {
+        let _beats = crate::locks::lock_or_recover(&self.beats);
+        self.beat.notify_all();
     }
 }
