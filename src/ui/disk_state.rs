@@ -290,20 +290,7 @@ impl QuillApp {
     fn announce_full_disk(&mut self, cx: &mut Context<Self>) {
         self.bring_main_window_forward(cx);
         self.disk.full_notices += 1;
-        let (title, body) = if self.disk.unwritable {
-            (
-                keys::Q_DISK_UNWRITABLE_TITLE,
-                keys::Q_DISK_UNWRITABLE_NOTICE,
-            )
-        } else {
-            (keys::Q_DISK_FULL_TITLE, keys::Q_DISK_FULL_NOTICE)
-        };
-        let notice = quill::notify::OsNotification {
-            chat_id: quill::ids::ChatId(0),
-            message_id: None,
-            title: tr(title).to_string(),
-            body: tr(body).to_string(),
-        };
+        let notice = full_disk_notice(self.disk.unwritable);
         let locked = self.account.passcode.locked;
         self.show_os_notification(notice, None, None, locked, cx);
     }
@@ -424,6 +411,19 @@ impl QuillApp {
                 .into_any_element()
         })
     }
+}
+
+/// The system notification for the full-disk screen.
+pub(super) fn full_disk_notice(unwritable: bool) -> quill::notify::OsNotification {
+    let (title, body) = if unwritable {
+        (
+            keys::Q_DISK_UNWRITABLE_TITLE,
+            keys::Q_DISK_UNWRITABLE_NOTICE,
+        )
+    } else {
+        (keys::Q_DISK_FULL_TITLE, keys::Q_DISK_FULL_NOTICE)
+    };
+    quill::notify::OsNotification::about_app(tr(title).to_string(), tr(body).to_string())
 }
 
 fn disk_size(bytes: u64) -> String {

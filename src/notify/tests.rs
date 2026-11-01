@@ -275,7 +275,7 @@ fn linux_command_shape() {
         title: "Ada".into(),
         body: "hello".into(),
     };
-    let cmd = linux_notify_send_command(&notification, None);
+    let cmd = linux_notify_send_command(&notification, None, false);
     assert_eq!(cmd.program, "notify-send");
     assert_eq!(
         cmd.args,
@@ -337,7 +337,7 @@ fn linux_command_passes_the_avatar_icon_before_the_separator() {
         body: "hi".to_string(),
     };
     let icon = std::path::Path::new("/cache/a.png");
-    let with = linux_notify_send_command(&notification, Some(icon));
+    let with = linux_notify_send_command(&notification, Some(icon), false);
     let sep = with.args.iter().position(|a| a == "--").unwrap();
     let at = with
         .args
@@ -345,7 +345,7 @@ fn linux_command_passes_the_avatar_icon_before_the_separator() {
         .position(|a| a == "--icon=/cache/a.png")
         .unwrap();
     assert!(at < sep);
-    let without = linux_notify_send_command(&notification, None);
+    let without = linux_notify_send_command(&notification, None, false);
     assert!(!without.args.iter().any(|a| a.starts_with("--icon")));
 }
 
@@ -457,10 +457,39 @@ fn action_ids_roundtrip() {
 
 #[test]
 fn locked_apps_offer_no_buttons() {
-    assert!(action_buttons(true).is_empty());
+    let chat = OsNotification {
+        chat_id: ChatId(7),
+        message_id: None,
+        title: "Ada".into(),
+        body: "hello".into(),
+    };
+    assert!(action_buttons(&chat, true).is_empty());
     assert_eq!(
-        action_buttons(false),
+        action_buttons(&chat, false),
         vec![("reply", "Reply"), ("read", "Mark as read")]
+    );
+    let locked = linux_notify_send_command(&chat, None, true).args;
+    assert!(
+        !locked.iter().any(|arg| arg.contains("reply")),
+        "{locked:?}"
+    );
+}
+
+#[test]
+fn a_notice_about_the_app_offers_no_reply_or_mark_as_read() {
+    let notice = OsNotification::about_app("Disk is full".into(), "Free up space".into());
+    assert!(action_buttons(&notice, false).is_empty());
+    let args = linux_notify_send_command(&notice, None, false).args;
+    assert_eq!(
+        args,
+        vec![
+            "--app-name=Quill",
+            "--wait",
+            "--action=default=Open",
+            "--",
+            "Disk is full",
+            "Free up space",
+        ]
     );
 }
 

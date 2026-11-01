@@ -178,7 +178,7 @@ impl Notifier {
         body: &str,
         avatar: Option<&Path>,
         photo: Option<&Path>,
-        locked: bool,
+        no_actions: bool,
         reply_field: bool,
     ) -> zbus::Result<()> {
         let replaces = lock(&self.shown).id_by_chat.get(&key).copied();
@@ -186,7 +186,7 @@ impl Notifier {
             inline_reply: self.capabilities.inline_reply && reply_field,
             ..self.capabilities
         };
-        let actions = notify_actions(capabilities, locked);
+        let actions = notify_actions(capabilities, no_actions);
         let hints: HashMap<&str, Value<'_>> = notify_hints(photo)
             .into_iter()
             .map(|(key, value)| (key, Value::from(value)))

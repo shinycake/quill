@@ -245,7 +245,8 @@ impl QuillApp {
     ) {
         let notification = notification.shown();
         let chat_id = notification.chat_id;
-        let reply_field = account.is_none() && !locked;
+        let offers_actions = notification.offers_actions(locked);
+        let reply_field = account.is_none() && offers_actions;
         // An inline reply answers the newest notified message.
         if account.is_none() {
             match notification.message_id {
@@ -287,12 +288,12 @@ impl QuillApp {
                 preview.as_deref(),
                 reply_field.then_some(NotificationAction::Reply.id()),
             );
+            let actions = quill::notify::action_buttons(&notification, locked);
             cx.show_system_notification(SystemNotification {
                 tag: tag.into(),
                 title: notification.title.into(),
                 body: notification.body.into(),
-                // Locked: no buttons, a reply must not bypass the passcode.
-                actions: quill::notify::action_buttons(locked)
+                actions: actions
                     .into_iter()
                     .map(|(id, label)| SystemNotificationAction {
                         id: id.into(),
@@ -306,6 +307,7 @@ impl QuillApp {
         let Some(command) = quill::notify::build_notification_command_with_icon(
             &notification,
             preview.as_deref().or(icon.as_deref()),
+            locked,
         ) else {
             return;
         };
@@ -330,7 +332,7 @@ impl QuillApp {
                     &notification.body,
                     icon.as_deref(),
                     preview.as_deref(),
-                    locked,
+                    !offers_actions,
                     reply_field,
                 ) {
                     eprintln!("failed to show the desktop notification: {error}");

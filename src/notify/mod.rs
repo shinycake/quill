@@ -89,6 +89,9 @@ impl NotifyView {
     }
 }
 
+/// TDLib never names a chat 0.
+const APP_NOTICE_CHAT: ChatId = ChatId(0);
+
 /// One notification the UI should show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsNotification {
@@ -102,6 +105,24 @@ pub struct OsNotification {
 }
 
 impl OsNotification {
+    /// A notice about Quill itself, such as a full disk: no chat stands
+    /// behind it, so it offers no Reply or Mark as read.
+    pub fn about_app(title: String, body: String) -> Self {
+        Self {
+            chat_id: APP_NOTICE_CHAT,
+            message_id: None,
+            title,
+            body,
+        }
+    }
+
+    /// Whether it can carry Reply and Mark as read: it is about a chat, and
+    /// the app is not `locked` (a reply or read receipt must not bypass the
+    /// passcode).
+    pub fn offers_actions(&self, locked: bool) -> bool {
+        !locked && self.chat_id != APP_NOTICE_CHAT
+    }
+
     /// The notification as it is drawn: title and body lose what message
     /// text drops before shaping (`display_text`), on every backend.
     pub fn shown(mut self) -> Self {
@@ -494,8 +515,11 @@ impl NotificationAction {
 
 /// The `(id, label)` buttons to attach to a notification. A locked app
 /// offers none: a reply or read receipt must not bypass the passcode.
-pub fn action_buttons(locked: bool) -> Vec<(&'static str, &'static str)> {
-    if locked {
+pub fn action_buttons(
+    notification: &OsNotification,
+    locked: bool,
+) -> Vec<(&'static str, &'static str)> {
+    if !notification.offers_actions(locked) {
         return Vec::new();
     }
     NotificationAction::BUTTONS
@@ -667,6 +691,7 @@ pub struct NotificationCommand {
 fn linux_notify_send_command(
     notification: &OsNotification,
     icon: Option<&std::path::Path>,
+    locked: bool,
 ) -> NotificationCommand {
     // `--wait` blocks until the notification is dismissed or an action
     // fires; each `--action=name=Label` prints its name on stdout when the
@@ -676,9 +701,11 @@ fn linux_notify_send_command(
         "--app-name=Quill".to_string(),
         "--wait".to_string(),
         "--action=default=Open".to_string(),
-        "--action=reply=Reply".to_string(),
-        "--action=read=Mark as read".to_string(),
     ];
+    if notification.offers_actions(locked) {
+        args.push("--action=reply=Reply".to_string());
+        args.push("--action=read=Mark as read".to_string());
+    }
     // The sender's circular userpic replaces the app icon; without one the
     // daemon keeps the app icon that goes with `--app-name=Quill`.
     if let Some(icon) = icon {
@@ -697,7 +724,7 @@ fn linux_notify_send_command(
 }
 
 pub fn build_notification_command(notification: &OsNotification) -> Option<NotificationCommand> {
-    build_notification_command_with_icon(notification, None)
+    build_notification_command_with_icon(notification, None, false)
 }
 
 /// Like [`build_notification_command`], with the sender's avatar PNG as the
@@ -705,9 +732,10 @@ pub fn build_notification_command(notification: &OsNotification) -> Option<Notif
 pub fn build_notification_command_with_icon(
     notification: &OsNotification,
     icon: Option<&std::path::Path>,
+    locked: bool,
 ) -> Option<NotificationCommand> {
     match current_backend() {
-        NotifyBackend::NotifySend => Some(linux_notify_send_command(notification, icon)),
+        NotifyBackend::NotifySend => Some(linux_notify_send_command(notification, icon, locked)),
         NotifyBackend::Native | NotifyBackend::Unsupported => None,
     }
 }

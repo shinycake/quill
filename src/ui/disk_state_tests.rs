@@ -378,6 +378,15 @@ fn each_time_the_disk_fills_sends_one_notice(cx: &mut TestAppContext) {
     assert_eq!(notices(&app, &mut vcx), 2, "the screen was up already");
 }
 
+#[test]
+fn the_full_disk_notice_offers_no_reply_or_mark_as_read() {
+    for unwritable in [false, true] {
+        let notice = super::full_disk_notice(unwritable);
+        assert!(!notice.offers_actions(false), "{notice:?}");
+        assert!(quill::notify::action_buttons(&notice, false).is_empty());
+    }
+}
+
 #[gpui_kit::test]
 fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_demo_app(cx, "wait-phone", 800.);
