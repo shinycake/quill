@@ -373,6 +373,13 @@ static void _horizLine(RleWorker& rw, int32_t x, int32_t y, int32_t area, int32_
 }
 
 
+//QUILL
+static inline int32_t _coverArea(int32_t cover, long area = 0)
+{
+    return static_cast<int32_t>(static_cast<uint32_t>(cover) * static_cast<uint32_t>(ONE_PIXEL * 2) - static_cast<uint32_t>(area));
+}
+
+
 static void _sweep(RleWorker& rw)
 {
     if (rw.cellsCnt == 0) return;
@@ -385,16 +392,16 @@ static void _sweep(RleWorker& rw)
             auto cell = rw.yCells[y * rw.rowBuckets + list];
 
             while (cell) {
-                if (cell->x > x && cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), cell->x - x);
+                if (cell->x > x && cover != 0) _horizLine(rw, x, y, _coverArea(cover), cell->x - x);  //QUILL
                 cover += cell->cover;
-                auto area = cover * (ONE_PIXEL * 2) - cell->area;
+                auto area = _coverArea(cover, cell->area);  //QUILL
                 if (area != 0 && cell->x >= 0) _horizLine(rw, cell->x, y, area, 1);
                 x = cell->x + 1;
                 cell = cell->next;
             }
         }
 
-        if (cover != 0) _horizLine(rw, x, y, cover * (ONE_PIXEL * 2), rw.cellXCnt - x);
+        if (cover != 0) _horizLine(rw, x, y, _coverArea(cover), rw.cellXCnt - x);  //QUILL
     }
 }
 

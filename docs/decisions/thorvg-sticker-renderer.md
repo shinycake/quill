@@ -81,8 +81,10 @@ evaluated, is in `third_party/thorvg/QUILL-CHANGES.md`.
 
 Each limit sits well above what real documents use, since a wrong refusal costs a
 sticker tdesktop shows. The real set is 245 documents: every `.tgs` and Lottie JSON
-in the reference tdesktop and rlottie checkouts, plus the golden stickers. None is
-refused. `third_party/thorvg` vendors no samples.
+in the reference tdesktop and rlottie checkouts, plus the golden stickers. None
+goes over a limit below. Three rlottie samples stay refused by the older rules:
+two with external images and one a frame past 30 s. `third_party/thorvg`
+vendors no samples.
 
 | Limit | Cap | Most in a real document | Headroom |
 | --- | --- | --- | --- |

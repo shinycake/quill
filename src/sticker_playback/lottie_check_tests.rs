@@ -83,7 +83,10 @@ fn a_precomp_layer_holds_nothing_of_its_own() {
     for own in [json!({"ty": 0, "shapes": []}), json!({"ty": 0, "t": {}})] {
         assert_eq!(check(&with_layers(json!([own]))), Err(Malformed::Layer));
     }
-    assert_eq!(check(&with_layers(json!([{"ty": 4, "shapes": []}]))), Ok(()));
+    assert_eq!(
+        check(&with_layers(json!([{"ty": 4, "shapes": []}]))),
+        Ok(())
+    );
 }
 
 #[test]
@@ -104,7 +107,10 @@ fn masks_on_a_layer_are_limited() {
 #[test]
 fn layers_in_a_document_are_limited() {
     let layers = vec![json!({"ty": 3}); 8193];
-    assert_eq!(check(&with_layers(json!(layers))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_layers(json!(layers))),
+        Err(Malformed::TooComplex)
+    );
     let layers = vec![json!({"ty": 3}); 8192];
     assert_eq!(check(&with_layers(json!(layers))), Ok(()));
 }
@@ -112,7 +118,10 @@ fn layers_in_a_document_are_limited() {
 #[test]
 fn shapes_are_objects_with_a_text_kind() {
     assert_eq!(check(&with_shapes(json!([1]))), Err(Malformed::Shape));
-    assert_eq!(check(&with_shapes(json!([{"ty": 1}]))), Err(Malformed::Shape));
+    assert_eq!(
+        check(&with_shapes(json!([{"ty": 1}]))),
+        Err(Malformed::Shape)
+    );
     let group = with_shapes(json!([{"ty": "gr", "it": 1}]));
     assert_eq!(check(&group), Err(Malformed::Shape));
 }
@@ -159,7 +168,10 @@ fn asset_ids_are_text_or_whole_numbers() {
 
 #[test]
 fn an_asset_without_layers_is_not_a_precomp() {
-    let doc = with_assets(json!([precomp("a")]), json!([{"id": "a", "u": "", "p": ""}]));
+    let doc = with_assets(
+        json!([precomp("a")]),
+        json!([{"id": "a", "u": "", "p": ""}]),
+    );
     assert_eq!(check(&doc), Ok(()));
 }
 
@@ -229,7 +241,10 @@ fn groups_nest_only_so_deep() {
     for _ in 0..70 {
         shape = json!({"ty": "gr", "it": [shape]});
     }
-    assert_eq!(check(&with_shapes(json!([shape]))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_shapes(json!([shape]))),
+        Err(Malformed::TooComplex)
+    );
 }
 
 #[test]
@@ -261,7 +276,10 @@ fn repeaters_in_a_list_multiply_what_they_copy() {
 fn every_paint_in_a_list_counts_against_its_paths() {
     let mut shapes = vec![json!({"ty": "st"}); 1100];
     shapes.extend(vec![json!({"ty": "rc"}); 1100]);
-    assert_eq!(check(&with_shapes(json!(shapes))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_shapes(json!(shapes))),
+        Err(Malformed::TooComplex)
+    );
     let mut shapes = vec![json!({"ty": "st"}); 5];
     shapes.extend(vec![json!({"ty": "rc"}); 1100]);
     assert_eq!(check(&with_shapes(json!(shapes))), Ok(()));
@@ -277,7 +295,10 @@ fn modifiers_in_a_list_multiply_the_paths_before_them() {
     assert_eq!(check(&with_shapes(json!(shapes))), Ok(()));
     let mut shapes = vec![path];
     shapes.extend(modifiers(20));
-    assert_eq!(check(&with_shapes(json!(shapes))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_shapes(json!(shapes))),
+        Err(Malformed::TooComplex)
+    );
 }
 
 #[test]
@@ -336,11 +357,20 @@ fn layers_that_draw_offscreen_cost_more() {
     let plain = vec![json!({"ty": 3}); 4000];
     assert_eq!(check(&with_layers(json!(plain))), Ok(()));
     let matte = vec![json!({"ty": 3, "tt": 1}); 4000];
-    assert_eq!(check(&with_layers(json!(matte))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_layers(json!(matte))),
+        Err(Malformed::TooComplex)
+    );
     let effect = vec![json!({"ty": 3, "ef": [{"ty": 29}]}); 4000];
-    assert_eq!(check(&with_layers(json!(effect))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_layers(json!(effect))),
+        Err(Malformed::TooComplex)
+    );
     let masked = vec![json!({"ty": 3, "masksProperties": [{}]}); 4000];
-    assert_eq!(check(&with_layers(json!(masked))), Err(Malformed::TooComplex));
+    assert_eq!(
+        check(&with_layers(json!(masked))),
+        Err(Malformed::TooComplex)
+    );
     let slider = vec![json!({"ty": 3, "ef": [{"ty": 5}]}); 4000];
     assert_eq!(check(&with_layers(json!(slider))), Ok(()));
 }

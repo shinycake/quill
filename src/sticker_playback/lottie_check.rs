@@ -111,7 +111,9 @@ fn easing_overshoot(handle: f64) -> f64 {
 /// `serde_json`'s recursion limit bounds the depth.
 fn scan(value: &Value, biggest: &mut f64, handle: &mut f64) {
     match value {
-        Value::Number(number) => *biggest = number.as_f64().map_or(*biggest, |n| biggest.max(n.abs())),
+        Value::Number(number) => {
+            *biggest = number.as_f64().map_or(*biggest, |n| biggest.max(n.abs()))
+        }
         Value::Array(items) => items.iter().for_each(|item| scan(item, biggest, handle)),
         Value::Object(fields) => {
             for (key, field) in fields {
@@ -135,7 +137,10 @@ fn vertices(path: &Value) -> u64 {
     match path {
         Value::Array(items) => items.iter().map(vertices).max().unwrap_or(0),
         Value::Object(fields) => {
-            let own = fields.get("v").and_then(Value::as_array).map_or(0, Vec::len);
+            let own = fields
+                .get("v")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
             let keyed = ["k", "s", "e"]
                 .iter()
                 .filter_map(|key| fields.get(*key))
@@ -277,7 +282,8 @@ impl<'a> Walk<'a> {
         }
         let effects = layer.get("ef").and_then(Value::as_array);
         let drawn = effects.into_iter().flatten();
-        let drawn = drawn.filter(|effect| effect.get("ty").and_then(Value::as_u64) != Some(CUSTOM_EFFECT));
+        let drawn =
+            drawn.filter(|effect| effect.get("ty").and_then(Value::as_u64) != Some(CUSTOM_EFFECT));
         let matte = ["tt", "td"].iter().any(|key| layer.contains_key(*key));
         let offscreen = drawn.count() as u64 + u64::from(matte);
         cost.work = cost
