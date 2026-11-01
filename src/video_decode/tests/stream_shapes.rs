@@ -491,6 +491,23 @@ fn sound_keeps_playing_while_nothing_paints() {
 }
 
 #[test]
+fn a_clip_nobody_paints_ends_when_its_time_runs_out() {
+    let mut rig = Rig::open(Shape::clip(2.0, 2.0));
+    let t0 = rig.start();
+    rig.play_with_nothing_painting(1.0);
+    rig.player.update_ended(t0 + Duration::from_secs(1));
+    assert!(!rig.player.ended, "still playing at 1 s");
+    rig.play_with_nothing_painting(1.5);
+    rig.player.update_ended(t0 + Duration::from_secs_f64(2.5));
+    assert!(
+        rig.player.ended,
+        "{} pictures queued",
+        rig.pictures_queued()
+    );
+    assert!(rig.player.error().is_none());
+}
+
+#[test]
 fn the_picture_is_current_when_painting_comes_back() {
     let mut rig = Rig::open(Shape::clip(90.0, 90.0));
     let t0 = rig.start();

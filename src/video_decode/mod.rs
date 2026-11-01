@@ -860,9 +860,13 @@ impl Player {
         if self.ended {
             return;
         }
+        // A clip nobody paints keeps its last picture queued; once the
+        // clock has passed it, it would only be shown late.
+        let position = self.position_at(now);
         let drained = {
             let state = lock(&self.shared.state);
-            state.eof && state.video.is_empty()
+            let passed = |last: &VideoFrame| !self.first && last.pts <= position + DUE_SLACK;
+            state.eof && state.video.back().is_none_or(passed)
         };
         if !drained {
             return;
