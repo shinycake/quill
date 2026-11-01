@@ -1305,6 +1305,8 @@ pub struct Window {
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
+    /// Quill: the mouse position the drag ghost was last painted for.
+    drag_painted_at: Option<Point<Pixels>>,
     /// The [`InteractiveElement::a11y_tag`]s of the elements being painted,
     /// outermost first (pushed and popped around each tagged element's
     /// paint), so the focused element can record the tags above it.
@@ -2221,6 +2223,7 @@ impl Window {
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
+            drag_painted_at: None,
             a11y_tag_stack: Vec::new(),
             tooltip_tags: Vec::new(),
             paint_filter: None,
@@ -3852,6 +3855,7 @@ impl Window {
             element.prepaint_as_root(offset, AvailableSpace::min_size(), self, cx);
             active_drag_element = Some(element);
             cx.active_drag = Some(active_drag);
+            self.drag_painted_at = Some(self.mouse_position);
         } else {
             tooltip_element = self.prepaint_tooltip(cx);
         }
@@ -6079,6 +6083,7 @@ impl Window {
                             external_payload_source: None,
                         });
                     }
+                    self.refresh();
                     PlatformInput::MouseMove(MouseMoveEvent {
                         position,
                         pressed_button: Some(MouseButton::Left),
@@ -6344,7 +6349,8 @@ impl Window {
 
     fn dispatch_mouse_event(&mut self, event: &dyn Any, cx: &mut App) {
         let hit_test = self.rendered_frame.hit_test(self.mouse_position());
-        if hit_test != self.mouse_hit_test {
+        let hit_test_changed = hit_test != self.mouse_hit_test;
+        if hit_test_changed {
             self.mouse_hit_test = hit_test;
             self.reset_cursor_style(cx);
         }
@@ -6383,9 +6389,17 @@ impl Window {
 
         if cx.has_active_drag() {
             if event.is::<MouseMoveEvent>() {
-                // If this was a mouse move event, redraw the window so that the
-                // active drag can follow the mouse cursor.
-                self.refresh();
+                // Quill: the ghost is painted on every draw, cached views or
+                // not, so a move only needs a redraw, and a platform update at
+                // the same spot needs nothing. Cached views render again only
+                // for `drag_over` styles, which follow the hovered hitboxes.
+                if hit_test_changed {
+                    self.refresh();
+                } else if self.drag_painted_at != Some(self.mouse_position)
+                    && self.invalidator.not_drawing()
+                {
+                    self.invalidator.set_dirty(true);
+                }
             } else if event.is::<MouseUpEvent>() {
                 // If this was a mouse up event, cancel the active drag and redraw
                 // the window.

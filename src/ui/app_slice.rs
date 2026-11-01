@@ -830,3 +830,8 @@ impl Element for MeasureHeight {
 #[cfg(feature = "demo-capture")]
 #[path = "scene_replay_tests.rs"]
 mod scene_replay_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "drag_redraw_tests.rs"]
+mod drag_redraw_tests;
