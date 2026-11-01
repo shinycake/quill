@@ -124,17 +124,16 @@ fn a_full_reading_ends_a_start_in_flight(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_start_that_lands_on_a_refused_screen_opens_nothing(cx: &mut TestAppContext) {
+fn a_refused_screen_leaves_other_accounts_running_above_close(cx: &mut TestAppContext) {
     let (app, mut vcx, root) = app_with_unsigned_accounts(cx);
     app.update_in(&mut vcx, |app, _, cx| {
-        app.ensure_background_accounts(cx);
         app.open_client(Err(ConnectBlocker::DiskFull), cx);
-        assert!(app.background.starting.contains(&account(1)));
-    });
-    vcx.run_until_parked();
-    app.read_with(&vcx, |app, _| {
-        assert!(app.background.client(&account(1)).is_none());
-        assert!(!app.background.starting.contains(&account(1)));
+        app.apply_disk_reading(NEARLY, cx);
+        app.apply_disk_reading(NEARLY, cx);
+        assert!(!app.disk.is_full(), "only the screen's client waits");
+        assert!(app.disk_full_view().is_some());
+        app.ensure_background_accounts(cx);
+        assert!(app.background.client(&account(2)).is_some());
     });
     let _ = std::fs::remove_dir_all(&root);
 }

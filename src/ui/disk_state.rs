@@ -31,6 +31,10 @@ pub(crate) struct DiskUi {
     waited: Duration,
     /// The last reading found a data folder TDLib cannot write.
     unwritable: bool,
+    /// The on-screen client was refused below the open floor. The screen
+    /// says so, while clients already running keep going until a reading
+    /// falls below close.
+    screen_refused: bool,
     main_window: AnyWindowHandle,
     start_refused: bool,
 }
@@ -52,6 +56,7 @@ impl DiskUi {
             confirming: false,
             waited: Duration::ZERO,
             unwritable: false,
+            screen_refused: false,
             main_window: window.window_handle(),
             start_refused: false,
         }
@@ -59,6 +64,12 @@ impl DiskUi {
 
     pub(super) fn is_full(&self) -> bool {
         self.state == DiskState::Full
+    }
+
+    /// The full-disk screen is up: the disk is full, or the on-screen
+    /// client was refused.
+    pub(super) fn shows_screen(&self) -> bool {
+        self.is_full() || self.screen_refused
     }
 
     pub(super) fn holds_auto_downloads(&self) -> bool {
@@ -168,36 +179,55 @@ impl QuillApp {
             running = true;
             let _ = live.driver.note_disk(after, free, &floors);
         }
-        let retry_starts = self.disk.start_refused && free.is_some_and(|free| free >= floors.open);
+        let room = free.is_some_and(|free| free >= floors.open);
+        let retry_starts = self.disk.start_refused && room;
+        let retry_screen = self.disk.screen_refused && room && after != DiskState::Full;
         let before = self.enter_disk_state(after, cx);
-        match before.step(
+        let step = before.step(
             after,
             DiskClients {
                 running,
                 retry_starts,
             },
-        ) {
+        );
+        match step {
             DiskStep::Hold => {}
             DiskStep::Close => self.close_clients_for_full_disk(cx),
-            DiskStep::Reconnect if self.account.passcode.locked => {
-                self.account.passcode.deferred_connect = true;
-            }
-            DiskStep::Reconnect => self.start_connection(cx),
+            DiskStep::Reconnect => self.reconnect_after_disk(cx),
             DiskStep::RetryStarts => {
                 self.disk.start_refused = false;
                 self.ensure_background_accounts(cx);
             }
         }
-        if before != after || (after == DiskState::Full && self.disk.free != shown) {
+        if retry_screen && step != DiskStep::Reconnect {
+            self.reconnect_after_disk(cx);
+        }
+        if before != after || (self.disk.shows_screen() && self.disk.free != shown) {
             cx.notify();
         }
     }
 
-    pub(super) fn enter_disk_state(
-        &mut self,
-        after: DiskState,
-        cx: &mut Context<Self>,
-    ) -> DiskState {
+    fn reconnect_after_disk(&mut self, cx: &mut Context<Self>) {
+        self.disk.screen_refused = false;
+        if self.account.passcode.locked {
+            self.account.passcode.deferred_connect = true;
+        } else {
+            self.start_connection(cx);
+        }
+    }
+
+    /// `prepare_connect` refused the on-screen client below the open floor.
+    /// Only that client waits: the state stays with the readings, so other
+    /// running clients close only when a reading falls below close.
+    pub(super) fn refuse_screen_open(&mut self, cx: &mut Context<Self>) {
+        if !self.disk.shows_screen() {
+            self.bring_main_window_forward(cx);
+        }
+        self.disk.screen_refused = true;
+        cx.notify();
+    }
+
+    fn enter_disk_state(&mut self, after: DiskState, cx: &mut Context<Self>) -> DiskState {
         let before = std::mem::replace(&mut self.disk.state, after);
         if after == DiskState::Full && before != DiskState::Full {
             self.bring_main_window_forward(cx);
@@ -225,7 +255,7 @@ impl QuillApp {
     }
 
     pub(super) fn disk_full_view(&self) -> Option<AuthView> {
-        if !self.disk.is_full() {
+        if !self.disk.shows_screen() {
             return None;
         }
         if self.disk.unwritable {
@@ -255,7 +285,7 @@ impl QuillApp {
     /// The kit's banner has no action slot, so the row around it carries the
     /// tint and the button.
     pub(super) fn disk_low_banner(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        (self.disk.state == DiskState::Low).then(|| {
+        (self.disk.state == DiskState::Low && !self.disk.shows_screen()).then(|| {
             let settings_can_show = self.pane_mode() != PaneMode::Connecting;
             h_flex()
                 .w_full()

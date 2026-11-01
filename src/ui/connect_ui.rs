@@ -229,7 +229,7 @@ impl super::app::QuillApp {
                 self.live = Some(live);
             }
             Err(ConnectBlocker::DiskFull) => {
-                self.enter_disk_state(quill::disk_guard::DiskState::Full, cx);
+                self.refuse_screen_open(cx);
                 self.connection.set_note(StatusNote::silent(""));
             }
             Err(blocker) => match blocker.startup_failure() {
