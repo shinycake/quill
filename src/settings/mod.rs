@@ -22,7 +22,7 @@ pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
-pub use deferred::flush_deferred_writes;
+pub use deferred::{flush_deferred_writes, take_deferred_write_failure};
 pub(crate) use deferred::{read_with_pending, write_json_deferred};
 pub use first_run::*;
 pub use media::*;
@@ -93,9 +93,9 @@ pub fn load_preferences(paths: &AccountPaths) -> Preferences {
     load_json_prefs(paths, "prefs.json")
 }
 
-/// Persist general prefs; failures are returned to the caller to surface
-/// in the status note.
-pub fn save_preferences(paths: &AccountPaths, prefs: &Preferences) -> std::io::Result<()> {
+/// Persist general prefs; a failure reaches the status note through
+/// [`take_deferred_write_failure`].
+pub fn save_preferences(paths: &AccountPaths, prefs: &Preferences) {
     save_json_prefs(paths, "prefs.json", prefs)
 }
 
@@ -153,19 +153,20 @@ fn load_json_prefs<T>(paths: &AccountPaths, file_name: &str) -> T
 where
     T: Default + for<'de> Deserialize<'de>,
 {
-    std::fs::read(paths.root.join(file_name))
+    read_with_pending(&paths.root.join(file_name))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .unwrap_or_default()
 }
 
-/// Shared save: creates the parent dir; failures are returned to the
-/// caller to surface in the status note.
-fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T) -> std::io::Result<()>
+/// Shared save, written by the settings writer thread (tdesktop saves
+/// settings from its storage thread). A failed write reaches the status
+/// note through [`take_deferred_write_failure`].
+fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T)
 where
     T: Serialize,
 {
-    write_json_atomic(&paths.root.join(file_name), prefs)
+    let _ = write_json_deferred(&paths.root.join(file_name), prefs);
 }
 
 /// Write `value` as JSON to `path` atomically: a sibling temp file is
@@ -283,9 +284,9 @@ pub fn load_call_prefs(paths: &AccountPaths) -> CallPrefs {
     load_json_prefs(paths, "call_prefs.json")
 }
 
-/// Persist call prefs; failures are returned to the caller to surface
-/// in the status note.
-pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) -> std::io::Result<()> {
+/// Persist call prefs; a failure reaches the status note through
+/// [`take_deferred_write_failure`].
+pub fn save_call_prefs(paths: &AccountPaths, prefs: &CallPrefs) {
     save_json_prefs(paths, "call_prefs.json", prefs)
 }
 
@@ -314,7 +315,10 @@ pub fn save_proxy_prefs(
 ) -> std::io::Result<()> {
     match app_root_of(paths) {
         Some(root) => write_json_atomic(&root.join(PROXY_PREFS), prefs),
-        None => save_json_prefs(paths, PROXY_PREFS, prefs),
+        None => {
+            save_json_prefs(paths, PROXY_PREFS, prefs);
+            Ok(())
+        }
     }
 }
 
@@ -395,7 +399,7 @@ mod tests {
             },
             call_noise_suppression: false,
         };
-        save_call_prefs(&paths, &prefs).expect("save works");
+        save_call_prefs(&paths, &prefs);
         assert_eq!(load_call_prefs(&paths), prefs);
         // Noise suppression is on by default, also for a file written
         // before the switch existed.
@@ -405,6 +409,7 @@ mod tests {
                 .unwrap();
         assert!(old.call_noise_suppression);
         // Corrupt file → defaults, never a panic.
+        crate::settings::flush_deferred_writes();
         std::fs::write(dir.join("accounts/primary/call_prefs.json"), b"not json").unwrap();
         assert_eq!(load_call_prefs(&paths), CallPrefs::default());
         let _ = std::fs::remove_dir_all(&dir);

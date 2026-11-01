@@ -825,6 +825,24 @@ impl Session {
     ///
     /// `None` = no gate (send freely). Pure in `now_ms` for replay tests.
     pub fn slow_mode_wait_secs(&self, chat_id: ChatId, now_ms: u64) -> Option<u64> {
+        let info = self.slow_mode_info(chat_id)?;
+        let elapsed_s = now_ms.saturating_sub(info.fetched_at_ms) as f64 / 1000.0;
+        let remaining = info.slow_mode_delay_expires_in - elapsed_s;
+        if remaining > 0.0 {
+            Some(remaining.ceil() as u64)
+        } else {
+            None
+        }
+    }
+
+    /// Slow mode holds the viewer in `chat_id` (tdesktop `slowmodeApplied`),
+    /// whether or not a wait is running now: one Send may make one message.
+    pub fn slow_mode_applies(&self, chat_id: ChatId) -> bool {
+        self.slow_mode_info(chat_id).is_some()
+    }
+
+    /// The full info of a group whose slow mode holds the viewer.
+    fn slow_mode_info(&self, chat_id: ChatId) -> Option<&SupergroupFullInfoData> {
         let chat = self.chats.get(&chat_id.0)?;
         let supergroup_id = match chat.kind {
             ChatKind::Supergroup {
@@ -851,13 +869,7 @@ impl Session {
         if info.unrestrict_boost_count > 0 && info.my_boost_count >= info.unrestrict_boost_count {
             return None;
         }
-        let elapsed_s = now_ms.saturating_sub(info.fetched_at_ms) as f64 / 1000.0;
-        let remaining = info.slow_mode_delay_expires_in - elapsed_s;
-        if remaining > 0.0 {
-            Some(remaining.ceil() as u64)
-        } else {
-            None
-        }
+        Some(info)
     }
 
     /// Phase B3: whether the currently open chat's loaded history contains

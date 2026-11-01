@@ -123,7 +123,7 @@ fn chat_prefs_roundtrip_and_missing_file() {
         highlight_emoji_words: true,
         emoji_word_blocklist: vec!["ok".into()],
     };
-    save_chat_prefs(&paths, &prefs).unwrap();
+    save_chat_prefs(&paths, &prefs);
     assert_eq!(load_chat_prefs(&paths), prefs);
 
     let _ = std::fs::remove_dir_all(&dir);

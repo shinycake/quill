@@ -8,7 +8,6 @@
 
 use super::app::QuillApp;
 use super::emoji_bar::EmojiBarUi;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -17,7 +16,7 @@ use quill::emoji::keyword_lookup::{
     keyword_emoji, normalize_query, prioritize_recent, push_unique, skip_exact_keyword,
 };
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::suggest::{
     EMOJI_LIMIT, RecentHashtags, SuggestKind, SuggestQuery, detect, emoji_name, search_emoji,
 };
@@ -554,15 +553,10 @@ impl QuillApp {
         if !self.composer_ui.suggest.hashtags.record_message(text) {
             return;
         }
-        if let Err(err) = quill::settings::save_recent_hashtags(
+        quill::settings::save_recent_hashtags(
             &Self::appearance_paths(),
             &self.composer_ui.suggest.hashtags,
-        ) {
-            self.connection.set_note(StatusNote::error(tr_with(
-                keys::Q_CHAT_COULDNT_SAVE_RECENT_HASHTAGS,
-                &[("err", &err.to_string())],
-            )));
-        }
+        );
     }
 
     /// The popup above the composer: a list of hashtags, or a strip of

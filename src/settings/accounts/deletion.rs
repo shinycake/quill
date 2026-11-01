@@ -52,6 +52,8 @@ pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
 /// Delete `key`'s folder (`accounts/<key>`); a missing folder is fine.
 /// Never call it while a TDLib client of `key` may still be open.
 pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
+    // A queued settings write would recreate the folder after it is gone.
+    crate::settings::flush_deferred_writes();
     let removed = std::fs::remove_dir_all(AccountPaths::for_root(app_root, key).root);
     // The folder held the test-environment marker.
     crate::advanced::test_environment::invalidate_active_test(app_root);
@@ -154,6 +156,22 @@ mod tests {
         let key = AccountKey::new("account-9").unwrap();
         delete_account_folder(&root, &key).unwrap();
         finish_pending_delete(&root, &key).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_setting_still_queued_does_not_bring_the_folder_back() {
+        let root = tmp_root("queued");
+        let work = add_account(&root, "Work").unwrap();
+        let paths = AccountPaths::for_root(&root, &work);
+        let prefs = paths.root.join("hashtags.json");
+        crate::settings::write_json_deferred(&prefs, &["#queued"]).unwrap();
+        delete_account_folder(&root, &work).unwrap();
+        assert!(!paths.root.exists());
+        assert!(
+            crate::settings::read_with_pending(&prefs).is_err(),
+            "nothing is left to write into the deleted folder"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -86,6 +86,9 @@ pub struct AttachmentExtras {
     /// The thumbnail Quill made for a picture sent as a file
     /// (`inputDocument.thumbnail`; tdesktop `FinalizeFileThumbnail`).
     pub file_thumbnail: Option<FileThumbnail>,
+    /// A photo edit is rendering into a new file for this one: the latest
+    /// Done's number. Until it lands the file must not be sent.
+    pub photo_render: Option<u64>,
 }
 
 /// A JPEG thumbnail written next to the media cache for upload with a file.

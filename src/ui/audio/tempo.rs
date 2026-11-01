@@ -11,7 +11,7 @@
 //! searches nothing and the output is the input within f32 rounding.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use rodio::source::SeekError;
@@ -72,6 +72,9 @@ pub(super) struct Tempo<S: Source> {
     /// Start of the previous slice.
     prev: Option<usize>,
     done: bool,
+    /// Where the frames read but not yet played are told
+    /// ([`Self::reporting_lag`]).
+    lag: Option<Arc<AtomicU64>>,
     /// Tests: positions the search has scored.
     #[cfg(test)]
     tried: usize,
@@ -103,8 +106,24 @@ impl<S: Source> Tempo<S> {
             nominal: 0.0,
             prev: None,
             done: false,
+            lag: None,
             #[cfg(test)]
             tried: 0,
+        }
+    }
+
+    /// Keep `lag` at the number of frames read from `inner` past the start
+    /// of the block being played, so a count of the frames `inner` gave
+    /// minus `lag` is the sound the device has reached, within one block.
+    pub(super) fn reporting_lag(mut self, lag: Arc<AtomicU64>) -> Self {
+        self.lag = Some(lag);
+        self
+    }
+
+    fn report_playing(&self, from: usize) {
+        if let Some(lag) = &self.lag {
+            let ahead = self.input_end().saturating_sub(from);
+            lag.store(ahead as u64, Ordering::Relaxed);
         }
     }
 
@@ -118,6 +137,7 @@ impl<S: Source> Tempo<S> {
         self.nominal = 0.0;
         self.prev = None;
         self.done = false;
+        self.report_playing(0);
     }
 
     fn input_end(&self) -> usize {
@@ -177,9 +197,8 @@ impl<S: Source> Tempo<S> {
             return 0;
         };
         let natural = prev + self.hs;
-        // Read as far ahead as a search could look even when none runs: what
-        // is read is the player's position (`engine::Counted`) and a video's
-        // audio clock.
+        // Read as far ahead as a search could look even when none runs, so
+        // a video's audio clock, which counts what is read, keeps one lag.
         self.fill_to(center + self.delta + self.n + self.hs);
         let low = center.saturating_sub(self.delta);
         let high = center + self.delta;
@@ -238,6 +257,7 @@ impl<S: Source> Tempo<S> {
             // Past the input: flush the held-back half block and stop.
             self.done = true;
             self.emit_front();
+            self.report_playing(self.prev.map_or(0, |prev| prev + self.hs));
             return true;
         }
         let start = self.pick(center);
@@ -267,6 +287,7 @@ impl<S: Source> Tempo<S> {
             self.input_base += drop;
         }
         self.emit_front();
+        self.report_playing(start);
         true
     }
 

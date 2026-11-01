@@ -100,6 +100,8 @@ pub(super) struct SelectableRichText {
     paragraph: Option<Rc<BidiParagraph>>,
     /// Custom emoji painted over placeholder glyphs.
     emoji: Vec<InlineEmoji>,
+    /// What the shaped text dropped from the message: a copy puts it back.
+    source: Option<quill::display_text::SourceMap>,
 }
 
 /// Highlights and font overrides of a paragraph, as `StyledText` takes them.
@@ -159,7 +161,15 @@ impl SelectableRichText {
             bidi_source: None,
             paragraph: None,
             emoji: Vec::new(),
+            source: None,
         }
+    }
+
+    /// Copy and quote take the message's own text: what `map` says the
+    /// shaped text dropped comes back.
+    pub(super) fn source_map(mut self, map: quill::display_text::SourceMap) -> Self {
+        self.source = Some(map);
+        self
     }
 
     /// Custom emoji drawn over their placeholder glyphs (see
@@ -581,6 +591,15 @@ impl Element for SelectableRichText {
         {
             SELECTED_MESSAGE.with(|selected| selected.set(Some(message)));
         }
+        if let Some(map) = &self.source {
+            let copied: String = projection
+                .ranges()
+                .iter()
+                .flatten()
+                .filter_map(|range| map.source_of(&self.text, range.clone()))
+                .collect();
+            handle.copy_with(move |_| copied.clone(), cx);
+        }
         if selected_before != TextSelection::selected_text(window, cx) {
             window.refresh();
         }
@@ -884,12 +903,15 @@ impl Element for SelectionViewport {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests {
-    use super::{EMOJI_PLACEHOLDER, SelectableRichText, emoji_bounds, with_emoji_fallbacks};
+    use super::{
+        EMOJI_PLACEHOLDER, SelectableRichText, emoji_bounds, selected_message_text,
+        with_emoji_fallbacks,
+    };
     use gpui_kit::component::Root;
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
-        AppContext, Context, IntoElement, ParentElement, Render, SharedString, Styled, StyledText,
-        TestAppContext, TextLayout, Window, div, px, size,
+        AppContext, Context, IntoElement, Modifiers, MouseButton, ParentElement, Render,
+        SharedString, Styled, StyledText, TestAppContext, TextLayout, Window, div, point, px, size,
     };
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -1023,5 +1045,76 @@ mod tests {
                 "{covered:?} vs {one_line:?}"
             );
         });
+    }
+
+    struct Quoted {
+        text: SharedString,
+        map: quill::display_text::SourceMap,
+        layout: Rc<RefCell<Option<TextLayout>>>,
+    }
+
+    impl Render for Quoted {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let styled = StyledText::new(self.text.clone());
+            *self.layout.borrow_mut() = Some(styled.layout().clone());
+            div().w(px(300.)).text_size(px(14.)).child(
+                SelectableRichText::new("quoted", self.text.clone(), styled)
+                    .message((1, 1))
+                    .source_map(self.map.clone()),
+            )
+        }
+    }
+
+    /// A drag over text that lost a third mark and stray tags copies, and
+    /// quotes, the message's own characters.
+    #[gpui_kit::test]
+    fn copy_and_quote_give_back_what_shaping_dropped(cx: &mut TestAppContext) {
+        let source = "a book \u{1F4DA}\u{E0069}\u{E007F} and x\u{0300}\u{0300}\u{0300} end";
+        let (mut shown, mut map) = (String::new(), quill::display_text::SourceMap::default());
+        quill::display_text::push_filtered(
+            &mut shown,
+            source,
+            &mut quill::display_text::FilterState::default(),
+            &mut map,
+        );
+        assert_ne!(shown, source, "something was dropped");
+        cx.update(gpui_kit::init);
+        let slot = Rc::new(RefCell::new(None));
+        let handle = cx.open_window(size(px(320.), px(200.)), {
+            let (slot, text) = (slot.clone(), SharedString::from(shown.clone()));
+            move |window, cx| {
+                let view = cx.new(|_| Quoted {
+                    text,
+                    map,
+                    layout: slot,
+                });
+                Root::new(view, window, cx)
+            }
+        });
+        let mut vcx = gpui_kit::VisualTestContext::from_window(handle.into(), cx);
+        vcx.update(|window, cx| window.render_frame(cx));
+        let layout = slot.borrow().clone().expect("rendered");
+        let half = layout.line_height() / 2.;
+        let start = layout.position_for_index(0).expect("first character");
+        let end = layout.position_for_index(shown.len()).expect("text end");
+        // Both ends inside the text: past its box the drag scrolls.
+        let (from, to) = (point(start.x, start.y + half), point(end.x, end.y + half));
+        let none = Modifiers::none();
+        vcx.simulate_mouse_move(from, None, none);
+        vcx.simulate_mouse_down(from, MouseButton::Left, none);
+        vcx.simulate_mouse_move(to, MouseButton::Left, none);
+        vcx.simulate_mouse_up(to, MouseButton::Left, none);
+        vcx.update(|window, cx| window.render_frame(cx));
+        let copied = vcx.update(selected_message_text);
+        assert_eq!(copied, Some(((1, 1), source.to_string())));
+        let message = quill::quote_source::QuotableText::plain(source);
+        assert!(
+            message.quote_for(&shown).is_none(),
+            "the shaped text is not a quote"
+        );
+        let quote = message
+            .quote_for(source)
+            .expect("the copy is a verbatim quote");
+        assert_eq!(quote.text, source);
     }
 }

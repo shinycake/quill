@@ -316,9 +316,8 @@ pub fn load_appearance_prefs(paths: &AccountPaths) -> AppearancePrefs {
     prefs
 }
 
-/// Persist appearance prefs; failures are returned to the caller to
-/// surface in the status note.
-pub fn save_appearance_prefs(paths: &AccountPaths, prefs: &AppearancePrefs) -> std::io::Result<()> {
+/// Persist appearance prefs.
+pub fn save_appearance_prefs(paths: &AccountPaths, prefs: &AppearancePrefs) {
     save_json_prefs(paths, "appearance_prefs.json", prefs)
 }
 
@@ -415,7 +414,7 @@ mod tests {
             tray_icon_monochrome: false,
             native_window_frame: true,
         };
-        save_appearance_prefs(&paths, &prefs).unwrap();
+        save_appearance_prefs(&paths, &prefs);
         assert_eq!(load_appearance_prefs(&paths), prefs);
         let _ = std::fs::remove_dir_all(&dir);
     }

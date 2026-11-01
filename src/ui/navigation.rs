@@ -505,22 +505,14 @@ impl QuillApp {
 
     /// Save the window geometry shortly after the last change (moves and
     /// resizes arrive as a stream). The newest state is staged at once; the
-    /// write itself runs on a background thread, and quitting flushes it.
+    /// write itself runs on a background thread, and quitting flushes it
+    /// ([`flush_settings_on_quit`]).
     pub(super) fn schedule_window_state_save(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.stage_window_state(window);
-        static QUIT_FLUSH: std::sync::Once = std::sync::Once::new();
-        QUIT_FLUSH.call_once(|| {
-            cx.on_app_quit(|_, _| {
-                quill::settings::flush_window_state();
-                quill::settings::flush_deferred_writes();
-                async {}
-            })
-            .detach();
-        });
         if self.frame.window_state_save_pending {
             return;
         }
@@ -563,4 +555,16 @@ impl QuillApp {
             sidebar_hidden: self.frame.sidebar.hidden(),
         }
     }
+}
+
+/// Quitting writes the staged window state and every setting still queued
+/// for the settings writer. Called once at startup, before any setting can
+/// be saved.
+pub(crate) fn flush_settings_on_quit(cx: &mut App) {
+    cx.on_app_quit(|_| {
+        quill::settings::flush_window_state();
+        quill::settings::flush_deferred_writes();
+        async {}
+    })
+    .detach();
 }
