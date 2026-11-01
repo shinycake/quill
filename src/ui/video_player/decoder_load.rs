@@ -7,10 +7,19 @@
 //! history first renders, loads it on the background executor and redraws
 //! the windows once it has. Until then clips show their still, as they do
 //! where the shim is missing. The sign-in screens never load it.
+//!
+//! Opening a player warms it too: a player (a chat list's userpic video)
+//! can open before any history renders, and its decode thread would then
+//! do the first load with nothing told to redraw once it ends.
 #![deny(clippy::indexing_slicing)]
 
-use gpui_kit::App;
-use std::sync::atomic::{AtomicBool, Ordering};
+use gpui_kit::{App, Global};
+
+/// Whether this app has started the load (and its redraw).
+#[derive(Default)]
+struct Warmed(bool);
+
+impl Global for Warmed {}
 
 /// Whether clips can play in this process: always on macOS (AVPlayer);
 /// elsewhere once the bundled FFmpeg shim has loaded. In tests, also once
@@ -28,22 +37,16 @@ fn supported_from(loaded: Option<bool>) -> bool {
     loaded == Some(true)
 }
 
-/// Start loading the shim, once per process.
+/// Start loading the shim, once per app.
 pub(crate) fn warm_decoder(cx: &mut App) {
-    static STARTED: AtomicBool = AtomicBool::new(false);
     if cfg!(target_os = "macos") {
         return;
     }
-    warm_with(
-        &STARTED,
-        quill::video_decode::available,
-        App::refresh_windows,
-        cx,
-    );
+    warm_with(quill::video_decode::available, App::refresh_windows, cx);
 }
 
-fn warm_with(started: &'static AtomicBool, load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
-    if started.swap(true, Ordering::AcqRel) {
+fn warm_with(load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
+    if std::mem::replace(&mut cx.default_global::<Warmed>().0, true) {
         return;
     }
     cx.spawn(async move |cx| {
@@ -57,9 +60,9 @@ fn warm_with(started: &'static AtomicBool, load: fn() -> bool, loaded: fn(&mut A
 
 #[cfg(test)]
 mod tests {
-    use super::{supported_from, warm_with};
+    use super::{Warmed, supported_from, warm_with};
     use gpui_kit::{App, TestAppContext};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn a_load_still_running_shows_the_still() {
@@ -73,7 +76,6 @@ mod tests {
 
     #[gpui_kit::test]
     fn the_finished_load_redraws_the_windows_once(cx: &mut TestAppContext) {
-        static STARTED: AtomicBool = AtomicBool::new(false);
         let load = || {
             LOADS.fetch_add(1, Ordering::SeqCst);
             true
@@ -82,8 +84,8 @@ mod tests {
             REFRESHES.fetch_add(1, Ordering::SeqCst);
         };
         cx.update(|cx| {
-            warm_with(&STARTED, load, loaded, cx);
-            warm_with(&STARTED, load, loaded, cx);
+            warm_with(load, loaded, cx);
+            warm_with(load, loaded, cx);
         });
         assert_eq!(
             REFRESHES.load(Ordering::SeqCst),
@@ -91,9 +93,26 @@ mod tests {
             "not before the load ends"
         );
         cx.run_until_parked();
-        cx.update(|cx| warm_with(&STARTED, load, loaded, cx));
+        cx.update(|cx| warm_with(load, loaded, cx));
         cx.run_until_parked();
         assert_eq!(LOADS.load(Ordering::SeqCst), 1);
         assert_eq!(REFRESHES.load(Ordering::SeqCst), 1);
+    }
+
+    /// A player that opens before any history has rendered starts the load
+    /// that redraws the windows, so its decode thread is not the one to load.
+    #[cfg(not(target_os = "macos"))]
+    #[gpui_kit::test]
+    fn opening_a_player_starts_the_load(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            assert!(!cx.has_global::<Warmed>());
+            let _ = super::super::VideoPlayer::open(
+                std::path::Path::new("/nonexistent/clip.mp4"),
+                super::super::Purpose::Inline { max_edge: 64 },
+                None,
+                cx,
+            );
+            assert!(cx.global::<Warmed>().0);
+        });
     }
 }

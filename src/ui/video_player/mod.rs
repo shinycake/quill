@@ -283,6 +283,7 @@ impl VideoPlayer {
         duration_hint: Option<f64>,
         cx: &mut App,
     ) -> Result<Self, PlayerError> {
+        warm_decoder(cx);
         let player = Self::from_backend(open_backend(path, purpose)?, duration_hint);
         let poll = player.spawn_open_poll(cx);
         if let Ok(mut inner) = player.0.inner.try_borrow_mut() {
