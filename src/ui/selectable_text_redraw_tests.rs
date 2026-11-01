@@ -111,9 +111,7 @@ impl Open {
     }
 
     fn selected(&mut self) -> String {
-        self.vcx
-            .update(TextSelection::selected_text)
-            .to_string()
+        self.vcx.update(TextSelection::selected_text).to_string()
     }
 }
 
