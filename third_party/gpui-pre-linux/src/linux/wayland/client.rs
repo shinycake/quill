@@ -3223,23 +3223,34 @@ impl Dispatch<XdgDialogV1, ()> for WaylandClientStatePtr {
     }
 }
 
-/// Quill: the compositor's keymap, or None when xkb cannot parse it (the
-/// caller keeps the keymap it had).
+/// Quill: the compositor's keymap, or None when the file holds less than
+/// `size` bytes or xkb cannot parse it (the caller keeps the keymap it had).
+/// Read rather than mapped: touching a mapping past the end of a file
+/// shorter than `size` raises SIGBUS.
 fn compile_keymap(context: &xkb::Context, fd: OwnedFd, size: u32) -> Option<xkb::Keymap> {
-    // SAFETY: `fd` is the keymap file the compositor sent with `size`;
-    // `new_from_fd` maps it privately and reports a short or unreadable file
-    // as an error.
-    unsafe {
-        xkb::Keymap::new_from_fd(
-            context,
-            fd,
-            size as usize,
-            XKB_KEYMAP_FORMAT_TEXT_V1,
-            KEYMAP_COMPILE_NO_FLAGS,
-        )
+    use std::os::unix::fs::FileExt as _;
+    /// Far above any real keymap (tens of KiB); refuses a size that would
+    /// only allocate.
+    const MAX_KEYMAP: u64 = 16 << 20;
+    let file = std::fs::File::from(fd);
+    let length = file.metadata().log_err()?.len();
+    if u64::from(size) > length.min(MAX_KEYMAP) {
+        log::error!("the compositor's keymap is {length} bytes, not the {size} it said");
+        return None;
     }
-    .log_err()
-    .flatten()
+    let mut text = vec![0; size as usize];
+    file.read_exact_at(&mut text, 0).log_err()?;
+    // The text ends with a NUL.
+    if let Some(end) = text.iter().position(|byte| *byte == 0) {
+        text.truncate(end);
+    }
+    let text = String::from_utf8(text).log_err()?;
+    xkb::Keymap::new_from_string(
+        context,
+        text,
+        XKB_KEYMAP_FORMAT_TEXT_V1,
+        KEYMAP_COMPILE_NO_FLAGS,
+    )
 }
 
 struct ModifierUpdate {
@@ -3287,6 +3298,43 @@ mod tests {
         let update = update_modifiers(Some(&mut state), [shift, 0, 0], 0).expect("a keymap");
         assert!(update.modifiers.shift);
         assert!(!update.modifiers.control);
+    }
+
+    fn keymap_file(name: &str, text: &[u8]) -> OwnedFd {
+        let path = std::env::temp_dir().join(format!("quill-{name}-{}", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        OwnedFd::from(file)
+    }
+
+    fn us_keymap_text() -> Vec<u8> {
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&context, "", "", "us", "", None, KEYMAP_COMPILE_NO_FLAGS)
+                .expect("us keymap");
+        let mut text = keymap.get_as_string(XKB_KEYMAP_FORMAT_TEXT_V1).into_bytes();
+        text.push(0);
+        text
+    }
+
+    #[test]
+    fn the_compositors_keymap_compiles() {
+        let text = us_keymap_text();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("keymap", &text);
+        assert!(compile_keymap(&context, fd, text.len() as u32).is_some());
+    }
+
+    /// A compositor that says the keymap is longer than the file it sent:
+    /// mapping that length and parsing it raised SIGBUS past the file's end.
+    #[test]
+    fn a_keymap_shorter_than_its_size_is_refused() {
+        let text = us_keymap_text();
+        let half = text.get(..text.len() / 2).unwrap();
+        let context = new_xkb_context().unwrap();
+        let fd = keymap_file("short-keymap", half);
+        assert!(compile_keymap(&context, fd, (text.len() + (1 << 20)) as u32).is_none());
     }
 
     #[test]

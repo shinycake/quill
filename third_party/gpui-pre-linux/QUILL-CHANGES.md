@@ -126,3 +126,15 @@ QUILL-CHANGES.md):
 - Both backends close a window on `Recovery::CloseWindow` from a calloop
   timer (`run_for_window_at`, also in `src/linux/x11/client.rs`), outside
   the draw, without asking `should_close`, as Windows destroys the window.
+
+The Quill project also changed it in 2026 so the Wayland keymap cannot crash
+the app (sweep bundle B13, N46):
+
+- `src/linux/wayland/client.rs`: `compile_keymap` reads the keymap file with
+  `read_exact_at` after checking its length, instead of
+  `xkb::Keymap::new_from_fd`, which maps the `size` the compositor sent: a
+  file shorter than that raised SIGBUS once xkb read past its end, and a
+  size of 0 underflowed. A size the file does not hold (or above 16 MiB) is
+  refused like a keymap xkb cannot parse. Tests:
+  `a_keymap_shorter_than_its_size_is_refused` (SIGBUS with the old mapping),
+  `the_compositors_keymap_compiles`.
