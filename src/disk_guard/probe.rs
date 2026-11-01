@@ -21,9 +21,43 @@ pub(super) fn usable(blocks: u64, available: u64, block_size: u64) -> Option<u64
     (blocks != 0 && block_size != 0).then(|| available.saturating_mul(block_size))
 }
 
-// `statfs`, not `statvfs`: Darwin's `statvfs` has 32-bit block counts.
+/// macOS counts purgeable space (local snapshots, caches it can evict) as
+/// available for important use, which is what Finder shows and what a
+/// write can get. `statfs` leaves it out, so it is the fallback only, for a
+/// volume that does not answer the key.
 #[cfg(target_os = "macos")]
 fn read_available(path: &Path) -> Option<u64> {
+    important_usage(path).or_else(|| statfs_available(path))
+}
+
+#[cfg(all(target_os = "macos", feature = "ui"))]
+fn important_usage(path: &Path) -> Option<u64> {
+    use objc2_foundation::{
+        NSNumber, NSString, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey,
+    };
+    let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str()?));
+    let mut value = None;
+    // SAFETY: the key is a Foundation constant, and `value` is a live slot
+    // the call fills with an NSNumber or nil.
+    unsafe {
+        url.getResourceValue_forKey_error(
+            &mut value,
+            NSURLVolumeAvailableCapacityForImportantUsageKey,
+        )
+    }
+    .ok()?;
+    let number = value?.downcast::<NSNumber>().ok()?;
+    u64::try_from(number.longLongValue()).ok()
+}
+
+#[cfg(all(target_os = "macos", not(feature = "ui")))]
+fn important_usage(_path: &Path) -> Option<u64> {
+    None
+}
+
+// `statfs`, not `statvfs`: Darwin's `statvfs` has 32-bit block counts.
+#[cfg(target_os = "macos")]
+fn statfs_available(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut stat = std::mem::MaybeUninit::<libc::statfs>::uninit();
