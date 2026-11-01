@@ -55,7 +55,9 @@ impl ScreenBackend for LinuxScreen {
         ScreenAccess::Granted
     }
 
-    fn open_privacy_settings(&self) {}
+    fn ask_access(&self) -> Option<&'static str> {
+        None
+    }
 
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError> {
         match self {

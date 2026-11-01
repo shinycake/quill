@@ -174,4 +174,6 @@ pub fn permission_granted() -> bool {
     true
 }
 
-pub fn open_permission_settings() {}
+pub fn permission_settings_pane() -> Option<&'static str> {
+    None
+}

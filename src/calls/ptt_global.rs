@@ -35,7 +35,9 @@ mod platform {
     pub fn permission_granted() -> bool {
         true
     }
-    pub fn open_permission_settings() {}
+    pub fn permission_settings_pane() -> Option<&'static str> {
+        None
+    }
 }
 
 /// Live hook; dropping it stops listening.
@@ -401,9 +403,10 @@ pub fn permission_granted() -> bool {
     platform::permission_granted()
 }
 
-/// Open the OS pane where the permission is granted (macOS only).
-pub fn open_permission_settings() {
-    platform::open_permission_settings();
+/// The system settings pane where the permission is granted (macOS
+/// only), for the UI to open (`QuillApp::open_system_settings`).
+pub fn permission_settings_pane() -> Option<&'static str> {
+    platform::permission_settings_pane()
 }
 
 /// One line for Settings under the shortcut row.

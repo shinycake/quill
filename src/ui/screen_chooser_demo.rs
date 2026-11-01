@@ -79,7 +79,9 @@ impl ScreenBackend for DemoScreens {
         self.access
     }
 
-    fn open_privacy_settings(&self) {}
+    fn ask_access(&self) -> Option<&'static str> {
+        Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+    }
 
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError> {
         Ok(Self::list())

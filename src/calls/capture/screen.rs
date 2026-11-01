@@ -95,8 +95,9 @@ pub trait ScreenBackend: Send + Sync {
     /// Checked before the chooser opens (tdesktop
     /// `desktopCaptureAllowed`).
     fn access(&self) -> ScreenAccess;
-    /// Ask the OS for access and open its privacy settings.
-    fn open_privacy_settings(&self);
+    /// Ask the OS for access. Returns the system settings pane where the
+    /// user grants it, for the UI to open (`QuillApp::open_system_settings`).
+    fn ask_access(&self) -> Option<&'static str>;
     /// Screens first, then windows, in the OS order.
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError>;
     /// One picture of `source`, fitted into `max` pixels.

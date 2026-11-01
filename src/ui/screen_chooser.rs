@@ -644,11 +644,21 @@ impl QuillApp {
     }
 
     /// Open Settings: ask the OS, open its privacy pane, close the box.
-    fn open_screen_privacy_settings(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn open_screen_privacy_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(backend) = self.screen_backend() {
-            cx.background_executor()
-                .spawn(async move { backend.open_privacy_settings() })
-                .detach();
+            let asked = cx
+                .background_executor()
+                .spawn(async move { backend.ask_access() });
+            Self::spawn_main(cx, async move |this, cx| {
+                let Some(pane) = asked.await else {
+                    return;
+                };
+                let _ = this.update(cx, |this, cx| {
+                    let failure = tr(keys::Q_AV_COULDNT_OPEN_SYSTEM_SETTINGS);
+                    this.open_system_settings(pane, failure, cx);
+                });
+            })
+            .detach();
         }
         self.close_screen_privacy(cx);
     }

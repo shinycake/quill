@@ -13,6 +13,7 @@ use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::calls::capture::screen::{
     SYSTEM_PICKER_SOURCE, ScreenAccess, ScreenSource, SourceId, SourceKind,
 };
+use quill::lang::{keys, tr};
 use quill::state::ActiveGroupCall;
 use std::sync::Arc;
 
@@ -226,6 +227,19 @@ fn without_access_the_privacy_box_shows_and_escape_closes_it(cx: &mut TestAppCon
         assert!(app.screen_share.privacy_for.is_none());
     });
     assert!(!group_sharing(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn the_privacy_box_says_so_when_system_settings_cannot_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Denied);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
+    vcx.run_until_parked();
+    quill::platform::script_next_os_open(quill::platform::OsOpen::Answered(false));
+    app.update_in(vcx, |app, _, cx| app.open_screen_privacy_settings(cx));
+    vcx.run_until_parked();
+    let note = app.read_with(vcx, |app, _| app.connection.note().text().to_string());
+    assert_eq!(note, tr(keys::Q_AV_COULDNT_OPEN_SYSTEM_SETTINGS));
 }
 
 #[gpui_kit::test]

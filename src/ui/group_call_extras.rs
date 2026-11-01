@@ -452,8 +452,13 @@ impl QuillApp {
                             Button::new("call-pref-ptt-open-settings")
                                 .label(tr(keys::GROUP_CALL_MAC_SETTINGS))
                                 .small()
-                                .on_click(cx.listener(|_, _, _, _| {
-                                    quill::calls::ptt_global::open_permission_settings();
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(pane) =
+                                        quill::calls::ptt_global::permission_settings_pane()
+                                    {
+                                        let failure = tr(keys::Q_AV_COULDNT_OPEN_SYSTEM_SETTINGS);
+                                        this.open_system_settings(pane, failure, cx);
+                                    }
                                 })),
                         )
                         .child(

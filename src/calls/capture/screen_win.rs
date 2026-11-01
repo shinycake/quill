@@ -78,7 +78,9 @@ impl ScreenBackend for WinScreen {
         ScreenAccess::Granted
     }
 
-    fn open_privacy_settings(&self) {}
+    fn ask_access(&self) -> Option<&'static str> {
+        None
+    }
 
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError> {
         ensure_supported()?;

@@ -237,16 +237,8 @@ pub fn permission_granted() -> bool {
     unsafe { CGPreflightListenEventAccess() }
 }
 
-pub fn open_permission_settings() {
-    if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open System Settings") {
-        return;
-    }
-    if let Ok(child) = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-        .spawn()
-    {
-        crate::child_reap::wait_in_background(child);
-    }
+pub fn permission_settings_pane() -> Option<&'static str> {
+    Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
 }
 
 #[cfg(test)]

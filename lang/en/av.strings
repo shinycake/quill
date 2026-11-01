@@ -146,6 +146,7 @@
 "qll_av_couldnt_join_the_voice_chat" = "Couldn't join the voice chat.";
 "qll_av_couldnt_open_the_audio_file" = "Couldn't open the audio file.";
 "qll_av_couldnt_open_the_folder" = "couldn't open the folder";
+"qll_av_couldnt_open_system_settings" = "Couldn't open System Settings.";
 "qll_av_couldnt_open_the_video_chat" = "Couldn't open the video chat window";
 "qll_av_couldnt_pin_album_item_s" = "couldn't pin {failed} album item(s)";
 "qll_av_couldnt_play_this" = "couldn't play this {noun}";

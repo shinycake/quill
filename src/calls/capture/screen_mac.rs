@@ -66,19 +66,14 @@ impl ScreenBackend for MacScreen {
         }
     }
 
-    fn open_privacy_settings(&self) {
+    fn ask_access(&self) -> Option<&'static str> {
         if crate::agent::ui_driver::guard::refuse_outside_if_injecting("open System Settings") {
-            return;
+            return None;
         }
         // Asking first adds Quill to the Screen Recording list, so the
         // switch is there when the settings open.
         let _ = CGRequestScreenCaptureAccess();
-        if let Ok(child) = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            .spawn()
-        {
-            crate::child_reap::wait_in_background(child);
-        }
+        Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
     }
 
     fn sources(&self) -> Result<Vec<ScreenSource>, CaptureError> {
