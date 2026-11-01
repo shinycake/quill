@@ -54,11 +54,18 @@ const CLOSE_FIXED: u64 = WRITTEN_IN_SHORTEST_READ + APFS_RESERVE;
 pub struct DataUse {
     /// Accounts with a database: each one's client closes at Full.
     pub accounts: u64,
+    /// The largest account's `db.sqlite` with its WAL. A TDLib update can
+    /// migrate the database while it opens, and SQLite may rewrite every
+    /// page of it into the WAL before the checkpoint.
+    pub largest_database: u64,
 }
 
 impl DataUse {
-    /// One account: the least any reading can mean.
-    pub const ONE: Self = Self { accounts: 1 };
+    /// One account with an empty database: the least any reading can mean.
+    pub const ONE: Self = Self {
+        accounts: 1,
+        largest_database: 0,
+    };
 }
 
 impl DiskFloors {
@@ -69,7 +76,9 @@ impl DiskFloors {
             warn: 1024 * MIB,
             warn_clear: 1280 * MIB,
             close,
-            open: close.saturating_add(CATCH_UP_ROOM),
+            open: close
+                .saturating_add(CATCH_UP_ROOM)
+                .saturating_add(data.largest_database),
         }
     }
 }

@@ -275,31 +275,52 @@ mod linux {
 fn the_close_floor_grows_by_each_account_that_closes() {
     use super::{DataUse, DiskFloors, MIB};
     let one = DiskFloors::for_data(DataUse::ONE);
-    let six = DiskFloors::for_data(DataUse { accounts: 6 });
+    let six = DiskFloors::for_data(DataUse {
+        accounts: 6,
+        ..DataUse::ONE
+    });
     assert_eq!(six.close - one.close, 5 * 14 * MIB);
     assert_eq!(six.open - six.close, one.open - one.close);
-    assert_eq!(DiskFloors::for_data(DataUse { accounts: 0 }), one);
+    assert_eq!(
+        DiskFloors::for_data(DataUse {
+            accounts: 0,
+            ..DataUse::ONE
+        }),
+        one
+    );
     assert_eq!(super::FLOORS, one);
 }
 
 #[test]
 fn only_accounts_with_a_database_count() {
     let root = crate::scratch::unique_dir("quill-disk-accounts");
-    for (name, file) in [
-        ("a", Some("db.sqlite")),
-        ("b", Some("td.binlog")),
-        ("c", None),
-    ] {
+    let files: [(&str, &[(&str, usize)]); 3] = [
+        ("a", &[("db.sqlite", 300), ("db.sqlite-wal", 50)]),
+        ("b", &[("td.binlog", 1000)]),
+        ("c", &[]),
+    ];
+    for (name, files) in files {
         let tdlib = root.join("accounts").join(name).join("tdlib");
         std::fs::create_dir_all(&tdlib).unwrap();
-        if let Some(file) = file {
-            std::fs::write(tdlib.join(file), b"x").unwrap();
+        for (file, size) in files {
+            std::fs::write(tdlib.join(file), vec![0; *size]).unwrap();
         }
     }
-    assert_eq!(super::folders::data_use(&root).accounts, 2);
-    assert_eq!(
-        data_floors(&root),
-        super::DiskFloors::for_data(super::DataUse { accounts: 2 })
-    );
+    let data = super::folders::data_use(&root);
+    assert_eq!(data.accounts, 2);
+    assert_eq!(data.largest_database, 350, "the binlog is not migrated");
+    assert_eq!(data_floors(&root), super::DiskFloors::for_data(data));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn the_open_floor_leaves_room_to_migrate_the_largest_database() {
+    use super::{DataUse, DiskFloors, MIB};
+    let small = DiskFloors::for_data(DataUse::ONE);
+    let big = DiskFloors::for_data(DataUse {
+        largest_database: 2048 * MIB,
+        ..DataUse::ONE
+    });
+    assert_eq!(big.close, small.close);
+    assert_eq!(big.open - small.open, 2048 * MIB);
 }

@@ -36,21 +36,32 @@ pub(super) fn tightest(folders: &[PathBuf], read: impl Fn(&Path) -> Option<u64>)
     folders.iter().filter_map(|folder| read(folder)).min()
 }
 
-/// The accounts under `root` that have a database.
+/// The accounts under `root` that have a database, and the largest one.
 pub(super) fn data_use(root: &Path) -> DataUse {
-    let accounts = std::fs::read_dir(root.join("accounts"))
+    let databases: Vec<u64> = std::fs::read_dir(root.join("accounts"))
         .map(|entries| {
             entries
                 .flatten()
-                .filter(|entry| has_database(&entry.path().join("tdlib")))
-                .count()
+                .map(|entry| entry.path().join("tdlib"))
+                .filter(|tdlib| has_database(tdlib))
+                .map(|tdlib| database_size(&tdlib))
+                .collect()
         })
-        .unwrap_or(0);
+        .unwrap_or_default();
     DataUse {
-        accounts: u64::try_from(accounts).unwrap_or(u64::MAX),
+        accounts: u64::try_from(databases.len()).unwrap_or(u64::MAX),
+        largest_database: databases.into_iter().max().unwrap_or(0),
     }
 }
 
 fn has_database(tdlib: &Path) -> bool {
     tdlib.join("db.sqlite").exists() || tdlib.join("td.binlog").exists()
+}
+
+fn database_size(tdlib: &Path) -> u64 {
+    ["db.sqlite", "db.sqlite-wal"]
+        .into_iter()
+        .filter_map(|name| std::fs::metadata(tdlib.join(name)).ok())
+        .map(|file| file.len())
+        .fold(0, u64::saturating_add)
 }

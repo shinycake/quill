@@ -252,7 +252,10 @@ fn a_client_opened_on_a_low_disk_holds_automatic_downloads_at_once(cx: &mut Test
 fn more_accounts_need_more_room_on_the_full_screen(cx: &mut TestAppContext) {
     use quill::disk_guard::{DataUse, DiskFloors};
     let (app, mut vcx) = new_app(cx);
-    let six = DiskFloors::for_data(DataUse { accounts: 6 });
+    let six = DiskFloors::for_data(DataUse {
+        accounts: 6,
+        ..DataUse::ONE
+    });
     app.update_in(&mut vcx, |app, _, cx| {
         app.apply_data_reading(Some(FLOORS.close), six, cx)
     });
