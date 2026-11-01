@@ -165,3 +165,32 @@ fn the_floors_keep_their_order() {
     assert!(floors.open < floors.warn);
     assert!(floors.warn < floors.warn_clear);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_files_folder_is_read_where_it_really_lives() {
+    use std::path::{Path, PathBuf};
+    let root = crate::scratch::unique_dir("quill-disk-folders");
+    let elsewhere = crate::scratch::unique_dir("quill-disk-elsewhere");
+    std::fs::create_dir_all(root.join("accounts/primary/tdlib")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, root.join("accounts/primary/files")).unwrap();
+    let folders = super::folders::data_folders(&root);
+    let elsewhere = std::fs::canonicalize(&elsewhere).unwrap();
+    assert!(folders.contains(&elsewhere), "{folders:?}");
+    assert!(
+        !folders.iter().any(|folder| folder.ends_with("files")),
+        "the link itself is not read: {folders:?}"
+    );
+    let read = |folder: &Path| Some(if folder == elsewhere { 10 } else { 5000 });
+    assert_eq!(super::folders::tightest(&folders, read), Some(10));
+    let none: &[PathBuf] = &[];
+    assert_eq!(super::folders::tightest(none, read), None);
+    let _ = std::fs::remove_dir_all(&root);
+    let _ = std::fs::remove_dir_all(&elsewhere);
+}
+
+#[test]
+fn a_missing_data_root_still_gets_a_reading() {
+    let root = std::env::temp_dir().join("quill-no-such-root/at/all");
+    assert!(data_free_bytes(&root).is_some());
+}

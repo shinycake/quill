@@ -6,10 +6,18 @@
 //! over.
 #![deny(clippy::indexing_slicing)]
 
+mod folders;
 mod probe;
 
 pub use probe::available_bytes;
 
+/// Free bytes for TDLib under the data root `root`: the least over the
+/// volumes its data folders live on (`folders::data_folders`).
+pub fn data_free_bytes(root: &Path) -> Option<u64> {
+    folders::tightest(&folders::data_folders(root), available_bytes)
+}
+
+use std::path::Path;
 use std::time::Duration;
 
 const MIB: u64 = 1 << 20;

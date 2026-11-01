@@ -13,7 +13,7 @@ use gpui_kit::{
     transparent_black,
 };
 use quill::auth::{AuthAction, AuthView};
-use quill::disk_guard::{DiskClients, DiskState, DiskStep, FLOORS, available_bytes, next_read_in};
+use quill::disk_guard::{DiskClients, DiskState, DiskStep, FLOORS, data_free_bytes, next_read_in};
 use quill::lang::{keys, tr, tr_with};
 use std::path::PathBuf;
 
@@ -70,7 +70,7 @@ fn watch(root: PathBuf, cx: &Context<QuillApp>) {
             let folder = root.clone();
             let free = cx
                 .background_executor()
-                .spawn(async move { demo_reading().or_else(|| available_bytes(&folder)) })
+                .spawn(async move { demo_reading().or_else(|| data_free_bytes(&folder)) })
                 .await;
             if this
                 .update(cx, |this, cx| this.apply_disk_reading(free, cx))
