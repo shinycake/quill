@@ -50,13 +50,18 @@ pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
 }
 
 /// Delete `key`'s folder (`accounts/<key>`); a missing folder is fine.
-/// Never call it while a TDLib client of `key` may still be open.
+/// Never call it while a TDLib client of `key` may still be open. Fails
+/// without deleting while a settings write into the folder is stuck.
 pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
     // A queued settings write would recreate the folder after it is gone,
     // and one that failed stays queued, so drop what is left for it.
     crate::settings::flush_deferred_writes();
     let folder = AccountPaths::for_root(app_root, key).root;
-    crate::settings::discard_deferred_writes_under(&folder);
+    if !crate::settings::discard_deferred_writes_under(&folder) {
+        // It would land after the removal; the record keeps the folder for
+        // the next try.
+        return Err(std::io::Error::other("a settings write is stuck"));
+    }
     let removed = std::fs::remove_dir_all(folder);
     // The folder held the test-environment marker.
     crate::advanced::test_environment::invalidate_active_test(app_root);
