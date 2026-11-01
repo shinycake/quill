@@ -1,5 +1,6 @@
 // Modified by the Quill project (2026) from gpui-pre-apple 0.3.9 (Apache-2.0):
-// a malformed CoreText run is skipped instead of panicking.
+// a malformed CoreText run is skipped instead of panicking, and `layout_line`
+// keeps one CTFont per font and size.
 // See third_party/gpui-pre-apple/QUILL-CHANGES.md.
 use anyhow::anyhow;
 use collections::{HashMap, HashSet};
@@ -57,10 +58,14 @@ use {
     std::sync::OnceLock,
 };
 
-use crate::open_type::apply_features_and_fallbacks;
+use crate::{open_type::apply_features_and_fallbacks, sized_fonts::SizedFonts};
 
 #[allow(non_upper_case_globals)]
 const kCGImageAlphaOnly: u32 = 7;
+
+/// QUILL: how many sized fonts `layout_line` keeps. Every font at every size
+/// the UI shows, twice (see `break_ligature`), fits well within this.
+const MAX_SIZED_FONTS: usize = 256;
 
 /// Apple text system using CoreText for font shaping.
 pub struct AppleTextSystem(RwLock<AppleTextSystemState>);
@@ -80,6 +85,8 @@ struct AppleTextSystemState {
     font_ids_by_postscript_name: HashMap<String, FontId>,
     font_ids_by_font_key: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     postscript_names_by_font_id: HashMap<FontId, String>,
+    /// QUILL: by font and the bits of the size.
+    sized_fonts: SizedFonts<(FontId, u32), CTFont>,
 }
 
 impl AppleTextSystem {
@@ -93,6 +100,7 @@ impl AppleTextSystem {
             font_ids_by_postscript_name: HashMap::default(),
             font_ids_by_font_key: HashMap::default(),
             postscript_names_by_font_id: HashMap::default(),
+            sized_fonts: SizedFonts::new(MAX_SIZED_FONTS),
         }))
     }
 }
@@ -572,12 +580,13 @@ impl AppleTextSystemState {
                 } else {
                     font_size
                 };
+                let sized_font = self
+                    .sized_fonts
+                    .get_or_build((run.font_id, f32::from(font_size).to_bits()), || {
+                        font.native_font().clone_with_font_size(font_size.into())
+                    });
                 unsafe {
-                    string.set_attribute(
-                        cf_range,
-                        kCTFontAttributeName,
-                        &font.native_font().clone_with_font_size(font_size.into()),
-                    );
+                    string.set_attribute(cf_range, kCTFontAttributeName, sized_font);
                 }
                 break_ligature = !break_ligature;
             }
@@ -787,7 +796,10 @@ mod lenient_font_attributes {
 #[cfg(test)]
 mod tests {
     use crate::AppleTextSystem;
-    use gpui::{FontFallbacks, FontFeatures, FontRun, GlyphId, PlatformTextSystem, font, px};
+    use gpui::{
+        FontFallbacks, FontFeatures, FontId, FontRun, GlyphId, LineLayout, PlatformTextSystem,
+        font, px,
+    };
     use std::sync::Arc;
 
     #[test]
@@ -811,6 +823,48 @@ mod tests {
         );
         assert_eq!(layout.len, 6);
         assert!(!layout.runs.is_empty());
+    }
+
+    /// What a line shapes to, with positions in hundredths of a pixel.
+    fn shaped(layout: &LineLayout) -> Vec<(FontId, GlyphId, i32, usize, bool)> {
+        layout
+            .runs
+            .iter()
+            .flat_map(|run| {
+                run.glyphs.iter().map(|glyph| {
+                    (
+                        run.font_id,
+                        glyph.id,
+                        (f32::from(glyph.position.x) * 100.).round() as i32,
+                        glyph.index,
+                        glyph.is_emoji,
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// A kept font shapes what a new one does: same glyphs, fallbacks and
+    /// positions, for a line of emoji and Latin, at each size.
+    #[test]
+    fn test_kept_fonts_shape_like_new_ones() {
+        let kept = AppleTextSystem::new();
+        let helvetica = font("Helvetica");
+        let line = "ok \u{1F600}\u{1F44D}\u{1F3FD} done \u{05E9}\u{05DC}\u{05D5}\u{05DD}";
+        for size in [13., 16., 26., 13.] {
+            let run = |fonts: &AppleTextSystem| {
+                [FontRun {
+                    font_id: fonts.font_id(&helvetica).unwrap(),
+                    len: line.len(),
+                }]
+            };
+            let kept_layout = kept.layout_line(line, px(size), &run(&kept));
+            let new = AppleTextSystem::new();
+            let new_layout = new.layout_line(line, px(size), &run(&new));
+            assert!(new_layout.runs.len() > 1, "the line needs a fallback font");
+            assert_eq!(shaped(&kept_layout), shaped(&new_layout), "at {size}");
+            assert_eq!(kept_layout.width, new_layout.width, "at {size}");
+        }
     }
 
     #[test]

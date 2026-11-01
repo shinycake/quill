@@ -94,3 +94,14 @@ textures (`docs/decisions/images-left-behind.md`):
   avatar left on screen kept the 4 MB texture larger pictures had come and
   gone in. Test: `test_small_pictures_get_small_textures`; the tile-reuse
   test's keeper tile is 200² so it shares the large tiles' texture.
+
+The Quill project also changed it in 2026 to stop rebuilding CoreText's font
+caches for every line:
+
+- `src/text_system.rs`: `layout_line` shapes with one kept CTFont per font and
+  size, where upstream built a new one per run. A new CTFont starts with empty
+  shaping and fallback caches, which cost a third of the CPU of scrolling the
+  emoji panel.
+- `src/sized_fonts.rs`: the map, std-only and bounded, tested by
+  `scripts/test-sized-fonts.sh`. `test_kept_fonts_shape_like_new_ones` in
+  `text_system.rs` compares a kept font's shaping with a new font's.
