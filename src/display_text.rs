@@ -100,7 +100,10 @@ pub fn push_filtered(out: &mut String, text: &str, state: &mut FilterState, map:
             true
         } else if is_bad(ch) {
             false
-        } else if ch.general_category() == GeneralCategory::NonspacingMark {
+        } else if matches!(
+            ch.general_category(),
+            GeneralCategory::NonspacingMark | GeneralCategory::EnclosingMark
+        ) {
             state.marks = state.marks.saturating_add(1);
             let limit = if is_generic_mark(ch) {
                 MAX_MARKS_AFTER_SYMBOL
@@ -196,6 +199,18 @@ mod tests {
         // Every generic block counts the same.
         let mixed = "o\u{1AB0}\u{1DC0}\u{20D0}\u{FE20}\u{0301}";
         assert_eq!(filtered(mixed), "o\u{1AB0}\u{1DC0}");
+    }
+
+    #[test]
+    fn enclosing_marks_count_as_marks_and_keep_the_count() {
+        // U+0489, a common Zalgo mark, is a script mark: six stay.
+        let rings = format!("x{}", "\u{0489}".repeat(1000));
+        assert_eq!(filtered(&rings), format!("x{}", "\u{0489}".repeat(6)));
+        // U+20DD is a generic mark and does not start the count over.
+        let rounds = format!("x{}", "\u{0300}\u{0300}\u{20DD}".repeat(300));
+        assert_eq!(filtered(&rounds), "x\u{0300}\u{0300}");
+        // A keycap's enclosing mark stays on its digit.
+        assert_eq!(filtered("1\u{FE0F}\u{20E3}"), "1\u{FE0F}\u{20E3}");
     }
 
     #[test]
