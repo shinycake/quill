@@ -712,7 +712,7 @@ impl Element for LayerPainter {
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 #[path = "layer_tick_tests.rs"]
-mod layer_tick_tests;
+pub(in crate::ui) mod layer_tick_tests;
 
 #[cfg(test)]
 mod tests {

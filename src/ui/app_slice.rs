@@ -194,13 +194,20 @@ impl Slices {
         self.app_only.as_ref().map(Entity::entity_id)
     }
 
+    fn layered(&self) -> impl Iterator<Item = EntityId> {
+        [&self.sidebar, &self.conversation, &self.panel]
+            .into_iter()
+            .flatten()
+            .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()])
+    }
+
+    pub(super) fn under_viewer(&self, id: EntityId) -> bool {
+        self.layered().any(|view| view == id)
+    }
+
     /// Whether `id` is a view of the main window: a slice, a layer's
     /// painter, or [`AppOnly`].
     pub(super) fn owns(&self, id: EntityId) -> bool {
-        let layered = [&self.sidebar, &self.conversation, &self.panel]
-            .into_iter()
-            .flatten()
-            .flat_map(|parts| [parts.slice.entity_id(), parts.painter.entity_id()]);
         let slices = [
             &self.composer,
             &self.viewer,
@@ -210,7 +217,7 @@ impl Slices {
         .into_iter()
         .flatten()
         .map(Entity::entity_id);
-        layered
+        self.layered()
             .chain(slices)
             .chain(self.app_only_id())
             .any(|view| view == id)

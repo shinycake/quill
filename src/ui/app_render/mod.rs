@@ -112,6 +112,11 @@ impl Render for QuillApp {
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
         self.frame.media_roots_frame.borrow_mut().take();
+        let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
+        let cover = self.frame.viewer_cover.get();
+        self.frame
+            .viewer_cover
+            .set(cover.follow(opening, cx.background_executor().now()));
         // Spoiler specks painted last frame keep drifting.
         if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);

@@ -348,7 +348,9 @@ fn a_live_redraw_is_a_frame(cx: &mut TestAppContext) {
 
 /// The demo with two looping 30 fps stickers in the open chat, in an
 /// active window, their first frames drawn.
-fn open_stickers(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+pub(in crate::ui) fn open_stickers(
+    cx: &mut TestAppContext,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = Rc::new(RefCell::new(None));
