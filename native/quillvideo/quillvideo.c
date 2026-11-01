@@ -483,7 +483,7 @@ static int emit_nv12(Ctx *c, const AVFrame *f, int ow, int oh, int cs,
       sws_freeContext(c->nsws);
       c->nsws = sws_getContext(f->width, f->height,
                                (enum AVPixelFormat)f->format, ow, oh,
-                               AV_PIX_FMT_NV12, SWS_BILINEAR | SWS_ACCURATE_RND,
+                               AV_PIX_FMT_NV12, SWS_BILINEAR,
                                NULL, NULL, NULL);
       c->nsws_fmt = -1;
       if (!c->nsws)
@@ -552,7 +552,7 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
     sws_freeContext(c->sws);
     c->sws = sws_getContext(f->width, f->height, (enum AVPixelFormat)f->format,
                             ow, oh, AV_PIX_FMT_BGRA,
-                            SWS_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+                            SWS_BILINEAR, NULL, NULL, NULL);
     if (!c->sws)
       return AVERROR(EINVAL);
     /* Ignored (harmlessly fails) for RGB sources such as GIF palettes. */
