@@ -1,5 +1,5 @@
 use super::head::{PAUSE_GAP, REPAINT_GAP, pick};
-use super::source::Source;
+use super::source::{Packer, Source};
 use super::store::{self, Scratch, Store};
 use super::*;
 use std::io::Write;
@@ -491,11 +491,12 @@ fn key(file: i32, edge: u32) -> ClipKey {
 /// Frames of `edge` px, frame n filled with byte n.
 fn synthetic(edge: u32, count: u8) -> Origin {
     let len = (edge * edge * 4) as usize;
-    Origin::Decoded(Box::new(move |_| {
-        Ok(DecodedFrames {
+    Origin::Decoded(Box::new(move |_, sink| {
+        DecodedFrames {
             frames: (0..count).map(|n| vec![n; len]).collect(),
             fps: 30.0,
-        })
+        }
+        .feed(sink)
     }))
 }
 
@@ -744,12 +745,13 @@ fn clips_decoding_at_once_do_not_wait_for_each_other() {
         let both_decoding = both_decoding.clone();
         engine.open(
             key,
-            Origin::Decoded(Box::new(move |_| {
+            Origin::Decoded(Box::new(move |_, sink| {
                 both_decoding.wait();
-                Ok(DecodedFrames {
+                DecodedFrames {
                     frames: vec![vec![7; len]; 3],
                     fps: 30.0,
-                })
+                }
+                .feed(sink)
             })),
         );
     }
@@ -777,13 +779,14 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
     let len = 16 * 16 * 4;
     engine.open(
         b,
-        Origin::Decoded(Box::new(move |_| {
+        Origin::Decoded(Box::new(move |_, sink| {
             let _ = started.send(std::thread::current().name().map(str::to_owned));
             let _ = released.recv();
-            Ok(DecodedFrames {
+            DecodedFrames {
                 frames: vec![vec![7; len]; 3],
                 fps: 30.0,
-            })
+            }
+            .feed(sink)
         })),
     );
     let thread = decoding.recv().unwrap();
@@ -816,6 +819,59 @@ fn a_clip_decoding_holds_back_no_frames_of_other_clips() {
 }
 
 #[test]
+fn a_held_frame_takes_no_more_of_the_store() {
+    let key = key(1, 16);
+    let len = 16 * 16 * 4;
+    let mut scratch = Scratch::default();
+    let mut packer = Packer::new(key, &mut scratch);
+    packer.repeat(5).unwrap();
+    assert_eq!(
+        packer.timeline(30.0),
+        Err("Animated sticker has no frames".into())
+    );
+    packer.frame(&mut vec![1; len]).unwrap();
+    let one = packer.store.bytes();
+    packer.repeat(2).unwrap();
+    assert_eq!(packer.store.bytes(), one);
+    packer.frame(&mut vec![2; len]).unwrap();
+    let timeline = packer.timeline(30.0).unwrap();
+    assert_eq!(timeline.frames, 4);
+    let store = packer.store;
+    let mut out = vec![0; len];
+    for (index, byte) in [1u8, 1, 1, 2].into_iter().enumerate() {
+        let stored = store.get(u32::try_from(index).unwrap()).unwrap();
+        assert!(store::decode(&stored, &mut out));
+        assert_eq!(out, vec![byte; len], "frame {index}");
+    }
+    assert!(store.get(4).is_none());
+}
+
+#[test]
+fn a_clip_failing_partway_keeps_none_of_its_frames() {
+    use std::sync::mpsc;
+    let engine = Engine::new(1, 64 << 20);
+    let (woke, wakes) = mpsc::channel::<()>();
+    engine.set_waker(Arc::new(move || {
+        let _ = woke.send(());
+    }));
+    let key = key(1, 16);
+    let len = 16 * 16 * 4;
+    engine.open(
+        key,
+        Origin::Decoded(Box::new(move |_, sink| {
+            sink.frame(&mut vec![1; len])?;
+            sink.frame(&mut vec![2; len - 4])?;
+            Ok(30.0)
+        })),
+    );
+    while !matches!(engine.state(&key), Some(ClipState::Failed(_))) {
+        wakes.recv().unwrap();
+    }
+    assert_eq!(engine.info(&key), None);
+    assert_eq!(engine.held_bytes(), 0);
+}
+
+#[test]
 fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
     use std::sync::mpsc;
     let engine = Engine::new(2, 64 << 20);
@@ -829,17 +885,20 @@ fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
     let (release, released) = mpsc::channel::<()>();
     engine.open(
         key,
-        Origin::Decoded(Box::new(move |cancel: &Cancel| {
-            let _ = started.send(std::thread::current().name().map(str::to_owned));
-            let _ = released.recv();
-            if cancel.flag.load(std::sync::atomic::Ordering::SeqCst) {
-                return Err("Sticker playback cancelled".to_string());
-            }
-            Ok(DecodedFrames {
-                frames: vec![vec![1; len]; 3],
-                fps: 30.0,
-            })
-        })),
+        Origin::Decoded(Box::new(
+            move |cancel: &Cancel, sink: &mut dyn FrameSink| {
+                let _ = started.send(std::thread::current().name().map(str::to_owned));
+                let _ = released.recv();
+                if cancel.flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err("Sticker playback cancelled".to_string());
+                }
+                DecodedFrames {
+                    frames: vec![vec![1; len]; 3],
+                    fps: 30.0,
+                }
+                .feed(sink)
+            },
+        )),
     );
     let old_opener = decoding.recv().unwrap();
     // Scrolled away and back while it decodes: the same key opens again,

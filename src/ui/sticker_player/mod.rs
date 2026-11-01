@@ -339,8 +339,8 @@ impl Player {
             .ok()
             .and_then(|fixtures| fixtures.get(&spec.file.0).cloned())
         {
-            return quill::sticker_playback::player::Origin::Decoded(Box::new(move |_| {
-                Ok(fixture(edge))
+            return quill::sticker_playback::player::Origin::Decoded(Box::new(move |_, frames| {
+                fixture(edge).feed(frames)
             }));
         }
         spec.origin(edge)

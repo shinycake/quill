@@ -33,8 +33,9 @@ has no GPUI types. The UI half is `src/ui/sticker_player`.
   part of the key (`grid_hz`: 60 up to 61 Hz, else the display's rate up to
   120), so a window that moves to a faster display opens the clip again on
   the finer grid. Until that clip is ready, the old clip's frame stays up.
-  WebM stickers are decoded whole (the bundled decoder, else `ffmpeg`), keep
-  their own rate, and play from the store.
+  WebM stickers are decoded at open (the bundled decoder, else `ffmpeg`),
+  one frame at a time into the store, keep their own rate, and play from
+  the store.
 - Each view names a head (`HeadId`), so two views of one
   clip share frames but not position. Modes are loop, play once and rest on
   the first or last frame, a number of loops, and a fixed position (the
@@ -267,9 +268,13 @@ longest hold from 448-518 ms to 67-83 ms. The last clip's first paint stayed
 at about 450 ms. A single opener took it to 390-1170 ms, which is why there
 is one per worker.
 
-Each open still holds all its raw frames at once (up to 58 MB at 448 px,
-inferred). Streaming WebM frame by frame through the shim, as tdesktop's
-`Media::Clip` does, would remove that.
+An open used to hold all its raw frames at once (up to 58 MB at 448 px,
+inferred). They now go through a `FrameSink` one at a time, tinted and packed
+for the store as they come, so one raw frame is in memory at a time, and a
+held frame takes no more of the store. tdesktop's `Media::Clip` differs: it
+keeps a decoder open per clip and decodes three frames ahead, looping by a
+seek. Here a stored clip holds no decoder and its views can sit at any frame,
+which every other clip needs too, so the store stays.
 
 ## Verification
 
