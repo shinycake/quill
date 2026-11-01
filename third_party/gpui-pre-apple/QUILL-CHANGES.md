@@ -100,8 +100,8 @@ caches for every line:
 
 - `src/text_system.rs`: `layout_line` shapes with one kept CTFont per font and
   size, where upstream built a new one per run. A new CTFont starts with empty
-  shaping and fallback caches, which cost a third of the CPU of scrolling the
-  emoji panel.
+  shaping and fallback caches, which cost about a third of the CPU cycles of
+  scrolling the emoji panel.
 - `src/sized_fonts.rs`: the map, std-only and bounded, tested by
   `scripts/test-sized-fonts.sh`. `test_kept_fonts_shape_like_new_ones` in
   `text_system.rs` compares a kept font's shaping with a new font's.
