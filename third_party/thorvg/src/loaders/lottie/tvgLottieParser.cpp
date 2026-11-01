@@ -1804,10 +1804,8 @@ bool LottieParser::parse()
         else if (KEY_AS("op")) outPoint = getFloat();
         else if (KEY_AS("w")) comp->w = getFloat();
         else if (KEY_AS("h")) comp->h = getFloat();
-        else if (KEY_AS("nm")) comp->name = getStringCopy();
         else if (KEY_AS("assets")) parseAssets();
         else if (KEY_AS("layers")) comp->root = parseLayers();
-        else if (KEY_AS("markers")) parseMarkers();
         else skip();  //QUILL
     }
 

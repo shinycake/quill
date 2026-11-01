@@ -376,7 +376,7 @@ index 0ab0d875c..a9641ee02 100644
      Line shift(Point& p1, Point& p2, float offset);
      void line(RenderPath& out, PathCommand* inCmds, uint32_t inCmdsCnt, Point* inPts, uint32_t& curPt, uint32_t curCmd, State& state, float offset, bool degenerated);
 diff --git a/src/loaders/lottie/tvgLottieParser.cpp b/src/loaders/lottie/tvgLottieParser.cpp
-index 242d52a98..10cbf73d7 100644
+index 242d52a98..e493dc011 100644
 --- a/src/loaders/lottie/tvgLottieParser.cpp
 +++ b/src/loaders/lottie/tvgLottieParser.cpp
 @@ -245,7 +245,7 @@ bool LottieParser::getValue(int8_t& val)
@@ -506,13 +506,16 @@ index 242d52a98..10cbf73d7 100644
      }
  
      layer->prepare(&color);
-@@ -1790,11 +1807,8 @@ bool LottieParser::parse()
-         else if (KEY_AS("nm")) comp->name = getStringCopy();
+@@ -1787,14 +1804,9 @@ bool LottieParser::parse()
+         else if (KEY_AS("op")) outPoint = getFloat();
+         else if (KEY_AS("w")) comp->w = getFloat();
+         else if (KEY_AS("h")) comp->h = getFloat();
+-        else if (KEY_AS("nm")) comp->name = getStringCopy();
          else if (KEY_AS("assets")) parseAssets();
          else if (KEY_AS("layers")) comp->root = parseLayers();
 -        else if (KEY_AS("fonts")) parseFonts();
 -        else if (KEY_AS("chars")) parseChars(glyphs);
-         else if (KEY_AS("markers")) parseMarkers();
+-        else if (KEY_AS("markers")) parseMarkers();
 -        else if (KEY_AS("slots")) captureSlots(key);
 -        else skip();
 +        else skip();  //QUILL
@@ -542,6 +545,20 @@ index e0933642f..41a9c7670 100644
          parseNext();
          return result;
      }
+diff --git a/src/loaders/lottie/tvgLottieParserHandler.h b/src/loaders/lottie/tvgLottieParserHandler.h
+index 348f3ec81..899f10bb8 100644
+--- a/src/loaders/lottie/tvgLottieParserHandler.h
++++ b/src/loaders/lottie/tvgLottieParserHandler.h
+@@ -152,8 +152,7 @@ struct LookaheadParserHandler
+     void Error()
+     {
+         TVGERR("LOTTIE", "Invalid JSON: unexpected or misaligned data fields.");
+-        state = kError;
+-        reader.IterativeParseNext<PARSE_FLAGS>(iss, *this);   //something wrong but try advancement.
++        state = kError;  //QUILL
+     }
+ 
+     bool Invalid()
 diff --git a/src/renderer/cpu_engine/tvgSwCommon.h b/src/renderer/cpu_engine/tvgSwCommon.h
 index 4cd4d9934..601bee93d 100644
 --- a/src/renderer/cpu_engine/tvgSwCommon.h
