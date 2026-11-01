@@ -166,7 +166,7 @@ fn save_json_prefs<T>(paths: &AccountPaths, file_name: &str, prefs: &T)
 where
     T: Serialize,
 {
-    let _ = write_json_deferred(&paths.root.join(file_name), prefs);
+    write_json_deferred(&paths.root.join(file_name), prefs);
 }
 
 /// Write `value` as JSON to `path` atomically: a sibling temp file is

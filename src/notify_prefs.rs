@@ -104,7 +104,7 @@ pub fn store(prefs: NotifyPrefs) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = prefs_path()
     {
-        let _ = crate::settings::write_json_deferred(&path, &prefs);
+        crate::settings::write_json_deferred(&path, &prefs);
     }
     if let Ok(mut guard) = PREFS.write() {
         *guard = Some(prefs);
@@ -132,7 +132,7 @@ pub fn persist() {
         return;
     }
     if let Some(path) = prefs_path() {
-        let _ = crate::settings::write_json_deferred(&path, &current());
+        crate::settings::write_json_deferred(&path, &current());
     }
 }
 

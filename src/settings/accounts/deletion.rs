@@ -165,7 +165,7 @@ mod tests {
         let work = add_account(&root, "Work").unwrap();
         let paths = AccountPaths::for_root(&root, &work);
         let prefs = paths.root.join("hashtags.json");
-        crate::settings::write_json_deferred(&prefs, &["#queued"]).unwrap();
+        crate::settings::write_json_deferred(&prefs, &["#queued"]);
         delete_account_folder(&root, &work).unwrap();
         assert!(!paths.root.exists());
         assert!(

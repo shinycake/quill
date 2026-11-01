@@ -60,7 +60,7 @@ pub fn mark_trusted(bot_id: i64) {
     if PERSIST.load(Ordering::SeqCst)
         && let Some(path) = path()
     {
-        let _ = crate::settings::write_json_deferred(&path, &stored);
+        crate::settings::write_json_deferred(&path, &stored);
     }
     if let Ok(mut guard) = BOTS.write() {
         *guard = Some(stored);
