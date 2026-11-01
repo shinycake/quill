@@ -276,6 +276,12 @@ impl SharedOutput {
         (output, gate)
     }
 
+    /// Tests: players made on this output so far.
+    #[cfg(test)]
+    pub(in crate::ui) fn players_made(&self) -> u64 {
+        self.0.players.load(Ordering::Relaxed)
+    }
+
     /// Where every new sound connects. A closed device starts opening on a
     /// thread of its own, as the sound will need it. `None` only when no
     /// device opened lately.

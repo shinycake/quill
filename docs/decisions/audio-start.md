@@ -16,8 +16,10 @@ upload progress, and `Media::Player::Instance` drops `WaitingForData` for audio.
   come first.
 - `Building` holds what a press asked for while the file is read: `latest_target` is the newest
   seek and `land_paused` the newest pause. A landing built for another position builds again.
-  Nothing is cancelled, since a build holds no state of the engine's, and a dropped `Built` plays
-  nothing.
+  A build holds no state of the engine's, and a dropped `Built` plays nothing.
+- Dropping `Building` (a stop, a newer start) sets the build's cancelled flag. The thread checks it
+  after the open and after the seek, so a build nobody waits for skips the seek scan and makes no
+  player.
 - `EngineState::Loading` shows as Pause at the offset and nothing else, however long the file
   takes to open, as in tdesktop.
 - A failed start fails when it lands. The failure note moved to the landing for that reason.

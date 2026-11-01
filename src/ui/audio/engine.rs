@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -245,6 +245,17 @@ struct Building {
     latest_target: f64,
     land_paused: bool,
     built: Receiver<Result<Built, AudioError>>,
+    _cancel: CancelOnDrop,
+}
+
+/// Tells the build thread nobody waits for it any more (a stop, a newer
+/// start), so it skips the seek scan and the player.
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 /// The build thread's end. Dropped on a return and on a panic alike, it
@@ -277,9 +288,19 @@ fn build_paused_player(
     path: &Path,
     offset: f64,
     speed: &SharedSpeed,
+    cancelled: &AtomicBool,
 ) -> Result<Built, AudioError> {
+    // A cancelled build's answer goes nowhere, so any error will do.
+    let check = || {
+        if cancelled.load(Ordering::Relaxed) {
+            Err(AudioError::Open)
+        } else {
+            Ok(())
+        }
+    };
     let probe = Arc::new(Probe::default());
     let mut decoded = open_decoded(path)?;
+    check()?;
     // Seeked below `Counted`, so its `try_seek` answers only the player's
     // seeks. A source that can't seek starts from the top.
     let start = if offset > 0.05 && decoded.try_seek(Duration::from_secs_f64(offset)).is_ok() {
@@ -287,6 +308,7 @@ fn build_paused_player(
     } else {
         0.0
     };
+    check()?;
     let source = Tempo::new(Counted::new(decoded, probe.clone(), start), speed.clone())
         .reporting_lag(probe.lag.clone());
     let player = outlet.player();
@@ -579,6 +601,8 @@ impl AudioEngine {
             wake: self.on_built,
         };
         let speed = self.speed.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel = CancelOnDrop(cancelled.clone());
         #[cfg(test)]
         let (gate, panics) = (self.build_gate.clone(), self.build_panics);
         let thread = quill::thread_guard::spawn_guarded("quill-audio-build", move || {
@@ -588,7 +612,9 @@ impl AudioEngine {
             }
             #[cfg(test)]
             assert!(!panics, "test: the decoder panicked");
-            end.send(build_paused_player(&outlet, &path, target, &speed));
+            end.send(build_paused_player(
+                &outlet, &path, target, &speed, &cancelled,
+            ));
         })
         .map_err(|_| AudioError::Open)?;
         #[cfg(test)]
@@ -601,6 +627,7 @@ impl AudioEngine {
             latest_target: target,
             land_paused,
             built,
+            _cancel: cancel,
         });
         Ok(())
     }
@@ -1138,6 +1165,24 @@ mod tests {
         assert!(!engine.is_ended(), "the tick must not take it for the end");
         assert_eq!(engine.error(), Some(AudioError::Open));
         assert!(engine.take_start_failed(), "the user is told");
+    }
+
+    #[test]
+    fn a_stopped_or_replaced_build_makes_no_player() {
+        let (output, _device) = device();
+        let mut engine = AudioEngine::new(output.clone());
+        let open = engine.gate_builds();
+        let first = track("cancel-first.wav", 4);
+        let second = track("cancel-second.wav", 4);
+        engine.start(&first, 2.0, 1.0, 1.0, 4.0).unwrap();
+        engine.stop();
+        engine.start(&first, 2.0, 1.0, 1.0, 4.0).unwrap();
+        engine.start(&second, 2.0, 1.0, 1.0, 4.0).unwrap();
+        drop(open);
+        engine.join_builds();
+        engine.settle();
+        assert_eq!(engine.state(), EngineState::Playing);
+        assert_eq!(output.players_made(), 1, "only the build that landed");
     }
 
     #[test]
