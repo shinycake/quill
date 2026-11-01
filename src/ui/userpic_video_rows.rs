@@ -133,13 +133,10 @@ impl QuillApp {
         Surface::History(self.windows.scope)
     }
 
-    /// The view to redraw for the history being built: the main window's
-    /// conversation slice, or the chat window in scope.
+    /// The view to redraw for the history being built: its window's
+    /// conversation slice.
     pub(super) fn history_redraw_target(&self) -> Option<EntityId> {
-        match self.windows.scope {
-            Some(chat) => self.windows.view_id_for(chat),
-            None => self.slices.current(),
-        }
+        self.slices.current()
     }
 
     /// Whether something covers the chat of the window being built, as

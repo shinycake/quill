@@ -112,7 +112,7 @@ struct UiClip {
     shown: Option<(u32, Arc<RenderImage>)>,
     used: Option<Instant>,
     /// Where views last drew it: one stamp per window and slice.
-    drawn: SmallVec<[Drawn; 2]>,
+    drawn: SmallVec<[PaintStamp; 2]>,
     /// When the closer last found it on screen.
     seen: Option<Instant>,
     /// What each head drawing it wants: its frame and the next ones.
@@ -176,45 +176,12 @@ impl Leaving {
     }
 }
 
-/// Where a view drew a clip, and in which frame: the main window (its
-/// frames, and the slice that may replay the draw), or a chat window,
-/// which the main window's frames say nothing about.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Drawn {
-    Main(PaintStamp),
-    Chat(ChatId, u64),
-}
-
-impl Drawn {
-    fn same_place(self, other: Drawn) -> bool {
-        match (self, other) {
-            (Drawn::Main(a), Drawn::Main(b)) => a.same_place(b),
-            (Drawn::Chat(a, _), Drawn::Chat(b, _)) => a == b,
-            _ => false,
-        }
-    }
-
-    /// Whether the window's latest frame shows it (between frames). A
-    /// stamp that does not show never will again: the window drew since,
-    /// or closed.
-    fn shows(self, chat_frames: &HashMap<ChatId, u64>) -> bool {
-        match self {
-            Drawn::Main(stamp) => super::image_budget::shows_now(stamp),
-            Drawn::Chat(chat, frame) => chat_frames.get(&chat) == Some(&frame),
-        }
-    }
-}
-
 #[derive(Default)]
 struct Inner {
     clips: HashMap<ClipKey, UiClip>,
     heads: HashMap<(HeadId, i32), Head>,
     stats: ScreenStats,
     trimmed: Option<Instant>,
-    /// Each open chat window's latest frame, numbered across all chat
-    /// windows (a window opened again starts past its old stamps).
-    chat_frames: HashMap<ChatId, u64>,
-    chat_frame_count: u64,
 }
 
 /// What [`Player::close_stale`] did.
@@ -490,13 +457,7 @@ impl Player {
         let shown = {
             let mut guard = self.inner.try_borrow_mut().ok()?;
             let inner = &mut *guard;
-            let drawn = match window {
-                None => Drawn::Main(super::image_budget::paint_stamp()),
-                Some(chat) => {
-                    let frame = inner.chat_frames.get(&chat).copied().unwrap_or(0);
-                    Drawn::Chat(chat, frame)
-                }
-            };
+            let drawn = super::image_budget::paint_stamp_in(window);
             let clip = inner.clips.entry(key).or_insert_with(|| {
                 self.engine.open(key, self.origin(spec, edge));
                 UiClip::default()
@@ -693,7 +654,7 @@ impl Player {
         let mut next: Option<Duration> = None;
         let mut stale = Vec::new();
         for (key, clip) in &mut inner.clips {
-            clip.drawn.retain(|drawn| drawn.shows(&inner.chat_frames));
+            clip.drawn.retain(|drawn| super::image_budget::shows_now(*drawn));
             if !clip.drawn.is_empty() {
                 clip.seen = Some(now);
                 continue;
@@ -726,25 +687,15 @@ impl Player {
         }
     }
 
-    /// A window starts a frame, before anything in it renders (`None`: the
-    /// main window, whose frames `image_budget` counts).
-    pub(super) fn frame_starts(&self, window: Option<ChatId>) {
+    /// A window starts a frame, before anything in it renders.
+    pub(super) fn frame_starts(&self) {
         self.screen_changes();
-        if let Some(chat) = window
-            && let Ok(mut inner) = self.inner.try_borrow_mut()
-        {
-            inner.chat_frame_count += 1;
-            let frame = inner.chat_frame_count;
-            inner.chat_frames.insert(chat, frame);
-        }
     }
 
-    /// `chat`'s window closed: what it showed is gone.
-    pub(super) fn window_closed(&self, chat: ChatId) {
+    /// A chat window closed (`image_budget::forget_window` came first):
+    /// what it showed is gone.
+    pub(super) fn window_closed(&self) {
         self.screen_changes();
-        if let Ok(mut inner) = self.inner.try_borrow_mut() {
-            inner.chat_frames.remove(&chat);
-        }
     }
 
     /// What is on screen may change now. If the closer waits for that,
@@ -761,13 +712,12 @@ impl Player {
             return;
         };
         let now = self.now();
-        if let Ok(mut guard) = self.inner.try_borrow_mut() {
-            let inner = &mut *guard;
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
             for clip in inner.clips.values_mut() {
                 if clip
                     .drawn
                     .iter()
-                    .any(|drawn| drawn.shows(&inner.chat_frames))
+                    .any(|drawn| super::image_budget::shows_now(*drawn))
                 {
                     clip.seen = Some(now);
                 }
@@ -941,7 +891,7 @@ impl Player {
 }
 
 /// Note that a view drew a clip at `drawn`, over its last stamp there.
-fn note_drawn(stamps: &mut SmallVec<[Drawn; 2]>, drawn: Drawn) {
+fn note_drawn(stamps: &mut SmallVec<[PaintStamp; 2]>, drawn: PaintStamp) {
     match stamps.iter_mut().find(|stamp| stamp.same_place(drawn)) {
         Some(stamp) => *stamp = drawn,
         None => stamps.push(drawn),

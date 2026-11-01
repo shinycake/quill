@@ -1,8 +1,10 @@
 use super::super::{
-    begin_frame, begin_patch_frame, frame, next_image_id, slice_rendered, slice_shown,
+    WindowDraw, begin_chat_frame, begin_frame, begin_patch_frame, forget_window, frame,
+    next_image_id, slice_rendered, slice_shown,
 };
-use super::{MainFrame, retire_all, take_unshowable};
+use super::{LatestFrames, retire_all, take_unshowable};
 use gpui_kit::{EntityId, RenderImage, WindowId};
+use quill::ids::ChatId;
 use smallvec::SmallVec;
 use std::sync::Arc;
 
@@ -45,18 +47,18 @@ fn frames_retired_while_a_slice_replays_leave_after_the_next_frame() {
     let sidebar = EntityId::from((1_u64 << 32) | 13);
     begin_frame();
     let painted_by_sidebar = next_image_id();
-    slice_rendered(sidebar);
+    slice_rendered(sidebar, None);
     // Layer-only frames: `QuillApp` renders, the sidebar replays.
     begin_frame();
-    slice_shown(sidebar);
+    slice_shown(sidebar, None);
     let mut pictures = Vec::new();
     for _ in 0..30 {
         let picture = next_image_id();
         let retired = begin_frame();
-        slice_shown(sidebar);
+        slice_shown(sidebar, None);
         pictures.push((picture, retired));
     }
-    let main = MainFrame::now();
+    let main = LatestFrames::now(true);
     assert_eq!(main.slices.len(), 1);
     // The latest frame may still show the newest picture.
     let (newest, newest_at) = pictures.pop().unwrap_or_default();
@@ -72,8 +74,8 @@ fn frames_retired_while_a_slice_replays_leave_after_the_next_frame() {
     // sidebar renders again.
     assert!(main.may_show(painted_by_sidebar, frame() - 1));
     begin_frame();
-    slice_rendered(sidebar);
-    assert!(!MainFrame::now().may_show(painted_by_sidebar, frame() - 2));
+    slice_rendered(sidebar, None);
+    assert!(!LatestFrames::now(true).may_show(painted_by_sidebar, frame() - 2));
 }
 
 /// Frames that redraw only an animation layer: what the layer drew leaves
@@ -85,21 +87,21 @@ fn a_patch_frame_lets_go_of_the_layer_alone() {
     let layer = EntityId::from((1_u64 << 32) | 21);
     let in_slice = next_image_id();
     let rendered = begin_frame();
-    slice_rendered(slice);
+    slice_rendered(slice, None);
     let in_app = next_image_id();
     let whole = begin_frame();
-    slice_shown(slice);
-    slice_rendered(layer);
-    MainFrame::now();
+    slice_shown(slice, None);
+    slice_rendered(layer, None);
+    LatestFrames::now(true);
     let mut drawn = Vec::new();
     for _ in 0..30 {
         let picture = next_image_id();
         begin_patch_frame();
-        slice_rendered(layer);
-        MainFrame::now();
+        slice_rendered(layer, None);
+        LatestFrames::now(true);
         drawn.push((picture, frame()));
     }
-    let main = MainFrame::now();
+    let main = LatestFrames::now(true);
     assert!(main.may_show(in_slice, rendered), "the slice it replays");
     assert!(main.may_show(in_app, whole), "the whole frame");
     let (latest, retired) = drawn.pop().unwrap_or_default();
@@ -117,19 +119,41 @@ fn a_patch_frame_lets_go_of_the_layer_alone() {
 fn a_slice_render_covers_what_was_made_until_its_frame_was_done() {
     let slice = EntityId::from((1_u64 << 32) | 15);
     begin_frame();
-    slice_rendered(slice);
+    slice_rendered(slice, None);
     let during = next_image_id();
     // Between frames: the frame of the render is done.
-    MainFrame::now();
+    LatestFrames::now(true);
     let after = next_image_id();
     begin_frame();
-    slice_shown(slice);
+    slice_shown(slice, None);
     let retired = frame();
     begin_frame();
-    slice_shown(slice);
-    let main = MainFrame::now();
+    slice_shown(slice, None);
+    let main = LatestFrames::now(true);
     assert!(main.may_show(during, retired), "the render may show it");
     assert!(!main.may_show(after, retired), "made after the render");
+}
+
+/// What a chat window's slice painted stays while the slice replays,
+/// with the main window closed and through the window's patch frames; a
+/// closed chat window keeps nothing.
+#[test]
+fn a_replaying_chat_slice_keeps_what_it_painted_until_its_window_closes() {
+    let chat = ChatId(5);
+    let slice = EntityId::from(0x61_u64);
+    begin_chat_frame(chat, WindowDraw::Whole);
+    slice_rendered(slice, Some(chat));
+    let painted = picture();
+    begin_chat_frame(chat, WindowDraw::Patch);
+    let retired = frame();
+    let id = painted.id.0;
+    for _ in 0..3 {
+        begin_chat_frame(chat, WindowDraw::Whole);
+        slice_shown(slice, Some(chat));
+    }
+    assert!(LatestFrames::now(false).may_show(id, retired));
+    forget_window(chat);
+    assert!(!LatestFrames::now(false).may_show(id, retired));
 }
 
 /// Another window's latest frame shows what existed when it was done,
@@ -165,7 +189,7 @@ fn a_window_that_stops_drawing_keeps_only_what_its_last_frame_may_show() {
 
 #[cfg(feature = "demo-capture")]
 mod windows {
-    use super::super::super::MainDraw;
+    use super::super::super::WindowDraw;
     use super::super::super::{BoundedImageCache, begin_frame, slice_rendered, slice_shown};
     use super::super::{begin_main_frame, retire_all, start_sweeper, sweep};
     use super::picture;
@@ -196,13 +220,13 @@ mod windows {
 
     impl Render for MainWindow {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            begin_main_frame(window, MainDraw::Whole, cx);
+            begin_main_frame(window, WindowDraw::Whole, cx);
             if std::mem::take(&mut self.slice_renders) {
-                slice_rendered(slice());
+                slice_rendered(slice(), None);
             } else {
-                slice_shown(slice());
+                slice_shown(slice(), None);
             }
-            slice_rendered(busy_slice());
+            slice_rendered(busy_slice(), None);
             let pictures = [&self.own, &self.in_slice];
             div().children(
                 pictures
@@ -246,7 +270,7 @@ mod windows {
     impl Render for StillWindow {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             self.cache
-                .update(cx, |cache, cx| cache.begin_window_frame(window, cx));
+                .update(cx, |cache, cx| cache.begin_window_frame(WindowDraw::Whole, window, cx));
             div().children(self.shown.clone().map(|picture| img(picture).size(px(40.))))
         }
     }
@@ -359,7 +383,7 @@ mod windows {
         retire_all([picture()]);
         cx.run_until_parked();
         let chat = cx.open_window(size(px(200.), px(200.)), |_, cx| StillWindow {
-            cache: cx.new(|_| BoundedImageCache::for_window()),
+            cache: cx.new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
             shown: Some(picture()),
         });
         let chat_view = chat.root(cx).expect("the chat view");

@@ -5,7 +5,7 @@ use super::super::app::QuillApp;
 use super::super::command_shortcuts::CommandActions;
 use super::super::frame_clock::follow_app;
 use super::super::glyph_sweep;
-use super::super::image_budget::{BoundedImageCache, CacheScope};
+use super::super::image_budget::{CacheScope, WindowDraw};
 use super::super::shell::QuillShell;
 use super::cover::WindowPlace;
 use super::slot::{SharedSlot, WindowSlot, scope_probe};
@@ -31,9 +31,6 @@ pub(crate) struct ChatWindowView {
     bounds_seen: Option<Bounds<Pixels>>,
     /// The window's bookkeeping ran (the app knows the window is gone).
     closed: bool,
-    /// The pictures this window shows (`image_budget`), counted by its own
-    /// frames; they go with the window.
-    pub(super) images: Entity<BoundedImageCache>,
     _observe: Subscription,
     /// The window's activation, bounds and display (`cover`).
     _placed: [Subscription; 3],
@@ -46,7 +43,7 @@ impl ChatWindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let slot = owner.update(cx, |app, cx| WindowSlot::new(app, window, cx));
+        let slot = owner.update(cx, |app, cx| WindowSlot::new(app, chat_id, window, cx));
         let shell = cx.new(|_| QuillShell::new(owner.clone()));
         let observe = follow_app(&owner, cx);
         let placed = [
@@ -68,7 +65,6 @@ impl ChatWindowView {
             title_shown: String::new(),
             bounds_seen: None,
             closed: false,
-            images: cx.new(|_| BoundedImageCache::for_window()),
             _observe: observe,
             _placed: placed,
         }
@@ -151,7 +147,7 @@ impl Render for ChatWindowView {
         let view_id = cx.entity_id();
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
-        let outer = app.update(cx, |app, cx| {
+        let (outer, outer_tick) = app.update(cx, |app, cx| {
             if app.windows.note_place(chat_id, active, place) {
                 // The gate follows it now, not at the main window's next
                 // render, which a minimized main window never draws.
@@ -161,34 +157,29 @@ impl Render for ChatWindowView {
             if moved {
                 app.schedule_chat_windows_save(cx);
             }
-            app.sticker_frame_starts(Some(chat_id), cx);
+            app.chat_frame_starts(chat_id, WindowDraw::Whole, window, cx);
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
-            app.frame.tick_view.set(Some(view_id));
-            // Its body builds the history every frame (no cached slice):
-            // a frame without a history pass shows none of its clips.
-            app.inline_videos_frame_start(true, window, cx);
-            outer
+            let outer_tick = app.frame.tick_view.replace(Some(view_id));
+            let history_drawn = app.slices.window.history_drawn();
+            app.inline_videos_frame_start(history_drawn, window, cx);
+            (outer, outer_tick)
         });
         // The kit dialog this window hosts, built with its state in place.
         self.shell.update(cx, |shell, cx| {
             shell.sync_kit_dialogs_in(Some(chat_id), window, cx)
         });
         let dialog_open = self.shell.read(cx).dialog_open();
-        self.images
-            .update(cx, |images, cx| images.begin_window_frame(window, cx));
-        glyph_sweep::start_frame(window, cx);
         let body = app.update(cx, |app, cx| {
             app.release_viewer_key_probe(window, cx);
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             app.adopt_remote_draft(window, cx);
-            app.schedule_idle_image_trim(cx);
             app.chat_window_body(chat_id, window, cx)
         });
         app.update(cx, |app, _| {
             app.set_window_scope(outer);
-            app.frame.tick_view.set(None);
+            app.frame.tick_view.set(outer_tick);
         });
         let view = cx.weak_entity();
         super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
@@ -242,7 +233,7 @@ impl Render for ChatWindowView {
             .child(WindowScope {
                 app: self.owner.clone(),
                 target: Some(chat_id),
-                child: CacheScope::new(self.images.clone(), body).into_any_element(),
+                child: CacheScope::new(self.slot.borrow().images.clone(), body).into_any_element(),
             })
             .when(dialog_open, |this| {
                 // Kit dialog contents paint at priority 10; occlude the
@@ -287,20 +278,19 @@ impl WindowScope {
 
     fn scoped<R>(&self, cx: &mut App, f: impl FnOnce(&mut App) -> R) -> R {
         let target = self.target;
-        let outer = self
+        let (outer, outer_tick) = self
             .app
             .update(cx, |app, _| {
                 let outer = app.windows.scope;
                 app.set_window_scope(target);
                 let view = target.and_then(|chat| app.windows.view_id_for(chat));
-                app.frame.tick_view.set(view);
-                outer
+                (outer, app.frame.tick_view.replace(view))
             })
-            .unwrap_or(None);
+            .unwrap_or((None, None));
         let result = f(cx);
         let _ = self.app.update(cx, |app, _| {
             app.set_window_scope(outer);
-            app.frame.tick_view.set(None);
+            app.frame.tick_view.set(outer_tick);
         });
         result
     }

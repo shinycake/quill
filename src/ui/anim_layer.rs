@@ -44,8 +44,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::image_budget::WindowDraw;
 use super::sticker_player::StickerView;
 use gpui_kit::*;
+use quill::ids::ChatId;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -642,38 +644,55 @@ impl Element for Occluder {
 pub(super) struct AnimationLayer {
     layer: Layer,
     app: WeakEntity<QuillApp>,
+    /// The chat window it draws in (`None`: the main window).
+    window: Option<ChatId>,
 }
 
 impl AnimationLayer {
-    pub(super) fn new(layer: Layer, app: WeakEntity<QuillApp>) -> Self {
-        Self { layer, app }
+    pub(super) fn new(layer: Layer, app: WeakEntity<QuillApp>, window: Option<ChatId>) -> Self {
+        Self { layer, app, window }
     }
 }
 
 impl Render for AnimationLayer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        super::frame_clock::trace_slice_render("animation layer");
+        let target = self.window;
+        super::frame_clock::trace_slice_render(match target {
+            None => "animation layer",
+            Some(_) => "chat window layer",
+        });
         let id = cx.entity_id();
         let painter = LayerPainter {
             layer: self.layer.clone(),
             app: self.app.clone(),
             painter: id,
+            window: target,
         };
         let Some(app) = self.app.upgrade() else {
             return painter.into_any_element();
         };
-        // A patch can land while input in a chat window has its state in
-        // place; the layer is the main window's, as in `QuillApp::render`.
+        // A patch can land while input in another window has its state in
+        // place; the layer draws in its own window's, as that window's
+        // view does, and a chat window that lost its state draws nothing.
         let content = app.update(cx, |app, cx| {
             let outer_scope = app.windows.scope;
-            app.set_window_scope(None);
-            app.main_frame_starts(window, super::image_budget::MainDraw::Patch, cx);
-            super::image_budget::slice_rendered(id);
-            let content = app.slices.painter_scope(id, painter);
+            app.set_window_scope(target);
+            let content = (app.windows.scope == target).then(|| {
+                match target {
+                    None => app.main_frame_starts(window, WindowDraw::Patch, cx),
+                    Some(chat) => app.chat_frame_starts(chat, WindowDraw::Patch, window, cx),
+                }
+                super::image_budget::slice_rendered(id, target);
+                let cache = app.image_cache_in_place();
+                app.slices.painter_scope(id, cache, painter)
+            });
             app.set_window_scope(outer_scope);
             content
         });
-        super::chat_window::WindowScope::new(self.app.clone(), None, content).into_any_element()
+        let Some(content) = content else {
+            return Empty.into_any_element();
+        };
+        super::chat_window::WindowScope::new(self.app.clone(), target, content).into_any_element()
     }
 }
 
@@ -682,6 +701,7 @@ struct LayerPainter {
     app: WeakEntity<QuillApp>,
     /// The [`AnimationLayer`] view, the frame-clock target.
     painter: EntityId,
+    window: Option<ChatId>,
 }
 
 impl IntoElement for LayerPainter {
@@ -745,9 +765,13 @@ impl Element for LayerPainter {
         // the first frame after new content appeared).
         let (layer, inline) = self.layer.demand();
         if layer > 0 || inline > 0 {
-            let (app, painter) = (self.app.clone(), self.painter);
+            let (app, painter, scope) = (self.app.clone(), self.painter, self.window);
             cx.defer(move |cx| {
-                let _ = app.update(cx, |app, cx| app.tick_animation_layer(painter, cx));
+                let _ = app.update(cx, |app, cx| {
+                    app.in_window_scope(scope, cx, |app, cx| {
+                        app.tick_animation_layer(painter, cx);
+                    })
+                });
             });
         }
     }

@@ -24,7 +24,9 @@
 //! "Can no longer be on screen" accounts for cached slices (`app_slice`):
 //! a slice replays the frame it last rendered, so an image it used is only
 //! gone once that slice rendered again without it. Images used outside any
-//! slice are re-requested by `QuillApp` every frame.
+//! slice are re-requested by the window's view every frame. Frames are
+//! numbered across all windows, and each window keeps its own record of
+//! what it drew in full.
 //!
 //! Atlas textures (512² for pictures up to 128 px a side, else 1024² and
 //! up, on every GPUI backend: Metal, wgpu, DirectX) are released only once
@@ -36,6 +38,7 @@
 
 use super::image_decode::{self, DecodeSize};
 use gpui_kit::*;
+use quill::ids::ChatId;
 use quill::telegram::envelope::MiniThumbnail;
 use smallvec::SmallVec;
 use std::cell::{Cell, RefCell};
@@ -82,12 +85,13 @@ const _: () =
 pub(super) const IDLE_AFTER: Duration = Duration::from_secs(2);
 
 thread_local! {
-    /// Window frames drawn so far (`begin_frame`, `begin_patch_frame`).
+    /// Frames drawn so far, in every window ([`next_frame`]).
     static FRAME: Cell<u64> = const { Cell::new(0) };
-    /// The main window's frames that drew everything.
-    static WHOLE: Cell<WholeFrames> = const { Cell::new(WholeFrames { latest: 0, on_screen: 0, images_below: 0 }) };
-    /// Each slice's last render frame, the last frame it was shown, and
-    /// the render before the last one.
+    /// Each window's frames that drew everything (`None`: the main
+    /// window). A window that closed has no entry.
+    static WHOLE: RefCell<HashMap<Option<ChatId>, WholeFrames>> = RefCell::new(HashMap::new());
+    /// Each slice's window, its last render frame, the last frame it was
+    /// shown, and the render before the last one.
     static SLICES: RefCell<HashMap<EntityId, SliceFrames>> = RefCell::new(HashMap::new());
     /// When the cache last started showing an image it didn't show just
     /// before (scrolling, new content) or stopped showing one (another
@@ -96,12 +100,14 @@ thread_local! {
     static IDLE_TRIMMED: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The slice being drawn (`app_slice`), for paint stamps.
     static SCOPE: RefCell<Option<Rc<Cell<Option<EntityId>>>>> = const { RefCell::new(None) };
-    /// The cache of the `CacheScope` being drawn (display-size loads).
-    static SCOPED: RefCell<Vec<Entity<BoundedImageCache>>> = const { RefCell::new(Vec::new()) };
+    /// The cache of the `CacheScope` being drawn (display-size loads), and
+    /// its window.
+    static SCOPED: RefCell<Vec<(Entity<BoundedImageCache>, Option<ChatId>)>> = const { RefCell::new(Vec::new()) };
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 struct SliceFrames {
+    window: Option<ChatId>,
     rendered: u64,
     shown: u64,
     previous_render: u64,
@@ -111,9 +117,9 @@ struct SliceFrames {
     images_below: Option<usize>,
 }
 
-/// What the main window shows beside its animation layers: a patch frame
-/// leaves all that as the latest whole frame drew it.
-#[derive(Clone, Copy, Debug)]
+/// What a window shows beside its animation layers: a patch frame leaves
+/// all that as the latest whole frame drew it.
+#[derive(Clone, Copy, Debug, Default)]
 struct WholeFrames {
     latest: u64,
     /// The whole frame on screen as the current frame started.
@@ -123,8 +129,8 @@ struct WholeFrames {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum MainDraw {
-    /// Everything: `QuillApp` renders.
+pub(super) enum WindowDraw {
+    /// Everything: the window's own view renders.
     Whole,
     /// Only the animation layers (`Entity::live`).
     Patch,
@@ -133,33 +139,51 @@ pub(super) enum MainDraw {
 /// Start a main window frame that draws everything (`begin_main_frame`,
 /// before anything renders).
 pub(super) fn begin_frame() -> u64 {
-    let frame = next_frame();
-    let whole = WHOLE.get();
-    WHOLE.set(WholeFrames {
-        latest: frame,
-        ..whole
-    });
-    frame
+    next_frame(None, WindowDraw::Whole)
 }
 
 /// Start a main window frame that draws only the animation layers.
 pub(super) fn begin_patch_frame() -> u64 {
-    next_frame()
+    next_frame(None, WindowDraw::Patch)
 }
 
-fn next_frame() -> u64 {
-    super::frame_clock::trace_slice_render("(window frame)");
-    // The frame just drawn painted only images that exist by now.
-    retired::close_main_frame();
-    let whole = WHOLE.get();
-    WHOLE.set(WholeFrames {
-        on_screen: whole.latest,
-        ..whole
-    });
-    FRAME.with(|frame| {
+/// Start a frame of `chat`'s window, before anything in it renders.
+pub(super) fn begin_chat_frame(chat: ChatId, draw: WindowDraw) -> u64 {
+    next_frame(Some(chat), draw)
+}
+
+fn next_frame(window: Option<ChatId>, draw: WindowDraw) -> u64 {
+    if window.is_none() {
+        super::frame_clock::trace_slice_render("(window frame)");
+    }
+    // The frame just drawn, in whichever window, painted only images that
+    // exist by now.
+    retired::close_frame();
+    let frame = FRAME.with(|frame| {
         frame.set(frame.get() + 1);
         frame.get()
-    })
+    });
+    WHOLE.with(|whole| {
+        let mut whole = whole.borrow_mut();
+        let whole = whole.entry(window).or_default();
+        whole.on_screen = whole.latest;
+        if draw == WindowDraw::Whole {
+            whole.latest = frame;
+        }
+    });
+    frame
+}
+
+/// What `window`'s frames drew in full; `None` once it closed.
+fn whole_of(window: Option<ChatId>) -> Option<WholeFrames> {
+    let whole = WHOLE.with(|whole| whole.borrow().get(&window).copied());
+    whole.or_else(|| window.is_none().then(WholeFrames::default))
+}
+
+/// `chat`'s window closed: nothing it drew shows any more.
+pub(super) fn forget_window(chat: ChatId) {
+    WHOLE.with(|whole| whole.borrow_mut().remove(&Some(chat)));
+    SLICES.with(|slices| slices.borrow_mut().retain(|_, s| s.window != Some(chat)));
 }
 
 /// The id the next `RenderImage` will get. GPUI numbers images from one
@@ -173,8 +197,8 @@ pub(super) fn frame() -> u64 {
     FRAME.with(Cell::get)
 }
 
-/// A slice rendered its content this frame.
-pub(super) fn slice_rendered(id: EntityId) {
+/// A slice of `window` rendered its content this frame.
+pub(super) fn slice_rendered(id: EntityId, window: Option<ChatId>) {
     let now = frame();
     SLICES.with(|slices| {
         let mut slices = slices.borrow_mut();
@@ -182,52 +206,64 @@ pub(super) fn slice_rendered(id: EntityId) {
         if entry.rendered != now {
             entry.previous_render = entry.rendered;
         }
+        entry.window = window;
         entry.rendered = now;
         entry.shown = now;
         entry.images_below = None;
     });
 }
 
-/// A slice is part of this frame (rendered or replayed).
-pub(super) fn slice_shown(id: EntityId) {
+/// A slice of `window` is part of this frame (rendered or replayed).
+pub(super) fn slice_shown(id: EntityId, window: Option<ChatId>) {
     let now = frame();
     SLICES.with(|slices| {
-        slices.borrow_mut().entry(id).or_default().shown = now;
+        let mut slices = slices.borrow_mut();
+        let entry = slices.entry(id).or_default();
+        entry.window = window;
+        entry.shown = now;
     });
 }
 
-/// Whether an image last used at `used` in `scope` (a slice, or `QuillApp`
-/// for `None`) can still be on screen, as of the start of the current frame.
-fn may_be_visible(scope: Option<EntityId>, used: u64) -> bool {
-    let on_screen = WHOLE.get().on_screen;
+/// Whether an image last used at `used` in `scope` (a slice, or `window`'s
+/// own view for `None`) can still be on screen, as of the start of the
+/// current frame.
+fn may_be_visible(window: Option<ChatId>, scope: Option<EntityId>, used: u64) -> bool {
     match scope {
-        None => used >= on_screen,
+        None => whole_of(window).is_some_and(|whole| used >= whole.on_screen),
         Some(id) => SLICES.with(|slices| {
-            slices
-                .borrow()
-                .get(&id)
-                .is_some_and(|s| s.shown >= on_screen && used >= s.rendered)
+            slices.borrow().get(&id).is_some_and(|s| {
+                let on_screen = whole_of(s.window).map(|whole| whole.on_screen);
+                on_screen.is_some_and(|on_screen| s.shown >= on_screen) && used >= s.rendered
+            })
         }),
     }
 }
 
-/// Where (slice, or `QuillApp`) and in which frame something was painted.
+/// Where (a window, and a slice of it or its own view) and in which frame
+/// something was painted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PaintStamp {
+    window: Option<ChatId>,
     scope: Option<EntityId>,
     frame: u64,
 }
 
 impl PaintStamp {
-    /// Whether both were painted in the same slice (or both outside any).
+    /// Whether both were painted in the same place.
     pub(super) fn same_place(self, other: PaintStamp) -> bool {
-        self.scope == other.scope
+        self.window == other.window && self.scope == other.scope
     }
 }
 
 /// A stamp for content painted now.
 pub(super) fn paint_stamp() -> PaintStamp {
+    paint_stamp_in(SCOPED.with(|scoped| scoped.borrow().last().and_then(|(_, window)| *window)))
+}
+
+/// A stamp for content painted now in `window`.
+pub(super) fn paint_stamp_in(window: Option<ChatId>) -> PaintStamp {
     PaintStamp {
+        window,
         scope: SCOPE.with(|scope| scope.borrow().as_ref().and_then(|scope| scope.get())),
         frame: frame(),
     }
@@ -236,32 +272,37 @@ pub(super) fn paint_stamp() -> PaintStamp {
 /// Whether content painted at `stamp` can still be on screen (a cached
 /// slice may replay it), as of the start of the current frame.
 pub(super) fn may_still_show(stamp: PaintStamp) -> bool {
-    may_be_visible(stamp.scope, stamp.frame)
+    may_be_visible(stamp.window, stamp.scope, stamp.frame)
 }
 
 /// Whether content painted at `stamp` is on screen now, between frames or
-/// while one paints: the latest frame drew it, or replays a slice render
-/// that did. ([`may_still_show`] also counts the frame before.)
+/// while one paints: its window's latest frame drew it, or replays a slice
+/// render that did. A stamp that does not show never will again: the
+/// window drew since, or closed. ([`may_still_show`] also counts the frame
+/// before.)
 pub(super) fn shows_now(stamp: PaintStamp) -> bool {
-    let whole = WHOLE.get().latest;
+    let Some(whole) = whole_of(stamp.window) else {
+        return false;
+    };
     match stamp.scope {
-        None => stamp.frame >= whole,
+        None => stamp.frame >= whole.latest,
         Some(id) => SLICES.with(|slices| {
             let slices = slices.borrow();
             let slice = slices.get(&id);
-            slice.is_some_and(|s| s.shown >= whole && stamp.frame >= s.rendered)
+            slice.is_some_and(|s| s.shown >= whole.latest && stamp.frame >= s.rendered)
         }),
     }
 }
 
-/// Whether an image used now in `scope`, last used there at `previous`,
-/// wasn't on screen just before (it scrolled in, or is new).
-fn newly_shown(scope: Option<EntityId>, previous: Option<u64>) -> bool {
+/// Whether an image used now in `scope` (of `window`, for its own view),
+/// last used there at `previous`, wasn't on screen just before (it
+/// scrolled in, or is new).
+fn newly_shown(window: Option<ChatId>, scope: Option<EntityId>, previous: Option<u64>) -> bool {
     let Some(previous) = previous else {
         return true;
     };
     match scope {
-        None => previous < WHOLE.get().on_screen,
+        None => whole_of(window).is_none_or(|whole| previous < whole.on_screen),
         Some(id) => SLICES.with(|slices| {
             slices
                 .borrow()
@@ -380,7 +421,7 @@ fn sized_image_with(
             source: source.clone(),
             edge: edge(window.scale_factor()),
         };
-        match SCOPED.with(|scoped| scoped.borrow().last().cloned()) {
+        match SCOPED.with(|scoped| scoped.borrow().last().map(|(cache, _)| cache.clone())) {
             Some(cache) => cache.update(cx, |cache, cx| cache.load_sized(&key, window, cx)),
             None => window.use_asset::<SizedAsset>(&key, cx),
         }
@@ -646,46 +687,10 @@ impl Entry {
         self.uses.iter().map(|(_, at)| *at).max().unwrap_or(0)
     }
 
-    fn may_be_visible(&self, clock: Clock) -> bool {
+    fn may_be_visible(&self, window: Option<ChatId>) -> bool {
         self.uses
             .iter()
-            .any(|(scope, used)| clock.may_be_visible(*scope, *used))
-    }
-}
-
-/// Whose frames a cache counts.
-#[derive(Clone, Copy, Debug)]
-enum Clock {
-    /// The main window's (`begin_frame`), with its slices.
-    Main,
-    /// A chat window's own (`begin_window_frame`): its pictures show in a
-    /// window the main window's frames say nothing about.
-    Window { frame: u64 },
-}
-
-impl Clock {
-    /// The scope and frame a use made now is stamped with.
-    fn stamp(self, scope: &Cell<Option<EntityId>>) -> (Option<EntityId>, u64) {
-        match self {
-            Self::Main => (scope.get(), frame()),
-            Self::Window { frame } => (None, frame),
-        }
-    }
-
-    fn may_be_visible(self, scope: Option<EntityId>, used: u64) -> bool {
-        match self {
-            Self::Main => may_be_visible(scope, used),
-            // A chat window has no cached slices: it draws all it shows
-            // every frame.
-            Self::Window { frame } => used + 1 >= frame,
-        }
-    }
-
-    fn newly_shown(self, scope: Option<EntityId>, previous: Option<u64>) -> bool {
-        match (self, previous) {
-            (Self::Window { frame }, Some(previous)) => previous + 1 < frame,
-            _ => newly_shown(scope, previous),
-        }
+            .any(|(scope, used)| may_be_visible(window, *scope, *used))
     }
 }
 
@@ -702,39 +707,46 @@ pub(super) struct BoundedImageCache {
     shown: usize,
     /// The slice being drawn (shared with `app_slice`).
     scope: Rc<Cell<Option<EntityId>>>,
-    clock: Clock,
+    /// The window it serves (`None`: the main window).
+    window: Option<ChatId>,
 }
 
 impl BoundedImageCache {
     pub(super) fn new(scope: Rc<Cell<Option<EntityId>>>) -> Self {
         SCOPE.with(|current| *current.borrow_mut() = Some(scope.clone()));
-        Self::with_clock(scope, Clock::Main)
+        Self::in_window(scope, None)
     }
 
-    /// A chat window's cache, counting that window's frames. Before it,
-    /// chat windows drew outside any bounded cache, so every picture one
-    /// showed stayed in GPUI's asset cache for good.
-    pub(super) fn for_window() -> Self {
-        Self::with_clock(Rc::default(), Clock::Window { frame: 0 })
+    /// The cache of `chat`'s window. Before it, chat windows drew outside
+    /// any bounded cache, so every picture one showed stayed in GPUI's
+    /// asset cache for good.
+    pub(super) fn for_window(chat: ChatId, scope: Rc<Cell<Option<EntityId>>>) -> Self {
+        Self::in_window(scope, Some(chat))
     }
 
-    fn with_clock(scope: Rc<Cell<Option<EntityId>>>, clock: Clock) -> Self {
+    fn in_window(scope: Rc<Cell<Option<EntityId>>>, window: Option<ChatId>) -> Self {
         Self {
             entries: HashMap::new(),
             variants: HashMap::new(),
             bytes: 0,
             shown: 0,
             scope,
-            clock,
+            window,
         }
     }
 
-    /// Start a frame of the chat window this cache serves, before its body
-    /// renders, and evict down to the scrolling budget (`trim`). What its
-    /// last frame showed may leave the atlas once this one is done.
-    pub(super) fn begin_window_frame(&mut self, window: &mut Window, cx: &mut App) {
-        if let Clock::Window { frame } = &mut self.clock {
-            *frame += 1;
+    /// Start a frame of the chat window this cache serves, before anything
+    /// in it renders, and evict down to the scrolling budget (`trim`).
+    /// What its last frame showed may leave the atlas once this one is
+    /// done.
+    pub(super) fn begin_window_frame(
+        &mut self,
+        draw: WindowDraw,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(chat) = self.window {
+            begin_chat_frame(chat, draw);
         }
         self.trim(window, cx);
         retired::wake();
@@ -743,11 +755,10 @@ impl BoundedImageCache {
     /// Evict down to the scrolling budget. Call at the start of a frame,
     /// before anything renders, so last frame's loads are all counted.
     pub(super) fn trim(&mut self, window: &mut Window, cx: &mut App) {
-        let clock = self.clock;
         let shown = self
             .entries
             .values()
-            .filter(|e| e.may_be_visible(clock))
+            .filter(|e| e.may_be_visible(self.window))
             .count();
         note_departures(&mut self.shown, shown);
         drop_images_off_ui_thread(self.evict(ACTIVE_BUDGET), Some(window), cx);
@@ -778,11 +789,10 @@ impl BoundedImageCache {
         // What stays off screen keeps its decode, so coming back to it only
         // uploads it again, but not its atlas tile: a kept photo would
         // otherwise hold a 4 MB texture of its own for as long as it stays.
-        let clock = self.clock;
         let off_screen = self
             .entries
             .values()
-            .filter(|entry| !entry.may_be_visible(clock))
+            .filter(|entry| !entry.may_be_visible(self.window))
             .filter_map(|entry| entry.load.get()?.ok());
         for image in images.into_iter().chain(off_screen) {
             cx.drop_image(image, None);
@@ -799,11 +809,10 @@ impl BoundedImageCache {
         if self.bytes <= budget.bytes && self.entries.len() <= budget.entries {
             return Vec::new();
         }
-        let clock = self.clock;
         let candidates = self
             .entries
             .iter()
-            .filter(|(_, entry)| !entry.may_be_visible(clock))
+            .filter(|(_, entry)| !entry.may_be_visible(self.window))
             .map(|(key, entry)| (entry.last_used(), *key, entry.bytes.unwrap_or(0)))
             .collect();
         let mut images = Vec::new();
@@ -832,7 +841,7 @@ impl BoundedImageCache {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<LoadResult> {
-        let (scope, now) = self.clock.stamp(&self.scope);
+        let (scope, now) = (self.scope.get(), frame());
         let entry = self.entries.entry(key).or_insert_with(|| Entry {
             load: start(cx),
             bytes: None,
@@ -845,7 +854,7 @@ impl BoundedImageCache {
                 None
             }
         };
-        if previous != Some(now) && self.clock.newly_shown(scope, previous) {
+        if previous != Some(now) && newly_shown(self.window, scope, previous) {
             note_activity();
         }
         let result = entry.load.use_image(window);
@@ -980,40 +989,41 @@ mod tests {
 
     use super::note_departures;
     use super::{
-        Budget, IDLE_AFTER, PaintStamp, begin_frame, begin_patch_frame, idle_trim_due,
-        may_be_visible, newly_shown, note_activity, plan_eviction, shows_now, slice_rendered,
-        slice_shown,
+        Budget, IDLE_AFTER, PaintStamp, WindowDraw, begin_chat_frame, begin_frame,
+        begin_patch_frame, forget_window, idle_trim_due, may_be_visible, may_still_show,
+        newly_shown, note_activity, plan_eviction, shows_now, slice_rendered, slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use gpui_kit::{EntityId, RenderImage};
+    use quill::ids::ChatId;
     use smallvec::SmallVec;
     use std::sync::Arc;
 
     #[test]
     fn app_images_stay_for_one_frame() {
         let used = begin_frame();
-        assert!(may_be_visible(None, used));
+        assert!(may_be_visible(None, None, used));
         begin_frame();
-        assert!(may_be_visible(None, used), "last frame may still show it");
+        assert!(may_be_visible(None, None, used), "last frame may still show it");
         begin_frame();
-        assert!(!may_be_visible(None, used));
+        assert!(!may_be_visible(None, None, used));
     }
 
     #[test]
     fn slice_images_stay_until_the_slice_renders_again() {
         let slice = EntityId::from((1_u64 << 32) | 7);
         let used = begin_frame();
-        slice_rendered(slice);
+        slice_rendered(slice, None);
         // Replayed (shown, not rendered) for a while: still on screen.
         for _ in 0..5 {
             begin_frame();
-            assert!(may_be_visible(Some(slice), used));
-            slice_shown(slice);
+            assert!(may_be_visible(None, Some(slice), used));
+            slice_shown(slice, None);
         }
         // Rendered again without it: gone from the next frame on.
-        slice_rendered(slice);
+        slice_rendered(slice, None);
         begin_frame();
-        assert!(!may_be_visible(Some(slice), used));
+        assert!(!may_be_visible(None, Some(slice), used));
     }
 
     /// A frame that redraws only an animation layer leaves all else on
@@ -1024,59 +1034,132 @@ mod tests {
         let slice = EntityId::from((1_u64 << 32) | 23);
         let layer = EntityId::from((1_u64 << 32) | 25);
         let whole = begin_frame();
-        slice_rendered(slice);
-        slice_rendered(layer);
+        slice_rendered(slice, None);
+        slice_rendered(layer, None);
         for _ in 0..10 {
             begin_patch_frame();
-            slice_rendered(layer);
+            slice_rendered(layer, None);
         }
         let painted = |scope| PaintStamp {
+            window: None,
             scope,
             frame: whole,
         };
         for scope in [None, Some(slice)] {
-            assert!(may_be_visible(scope, whole), "{scope:?} may show");
+            assert!(may_be_visible(None, scope, whole), "{scope:?} may show");
             assert!(shows_now(painted(scope)), "{scope:?} shows");
         }
-        assert!(!newly_shown(None, Some(whole)), "and was not away");
-        assert!(!may_be_visible(Some(layer), whole), "the layer drew since");
+        assert!(!newly_shown(None, None, Some(whole)), "and was not away");
+        assert!(!may_be_visible(None, Some(layer), whole), "the layer drew since");
         assert!(!shows_now(painted(Some(layer))));
         let next = begin_frame();
-        slice_shown(slice);
-        slice_rendered(layer);
-        assert!(may_be_visible(None, whole), "until the next one is done");
+        slice_shown(slice, None);
+        slice_rendered(layer, None);
+        assert!(may_be_visible(None, None, whole), "until the next one is done");
         assert!(!shows_now(painted(None)));
         assert!(shows_now(painted(Some(slice))), "the slice replays it");
         begin_patch_frame();
-        assert!(!may_be_visible(None, whole), "whole frame {next} is on");
-        assert!(may_be_visible(Some(slice), whole));
+        assert!(!may_be_visible(None, None, whole), "whole frame {next} is on");
+        assert!(may_be_visible(None, Some(slice), whole));
     }
 
     /// Between frames only the latest frame is on screen: what the frame
     /// before drew and the latest did not (a closed panel) is gone.
+    /// A chat window's slice replays what it rendered, whatever the main
+    /// window draws meanwhile, until it renders again.
+    #[test]
+    fn what_a_chat_windows_slice_replays_stays_on_screen() {
+        let chat = ChatId(5);
+        let slice = EntityId::from(0x51_u64);
+        let used = begin_chat_frame(chat, WindowDraw::Whole);
+        slice_rendered(slice, Some(chat));
+        for _ in 0..3 {
+            begin_frame();
+        }
+        assert!(may_be_visible(Some(chat), Some(slice), used));
+        for _ in 0..3 {
+            begin_chat_frame(chat, WindowDraw::Whole);
+            slice_shown(slice, Some(chat));
+        }
+        assert!(may_be_visible(Some(chat), Some(slice), used));
+        let rendered = begin_chat_frame(chat, WindowDraw::Whole);
+        slice_rendered(slice, Some(chat));
+        begin_chat_frame(chat, WindowDraw::Whole);
+        slice_shown(slice, Some(chat));
+        assert!(!may_be_visible(Some(chat), Some(slice), used));
+        assert!(may_be_visible(Some(chat), Some(slice), rendered));
+    }
+
+    /// Patch frames of a chat window leave what its whole frame drew, and
+    /// another window's frames say nothing about it.
+    #[test]
+    fn a_chat_window_counts_its_own_whole_frames() {
+        let chat = ChatId(5);
+        let used = begin_chat_frame(chat, WindowDraw::Whole);
+        let stamp = PaintStamp {
+            window: Some(chat),
+            scope: None,
+            frame: used,
+        };
+        for _ in 0..3 {
+            begin_chat_frame(chat, WindowDraw::Patch);
+            begin_frame();
+        }
+        assert!(may_be_visible(Some(chat), None, used));
+        assert!(shows_now(stamp));
+        begin_chat_frame(chat, WindowDraw::Whole);
+        assert!(!shows_now(stamp));
+    }
+
+    /// Nothing a closed window drew shows, in any slice of it.
+    #[test]
+    fn a_closed_window_shows_nothing() {
+        let chat = ChatId(5);
+        let slice = EntityId::from(0x51_u64);
+        let frame = begin_chat_frame(chat, WindowDraw::Whole);
+        slice_rendered(slice, Some(chat));
+        let (own, in_slice) = (
+            PaintStamp {
+                window: Some(chat),
+                scope: None,
+                frame,
+            },
+            PaintStamp {
+                window: Some(chat),
+                scope: Some(slice),
+                frame,
+            },
+        );
+        assert!(shows_now(own) && shows_now(in_slice));
+        forget_window(chat);
+        assert!(!shows_now(own) && !shows_now(in_slice));
+        assert!(!may_still_show(own) && !may_still_show(in_slice));
+    }
+
     #[test]
     fn shows_now_is_the_latest_frame_or_the_slice_it_replays() {
         let slice = EntityId::from((1_u64 << 32) | 17);
         let first = begin_frame();
-        slice_rendered(slice);
+        slice_rendered(slice, None);
         let painted = |scope| PaintStamp {
+            window: None,
             scope,
             frame: first,
         };
         assert!(shows_now(painted(None)) && shows_now(painted(Some(slice))));
         begin_frame();
-        slice_shown(slice);
+        slice_shown(slice, None);
         assert!(
             !shows_now(painted(None)),
             "the latest frame drew without it"
         );
         assert!(
-            may_be_visible(None, first),
+            may_be_visible(None, None, first),
             "unlike at the start of a frame"
         );
         assert!(shows_now(painted(Some(slice))), "the slice replays it");
         begin_frame();
-        slice_rendered(slice);
+        slice_rendered(slice, None);
         assert!(
             !shows_now(painted(Some(slice))),
             "rendered again without it"
@@ -1087,35 +1170,35 @@ mod tests {
     fn hidden_slices_show_nothing() {
         let slice = EntityId::from((1_u64 << 32) | 9);
         let used = begin_frame();
-        slice_rendered(slice);
+        slice_rendered(slice, None);
         begin_frame();
         begin_frame();
-        assert!(!may_be_visible(Some(slice), used));
+        assert!(!may_be_visible(None, Some(slice), used));
     }
 
     #[test]
     fn rerendering_the_same_images_is_not_activity() {
         let slice = EntityId::from((1_u64 << 32) | 11);
         let first = begin_frame();
-        slice_rendered(slice);
-        assert!(newly_shown(Some(slice), None), "a new image");
+        slice_rendered(slice, None);
+        assert!(newly_shown(None, Some(slice), None), "a new image");
         // Replayed for a while, then rendered again showing it: unchanged.
         for _ in 0..10 {
             begin_frame();
-            slice_shown(slice);
+            slice_shown(slice, None);
         }
         let second = begin_frame();
-        slice_rendered(slice);
-        assert!(!newly_shown(Some(slice), Some(first)));
+        slice_rendered(slice, None);
+        assert!(!newly_shown(None, Some(slice), Some(first)));
         // An image last shown two renders ago scrolled back in.
         begin_frame();
-        slice_rendered(slice);
-        assert!(newly_shown(Some(slice), Some(first)));
-        assert!(!newly_shown(Some(slice), Some(second)));
+        slice_rendered(slice, None);
+        assert!(newly_shown(None, Some(slice), Some(first)));
+        assert!(!newly_shown(None, Some(slice), Some(second)));
         // App-level images: shown last frame, or not.
         let now = begin_frame();
-        assert!(!newly_shown(None, Some(now - 1)));
-        assert!(newly_shown(None, Some(now - 2)));
+        assert!(!newly_shown(None, None, Some(now - 1)));
+        assert!(newly_shown(None, None, Some(now - 2)));
     }
 
     /// The browse finding: photos of a chat left for one without stayed at
@@ -1125,12 +1208,12 @@ mod tests {
     fn leaving_a_chat_of_photos_schedules_the_idle_trim() {
         let chat = EntityId::from((1_u64 << 32) | 17);
         let photos = begin_frame();
-        slice_rendered(chat);
+        slice_rendered(chat, None);
         begin_frame();
-        slice_shown(chat);
+        slice_shown(chat, None);
         let on_screen = |used: &[u64]| {
             used.iter()
-                .filter(|u| may_be_visible(Some(chat), **u))
+                .filter(|u| may_be_visible(None, Some(chat), **u))
                 .count()
         };
         let used = [photos; 3];
@@ -1144,13 +1227,13 @@ mod tests {
         );
         // Replayed for a while: nothing changed.
         begin_frame();
-        slice_shown(chat);
+        slice_shown(chat, None);
         note_departures(&mut shown, on_screen(&used));
         assert_eq!(idle_trim_due(), None);
         // Another chat opens: the slice renders without the photos.
-        slice_rendered(chat);
+        slice_rendered(chat, None);
         begin_frame();
-        slice_shown(chat);
+        slice_shown(chat, None);
         note_departures(&mut shown, on_screen(&used));
         assert_eq!(shown, 0);
         assert!(
@@ -1301,7 +1384,7 @@ mod tests {
         impl Render for ChatWindow {
             fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
                 self.cache
-                    .update(cx, |cache, cx| cache.begin_window_frame(window, cx));
+                    .update(cx, |cache, cx| cache.begin_window_frame(super::WindowDraw::Whole, window, cx));
                 let left = self.show_left.then(|| img(self.left.clone()).size(px(40.)));
                 let pictures = div()
                     .size_full()
@@ -1329,7 +1412,7 @@ mod tests {
         }
         let view_paths = (on_screen.clone(), left.clone());
         let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| ChatWindow {
-            cache: cx.new(|_| BoundedImageCache::for_window()),
+            cache: cx.new(|_| BoundedImageCache::for_window(quill::ids::ChatId(1), Default::default())),
             on_screen: view_paths.0,
             left: view_paths.1,
             show_left: true,

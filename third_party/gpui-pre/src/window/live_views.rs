@@ -136,6 +136,14 @@ impl Window {
         self.next_frame.live_views.extend(replayed);
     }
 
+    /// How many live views of the last whole frame built hitboxes, and so
+    /// draw in whole frames alone.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn interactive_live_views(&self) -> usize {
+        let sites = &self.rendered_frame.live_views;
+        sites.iter().filter(|site| site.interactive).count()
+    }
+
     /// The scene this window last drew.
     pub(crate) fn shown_scene(&self) -> &Scene {
         if self.scene_patched {

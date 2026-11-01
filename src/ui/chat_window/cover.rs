@@ -221,6 +221,7 @@ impl QuillApp {
     /// that does not follow the app keep their frame, as with the notify.
     pub(in crate::ui) fn tick_app(&self, cx: &mut Context<Self>) {
         if self.frame.main_covered.get() {
+            self.notify_chat_window_slices(cx);
             cx.emit(AppTick);
         } else {
             cx.notify();

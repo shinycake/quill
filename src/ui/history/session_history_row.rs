@@ -797,7 +797,7 @@ pub(in crate::ui) fn session_history_row(
             .then(|| message_footer_meta(&footer_meta))
             .flatten()
             .map(|footer| {
-                let meta = footer_meta.clone();
+                let meta = footer_meta.mirrored();
                 crate::ui::synthetic::media_footer_pill(
                     footer,
                     Some(std::rc::Rc::new(move || message_footer_meta(&meta))),
@@ -884,7 +884,7 @@ pub(in crate::ui) fn session_history_row(
         chrome.footer_inline = footer_inline;
         chrome.footer_overlay = footer_overlay;
         if footer_overlay && chrome.footer.is_some() {
-            let meta = footer_meta.clone();
+            let meta = footer_meta.mirrored();
             chrome.footer_rebuild = Some(std::rc::Rc::new(move || message_footer_meta(&meta)));
         }
         chrome.media_led = media_led;

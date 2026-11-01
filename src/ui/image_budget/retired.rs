@@ -6,12 +6,12 @@
 //! system may show again at any time. So a sweep asks every open window
 //! what its latest frame can show:
 //!
-//! - the main window: what `QuillApp` drew in its latest whole frame and
-//!   what the slices that frame replayed last rendered, as of that frame
-//!   however long ago it was drawn, plus what its animation layers drew
-//!   last (they count as slices);
-//! - every other window (chat windows, Picture-in-Picture, calls): its
-//!   latest frame, by GPUI's count of the frames it began.
+//! - the main window and each chat window: what its own view drew in its
+//!   latest whole frame and what the slices that frame replayed last
+//!   rendered, as of that frame however long ago it was drawn, plus what
+//!   its animation layers drew last (they count as slices);
+//! - every window but the main one (chat windows, Picture-in-Picture,
+//!   calls): its latest frame, by GPUI's count of the frames it began.
 //!
 //! A frame only shows images made before it was done (image ids only
 //! grow), so the frames a chat window retires go after its next frame,
@@ -22,7 +22,7 @@
 //! ([`start_sweeper`]), so retired images also go with no window drawing,
 //! or none open.
 
-use super::{MainDraw, SLICES, WHOLE, WholeFrames, frame, next_image_id};
+use super::{SLICES, WHOLE, WindowDraw, frame, next_image_id, whole_of};
 use futures_channel::oneshot;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
@@ -38,17 +38,16 @@ thread_local! {
     static SEEN: RefCell<HashMap<WindowId, Seen>> = RefCell::new(HashMap::new());
     /// The main window (`QuillApp`'s), once it drew.
     static MAIN: Cell<Option<WindowId>> = const { Cell::new(None) };
-    /// The main window's latest frame once done, and the bound on the ids
+    /// The latest frame of any window once done, and the bound on the ids
     /// of the images it painted.
-    static MAIN_DONE: Cell<Option<(u64, usize)>> = const { Cell::new(None) };
+    static FRAME_DONE: Cell<Option<(u64, usize)>> = const { Cell::new(None) };
     /// Wakes the sweeper task.
     static WAKE: RefCell<Option<oneshot::Sender<()>>> = const { RefCell::new(None) };
 }
 
 struct Retired {
     image: Arc<RenderImage>,
-    /// The main window's frame and the sweep count when it was (last)
-    /// retired.
+    /// The frame and the sweep count when it was (last) retired.
     frame: u64,
     sweep: u64,
 }
@@ -72,72 +71,75 @@ impl Seen {
     }
 }
 
-/// What the main window's latest frame shows.
-struct MainFrame {
-    frame: u64,
-    /// Every image the frame painted has an id below this.
-    images_below: usize,
-    /// Each slice it replayed: the frame of the slice's last render, and
-    /// the bound on what that render painted.
+/// What the latest frames of the main window and the chat windows show.
+struct LatestFrames {
+    /// Each window's latest whole frame, and the bound on the ids of the
+    /// images it painted.
+    whole: Vec<(u64, usize)>,
+    /// Each slice those frames replayed: the frame of the slice's last
+    /// render, and the bound on what that render painted.
     slices: Vec<(u64, usize)>,
 }
 
-impl MainFrame {
-    /// Between frames: the main window's latest frame is done.
-    fn now() -> Self {
-        close_main_frame();
-        let whole = WHOLE.get();
-        let frame = whole.latest;
-        let images_below = whole.images_below;
+impl LatestFrames {
+    /// Between frames: every window's latest frame is done. `main` says
+    /// whether the main window is open.
+    fn now(main: bool) -> Self {
+        close_frame();
+        let counts = |window: &Option<_>| main || window.is_some();
+        let whole = WHOLE.with(|whole| {
+            whole
+                .borrow()
+                .iter()
+                .filter(|(window, _)| counts(window))
+                .map(|(_, whole)| (whole.latest, whole.images_below))
+                .collect()
+        });
         let slices = SLICES.with(|slices| {
             slices
                 .borrow()
                 .values()
-                .filter(|s| s.shown >= frame)
+                .filter(|s| counts(&s.window))
+                .filter(|s| whole_of(s.window).is_some_and(|whole| s.shown >= whole.latest))
                 .map(|s| (s.rendered, s.images_below.unwrap_or(usize::MAX)))
                 .collect()
         });
-        Self {
-            frame,
-            images_below,
-            slices,
-        }
+        Self { whole, slices }
     }
 
-    /// Whether it may show image `id`, retired in main frame `retired`:
-    /// `QuillApp` drew it if it was retired no earlier than this frame and
-    /// already existed then; a replayed slice, if it was retired no
-    /// earlier than the slice's last render and existed by its end.
-    /// Without the id check a chat list replaying for minutes kept every
-    /// video frame retired meanwhile.
+    /// Whether one may show image `id`, retired in frame `retired`: a
+    /// window's view drew it if it was retired no earlier than that
+    /// window's frame and already existed then; a replayed slice, if it
+    /// was retired no earlier than the slice's last render and existed by
+    /// its end. Without the id check a chat list replaying for minutes
+    /// kept every video frame retired meanwhile.
     fn may_show(&self, id: usize, retired: u64) -> bool {
-        (retired >= self.frame && id < self.images_below)
-            || self
-                .slices
-                .iter()
-                .any(|&(rendered, below)| retired >= rendered && id < below)
+        self.whole
+            .iter()
+            .chain(&self.slices)
+            .any(|&(frame, below)| retired >= frame && id < below)
     }
 }
 
-/// The main window's latest frame is done: bound the ids of the images it
+/// The latest frame of any window is done: bound the ids of the images it
 /// (and each slice that rendered in it) painted, once. Call between frames
-/// or as the next main frame starts. Returns the bound.
-pub(super) fn close_main_frame() -> usize {
+/// or as the next frame starts, in any window. Returns the bound.
+pub(super) fn close_frame() -> usize {
     let frame = frame();
-    if let Some((done, below)) = MAIN_DONE.get()
+    if let Some((done, below)) = FRAME_DONE.get()
         && done == frame
     {
         return below;
     }
     let below = next_image_id();
-    MAIN_DONE.set(Some((frame, below)));
-    let whole = WHOLE.get();
-    if whole.latest == frame {
-        WHOLE.set(WholeFrames {
-            images_below: below,
-            ..whole
-        });
-    }
+    FRAME_DONE.set(Some((frame, below)));
+    WHOLE.with(|whole| {
+        for whole in whole.borrow_mut().values_mut() {
+            if whole.latest == frame {
+                whole.images_below = below;
+            }
+        }
+    });
     SLICES.with(|slices| {
         for slice in slices.borrow_mut().values_mut() {
             if slice.rendered == frame && slice.images_below.is_none() {
@@ -189,12 +191,12 @@ pub(super) fn wake() {
 
 /// The main window starts a frame: its last frame is done, so sweep first
 /// (dropping from `window`'s atlas too), then count the new frame.
-pub(in crate::ui) fn begin_main_frame(window: &mut Window, draw: MainDraw, cx: &mut App) -> u64 {
+pub(in crate::ui) fn begin_main_frame(window: &mut Window, draw: WindowDraw, cx: &mut App) -> u64 {
     MAIN.set(Some(window.window_handle().window_id()));
     sweep(Some(window), cx);
     match draw {
-        MainDraw::Whole => super::begin_frame(),
-        MainDraw::Patch => super::begin_patch_frame(),
+        WindowDraw::Whole => super::begin_frame(),
+        WindowDraw::Patch => super::begin_patch_frame(),
     }
 }
 
@@ -284,16 +286,14 @@ pub(in crate::ui) fn take_unshowable(
     let sweep = SWEEPS.get() + 1;
     SWEEPS.set(sweep);
     let seen = see(windows, sweep);
-    let main = main.then(MainFrame::now);
+    let latest = LatestFrames::now(main);
     RETIRED.with(|retired| {
         let mut gone = Vec::new();
         retired.borrow_mut().retain(|&id, entry| {
             // Still held elsewhere (a cache that took it back, the chat
             // list's animation layer): it may be painted again.
             if Arc::strong_count(&entry.image) > 1
-                || main
-                    .as_ref()
-                    .is_some_and(|main| main.may_show(id, entry.frame))
+                || latest.may_show(id, entry.frame)
                 || seen.iter().any(|window| window.may_show(id, entry.sweep))
             {
                 return true;

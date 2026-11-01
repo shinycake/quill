@@ -3,7 +3,8 @@
 //!
 //! `QuillApp` keeps one copy of the view state its conversation, composer
 //! and overlay code reads (`history`, `composer`, `composer_ui`,
-//! `message_ui`, `pickers`, `viewer`) and the `Session` keeps one view
+//! `message_ui`, `pickers`, `viewer`, and the slices that draw them,
+//! `slices.window`) and the `Session` keeps one view
 //! (`open_chat`, `open_topic`, the thread, Saved Messages and search
 //! views, the gallery). A chat window owns its own copy of the app's part
 //! in a [`WindowSlot`] and the session keeps its view by chat
@@ -18,8 +19,11 @@
 //! request (`Session::enter_view`).
 
 use super::super::app::QuillApp;
+use super::super::app_slice::WindowSlices;
 use super::super::composer_state::ComposerUi;
+use super::super::glyph_sweep;
 use super::super::history_state::HistoryUi;
+use super::super::image_budget::{BoundedImageCache, WindowDraw};
 use super::super::message_state::MessageUi;
 use super::super::pickers_state::PickerUi;
 use super::super::share_state::ShareUi;
@@ -28,7 +32,7 @@ use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// One chat window's view state.
@@ -43,6 +47,13 @@ pub(super) struct WindowSlot {
     pub(super) chat_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     pub(super) share: ShareUi,
+    /// Its conversation and composer slices and their layers.
+    pub(super) slices: WindowSlices,
+    /// The pictures the window shows (`image_budget`); they go with it.
+    /// Stays here while the window's state is in place.
+    pub(super) images: Entity<BoundedImageCache>,
+    /// The frame `QuillApp::chat_frame_starts` last ran for.
+    pub(super) frame_started: Cell<u64>,
     /// The window was the active one at its last render or activation
     /// change.
     pub(super) active: bool,
@@ -55,7 +66,12 @@ pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
 impl WindowSlot {
     /// A fresh slot, with a compose field wired like the main window's and
     /// its own picker search fields.
-    pub(super) fn new(app: &QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
+    pub(super) fn new(
+        app: &QuillApp,
+        chat_id: ChatId,
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) -> Self {
         let composer = QuillApp::new_composer_field(app.chat_prefs.send_key_mode, window, cx);
         let emoji_search_input = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -85,6 +101,10 @@ impl WindowSlot {
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
+            slices: WindowSlices::new(Some(chat_id), cx)
+                .with_composer_height(app.slices.composer_height()),
+            images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
+            frame_started: Cell::new(0),
             active: false,
             place: None,
         }
@@ -139,6 +159,7 @@ impl QuillApp {
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
         std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
         std::mem::swap(&mut self.share, &mut slot.share);
+        std::mem::swap(&mut self.slices.window, &mut slot.slices);
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for
@@ -161,6 +182,35 @@ impl QuillApp {
         let result = f(self, cx);
         self.set_window_scope(outer);
         Some(result)
+    }
+
+    /// What each frame of `chat`'s window starts with, whether its view
+    /// renders or only its animation layers redraw, as `main_frame_starts`
+    /// for the main window. The first call of a frame counts.
+    pub(in crate::ui) fn chat_frame_starts(
+        &mut self,
+        chat: ChatId,
+        draw: WindowDraw,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(slot) = self.windows.slot_for(chat) else {
+            return;
+        };
+        let frame = window.frame_number();
+        let (started, images) = {
+            let slot = slot.borrow();
+            (slot.frame_started.replace(frame), slot.images.clone())
+        };
+        if started == frame {
+            return;
+        }
+        self.sticker_frame_starts(cx);
+        images.update(cx, |images, cx| {
+            images.begin_window_frame(draw, window, cx);
+        });
+        glyph_sweep::start_frame(window, cx);
+        self.schedule_idle_image_trim(cx);
     }
 
     /// Clear the pending chrome notify on `chat_id`'s slot without putting
