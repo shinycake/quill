@@ -4,9 +4,11 @@
 //!
 //! The compressed packets are read up front (voice notes are ~4 KB/s) so the
 //! exact duration is known and seeking is an index lookup plus the 80 ms
-//! pre-roll Opus needs to converge.
+//! pre-roll Opus needs to converge. They sit back to back in one block: a long
+//! file is hundreds of thousands of packets, and the audio thread drops a
+//! finished source.
 
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::time::Duration;
 
 use opus_decoder::OpusDecoder;
@@ -60,7 +62,8 @@ pub(super) fn packet_frames(packet: &[u8]) -> Option<u64> {
 }
 
 pub(super) struct OpusSource {
-    packets: Vec<Vec<u8>>,
+    bytes: Vec<u8>,
+    ends: Vec<usize>,
     /// Decoded frame index (48 kHz, pre-skip included) where packet `i` starts.
     starts: Vec<u64>,
     channels: u16,
@@ -79,7 +82,9 @@ pub(super) struct OpusSource {
 }
 
 impl OpusSource {
-    pub(super) fn new<R: Read + Seek>(reader: R) -> Result<Self, String> {
+    pub(super) fn new<R: Read + Seek>(mut reader: R) -> Result<Self, String> {
+        let file_len = reader.seek(SeekFrom::End(0)).map_err(|e| e.to_string())?;
+        reader.rewind().map_err(|e| e.to_string())?;
         let mut reader = ogg::PacketReader::new(reader);
         let head = reader
             .read_packet()
@@ -117,7 +122,11 @@ impl OpusSource {
         if !(1..=2).contains(&channels) || *mapping_family != 0 {
             return Err("unsupported Opus channel layout".into());
         }
-        let mut packets = Vec::new();
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(usize::try_from(file_len).unwrap_or(0))
+            .map_err(|e| e.to_string())?;
+        let mut ends = Vec::new();
         let mut starts = Vec::new();
         let mut at = 0u64;
         let mut last_granule = None;
@@ -143,9 +152,10 @@ impl OpusSource {
             };
             starts.push(at);
             at += frames;
-            packets.push(packet.data);
+            bytes.extend_from_slice(&packet.data);
+            ends.push(bytes.len());
         }
-        if packets.is_empty() {
+        if ends.is_empty() {
             return Err("no audio in the Opus stream".into());
         }
         // The last page's granule position trims the final packet's padding.
@@ -154,7 +164,8 @@ impl OpusSource {
             .unwrap_or(at);
         let decoder = OpusDecoder::new(RATE, usize::from(channels)).map_err(|e| e.to_string())?;
         Ok(Self {
-            packets,
+            bytes,
+            ends,
             starts,
             channels,
             pre_skip,
@@ -195,7 +206,13 @@ impl OpusSource {
     fn refill(&mut self) -> bool {
         let ch = usize::from(self.channels);
         while self.remaining > 0 {
-            let Some(packet) = self.packets.get(self.next_packet) else {
+            let from = self
+                .next_packet
+                .checked_sub(1)
+                .and_then(|i| self.ends.get(i));
+            let from = from.copied().unwrap_or(0);
+            let packet = self.ends.get(self.next_packet);
+            let Some(packet) = packet.and_then(|&to| self.bytes.get(from..to)) else {
                 return false;
             };
             self.next_packet += 1;

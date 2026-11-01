@@ -69,6 +69,7 @@ pub(crate) struct PlaybackUi {
     /// What the seek bars, the player bar and the Touch Bar showed of the
     /// track at the last tick: the tick redraws them only when it changed.
     pub(super) tick_shown: Option<TrackShown>,
+    pub(super) builds_watched: bool,
     /// Last known position per message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<MessageId, f64>,
@@ -131,9 +132,11 @@ impl PlaybackUi {
         self.audio.state()
     }
 
-    /// The play button: true only while the sound is being consumed.
+    /// The play button: true while the sound is being consumed, or on its
+    /// way (tdesktop shows Pause for a track that is starting).
     pub(super) fn is_playing(&self) -> bool {
-        self.engine_state() == super::audio::EngineState::Playing
+        use super::audio::EngineState::{Loading, Playing};
+        matches!(self.engine_state(), Playing | Loading)
     }
 
     /// What the seek bars, the player bar and the Touch Bar draw of the
@@ -170,6 +173,7 @@ impl PlaybackUi {
             seek_hover: None,
             tick: false,
             tick_shown: None,
+            builds_watched: false,
             positions: HashMap::new(),
             stickers: std::rc::Rc::new(super::sticker_player::Player::new()),
             emoji_plays: std::cell::RefCell::default(),
@@ -216,6 +220,38 @@ mod tests {
         assert_eq!(ui.active_position_secs(), Some(4.0));
     }
 
+    /// tdesktop shows Pause and the position asked for from the press on.
+    #[test]
+    fn a_track_still_building_shows_pause_at_its_offset() {
+        let (output, _device) = device();
+        let mut ui = PlaybackUi::new(&output);
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(4.0);
+        let path = track("ui-loading.wav", 4);
+        ui.audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
+        assert_eq!(ui.engine_state(), EngineState::Loading);
+        assert!(ui.is_playing());
+        assert_eq!(ui.active_position_secs(), Some(2.0));
+    }
+
+    /// tdesktop's audio row reads no waiting state: a start shows Pause
+    /// alone however long the file takes to open.
+    #[test]
+    fn a_long_start_shows_pause_alone_and_draws_nothing_new() {
+        let (output, _device) = device();
+        let mut ui = PlaybackUi::new(&output);
+        let clock;
+        (ui.audio, clock) = ui.audio.with_manual_clock();
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(4.0);
+        let path = track("ui-long-start.wav", 4);
+        ui.audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
+        let pressed = ui.track_shown((false, false));
+        clock.store(5000, std::sync::atomic::Ordering::Relaxed);
+        assert!(ui.is_playing());
+        assert_eq!(ui.track_shown((false, false)), pressed);
+    }
+
     #[test]
     fn a_failed_resume_keeps_the_button_on_play() {
         let (output, _device) = device();
@@ -224,12 +260,14 @@ mod tests {
         ui.playing_audio = Some(MessageId(1));
         ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        ui.audio.await_landing();
         assert!(ui.is_playing());
         ui.audio.pause();
         assert!(!ui.is_playing());
         ui.audio.seek(2.0, false).unwrap();
         std::fs::remove_file(&path).unwrap();
-        assert!(ui.audio.resume(2.0).is_err());
+        ui.audio.resume(2.0).unwrap();
+        ui.audio.await_landing();
         assert!(!ui.is_playing());
         assert_eq!(ui.engine_state(), EngineState::Paused);
     }
@@ -242,6 +280,7 @@ mod tests {
         ui.playing_audio = Some(MessageId(1));
         ui.track_length = Some(4.0);
         ui.audio.start(&path, 0.0, 1.0, 1.0, 4.0).unwrap();
+        ui.audio.await_landing();
         std::thread::sleep(std::time::Duration::from_millis(250));
         assert!(ui.active_position_secs().unwrap_or(9.0) < 0.05);
         pull(&mut source, usize::try_from(RATE).unwrap() * 2);
