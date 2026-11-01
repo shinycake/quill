@@ -1105,6 +1105,7 @@
 "qll_ops_leave_group_title" = "Leave group?";
 "qll_polls_link_url" = "URL";
 "qll_ops_preparing_the_files" = "Preparing the files…";
+"qll_ops_photos_are_sending" = "The photos are being sent.";
 "qll_ops_video_tool_took_too_long" = "The video tool took too long to finish.";
 "qll_ops_video_playback_needs_ffmpeg" = "Video playback needs ffmpeg, and it could not be started.";
 "qll_ops_video_could_not_read" = "The video could not be read.";
