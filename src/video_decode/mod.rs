@@ -68,6 +68,12 @@ pub fn available() -> bool {
     ffi::availability().is_ok()
 }
 
+/// [`available`] without waiting: `None` until the shim has been loaded
+/// (by [`available`] on some other thread), so a render never pays for it.
+pub fn available_now() -> Option<bool> {
+    ffi::loaded()
+}
+
 /// Why [`available`] is false.
 pub fn unavailable_reason() -> Option<&'static str> {
     ffi::availability().err()

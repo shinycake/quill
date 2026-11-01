@@ -310,9 +310,36 @@ impl Api {
     }
 }
 
+static API: OnceLock<Result<Api, String>> = OnceLock::new();
+
 fn api() -> Result<&'static Api, &'static str> {
-    static API: OnceLock<Result<Api, String>> = OnceLock::new();
-    API.get_or_init(Api::load).as_ref().map_err(String::as_str)
+    API.get_or_init(load_traced)
+        .as_ref()
+        .map_err(String::as_str)
+}
+
+/// `Api::load` (dlopen of the shim and its FFmpeg libraries), with
+/// `QUILL_STARTUP_TRACE` marks that say whether the UI thread paid for it.
+fn load_traced() -> Result<Api, String> {
+    let ui_thread = std::thread::current().name() == Some("main");
+    crate::startup_trace::mark(if ui_thread {
+        "video-decoder-load-start-ui-thread"
+    } else {
+        "video-decoder-load-start-worker"
+    });
+    let api = Api::load();
+    crate::startup_trace::mark(if ui_thread {
+        "video-decoder-load-end-ui-thread"
+    } else {
+        "video-decoder-load-end-worker"
+    });
+    api
+}
+
+/// Whether the shim loaded, without loading it: `None` before the first
+/// [`availability`] call has finished.
+pub(super) fn loaded() -> Option<bool> {
+    API.get().map(Result::is_ok)
 }
 
 /// Whether the in-process decoder is installed (and why not).

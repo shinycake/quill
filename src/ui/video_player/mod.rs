@@ -24,6 +24,7 @@ mod backend_live;
 #[cfg(feature = "demo-capture")]
 mod backend_still;
 pub(crate) mod controls;
+mod decoder_load;
 mod element;
 mod live_follow;
 mod live_picture;
@@ -45,6 +46,7 @@ mod live_view_tests;
 mod tests;
 
 pub(crate) use backend_live::STALL_AFTER;
+pub(crate) use decoder_load::{supported, warm_decoder};
 pub(crate) use element::{WidthReport, video_frame};
 pub(crate) use live_follow::{follow_live_feed, follow_live_slot, shows_feed};
 #[cfg(test)]
@@ -904,17 +906,6 @@ fn open_backend(path: &Path, purpose: Purpose) -> Result<Box<dyn Backend>, Playe
             .map(|b| Box::new(b) as Box<dyn Backend>);
     }
     backend_ffmpeg::FfmpegBackend::open(path, purpose).map(|b| Box::new(b) as Box<dyn Backend>)
-}
-
-/// Whether clips can play in this process: always on macOS (AVPlayer);
-/// elsewhere once the bundled FFmpeg shim loads. In tests, also once the
-/// test scripted a backend (CI has no shim).
-pub(crate) fn supported() -> bool {
-    #[cfg(test)]
-    if tests::scripted_backends() {
-        return true;
-    }
-    cfg!(target_os = "macos") || quill::video_decode::available()
 }
 
 /// Whether pictures are decoded in software into BGRA images in this
