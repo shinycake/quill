@@ -667,19 +667,13 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // Demo: clear the badges directly so the fixture shows the
             // result (no server sends updates in a screenshot demo).
-            for chat in session.chats.values_mut() {
-                let in_list = if archived {
+            session.mark_chats_read_locally(|chat| {
+                if archived {
                     chat.in_archive
                 } else {
                     chat.in_main_list
-                };
-                if in_list {
-                    chat.unread_count = 0;
-                    chat.is_marked_as_unread = false;
                 }
-            }
-            // The unread badges recount on a revision change.
-            session.revision = session.revision.wrapping_add(1);
+            });
         }
         cx.notify();
     }

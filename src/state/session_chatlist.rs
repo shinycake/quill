@@ -13,6 +13,17 @@ pub(crate) struct ChatOrderSync {
 }
 
 impl Session {
+    /// Demo: clear the unread marks of every chat `in_list` picks, as the
+    /// server's updates do after `readChatList`, and bump the revision the
+    /// unread badges recount on.
+    pub fn mark_chats_read_locally(&mut self, in_list: impl Fn(&ChatSummary) -> bool) {
+        for chat in self.chats.values_mut().filter(|chat| in_list(chat)) {
+            chat.unread_count = 0;
+            chat.is_marked_as_unread = false;
+        }
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     pub fn request_download(&mut self, file_id: FileId) -> RequestId {
         let extra = self
             .requests
