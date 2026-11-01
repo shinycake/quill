@@ -447,3 +447,7 @@ Added in 2026, after an audit of the earlier panic pass
   copies only (`snapshot`, `find`) or change it under its own lock (`push`,
   `remove`), so none can hold the lock across `SendMessageW`. `src/platform.rs`
   and `src/vsync.rs` use it; `TrackedWindow` is `Clone`.
+- `src/platform.rs`: after `open_window` lists a new window, it checks the
+  window's device against the platform's current one and, when recovery
+  replaced the devices meanwhile, sends the window `WM_GPUI_GPU_DEVICE_LOST`
+  with the new ones (`hand_over_recovered_devices`).

@@ -135,6 +135,16 @@ platform. Each is fixed in its own commit:
   can hold the lock at all. It uses std's `RwLock` and recovers a poisoned
   lock, so it stays std-only and `scripts/test-window-list.sh` still runs it
   on any host.
+- `platform.rs`, `open_window`: a window that opened while the vsync thread
+  was recovering from a device loss could stay blank. Recovery sends the
+  new devices to the platform window first and then to the windows in the
+  list; a window built from the old devices that joined the list after
+  that read never got them. `open_window` now compares the device the
+  window was made with against the platform's current one once the window
+  is listed, and sends it `WM_GPUI_GPU_DEVICE_LOST` with the current devices
+  when they differ. Either the window was listed in time for recovery's
+  read, or the platform already holds the new devices when it checks, so
+  no window misses both.
 
 ### macOS (`gpui-pre-macos`)
 

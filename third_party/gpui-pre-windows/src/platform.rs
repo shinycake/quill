@@ -394,6 +394,24 @@ impl WindowsPlatform {
             .map(|hwnd| hwnd.as_raw())
     }
 
+    fn hand_over_recovered_devices(&self, window: HWND, created_with: &ID3D11Device) {
+        let Some(current) = self.inner.state.directx_devices.borrow().clone() else {
+            return;
+        };
+        if current.device == *created_with {
+            return;
+        }
+        let device_lost = self.inner.validation_number.message(
+            WM_GPUI_GPU_DEVICE_LOST,
+            &current as *const DirectXDevices as isize,
+        );
+        // SAFETY: `window` belongs to this thread, so the send runs its handler before returning,
+        // while `current` is alive.
+        unsafe {
+            device_lost.send(window);
+        }
+    }
+
     fn is_windowed(&self) -> bool {
         self.inner.state.directx_devices.borrow().is_some()
     }
@@ -831,13 +849,18 @@ impl Platform for WindowsPlatform {
             }
             return Err(anyhow!("cannot open windows while headless"));
         }
-        let window = WindowsWindow::new(handle, options, self.generate_creation_info())?;
+        let creation_info = self.generate_creation_info();
+        let created_with = creation_info.directx_devices.device.clone();
+        let window = WindowsWindow::new(handle, options, creation_info)?;
         let handle = window.get_raw_handle();
         self.raw_window_handles.push(TrackedWindow {
             handle: handle.into(),
             frame_signal: window.state.frame_signal.clone(),
             destroyed: window.state.destroyed.clone(),
         });
+        // Quill: device-loss recovery hands the new devices to the windows listed after the
+        // platform got them. One made from the old devices that joined later missed them.
+        self.hand_over_recovered_devices(handle, &created_with);
         // Quill: a new window starts with frames running; wake the vsync
         // thread if every other window is parked. One created hidden starts
         // parked (it gets no WM_PAINT until shown, so nothing would park it,
