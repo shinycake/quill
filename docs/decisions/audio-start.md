@@ -35,4 +35,6 @@ A seek within a playing track still runs in the source on the audio thread. A co
 would be quicker there, but lands in the wrong place on a VBR file.
 
 ## Test
-`cargo test --features demo-capture --bin quill -- ui::audio ui::playback_state`.
+`cargo test --features demo-capture --bin quill -- ui::audio ui::playback_state`. The row test
+`a_long_start_shows_pause_alone_on_the_row` holds a real build open on the engine clock, so it
+runs the start the app runs, not a simulation.

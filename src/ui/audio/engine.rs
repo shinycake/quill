@@ -526,7 +526,7 @@ impl AudioEngine {
     }
 
     #[cfg(test)]
-    fn gate_builds(&mut self) -> mpsc::Sender<()> {
+    pub(in crate::ui) fn gate_builds(&mut self) -> mpsc::Sender<()> {
         let (open, gate) = mpsc::channel();
         self.build_gate = Some(Arc::new(std::sync::Mutex::new(gate)));
         open
