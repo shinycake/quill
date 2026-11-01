@@ -128,7 +128,10 @@ impl QuillApp {
             )
         });
         let viewport = window.viewport_size();
-        self.viewer.extra.strip_lane = Some(lane_width(f32::from(viewport.width)));
+        let lane = lane_width(f32::from(viewport.width));
+        self.viewer
+            .extra
+            .set_strip_lane(lane, &quill::wake::UPDATES);
         let group_thumbs = self.viewer_group_thumbs(f32::from(viewport.width), cx);
         // An expanded caption stops short of the top bar with the strip
         // under it too.

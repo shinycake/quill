@@ -3,6 +3,7 @@
 //! keeps the wheel, a lone photo has no strip, and a group's photo gallery
 //! has one too (needs the `demo-capture` feature for gpui-kit's test
 //! support).
+use super::ViewerExtra;
 use super::navigation::wheel_ui_tests::{current, new_app, notch, open, settle};
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -13,7 +14,7 @@ use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext,
 use quill::ids::{FileId, MessageId};
 use quill::media_viewer::{MediaViewer, MediaViewerItem, thumb_file_ids};
 use quill::telegram::envelope::{MessageContent, PhotoContent, PhotoSizeView};
-use quill::wake::UPDATES;
+use quill::wake::{Signal, UPDATES};
 use std::time::Duration;
 
 /// A 160 x 100 photo, in album `album` (0: none).
@@ -279,6 +280,21 @@ fn the_first_frame_of_a_viewer_wakes_the_pass_that_asks_for_its_thumbs(cx: &mut 
         )
     });
     assert_eq!(asked, thumb_files(&gallery));
+}
+
+#[test]
+fn a_strip_wakes_a_pass_once_per_width() {
+    static WAKE: Signal = Signal::new();
+    let mut extra = ViewerExtra::default();
+    let frames_at = |extra: &mut ViewerExtra, width: f32| {
+        for _ in 0..3 {
+            extra.set_strip_lane(width, &WAKE);
+        }
+        WAKE.epoch()
+    };
+    assert_eq!(frames_at(&mut extra, 800.0), 1, "the first width");
+    assert_eq!(frames_at(&mut extra, 800.0), 1, "the same width");
+    assert_eq!(frames_at(&mut extra, 640.0), 2, "a new width");
 }
 
 /// Past the idle wait on both clocks: the wall clock the viewer measures
