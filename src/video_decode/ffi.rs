@@ -28,12 +28,15 @@ const HW_ALLOWED: i32 = 1;
 const HW_FAIL_THIRD_PICTURE: i32 = 2;
 #[cfg(test)]
 const HW_FAIL_THIRD_PICTURE_AND_REOPEN: i32 = 3;
+#[cfg(test)]
+const HW_FAIL_AT_END: i32 = 4;
 
 /// The shim's stand-in hardware decoders (`QV_HW_FAIL_*`).
 #[cfg(test)]
 pub(super) enum StandIn {
     FailThirdPicture,
     FailThirdPictureAndReopen,
+    FailAtEnd,
 }
 
 #[repr(C)]
@@ -396,6 +399,7 @@ impl FfiDemuxer {
         let hw = match stand_in {
             StandIn::FailThirdPicture => HW_FAIL_THIRD_PICTURE,
             StandIn::FailThirdPictureAndReopen => HW_FAIL_THIRD_PICTURE_AND_REOPEN,
+            StandIn::FailAtEnd => HW_FAIL_AT_END,
         };
         Self::open_with(path, options, hw)
     }
@@ -530,6 +534,8 @@ impl Demuxer for FfiDemuxer {
         // SAFETY: live context, valid out pointer.
         let r = unsafe { (self.api.next)(self.ctx, &mut item) };
         if r == 0 {
+            // A fallback at the end shows no later picture to note it on.
+            self.refresh_hardware_flag();
             return Ok(None);
         }
         if r < 0 {

@@ -107,6 +107,27 @@ fn a_failing_hardware_decoder_hands_over_to_software_without_losing_a_picture() 
     assert!(drift <= 2048, "sound kept: {drift} samples apart");
 }
 
+/// A seek arms the shim to show the last picture it skipped if the file
+/// ends first. A hardware failure at the end, long after that seek, used
+/// to replay a picture already shown.
+#[test]
+fn a_hardware_failure_at_the_end_after_a_seek_repeats_no_picture() {
+    if !decoder() {
+        return;
+    }
+    let clip = fixture("clip-h264-aac.mp4");
+    let software = decode(
+        FfiDemuxer::open(&clip, &options(false)).expect("open"),
+        PixelOutput::Bgra,
+    );
+    let mut demuxer =
+        FfiDemuxer::open_stand_in(&clip, &options(true), StandIn::FailAtEnd).expect("open");
+    demuxer.seek(0.0).expect("seek");
+    let failing = decode(demuxer, PixelOutput::Bgra);
+    assert!(!failing.finished.hardware, "software after the failure");
+    assert_eq!(failing.pts, software.pts, "no picture lost or repeated");
+}
+
 #[test]
 fn a_hardware_decoder_that_software_cannot_replace_stays_in_charge() {
     if !decoder() {

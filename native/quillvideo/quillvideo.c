@@ -48,6 +48,7 @@ typedef struct Ctx {
   AVFrame *sw_frame;
   int stand_in_pictures_left;
   int stand_in_reopen_fails;
+  int stand_in_fails_at_end;
   /* A test stand-in for a hardware decoder: keeps QvInfo.hw set even where
    * no GPU decodes, so the fallback paths test the same on every machine. */
   int stand_in;
@@ -327,6 +328,11 @@ void *qv_open(const char *path, const QvOptions *options, char *err,
           options->hw == QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN;
       c->info.hw = 1;
     }
+    if (options->hw == QV_HW_FAIL_AT_END) {
+      c->stand_in = 1;
+      c->stand_in_fails_at_end = 1;
+      c->info.hw = 1;
+    }
     snprintf(c->info.video_codec, sizeof c->info.video_codec, "%s",
              avcodec_get_name(st->codecpar->codec_id));
   }
@@ -556,6 +562,7 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
       return 0;
     }
     c->vskip = -1.0;
+    c->keep_skipped = 0;
     av_frame_unref(c->skipped);
   }
   if (f->width <= 0 || f->height <= 0)
@@ -766,6 +773,7 @@ static int fall_back_to_software(Ctx *c) {
   c->hw_fmt = AV_PIX_FMT_NONE;
   c->stand_in = 0;
   c->stand_in_pictures_left = 0;
+  c->stand_in_fails_at_end = 0;
   c->info.hw = 0;
   double after_picture = c->vskip > c->vnext ? c->vskip : c->vnext;
   double after_sound = c->askip > c->anext ? c->askip : c->anext;
@@ -801,6 +809,7 @@ static int emit_skipped(Ctx *c, QvItem *out) {
   if (c->vskip < 0 || !c->skipped || !c->skipped->buf[0])
     return 0;
   c->vskip = -1.0;
+  c->keep_skipped = 0;
   int k = emit_video(c, c->skipped, out);
   av_frame_unref(c->skipped);
   return k;
@@ -816,6 +825,8 @@ static int drain(Ctx *c, int video, QvItem *out) {
     if (r == AVERROR(EAGAIN) && !flushed)
       return 0;
     if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) {
+      if (video && c->stand_in_fails_at_end)
+        return fall_back_to_software(c);
       *done = 1;
       return video ? emit_skipped(c, out) : 0;
     }

@@ -47,6 +47,9 @@ typedef struct QvOptions {
 /* Tests: as QV_HW_FAIL_THIRD_PICTURE, and the software decoder then fails to
  * open, so the hardware decoder has to stay in charge. */
 #define QV_HW_FAIL_THIRD_PICTURE_AND_REOPEN 3
+/* Tests: as QV_HW_ALLOWED, with a stand-in hardware decoder that fails once
+ * as it drains at the end of the file, after every picture came out. */
+#define QV_HW_FAIL_AT_END 4
 
 typedef struct QvInfo {
   /* Seconds; <= 0 when unknown. */
