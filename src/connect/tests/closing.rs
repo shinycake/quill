@@ -16,7 +16,7 @@ use crate::platform::MemorySecretStore;
 use crate::state::ActiveCall;
 use crate::telegram::client::{ReceiveBridge, copy_and_parse};
 use crate::telegram::envelope::{AuthorizationState, CallState};
-use crate::telegram::hub::{ReceiveSource, TdHub};
+use crate::telegram::hub::{ReceiveSource, ReceiveWake, TdHub};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
@@ -96,7 +96,11 @@ fn channel_hub() -> (Arc<TdHub>, Sender<String>) {
     let (tx, rx) = mpsc::channel::<String>();
     let source: ReceiveSource =
         Box::new(move |timeout| rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
-    let hub = TdHub::with_source(source, Arc::new(MemorySink::new())).expect("hub thread");
+    let wake_tx = tx.clone();
+    let wake: ReceiveWake = Box::new(move || {
+        let _ = wake_tx.send(String::new());
+    });
+    let hub = TdHub::with_source(source, wake, Arc::new(MemorySink::new())).expect("hub thread");
     (Arc::new(hub), tx)
 }
 
@@ -108,7 +112,8 @@ fn dying_hub() -> (Arc<TdHub>, Sender<String>) {
         Ok(json) => Some(json),
         Err(_) => panic!("receive source failed"),
     });
-    let hub = TdHub::with_source(source, Arc::new(MemorySink::new())).expect("hub thread");
+    let hub = TdHub::with_source(source, Box::new(|| {}), Arc::new(MemorySink::new()))
+        .expect("hub thread");
     (Arc::new(hub), tx)
 }
 
