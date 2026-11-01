@@ -22,7 +22,7 @@ pub(crate) use headless::*;
 pub(crate) use keyboard::*;
 pub(crate) use platform::*;
 #[cfg(any(feature = "wayland", feature = "x11"))]
-pub(crate) use recovery_timers::RecoveryTimers;
+pub(crate) use recovery_timers::{RecoveryTimers, TimerKind};
 #[cfg(any(feature = "wayland", feature = "x11"))]
 pub(crate) use text_system::*;
 #[cfg(feature = "wayland")]

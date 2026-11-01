@@ -289,19 +289,20 @@ impl X11ClientStatePtr {
     }
 
     /// Quill: run `f` on `x_window` from the event loop at `at`, outside the
-    /// draw that asked for it (a GPU recovery step).
+    /// draw that asked for it (a GPU recovery step). Returns whether the
+    /// timer is armed.
     pub(crate) fn run_for_window_at(
         &self,
         x_window: xproto::Window,
         at: Instant,
         f: impl FnOnce(X11WindowStatePtr) + 'static,
-    ) {
+    ) -> bool {
         let Some(client) = self.get_client() else {
-            return;
+            return false;
         };
         let Ok(state) = client.0.try_borrow() else {
             log::error!("cannot schedule a GPU recovery step: the X11 client is busy");
-            return;
+            return false;
         };
         let this = self.clone();
         let mut f = Some(f);
@@ -316,7 +317,9 @@ impl X11ClientStatePtr {
             calloop::timer::TimeoutAction::Drop
         }) {
             log::error!("cannot schedule a GPU recovery step: {err}");
+            return false;
         }
+        true
     }
 
     pub fn update_ime_position(&self, bounds: Bounds<Pixels>) {

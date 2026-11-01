@@ -34,7 +34,9 @@ use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::linux::wayland::{display::WaylandDisplay, serial::SerialKind};
-use crate::linux::{Globals, Output, RecoveryTimers, WaylandClientStatePtr, get_window};
+use crate::linux::{
+    Globals, Output, RecoveryTimers, TimerKind, WaylandClientStatePtr, get_window,
+};
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, ExternalDragPayload,
     FrameRequestSource, GpuSpecs, Modifiers, Pixels, PlatformAtlas, PlatformDisplay,
@@ -2081,22 +2083,29 @@ impl PlatformWindow for WaylandWindow {
                     schedule_hardware_probe(state, at);
                 }
                 Recovery::RetryAt(at) => {
-                    if state.recovery_timers.arm_retry(at) {
-                        let surface_id = state.surface.id();
-                        state.client.run_for_window_at(&surface_id, at, move |window| {
+                    let surface_id = state.surface.id();
+                    if state.recovery_timers.arm_retry(at)
+                        && !state.client.run_for_window_at(&surface_id, at, move |window| {
                             window.recovery_retry_due(at)
-                        });
+                        })
+                    {
+                        // No timer: ask again from the next frame.
+                        state.recovery_timers.not_armed(TimerKind::Retry);
+                        state.redraw_requested = true;
                     }
                 }
                 Recovery::GaveUp => state.recovery_timers.clear_retry(),
                 Recovery::CloseWindow => {
-                    if state.recovery_timers.arm_close() {
-                        let surface_id = state.surface.id();
-                        state
+                    let surface_id = state.surface.id();
+                    if state.recovery_timers.arm_close()
+                        && !state
                             .client
                             .run_for_window_at(&surface_id, Instant::now(), |window| {
                                 window.close()
-                            });
+                            })
+                    {
+                        state.recovery_timers.not_armed(TimerKind::Close);
+                        state.redraw_requested = true;
                     }
                 }
             }
@@ -2505,8 +2514,11 @@ fn inset_by_tiling(mut bounds: Bounds<Pixels>, inset: Pixels, tiling: Tiling) ->
 fn schedule_hardware_probe(state: &mut WaylandWindowState, at: Option<Instant>) {
     if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at))) {
         let surface_id = state.surface.id();
-        state
+        if !state
             .client
-            .run_for_window_at(&surface_id, at, move |window| window.probe_hardware(at));
+            .run_for_window_at(&surface_id, at, move |window| window.probe_hardware(at))
+        {
+            state.recovery_timers.not_armed(TimerKind::Probe);
+        }
     }
 }

@@ -629,13 +629,14 @@ impl WaylandClientStatePtr {
     }
 
     /// Quill: run `f` on `surface_id`'s window from the event loop at `at`,
-    /// outside the draw that asked for it (a GPU recovery step).
+    /// outside the draw that asked for it (a GPU recovery step). Returns
+    /// whether the timer is armed.
     pub fn run_for_window_at(
         &self,
         surface_id: &ObjectId,
         at: Instant,
         f: impl FnOnce(WaylandWindowStatePtr) + 'static,
-    ) {
+    ) -> bool {
         let client = self.get_client();
         let state = client.borrow();
         let surface_id = surface_id.clone();
@@ -656,7 +657,9 @@ impl WaylandClientStatePtr {
                 })
         {
             log::error!("cannot schedule a GPU recovery step: {err}");
+            return false;
         }
+        true
     }
 
     /// Queue a retry tick for `surface_id` one refresh interval from now. An immediate

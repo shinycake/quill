@@ -10,6 +10,13 @@
 
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TimerKind {
+    Retry,
+    Probe,
+    Close,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct RecoveryTimers {
     retry: Option<Instant>,
@@ -64,11 +71,20 @@ impl RecoveryTimers {
     pub(crate) fn arm_close(&mut self) -> bool {
         !std::mem::replace(&mut self.closing, true)
     }
+
+    /// The timer `arm_*` asked for could not be armed: the next ask arms it.
+    pub(crate) fn not_armed(&mut self, kind: TimerKind) {
+        match kind {
+            TimerKind::Retry => self.retry = None,
+            TimerKind::Probe => self.probe = None,
+            TimerKind::Close => self.closing = false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RecoveryTimers;
+    use super::{RecoveryTimers, TimerKind};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -105,5 +121,23 @@ mod tests {
         let mut timers = RecoveryTimers::default();
         assert!(timers.arm_close());
         assert!(!timers.arm_close());
+    }
+
+    /// The event loop was busy: the next draw's ask arms the timer, instead
+    /// of the window waiting for one that never fires.
+    #[test]
+    fn a_timer_that_could_not_be_armed_is_asked_for_again() {
+        let at = Instant::now();
+        let mut timers = RecoveryTimers::default();
+        assert!(timers.arm_retry(at));
+        timers.not_armed(TimerKind::Retry);
+        assert!(!timers.retry_pending());
+        assert!(timers.arm_retry(at));
+        assert!(timers.arm_probe(Some(at)));
+        timers.not_armed(TimerKind::Probe);
+        assert!(timers.arm_probe(Some(at)));
+        assert!(timers.arm_close());
+        timers.not_armed(TimerKind::Close);
+        assert!(timers.arm_close());
     }
 }

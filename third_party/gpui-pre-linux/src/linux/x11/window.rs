@@ -3,7 +3,7 @@
 use anyhow::{Context as _, anyhow};
 use x11rb::connection::RequestConnection;
 
-use crate::linux::{RecoveryTimers, X11ClientStatePtr};
+use crate::linux::{RecoveryTimers, TimerKind, X11ClientStatePtr};
 use gpui::{
     AnyWindowHandle, Bounds, Decorations, DevicePixels, ForegroundExecutor, GpuSpecs, Modifiers,
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
@@ -1560,10 +1560,12 @@ fn schedule_hardware_probe(
     x_window: xproto::Window,
     at: Option<Instant>,
 ) {
-    if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at))) {
-        state
+    if let Some(at) = at.filter(|&at| state.recovery_timers.arm_probe(Some(at)))
+        && !state
             .client
-            .run_for_window_at(x_window, at, move |window| window.probe_hardware(at));
+            .run_for_window_at(x_window, at, move |window| window.probe_hardware(at))
+    {
+        state.recovery_timers.not_armed(TimerKind::Probe);
     }
 }
 
@@ -1973,22 +1975,31 @@ impl PlatformWindow for X11Window {
                     schedule_hardware_probe(inner, self.0.x_window, at);
                 }
                 Recovery::RetryAt(at) => {
-                    if inner.recovery_timers.arm_retry(at) {
-                        inner
+                    if inner.recovery_timers.arm_retry(at)
+                        && !inner
                             .client
                             .run_for_window_at(self.0.x_window, at, move |window| {
                                 window.recovery_retry_due(at)
-                            });
+                            })
+                    {
+                        // No timer: ask again from the next refresh.
+                        inner.recovery_timers.not_armed(TimerKind::Retry);
+                        inner.force_render_after_recovery = true;
+                        self.0.frame.demand();
                     }
                 }
                 Recovery::GaveUp => inner.recovery_timers.clear_retry(),
                 Recovery::CloseWindow => {
-                    if inner.recovery_timers.arm_close() {
-                        inner
+                    if inner.recovery_timers.arm_close()
+                        && !inner
                             .client
                             .run_for_window_at(self.0.x_window, Instant::now(), |window| {
                                 window.close()
-                            });
+                            })
+                    {
+                        inner.recovery_timers.not_armed(TimerKind::Close);
+                        inner.force_render_after_recovery = true;
+                        self.0.frame.demand();
                     }
                 }
             }
