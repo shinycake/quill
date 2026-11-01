@@ -27,9 +27,9 @@ the poke wait replaced the fixed tick (2026-10-16).
 
 ## Why no ramp
 
-The 10 ms to 2 s ramp came before `wake::UPDATES`. Every async source now pokes, so after an
-update it only added polls that found nothing, about 8 per update. A batched redraw no longer
-needs a 120 ms cap, because `PolledRedraw::next_due` says when it lands.
+The 10 ms to 2 s ramp came before `wake::UPDATES`. After an update it mostly added polls that
+found nothing, about 6 per update. A batched redraw no longer needs a 120 ms cap, because
+`PolledRedraw::next_due` says when it lands.
 
 Things that relied on the ramp without knowing it:
 
@@ -39,6 +39,18 @@ Things that relied on the ramp without knowing it:
   while one runs. Same cadence as before.
 - `poll_device_qr` and `drain_account_notices` read what the reducer set, and ran before the
   drain, so they needed a second pass. They run after it now.
+- A user avatar a render finds missing is claimed for the next pass, and the pass that led to
+  that render has ended. A claim the next pass will send pokes. A repeat, a file in flight, a
+  failed file and data saver do not, or a list with a stuck download would poke every frame.
+  `avatar_claim_sends` decides for the poke and the send alike, so the two cannot disagree. A
+  pass that sends a download asks for no redraw, so the poke cannot feed itself.
+- The chat export worker writes its progress and last stage to a slot only a pass reads, and the
+  Writing stage can go a long way with no request. Both writes poke now.
+- Work a click leaves for the next pass pokes: a queued deep link, the Translate toggle, opening
+  Settings for the grams probe, and a linked media timestamp. That timestamp counted 100 passes
+  before giving up, which is 200 s on a quiet account. It has a 12 s deadline now, close to what
+  the count came to at the 8 polls a second its comment assumed.
+- A group call stream takes 64 events a pass and pokes when it takes the 64th, for what is left.
 
 Anything else with no poke waits at most the ceiling, as it did at rest before.
 
@@ -54,13 +66,20 @@ it is left as a follow-up.
 
 ## Trade-off
 
-A long backlog drains at about 8 ms of work per 18 ms. The old loop ran passes back to back for
-as long as updates kept arriving, which was faster only because nothing else ran. 300,000 updates
-arriving in 2 s took 10.6 s to apply instead of 6.7 s, and the window stayed at 60 frames a second
-for all of it.
+A long backlog drains at about 8 ms of work per 20 ms, from 49 passes a second. The old loop ran
+passes back to back for as long as updates kept arriving, which was faster only because nothing
+else ran. 300,000 updates arriving in 2 s took 10.6 s to apply instead of 6.7 s, and the window
+held 60 frames a second through the stream.
 
 ## Why 10 ms
 
 It is the old busy cadence. A 2 ms gap drained that flood 17% faster, because frames took most of
 the time it freed: passes only rose from 49 to 64 a second. Under a steady 2,000 updates a second
 the same gap tripled the passes, from 70 to 218 a second, for updates nobody can see 8 ms sooner.
+
+## Background accounts
+
+They get 4 ms per account in about 44 ms, 9% of the thread. At the demo's rough 50 µs per update
+that is about 1,800 updates a second for each account, an estimate that no run has checked.
+Notifications and badges lag behind a backlog by that much. A 10 ms gap with the same budget is
+the cheap change if it ever hurts.
