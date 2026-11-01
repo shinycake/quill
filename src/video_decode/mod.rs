@@ -50,6 +50,10 @@ pub const SYNC_TOLERANCE: f64 = 0.04;
 /// A gap in the sound's timestamps longer than this plays as silence, so
 /// the sound after it plays at its time (shorter ones are rounding).
 const SOUND_GAP_MIN: f64 = 0.005;
+/// A gap longer than this is a broken timestamp, not silence: the sound
+/// after it plays at once instead of after hours of silence that would
+/// fill the sound queue and stall the pictures.
+const SOUND_GAP_MAX: f64 = 5.0;
 /// A picture is due this much before its time (half a 60 Hz refresh), so
 /// it isn't held a whole refresh for rounding.
 const DUE_SLACK: f64 = 0.008;
@@ -503,6 +507,9 @@ pub struct AudioTap {
     chunk_pts: f64,
     /// Where the sound played so far ends, since the last seek.
     end_pts: f64,
+    /// Taken off the chunks' timestamps since a broken one, so the sound
+    /// stays on the pictures' clock.
+    pts_shift: f64,
     /// Silent samples owed before `chunk`, for a gap in the sound.
     gap: usize,
     gap_at: usize,
@@ -534,6 +541,7 @@ impl AudioTap {
             self.at = 0;
             let origin = f64::from_bits(self.shared.origin.load(Ordering::Acquire));
             self.end_pts = origin;
+            self.pts_shift = 0.0;
             self.gap = 0;
         }
         if self.gap_at < self.gap {
@@ -589,16 +597,25 @@ impl AudioTap {
     fn start_chunk(&mut self, chunk: AudioChunk) {
         let channels = usize::from(self.channels());
         let rate = f64::from(self.sample_rate());
-        let gap = chunk.pts - self.end_pts;
-        self.gap = if gap > SOUND_GAP_MIN {
-            (gap * rate).round() as usize * channels
+        let mut pts = chunk.pts - self.pts_shift;
+        let gap = pts - self.end_pts;
+        if !gap.is_finite() || gap.abs() > SOUND_GAP_MAX {
+            // A broken timestamp: the sound goes on where it was, and so do
+            // the chunks stamped after it.
+            if chunk.pts.is_finite() {
+                self.pts_shift = chunk.pts - self.end_pts;
+            }
+            pts = self.end_pts;
+        }
+        self.gap = if gap > SOUND_GAP_MIN && gap <= SOUND_GAP_MAX {
+            ((gap * rate).round() as usize).saturating_mul(channels)
         } else {
             0
         };
         self.gap_at = 0;
         let frames = chunk.samples.len() / channels;
-        self.end_pts = chunk.pts + frames as f64 / rate;
-        self.chunk_pts = chunk.pts;
+        self.end_pts = pts + frames as f64 / rate;
+        self.chunk_pts = pts;
         self.chunk = chunk.samples;
         self.at = 0;
     }

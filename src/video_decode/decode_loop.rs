@@ -123,6 +123,7 @@ impl Decoder {
                 at: 0,
                 chunk_pts: 0.0,
                 end_pts: 0.0,
+                pts_shift: 0.0,
                 gap: 0,
                 gap_at: 0,
                 generation: 0,

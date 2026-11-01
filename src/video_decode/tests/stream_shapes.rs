@@ -606,6 +606,29 @@ fn sound_that_starts_late_plays_at_its_time() {
     assert!((heard - expected).abs() < 0.01, "{heard}");
 }
 
+/// Sound stamped an hour late used to queue an hour of silence: the sound
+/// queue filled and the pictures froze.
+#[test]
+fn sound_with_a_broken_timestamp_plays_on_and_the_pictures_keep_going() {
+    let mut rig = Rig::open(Shape {
+        sound_jump: (1.0, 3600.0),
+        ..Shape::clip(10.0, 10.0)
+    });
+    let t0 = rig.start();
+    let mut shown = 0.0;
+    for step in 1..=200u32 {
+        rig.pull_sound(FRAME_SECS);
+        rig.settle();
+        let now = t0 + Duration::from_secs_f64(f64::from(step) * FRAME_SECS);
+        if let Some(frame) = rig.player.take_frame_for(now, now) {
+            shown = frame.pts;
+        }
+    }
+    assert!(shown > 7.0, "the picture stopped at {shown}");
+    let heard = rig.player.heard().expect("sound plays");
+    assert!((heard - 8.0).abs() < 0.2, "{heard}");
+}
+
 #[test]
 fn the_picture_is_current_when_painting_comes_back() {
     let mut rig = Rig::open(Shape::clip(90.0, 90.0));
