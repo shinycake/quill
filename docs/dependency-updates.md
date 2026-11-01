@@ -84,7 +84,7 @@ the `=` pinned crates. Updates there are deliberate and visually verified.
   tag's CPU engine, Lottie loader, raw loader and C API, applies
   `native/patches/thorvg-sticker-limits.patch` and records the commit in `VERSION`.
   If the patch stops applying, the script stops: port each change
-  (`third_party/thorvg/QUILL-CHANGES.md` says what each one is for). To regenerate
+  (`third_party/thorvg/QUILL-CHANGES.md` says what each file's changes touch). To regenerate
   the patch, run the script with `THORVG_NO_PATCH=1`, stage the result, make the
   changes, then run `git diff --relative=third_party/thorvg -- third_party/thorvg/src`
   into the patch file. Build (a new source file is picked up automatically; a new
