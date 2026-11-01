@@ -1337,6 +1337,9 @@ impl App {
         self.foreground_executor.spawn(futures).detach();
 
         self.quitting = false;
+        // QUILL: macOS exits right after this, so `Application::run` never
+        // returns and code after it never runs.
+        log::logger().flush();
     }
 
     /// Get the id of the current keyboard layout

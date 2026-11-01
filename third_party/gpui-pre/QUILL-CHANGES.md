@@ -471,6 +471,13 @@ content painted away from its place in the tree keeps the opacity it was given t
 
 `src/ui/layer_tick_tests.rs` holds the tests.
 
+The Quill project also changed it in 2026 so a warning logged during a quit
+reaches the log:
+
+- `src/app.rs`: `App::shutdown` ends with `log::logger().flush()`. macOS exits
+  from `applicationWillTerminate`, so `Application::run` never returns there.
+  Test: `src/ui/quit_flush_tests.rs`.
+
 The Quill project also changed it in 2026 so the docs say what macOS now
 emits (`third_party/gpui-pre-macos/QUILL-CHANGES.md`):
 
