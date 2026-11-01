@@ -122,7 +122,7 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
         .expect("chat photo downloadFile");
     let avatar_json: Value = serde_json::from_str(avatar_req).unwrap();
     assert_eq!(avatar_json["priority"], CHAT_LIST_PHOTO_PRIORITY);
-    assert!(CHAT_LIST_PHOTO_PRIORITY < THUMB_DOWNLOAD_PRIORITY);
+    const { assert!(CHAT_LIST_PHOTO_PRIORITY < THUMB_DOWNLOAD_PRIORITY) };
     assert_eq!(avatar_json["synchronous"], false);
     // A second ingest (any envelope) must not duplicate the in-flight
     // download.
