@@ -160,9 +160,10 @@ pub(crate) struct AppThemeUi {
     pub(super) custom: Option<Vec<CustomTheme>>,
     /// The read of the themes folder running for `custom`.
     custom_read: Option<Task<()>>,
-    /// The last custom theme read: its name and palette (`None` when the
-    /// file could not be read).
-    custom_cache: Option<(String, Option<Palette>)>,
+    /// The custom themes read last, the newest at the end: name and
+    /// palette (`None` when the file could not be read). Two, so a custom
+    /// day theme and a custom night theme both stay read.
+    custom_cache: Vec<(String, Option<Palette>)>,
     /// The custom theme being read off the UI thread, by name.
     palette_read: Option<(String, Task<()>)>,
     /// The theme and palette applied last (outside high contrast).
@@ -177,6 +178,23 @@ pub(crate) struct AppThemeUi {
     pub(super) omarchy: Option<omarchy::OmarchyState>,
     omarchy_probed: bool,
     omarchy_watched: bool,
+}
+
+impl AppThemeUi {
+    fn cached_palette(&self, name: &str) -> Option<&Option<Palette>> {
+        self.custom_cache
+            .iter()
+            .find(|(cached, _)| cached == name)
+            .map(|(_, palette)| palette)
+    }
+
+    fn cache_palette(&mut self, name: String, palette: Option<Palette>) {
+        self.custom_cache.retain(|(cached, _)| *cached != name);
+        if self.custom_cache.len() >= 2 {
+            self.custom_cache.remove(0);
+        }
+        self.custom_cache.push((name, palette));
+    }
 }
 
 /// The colour standing for a theme image: the 1x1 PNG's, else the mean of
@@ -330,7 +348,7 @@ impl QuillApp {
         let themes = &mut self.settings.app_theme;
         themes.custom = None;
         themes.custom_read = None;
-        themes.custom_cache = None;
+        themes.custom_cache.clear();
         themes.palette_read = None;
         themes.editor_read = None;
     }

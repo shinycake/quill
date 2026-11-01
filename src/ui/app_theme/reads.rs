@@ -66,14 +66,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> PaletteRead {
         let themes = &mut self.settings.app_theme;
-        if let Some((cached, palette)) = &themes.custom_cache
-            && cached == name
-        {
+        if let Some(palette) = themes.cached_palette(name) {
             return PaletteRead::Read(palette.clone());
         }
         let Some(shown) = themes.applied.clone() else {
             let palette = read_custom_palette(&Self::themes_dir(), name);
-            themes.custom_cache = Some((name.to_string(), palette.clone()));
+            themes.cache_palette(name.to_string(), palette.clone());
             return PaletteRead::Read(palette);
         };
         if !themes
@@ -90,7 +88,7 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     let themes = &mut this.settings.app_theme;
                     themes.palette_read = None;
-                    themes.custom_cache = Some((wanted, palette));
+                    themes.cache_palette(wanted, palette);
                     this.apply_appearance(cx);
                 });
             });

@@ -275,3 +275,47 @@ fn closing_settings_drops_the_editor_read(cx: &mut TestAppContext) {
         assert_eq!(app.connection.status_note(), note, "no load error either");
     });
 }
+
+/// A custom day theme and a custom night theme: once both are read,
+/// switching between day and night shows the new mode's theme at once,
+/// never the other mode's for a moment.
+#[gpui_kit::test]
+fn switching_between_two_custom_themes_never_shows_the_other(cx: &mut TestAppContext) {
+    use quill::app_theme::{ThemeFile, store};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let dir = QuillApp::themes_dir();
+    let day = "quill-test-b9-custom-day".to_string();
+    let night = "quill-test-b9-custom-night".to_string();
+    for (name, theme) in [(&day, BuiltinTheme::Day), (&night, BuiltinTheme::Night)] {
+        store::save(&dir, name, &ThemeFile::from_palette(&theme.palette())).expect("saved");
+    }
+    let show = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, dark: bool| {
+        app.update_in(vcx, |app, _, cx| {
+            app.appearance.theme = if dark {
+                quill::settings::ThemeChoice::Dark
+            } else {
+                quill::settings::ThemeChoice::Light
+            };
+            reapply(app, cx);
+            applied_id(app).cloned()
+        })
+    };
+    app.update_in(vcx, |app, _, _| {
+        app.appearance.auto_night = quill::settings::AutoNight::Off;
+        app.appearance.day_theme = ThemeId::Custom(day.clone());
+        app.appearance.night_theme = ThemeId::Custom(night.clone());
+    });
+    // The first time each is read off the UI thread.
+    show(&app, vcx, false);
+    vcx.run_until_parked();
+    show(&app, vcx, true);
+    vcx.run_until_parked();
+    for dark in [false, true, false] {
+        let expected = ThemeId::Custom(if dark { night.clone() } else { day.clone() });
+        assert_eq!(show(&app, vcx, dark), Some(expected));
+    }
+    for name in [&day, &night] {
+        let _ = store::delete(&dir, name);
+    }
+}
