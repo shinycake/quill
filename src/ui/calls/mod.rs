@@ -494,30 +494,33 @@ impl QuillApp {
         }
     }
 
+    fn call_on_screen(&self) -> bool {
+        self.session()
+            .is_some_and(|s| s.calls.active_call.is_some())
+    }
+
     /// Phase C1: 1s tick while a call is tracked, keeping the overlay's
-    /// ringing / connected clock fresh. Mirrors the Phase A1 slow-mode
-    /// tick (at most one task; exits when no call is active).
+    /// ringing / connected clock fresh, and while another account's call
+    /// rings, whose ringtone no update comes along to loop. Mirrors the
+    /// Phase A1 slow-mode tick (at most one task; exits when neither runs).
     pub(super) fn ensure_call_tick(&mut self, cx: &mut Context<Self>) {
-        let call_active = self
-            .session()
-            .is_some_and(|s| s.calls.active_call.is_some());
-        if !call_active || self.calls.tick_active {
+        let wanted = self.call_on_screen() || self.background_ring_audible();
+        if !wanted || self.calls.tick_active {
             return;
         }
         self.calls.tick_active = true;
         cx.spawn(async move |this, cx| {
             loop {
-                // Frames wake their own pictures (`call_video`): the
-                // tick only keeps the clock fresh.
+                // Frames wake their own pictures (`call_video`).
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let still_active = this
-                            .session()
-                            .is_some_and(|s| s.calls.active_call.is_some());
-                        if still_active {
-                            this.sync_call_sounds();
+                        let on_screen = this.call_on_screen();
+                        if on_screen {
                             this.notify_call_clock(cx);
+                        }
+                        if on_screen || this.background_ring_audible() {
+                            this.sync_call_sounds();
                             true
                         } else {
                             this.calls.tick_active = false;
