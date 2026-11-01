@@ -708,7 +708,7 @@ impl QuillApp {
             SLIDE.set(None);
             return 0.;
         }
-        self.request_animation_tick_for(None, 60, cx);
+        self.request_app_tick(60, cx);
         1. - metrics::ease_out_quint(t)
     }
 

@@ -82,8 +82,10 @@ const _: () =
 pub(super) const IDLE_AFTER: Duration = Duration::from_secs(2);
 
 thread_local! {
-    /// Window frames drawn so far (`begin_frame`).
+    /// Window frames drawn so far (`begin_frame`, `begin_patch_frame`).
     static FRAME: Cell<u64> = const { Cell::new(0) };
+    /// The main window's frames that drew everything.
+    static WHOLE: Cell<WholeFrames> = const { Cell::new(WholeFrames { latest: 0, on_screen: 0, images_below: 0 }) };
     /// Each slice's last render frame, the last frame it was shown, and
     /// the render before the last one.
     static SLICES: RefCell<HashMap<EntityId, SliceFrames>> = RefCell::new(HashMap::new());
@@ -109,11 +111,51 @@ struct SliceFrames {
     images_below: Option<usize>,
 }
 
-/// Start a main window frame (`begin_main_frame`, before anything renders).
+/// What the main window shows beside its animation layers: a patch frame
+/// leaves all that as the latest whole frame drew it.
+#[derive(Clone, Copy, Debug)]
+struct WholeFrames {
+    latest: u64,
+    /// The whole frame on screen as the current frame started.
+    on_screen: u64,
+    /// Every image `latest` painted has an id below this, once it is done.
+    images_below: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum MainDraw {
+    /// Everything: `QuillApp` renders.
+    Whole,
+    /// Only the animation layers (`Entity::live`).
+    Patch,
+}
+
+/// Start a main window frame that draws everything (`begin_main_frame`,
+/// before anything renders).
 pub(super) fn begin_frame() -> u64 {
+    let frame = next_frame();
+    let whole = WHOLE.get();
+    WHOLE.set(WholeFrames {
+        latest: frame,
+        ..whole
+    });
+    frame
+}
+
+/// Start a main window frame that draws only the animation layers.
+pub(super) fn begin_patch_frame() -> u64 {
+    next_frame()
+}
+
+fn next_frame() -> u64 {
     super::frame_clock::trace_slice_render("(window frame)");
     // The frame just drawn painted only images that exist by now.
     retired::close_main_frame();
+    let whole = WHOLE.get();
+    WHOLE.set(WholeFrames {
+        on_screen: whole.latest,
+        ..whole
+    });
     FRAME.with(|frame| {
         frame.set(frame.get() + 1);
         frame.get()
@@ -154,19 +196,17 @@ pub(super) fn slice_shown(id: EntityId) {
     });
 }
 
-/// Whether an image last used in `scope` at `used` can still be on
-/// screen, as of the start of the current frame.
+/// Whether an image last used at `used` in `scope` (a slice, or `QuillApp`
+/// for `None`) can still be on screen, as of the start of the current frame.
 fn may_be_visible(scope: Option<EntityId>, used: u64) -> bool {
-    let now = frame();
+    let on_screen = WHOLE.get().on_screen;
     match scope {
-        // `QuillApp` itself renders every frame: the last one shows all.
-        None => used + 1 >= now,
+        None => used >= on_screen,
         Some(id) => SLICES.with(|slices| {
             slices
                 .borrow()
                 .get(&id)
-                // A slice that wasn't shown last frame replays nothing.
-                .is_some_and(|s| s.shown + 1 >= now && used >= s.rendered)
+                .is_some_and(|s| s.shown >= on_screen && used >= s.rendered)
         }),
     }
 }
@@ -203,13 +243,13 @@ pub(super) fn may_still_show(stamp: PaintStamp) -> bool {
 /// while one paints: the latest frame drew it, or replays a slice render
 /// that did. ([`may_still_show`] also counts the frame before.)
 pub(super) fn shows_now(stamp: PaintStamp) -> bool {
-    let now = frame();
+    let whole = WHOLE.get().latest;
     match stamp.scope {
-        None => stamp.frame >= now,
+        None => stamp.frame >= whole,
         Some(id) => SLICES.with(|slices| {
             let slices = slices.borrow();
             let slice = slices.get(&id);
-            slice.is_some_and(|s| s.shown >= now && stamp.frame >= s.rendered)
+            slice.is_some_and(|s| s.shown >= whole && stamp.frame >= s.rendered)
         }),
     }
 }
@@ -221,7 +261,7 @@ fn newly_shown(scope: Option<EntityId>, previous: Option<u64>) -> bool {
         return true;
     };
     match scope {
-        None => previous + 1 < frame(),
+        None => previous < WHOLE.get().on_screen,
         Some(id) => SLICES.with(|slices| {
             slices
                 .borrow()
@@ -940,8 +980,9 @@ mod tests {
 
     use super::note_departures;
     use super::{
-        Budget, IDLE_AFTER, PaintStamp, begin_frame, idle_trim_due, may_be_visible, newly_shown,
-        note_activity, plan_eviction, shows_now, slice_rendered, slice_shown,
+        Budget, IDLE_AFTER, PaintStamp, begin_frame, begin_patch_frame, idle_trim_due,
+        may_be_visible, newly_shown, note_activity, plan_eviction, shows_now, slice_rendered,
+        slice_shown,
     };
     use super::{Fit, VariantPick, atlas_cost, bucket_edge, pick_variant, shorter_side_in_frame};
     use gpui_kit::{EntityId, RenderImage};
@@ -973,6 +1014,42 @@ mod tests {
         slice_rendered(slice);
         begin_frame();
         assert!(!may_be_visible(Some(slice), used));
+    }
+
+    /// A frame that redraws only an animation layer leaves all else on
+    /// screen, as the last whole frame drew it, however many such frames
+    /// pass; only the layer's last render goes.
+    #[test]
+    fn what_a_patch_frame_does_not_draw_stays_on_screen() {
+        let slice = EntityId::from((1_u64 << 32) | 23);
+        let layer = EntityId::from((1_u64 << 32) | 25);
+        let whole = begin_frame();
+        slice_rendered(slice);
+        slice_rendered(layer);
+        for _ in 0..10 {
+            begin_patch_frame();
+            slice_rendered(layer);
+        }
+        let painted = |scope| PaintStamp {
+            scope,
+            frame: whole,
+        };
+        for scope in [None, Some(slice)] {
+            assert!(may_be_visible(scope, whole), "{scope:?} may show");
+            assert!(shows_now(painted(scope)), "{scope:?} shows");
+        }
+        assert!(!newly_shown(None, Some(whole)), "and was not away");
+        assert!(!may_be_visible(Some(layer), whole), "the layer drew since");
+        assert!(!shows_now(painted(Some(layer))));
+        let next = begin_frame();
+        slice_shown(slice);
+        slice_rendered(layer);
+        assert!(may_be_visible(None, whole), "until the next one is done");
+        assert!(!shows_now(painted(None)));
+        assert!(shows_now(painted(Some(slice))), "the slice replays it");
+        begin_patch_frame();
+        assert!(!may_be_visible(None, whole), "whole frame {next} is on");
+        assert!(may_be_visible(Some(slice), whole));
     }
 
     /// Between frames only the latest frame is on screen: what the frame
