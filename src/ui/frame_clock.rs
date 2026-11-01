@@ -13,16 +13,16 @@
 //! clock ticks on the main window's content grid (`frame_grid`), the
 //! vsyncs the clip draws on too, so they share window frames. An animation
 //! layer whose inline clip redraws it more often than its content needs
-//! asks for no tick at all ([`layer_redrawn_by_clip`]).
+//! asks for no tick at all ([`layer_redrawn_by_clip`]). Elsewhere it ticks
+//! on the display's own vsyncs where it knows them, and runs free on a
+//! timer where it does not.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::frame_grid::{self, Lattice, Source, Vsync};
-use super::video_player::FrameRequested;
-use super::video_player::pacing::{FrameRequest, request_policy};
 use gpui_kit::*;
-use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// The main window's display and its refresh period, and how long before
@@ -72,40 +72,46 @@ pub(super) struct ClockRun {
     pub(super) fps: u32,
     last: LastDraw,
     later: Option<(Duration, Option<Instant>)>,
-    /// The grid vsyncs it ticks on, while it ticks on the grid.
+    /// The vsyncs it ticks on, while it ticks on vsyncs.
     lattice: Option<Lattice>,
+    /// Wakes in a row with nothing asked.
+    idle_wakes: u32,
 }
+
+/// [`ClockRun::idle_wakes`] that stop the clock. A wake can beat the draw of
+/// the tick before it, and that draw asks for the next tick: stopped there,
+/// the clock would restart after the draw, off its phase.
+const IDLE_WAKES_TO_STOP: u32 = 2;
 
 /// The vsync the frame clock's content last drew on.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LastDraw {
     /// No tick yet: the draw that started the clock, on the latest vsync.
     Start,
-    /// A tick off the grid: its draw comes on the vsync after the latest
+    /// A tick on no vsync: its draw comes on the vsync after the latest
     /// one when it woke (the clock plans right after).
-    OffGrid,
-    /// A tick on this grid vsync.
+    Free,
     On(Instant),
 }
 
 impl ClockRun {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(fps: u32) -> Self {
         Self {
-            fps: 30,
+            fps,
             last: LastDraw::Start,
             later: None,
             lattice: None,
+            idle_wakes: 0,
         }
     }
 
-    /// The grid vsyncs it ticks content on, while it ticks on the grid.
     pub(super) fn lattice(&self) -> Option<Lattice> {
         self.lattice
     }
 
-    /// How long to sleep for the next tick at `now`, and the grid vsync it
-    /// draws on (`None`: off the grid), for a main window drawn as
-    /// `display` says.
+    /// How long to sleep for the next tick at `now`, and the vsync it
+    /// draws on (`None`: unknown), for a main window drawn as `display`
+    /// says.
     pub(super) fn plan(
         &mut self,
         display: Option<(ClockTiming, Vsync)>,
@@ -116,7 +122,7 @@ impl ClockRun {
         }
         let last = display.map(|(_, vsync)| match self.last {
             LastDraw::Start => vsync.at,
-            LastDraw::OffGrid => vsync.at + vsync.period,
+            LastDraw::Free => vsync.at + vsync.period,
             LastDraw::On(at) => at,
         });
         tick_wait(display, now, self.fps, last)
@@ -134,12 +140,17 @@ impl ClockRun {
                 self.later = Some(plan);
             }
             Woke::Ticked(0) => {
-                self.lattice = None;
-                return false;
+                self.idle_wakes += 1;
+                if self.idle_wakes >= IDLE_WAKES_TO_STOP {
+                    self.lattice = None;
+                    return false;
+                }
+                self.last = planned.map_or(LastDraw::Free, LastDraw::On);
             }
             Woke::Ticked(fps) => {
+                self.idle_wakes = 0;
                 self.fps = fps;
-                self.last = planned.map_or(LastDraw::OffGrid, LastDraw::On);
+                self.last = planned.map_or(LastDraw::Free, LastDraw::On);
                 self.lattice = planned.map(|at| Lattice {
                     at,
                     every: content_frame(fps),
@@ -152,8 +163,8 @@ impl ClockRun {
 
 impl QuillApp {
     /// Ask for another frame within `1 / fps` seconds. Animated content
-    /// calls this each time it renders; the clock stops after a tick in
-    /// which nothing asked.
+    /// calls this each time it renders; the clock stops after two ticks in
+    /// a row in which nothing asked.
     #[track_caller]
     pub(super) fn request_animation_tick(&self, fps: u32, cx: &mut Context<Self>) {
         let target = self.slices.current().or(self.frame.tick_view.get());
@@ -167,6 +178,45 @@ impl QuillApp {
     pub(super) fn request_app_tick(&self, fps: u32, cx: &mut Context<Self>) {
         let target = self.frame.tick_view.get().or(self.slices.app_only_id());
         self.request_animation_tick_for(target, fps, cx);
+    }
+
+    /// [`Self::request_app_tick`] for content that can say what a draw
+    /// would show: a tick where `still` holds keeps ticking without a draw,
+    /// unless something else asked for the same tick. Content ticking
+    /// faster than its frames change (the tap effect beside other clips, a
+    /// clip held to its file's rate) would otherwise redraw the app for
+    /// nothing.
+    #[track_caller]
+    pub(super) fn request_app_tick_unless(
+        &self,
+        still: Rc<dyn Fn(TickDraw) -> bool>,
+        fps: u32,
+        cx: &mut Context<Self>,
+    ) {
+        let target = self.frame.tick_view.get().or(self.slices.app_only_id());
+        let unasked = !self.frame.animation_targets.borrow().contains(&target);
+        let alone = unasked || target.is_some_and(|id| self.still_tick_of(id));
+        self.request_animation_tick_for(target, fps, cx);
+        if let Some(id) = target.filter(|_| alone) {
+            let tick = StillTick { fps, still };
+            self.frame.still_ticks.borrow_mut().insert(id, tick);
+        }
+    }
+
+    fn still_tick_of(&self, target: EntityId) -> bool {
+        self.frame.still_ticks.borrow().contains_key(&target)
+    }
+
+    /// Whether the tick of `target` draws nothing new
+    /// ([`Self::request_app_tick_unless`]): it then keeps ticking.
+    fn still_tick(&self, target: EntityId, draw: TickDraw, cx: &mut Context<Self>) -> bool {
+        let tick = self.frame.still_ticks.borrow_mut().remove(&target);
+        let Some(tick) = tick.filter(|tick| (tick.still)(draw)) else {
+            return false;
+        };
+        self.request_animation_tick_for(Some(target), tick.fps, cx);
+        self.frame.still_ticks.borrow_mut().insert(target, tick);
+        true
     }
 
     /// [`Self::request_animation_tick`] for an explicit target: a slice or
@@ -247,6 +297,9 @@ impl QuillApp {
                 .max(fps.clamp(1, MAX_TICK_FPS)),
         );
         self.frame.animation_targets.borrow_mut().insert(target);
+        if let Some(id) = target {
+            self.frame.still_ticks.borrow_mut().remove(&id);
+        }
         if plays_sound {
             self.frame.animation_sound.set(true);
         }
@@ -257,8 +310,9 @@ impl QuillApp {
             return;
         }
         self.frame.frame_clock_running.set(true);
+        let fps = self.frame.animation_demand.get();
         cx.spawn(async move |this, cx| {
-            let mut run = ClockRun::new();
+            let mut run = ClockRun::new(fps);
             loop {
                 let (wait, vsync) = this
                     .update(cx, |this, _| run.plan(this.clock_display(), Instant::now()))
@@ -296,11 +350,15 @@ impl QuillApp {
                                         .filter(|id| !this.tick_hidden(*id, cx))
                                         .filter(|id| !this.windows.holds_view(*id, cx))
                                         .collect();
+                                    let draw = this.tick_draw(vsync);
                                     // Only the slices with animated content
                                     // redraw.
                                     for id in views {
-                                        if let Some(fps) = this.idle_layer_tick(id) {
+                                        if let Some(fps) = this.idle_layer_tick(id, draw) {
                                             this.request_animation_tick_for(Some(id), fps, cx);
+                                            continue;
+                                        }
+                                        if this.still_tick(id, draw, cx) {
                                             continue;
                                         }
                                         this.frame.layers_drawn.borrow_mut().ticked(id);
@@ -368,6 +426,21 @@ impl QuillApp {
         later_tick(self.clock_display(), Instant::now(), fps, planned, redrawn)
     }
 
+    /// When a draw this tick asks for shows: on `planned`, the vsync it was
+    /// planned for, else the frame after the main window's latest. Without
+    /// vsync times, within the main window's next refresh, whichever
+    /// window painted last; unknown, a 60 Hz one, the longest look-ahead,
+    /// skips least.
+    pub(super) fn tick_draw(&self, planned: Option<Instant>) -> TickDraw {
+        let refresh = self
+            .frame
+            .main_refresh
+            .get()
+            .unwrap_or(Duration::from_secs_f64(1.0 / 60.0));
+        let vsync = self.clock_display().map(|(_, vsync)| vsync);
+        TickDraw::of(vsync, planned, refresh, Instant::now())
+    }
+
     /// Whether animation layer `painter`, just drawn with content at `fps`
     /// (`tick_animation_layer`), needs a tick: not while a clip's picture
     /// redraws it in time ([`layer_redrawn_by_clip`]). The clock then also
@@ -423,27 +496,28 @@ impl QuillApp {
     }
 }
 
-/// How long until the next tick at `now` of content at `fps`, and the grid
+/// How long until the next tick at `now` of content at `fps`, and the
 /// vsync it draws on, for a main window drawn as `display` says with that
 /// display's latest vsync, if known: one content frame after `last` (the
 /// vsync the content last drew on) on the content grid while a clip also
-/// plays on the display (`frame_grid`); else one period at `fps` from
-/// now, as before.
+/// plays on the display (`frame_grid`), else on the display's vsyncs; one
+/// period at `fps` from now where no vsync fits.
 fn tick_wait(
     display: Option<(ClockTiming, Vsync)>,
     now: Instant,
     fps: u32,
     last: Option<Instant>,
 ) -> (Duration, Option<Instant>) {
-    let on_grid = display.and_then(|(timing, vsync)| {
-        let grid = frame_grid::display_grid(timing.display, vsync, now)?;
-        // Alone, content keeps its own timing.
-        if !frame_grid::shared(timing.display, Source::Clock, now) {
+    let on_vsync = display.zip(last).and_then(|((timing, vsync), last)| {
+        if !vsync.fresh(now) {
             return None;
         }
-        frame_grid::clock_tick(&grid, timing.lead, last?, now, fps)
+        frame_grid::display_grid(timing.display, vsync, now)
+            .filter(|_| frame_grid::shared(timing.display, Source::Clock, now))
+            .and_then(|grid| frame_grid::clock_tick(&grid, timing.lead, last, now, fps))
+            .or_else(|| frame_grid::vsync_tick(vsync, timing.lead, last, now, fps))
     });
-    match on_grid {
+    match on_vsync {
         Some((wake, vsync)) => (wake.saturating_duration_since(now), Some(vsync)),
         None => (tick_period(fps), None),
     }
@@ -458,9 +532,42 @@ pub(super) fn note_clock_playing(timing: Option<ClockTiming>, now: Instant, fps:
     }
 }
 
+/// When the draw a tick asks for shows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::ui) enum TickDraw {
+    /// On this vsync.
+    On(Instant),
+    /// Within this long of now: its vsync is not known.
+    Within(Duration),
+}
+
+impl TickDraw {
+    pub(super) fn of(
+        vsync: Option<Vsync>,
+        planned: Option<Instant>,
+        refresh: Duration,
+        now: Instant,
+    ) -> Self {
+        let next = || {
+            let shown = vsync.filter(|vsync| vsync.fresh(now))?.target(now);
+            shown.at.checked_add(shown.period)
+        };
+        planned
+            .or_else(next)
+            .map_or(Self::Within(refresh), Self::On)
+    }
+}
+
+/// An app tick that needs no draw while `still` holds, with the rate to
+/// keep ticking at ([`QuillApp::request_app_tick_unless`]).
+pub(super) struct StillTick {
+    fps: u32,
+    still: Rc<dyn Fn(TickDraw) -> bool>,
+}
+
 /// What a wake of the frame clock did.
 pub(super) enum Woke {
-    /// Ticked what asked at this rate (0: nothing asked, the clock stops).
+    /// Ticked what asked at this rate (0: nothing asked).
     Ticked(u32),
     /// Nothing was due yet: wait this long, for that vsync.
     Later((Duration, Option<Instant>)),
@@ -495,30 +602,40 @@ pub(super) fn later_tick(
 }
 
 thread_local! {
-    /// The main window's display and the grid vsyncs the clock ticks its
-    /// content on, while it ticks on the grid.
+    /// The main window's display and the vsyncs the clock ticks its content
+    /// on, while it ticks on vsyncs.
     static CONTENT_LATTICE: Cell<Option<(u64, Lattice)>> = const { Cell::new(None) };
 }
 
-/// The time content the main window paints at `now` plays at: on the
-/// clock's last tick vsync while it ticks on the grid
-/// (`frame_grid::content_time`), else `now`.
-pub(in crate::ui) fn content_now(now: Instant) -> Instant {
-    let Some((display, lattice)) = CONTENT_LATTICE.with(Cell::get) else {
+/// The time content a window on `display` paints at `now` plays at
+/// ([`content_at`]).
+pub(in crate::ui) fn content_now(display: Option<u64>, now: Instant) -> Instant {
+    let Some(display) = display else {
         return now;
     };
-    display_vsync(display).map_or(now, |vsync| content_at(now, vsync, lattice))
+    let lattice = CONTENT_LATTICE
+        .with(Cell::get)
+        .filter(|(clock, _)| *clock == display)
+        .map(|(_, lattice)| lattice);
+    content_at(now, display_vsync(display), lattice)
 }
 
-/// The time content painted at `now` for the frame shown on `vsync` plays
-/// at, while the clock ticks on `lattice`: its own on a frame that draws a
-/// picture of a clip keeping time with it, else the last tick's
-/// (`frame_grid::content_time`).
-pub(super) fn content_at(now: Instant, vsync: Vsync, lattice: Lattice) -> Instant {
-    if clip_frame_keeps_time(None, vsync, lattice.every) {
-        now
-    } else {
-        frame_grid::content_time(now, vsync, lattice)
+/// The time content painted at `now` plays at, on a display whose latest
+/// vsync is `vsync`, while the clock ticks there on `lattice`: the vsync
+/// its frame shows on, so a late paint moves nothing, or the last tick's
+/// there (`frame_grid::content_time`) unless that frame draws a picture of
+/// a clip keeping time with it. `now` without a recent vsync: the display
+/// reports none (Windows, Linux), or its display link has stopped.
+pub(super) fn content_at(now: Instant, vsync: Option<Vsync>, lattice: Option<Lattice>) -> Instant {
+    let Some(shown) = vsync.filter(|vsync| vsync.fresh(now)) else {
+        return now;
+    };
+    let shown = shown.target(now);
+    match lattice {
+        Some(lattice) if !clip_frame_keeps_time(None, shown, lattice.every) => {
+            frame_grid::content_time(shown, lattice)
+        }
+        _ => shown.at,
     }
 }
 
@@ -555,317 +672,6 @@ fn tick_period(fps: u32) -> Duration {
         Duration::from_secs_f64(frame * 0.92)
     } else {
         Duration::from_secs_f64(frame)
-    }
-}
-
-/// What [`request_video_frame`] needs from the playing clip.
-pub(crate) struct VideoFrameAsk {
-    /// When the next picture becomes due (`None`: unknown, ask every frame).
-    pub(crate) next_due: Option<Instant>,
-    /// The display's frame interval as measured by the element.
-    pub(crate) interval: Duration,
-    /// How long before it is shown a frame starts drawing.
-    pub(crate) lead: Duration,
-    /// Its pictures' spacing, once they come a whole number of grid
-    /// vsyncs apart (`frame_grid::Cadence::even`).
-    pub(crate) even_spacing: Option<Duration>,
-    /// The clip plays with sound (keeps drawing behind another app).
-    pub(crate) plays_sound: bool,
-    /// Keep drawing while the window is inactive (a Picture-in-Picture
-    /// window rarely has focus).
-    pub(crate) keep_alive: bool,
-    /// Shared per player: the request in flight (the view it redraws and
-    /// when it counts as lost), so several draws in one frame ask once.
-    pub(crate) requested: FrameRequested,
-}
-
-/// A request not answered this long after its frame was due is treated as
-/// lost (the window closed or the frame never came) and asked again.
-const VIDEO_REQUEST_LOST: Duration = Duration::from_millis(250);
-/// A sleeping request counts as lost this long after its wake.
-const VIDEO_WAKE_SLACK: Duration = Duration::from_millis(50);
-
-/// Whether a request for `target` is already in flight at `now`. One left
-/// by another view (a closed Picture-in-Picture window) does not hold this
-/// one back.
-fn video_request_in_flight(
-    requested: Option<(EntityId, Instant)>,
-    target: EntityId,
-    now: Instant,
-) -> bool {
-    requested.is_some_and(|(view, lost_at)| view == target && now < lost_at)
-}
-
-/// What to ask for a clip drawn in `target` at `now` whose next picture
-/// is due at `next_due`, noted in `requested` (the player's) as in flight
-/// until it counts as lost. `None` while a request for `target` is in
-/// flight.
-pub(super) fn video_request(
-    requested: &FrameRequested,
-    target: EntityId,
-    now: Instant,
-    next_due: Option<Instant>,
-    interval: Duration,
-    lead: Duration,
-    even_spacing: Option<Duration>,
-) -> Option<FrameRequest> {
-    if video_request_in_flight(requested.get(), target, now) {
-        return None;
-    }
-    let request = request_policy(now, next_due, interval, lead);
-    let lost_after = match request {
-        FrameRequest::NextFrame => VIDEO_REQUEST_LOST,
-        // A long sleep (a low-rate clip) must not look lost before it
-        // wakes, or a second timer would stack on it.
-        FrameRequest::SleepUntil(wake) => VIDEO_REQUEST_LOST.max(
-            wake.saturating_duration_since(now)
-                .saturating_add(VIDEO_WAKE_SLACK),
-        ),
-    };
-    requested.set(Some((target, now.checked_add(lost_after).unwrap_or(now))));
-    VIDEO_ASKS.with(|asks| {
-        let mut asks = asks.borrow_mut();
-        asks.retain(|ask| {
-            ask.requested.upgrade().is_some_and(|other| {
-                !Rc::ptr_eq(&other, requested)
-                    && other.get().is_some_and(|(_, lost_at)| now < lost_at)
-            })
-        });
-        asks.push(VideoAsk {
-            requested: Rc::downgrade(requested),
-            due: next_due.unwrap_or(now),
-            even_spacing,
-        });
-    });
-    Some(request)
-}
-
-thread_local! {
-    static VIDEO_ASKS: RefCell<Vec<VideoAsk>> = const { RefCell::new(Vec::new()) };
-}
-
-/// A player's clip frame request ([`video_request`]).
-struct VideoAsk {
-    requested: Weak<Cell<Option<(EntityId, Instant)>>>,
-    /// When the picture it asked for is due.
-    due: Instant,
-    /// Its pictures' spacing, once they come a whole number of grid
-    /// vsyncs apart.
-    even_spacing: Option<Duration>,
-}
-
-impl VideoAsk {
-    fn in_flight(&self, target: EntityId, now: Instant) -> bool {
-        self.requested
-            .upgrade()
-            .is_some_and(|requested| video_request_in_flight(requested.get(), target, now))
-    }
-}
-
-/// Whether a clip whose pictures come `spacing` apart keeps time with
-/// content whose frames come `frame` apart: one is a whole number of the
-/// other. Only then does each of its pictures that shows content's next
-/// frame come one content frame after the last. A 12 fps clip's, ten
-/// refreshes apart at 120 Hz, would show 30 fps content's frames on every
-/// other grid vsync, one refresh early or late.
-fn keeps_time(spacing: Option<Duration>, frame: Duration) -> bool {
-    let whole = |a: f64, b: f64| {
-        let ratio = a / b;
-        ratio.is_finite() && ratio.round() >= 1.0 && (ratio - ratio.round()).abs() <= 0.05
-    };
-    spacing.is_some_and(|spacing| {
-        let (spacing, frame) = (spacing.as_secs_f64(), frame.as_secs_f64());
-        whole(spacing, frame) || whole(frame, spacing)
-    })
-}
-
-/// A clip picture whose frame request was answered: the view it redraws,
-/// when it is due, and its clip's [`VideoAsk::even_spacing`].
-#[derive(Clone, Copy)]
-struct Answered {
-    target: EntityId,
-    due: Instant,
-    even_spacing: Option<Duration>,
-}
-
-thread_local! {
-    static ANSWERED: RefCell<Vec<Answered>> = const { RefCell::new(Vec::new()) };
-}
-
-/// Forget every clip's asks and answers: a simulated clock starts again at
-/// a real `Instant`, which an earlier simulation on this thread ran past.
-#[cfg(test)]
-pub(super) fn forget_video_requests() {
-    VIDEO_ASKS.with(|asks| asks.borrow_mut().clear());
-    ANSWERED.with(|answered| answered.borrow_mut().clear());
-}
-
-/// Whether the frame shown on `vsync` draws a picture of a clip that keeps
-/// time with content whose frames come `frame` apart ([`keeps_time`]), in
-/// `target` (`None`: any view). Content shows its own time on that frame
-/// ([`content_now`]), and a layer it redraws needs no tick until a content
-/// frame later (`LayerDraws`).
-pub(super) fn clip_frame_keeps_time(
-    target: Option<EntityId>,
-    vsync: Vsync,
-    frame: Duration,
-) -> bool {
-    let shows_now =
-        |due: Instant| due <= vsync.at + vsync.period / 4 && vsync.at < due + vsync.period;
-    ANSWERED.with(|answered| {
-        answered.borrow().iter().any(|picture| {
-            target.is_none_or(|target| target == picture.target)
-                && shows_now(picture.due)
-                && keeps_time(picture.even_spacing, frame)
-        })
-    })
-}
-
-/// Whether a clip frame asked for `target` and still in flight at `now`
-/// shows a picture by `by` and keeps time with content at `fps`: its draw
-/// redraws `target` with that content's next frame.
-fn video_redraws(target: EntityId, fps: u32, by: Instant, now: Instant) -> bool {
-    VIDEO_ASKS.with(|asks| {
-        asks.borrow().iter().any(|ask| {
-            ask.due <= by
-                && keeps_time(ask.even_spacing, content_frame(fps))
-                && ask.in_flight(target, now)
-        })
-    })
-}
-
-/// Whether animation layer `painter`, drawn on the main window's latest
-/// vsync (`display`) with content at `fps`, is drawn again by a clip's
-/// picture (an inline tile's) at least a display frame before that content
-/// needs its next frame: the clip's frame, already asked for, redraws the
-/// layer with it. The layer then needs no tick, which would only wait for
-/// that draw (`later_tick`). Only on a display with a content grid.
-pub(super) fn layer_redrawn_by_clip(
-    display: Option<(ClockTiming, Vsync)>,
-    painter: EntityId,
-    fps: u32,
-    now: Instant,
-) -> bool {
-    let Some((timing, vsync)) = display else {
-        return false;
-    };
-    if frame_grid::display_grid(timing.display, vsync, now).is_none() {
-        return false;
-    }
-    let frame = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
-    // The content's next frame, a display frame early.
-    let by = vsync
-        .at
-        .checked_add(frame)
-        .and_then(|next| next.checked_sub(vsync.period));
-    by.is_some_and(|by| video_redraws(painter, fps, by, now))
-}
-
-/// The request for `target` was answered: forget it, unless another view's
-/// replaced it meanwhile, and note the picture it asked for
-/// ([`clip_frame_keeps_time`]).
-pub(super) fn video_request_done(requested: &FrameRequested, target: EntityId) {
-    if !requested.get().is_some_and(|(view, _)| view == target) {
-        return;
-    }
-    requested.set(None);
-    let ask = VIDEO_ASKS.with(|asks| {
-        asks.borrow()
-            .iter()
-            .find(|ask| {
-                ask.requested
-                    .upgrade()
-                    .is_some_and(|other| Rc::ptr_eq(&other, requested))
-            })
-            .map(|ask| Answered {
-                target,
-                due: ask.due,
-                even_spacing: ask.even_spacing,
-            })
-    });
-    if let Some(ask) = ask {
-        ANSWERED.with(|answered| {
-            let mut answered = answered.borrow_mut();
-            answered.retain(|old| old.due + VIDEO_REQUEST_LOST > ask.due);
-            answered.push(ask);
-        });
-    }
-}
-
-/// Ask for the frame that shows the next video picture, redrawing only
-/// `target` (the view holding the picture). A frame shows the picture it
-/// pulls `lead` after it starts drawing, so the frame for a picture due at
-/// `next_due` starts at `next_due - lead`: a one-shot timer wakes half an
-/// interval before that and asks for the next display frame. When that is
-/// already now, or the due time is unknown, the next display frame is
-/// asked for at once (`pacing::request_policy`).
-///
-/// Unlike [`QuillApp::request_animation_tick`] it runs at the display's own
-/// rate, so the picture lands on the vsync it is due for. GPUI caps an
-/// unfocused window's next-frame callbacks at its `inactive_frame_interval`
-/// (`window_frame::INACTIVE_FRAME_INTERVAL` for Quill's main and chat
-/// windows; `None` for Picture-in-Picture's).
-///
-/// Nothing is asked behind another app unless the clip has sound (or
-/// `keep_alive`), like the animation clock: frames are asked while any
-/// Quill window is active ([`AppGate`]), not only the clip's own. Asked
-/// only while its own window was, a clip froze once its window lost focus
-/// to another Quill window: its last asks were refused, and nothing drew
-/// its window again.
-pub(crate) fn request_video_frame(
-    target: EntityId,
-    ask: VideoFrameAsk,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    #[cfg(test)]
-    VIDEO_TARGETS.with(|targets| targets.borrow_mut().push(target));
-    let active = window.is_window_active()
-        || assume_active()
-        || cx
-            .try_global::<AppGate>()
-            .is_some_and(|gate| gate.animates(window.window_handle().window_id()));
-    if !tick_wanted(active, ask.plays_sound || ask.keep_alive) {
-        return;
-    }
-    let now = Instant::now();
-    let requested = ask.requested;
-    let Some(request) = video_request(
-        &requested,
-        target,
-        now,
-        ask.next_due,
-        ask.interval,
-        ask.lead,
-        ask.even_spacing,
-    ) else {
-        return;
-    };
-    match request {
-        FrameRequest::NextFrame => {
-            window.on_next_frame(move |_, cx| {
-                video_request_done(&requested, target);
-                cx.notify(target);
-            });
-        }
-        FrameRequest::SleepUntil(wake) => {
-            let sleep = wake.saturating_duration_since(now);
-            let handle = window.window_handle();
-            cx.spawn(async move |cx| {
-                cx.background_executor().timer(sleep).await;
-                let asked = handle.update(cx, |_, window, _| {
-                    let requested = requested.clone();
-                    window.on_next_frame(move |_, cx| {
-                        video_request_done(&requested, target);
-                        cx.notify(target);
-                    });
-                });
-                if asked.is_err() {
-                    video_request_done(&requested, target);
-                }
-            })
-            .detach();
-        }
     }
 }
 
@@ -963,6 +769,10 @@ pub(super) fn assume_active() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_ASSUME_ACTIVE").is_some())
 }
+
+#[path = "frame_clips.rs"]
+mod clips;
+pub(crate) use clips::*;
 
 #[path = "frame_trace.rs"]
 mod trace;

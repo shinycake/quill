@@ -1,13 +1,15 @@
-//! The opener threads, one per worker: they decode clips whose frames all
-//! come up front (WebM video stickers) and fill their stores. A decode takes
-//! tens to hundreds of milliseconds, so on a worker it would hold back the
-//! frames of every clip that worker owns. A decoded clip holds no canvas, so
-//! nothing ties the decode to the worker that later unpacks its frames.
+//! The opener threads, one per worker: they run through clips whose frames
+//! all come up front (WebM video stickers), packing each frame into the
+//! clip's store as it comes. A decode takes tens to hundreds of milliseconds,
+//! so on a worker it would hold back the frames of every clip that worker
+//! owns. A decoded clip holds no canvas, so nothing ties the decode to the
+//! worker that later unpacks its frames.
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;
-use super::store::{self, Scratch, Store};
-use super::{Cancel, ClipInfo, ClipKey, ClipState, DecodeAll, source};
+use super::source::Packer;
+use super::store::Scratch;
+use super::{Cancel, ClipInfo, ClipKey, ClipState, DecodeAll};
 use crate::locks::lock_or_recover;
 
 pub(super) fn run(shared: &Shared) {
@@ -42,17 +44,9 @@ pub(super) fn open(
     decode: DecodeAll,
     cancel: &Cancel,
 ) {
-    let mut packed = Store::default();
-    let opened = decode(cancel)
-        .and_then(|decoded| source::decoded(key, decoded))
-        .and_then(|(timeline, frames)| {
-            for (index, frame) in (0u32..).zip(&frames) {
-                let frame = store::encode(frame, scratch)
-                    .ok_or_else(|| "Could not keep animated sticker frames".to_string())?;
-                packed.insert(index, frame);
-            }
-            Ok(timeline)
-        });
+    let mut packer = Packer::new(key, scratch);
+    let opened = decode(cancel, &mut packer).and_then(|fps| packer.timeline(fps));
+    let packed = packer.store;
     let mut state = lock_or_recover(&shared.state);
     let Some(clip) = state.clip_mut(&key, id) else {
         state.freed.push(packed);

@@ -35,6 +35,7 @@ pub fn utf16_to_utf8_offset(text: &str, utf16_offset: i32) -> Result<usize, Offs
         return Err(OffsetError::OutOfRange);
     }
     let mut remaining = utf16_offset as usize;
+    crate::composer::scan_work::add(remaining);
     for (i, ch) in text.char_indices() {
         if remaining == 0 {
             return Ok(i);

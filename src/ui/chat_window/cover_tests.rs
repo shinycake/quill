@@ -6,7 +6,7 @@
 
 use crate::ui::actions::CloseWindow;
 use crate::ui::app::QuillApp;
-use crate::ui::frame_clock::{follow_app, frames_over};
+use crate::ui::frame_clock::{TickDraw, follow_app, frames_over};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -116,6 +116,19 @@ fn alone_draws(vcx: &mut VisualTestContext) -> (u32, u32) {
     vcx.update(|window, _| window.activate_window());
     vcx.run_until_parked();
     main_draws(vcx)
+}
+
+/// The main window draws as it does alone, give or take the one tick that
+/// falls on either side of the two seconds counted.
+#[track_caller]
+fn assert_as_alone(vcx: &mut VisualTestContext, alone: (u32, u32), what: &str) {
+    let drawn = main_draws(vcx);
+    let frames = drawn.1.abs_diff(alone.1);
+    let layers = drawn.0.abs_diff(alone.0);
+    assert!(
+        frames <= 1 && layers <= 3,
+        "{what}: {drawn:?}, alone {alone:?}"
+    );
 }
 
 /// The frames `window` draws over the next two seconds, from the change
@@ -259,7 +272,7 @@ fn a_covered_main_window_draws_nothing_until_the_chat_window_moves(cx: &mut Test
     // 40 px right: the main window's left edge shows.
     vcx.simulate_window_move(chat, point(px(20.), px(-30.)));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "partly shown");
+    assert_as_alone(vcx, alone, "partly shown");
 }
 
 /// Resized to leave the main window's right edge out, the chat window
@@ -274,7 +287,7 @@ fn a_covered_main_window_animates_once_resized_past_or_closed(cx: &mut TestAppCo
     assert_eq!(main_draws(vcx), (0, 0), "covered");
     vcx.simulate_window_resize(chat, size(px(1100.), px(760.)));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "the right edge shows");
+    assert_as_alone(vcx, alone, "the right edge shows");
     vcx.simulate_window_resize(chat, covering().size);
     vcx.run_until_parked();
     assert_eq!(main_draws(vcx), (0, 0), "covered again");
@@ -289,7 +302,7 @@ fn a_covered_main_window_animates_once_resized_past_or_closed(cx: &mut TestAppCo
     );
     vcx.update(|window, _| window.activate_window());
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "the chat window closed");
+    assert_as_alone(vcx, alone, "the chat window closed");
 }
 
 /// Moved or resized so part of it leaves the chat window's frame, the
@@ -309,7 +322,7 @@ fn a_covered_main_window_animates_once_moved_or_resized_out(cx: &mut TestAppCont
     // The chat window ends at 1140: 50 px of the main window show.
     vcx.simulate_window_move(main, point(px(90.), px(20.)));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "moved partly out");
+    assert_as_alone(vcx, alone, "moved partly out");
     vcx.simulate_window_move(main, point(px(0.), px(0.)));
     vcx.run_until_parked();
     assert_eq!(main_draws(vcx), (0, 0), "moved back");
@@ -318,7 +331,7 @@ fn a_covered_main_window_animates_once_moved_or_resized_out(cx: &mut TestAppCont
     assert_eq!(main_draws(vcx), (0, 0), "narrowed within it");
     vcx.simulate_window_resize(main, size(px(1100.), px(760.)));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "its bottom edge shows");
+    assert_as_alone(vcx, alone, "its bottom edge shows");
 }
 
 /// An active chat window beside the main window, at covering bounds on
@@ -330,14 +343,14 @@ fn a_chat_window_that_leaves_the_main_window_in_view_keeps_it_animating(cx: &mut
     let vcx = &mut vcx;
     let alone = alone_draws(vcx);
     let chat = open_chat_window(&app, vcx, OTHER, beside());
-    assert_eq!(main_draws(vcx), alone, "a chat window beside it");
+    assert_as_alone(vcx, alone, "a chat window beside it");
 
     vcx.simulate_display_added(DisplayId::new(2), None);
     vcx.simulate_window_move(chat, covering().origin);
     vcx.simulate_window_resize(chat, covering().size);
     vcx.simulate_window_move_to_display(chat, DisplayId::new(2));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "the same bounds on another display");
+    assert_as_alone(vcx, alone, "the same bounds on another display");
 
     vcx.simulate_window_move_to_display(chat, DisplayId::new(1));
     vcx.run_until_parked();
@@ -347,7 +360,7 @@ fn a_chat_window_that_leaves_the_main_window_in_view_keeps_it_animating(cx: &mut
     // Fullscreen resizes the window to its screen.
     vcx.simulate_window_resize(chat, size(px(1920.), px(1080.)));
     vcx.run_until_parked();
-    assert_eq!(main_draws(vcx), alone, "a fullscreen chat window");
+    assert_as_alone(vcx, alone, "a fullscreen chat window");
 }
 
 /// The chat window's own stickers draw as many frames covering the main
@@ -484,10 +497,8 @@ fn a_covered_main_window_leaves_windows_and_views_that_do_not_follow_the_app_alo
 }
 
 /// A tick of the main window's layer draws whenever one of its stickers
-/// comes to a new frame before the main window's next refresh, also when a
-/// window on a faster display painted a sticker last: there a tick would
-/// look only that display's shorter refresh ahead, skip, and show the
-/// frame a refresh late.
+/// comes to a new frame before the main window's next refresh: a skipped
+/// tick would show the frame a refresh late.
 #[gpui_kit::test]
 fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mut TestAppContext) {
     use std::time::Duration;
@@ -497,13 +508,14 @@ fn a_tick_draws_a_sticker_frame_due_before_the_main_windows_next_refresh(cx: &mu
         let (_, painter) = app.slices.conversation_ids().expect("its layer");
         (painter, app.slices.conversation_layer().expect("its layer"))
     });
-    crate::ui::sticker_player::note_display_hz(120.0);
     // 1 ms steps up to the stickers' next frame: whether a tick at each
     // would draw.
     let mut draws = Vec::new();
-    while !layer.changes_within(Duration::ZERO) {
+    while !layer.changes_in(TickDraw::Within(Duration::ZERO)) {
         assert!(draws.len() < 40, "no frame of a 30 fps sticker in 40 ms");
-        draws.push(app.read_with(vcx, |app, _| app.idle_layer_tick(painter).is_none()));
+        draws.push(app.read_with(vcx, |app, _| {
+            app.idle_layer_tick(painter, app.tick_draw(None)).is_none()
+        }));
         app.read_with(vcx, |app, _| {
             app.playback.stickers.skip(Duration::from_millis(1));
         });

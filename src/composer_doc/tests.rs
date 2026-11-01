@@ -368,3 +368,20 @@ fn slice_off_a_char_boundary_is_empty() {
         ComposerDoc::default()
     );
 }
+
+#[test]
+fn touching_code_spans_write_as_the_one_span_they_merge_into() {
+    let touching = ComposerDoc {
+        text: "abcdef".to_string(),
+        spans: vec![
+            DocSpan::new(0..3, ComposerTag::Bold),
+            DocSpan::new(0..3, ComposerTag::Code),
+            DocSpan::new(3..6, ComposerTag::Code),
+        ],
+        emoji: Vec::new(),
+    };
+    let mut merged = touching.clone();
+    merged.normalize();
+    assert_eq!(touching.to_markup(), "`abcdef`");
+    assert_eq!(touching.to_markup(), merged.to_markup());
+}

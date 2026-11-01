@@ -35,6 +35,9 @@ const EPS: f32 = 0.01;
 /// A caret step must move at least this far to count as a visual move.
 const STEP_EPS: f32 = 0.5;
 
+/// Characters [`starts_rtl`] looks through for the first strong one.
+const BASE_DIRECTION_REACH: usize = 4096;
+
 /// Whether `text` needs the bidi path at all: it holds a character that is
 /// right-to-left or can start a right-to-left run. Pure ASCII and plain
 /// left-to-right scripts take the unchanged fast path.
@@ -53,6 +56,23 @@ pub(crate) fn needs_bidi(text: &str) -> bool {
                         | BidiClass::FSI
                 )
         })
+}
+
+/// The base direction of a long paragraph from its first characters (UAX #9
+/// P2/P3). A paragraph with no strong character that early counts as
+/// left-to-right, so the answer costs the same on any length of line.
+pub(crate) fn starts_rtl(chars: impl Iterator<Item = char>) -> bool {
+    let mut isolates = 0usize;
+    for c in chars.take(BASE_DIRECTION_REACH) {
+        match bidi_class(c) {
+            BidiClass::L if isolates == 0 => return false,
+            BidiClass::R | BidiClass::AL if isolates == 0 => return true,
+            BidiClass::LRI | BidiClass::RLI | BidiClass::FSI => isolates += 1,
+            BidiClass::PDI => isolates = isolates.saturating_sub(1),
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A buffer line analysed for bidi: the paragraph direction plus the resolved
@@ -79,6 +99,22 @@ impl<'a> Paragraph<'a> {
         }
         let info = ParagraphBidiInfo::new(text, None);
         let rtl = info.paragraph_level.is_rtl();
+        Some(Self { info, rtl })
+    }
+
+    /// Analyse the laid-out rows of a long paragraph whose base direction is known.
+    /// Levels are resolved inside `text`, and the rows that can show keep a margin of
+    /// rows around them, so a run cut at the edge of `text` stays out of sight.
+    pub(crate) fn analyze_part(text: &'a str, rtl: bool) -> Option<Self> {
+        if !rtl && !needs_bidi(text) {
+            return None;
+        }
+        let level = if rtl {
+            unicode_bidi::RTL_LEVEL
+        } else {
+            unicode_bidi::LTR_LEVEL
+        };
+        let info = ParagraphBidiInfo::new(text, Some(level));
         Some(Self { info, rtl })
     }
 

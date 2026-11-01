@@ -96,7 +96,6 @@ the others (`shared`).
 
 Nothing else changes:
 
-- A source animating alone keeps exactly its old timing.
 - Clock content at other rates (24, 25 fps GIFs) keeps its own rate.
 - At 60 Hz every vsync is on the grid.
 - At 90, 144 and 165 Hz there is no grid.
@@ -150,15 +149,6 @@ pictures land on the same vsyncs as before.
 
 ## Not fixed
 
-- **The clock alone still drifts.** Each tick sleeps `1 / fps` after the last
-  fired, so with late timers a lone 30 fps emoji skips 2 to 3 frames a second
-  (6–10 in 3 s in the simulation). Ticking on the grid when alone (for rates
-  that divide 60) would fix it.
-- **The clock can stop early.** It stops when a tick fires before the previous
-  tick's frame drew, because the tick period (0.92 of a frame) is shorter than
-  the time from tick to draw. This hits 60 fps content on a 60 Hz display and
-  120 fps stickers at 120 Hz. In the simulation a lone 60 fps sticker at 60 Hz
-  draws about 26 of 60 frames.
 - **A lone clip's wake is tight.** It still wakes half a frame before its frame
   starts (`pacing::request_policy`), so with timers over 4 ms late at 120 Hz
   some pictures show a display frame late.
@@ -174,3 +164,43 @@ pictures land on the same vsyncs as before.
   after the display link's call but before that frame's draw draws on the
   latest vsync, not the one after. If sharing begins right then, the next tick
   can come one vsync late and hold a frame that much longer.
+
+## The clock on the display's vsyncs (2026-11-01)
+
+The clock ran free outside the grid, 92% of a frame after its last wake. A
+60 fps tap effect on a 60 Hz display missed one refresh, painted, then missed
+two, in about half of its 3 s plays. A wake a little late landed just after a
+frame started, so that frame drew nothing. The next wake came before the frame
+after it, with nothing asked since the last draw, and the clock stopped. That
+draw started it again at its first rate of 30 fps, whose 33 ms wait passed two
+more frames. In nine plays traced on a fast release build, six lost a refresh
+and all seven restarts came in play. With the changes below, none of nine did.
+
+- **Ticks.** Off the grid the clock ticks on the display's vsyncs when a whole
+  number of them make one content frame (`frame_grid::vsync_tick`), with the
+  grid's wake timing. Each wake then sits between two frame starts. A rate no
+  vsync fits (24 or 25 fps at 60 Hz, 60 fps at 144 Hz) runs free as before: a
+  chain of snapped ticks there would drift away from the rate.
+- **Stopping.** A wake with nothing asked no longer stops the clock; a second
+  one in a row does (`ClockRun::woke`). On systems without vsync times the
+  race remains, a late tick can still miss one refresh, and this keeps it from
+  missing three.
+- **Restarting.** A clock starts at the rate that asked, not at 30 fps.
+- **Play heads.** On a display reporting vsyncs, every head reads the vsync its
+  frame shows on (`frame_clock::content_at`), not the paint's wall time, in every
+  window. So a late paint moves nothing, and any draw between ticks shows what
+  the last tick showed. `grid_slack` stays for displays without vsync times.
+- **What a tick asks.** A tick that can skip its draw (`idle_layer_tick`, and
+  the tap effect through `request_app_tick_unless`) asks about the vsync it
+  draws on (`TickDraw::On`), so it draws only on the refresh a frame changes.
+  Without vsync times it still asks about the whole next refresh
+  (`TickDraw::Within`), and a frame costs one or two draws.
+
+The cost is at 60 Hz beside a clip. There is no grid to share there, and a
+clock on vsyncs no longer drifts into phase with a 30 fps clip: when they sit on
+opposite refreshes the window draws close to 60 frames a second where the free
+clock averaged 43. A chat with a clip, emoji and stickers took 16% more
+instructions. Its 30 fps stickers held two refreshes 99.7% of the time, up from
+93%, so this stays until a 60 Hz display shares vsyncs. A 24 fps sticker beside
+30 fps content now holds two or four refreshes rather than two, three or four: a
+clip's draw between ticks no longer shows it early.

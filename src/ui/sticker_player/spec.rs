@@ -3,7 +3,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use quill::ids::FileId;
-use quill::sticker_playback::player::{ClipKey, DecodedFrames, Origin};
+use quill::sticker_playback::WebmStep;
+use quill::sticker_playback::player::{ClipKey, Origin};
 use quill::sticker_playback::{FitzType, MAX_STICKER_FRAMES, Tint};
 use quill::telegram::envelope::StickerFormat;
 use std::hash::{Hash, Hasher};
@@ -88,28 +89,26 @@ impl ClipSpec {
             StickerFormat::Webm => {
                 let path = self.path.clone();
                 let file = self.file.0;
-                Origin::Decoded(Box::new(move |cancel| {
+                Origin::Decoded(Box::new(move |cancel, frames| {
                     let nonce = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |d| d.as_nanos());
                     let dir = quill::animation::gif_frame_cache_dir(file)
                         .join(format!("sticker-{edge}-{nonce}"));
-                    let decoded = quill::sticker_playback::decode_webm_sized(
+                    let fps = quill::sticker_playback::stream_webm_sized(
                         &path,
                         &dir,
                         edge as usize,
                         MAX_STICKER_FRAMES,
                         &cancel.child,
                         &cancel.flag,
+                        &mut |step| match step {
+                            WebmStep::Frame(frame) => frames.frame(&mut frame.into_square(edge)),
+                            WebmStep::Repeat(times) => frames.repeat(times),
+                        },
                     );
                     let _ = std::fs::remove_dir_all(&dir);
-                    let decoded = decoded?;
-                    let fps = decoded.fps;
-                    Ok(DecodedFrames {
-                        // Already BGRA, centred on the transparent square.
-                        frames: decoded.into_squares(edge),
-                        fps,
-                    })
+                    fps
                 }))
             }
             _ => Origin::Lottie(self.path.clone()),

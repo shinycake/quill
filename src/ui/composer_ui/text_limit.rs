@@ -33,34 +33,75 @@ struct TextLimitKey {
     editing: bool,
 }
 
+/// The note of the text at the last counted revision. Counting takes time in
+/// proportion to the text, so a text that may be over the limit is counted off
+/// the UI thread, and the note on screen stays until the count of the latest
+/// revision comes back.
 #[derive(Default)]
-pub(in crate::ui) struct TextLimitMemo(Cell<Option<(TextLimitKey, TextLimitNote)>>);
+struct TextLimitCount {
+    known: Cell<Option<(TextLimitKey, TextLimitNote)>>,
+    running: Cell<Option<(TextLimitKey, Task<()>)>>,
+}
+
+#[derive(Default)]
+pub(in crate::ui) struct TextLimitMemo(Box<TextLimitCount>);
 
 impl TextLimitMemo {
-    fn get(&self, key: TextLimitKey, count: impl FnOnce() -> TextLimitNote) -> TextLimitNote {
-        match self.0.get() {
-            Some((known, note)) if known == key => note,
-            _ => {
-                let note = count();
-                self.0.set(Some((key, note)));
-                note
-            }
-        }
+    fn known(&self) -> Option<(TextLimitKey, TextLimitNote)> {
+        self.0.known.get()
+    }
+
+    fn set(&self, key: TextLimitKey, note: TextLimitNote) {
+        self.0.known.set(Some((key, note)));
+        self.0.running.take();
+    }
+
+    fn is_counting(&self, key: TextLimitKey) -> bool {
+        let running = self.0.running.take();
+        let same = running.as_ref().is_some_and(|(known, _)| *known == key);
+        self.0.running.set(running);
+        same
     }
 }
 
 impl QuillApp {
-    fn text_limit_note(&self, editing: bool, cx: &App) -> TextLimitNote {
+    fn text_limit_note(&self, editing: bool, cx: &mut Context<Self>) -> TextLimitNote {
+        let composer = self.composer.read(cx);
         let key = TextLimitKey {
             field: self.composer.entity_id(),
-            revision: self.composer.read(cx).document_revision(),
+            revision: composer.document_revision(),
             rich_editor: self.composer_ui.rich_editor_open,
             limit: self.text_length_limit(),
             editing,
         };
-        self.composer_ui.text_limit.get(key, || {
-            TextLimitNote::of(&self.composer_markup(cx), key.limit, editing)
-        })
+        let memo = &self.composer_ui.text_limit;
+        let shown = memo.known();
+        if let Some((known, note)) = shown
+            && known == key
+        {
+            return note;
+        }
+        // A UTF-8 byte is at least a UTF-16 unit, and parsing only removes.
+        let fits = usize::try_from(key.limit).is_ok_and(|limit| composer.text().len() <= limit);
+        if fits {
+            memo.set(key, TextLimitNote::Fits);
+            return TextLimitNote::Fits;
+        }
+        if !memo.is_counting(key) {
+            let markup = self.composer_markup(cx);
+            let count =
+                cx.background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
+            let task = Self::spawn_main(cx, async move |this, cx| {
+                let note = count.await;
+                this.update(cx, |this, cx| {
+                    this.composer_ui.text_limit.set(key, note);
+                    cx.notify();
+                })
+                .ok();
+            });
+            memo.0.running.set(Some((key, task)));
+        }
+        shown.map_or(TextLimitNote::Fits, |(_, note)| note)
     }
 
     /// R8: tdesktop `CharactersLimitLabel` — only shown once the text is

@@ -189,3 +189,31 @@ and `split_at` read. What is drawn and measured is unchanged.
 about how many bytes a laid-out paragraph holds on the heap, from its rows,
 runs, shaped lines, glyphs, clusters and text, so Quill's cache keeps
 laid-out text to a budget of bytes rather than a count of paragraphs.
+
+## A long line costs in proportion to the edit
+
+A keystroke on a 100 KB line wrapped the whole line through the shaper, then
+shaped and painted every row, every frame. `docs/decisions/long-text.md` has
+the numbers.
+
+- Added `src/input/editor/display_map/row_wrap.rs`. A row is a pure function of
+  where it starts and the text after it, so an edit wraps again from just
+  before itself and stops at the first row start the old wrap shares
+  (`Resume`). Each row works in a window of text seeded by summed character
+  widths and shapes only to settle the last few characters. A line of
+  `LONG_LINE` bytes or more trusts the sum and shapes nothing.
+- `src/input/editor/display_map/text_wrapper.rs`: `TextWrapper::update` goes
+  through `wrap_rows` for every line, so tokens, spans and tabs share one path.
+  The `LineFragment` token path, the plain path and the `WrappingIndent::None`
+  second pass are gone. `LineLayout` can hold only some rows of a line
+  (`OmittedRows`); offsets and positions stay relative to the whole line.
+- `src/input/base/element.rs`: `layout_lines` and `layout_token_lines` shape a
+  long line's rows near the viewport (`LineItem::window`) in an input with no
+  gutter. When the caret scrolls the viewport past those rows, prepaint lays out
+  the rows it landed on in the same frame.
+- `src/input/editor/display_map/bidi.rs`: `starts_rtl` and
+  `Paragraph::analyze_part` give the laid-out part of a long line the base
+  direction of the whole line.
+- `src/input/base/movement.rs`, `src/input/base/state.rs`: an arrow key on a
+  caret outside the laid-out rows steps logically, and a pointer over those rows
+  resolves on the nearest laid-out row.

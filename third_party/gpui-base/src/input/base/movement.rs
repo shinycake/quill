@@ -40,14 +40,20 @@ impl<M: InputModeKind> InputBaseState<M> {
     fn laid_out_paragraph(&self, offset: usize) -> Option<(&crate::input::display_map::LineLayout, usize)> {
         let last_layout = self.last_layout.as_ref()?;
         let row = self.text.offset_to_point(offset).row;
-        Some((last_layout.line(row)?, self.text.line_start_offset(row)))
+        let line_start = self.text.line_start_offset(row);
+        last_layout
+            .line(row)
+            .filter(|line| line.holds_offset(offset - line_start))
+            .map(|line| (line, line_start))
     }
 
     /// Whether the paragraph at `offset` has a right-to-left base direction, which swaps what
     /// the arrow keys mean: Left moves visually left, so logically forward.
     pub(super) fn is_rtl_paragraph_at(&self, offset: usize) -> bool {
-        self.laid_out_paragraph(offset)
-            .is_some_and(|(line, _)| line.is_rtl())
+        self.last_layout
+            .as_ref()
+            .and_then(|layout| layout.line(self.text.offset_to_point(offset).row))
+            .is_some_and(|line| line.is_rtl())
     }
 
     /// One arrow-key step from the caret stop `(offset, trailing)`, `left` or right of it on

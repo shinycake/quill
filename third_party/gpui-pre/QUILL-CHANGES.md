@@ -528,3 +528,8 @@ started (`third_party/gpui-pre-macos/QUILL-CHANGES.md`,
 - `src/platform.rs`, `src/window.rs`: `PlatformWindow::set_shutdown_block_reason`
   (a no-op by default) and `Window::set_shutdown_block_reason`, the text
   Windows shows while the window holds back the end of the session.
+
+The Quill project also changed it in 2026 so the input can wrap a long line
+without shaping it (`third_party/gpui-base/QUILL-CHANGES.md`):
+
+- `src/text_system/line_wrapper.rs`: `LineWrapper::width_for_char` is public.

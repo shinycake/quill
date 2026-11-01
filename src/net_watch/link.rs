@@ -1,16 +1,18 @@
 //! Which interface and gateway carry traffic to Telegram. Two networks can
-//! hand out the same local address (two home routers on 192.168.0.x), and
-//! TDLib's connections do not survive the move between them.
+//! hand out the same local address and even the same gateway address (two
+//! home routers on 192.168.0.1), and TDLib's connections do not survive the
+//! move between them. The gateway's link-layer address tells them apart.
 
 use std::net::IpAddr;
-#[cfg(any(target_os = "linux", test))]
-use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Link {
     /// The OS interface index; 0 when unknown.
     pub(super) interface: u32,
     pub(super) gateway: Option<IpAddr>,
+    /// The gateway's link-layer address; `None` until the system has
+    /// resolved it, which is no change of network ([`super::Path::settled`]).
+    pub(super) gateway_hardware: Option<[u8; 6]>,
 }
 
 /// The link `local` sends to `to` from.
@@ -18,7 +20,7 @@ pub(super) fn of(local: IpAddr, to: IpAddr) -> Link {
     backend::of(local, to)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 mod unix {
     use std::ffi::CStr;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -72,70 +74,29 @@ mod unix {
     }
 }
 
+/// The kernel's own route lookup toward `to`, which goes through the
+/// policy rules (VPN tables, per-connection tables, split tunnels) as a
+/// real packet does.
 #[cfg(target_os = "linux")]
 mod backend {
     use super::Link;
+    use crate::net_watch::netlink;
     use std::net::IpAddr;
 
-    pub(super) fn of(local: IpAddr, _to: IpAddr) -> Link {
-        let Some((name, interface)) = super::unix::interface_of(local) else {
+    pub(super) fn of(_local: IpAddr, to: IpAddr) -> Link {
+        let Ok(socket) = netlink::open(0) else {
             return Link::default();
         };
-        let gateway = match local {
-            IpAddr::V4(_) => std::fs::read_to_string("/proc/net/route")
-                .ok()
-                .and_then(|table| super::ipv4_gateway(&table, &name))
-                .map(IpAddr::V4),
-            IpAddr::V6(_) => std::fs::read_to_string("/proc/net/ipv6_route")
-                .ok()
-                .and_then(|table| super::ipv6_gateway(&table, &name))
-                .map(IpAddr::V6),
+        let Some((interface, gateway)) = netlink::route_to(&socket, to) else {
+            return Link::default();
         };
-        Link { interface, gateway }
+        Link {
+            interface,
+            gateway,
+            gateway_hardware: gateway
+                .and_then(|gateway| netlink::neighbour(&socket, interface, gateway)),
+        }
     }
-}
-
-/// The default gateway on `interface` from `/proc/net/route`, lowest metric
-/// first. Addresses are the kernel's in-memory bytes printed as a native u32.
-#[cfg(any(target_os = "linux", test))]
-fn ipv4_gateway(table: &str, interface: &str) -> Option<Ipv4Addr> {
-    table
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let name = fields.next()?;
-            let destination = fields.next()?;
-            let gateway = u32::from_str_radix(fields.next()?, 16).ok()?;
-            let metric: u32 = fields.nth(3)?.parse().ok()?;
-            let mask = fields.next()?;
-            (name == interface && destination == "00000000" && mask == "00000000" && gateway != 0)
-                .then(|| (metric, Ipv4Addr::from(gateway.to_ne_bytes())))
-        })
-        .min_by_key(|(metric, _)| *metric)
-        .map(|(_, gateway)| gateway)
-}
-
-/// The default gateway on `interface` from `/proc/net/ipv6_route`.
-#[cfg(any(target_os = "linux", test))]
-fn ipv6_gateway(table: &str, interface: &str) -> Option<Ipv6Addr> {
-    table
-        .lines()
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            let [destination, length, _, _, hop, metric, _, _, _, name] = fields.as_slice() else {
-                return None;
-            };
-            let hop = u128::from_str_radix(hop, 16).ok()?;
-            let metric = u32::from_str_radix(metric, 16).ok()?;
-            (*name == interface
-                && *length == "00"
-                && destination.bytes().all(|digit| digit == b'0')
-                && hop != 0)
-                .then(|| (metric, Ipv6Addr::from(hop)))
-        })
-        .min_by_key(|(metric, _)| *metric)
-        .map(|(_, gateway)| gateway)
 }
 
 #[cfg(target_os = "macos")]
@@ -156,47 +117,81 @@ mod backend {
         let Some((name, interface)) = super::unix::interface_of(local) else {
             return Link::default();
         };
-        Link {
-            interface,
-            gateway: router(&name, local.is_ipv4()),
-        }
-    }
-
-    /// The primary service's router, when `name` is its interface.
-    fn router(name: &str, v4: bool) -> Option<IpAddr> {
-        let key = CFString::new(if v4 {
+        let Some(global) = store_value(if local.is_ipv4() {
             "State:/Network/Global/IPv4"
         } else {
             "State:/Network/Global/IPv6"
-        });
+        }) else {
+            return Link {
+                interface,
+                ..Link::default()
+            };
+        };
+        // Only the primary service's router is known here.
+        if text(&global, "PrimaryInterface").as_deref() != Some(name.as_str()) {
+            return Link {
+                interface,
+                ..Link::default()
+            };
+        }
+        // configd records the router's address once ARP has resolved it,
+        // and IPv4 only (`kSCPropNetIPv4ARPResolvedHardwareAddress`).
+        let gateway_hardware = text(&global, "PrimaryService")
+            .filter(|_| local.is_ipv4())
+            .and_then(|service| store_value(&format!("State:/Network/Service/{service}/IPv4")))
+            .and_then(|service| text(&service, "ARPResolvedHardwareAddress"))
+            .and_then(|text| super::hardware_from_text(&text));
+        Link {
+            interface,
+            gateway: text(&global, "Router").and_then(|router| router.parse().ok()),
+            gateway_hardware,
+        }
+    }
+
+    fn store_value(key: &str) -> Option<CFDictionary<CFString, CFType>> {
+        let key = CFString::new(key);
         // SAFETY: a null store uses a session of its own; `key` is live.
         let value = unsafe { SCDynamicStoreCopyValue(std::ptr::null(), key.as_concrete_TypeRef()) };
         if value.is_null() {
             return None;
         }
         // SAFETY: a non-null dictionary from a Copy call, owned from here on.
-        let global: CFDictionary<CFString, CFType> =
-            unsafe { CFDictionary::wrap_under_create_rule(value) };
-        let text = |key: &str| {
-            global
-                .find(CFString::new(key))
-                .and_then(|value| value.downcast::<CFString>())
-                .map(|text| text.to_string())
-        };
-        if text("PrimaryInterface")? != name {
+        Some(unsafe { CFDictionary::wrap_under_create_rule(value) })
+    }
+
+    fn text(dictionary: &CFDictionary<CFString, CFType>, key: &str) -> Option<String> {
+        dictionary
+            .find(CFString::new(key))
+            .and_then(|value| value.downcast::<CFString>())
+            .map(|text| text.to_string())
+    }
+}
+
+/// `0:1b:63:a:b:c` as configd writes it, leading zeros left out.
+#[cfg(any(target_os = "macos", test))]
+fn hardware_from_text(text: &str) -> Option<[u8; 6]> {
+    let mut out = [0u8; 6];
+    let mut parts = text.split(':');
+    for byte in &mut out {
+        let part = parts.next()?;
+        if part.is_empty() || part.len() > 2 {
             return None;
         }
-        text("Router")?.parse().ok()
+        *byte = u8::from_str_radix(part, 16).ok()?;
     }
+    parts.next().is_none().then_some(out)
 }
 
 #[cfg(windows)]
 mod backend {
     use super::Link;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use windows_sys::Win32::Foundation::NO_ERROR;
-    use windows_sys::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
-    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, SOCKADDR_INET};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetBestRoute2, GetIpNetEntry2, MIB_IPFORWARD_ROW2, MIB_IPNET_ROW2, ResolveIpNetEntry2,
+    };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, NlnsProbe, SOCKADDR_INET};
 
     pub(super) fn of(_local: IpAddr, to: IpAddr) -> Link {
         let destination = socket_address(to);
@@ -218,9 +213,53 @@ mod backend {
         if status != NO_ERROR {
             return Link::default();
         }
+        let gateway = ip_of(&route.NextHop).filter(|hop| !hop.is_unspecified());
         Link {
             interface: route.InterfaceIndex,
-            gateway: ip_of(&route.NextHop).filter(|hop| !hop.is_unspecified()),
+            gateway,
+            gateway_hardware: gateway.and_then(|gateway| hardware(route.InterfaceIndex, gateway)),
+        }
+    }
+
+    /// The gateway's entry in the neighbour cache. Windows has no
+    /// notification for that cache, so a missing entry is resolved in the
+    /// background and the network looked at again once it is there.
+    fn hardware(interface: u32, gateway: IpAddr) -> Option<[u8; 6]> {
+        let mut row = MIB_IPNET_ROW2 {
+            Address: socket_address(gateway),
+            InterfaceIndex: interface,
+            ..MIB_IPNET_ROW2::default()
+        };
+        // SAFETY: `row` is live and names the entry to read.
+        let found = unsafe { GetIpNetEntry2(&raw mut row) } == NO_ERROR && row.State >= NlnsProbe;
+        if !found {
+            resolve_later(row);
+            return None;
+        }
+        if row.PhysicalAddressLength != 6 {
+            return None;
+        }
+        row.PhysicalAddress.get(..6)?.try_into().ok()
+    }
+
+    static RESOLVING: AtomicBool = AtomicBool::new(false);
+
+    fn resolve_later(mut row: MIB_IPNET_ROW2) {
+        if RESOLVING.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let spawned = crate::thread_guard::spawn_guarded("quill-net-neighbour", move || {
+            // SAFETY: `row` is live and names the entry; a null source lets
+            // Windows pick one. The call blocks until ARP or ND answers.
+            let resolved =
+                unsafe { ResolveIpNetEntry2(&raw mut row, std::ptr::null()) } == NO_ERROR;
+            RESOLVING.store(false, Ordering::Release);
+            if resolved {
+                super::super::network_changed();
+            }
+        });
+        if spawned.is_err() {
+            RESOLVING.store(false, Ordering::Release);
         }
     }
 
@@ -266,40 +305,13 @@ mod backend {
 
 #[cfg(test)]
 mod tests {
-    use super::{ipv4_gateway, ipv6_gateway};
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
     #[test]
-    #[cfg(target_endian = "little")]
-    fn the_ipv4_default_gateway_is_the_cheapest_one_on_the_interface() {
-        let table = "\
-Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
-wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000\t0\t0\t0
-eth0\t00000000\t0100000A\t0003\t0\t0\t100\t00000000\t0\t0\t0
-wlan0\t00000000\t0201A8C0\t0003\t0\t0\t50\t00000000\t0\t0\t0
-wlan0\t0001A8C0\t00000000\t0001\t0\t0\t600\t00FFFFFF\t0\t0\t0
-";
-        assert_eq!(
-            ipv4_gateway(table, "wlan0"),
-            Some(Ipv4Addr::new(192, 168, 1, 2))
-        );
-        assert_eq!(
-            ipv4_gateway(table, "eth0"),
-            Some(Ipv4Addr::new(10, 0, 0, 1))
-        );
-        assert_eq!(ipv4_gateway(table, "wg0"), None);
-    }
-
-    #[test]
-    fn the_ipv6_default_gateway_is_read_from_the_route_table() {
-        let table = "\
-00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00450003 wlan0
-fe800000000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001 wlan0
-";
-        assert_eq!(
-            ipv6_gateway(table, "wlan0"),
-            Some(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))
-        );
-        assert_eq!(ipv6_gateway(table, "eth0"), None);
+    fn a_hardware_address_reads_with_or_without_leading_zeros() {
+        let router = Some([0x00, 0x1b, 0x63, 0x0a, 0xbc, 0xde]);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:de"), router);
+        assert_eq!(super::hardware_from_text("00:1b:63:0a:bc:de"), router);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc"), None);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:de:f"), None);
+        assert_eq!(super::hardware_from_text("0:1b:63:a:bc:xyz"), None);
     }
 }

@@ -41,6 +41,7 @@ use super::inline_video::{InlineFrame, InlineTile};
 use super::video_player::{PlayState, Purpose, VideoPlayer};
 pub(super) use demand::Demand;
 use gpui_kit::*;
+use quill::bubble_layout::HistoryWidth;
 use quill::ids::ChatId;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -329,6 +330,8 @@ struct State {
     /// Each window's pass counts, of its history and of each panel
     /// (`None`: the main window's).
     passes: HashMap<(Option<ChatId>, List), u64>,
+    /// Each window's history width, and its pass number when that changed.
+    history_widths: HashMap<Option<ChatId>, (HistoryWidth, u64)>,
     /// The view each window's history renders in (`begin_render`): redrawn
     /// once a sleeping slot it shows gets a new player, so its tile picks
     /// it up.
@@ -391,15 +394,18 @@ impl InlineVideos {
         self: &Rc<Self>,
         window: Option<ChatId>,
         view: Option<EntityId>,
+        width: HistoryWidth,
         cx: &mut App,
     ) {
         let dropped = self.with(|state| {
+            let number = state.pass(window, List::History).saturating_add(1);
+            let resizing = state.note_history_width(window, width, number);
             state.swept.insert(window);
             match view {
                 Some(view) => state.views.insert(window, view),
                 None => state.views.remove(&window),
             };
-            state.begin_pass(window, List::History)
+            state.begin_pass(window, List::History, resizing)
         });
         let marks: Vec<(Key, VideoPlayer)> = self
             .with(|state| {
