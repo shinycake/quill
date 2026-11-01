@@ -125,7 +125,7 @@ impl ChatWindows {
     }
 
     /// Every open chat window, as its chat and window.
-    fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
+    pub(super) fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
         self.open.iter().map(|open| (open.chat_id, open.handle))
     }
 

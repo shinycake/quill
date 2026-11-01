@@ -27,6 +27,70 @@ fn export_settings(dir: &std::path::Path) -> crate::export::ExportSettings {
 }
 
 #[test]
+fn an_account_off_screen_still_forwards_its_exports_requests() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, chat_worker) = crate::export::ChatExport::scripted();
+    let (account, account_worker) = crate::export::AccountExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    driver.session.settings.account_export = Some(account);
+
+    chat_worker
+        .send(serde_json::json!({"@type": "getChatHistory"}))
+        .unwrap();
+    account_worker
+        .send(serde_json::json!({"@type": "getSessions"}))
+        .unwrap();
+    driver.poll_ticks(
+        crate::connect::TickScope::Background,
+        std::time::Instant::now(),
+        ONLINE,
+    );
+
+    let sent = recorder.snapshot();
+    assert!(sent.iter().any(|json| json.contains("getChatHistory")));
+    assert!(sent.iter().any(|json| json.contains("getSessions")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cancelled_exports_last_request_passes_the_download_it_stops() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    let stop_sent = |recorder: &RecordingSender| {
+        let mut sent = recorder.snapshot().into_iter();
+        sent.any(|json| json.contains("cancelDownloadFile"))
+    };
+
+    worker
+        .send(serde_json::json!({"@type": "downloadFile"}))
+        .unwrap();
+    driver.pump_chat_export();
+    worker
+        .send(serde_json::json!({"@type": "cancelDownloadFile"}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert!(
+        !stop_sent(&recorder),
+        "one request at a time until cancelled"
+    );
+
+    let export = driver.session.settings.chat_export.as_ref().unwrap();
+    export.cancel();
+    driver.pump_chat_export();
+    assert!(stop_sent(&recorder));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn chat_export_worker_requests_flow_through_the_driver() {
     // `parity:data-chat-export-html`: the worker's TDLib requests go out
     // tagged for the export, the answer is routed back to the worker, and an
@@ -114,7 +178,7 @@ fn account_export_worker_requests_flow_through_the_driver() {
         assert!(std::time::Instant::now() < deadline, "export never settled");
         driver.pump_account_export();
         let export = driver.session.settings.account_export.as_ref().unwrap();
-        if export.finished.load(std::sync::atomic::Ordering::Acquire) {
+        if export.progress().is_settled() {
             break;
         }
         let sent: Vec<String> = recorder
@@ -247,5 +311,34 @@ fn clear_call_history_empties_the_list_only_on_ok() {
     );
     assert!(driver.session.calls.recent_calls.is_empty());
     assert!(!driver.session.calls.recent_calls_clearing);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_export_leaves_a_file_the_view_asked_for_in_the_cache() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    let deletes = |recorder: &RecordingSender| {
+        let sent = recorder.snapshot().into_iter();
+        sent.filter(|json| json.contains("deleteFile")).count()
+    };
+
+    let _ = driver.download_file(crate::ids::FileId(10), 1);
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 10}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(deletes(&recorder), 0, "the view's photo stays");
+
+    worker
+        .send(serde_json::json!({"@type": "deleteFile", "file_id": 11}))
+        .unwrap();
+    driver.pump_chat_export();
+    assert_eq!(deletes(&recorder), 1, "a file only the export wanted goes");
     let _ = std::fs::remove_dir_all(&dir);
 }

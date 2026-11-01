@@ -82,12 +82,14 @@ impl ReportKind {
 
 /// Install the crash-log hook in front of the current panic hook. Call it
 /// first thing in `main`; the previous hook (the standard stderr message)
-/// still runs after the report is written.
+/// still runs after the report is written. The platform log is flushed
+/// too, since the line that explains the panic may still be in its queue.
 pub fn install_panic_hook() {
     session_start();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         record_panic(info);
+        log::logger().flush();
         previous(info);
     }));
 }
@@ -400,6 +402,7 @@ pub(crate) fn begin_run_for_session(root: &Path, session_start: u64, pid: u32) {
 /// touches the running Quill's files. It also files the previous run's crash
 /// report before the "closed unexpectedly" notice looks for it.
 pub fn begin_app_run() {
+    crate::advanced::platform_log::install();
     if let Some(root) = crate::settings::safe_app_root() {
         begin_run_with_native_handlers(&root);
     }

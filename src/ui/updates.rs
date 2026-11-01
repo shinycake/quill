@@ -88,11 +88,19 @@ impl QuillApp {
     }
 
     /// The update button was pressed: the step it shows.
-    pub(super) fn press_update_control(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn press_update_control(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.update_control() {
             UpdateControl::Check { busy: false } => self.check_for_updates(cx),
             UpdateControl::Install(release) => self.download_update(release, cx),
-            UpdateControl::Restart => self.restart_to_update(cx),
+            UpdateControl::Restart => {
+                let app = cx.entity().downgrade();
+                let restart = move |_: &mut Window, cx: &mut App| {
+                    let _ = app.update(cx, |this, cx| this.restart_to_update(cx));
+                };
+                if !self.exit_held_by_export(restart, window, cx) {
+                    self.restart_to_update(cx);
+                }
+            }
             UpdateControl::OpenRelease(url) => cx.open_url(&url),
             UpdateControl::Check { busy: true }
             | UpdateControl::Downloading { .. }
@@ -209,7 +217,9 @@ impl QuillApp {
                     | UpdateControl::Downloading { .. }
                     | UpdateControl::Restarting
             ))
-            .on_click(cx.listener(|this, _, _, cx| this.press_update_control(cx)));
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.press_update_control(window, cx);
+            }));
         // The step that moves the update forward is the primary action.
         if matches!(
             control,

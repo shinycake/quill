@@ -301,12 +301,17 @@ impl QuillApp {
             while let Some(due) = super::image_budget::idle_trim_due() {
                 let now = std::time::Instant::now();
                 if due <= now {
-                    let (main, background, windows) = this
+                    let (main, background, windows, sweeping) = this
                         .read_with(cx, |this, cx| {
                             (
                                 this.windows.main,
                                 !this.frame.window_active.get(),
                                 this.windows.image_caches(cx),
+                                this.windows
+                                    .main
+                                    .into_iter()
+                                    .chain(this.windows.open_windows().map(|(_, handle)| handle))
+                                    .collect::<Vec<_>>(),
                             )
                         })
                         .unwrap_or_default();
@@ -320,9 +325,7 @@ impl QuillApp {
                     for (images, active) in windows {
                         images.update(cx, |images, cx| images.idle_trim(!active, cx));
                     }
-                    if let Some(main) = main {
-                        let _ = main.update(cx, |_, window, _| super::glyph_sweep::begin(window));
-                    }
+                    cx.update(|cx| super::glyph_sweep::begin_for(&sweeping, cx));
                     break;
                 }
                 cx.background_executor().timer(due - now).await;
@@ -944,3 +947,8 @@ impl Element for MeasureHeight {
 #[cfg(feature = "demo-capture")]
 #[path = "scene_replay_tests.rs"]
 mod scene_replay_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "drag_redraw_tests.rs"]
+mod drag_redraw_tests;

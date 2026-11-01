@@ -400,11 +400,26 @@ Added in 2026:
 - `src/events.rs`, `src/platform.rs`: `handle_msg` passes whatever it does not
   handle itself to `handle_gpui_events`, which parses the id with
   `GpuiMessageId::from_raw` and then checks the number. The window's check now
-  calls `log::error!` on a wrong number, as the platform's always did. Quill
-  installs no `log` backend, so a shipped build still writes that nowhere.
+  calls `log::error!` on a wrong number, as the platform's always did, and
+  Quill's `log` backend writes it to `logs/platform.log`.
 - `src/dispatcher.rs`, `src/window.rs`: `validation_number` is a
   `ValidationNumber`.
 - `src/gpui_windows.rs`: declares the new module.
 
 Type-checked with `cargo check -p gpui-pre-windows --target
 x86_64-pc-windows-msvc` on macOS. Not run on Windows by the author.
+
+The Quill project also changed it in 2026 so a window can't survive a device
+give-up:
+
+- `src/platform.rs`: the vsync thread no longer posts
+  `WM_GPUI_DESTROY_AFTER_DEVICE_LOST` itself. `handle_device_gone` posts it
+  after dropping the devices, on the thread that owns the windows. The vsync
+  thread read the list before `WM_GPUI_GPU_DEVICE_GONE` arrived, so a window
+  opened in between missed the destroy. `open_window` fails from this point
+  on, so no window can miss this one.
+- `src/window.rs`, `src/events.rs`, `src/platform.rs`: `WM_DESTROY` sets a
+  `destroyed` flag that the tracked window shares. A destroyed window stays
+  listed until its `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a post to it fails.
+- `src/window_list.rs`: `for_each_open_after_unlock` skips destroyed windows.
+  It is std-only, tested by `scripts/test-window-list.sh`.
