@@ -103,6 +103,14 @@ impl PlatformAtlas for DirectXAtlas {
     fn remove_emoji_glyphs_unused_since(&self, mark: u64) -> usize {
         self.0.lock().remove_emoji_glyphs_unused_since(mark)
     }
+
+    fn text_glyph_count(&self) -> usize {
+        self.0.lock().text_glyph_count()
+    }
+
+    fn remove_text_glyphs_unused_since(&self, mark: u64) -> usize {
+        self.0.lock().remove_text_glyphs_unused_since(mark)
+    }
 }
 
 impl AtlasBackend for DirectXAtlasTextures {

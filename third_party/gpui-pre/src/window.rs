@@ -5423,6 +5423,16 @@ impl Window {
         self.sprite_atlas.remove_emoji_glyphs_unused_since(mark)
     }
 
+    /// QUILL: how many text glyphs this window's sprite atlas holds.
+    pub fn text_glyph_count(&self) -> usize {
+        self.sprite_atlas.text_glyph_count()
+    }
+
+    /// QUILL: [`Window::sweep_emoji_glyphs`] for text glyphs.
+    pub fn sweep_text_glyphs(&mut self, mark: u64) -> usize {
+        self.sprite_atlas.remove_text_glyphs_unused_since(mark)
+    }
+
     /// QUILL: this window's atlas, for tests that seed it.
     #[cfg(any(test, feature = "test-support"))]
     pub fn sprite_atlas(&self) -> &Arc<dyn PlatformAtlas> {

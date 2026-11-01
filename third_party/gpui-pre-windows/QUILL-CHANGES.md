@@ -423,3 +423,7 @@ give-up:
   listed until its `WM_GPUI_CLOSE_ONE_WINDOW` arrives, and a post to it fails.
 - `src/window_list.rs`: `for_each_open_after_unlock` skips destroyed windows.
   It is std-only, tested by `scripts/test-window-list.sh`.
+
+The Quill project also changed it in 2026 so text glyphs can be swept: the atlas
+forwards `text_glyph_count` and `remove_text_glyphs_unused_since` to its
+`AtlasState` (see gpui-pre's `QUILL-CHANGES.md`).

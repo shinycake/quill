@@ -1,4 +1,4 @@
-use super::{KEEP, begin_for, start_frame, window_activation};
+use super::{KEEP, KEEP_TEXT, begin_for, start_frame, window_activation};
 use gpui_kit::{
     AnyWindowHandle, AppContext, AtlasKey, Context, DevicePixels, FontId, GlyphId, IntoElement,
     Render, RenderGlyphParams, TestAppContext, Window, div, px, size,
@@ -89,4 +89,47 @@ fn a_window_in_the_background_sweeps_alone(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     assert_eq!((count(main, cx), count(chat, cx)), (3, 0));
+}
+
+fn seed_text(window: AnyWindowHandle, text: usize, cx: &mut TestAppContext) {
+    cx.update_window(window, |_, window, _| {
+        for id in 0..text as u32 {
+            let key = AtlasKey::Glyph(RenderGlyphParams {
+                font_id: FontId(0),
+                glyph_id: GlyphId(id),
+                font_size: px(14.),
+                subpixel_variant: Default::default(),
+                scale_factor: 2.,
+                is_emoji: false,
+                subpixel_rendering: false,
+                dilation: 0,
+            });
+            let pixels = [0u8; 1];
+            let mut build = || {
+                Ok(Some((
+                    size(DevicePixels(1), DevicePixels(1)),
+                    Cow::Borrowed(pixels.as_slice()),
+                )))
+            };
+            window
+                .sprite_atlas()
+                .get_or_insert_with(key, &mut build)
+                .expect("headless atlas");
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn text_past_the_limit_leaves_once_a_frame_redrew_the_window(cx: &mut TestAppContext) {
+    let window = open(cx);
+    seed_text(window, KEEP_TEXT + 1, cx);
+
+    cx.update(|cx| begin_for(&[window], cx));
+    cx.run_until_parked();
+
+    let left = cx
+        .update_window(window, |_, window, _| window.text_glyph_count())
+        .unwrap();
+    assert_eq!(left, 0);
 }
