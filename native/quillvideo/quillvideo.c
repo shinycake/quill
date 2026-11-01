@@ -553,7 +553,8 @@ static int emit_video(Ctx *c, const AVFrame *f, QvItem *out) {
     sws_freeContext(c->sws);
     c->sws = sws_getContext(f->width, f->height, (enum AVPixelFormat)f->format,
                             ow, oh, AV_PIX_FMT_BGRA,
-                            SWS_BILINEAR, NULL, NULL, NULL);
+                            qv_bgra_sws_flags(SWS_BILINEAR, ow), NULL, NULL,
+                            NULL);
     if (!c->sws)
       return AVERROR(EINVAL);
     /* Ignored (harmlessly fails) for RGB sources such as GIF palettes. */

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks the shims' BGRA picture layout (native/quillvideo/bgra_layout.h)
-# against the FFmpeg that scripts/build-ffmpeg.sh built: swscale's x86
+# against the FFmpeg that scripts/build-ffmpeg.sh built: swscale's
 # unscaled kernels must write every column and nothing past the buffer.
 # Usage: scripts/test-bgra-layout.sh [ffmpeg prefix]
 set -euo pipefail

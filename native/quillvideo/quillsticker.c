@@ -358,7 +358,8 @@ int32_t qs_pixels(void *ctx, QsFrame *out) {
     sws_freeContext(c->sws);
     /* Bicubic, as ffmpeg's scale filter (the subprocess path) uses. */
     c->sws = sws_getContext(f->width, f->height, (enum AVPixelFormat)format,
-                            ow, oh, AV_PIX_FMT_BGRA, SWS_BICUBIC, NULL, NULL,
+                            ow, oh, AV_PIX_FMT_BGRA,
+                            qv_bgra_sws_flags(SWS_BICUBIC, ow), NULL, NULL,
                             NULL);
     if (!c->sws)
       return AVERROR(EINVAL);

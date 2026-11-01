@@ -7,6 +7,9 @@
  * columns when a block would not fit in the stride. Rows padded to 64 bytes
  * and 64 spare bytes after the last row leave them room, the layout Telegram
  * Desktop uses (kAlignImageBy, ComputeAlignedFrameStorageLayout).
+ * Everywhere else the same path runs the generic C kernels, which leave the
+ * last column of an odd width unwritten, so those widths take the
+ * SWS_ACCURATE_RND path instead.
  * native/quillvideo/tests/bgra_layout_test.c checks it against swscale.
  * MIT licensed like Quill.
  */
@@ -14,6 +17,7 @@
 #define QUILL_BGRA_LAYOUT_H
 
 #include <libavutil/macros.h>
+#include <libswscale/swscale.h>
 #include <stddef.h>
 
 #define QV_BGRA_ALIGN 64
@@ -26,6 +30,11 @@ static inline int qv_bgra_stride(int width) {
 /* Bytes to allocate for `height` rows. */
 static inline size_t qv_bgra_size(int width, int height) {
   return (size_t)qv_bgra_stride(width) * (size_t)height + QV_BGRA_ALIGN;
+}
+
+/* Flags for converting to BGRA at `width` with `scaler`. */
+static inline int qv_bgra_sws_flags(int scaler, int width) {
+  return width & 1 ? scaler | SWS_ACCURATE_RND : scaler;
 }
 
 #endif

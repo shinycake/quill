@@ -74,9 +74,12 @@ int main(void) {
   for (size_t i = 0; i < sizeof sizes / sizeof sizes[0]; i++) {
     int w = sizes[i][0], h = sizes[i][1];
     /* quillvideo.c's BGRA path, and quillsticker.c's with and without alpha. */
-    failures += check(w, h, AV_PIX_FMT_YUV420P, SWS_BILINEAR, "video");
-    failures += check(w, h, AV_PIX_FMT_YUV420P, SWS_BICUBIC, "sticker");
-    failures += check(w, h, AV_PIX_FMT_YUVA420P, SWS_BICUBIC, "sticker+alpha");
+    failures += check(w, h, AV_PIX_FMT_YUV420P, qv_bgra_sws_flags(SWS_BILINEAR, w),
+                      "video");
+    failures += check(w, h, AV_PIX_FMT_YUV420P, qv_bgra_sws_flags(SWS_BICUBIC, w),
+                      "sticker");
+    failures += check(w, h, AV_PIX_FMT_YUVA420P, qv_bgra_sws_flags(SWS_BICUBIC, w),
+                      "sticker+alpha");
   }
   if (failures) {
     printf("%d conversions broke the layout\n", failures);
