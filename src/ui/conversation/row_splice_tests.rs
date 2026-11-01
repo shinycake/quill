@@ -826,6 +826,15 @@ fn live_past_the_end(
     from + count
 }
 
+fn room_below_the_cap(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> i64 {
+    let loaded = app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .map_or(0, |session| session.histories[&GROUP].messages.len())
+    });
+    (quill::state::HISTORY_WINDOW_CAP - loaded) as i64
+}
+
 fn row_count(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (usize, usize) {
     app.read_with(vcx, |app, cx| {
         (
@@ -846,8 +855,8 @@ fn a_live_trim_keeps_following_the_tail(cx: &mut TestAppContext) {
             .update(cx, |state, cx| state.scroll_to_end(cx));
     });
     frames(vcx);
-    let cap = quill::state::HISTORY_WINDOW_CAP as i64;
-    let next = live_past_the_end(&app, vcx, MESSAGES, cap - MESSAGES);
+    let room = room_below_the_cap(&app, vcx);
+    let next = live_past_the_end(&app, vcx, MESSAGES, room);
     assert!(following_tail(&app, vcx), "at the tail before the trim");
     let (before, _) = row_count(&app, vcx);
     live_past_the_end(&app, vcx, next, 2);
@@ -863,8 +872,8 @@ fn a_live_trim_leaves_the_reader_where_they_were(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     mixed_group(&app, vcx);
-    let cap = quill::state::HISTORY_WINDOW_CAP as i64;
-    let next = live_past_the_end(&app, vcx, MESSAGES, cap - MESSAGES);
+    let room = room_below_the_cap(&app, vcx);
+    let next = live_past_the_end(&app, vcx, MESSAGES, room);
     app.update(vcx, |app, cx| {
         app.history
             .scroller
