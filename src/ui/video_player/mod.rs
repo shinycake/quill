@@ -806,6 +806,7 @@ impl VideoPlayer {
                 next_due,
                 interval: inner.estimator.interval(),
                 lead: inner.estimator.request_lead(),
+                even_spacing: inner.estimator.even_spacing(),
                 requested: self.0.requested.clone(),
             }
         })
@@ -815,6 +816,7 @@ impl VideoPlayer {
             next_due: None,
             interval: Duration::from_millis(16),
             lead: Duration::from_millis(16),
+            even_spacing: None,
             requested: self.0.requested.clone(),
         })
     }
@@ -855,6 +857,9 @@ pub(super) struct FrameDemand {
     pub(super) interval: Duration,
     /// How far ahead of its draw start a frame is shown.
     pub(super) lead: Duration,
+    /// Its pictures' spacing, once they come a whole number of grid
+    /// vsyncs apart.
+    pub(super) even_spacing: Option<Duration>,
     pub(super) requested: FrameRequested,
 }
 

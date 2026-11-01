@@ -1,20 +1,15 @@
-//! A clip's source on its worker: a ThorVG animation drawing frames on
-//! demand, or nothing but the store (frames decoded up front).
+//! A clip's source on its worker, a ThorVG animation drawing frames on
+//! demand, and the frames of a clip decoded up front, finished for its
+//! store.
 #![deny(clippy::indexing_slicing)]
 
 use super::super::thorvg::Lottie;
 use super::{ClipKey, DecodedFrames, Timeline, mirror_rows, rate_step};
 use std::path::Path;
 
-pub(super) enum Kind {
-    /// Draws grid frame `g` as file frame `g / step`.
-    Lottie(Box<Lottie>),
-    /// Every frame is in the store.
-    Stored,
-}
-
+/// Draws grid frame `g` as file frame `g / step`.
 pub(super) struct Source {
-    pub(super) kind: Kind,
+    lottie: Box<Lottie>,
     pub(super) key: ClipKey,
     pub(super) timeline: Timeline,
 }
@@ -31,7 +26,7 @@ impl Source {
         let step = rate_step(tgs.fps, f64::from(key.hz));
         let frames = (total.floor() as u32).max(1).saturating_mul(step);
         Ok(Self {
-            kind: Kind::Lottie(Box::new(lottie)),
+            lottie: Box::new(lottie),
             key,
             timeline: Timeline {
                 frames,
@@ -41,51 +36,41 @@ impl Source {
         })
     }
 
-    /// A source for frames decoded up front; returns the frames finished
-    /// (tinted, mirrored) for the store.
-    pub(super) fn stored(
-        key: ClipKey,
-        decoded: DecodedFrames,
-    ) -> Result<(Self, Vec<Vec<u8>>), String> {
-        let len = frame_len(key)?;
-        let fps = decoded.fps;
-        if !(fps.is_finite() && fps > 0.0) {
-            return Err("Invalid animated sticker duration".into());
-        }
-        let mut frames = decoded.frames;
-        if frames.is_empty() || frames.iter().any(|frame| frame.len() != len) {
-            return Err("Animated sticker has no frames".into());
-        }
-        for frame in &mut frames {
-            finish(key, frame);
-        }
-        let count = u32::try_from(frames.len()).map_err(|_| "Animated sticker is too long")?;
-        Ok((
-            Self {
-                kind: Kind::Stored,
-                key,
-                timeline: Timeline {
-                    frames: count,
-                    file_fps: fps,
-                    step: 1,
-                },
-            },
-            frames,
-        ))
-    }
-
-    /// Draws grid frame `index`, finished. `None` for a stored-only
-    /// source (it cannot draw) or when ThorVG fails.
+    /// Draws grid frame `index`, finished. `None` when ThorVG fails.
     pub(super) fn draw(&mut self, index: u32) -> Option<Vec<u8>> {
-        let Kind::Lottie(lottie) = &mut self.kind else {
-            return None;
-        };
         let step = self.timeline.step.max(1);
         let frame = index as f32 / step as f32;
-        let mut pixels = lottie.render(frame).ok()?;
+        let mut pixels = self.lottie.render(frame).ok()?;
         finish(self.key, &mut pixels);
         Some(pixels)
     }
+}
+
+/// The timeline of frames decoded up front for `key`, and the frames
+/// finished (tinted, mirrored) for its store.
+pub(super) fn decoded(
+    key: ClipKey,
+    decoded: DecodedFrames,
+) -> Result<(Timeline, Vec<Vec<u8>>), String> {
+    let len = frame_len(key)?;
+    let fps = decoded.fps;
+    if !(fps.is_finite() && fps > 0.0) {
+        return Err("Invalid animated sticker duration".into());
+    }
+    let mut frames = decoded.frames;
+    if frames.is_empty() || frames.iter().any(|frame| frame.len() != len) {
+        return Err("Animated sticker has no frames".into());
+    }
+    for frame in &mut frames {
+        finish(key, frame);
+    }
+    let count = u32::try_from(frames.len()).map_err(|_| "Animated sticker is too long")?;
+    let timeline = Timeline {
+        frames: count,
+        file_fps: fps,
+        step: 1,
+    };
+    Ok((timeline, frames))
 }
 
 /// Bytes in one frame of `key`.

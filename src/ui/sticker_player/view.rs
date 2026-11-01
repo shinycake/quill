@@ -1,13 +1,32 @@
 //! A view of a clip: one place it shows, with its own play head.
 #![deny(clippy::indexing_slicing)]
 
-use super::{ClipSpec, HeadId, OPENING_FPS, Player, high_rate};
+use super::{ClipSpec, HeadId, OPENING_FPS, Player, display_hz, high_rate};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::sticker_playback::player::{PlayMode, edge_for};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Where a view's clip and head stand.
+enum ViewState {
+    /// Its clip failed, or none is open.
+    Gone,
+    Opening,
+    Open(Open),
+}
+
+struct Open {
+    head: quill::sticker_playback::player::PlayHead,
+    /// The frame it showed last.
+    shown: Option<u32>,
+    timeline: quill::sticker_playback::player::Timeline,
+    /// The display may play the fine grid.
+    display_high: bool,
+    /// The view plays the fine grid.
+    high: bool,
+}
 
 /// One place a clip shows, with its own play head.
 #[derive(Clone)]
@@ -76,11 +95,7 @@ impl StickerView {
         )
     }
 
-    /// Frames a second it needs now (0: it rests).
-    pub(in crate::ui) fn fps(&self) -> u32 {
-        let Ok(inner) = self.player.inner.try_borrow() else {
-            return 0;
-        };
+    fn state(&self, inner: &super::Inner) -> ViewState {
         let key = self.spec.key(self.edge);
         // The clip drawn at the painted size, else the one asked for while
         // rendering.
@@ -92,37 +107,79 @@ impl StickerView {
             .map(|(_, clip)| clip);
         let Some(timeline) = clip.and_then(|clip| clip.timeline) else {
             return if clip.is_none_or(|clip| clip.failed) {
-                0
+                ViewState::Gone
             } else {
-                OPENING_FPS.min(self.max_fps)
+                ViewState::Opening
             };
         };
-        let head = inner
-            .heads
-            .get(&(self.head, key.file))
-            .map(|head| head.state)
-            .unwrap_or_default();
+        let head = inner.heads.get(&(self.head, key.file));
         // A clip held to its file's rate still ticks at the display's, so
         // each of its frames stays up for the same number of refreshes.
         let display_high = high_rate(self.active);
-        let high = display_high && !self.player.engine.coarse(&key);
+        ViewState::Open(Open {
+            head: head.map(|head| head.state).unwrap_or_default(),
+            shown: head.and_then(|head| head.shown),
+            timeline,
+            display_high,
+            high: display_high && !self.player.engine.coarse(&key),
+        })
+    }
+
+    /// Frames a second it needs now (0: it rests).
+    pub(in crate::ui) fn fps(&self) -> u32 {
+        let Ok(inner) = self.player.inner.try_borrow() else {
+            return 0;
+        };
+        let open = match self.state(&inner) {
+            ViewState::Gone => return 0,
+            ViewState::Opening => return OPENING_FPS.min(self.max_fps),
+            ViewState::Open(open) => open,
+        };
+        let timeline = open.timeline;
         let pick = match self.mode {
             PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                 Duration::ZERO,
                 self.mode,
                 timeline,
-                high,
+                open.high,
+                display_hz(),
             ),
             _ => {
-                let mut head = head;
-                head.advance(self.player.now(), self.mode, timeline, high)
+                let mut head = open.head;
+                head.advance(
+                    self.player.now(),
+                    self.mode,
+                    timeline,
+                    open.high,
+                    display_hz(),
+                )
             }
         };
         match pick {
             Some(pick) if pick.animating => {
-                (timeline.tick_fps(display_high).ceil() as u32).clamp(1, self.max_fps.max(1))
+                (timeline.tick_fps(open.display_high).ceil() as u32).clamp(1, self.max_fps.max(1))
             }
             _ => 0,
+        }
+    }
+
+    /// Whether painting it within `ahead` from now would show another
+    /// frame than it shows, so a frame clock tick needs to draw it.
+    pub(in crate::ui) fn changes_within(&self, ahead: Duration) -> bool {
+        let Ok(inner) = self.player.inner.try_borrow() else {
+            return true;
+        };
+        match self.state(&inner) {
+            ViewState::Gone => false,
+            ViewState::Opening => true,
+            ViewState::Open(open) => open.head.changes_at(
+                self.player.now() + ahead,
+                open.shown,
+                self.mode,
+                open.timeline,
+                open.high,
+                display_hz(),
+            ),
         }
     }
 

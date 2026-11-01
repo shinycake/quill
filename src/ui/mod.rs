@@ -99,6 +99,7 @@ mod index_sliders;
 mod inline_players;
 mod inline_video;
 pub(crate) mod interface_zoom;
+mod layer_draws;
 mod lean_buttons;
 mod links_state;
 mod lru;

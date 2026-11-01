@@ -429,3 +429,29 @@ fn a_window_leaving_its_chat_keeps_the_rest_of_it() {
     assert_eq!(player.engine().stats().clips, 0);
     assert_eq!(player.head_known(window_list, 7), None);
 }
+
+#[test]
+fn a_tick_draws_a_view_only_when_its_frame_changes() {
+    let (player, spec) = player(8);
+    player.freeze();
+    let player = std::rc::Rc::new(player);
+    let view = super::StickerView {
+        player: player.clone(),
+        spec: std::rc::Rc::new(spec.clone()),
+        head: head("tick"),
+        mode: PlayMode::Loop,
+        edge: EDGE,
+        max_fps: 120,
+        active: false,
+        window: None,
+    };
+    let refresh = ms(8);
+    let t0 = player.now();
+    assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, t0), 0);
+    assert!(!view.changes_within(refresh), "frame 0 stays up");
+    player.skip(ms(20));
+    assert!(view.changes_within(refresh), "frame 1 is due by 28 ms");
+    let at = player.now() + refresh;
+    assert_eq!(shown(&player, &spec, view.head, PlayMode::Loop, at), 1);
+    assert!(!view.changes_within(refresh), "frame 1 is up");
+}

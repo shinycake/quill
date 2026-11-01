@@ -81,6 +81,12 @@ pub(super) fn note_display(window: &Window, cx: &App) {
     DISPLAY.with(|display| display.set((window.scale_factor(), hz)));
 }
 
+/// Note that a window refreshing at `hz` painted a sticker last (a test).
+#[cfg(test)]
+pub(super) fn note_display_hz(hz: f64) {
+    DISPLAY.with(|display| display.set((display.get().0, hz)));
+}
+
 fn trace_stickers() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("QUILL_TRACE_STICKERS").is_some_and(|v| v == "1"))
@@ -126,6 +132,8 @@ struct UiClip {
 /// Where a view is in a clip.
 struct Head {
     state: PlayHead,
+    /// The frame its view showed last.
+    shown: Option<u32>,
     /// When a view last drew it.
     seen: Instant,
     /// Where views drew it.
@@ -252,6 +260,9 @@ pub(crate) struct Player {
     /// Where a test stopped the clock (`freeze`).
     #[cfg(test)]
     frozen: Cell<Option<Instant>>,
+    /// The test executor whose clock [`Self::now`] follows (`follow`).
+    #[cfg(test)]
+    executor: RefCell<Option<BackgroundExecutor>>,
     /// How many times `close_stale` looked (a test).
     #[cfg(test)]
     looks: Cell<usize>,
@@ -272,6 +283,8 @@ impl Player {
             #[cfg(test)]
             frozen: Cell::new(None),
             #[cfg(test)]
+            executor: RefCell::new(None),
+            #[cfg(test)]
             looks: Cell::new(0),
         }
     }
@@ -279,7 +292,12 @@ impl Player {
     /// The time views draw at and the closer judges by.
     pub(super) fn now(&self) -> Instant {
         #[cfg(test)]
-        return self.frozen.get().unwrap_or_else(Instant::now) + self.skew.get();
+        return self
+            .frozen
+            .get()
+            .or_else(|| self.executor.borrow().as_ref().map(BackgroundExecutor::now))
+            .unwrap_or_else(Instant::now)
+            + self.skew.get();
         #[cfg(not(test))]
         Instant::now()
     }
@@ -288,6 +306,13 @@ impl Player {
     #[cfg(test)]
     pub(super) fn skip(&self, by: Duration) {
         self.skew.set(self.skew.get() + by);
+    }
+
+    /// Run [`Self::now`] on `executor`'s clock, which a test moves on:
+    /// heads then play as far as the frame clock's ticks came.
+    #[cfg(test)]
+    pub(in crate::ui) fn follow(&self, executor: BackgroundExecutor) {
+        *self.executor.borrow_mut() = Some(executor);
     }
 
     /// Stop [`Self::now`] where it is: from then on only [`Self::skip`]
@@ -483,6 +508,10 @@ impl Player {
         now: Instant,
     ) -> Option<Arc<RenderImage>> {
         self.drain();
+        let now = match window {
+            None => super::frame_clock::content_now(now),
+            Some(_) => now,
+        };
         let key = spec.key(edge);
         let high_rate = high_rate && !self.engine.coarse(&key);
         let place = Place::of(head, window);
@@ -515,20 +544,26 @@ impl Player {
                 Some(timeline) => {
                     let entry = inner.heads.entry((head, key.file)).or_insert_with(|| Head {
                         state: PlayHead::default(),
+                        shown: None,
                         seen: now,
                         places: Places::new(),
                     });
                     entry.seen = now;
                     note_place(&mut entry.places, place);
-                    let head_state = &mut entry.state;
+                    let Head {
+                        state: head_state,
+                        shown: head_shown,
+                        ..
+                    } = entry;
                     let pick = match mode {
                         PlayMode::At(_) => quill::sticker_playback::player::head::pick(
                             Duration::ZERO,
                             mode,
                             timeline,
                             high_rate,
+                            display_hz(),
                         ),
-                        _ => head_state.advance(now, mode, timeline, high_rate),
+                        _ => head_state.advance(now, mode, timeline, high_rate, display_hz()),
                     };
                     pick.and_then(|pick| {
                         let exact = clip
@@ -554,6 +589,7 @@ impl Player {
                         clip.wants.retain(|(h, ..)| *h != head);
                         clip.wants.push((head, pick.index, pick.ahead, now));
                         let (index, image) = found?;
+                        *head_shown = Some(index);
                         if clip
                             .shown
                             .as_ref()
@@ -816,7 +852,7 @@ impl Player {
             }
         };
         eprintln!(
-            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
+            "stickers: shown {} late {} | drawn {} ({:.3} ms, pack {:.3} ms) unpacked {} ({:.3} ms) | clips {} coarse {} store {:.1} MB sources {:.1} MB evicted {} | {} Hz",
             screen.shown,
             screen.late,
             stats.drawn,
@@ -825,6 +861,7 @@ impl Player {
             stats.unpacked,
             avg(stats.unpack_time, stats.unpacked),
             stats.clips,
+            stats.coarse,
             stats.store_bytes as f64 / 1_048_576.0,
             stats.source_bytes as f64 / 1_048_576.0,
             stats.evicted,
