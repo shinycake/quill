@@ -659,7 +659,7 @@ fn stores_are_evicted_least_recently_used_under_the_budget() {
             engine.held_bytes()
         );
         // The next clip comes after this one left the screen.
-        std::thread::sleep(ms(520));
+        engine.left_screen(key);
     }
     let stats = engine.stats();
     assert!(stats.evicted > 0, "older stores made room");

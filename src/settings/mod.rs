@@ -22,7 +22,7 @@ pub use appearance::*;
 pub use badge::*;
 pub use chat_prefs::*;
 pub use chat_windows::*;
-pub(crate) use deferred::{discard_deferred_writes_under, read_with_pending, write_json_deferred};
+pub(crate) use deferred::{close_deferred_writes_under, read_with_pending, write_json_deferred};
 pub use deferred::{flush_deferred_writes, take_deferred_write_failure};
 pub use first_run::*;
 pub use media::*;

@@ -1,5 +1,5 @@
-//! A file or audio album: its files stacked in one bubble, the caption
-//! under the last one (tdesktop `HistoryView::GroupedMedia` with
+//! A file or audio album: its files stacked in one bubble, each with its
+//! own caption under it (tdesktop `HistoryView::GroupedMedia` with
 //! documents).
 
 use super::*;
@@ -47,6 +47,8 @@ pub(in crate::ui) fn file_album_history_row(
         .flex()
         .flex_col()
         .gap_2();
+    let emoji: HashMap<i64, ImageSource> = HashMap::new();
+    let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
     for (message, seek_bar) in messages.iter().zip(seek_bars.iter()) {
         let row = match (&message.content, seek_bar) {
             (MessageContent::Document(doc), _) => Some(document_chip(
@@ -76,37 +78,44 @@ pub(in crate::ui) fn file_album_history_row(
             )),
             _ => None,
         };
+        let Some(row) = row else {
+            continue;
+        };
+        let caption = match &message.content {
+            MessageContent::Document(doc) => Some((&doc.caption, &doc.caption_entities)),
+            MessageContent::Audio(audio) => Some((&audio.caption, &audio.caption_entities)),
+            _ => None,
+        }
+        .filter(|(text, _)| !text.is_empty())
+        .map(|(text, entities)| {
+            rich_text_reserving(
+                text,
+                entities,
+                (message.chat_id.0, message.id.0 as u64),
+                true,
+                revealed,
+                look.font,
+                &emoji,
+                &layered,
+                None,
+                cx,
+            )
+        });
         let id = message.id.0;
-        stack = stack.children(row.map(|row| {
+        stack = stack.child(
             div()
                 .debug_selector(move || format!("file-album-item-{id}"))
+                .flex()
+                .flex_col()
+                .gap_1()
                 .child(row)
-        }));
+                .children(caption.map(|caption| {
+                    div()
+                        .debug_selector(move || format!("file-album-caption-{id}"))
+                        .child(caption)
+                })),
+        );
     }
-    let caption = messages.iter().rev().find_map(|message| {
-        let (text, entities) = match &message.content {
-            MessageContent::Document(doc) => (&doc.caption, &doc.caption_entities),
-            MessageContent::Audio(audio) => (&audio.caption, &audio.caption_entities),
-            _ => return None,
-        };
-        (!text.is_empty()).then(|| (message.chat_id, message.id, text.clone(), entities.clone()))
-    });
-    let emoji: HashMap<i64, ImageSource> = HashMap::new();
-    let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
-    let stack = stack.when_some(caption, |this, (chat_id, message_id, text, entities)| {
-        this.child(rich_text_reserving(
-            &text,
-            &entities,
-            (chat_id.0, message_id.0 as u64),
-            true,
-            revealed,
-            look.font,
-            &emoji,
-            &layered,
-            None,
-            cx,
-        ))
-    });
     let avatar_link = avatar_link(&sender_avatar, first, cx);
     let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
     if let Some(link) = avatar_link

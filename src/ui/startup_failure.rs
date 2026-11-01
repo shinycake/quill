@@ -78,8 +78,8 @@ thread_local! {
 
 thread_local! {
     static GPU_GONE: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// Quill asked to quit or restart: a window closing from now on is part
-    /// of that, not a window the renderer gave up on.
+    /// Quill or the system asked to quit or restart: a window closing from
+    /// now on is part of that, not a window the renderer gave up on.
     static QUIT_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -90,7 +90,7 @@ pub(crate) fn note_quit_asked() {
 }
 
 #[cfg(any(test, target_os = "windows"))]
-fn quit_asked() -> bool {
+pub(super) fn quit_asked() -> bool {
     QUIT_ASKED.with(std::cell::Cell::get)
 }
 

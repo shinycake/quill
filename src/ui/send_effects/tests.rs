@@ -30,6 +30,11 @@ fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let demo = ScreenshotDemo::named("ready-message-effects");
     let handle = cx.open_window(size(px(1200.), px(1000.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
+        // Effects play on the clock the test moves.
+        view.read(cx)
+            .playback
+            .stickers
+            .follow(cx.background_executor().clone());
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -124,8 +129,10 @@ fn the_ticks_of_an_effect_leave_the_slices_alone(cx: &mut TestAppContext) {
     let key = (CHAT, ARRIVING);
     let_the_history_settle(vcx);
     arrive(&app, vcx);
+    // The arrival's own redraws settle in the first second; the effect
+    // plays on, on the test clock.
     let _ = crate::ui::frame_clock::frames_over(vcx, 1);
-    let drawn = crate::ui::frame_clock::frames_over(vcx, 2);
+    let drawn = crate::ui::frame_clock::frames_over(vcx, 1);
     assert!(crate::ui::emoji_effect::message_effect_playing(key));
     assert!(drawn.get("app").is_some_and(|app| *app > 5), "{drawn:?}");
     for slice in ["sidebar", "conversation", "composer"] {

@@ -35,6 +35,9 @@ struct State {
     /// disk from a stuck one.
     finished: u64,
     failure: Option<std::io::Error>,
+    /// Folders being deleted: a submit under one is dropped, so a write
+    /// from another thread cannot recreate the folder.
+    closed: Vec<PathBuf>,
 }
 
 struct Queued {
@@ -89,6 +92,9 @@ impl DeferredWriter {
     pub(crate) fn submit(&self, path: PathBuf, bytes: Vec<u8>) {
         let start = {
             let mut state = self.shared.lock();
+            if state.closed.iter().any(|folder| path.starts_with(folder)) {
+                return;
+            }
             state.retry_failed();
             state.pending.insert(
                 path,
@@ -218,11 +224,17 @@ impl DeferredWriter {
         }
     }
 
-    /// Drop every write queued under `folder` and wait for one already on
-    /// its way there, so nothing recreates the folder once it is removed.
-    /// `false`: that write was still stuck after `stall`.
-    pub(crate) fn discard_under(&self, folder: &Path, stall: Duration) -> bool {
+    /// Drop every write queued under `folder`, refuse new ones until the
+    /// returned mark drops, and wait for one already on its way there, so
+    /// nothing recreates the folder while it is removed. `None`: that
+    /// write was still stuck after `stall`.
+    pub(crate) fn close_under(&self, folder: &Path, stall: Duration) -> Option<ClosedFolder> {
         let mut state = self.shared.lock();
+        state.closed.push(folder.to_path_buf());
+        let closed = ClosedFolder {
+            writer: self.clone(),
+            folder: folder.to_path_buf(),
+        };
         state.pending.retain(|path, _| !path.starts_with(folder));
         let mut stalled = Stall::new(stall, state.finished);
         while state
@@ -231,11 +243,27 @@ impl DeferredWriter {
             .is_some_and(|path| path.starts_with(folder))
         {
             let Some(left) = stalled.left(state.finished) else {
-                return false;
+                drop(state);
+                return None;
             };
             state = self.wait(state, left);
         }
-        true
+        Some(closed)
+    }
+}
+
+/// A folder the writer refuses writes under, until this drops.
+pub(crate) struct ClosedFolder {
+    writer: DeferredWriter,
+    folder: PathBuf,
+}
+
+impl Drop for ClosedFolder {
+    fn drop(&mut self) {
+        let mut state = self.writer.shared.lock();
+        if let Some(at) = state.closed.iter().position(|f| *f == self.folder) {
+            state.closed.swap_remove(at);
+        }
     }
 }
 
@@ -348,10 +376,11 @@ pub(crate) fn read_with_pending(path: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-/// Drop the writes queued under `folder`, which is about to be deleted.
-/// `false`: a write into it is stuck on the disk.
-pub(crate) fn discard_deferred_writes_under(folder: &Path) -> bool {
-    global().discard_under(folder, STALL_BUDGET)
+/// Drop the writes queued under `folder`, which is about to be deleted,
+/// and refuse new ones while the returned mark lives. `None`: a write into
+/// it is stuck on the disk.
+pub(crate) fn close_deferred_writes_under(folder: &Path) -> Option<ClosedFolder> {
+    global().close_under(folder, STALL_BUDGET)
 }
 
 /// Wait for every deferred write, or until the disk stops finishing them;
@@ -529,7 +558,11 @@ mod tests {
                 },
             );
         }
-        assert!(writer.discard_under(Path::new("/x/acct"), super::STALL_BUDGET));
+        assert!(
+            writer
+                .close_under(Path::new("/x/acct"), super::STALL_BUDGET)
+                .is_some()
+        );
         assert_eq!(writer.pending(&gone), None);
         writer.flush(super::STALL_BUDGET);
         let written: Vec<PathBuf> = log
@@ -550,10 +583,29 @@ mod tests {
         // The write never finishes while the gate is shut: quit goes on.
         writer.flush(std::time::Duration::ZERO);
         assert_eq!(writer.pending(&path), Some(b"a".to_vec()));
-        assert!(!writer.discard_under(Path::new("/x"), std::time::Duration::ZERO));
+        assert!(
+            writer
+                .close_under(Path::new("/x"), std::time::Duration::ZERO)
+                .is_none()
+        );
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
         let _ = open.send(());
         writer.flush(super::STALL_BUDGET);
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
+    }
+
+    #[test]
+    fn a_write_under_a_folder_being_deleted_is_refused_until_the_delete_returns() {
+        let (writer, log) = recording(None);
+        let inside = PathBuf::from("/x/acct/a.json");
+        let closed = writer.close_under(Path::new("/x/acct"), super::STALL_BUDGET);
+        assert!(closed.is_some());
+        writer.submit(inside.clone(), b"late".to_vec());
+        assert_eq!(writer.pending(&inside), None, "refused while it is deleted");
+        drop(closed);
+        writer.submit(inside.clone(), b"new".to_vec());
+        writer.flush(super::STALL_BUDGET);
+        let written: Vec<(PathBuf, Vec<u8>)> = log.lock().map(|l| l.clone()).unwrap_or_default();
+        assert_eq!(written, vec![(inside, b"new".to_vec())]);
     }
 }

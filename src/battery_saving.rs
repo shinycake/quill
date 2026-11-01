@@ -122,7 +122,7 @@ fn probe_native() -> Option<bool> {
     };
     // SAFETY: the pointer references a live local the call fills in.
     let ok = unsafe { GetSystemPowerStatus(&mut status) } != 0;
-    ok.then(|| status.SystemStatusFlag == 1)
+    ok.then_some(status.SystemStatusFlag == 1)
 }
 
 #[cfg(target_os = "linux")]

@@ -1,4 +1,5 @@
-//! A received file album is one row: its files stacked in one bubble.
+//! A received file album is one row: its files stacked in one bubble,
+//! each with its own caption under it.
 use super::*;
 
 fn document(id: i32, name: &str, caption: &str) -> String {
@@ -43,4 +44,34 @@ fn a_received_two_file_album_is_one_bubble(cx: &mut TestAppContext) {
     };
     assert!(a.bottom() <= b.top(), "the files stack in order");
     assert!(bubble.top() <= a.top() && b.bottom() <= bubble.bottom());
+}
+
+#[gpui_kit::test]
+fn each_file_of_an_album_keeps_its_own_caption_under_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    open_group(&app, vcx);
+    let (first, second) = (
+        document(204, "a.pdf", "First"),
+        document(205, "b.pdf", "Second"),
+    );
+    apply(&app, vcx, &[first.as_str(), second.as_str()]);
+    app.update(vcx, |app, cx| app.jump_to_latest_messages(cx));
+    frames(vcx);
+    let painted = [
+        "file-album-item-204",
+        "file-album-caption-204",
+        "file-album-item-205",
+        "file-album-caption-205",
+    ]
+    .map(|id| vcx.debug_bounds(id));
+    let [Some(a), Some(a_caption), Some(b), Some(b_caption)] = painted else {
+        panic!("both files and both captions are painted: {painted:?}");
+    };
+    assert!(a.top() < a_caption.top() && a_caption.bottom() <= a.bottom());
+    assert!(
+        a_caption.bottom() <= b.top(),
+        "the first caption sits above the second file"
+    );
+    assert!(b.top() < b_caption.top() && b_caption.bottom() <= b.bottom());
 }

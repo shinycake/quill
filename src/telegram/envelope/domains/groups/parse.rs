@@ -550,7 +550,7 @@ pub(crate) fn parse_groups_payload(
         })),
         // Checked invite preview; joining requires a separate confirmation.
         "chatInviteLinkInfo" => Ok(EnvelopePayload::Groups(GroupsPayload::ChatInviteLinkInfo {
-            title: json_field_str(value, "title"),
+            title: json_name_str(value, "title"),
             member_count: int53(value.get("member_count")).unwrap_or(0).sat_i32(),
             creates_join_request: value
                 .get("creates_join_request")

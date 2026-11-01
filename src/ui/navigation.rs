@@ -561,10 +561,23 @@ impl QuillApp {
 /// for the settings writer. Called once at startup, before any setting can
 /// be saved.
 pub(crate) fn flush_settings_on_quit(cx: &mut App) {
-    cx.on_app_quit(|_| {
+    after_windows_on_quit(cx, || {
         quill::settings::flush_window_state();
         quill::settings::flush_deferred_writes();
-        async {}
+    });
+}
+
+/// Runs `work` at quit once GPUI has dropped every window, so a write
+/// that stalls on a hung disk leaves no frozen window on screen.
+fn after_windows_on_quit(cx: &mut App, work: impl FnOnce() + 'static) {
+    let mut work = Some(work);
+    cx.on_app_quit(move |_| {
+        let work = work.take();
+        async move { work.into_iter().for_each(|work| work()) }
     })
     .detach();
 }
+
+#[cfg(test)]
+#[path = "navigation_quit_tests.rs"]
+mod quit_tests;

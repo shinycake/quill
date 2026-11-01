@@ -57,12 +57,13 @@ pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Resu
     // and one that failed stays queued, so drop what is left for it.
     crate::settings::flush_deferred_writes();
     let folder = AccountPaths::for_root(app_root, key).root;
-    if !crate::settings::discard_deferred_writes_under(&folder) {
+    let Some(closed) = crate::settings::close_deferred_writes_under(&folder) else {
         // It would land after the removal; the record keeps the folder for
         // the next try.
         return Err(std::io::Error::other("a settings write is stuck"));
-    }
+    };
     let removed = std::fs::remove_dir_all(folder);
+    drop(closed);
     // The folder held the test-environment marker.
     crate::advanced::test_environment::invalidate_active_test(app_root);
     match removed {
