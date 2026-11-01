@@ -8,7 +8,7 @@
 //! it while rendering, and the Appearance dialog writes it.
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// One power-saving category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,42 +165,50 @@ pub(crate) const BATTERY_IGNORE: usize = 4;
 pub(crate) const THERMAL_HOT: usize = 5;
 
 static GLOBAL: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
-static ISOLATED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
-    static LOCAL: std::cell::Cell<[u32; SLOTS]> = const { std::cell::Cell::new([0; SLOTS]) };
+    /// This thread's own copy, once it is isolated.
+    static LOCAL: std::cell::Cell<Option<[u32; SLOTS]>> = const { std::cell::Cell::new(None) };
 }
 
-/// Keep this state per thread from now on. The app keeps one process-wide
-/// copy; UI tests run in parallel, so each gets its own (the same split as
-/// `chat_theme`'s palette state).
+/// Keep this state for the calling thread alone from now on, starting from
+/// nothing saved. The app keeps one process-wide copy; UI tests run in
+/// parallel on threads of their own, so each gets its own (the same split as
+/// `wake::isolate_current_thread`). Isolating again keeps what is set.
 #[doc(hidden)]
 pub fn isolate_for_tests() {
-    ISOLATED.store(true, Ordering::Relaxed);
+    let _ = LOCAL.try_with(|local| {
+        if local.get().is_none() {
+            local.set(Some([0; SLOTS]));
+        }
+    });
+}
+
+fn local() -> Option<[u32; SLOTS]> {
+    LOCAL.try_with(std::cell::Cell::get).ok().flatten()
 }
 
 pub(crate) fn slot_get(slot: usize) -> u32 {
-    if ISOLATED.load(Ordering::Relaxed) {
-        LOCAL.with(|c| c.get().get(slot).copied().unwrap_or(0))
-    } else {
-        GLOBAL
+    match local() {
+        Some(all) => all.get(slot).copied().unwrap_or(0),
+        None => GLOBAL
             .get(slot)
-            .map_or(0, |value| value.load(Ordering::Relaxed))
+            .map_or(0, |value| value.load(Ordering::Relaxed)),
     }
 }
 
 pub(crate) fn slot_set(slot: usize, value: u32) {
-    if ISOLATED.load(Ordering::Relaxed) {
-        LOCAL.with(|c| {
-            let mut all = c.get();
+    match local() {
+        Some(mut all) => {
             if let Some(entry) = all.get_mut(slot) {
                 *entry = value;
             }
-            c.set(all);
-        });
-    } else {
-        if let Some(entry) = GLOBAL.get(slot) {
-            entry.store(value, Ordering::Relaxed);
+            let _ = LOCAL.try_with(|local| local.set(Some(all)));
+        }
+        None => {
+            if let Some(entry) = GLOBAL.get(slot) {
+                entry.store(value, Ordering::Relaxed);
+            }
         }
     }
 }
