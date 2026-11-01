@@ -282,6 +282,20 @@ impl Rig {
         }
     }
 
+    fn play_with_nothing_painting(&mut self, secs: f64) -> f64 {
+        let mut sound = 0.0;
+        for _ in 0..(secs / FRAME_SECS).round() as usize {
+            sound += self.pull_sound(FRAME_SECS);
+            self.settle();
+            assert!(
+                self.pictures_queued() <= QUEUE,
+                "{} pictures queued",
+                self.pictures_queued(),
+            );
+        }
+        sound
+    }
+
     fn start(&mut self) -> Instant {
         self.player.play();
         let t0 = Instant::now();
@@ -325,6 +339,12 @@ struct Run {
 impl Run {
     fn last_shown(&self) -> f64 {
         self.shown.last().copied().unwrap_or(-1.0)
+    }
+
+    fn skipped_a_picture(&self) -> bool {
+        self.shown
+            .windows(2)
+            .any(|pair| pair[1] - pair[0] > 1.5 * FRAME_SECS)
     }
 }
 
@@ -431,6 +451,55 @@ fn sound_too_far_behind_to_reach_arrives_once_the_clock_moves_the_pictures() {
         "picture stopped at {}",
         run.last_shown()
     );
+    assert!(!run.skipped_a_picture(), "{:?}", run.shown);
+}
+
+#[test]
+fn a_painted_clip_shows_every_picture() {
+    let mut rig = Rig::open(Shape::clip(20.0, 20.0));
+    let t0 = rig.start();
+    let run = rig.run(t0, 250);
+    assert!(run.last_shown() > 9.8, "{}", run.last_shown());
+    assert!(!run.skipped_a_picture(), "{:?}", run.shown);
+}
+
+#[test]
+fn sound_keeps_playing_while_nothing_paints() {
+    let mut rig = Rig::open(Shape::clip(90.0, 90.0));
+    rig.player.play();
+    let sound = rig.play_with_nothing_painting(60.0);
+    assert!((sound - 60.0).abs() < 1e-6, "{sound} s of sound");
+}
+
+#[test]
+fn the_picture_is_current_when_painting_comes_back() {
+    let mut rig = Rig::open(Shape::clip(90.0, 90.0));
+    let t0 = rig.start();
+    rig.play_with_nothing_painting(60.0);
+    let back = t0 + Duration::from_secs(60);
+    let shown = rig
+        .player
+        .take_frame_for(back, back)
+        .expect("a picture is due");
+    let position = rig.player.position_at(back);
+    assert!(
+        (position - shown.pts).abs() <= FRAME_SECS,
+        "{} at {position}",
+        shown.pts
+    );
+}
+
+#[test]
+fn the_last_picture_waits_for_paint_after_the_sound_passed_it() {
+    let mut rig = Rig::open(Shape::clip(2.0, 3.0));
+    let t0 = rig.start();
+    rig.play_with_nothing_painting(3.0);
+    let back = t0 + Duration::from_secs(3);
+    let last = rig
+        .player
+        .take_frame_for(back, back)
+        .expect("a picture is due");
+    assert_eq!(last.pts, 49.0 * FRAME_SECS);
 }
 
 #[test]
