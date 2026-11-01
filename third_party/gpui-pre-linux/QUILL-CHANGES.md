@@ -148,8 +148,9 @@ compositor's first keymap is unusable (sweep bundle B13, N47):
   system rules, else the built-in one) instead of dropping every key. With
   a keymap already installed it is kept, as before.
 - `src/linux/wayland/default_keymap.xkb` (new): a US keymap compiled by
-  libxkbcommon from xkeyboard-config 2.41 (MIT licence), for systems without
-  xkeyboard-config. Test: `without_a_usable_first_keymap_keys_type_with_the_default`.
+  libxkbcommon from xkeyboard-config 2.41 (MIT/X11-style notices, shipped as
+  `licenses/xkeyboard-config-COPYING.txt` and listed in `THIRD_PARTY.md`),
+  for systems without xkeyboard-config. Test: `without_a_usable_first_keymap_keys_type_with_the_default`.
 
 The Quill project also changed it in 2026 so GPU recovery arms each timer
 once (sweep bundle B13, N42):
