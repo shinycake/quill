@@ -62,20 +62,19 @@ impl Session {
     /// Reorder the cached pinned topics right away (the server confirms
     /// with `updateForumTopic`).
     pub(crate) fn apply_pinned_forum_order(&mut self, chat_id: ChatId, ids: &[i32]) {
-        let Some(topics) = self.threads.forum_topics.get_mut(&chat_id.0) else {
-            return;
-        };
-        let mut orders: Vec<i64> = topics
-            .iter()
-            .filter(|topic| ids.contains(&topic.forum_topic_id))
-            .map(|topic| topic.order)
-            .collect();
-        orders.sort_unstable_by(|a, b| b.cmp(a));
-        for (id, order) in ids.iter().zip(orders) {
-            if let Some(topic) = topics.iter_mut().find(|topic| topic.forum_topic_id == *id) {
-                topic.order = order;
+        self.threads.forum_topics.update(chat_id.0, |topics| {
+            let mut orders: Vec<i64> = topics
+                .iter()
+                .filter(|topic| ids.contains(&topic.forum_topic_id))
+                .map(|topic| topic.order)
+                .collect();
+            orders.sort_unstable_by(|a, b| b.cmp(a));
+            for (id, order) in ids.iter().zip(orders) {
+                if let Some(topic) = topics.iter_mut().find(|topic| topic.forum_topic_id == *id) {
+                    topic.order = order;
+                }
             }
-        }
+        });
     }
 
     /// Zero the mention / reaction badges of one topic after a read-all.
@@ -85,22 +84,15 @@ impl Session {
         forum_topic_id: i32,
         mentions: bool,
     ) {
-        if let Some(topic) = self
-            .threads
+        self.threads
             .forum_topics
-            .get_mut(&chat_id.0)
-            .and_then(|topics| {
-                topics
-                    .iter_mut()
-                    .find(|t| t.forum_topic_id == forum_topic_id)
-            })
-        {
-            if mentions {
-                topic.unread_mention_count = 0;
-            } else {
-                topic.unread_reaction_count = 0;
-            }
-        }
+            .update_topic(chat_id.0, forum_topic_id, |topic| {
+                if mentions {
+                    topic.unread_mention_count = 0;
+                } else {
+                    topic.unread_reaction_count = 0;
+                }
+            });
     }
 
     /// `getForumTopicDefaultIcons` answered.

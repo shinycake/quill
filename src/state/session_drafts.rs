@@ -128,14 +128,9 @@ impl Session {
                 }
             }
             DraftTopic::Forum(topic_id) => {
-                if let Some(topic) = self
-                    .threads
+                self.threads
                     .forum_topics
-                    .get_mut(&chat_id.0)
-                    .and_then(|topics| topics.iter_mut().find(|t| t.forum_topic_id == topic_id))
-                {
-                    topic.draft = draft;
-                }
+                    .update_topic(chat_id.0, topic_id, |topic| topic.draft = draft);
             }
             DraftTopic::Thread(thread_id) => {
                 if let Some(thread) = self

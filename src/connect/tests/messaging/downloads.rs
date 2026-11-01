@@ -144,7 +144,7 @@ fn chat_list_photo_downloads_on_ingest_and_dedupes() {
         .count();
     assert_eq!(avatar_downloads, 1, "in-flight avatar download deduped");
     driver.ingest(copy_and_parse(
-        r#"{"@type":"updateUser","user":{"id":42,"first_name":"Contact","type":{"@type":"userTypeRegular"},"profile_photo":{"@type":"profilePhoto","small":{"@type":"file","id":92},"big":null}}}"#,
+        r#"{"@type":"updateUser","user":{"id":42,"first_name":"Contact","type":{"@type":"userTypeRegular"},"profile_photo":{"@type":"profilePhoto","small":{"@type":"file","id":92,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_completed":false}},"big":null}}}"#,
         &seq, &dyn_sink).unwrap()).unwrap();
     let user_downloads = |recorder: &RecordingSender| {
         recorder
@@ -571,7 +571,7 @@ fn avatar_downloads(recorder: &RecordingSender, id: i32) -> Vec<String> {
 
 fn avatar_user(id: i64, file: i32) -> String {
     format!(
-        r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"U","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","small":{{"@type":"file","id":{file}}},"big":null}}}}}}"#
+        r#"{{"@type":"updateUser","user":{{"id":{id},"first_name":"U","type":{{"@type":"userTypeRegular"}},"profile_photo":{{"@type":"profilePhoto","small":{{"@type":"file","id":{file},"local":{{"@type":"localFile","path":"","can_be_downloaded":true,"is_downloading_completed":false}}}},"big":null}}}}}}"#
     )
 }
 

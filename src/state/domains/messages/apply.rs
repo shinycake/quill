@@ -23,7 +23,7 @@ impl Session {
                     .or_insert_with(|| placeholder_chat(chat_id));
                 self.set_remote_draft(chat_id, crate::composer::DraftTopic::Chat, draft);
                 self.replace_main_list_from_positions(chat_id, &positions);
-                self.rebuild_main_order();
+                self.sync_chat_order();
             }
             MessagesPayload::UpdateChatHasScheduledMessages {
                 chat_id,

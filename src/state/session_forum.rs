@@ -107,24 +107,32 @@ impl Session {
         topics
     }
 
+    /// The chat backed by `supergroup_id`, found by its id rather than a
+    /// walk over every chat. A chat no `updateNewChat` named yet has the id
+    /// TDLib derives from the supergroup.
+    pub(crate) fn supergroup_chat_mut(&mut self, supergroup_id: i64) -> Option<&mut ChatSummary> {
+        let chat_id = self
+            .groups
+            .supergroup_chat_ids
+            .get(&supergroup_id)
+            .copied()
+            .unwrap_or(ChatId::from_supergroup(supergroup_id).0);
+        self.chats
+            .get_mut(&chat_id)
+            .filter(|chat| {
+                matches!(chat.kind, ChatKind::Supergroup { supergroup_id: id, .. } if id == supergroup_id)
+            })
+    }
+
     /// Phase 5.1: record `supergroup.is_forum` for the chat backed by this
     /// supergroup (via `updateSupergroup` or the `getSupergroup` response).
     /// Returns true when a chat was updated.
     pub fn set_supergroup_forum(&mut self, supergroup_id: i64, is_forum: bool) -> bool {
-        let mut changed = false;
-        for chat in self.chats.values_mut() {
-            if matches!(
-                chat.kind,
-                ChatKind::Supergroup {
-                    supergroup_id: id,
-                    ..
-                } if id == supergroup_id
-            ) && chat.is_forum != Some(is_forum)
-            {
-                chat.is_forum = Some(is_forum);
-                changed = true;
-            }
-        }
+        let Some(chat) = self.supergroup_chat_mut(supergroup_id) else {
+            return false;
+        };
+        let changed = chat.is_forum != Some(is_forum);
+        chat.is_forum = Some(is_forum);
         changed
     }
 

@@ -13,9 +13,12 @@ impl Session {
         seq: u64,
     ) {
         match payload {
-            UsersPayload::UpdateUser { user_id, user } => {
+            UsersPayload::UpdateUser { user_id, mut user } => {
                 // Phase 6: keep the full user object for the contacts list
                 // and info panels.
+                if let Some(file) = user.photo_small.take() {
+                    self.remember_files(std::slice::from_ref(&file));
+                }
                 let is_bot = user.is_bot;
                 self.users.insert(user_id.0, user);
                 if is_bot {

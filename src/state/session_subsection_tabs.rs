@@ -151,9 +151,9 @@ impl Session {
     /// last message is newer than the whole chat's read position, else
     /// nothing.
     pub fn topic_badge(&self, chat_id: ChatId, topic: &ForumTopic) -> TopicBadge {
-        if topic.last_read_inbox_message_id > 1 {
-            return if topic.unread_count > 0 {
-                TopicBadge::Count(topic.unread_count)
+        if let Some(count) = topic_unread_count(topic) {
+            return if count > 0 {
+                TopicBadge::Count(count)
             } else {
                 TopicBadge::None
             };
@@ -185,18 +185,7 @@ impl Session {
         if !self.chat_has_topics(chat_id) {
             return 0;
         }
-        self.threads
-            .forum_topics
-            .get(&chat_id.0)
-            .map_or(0, |topics| {
-                topics
-                    .iter()
-                    .map(|topic| match self.topic_badge(chat_id, topic) {
-                        TopicBadge::Count(n) => n.max(0),
-                        _ => 0,
-                    })
-                    .fold(0, i32::saturating_add)
-            })
+        self.threads.forum_topics.unread(chat_id.0)
     }
 
     /// Whether the chat list draws the chat as a forum row
@@ -362,75 +351,77 @@ impl Session {
     /// topic (a bot creating one). New topics go first, as the newest
     /// activity does in Telegram's topic order.
     pub(crate) fn apply_update_forum_topic_info(&mut self, info: ForumTopicInfoUpdate) {
-        let Some(topics) = self.threads.forum_topics.get_mut(&info.chat_id) else {
-            // Not loaded yet: the first `getForumTopics` brings it.
-            return;
-        };
-        if let Some(topic) = topics
-            .iter_mut()
-            .find(|t| t.forum_topic_id == info.forum_topic_id)
-        {
-            topic.name = info.name;
-            topic.icon_color = info.icon_color;
-            topic.icon_custom_emoji_id = info.icon_custom_emoji_id;
-            topic.is_general = info.is_general;
-            topic.is_closed = info.is_closed;
-            topic.is_hidden = info.is_hidden;
-            topic.creation_date = info.creation_date;
-            topic.creator = info.creator;
-            topic.is_outgoing = info.is_outgoing;
-            return;
-        }
-        let order = topics.iter().map(|t| t.order).max().unwrap_or(0) + 1;
-        topics.push(ForumTopic {
-            forum_topic_id: info.forum_topic_id,
-            name: info.name,
-            is_general: info.is_general,
-            is_closed: info.is_closed,
-            is_pinned: false,
-            is_hidden: info.is_hidden,
-            unread_count: 0,
-            order,
-            last_message_preview: String::new(),
-            icon_color: info.icon_color,
-            icon_custom_emoji_id: info.icon_custom_emoji_id,
-            last_message_id: 0,
-            last_read_inbox_message_id: 0,
-            notification_settings: Default::default(),
-            unread_mention_count: 0,
-            unread_reaction_count: 0,
-            creation_date: info.creation_date,
-            creator: info.creator,
-            is_outgoing: info.is_outgoing,
-            draft: None,
-        });
+        // Not loaded yet: the first `getForumTopics` brings it.
+        self.threads
+            .forum_topics
+            .update(info.chat_id, |topics| apply_topic_info(topics, info));
     }
+}
 
+fn apply_topic_info(topics: &mut Vec<ForumTopic>, info: ForumTopicInfoUpdate) {
+    if let Some(topic) = topics
+        .iter_mut()
+        .find(|t| t.forum_topic_id == info.forum_topic_id)
+    {
+        topic.name = info.name;
+        topic.icon_color = info.icon_color;
+        topic.icon_custom_emoji_id = info.icon_custom_emoji_id;
+        topic.is_general = info.is_general;
+        topic.is_closed = info.is_closed;
+        topic.is_hidden = info.is_hidden;
+        topic.creation_date = info.creation_date;
+        topic.creator = info.creator;
+        topic.is_outgoing = info.is_outgoing;
+        return;
+    }
+    let order = topics.iter().map(|t| t.order).max().unwrap_or(0) + 1;
+    topics.push(ForumTopic {
+        forum_topic_id: info.forum_topic_id,
+        name: info.name,
+        is_general: info.is_general,
+        is_closed: info.is_closed,
+        is_pinned: false,
+        is_hidden: info.is_hidden,
+        unread_count: 0,
+        order,
+        last_message_preview: String::new(),
+        icon_color: info.icon_color,
+        icon_custom_emoji_id: info.icon_custom_emoji_id,
+        last_message_id: 0,
+        last_read_inbox_message_id: 0,
+        notification_settings: Default::default(),
+        unread_mention_count: 0,
+        unread_reaction_count: 0,
+        creation_date: info.creation_date,
+        creator: info.creator,
+        is_outgoing: info.is_outgoing,
+        draft: None,
+    });
+}
+
+impl Session {
     /// `updateForumTopic`: pin state, notification settings and the read
     /// position. TDLib sends no per-topic unread count here; the driver
     /// refetches the topic (`getForumTopic`) for TDLib's own count. Reading
     /// up to TDLib's last message clears the badge right away.
     pub(crate) fn apply_update_forum_topic(&mut self, update: ForumTopicUpdate) {
-        let Some(topic) = self
-            .threads
-            .forum_topics
-            .get_mut(&update.chat_id)
-            .and_then(|topics| {
-                topics
-                    .iter_mut()
-                    .find(|t| t.forum_topic_id == update.forum_topic_id)
-            })
-        else {
+        let found = self.threads.forum_topics.update_topic(
+            update.chat_id,
+            update.forum_topic_id,
+            |topic| {
+                topic.is_pinned = update.is_pinned;
+                topic.notification_settings = update.notification_settings;
+                topic.unread_mention_count = update.unread_mention_count;
+                topic.unread_reaction_count = update.unread_reaction_count;
+                if update.last_read_inbox_message_id > topic.last_read_inbox_message_id {
+                    topic.last_read_inbox_message_id = update.last_read_inbox_message_id;
+                    settle_topic_unread(topic);
+                    trace_topic_unread("updateForumTopic", update.chat_id, topic);
+                }
+            },
+        );
+        if found.is_none() {
             return;
-        };
-        topic.is_pinned = update.is_pinned;
-        topic.notification_settings = update.notification_settings;
-        topic.unread_mention_count = update.unread_mention_count;
-        topic.unread_reaction_count = update.unread_reaction_count;
-        if update.last_read_inbox_message_id > topic.last_read_inbox_message_id {
-            topic.last_read_inbox_message_id = update.last_read_inbox_message_id;
-            settle_topic_unread(topic);
-            trace_topic_unread("updateForumTopic", update.chat_id, topic);
         }
         // The topic's draft rides the same update (schema 1.8.68, line
         // 11028); an unsaved composer edit for that topic wins.
@@ -449,56 +440,55 @@ impl Session {
         let Some(topic_id) = message.topic_id else {
             return;
         };
-        let Some(topics) = self.threads.forum_topics.get_mut(&message.chat_id.0) else {
-            return;
-        };
-        let top = topics.iter().map(|t| t.order).max().unwrap_or(0);
-        let Some(topic) = topics.iter_mut().find(|t| t.forum_topic_id == topic_id) else {
-            return;
-        };
-        topic.last_message_preview =
-            effective_content(&message.content, message.ephemeral.as_ref()).preview();
-        topic.last_message_id = topic.last_message_id.max(message.id.0);
-        if !topic.is_pinned && topic.order != top {
-            topic.order = top + 1;
-        }
+        self.threads
+            .forum_topics
+            .update(message.chat_id.0, |topics| {
+                let top = topics.iter().map(|t| t.order).max().unwrap_or(0);
+                let Some(topic) = topics.iter_mut().find(|t| t.forum_topic_id == topic_id) else {
+                    return;
+                };
+                topic.last_message_preview =
+                    effective_content(&message.content, message.ephemeral.as_ref()).preview();
+                topic.last_message_id = topic.last_message_id.max(message.id.0);
+                if !topic.is_pinned && topic.order != top {
+                    topic.order = top + 1;
+                }
+            });
     }
 
     /// A `getForumTopic` answer: TDLib's state for one topic replaces the
     /// cached entry (or adds it).
     pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, mut topic: ForumTopic) {
         self.keep_dirty_topic_drafts(chat_id, std::slice::from_mut(&mut topic));
-        let Some(topics) = self.threads.forum_topics.get_mut(&chat_id.0) else {
+        if !self.threads.forum_topics.contains_key(&chat_id.0) {
             return;
-        };
+        }
         settle_topic_unread(&mut topic);
         trace_topic_unread("getForumTopic", chat_id.0, &topic);
-        match topics
-            .iter_mut()
-            .find(|t| t.forum_topic_id == topic.forum_topic_id)
-        {
-            Some(slot) => *slot = topic,
-            None => topics.push(topic),
-        }
+        self.threads.forum_topics.update(chat_id.0, |topics| {
+            match topics
+                .iter_mut()
+                .find(|t| t.forum_topic_id == topic.forum_topic_id)
+            {
+                Some(slot) => *slot = topic,
+                None => topics.push(topic),
+            }
+        });
     }
 
     /// Optimistic "Mark as read" for one topic (the server's
     /// `updateForumTopic` confirms it).
     pub fn mark_forum_topic_read_locally(&mut self, chat_id: ChatId, forum_topic_id: i32) {
-        if let Some(topic) = self
+        let marked = self
             .threads
             .forum_topics
-            .get_mut(&chat_id.0)
-            .and_then(|topics| {
-                topics
-                    .iter_mut()
-                    .find(|t| t.forum_topic_id == forum_topic_id)
-            })
-        {
-            topic.unread_count = 0;
-            topic.last_read_inbox_message_id =
-                topic.last_read_inbox_message_id.max(topic.last_message_id);
-            trace_topic_unread("markRead(local)", chat_id.0, topic);
+            .update_topic(chat_id.0, forum_topic_id, |topic| {
+                topic.unread_count = 0;
+                topic.last_read_inbox_message_id =
+                    topic.last_read_inbox_message_id.max(topic.last_message_id);
+                trace_topic_unread("markRead(local)", chat_id.0, topic);
+            });
+        if marked.is_some() {
             // The unread badges recount on a revision change.
             self.revision = self.revision.wrapping_add(1);
         }

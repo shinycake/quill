@@ -174,6 +174,9 @@ pub struct GroupsState {
     /// Supergroups whose boost level moved since the driver last looked; it
     /// refetches the boost status of the ones it has cached.
     pub boost_level_moved: Vec<i64>,
+    /// The chat of each supergroup `updateNewChat` named, so a supergroup
+    /// update reaches its chat without a walk over every chat.
+    pub supergroup_chat_ids: HashMap<i64, i64>,
     /// Phase A1: the viewer's own `chatMemberStatus*` per supergroup
     /// (`supergroup.status` / `updateSupergroup`, schema 1.8.67 line 2746).
     /// Drives the slow-mode bypass (admins/creators are exempt) and gates
@@ -332,6 +335,7 @@ impl GroupsState {
             supergroup_verification: HashMap::new(),
             supergroup_boost_levels: HashMap::new(),
             boost_level_moved: Vec::new(),
+            supergroup_chat_ids: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),
             supergroup_invite_right: HashMap::new(),

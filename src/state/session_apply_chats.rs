@@ -155,6 +155,11 @@ impl Session {
                 action: action.clone(),
             });
         }
+        if let ChatKind::Supergroup { supergroup_id, .. } = kind {
+            self.groups
+                .supergroup_chat_ids
+                .insert(supergroup_id, chat_id.0);
+        }
         let chat = self
             .chats
             .entry(chat_id.0)

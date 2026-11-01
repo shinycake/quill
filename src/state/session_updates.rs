@@ -89,6 +89,7 @@ impl Session {
                         self.chat_list.promoted_chats.remove(&pos.chat_id.0);
                     }
                 }
+                let before = (chat.in_main_list, chat.order);
                 if pos.order == 0 {
                     chat.in_main_list = false;
                 } else {
@@ -96,8 +97,12 @@ impl Session {
                     chat.is_pinned = pos.is_pinned;
                     chat.in_main_list = true;
                 }
+                if before != (chat.in_main_list, chat.order) {
+                    self.chat_order_sync.moved.insert(pos.chat_id.0);
+                }
             }
             ChatList::Archive => {
+                let before = (chat.in_archive, chat.archive_order);
                 if pos.order == 0 {
                     chat.in_archive = false;
                 } else {
@@ -105,16 +110,21 @@ impl Session {
                     chat.archive_is_pinned = pos.is_pinned;
                     chat.in_archive = true;
                 }
+                if before != (chat.in_archive, chat.archive_order) {
+                    self.chat_order_sync.moved.insert(pos.chat_id.0);
+                }
             }
             // Phase 7.1: folder membership is positional, like Main/Archive.
             // `getChatListsToAddChat` is *not* folder membership — it lists
             // chat lists a chat can be added to for `addChatToList`.
             ChatList::Folder(folder_id) => {
-                self.chat_order_sync.folder_orders.invalidate();
-                if pos.order == 0 {
-                    chat.folder_positions.remove(&folder_id);
+                let previous = if pos.order == 0 {
+                    chat.folder_positions.remove(&folder_id)
                 } else {
-                    chat.folder_positions.insert(folder_id, pos.order);
+                    chat.folder_positions.insert(folder_id, pos.order)
+                };
+                if previous != Some(pos.order).filter(|order| *order != 0) {
+                    self.chat_order_sync.folder_orders.invalidate(folder_id);
                 }
             }
             ChatList::Unknown => {}
@@ -134,8 +144,10 @@ impl Session {
             Some(pos) => self.apply_position_fields(pos),
             None => {
                 self.chat_list.promoted_chats.remove(&chat_id.0);
-                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                    chat.in_main_list = false;
+                if let Some(chat) = self.chats.get_mut(&chat_id.0)
+                    && std::mem::take(&mut chat.in_main_list)
+                {
+                    self.chat_order_sync.moved.insert(chat_id.0);
                 }
             }
         }
@@ -146,8 +158,10 @@ impl Session {
         {
             Some(pos) => self.apply_position_fields(pos),
             None => {
-                if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                    chat.in_archive = false;
+                if let Some(chat) = self.chats.get_mut(&chat_id.0)
+                    && std::mem::take(&mut chat.in_archive)
+                {
+                    self.chat_order_sync.moved.insert(chat_id.0);
                 }
             }
         }
@@ -161,9 +175,14 @@ impl Session {
             })
             .collect();
         if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-            chat.folder_positions
-                .retain(|id, _| folder_ids.contains(id));
-            self.chat_order_sync.folder_orders.invalidate();
+            let folder_orders = &mut self.chat_order_sync.folder_orders;
+            chat.folder_positions.retain(|id, _| {
+                let kept = folder_ids.contains(id);
+                if !kept {
+                    folder_orders.invalidate(*id);
+                }
+                kept
+            });
         }
         for pos in positions {
             if matches!(pos.list, ChatList::Folder(_)) {
