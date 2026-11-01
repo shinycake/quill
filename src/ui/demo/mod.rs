@@ -340,6 +340,8 @@ pub(super) fn demo_stress_size() -> Option<(usize, usize)> {
 pub(super) enum HistoryAnim {
     /// A photo and a text behind spoilers (not part of `all`).
     Spoiler,
+    /// A 12-line text under one spoiler, the specks' load case (not part
+    /// of `all`).
     Spoiler12,
     /// A video that autoplays inline (macOS).
     Video,

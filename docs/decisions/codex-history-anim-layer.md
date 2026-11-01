@@ -166,6 +166,12 @@ the part this removes.
   stickers (TGS, WebM), a message with three animated custom emoji, an
   inline-autoplaying video, a round video message, and (`spoiler`) a photo
   and a text behind spoilers; read to the end.
+- `QUILL_DEMO_HISTORY_ANIM=spoiler12` (not part of `all`): one incoming
+  text of 12 lines, all of it under a single spoiler entity. It is the load
+  case for text spoiler specks. On it each speck searched the scene's
+  bounds tree and every tile rescanned all 9,000 particles, which held the
+  main thread for most of every frame. The specks of a rect now share one
+  layer, and the walk covers only the live ones (`spoiler_fx.rs`).
 - `…,panel` / `…,menu` / `…,select`: the emoji panel, a message menu or
   selection mode over that history, to check what covers animated content.
 - `QUILL_DEMO_CLICK` (demo-capture builds) now dispatches through the
