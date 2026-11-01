@@ -202,7 +202,6 @@ impl QuillApp {
             .then(|| super::audio::Simulation {
                 fail: std::env::var_os("QUILL_DEMO_AUDIO_FAIL").is_some(),
                 stall: std::env::var_os("QUILL_DEMO_AUDIO_STALL").is_some(),
-                slow: std::env::var_os("QUILL_DEMO_AUDIO_SLOW").is_some(),
             });
         if simulation.is_none() {
             self.watch_audio_builds(cx);
@@ -506,7 +505,6 @@ impl QuillApp {
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
                 is_playing: self.playback.is_playing(),
-                loading: self.playback.audio.loading_shown(),
                 // Speed, mute and the engine's error show on the active row.
                 speed: self.playback.speed,
                 muted: self.playback.volume < 0.01,
@@ -529,7 +527,6 @@ impl QuillApp {
                     .unwrap_or(0.0),
                 duration_secs,
                 is_playing: false,
-                loading: false,
                 speed: self.playback.speed,
                 muted: false,
                 error: None,

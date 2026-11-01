@@ -52,14 +52,7 @@ pub(in crate::ui) struct Simulation {
     pub(in crate::ui) fail: bool,
     /// Every seek hangs, to show the stalled-device state.
     pub(in crate::ui) stall: bool,
-    /// The sound never comes up, to show a long start.
-    pub(in crate::ui) slow: bool,
 }
-
-/// How long a start may take before the row says so. Telegram Desktop shows a
-/// stream's waiting radial after this long (`kWaitingShowDelay`), and nothing
-/// before: a track that is starting shows Pause, at the position asked for.
-const LOADING_SHOWS_AFTER: Duration = Duration::from_millis(500);
 
 /// The engine's time source. Tests drive a manual one so the stall bound
 /// needs no sleeping.
@@ -251,7 +244,6 @@ struct Building {
     built_for: f64,
     latest_target: f64,
     land_paused: bool,
-    asked_at: Duration,
     built: Receiver<Result<Built, AudioError>>,
 }
 
@@ -401,11 +393,7 @@ impl AudioEngine {
             return if clock.finished_at(self.sim_now()) {
                 EngineState::Ended
             } else if clock.is_playing() {
-                if self.simulation.is_some_and(|simulation| simulation.slow) {
-                    EngineState::Loading
-                } else {
-                    EngineState::Playing
-                }
+                EngineState::Playing
             } else {
                 EngineState::Paused
             };
@@ -423,17 +411,6 @@ impl AudioEngine {
             Some(player) if player.empty() => EngineState::Ended,
             Some(_) => EngineState::Playing,
         }
-    }
-
-    /// A start has been `Loading` for long enough to show.
-    pub(in crate::ui) fn loading_shown(&self) -> bool {
-        let waited = |building: &Building| self.clock.now().saturating_sub(building.asked_at);
-        self.state() == EngineState::Loading
-            && (self.sim_clock.is_some()
-                || self
-                    .building
-                    .as_ref()
-                    .is_some_and(|b| waited(b) >= LOADING_SHOWS_AFTER))
     }
 
     /// Where the track is, in seconds of the track: frames the mixer took,
@@ -486,7 +463,7 @@ impl AudioEngine {
 
     /// Tests: an engine whose clock is the returned handle (milliseconds).
     #[cfg(test)]
-    fn with_manual_clock(mut self) -> (Self, Arc<AtomicU64>) {
+    pub(in crate::ui) fn with_manual_clock(mut self) -> (Self, Arc<AtomicU64>) {
         let millis = Arc::new(AtomicU64::new(0));
         self.clock.manual = Some(millis.clone());
         (self, millis)
@@ -547,16 +524,11 @@ impl AudioEngine {
             return;
         }
         let land_paused = self.track.as_ref().is_some_and(|t| t.player.is_paused());
-        let began = self.spawn_build(target, land_paused, self.clock.now());
+        let began = self.spawn_build(target, land_paused);
         self.note(&began);
     }
 
-    fn spawn_build(
-        &mut self,
-        target: f64,
-        land_paused: bool,
-        asked_at: Duration,
-    ) -> Result<(), AudioError> {
+    fn spawn_build(&mut self, target: f64, land_paused: bool) -> Result<(), AudioError> {
         let path = self.path.clone().ok_or(AudioError::Open)?;
         let outlet = self.output.outlet().ok_or(AudioError::NoOutput)?;
         let (done, built) = mpsc::channel();
@@ -578,7 +550,6 @@ impl AudioEngine {
             built_for: target,
             latest_target: target,
             land_paused,
-            asked_at,
             built,
         });
         Ok(())
@@ -600,14 +571,13 @@ impl AudioEngine {
             built_for,
             latest_target: target,
             land_paused,
-            asked_at,
             ..
         }) = self.building.take()
         else {
             return;
         };
         let redone = ((built_for - target).abs() > f64::EPSILON)
-            .then(|| self.spawn_build(target, land_paused, asked_at));
+            .then(|| self.spawn_build(target, land_paused));
         match (redone, result) {
             (Some(Ok(())), _) => {}
             (Some(Err(error)), _) | (None, Err(error)) => self.fail_build(error, target),
@@ -676,7 +646,7 @@ impl AudioEngine {
             self.sim_clock = Some(clock);
             return Ok(());
         }
-        self.spawn_build(offset, false, self.clock.now())
+        self.spawn_build(offset, false)
     }
 
     /// True while a track is loaded (playing or paused, ended or not).
@@ -1066,26 +1036,6 @@ mod tests {
     }
 
     #[test]
-    fn a_short_start_shows_nothing_and_a_long_one_shows_loading() {
-        let (engine, _device) = rig();
-        let (mut engine, clock) = engine.with_manual_clock();
-        let open = engine.gate_builds();
-        let path = track("loading-long.wav", 4);
-        engine.start(&path, 1.0, 1.0, 1.0, 4.0).unwrap();
-        clock.store(499, std::sync::atomic::Ordering::Relaxed);
-        assert!(!engine.loading_shown());
-        clock.store(500, std::sync::atomic::Ordering::Relaxed);
-        assert!(engine.loading_shown());
-        engine.pause();
-        assert!(!engine.loading_shown(), "a held start shows Play");
-        engine.resume(1.0).unwrap();
-        assert!(engine.loading_shown());
-        open.send(()).unwrap();
-        engine.await_landing();
-        assert!(!engine.loading_shown());
-    }
-
-    #[test]
     fn a_started_track_plays_and_a_pause_holds_it() {
         let (mut engine, mut device) = rig();
         let path = track("play-pause.wav", 4);
@@ -1218,7 +1168,6 @@ mod tests {
         engine.set_simulation(Some(Simulation {
             fail: true,
             stall: false,
-            slow: false,
         }));
         assert!(engine.start(&path, 1.0, 1.0, 1.0, 4.0).is_err());
         assert_eq!(engine.state(), EngineState::Failed);
@@ -1246,7 +1195,6 @@ mod tests {
         engine.set_simulation(Some(Simulation {
             fail: false,
             stall: false,
-            slow: false,
         }));
         let path = PathBuf::from("unused.wav");
         start_landed(&mut engine, &path, 3.0, 1.0, 1.0, 10.0);

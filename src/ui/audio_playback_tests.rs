@@ -1,18 +1,13 @@
 use super::AUDIO_BUILT;
 use crate::ui::app::QuillApp;
 use crate::ui::audio::engine::test_support::{device, track};
-use crate::ui::audio::{AudioEngine, EngineState, Simulation};
+use crate::ui::audio::{AudioEngine, EngineState};
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-
-const DEMO_CHAT: ChatId = ChatId(11);
-const DEMO_SONG: MessageId = MessageId(801);
-const DEMO_SONG_SECS: f64 = 214.0;
 
 fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     quill::settings::use_isolated_app_root(quill::scratch::process_dir("quill-audio-start-ui"));
@@ -32,36 +27,6 @@ fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let vcx = VisualTestContext::from_window(handle.into(), cx);
     vcx.run_until_parked();
     (app, vcx)
-}
-
-fn is_showing_pause(app: &QuillApp) -> bool {
-    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS)
-        .is_playing
-}
-
-fn shows_loading(app: &QuillApp) -> bool {
-    app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS)
-        .loading
-}
-
-#[gpui_kit::test]
-fn a_start_that_takes_long_shows_pause_and_loading_on_the_row(cx: &mut TestAppContext) {
-    let (app, mut vcx) = open_app(cx);
-    app.read_with(&vcx, |app, _| {
-        assert!(is_showing_pause(app));
-        assert!(!shows_loading(app));
-    });
-    app.update(&mut vcx, |app, _| {
-        app.playback.audio.set_simulation(Some(Simulation {
-            fail: false,
-            stall: false,
-            slow: true,
-        }));
-    });
-    app.read_with(&vcx, |app, _| {
-        assert!(is_showing_pause(app), "tdesktop: Pause from the press on");
-        assert!(shows_loading(app));
-    });
 }
 
 /// The poke stands in for the build thread, which can't touch a test

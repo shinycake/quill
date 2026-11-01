@@ -32,7 +32,6 @@ pub(super) struct TrackShown {
     state: super::audio::EngineState,
     position_bits: Option<u64>,
     error: Option<super::audio::AudioError>,
-    loading: bool,
     /// Previous / next (`QuillApp::playlist_can_move`): the songs loaded
     /// in the track's chat, which a message arriving there off screen
     /// changes without redrawing the bar.
@@ -147,7 +146,6 @@ impl PlaybackUi {
             state: self.engine_state(),
             position_bits: self.active_position_secs().map(f64::to_bits),
             error: self.audio.error(),
-            loading: self.audio.loading_shown(),
             can_move,
         }
     }
@@ -236,6 +234,24 @@ mod tests {
         assert_eq!(ui.active_position_secs(), Some(2.0));
     }
 
+    /// tdesktop's audio row reads no waiting state: a start shows Pause
+    /// alone however long the file takes to open.
+    #[test]
+    fn a_long_start_shows_pause_alone_and_draws_nothing_new() {
+        let (output, _device) = device();
+        let mut ui = PlaybackUi::new(&output);
+        let clock;
+        (ui.audio, clock) = ui.audio.with_manual_clock();
+        ui.playing_audio = Some(MessageId(1));
+        ui.track_length = Some(4.0);
+        let path = track("ui-long-start.wav", 4);
+        ui.audio.start(&path, 2.0, 1.0, 1.0, 4.0).unwrap();
+        let pressed = ui.track_shown((false, false));
+        clock.store(5000, std::sync::atomic::Ordering::Relaxed);
+        assert!(ui.is_playing());
+        assert_eq!(ui.track_shown((false, false)), pressed);
+    }
+
     #[test]
     fn a_failed_resume_keeps_the_button_on_play() {
         let (output, _device) = device();
@@ -280,7 +296,6 @@ mod tests {
         ui.audio.set_simulation(Some(Simulation {
             fail: false,
             stall: false,
-            slow: false,
         }));
         ui.audio
             .start(Path::new("a.ogg"), 5.0, 1.0, 1.0, 5.0)

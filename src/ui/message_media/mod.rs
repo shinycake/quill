@@ -44,8 +44,8 @@ pub(super) use call::call_card;
 pub(super) use cards::{ContactCardState, contact_row};
 pub(super) use dice::dice_row;
 pub(super) use document::{
-    DocOrigin, action_disc, bubble_accent, disc_ring, document_chip, download_display_name,
-    format_bytes, inline_link,
+    DocOrigin, action_disc, bubble_accent, document_chip, download_display_name, format_bytes,
+    inline_link,
 };
 pub(super) use layout::{
     MediaCorners, MediaDisc, MediaFrameKind, bubble_outer_width, download_fraction,

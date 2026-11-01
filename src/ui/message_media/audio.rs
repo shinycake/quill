@@ -159,7 +159,7 @@ pub(in crate::ui) fn voice_note_row(
         (
             gpui_kit::assets::IconName::Pause,
             tr(keys::MAC_MENU_PLAYER_PAUSE),
-            seek.loading.then_some(None),
+            None,
         )
     } else if downloading_now {
         (
@@ -313,7 +313,7 @@ pub(in crate::ui) fn audio_row(
         (
             gpui_kit::assets::IconName::Pause,
             tr(keys::MAC_MENU_PLAYER_PAUSE),
-            seek.loading.then_some(None),
+            None,
         )
     } else if downloading_now {
         (
@@ -370,13 +370,6 @@ pub(in crate::ui) fn audio_row(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .when(seek.loading, |this| {
-                        this.child(disc_ring(
-                            ("audio-loading", row_key).into(),
-                            None,
-                            gpui_kit::white(),
-                        ))
-                    })
                     .child(Icon::new(icon).size(px(20.)).text_color(gpui_kit::white())),
             )
             .on_click(play),

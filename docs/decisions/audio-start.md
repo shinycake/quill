@@ -3,9 +3,10 @@
 ## tdesktop
 `media/audio/media_audio.cpp`: `Mixer::play` sets the track's state and position at once, with
 `loading = true`, and a thread does the rest. `ShowPauseIcon` is true for Starting and Playing,
-so the button says Pause from the press on. A local track shows no spinner.
-`media/streaming/media_streaming_document.cpp` shows the waiting ring only after
-`kWaitingShowDelay`, 500 ms.
+so the button says Pause from the press on. The audio and voice row
+(`history_view_document.cpp`) reads no waiting state: its only radial is the file's download or
+upload progress, and `Media::Player::Instance` drops `WaitingForData` for audio. The 500 ms
+`kWaitingShowDelay` in `media_streaming_document.cpp` belongs to the video surfaces only.
 
 ## What changed in Quill
 - `AudioEngine::start`, a resume after the end, and a seek the decoder can't do return at once.
@@ -17,8 +18,8 @@ so the button says Pause from the press on. A local track shows no spinner.
   seek and `land_paused` the newest pause. A landing built for another position builds again.
   Nothing is cancelled, since a build holds no state of the engine's, and a dropped `Built` plays
   nothing.
-- `EngineState::Loading` shows as Pause at the offset, as in tdesktop. The ring shows only from
-  500 ms on, by the engine clock, so a short start shows nothing at all.
+- `EngineState::Loading` shows as Pause at the offset and nothing else, however long the file
+  takes to open, as in tdesktop.
 - A failed start fails when it lands. The failure note moved to the landing for that reason.
 - `OpusSource` keeps its packets in one block, so ending a track on the audio thread frees two
   allocations and not one per packet.
@@ -29,4 +30,3 @@ would be quicker there, but lands in the wrong place on a VBR file.
 
 ## Test
 `cargo test --features demo-capture --bin quill -- ui::audio ui::playback_state`.
-`QUILL_DEMO_AUDIO_SLOW=1` with `ready-audio` or `ready-voice-playing` shows the long wait.
