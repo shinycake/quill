@@ -72,7 +72,7 @@ the gift value box (#824), that PR completes the item and declares it in
   empty or repeats, so a row without an id is kept and opens its own
   receipt (it has no Transaction ID line). The Settings row is
   added after Stars in `navigation.rs`. Top-up goes through
-  `link_policy::open_decision` and `open_message_url`.
+  `link_policy::open_decision` and `open_link`.
 - Strings in `lang/en/money.strings`: tdesktop keys where tdesktop has the
   text (`lng_credits_currency_summary_*`, `lng_credits_box_history_entry_*`,
   `lng_credits_summary_history_tab_*`, `lng_settings_currency`, …) and

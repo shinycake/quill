@@ -280,7 +280,7 @@ pub(super) fn sponsored_message_row(
                 .label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.click_sponsored_message(chat_id, sponsored_id, false, cx);
-                    this.open_message_url(&url, cx);
+                    this.open_link(&url, cx);
                 })),
         );
     }

@@ -321,7 +321,7 @@ pub(super) fn tx_details(
                 .label(tr(keys::Q_MONEY_VIEW_IN_EXPLORER))
                 .outline()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_message_url(&url, cx);
+                    this.open_link(&url, cx);
                 })),
         )
     })

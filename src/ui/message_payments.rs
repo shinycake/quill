@@ -228,7 +228,7 @@ impl QuillApp {
     ) {
         match &button.kind {
             InlineKeyboardButtonType::Url { url } => {
-                self.open_message_url(url, cx);
+                self.open_link(url, cx);
             }
             // Mini apps open in their own window (`ui/web_app_ui.rs`).
             InlineKeyboardButtonType::WebApp { url } => {

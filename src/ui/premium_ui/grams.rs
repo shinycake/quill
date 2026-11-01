@@ -190,7 +190,7 @@ impl QuillApp {
             label: None,
         };
         if let OpenDecision::Open = open_decision(&link) {
-            self.open_message_url(TOPUP_URL, cx);
+            self.open_link(TOPUP_URL, cx);
         }
     }
 

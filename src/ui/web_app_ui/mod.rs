@@ -844,7 +844,7 @@ impl QuillApp {
                         .ghost()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_message_url(MINI_APP_TERMS_URL, cx);
+                            this.open_link(MINI_APP_TERMS_URL, cx);
                         })),
                 );
             }

@@ -653,7 +653,7 @@ impl QuillApp {
         {
             let messages = &mut live.driver.session.messages;
             let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
-            self.agent_step(from_agent, |this| this.open_message_url(&url, cx));
+            self.agent_step(from_agent, |this| this.open_link(&url, cx));
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)
@@ -758,18 +758,6 @@ impl QuillApp {
         }
     }
 
-    pub(in crate::ui) fn open_message_url(&mut self, url: &str, cx: &mut Context<Self>) {
-        let open = quill::platform::open_external_url(url);
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            this.connection.set_note(if opened {
-                StatusNote::info(tr(keys::Q_CHAT_OPENED_LINK))
-            } else {
-                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK))
-            });
-            cx.notify();
-        });
-    }
-
     /// MED4: open a link-preview card tap (TGX `TdlibUi` behavior).
     /// Embedded players open their embed URL (IV never applies); cards
     /// with `instant_view_version > 0` (schema:4570) open the IV reader
@@ -786,7 +774,7 @@ impl QuillApp {
             &preview.kind
             && !url.is_empty()
         {
-            self.open_message_url(url, cx);
+            self.open_link(url, cx);
             return;
         }
         let url = preview.url.clone();
@@ -809,7 +797,7 @@ impl QuillApp {
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
             cx.notify();
         } else {
-            self.open_message_url(&url, cx);
+            self.open_link(&url, cx);
         }
     }
 

@@ -57,7 +57,7 @@ impl QuillApp {
     /// The provider's 3-D Secure page opens in the OS browser and the
     /// checkout closes, as tdesktop does when it cannot show a web view.
     pub(super) fn open_payment_verification(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.open_message_url(url, cx);
+        self.open_link(url, cx);
         self.close_payment_dialog(cx);
     }
 
@@ -152,7 +152,7 @@ impl QuillApp {
                     ))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_message_url(&url, cx);
+                        this.open_link(&url, cx);
                     })),
             );
         }
@@ -312,7 +312,7 @@ impl QuillApp {
                             .label(tr(keys::Q_MONEY_I_ACCEPT_THE_TERMS_OF))
                             .ghost()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_message_url(&url, cx);
+                                this.open_link(&url, cx);
                             })),
                     ),
             );
@@ -324,7 +324,7 @@ impl QuillApp {
                     .label(tr(keys::Q_MONEY_RECURRING_PAYMENT_TERMS))
                     .ghost()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_message_url(&url, cx);
+                        this.open_link(&url, cx);
                     })),
             );
         }
@@ -526,7 +526,7 @@ impl QuillApp {
             return;
         }
         match info {
-            LoginUrlInfo::Open { url } => self.open_message_url(&url, cx),
+            LoginUrlInfo::Open { url } => self.open_link(&url, cx),
             LoginUrlInfo::RequestConfirmation {
                 domain,
                 request_write_access,
@@ -551,7 +551,7 @@ impl QuillApp {
                         cx,
                     );
                 } else {
-                    self.open_message_url(&fallback_url, cx);
+                    self.open_link(&fallback_url, cx);
                 }
             }
         }
@@ -572,7 +572,7 @@ impl QuillApp {
                 .send_login_url(&confirm.request, confirm.request_write_access)
         });
         if !matches!(sent, Some(Ok(_))) {
-            self.open_message_url(&confirm.request.raw_url, cx);
+            self.open_link(&confirm.request.raw_url, cx);
         }
         cx.notify();
     }

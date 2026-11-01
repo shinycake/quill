@@ -203,11 +203,11 @@ impl QuillApp {
             .map(|info| privacy_target(&info.privacy_policy_url, &info.commands))
             .unwrap_or(PrivacyTarget::Default);
         match target {
-            PrivacyTarget::Url(url) => self.open_message_url(&url, cx),
+            PrivacyTarget::Url(url) => self.open_link(&url, cx),
             PrivacyTarget::Command(command) => {
                 self.send_profile_bot_command(user_id, &command, window, cx)
             }
-            PrivacyTarget::Default => self.open_message_url(tr(keys::PROFILE_BOT_PRIVACY_URL), cx),
+            PrivacyTarget::Default => self.open_link(tr(keys::PROFILE_BOT_PRIVACY_URL), cx),
         }
     }
 

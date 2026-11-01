@@ -37,13 +37,13 @@ fn note(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (String, NoteKin
 fn open_link(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> oneshot::Sender<bool> {
     let (answer, answered) = oneshot::channel();
     script_next_os_open(OsOpen::Pending(answered));
-    app.update_in(vcx, |app, _, cx| app.open_message_url(URL, cx));
+    app.update_in(vcx, |app, _, cx| app.open_link(URL, cx));
     vcx.run_until_parked();
     answer
 }
 
 #[gpui_kit::test]
-fn a_link_says_nothing_until_the_shell_answers(cx: &mut TestAppContext) {
+fn a_link_the_shell_took_says_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let before = note(&app, vcx);
@@ -52,10 +52,7 @@ fn a_link_says_nothing_until_the_shell_answers(cx: &mut TestAppContext) {
 
     answer.send(true).unwrap();
     vcx.run_until_parked();
-    assert_eq!(
-        note(&app, vcx),
-        (tr(keys::Q_CHAT_OPENED_LINK).to_string(), NoteKind::Info)
-    );
+    assert_eq!(note(&app, vcx), before);
 }
 
 #[gpui_kit::test]
@@ -89,7 +86,7 @@ fn a_known_answer_shows_in_the_same_call(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     script_next_os_open(OsOpen::Answered(false));
     app.update_in(vcx, |app, _, cx| {
-        app.open_message_url(URL, cx);
+        app.open_link(URL, cx);
         assert_eq!(app.connection.note().kind(), NoteKind::Error);
     });
 }

@@ -100,14 +100,7 @@ impl QuillApp {
         let open = path.map_or(OsOpen::Answered(false), |path| {
             quill::platform::reveal_in_file_manager(&path)
         });
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            this.connection.set_note(if opened {
-                StatusNote::silent(tr(keys::Q_OPS_REVEALED_IN_FILE_MANAGER))
-            } else {
-                StatusNote::error(tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE))
-            });
-            cx.notify();
-        });
+        self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE), cx);
     }
 
     /// Cancel an in-flight download: listed (user-initiated) downloads go
