@@ -7,6 +7,8 @@
 //! path, so the newest bytes for a path win and earlier ones are dropped.
 //! Each write is still the atomic temp-file-and-rename, and
 //! [`flush_deferred_writes`] waits for everything queued, for quitting.
+//! A write that fails stays queued, so reads still see it, and is tried
+//! again with the next submit or the flush.
 
 use super::{json_bytes, write_bytes_atomic};
 use serde::Serialize;
@@ -20,9 +22,28 @@ type Sink = dyn Fn(&Path, &[u8]) -> std::io::Result<()> + Send + Sync;
 #[derive(Default)]
 struct State {
     /// Kept until the bytes are on disk, so a read during the write sees them.
-    pending: HashMap<PathBuf, Arc<Vec<u8>>>,
+    pending: HashMap<PathBuf, Queued>,
     writer_running: bool,
     failure: Option<std::io::Error>,
+}
+
+struct Queued {
+    bytes: Arc<Vec<u8>>,
+    /// The last try failed: the writer leaves it until a submit or a
+    /// flush asks for another.
+    failed: bool,
+}
+
+impl State {
+    fn has_work(&self) -> bool {
+        self.pending.values().any(|queued| !queued.failed)
+    }
+
+    fn retry_failed(&mut self) {
+        for queued in self.pending.values_mut() {
+            queued.failed = false;
+        }
+    }
 }
 
 struct Shared {
@@ -58,7 +79,14 @@ impl DeferredWriter {
     pub(crate) fn submit(&self, path: PathBuf, bytes: Vec<u8>) {
         let start = {
             let mut state = self.shared.lock();
-            state.pending.insert(path, Arc::new(bytes));
+            state.retry_failed();
+            state.pending.insert(
+                path,
+                Queued {
+                    bytes: Arc::new(bytes),
+                    failed: false,
+                },
+            );
             !std::mem::replace(&mut state.writer_running, true)
         };
         if start && !self.spawn_writer() {
@@ -76,7 +104,7 @@ impl DeferredWriter {
             .lock()
             .pending
             .get(path)
-            .map(|bytes| bytes.as_ref().clone())
+            .map(|queued| queued.bytes.as_ref().clone())
     }
 
     /// The latest write that failed since the last call, for the status note.
@@ -99,25 +127,37 @@ impl DeferredWriter {
         loop {
             let batch = {
                 let mut state = self.shared.lock();
-                if state.pending.is_empty() {
+                if !state.has_work() {
                     state.writer_running = false;
                     self.shared.idle.notify_all();
                     return;
                 }
-                state.pending.clone()
+                state
+                    .pending
+                    .iter()
+                    .filter(|(_, queued)| !queued.failed)
+                    .map(|(path, queued)| (path.clone(), queued.bytes.clone()))
+                    .collect::<Vec<_>>()
             };
             for (path, bytes) in batch {
                 let written = (self.shared.sink)(&path, &bytes);
                 let mut state = self.shared.lock();
-                if state
+                let current = state
                     .pending
-                    .get(&path)
-                    .is_some_and(|queued| Arc::ptr_eq(queued, &bytes))
-                {
-                    state.pending.remove(&path);
-                }
-                if let Err(err) = written {
-                    state.failure = Some(err);
+                    .get_mut(&path)
+                    .filter(|queued| Arc::ptr_eq(&queued.bytes, &bytes));
+                match written {
+                    Ok(()) => {
+                        if current.is_some() {
+                            state.pending.remove(&path);
+                        }
+                    }
+                    Err(err) => {
+                        if let Some(queued) = current {
+                            queued.failed = true;
+                        }
+                        state.failure = Some(err);
+                    }
                 }
             }
         }
@@ -127,7 +167,8 @@ impl DeferredWriter {
     pub(crate) fn flush(&self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         let mut state = self.shared.lock();
-        while state.writer_running || !state.pending.is_empty() {
+        state.retry_failed();
+        while state.writer_running || state.has_work() {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return;
@@ -312,11 +353,13 @@ mod tests {
         let (writer, log) = recording(None);
         let path = PathBuf::from("/x/stuck.json");
         // The state `submit` leaves when its writer thread cannot start.
-        writer
-            .shared
-            .lock()
-            .pending
-            .insert(path.clone(), Arc::new(b"q".to_vec()));
+        writer.shared.lock().pending.insert(
+            path.clone(),
+            super::Queued {
+                bytes: Arc::new(b"q".to_vec()),
+                failed: false,
+            },
+        );
         assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
         writer.flush(Duration::from_secs(5));
@@ -333,6 +376,39 @@ mod tests {
         let failure = writer.take_failure().map(|err| err.to_string());
         assert_eq!(failure.as_deref(), Some("disk full"));
         assert!(writer.take_failure().is_none());
+    }
+
+    #[test]
+    fn a_failed_write_stays_queued_and_the_next_submit_tries_it_again() {
+        let full = Arc::new(Mutex::new(true));
+        let (seen, disk) = (Log::default(), full.clone());
+        let written = seen.clone();
+        let writer = DeferredWriter::new(Box::new(move |path, bytes| {
+            if disk.lock().map(|full| *full).unwrap_or(false) {
+                return Err(std::io::Error::other("disk full"));
+            }
+            if let Ok(mut log) = written.lock() {
+                log.push((path.to_path_buf(), bytes.to_vec()));
+            }
+            Ok(())
+        }));
+        let (prefs, other) = (PathBuf::from("/x/prefs.json"), PathBuf::from("/x/b.json"));
+        writer.submit(prefs.clone(), b"kept".to_vec());
+        writer.flush(Duration::from_secs(5));
+        assert_eq!(writer.pending(&prefs), Some(b"kept".to_vec()));
+        assert!(writer.take_failure().is_some());
+        if let Ok(mut full) = full.lock() {
+            *full = false;
+        }
+        writer.submit(other.clone(), b"b".to_vec());
+        writer.flush(Duration::from_secs(5));
+        assert_eq!(writer.pending(&prefs), None);
+        let mut on_disk = seen.lock().map(|l| l.clone()).unwrap_or_default();
+        on_disk.sort();
+        assert_eq!(
+            on_disk,
+            vec![(other, b"b".to_vec()), (prefs, b"kept".to_vec())]
+        );
     }
 
     #[test]
