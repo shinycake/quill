@@ -97,10 +97,11 @@ impl QuillApp {
             .and_then(|s| s.media.files.get(&file_id.0))
             .and_then(|f| f.usable_path())
             .map(PathBuf::from);
-        let open = path.map_or(OsOpen::Answered(false), |path| {
-            quill::platform::reveal_in_file_manager(&path)
-        });
-        self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE), cx);
+        let failure = tr(keys::Q_OPS_COULD_NOT_REVEAL_THE_FILE);
+        match path {
+            Some(path) => self.reveal_in_folder_or(&path, failure, cx),
+            None => self.report_failed_open(OsOpen::Answered(false), failure, cx),
+        }
     }
 
     /// Cancel an in-flight download: listed (user-initiated) downloads go

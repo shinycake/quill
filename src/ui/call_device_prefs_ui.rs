@@ -4,18 +4,15 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use crate::ui::status_note::StatusNote;
 use gpui_base::Disableable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{ActiveTheme, Sizable};
 use gpui_kit::*;
 use quill::call_device_prefs::{
-    ACCEPT_CALLS_TITLE, SYSTEM_PREFS_TITLE, current_session_accepts_calls, open_system_sound_prefs,
-    system_sound_target,
+    ACCEPT_CALLS_TITLE, SYSTEM_PREFS_TITLE, current_session_accepts_calls, system_sound_target,
 };
 use quill::lang::{keys, tr};
-use quill::platform::OsOpen;
 
 impl QuillApp {
     pub(super) fn call_device_prefs_section(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -66,29 +63,19 @@ impl QuillApp {
                     .child(div().text_sm().child(ACCEPT_CALLS_TITLE)),
             );
         }
-        if system_sound_target().is_some() {
+        if let Some(target) = system_sound_target() {
             block = block.child(
                 div().flex().child(
                     Button::new("call-system-sound-prefs")
                         .label(SYSTEM_PREFS_TITLE)
                         .small()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.sound_prefs_answer(open_system_sound_prefs(), cx);
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let failure = tr(keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND);
+                            this.open_system_settings(target, failure, cx);
                         })),
                 ),
             );
         }
         block.text_color(cx.theme().foreground).into_any_element()
-    }
-
-    pub(super) fn sound_prefs_answer(&mut self, open: OsOpen, cx: &mut Context<Self>) {
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            if !opened {
-                this.connection.set_note(StatusNote::error(tr(
-                    keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND,
-                )));
-                cx.notify();
-            }
-        });
     }
 }

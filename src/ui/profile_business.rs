@@ -7,7 +7,6 @@
 
 use super::app::QuillApp;
 use super::fragment_link::text_with_link;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -117,15 +116,7 @@ impl QuillApp {
             )
             .on_click(cx.listener(move |this, _, _, cx| match &url {
                 Some(url) => {
-                    let open = quill::platform::open_external_url(url);
-                    this.when_os_answers(open, cx, |this, opened, cx| {
-                        if !opened {
-                            this.connection.set_note(StatusNote::error(tr(
-                                keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP,
-                            )));
-                            cx.notify();
-                        }
-                    });
+                    this.open_web_link(url, tr(keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP), cx);
                 }
                 None => this.copy_profile_text(
                     &address,

@@ -88,7 +88,7 @@ impl QuillApp {
                                 .child(auth.body.clone()),
                         )
                     })
-                    .children(self.disk_full_reveal()),
+                    .children(self.disk_full_reveal(cx)),
             );
         let mut form = div().w_full().flex().flex_col().gap_3();
         if matches!(auth.action, AuthAction::Register) && self.live.is_some() {

@@ -234,8 +234,7 @@ impl QuillApp {
     }
 
     fn story_area_open_map(&mut self, url: &str, cx: &mut Context<Self>) {
-        let open = quill::platform::open_external_url(url);
-        self.report_failed_open(open, tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP), cx);
+        self.open_web_link(url, tr(keys::Q_MEDIA_COULD_NOT_OPEN_MAP), cx);
     }
 
     /// Phase 9.8: a story area tap — the action each `StoryAreaType`

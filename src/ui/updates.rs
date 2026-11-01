@@ -14,7 +14,6 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
-use quill::platform::OsOpen;
 use quill::updater::{DownloadProgress, UpdateControl, UpdateState, check_latest_release};
 use std::time::Duration;
 
@@ -442,18 +441,10 @@ impl QuillApp {
     }
 
     fn open_license_notices(&mut self, cx: &mut Context<Self>) {
-        let open = quill::about::bundled_notices().map_or(OsOpen::Answered(false), |path| {
-            quill::platform::open_local_file(&path)
-        });
-        self.published_notices_unless_opened(open, cx);
-    }
-
-    pub(super) fn published_notices_unless_opened(&mut self, open: OsOpen, cx: &mut Context<Self>) {
-        self.when_os_answers(open, cx, |this, opened, cx| {
-            if !opened {
-                this.open_link(quill::about::NOTICES_URL, cx);
-            }
-        });
+        match quill::about::bundled_notices() {
+            Some(path) => self.open_file_then(&path, cx, published_notices_unless_opened),
+            None => self.open_link(quill::about::NOTICES_URL, cx),
+        }
     }
 
     /// "Updated to Quill X" after an update, with its notes; the update
@@ -498,5 +489,17 @@ impl QuillApp {
                     ),
             )
             .into_any_element()
+    }
+}
+
+/// The license notices did not open from the app bundle: the published
+/// copy opens in the browser instead.
+pub(super) fn published_notices_unless_opened(
+    this: &mut QuillApp,
+    opened: bool,
+    cx: &mut Context<QuillApp>,
+) {
+    if !opened {
+        this.open_link(quill::about::NOTICES_URL, cx);
     }
 }

@@ -399,6 +399,14 @@ fn the_full_screen_links_to_the_cached_files(cx: &mut TestAppContext) {
     fill(&app, &mut vcx, Some(0));
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(vcx.update(|window, _| window.try_find("disk-full-reveal").is_some()));
+    quill::platform::script_next_os_open(quill::platform::OsOpen::Answered(false));
+    vcx.update(|window, cx| window.click("disk-full-reveal", cx));
+    let note = app.read_with(&vcx, |app, _| app.connection.note().text().to_string());
+    assert_eq!(
+        note,
+        tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER),
+        "a failed reveal says so"
+    );
     app.update_in(&mut vcx, |app, _, _| app.disk.cache_folder = None);
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(

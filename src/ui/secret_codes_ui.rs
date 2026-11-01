@@ -110,8 +110,7 @@ impl QuillApp {
             .create(true)
             .append(true)
             .open(&path);
-        let open = quill::platform::reveal_in_file_manager(&path);
-        self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS), cx);
+        self.reveal_in_folder_or(&path, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_LOGS), cx);
         cx.notify();
     }
 

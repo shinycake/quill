@@ -556,8 +556,7 @@ impl QuillApp {
         if guard::refuse_outside_if_injecting("open a file with its app") {
             return;
         }
-        let open = quill::platform::open_local_file(path);
-        self.report_failed_open(open, tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE), cx);
+        self.open_file(path, tr(keys::Q_PREFS_COULD_NOT_OPEN_THE_FILE), cx);
     }
 
     /// The warning's confirm: remember the choice when ticked, then open.

@@ -152,8 +152,7 @@ impl QuillApp {
                 self.send_bot_command(chat_id, message_id, &command, cx);
             }
             LinkTarget::Email(address) => {
-                let open = quill::platform::open_mailto(&address);
-                self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL), cx);
+                self.open_mail_to(&address, cx);
             }
             LinkTarget::Phone(_) | LinkTarget::BankCard(_) | LinkTarget::DateTime { .. } => {
                 if let LinkTarget::BankCard(number) = &link {

@@ -6,7 +6,6 @@
 //! no output "Test" playback, so Quill has none either.
 #![deny(clippy::indexing_slicing)]
 
-use crate::platform::OsOpen;
 use crate::telegram::envelope::ParsedSession;
 
 pub const ACCEPT_CALLS_TITLE: &str = "Accept calls on this device";
@@ -37,15 +36,6 @@ fn sound_target_for(mac: bool, windows: bool) -> Option<&'static str> {
         Some("ms-settings:sound")
     } else {
         None
-    }
-}
-
-/// Open the system sound settings; answers `false` when unsupported or the
-/// OS refused.
-pub fn open_system_sound_prefs() -> OsOpen {
-    match system_sound_target() {
-        Some(target) => crate::platform::open_local_file(std::path::Path::new(target)),
-        None => OsOpen::Answered(false),
     }
 }
 

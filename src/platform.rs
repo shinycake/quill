@@ -532,6 +532,7 @@ pub fn mailto_url(address: &str) -> Option<String> {
 }
 
 /// Open the mail client on a new message to `address`.
+#[allow(clippy::disallowed_methods, reason = "the definition of the door")]
 pub fn open_mailto(address: &str) -> OsOpen {
     match mailto_url(address) {
         Some(url) => open_mailto_url(&url),
@@ -550,6 +551,21 @@ pub fn open_mailto_url(url: &str) -> OsOpen {
         return OsOpen::Answered(false);
     }
     os_open(std::ffi::OsStr::new(url), "open the mail client")
+}
+
+/// Open a pane of the system settings: a `x-apple.systempreferences:` URL
+/// on macOS or an `ms-settings:` one on Windows. Anything else is refused.
+pub fn open_system_settings(target: &str) -> OsOpen {
+    let settings = ["x-apple.systempreferences:", "ms-settings:"]
+        .iter()
+        .any(|scheme| target.starts_with(scheme));
+    let plain = target
+        .chars()
+        .all(|ch| !ch.is_whitespace() && !ch.is_control());
+    if !settings || !plain {
+        return OsOpen::Answered(false);
+    }
+    os_open(std::ffi::OsStr::new(target), "open System Settings")
 }
 
 /// Hand a URL or path to the OS default handler: the one door every helper
@@ -817,6 +833,7 @@ fn reveal_now(path: &std::path::Path) -> OsOpen {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods, reason = "tests of the doors themselves")]
 mod tests {
     use super::*;
     use futures_lite::future::block_on;

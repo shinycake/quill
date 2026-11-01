@@ -120,18 +120,9 @@ fn notice(crash: &PendingCrash) -> Notification {
             Button::new("crash-notice-show-log")
                 .label(tr(keys::Q_MISC_SHOW_LOG))
                 .on_click(cx.listener(move |note, _, window, cx| {
-                    let open = quill::platform::reveal_in_file_manager(&report);
                     note.dismiss(window, cx);
-                    cx.spawn_in(window, async move |_, cx| {
-                        if open.opened().await {
-                            return;
-                        }
-                        let failure = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER);
-                        let _ = cx.update(|window, cx| {
-                            window.push_notification(Notification::new().message(failure), cx);
-                        });
-                    })
-                    .detach();
+                    let failure = tr(keys::Q_AV_COULDNT_OPEN_THE_FOLDER).into();
+                    super::os_open::reveal_from(&report, failure, window, cx);
                 }))
         })
 }

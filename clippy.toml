@@ -9,4 +9,10 @@ allow-indexing-slicing-in-tests = true
 disallowed-methods = [
     { path = "gpui_kit::App::open_url", reason = "GPUI reports no failure: use QuillApp::open_link or os_open::open_link_in" },
     { path = "gpui_kit::App::reveal_path", reason = "GPUI reports no failure: use QuillApp::reveal_in_folder" },
+    { path = "quill::platform::open_external_url", reason = "a failed open must show a note: use QuillApp::open_link or open_web_link (src/ui/os_open.rs)" },
+    { path = "quill::platform::open_mailto", reason = "a failed open must show a note: use QuillApp::open_mail_to (src/ui/os_open.rs)" },
+    { path = "quill::platform::open_mailto_url", reason = "a failed open must show a note: use QuillApp::open_link (src/ui/os_open.rs)" },
+    { path = "quill::platform::open_local_file", reason = "a failed open must show a note: use QuillApp::open_file (src/ui/os_open.rs)" },
+    { path = "quill::platform::open_system_settings", reason = "a failed open must show a note: use QuillApp::open_system_settings (src/ui/os_open.rs)" },
+    { path = "quill::platform::reveal_in_file_manager", reason = "a failed open must show a note: use QuillApp::reveal_in_folder (src/ui/os_open.rs)" },
 ]

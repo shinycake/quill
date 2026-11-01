@@ -354,7 +354,7 @@ impl QuillApp {
     /// On the full-disk screen, a link that shows the account's cached files
     /// in the file manager, so they can be removed there. Quill deletes
     /// nothing itself while TDLib is closed: TDLib keeps their records.
-    pub(super) fn disk_full_reveal(&self) -> Option<gpui_kit::AnyElement> {
+    pub(super) fn disk_full_reveal(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
         if !self.disk.shows_screen() || self.disk.unwritable {
             return None;
         }
@@ -364,9 +364,7 @@ impl QuillApp {
                 .label(tr(keys::Q_DISK_SHOW_CACHED_FILES))
                 .link()
                 .small()
-                .on_click(move |_, _, _| {
-                    let _ = quill::platform::reveal_in_file_manager(&folder);
-                })
+                .on_click(cx.listener(move |this, _, _, cx| this.reveal_in_folder(&folder, cx)))
                 .into_any_element(),
         )
     }

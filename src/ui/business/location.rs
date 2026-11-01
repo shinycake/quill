@@ -5,7 +5,6 @@
 
 use super::{Leave, LocationDraft};
 use crate::ui::app::QuillApp;
-use crate::ui::status_note::StatusNote;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -88,15 +87,11 @@ impl QuillApp {
                             .child(
                                 gpui_kit::component::link::Link::new("business-location-map")
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        let open = quill::platform::open_external_url(&map_url);
-                                        this.when_os_answers(open, cx, |this, opened, cx| {
-                                            if !opened {
-                                                this.connection.set_note(StatusNote::error(tr(
-                                                    keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP,
-                                                )));
-                                                cx.notify();
-                                            }
-                                        });
+                                        this.open_web_link(
+                                            &map_url,
+                                            tr(keys::Q_PEOPLE_COULDNT_OPEN_THE_MAP),
+                                            cx,
+                                        );
                                     }))
                                     .text_xs()
                                     .child(tr(keys::Q_OPS_OPEN_ON_MAP)),

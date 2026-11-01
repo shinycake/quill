@@ -96,8 +96,10 @@ fn the_sound_settings_note_comes_with_a_late_failure(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let (answer, answered) = oneshot::channel();
+    script_next_os_open(OsOpen::Pending(answered));
     app.update_in(vcx, |app, _, cx| {
-        app.sound_prefs_answer(OsOpen::Pending(answered), cx);
+        let failure = tr(keys::Q_OPS_COULDNT_OPEN_THE_SYSTEM_SOUND);
+        app.open_system_settings("ms-settings:sound", failure, cx);
     });
     answer.send(false).unwrap();
     vcx.run_until_parked();
@@ -116,7 +118,11 @@ fn license_notices_that_fail_late_open_the_published_copy(cx: &mut TestAppContex
     let vcx = &mut vcx;
     let (answer, answered) = oneshot::channel();
     app.update_in(vcx, |app, _, cx| {
-        app.published_notices_unless_opened(OsOpen::Pending(answered), cx);
+        app.when_os_answers(
+            OsOpen::Pending(answered),
+            cx,
+            crate::ui::updates::published_notices_unless_opened,
+        );
     });
     vcx.run_until_parked();
     let launches = os_launch_attempts();
@@ -132,7 +138,11 @@ fn license_notices_that_open_stay_off_the_web(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let (answer, answered) = oneshot::channel();
     app.update_in(vcx, |app, _, cx| {
-        app.published_notices_unless_opened(OsOpen::Pending(answered), cx);
+        app.when_os_answers(
+            OsOpen::Pending(answered),
+            cx,
+            crate::ui::updates::published_notices_unless_opened,
+        );
     });
     vcx.run_until_parked();
     let launches = os_launch_attempts();
