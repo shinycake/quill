@@ -30,19 +30,20 @@ fn find(vcx: &mut VisualTestContext, selector: &'static str) -> Option<Bounds<Pi
 /// The demo's call window; returns the app, the main window and the call
 /// window.
 fn open_share(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, VisualTestContext) {
+    open_call(cx, "ready-call-screen-share")
+}
+
+fn open_call(
+    cx: &mut TestAppContext,
+    demo: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(
-                window,
-                cx,
-                None,
-                Some(ScreenshotDemo::named("ready-call-screen-share")),
-            )
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -174,6 +175,18 @@ fn a_replaced_call_window_hiding_leaves_the_large_tile(cx: &mut TestAppContext) 
     call.simulate_visibility_change(WindowVisibility::Hidden);
     let large = app.read_with(call, |app, _| app.group_call_large_tile());
     assert_eq!(large, Some(tile), "the old window's hiding is not yours");
+}
+
+/// The mute button's halo breathes on the frame clock, not on every frame
+/// the display offers.
+#[gpui_kit::test]
+fn the_breathing_halo_runs_on_the_frame_clock(cx: &mut TestAppContext) {
+    let (_app, _main, mut call) = open_call(cx, "ready-group-call-bar");
+    let _ = frames_over(&mut call, 1);
+    let drawn = frames_over(&mut call, 2);
+    let panel = drawn.get("group-call-panel").copied().unwrap_or(0);
+    assert!(panel > 5, "the halo breathes: {drawn:?}");
+    assert_eq!(drawn.get("(next frame)"), None, "{drawn:?}");
 }
 
 /// The microphone's halo plays by ticks for the call window alone: while it
