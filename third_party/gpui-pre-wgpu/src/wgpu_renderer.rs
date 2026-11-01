@@ -1,6 +1,7 @@
 // Modified for gpui-pre (snapshot of zed@08cbb88): adapt device queues and sRGB detection to wgpu 30.0.1.
 // Modified by the Quill project (2026) from gpui-pre-wgpu 0.3.9 (Apache-2.0):
 // `WgpuRenderer::capture_scene` renders a scene offscreen and reads it back. See third_party/gpui-pre-wgpu/QUILL-CHANGES.md.
+use crate::device_recovery::{RecoveryPolicy, RecoveryStep};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -18,6 +19,7 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
 
@@ -265,6 +267,8 @@ pub struct WgpuRenderer {
     observed_error_generation: u64,
     last_surface_error: Option<String>,
     needs_redraw: bool,
+    // Quill: set from the first `recover` after a device loss.
+    recovery: Option<RecoveryPolicy>,
 }
 
 impl WgpuRenderer {
@@ -488,6 +492,7 @@ impl WgpuRenderer {
             observed_error_generation: 0,
             last_surface_error: None,
             needs_redraw: false,
+            recovery: None,
         })
     }
 }
@@ -2339,46 +2344,98 @@ impl WgpuRenderer {
     /// This method coordinates recovery across multiple windows:
     /// - The first window to call this will recreate the shared context
     /// - Subsequent windows will adopt the already-recovered context
+    ///
+    /// Quill: never sleeps. Until an attempt is due ([`RecoveryPolicy`]) it
+    /// returns [`Recovery::RetryAt`] at once; the caller asks again then.
     #[cfg(not(target_family = "wasm"))]
-    pub fn recover<W>(&mut self, window: &W) -> anyhow::Result<()>
+    pub fn recover<W>(&mut self, window: &W) -> Recovery
     where
         W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
     {
-        let gpu_context = self.context.as_ref().expect("recover requires gpu_context");
-
+        let Some(gpu_context) = self.context.clone() else {
+            return Recovery::GaveUp;
+        };
+        let now = Instant::now();
         // Check if another window already recovered the context
         let needs_new_context = gpu_context
             .borrow()
             .as_ref()
             .is_none_or(|ctx| ctx.device_lost());
+        if needs_new_context && self.recovery.is_none() {
+            log::warn!("GPU device lost, recreating context...");
+            let lost_was_software = gpu_context
+                .borrow()
+                .as_ref()
+                .is_some_and(|ctx| ctx.adapter.get_info().device_type == wgpu::DeviceType::Cpu);
+            // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
+            self.state = RendererState::Released;
+            *gpu_context.borrow_mut() = None;
+            self.recovery = Some(RecoveryPolicy::new(now, lost_was_software));
+        }
+        let allow_software = match self.recovery.map(|policy| policy.step(now)) {
+            _ if !needs_new_context => None,
+            Some(RecoveryStep::Wait(at)) => return Recovery::RetryAt(at),
+            Some(RecoveryStep::GiveUp) => return Recovery::GaveUp,
+            Some(RecoveryStep::Attempt { allow_software }) => Some(allow_software),
+            None => Some(false),
+        };
+        match self.try_recover(window, &gpu_context, allow_software) {
+            Ok(()) => {
+                log::info!("GPU recovery complete");
+                Recovery::Recovered
+            }
+            Err(err) => {
+                let policy = self
+                    .recovery
+                    .get_or_insert_with(|| RecoveryPolicy::new(now, false));
+                policy.failed(now);
+                match policy.step(now) {
+                    RecoveryStep::GiveUp => {
+                        device_gone(&format!("{err:#}"));
+                        Recovery::GaveUp
+                    }
+                    RecoveryStep::Wait(at) => {
+                        log::warn!("GPU recovery failed, retrying: {err:#}");
+                        Recovery::RetryAt(at)
+                    }
+                    RecoveryStep::Attempt { .. } => Recovery::RetryAt(now),
+                }
+            }
+        }
+    }
 
+    /// One attempt: `allow_software` is `None` to adopt the context another
+    /// window recreated, else whether a CPU adapter may replace the lost one.
+    #[cfg(not(target_family = "wasm"))]
+    fn try_recover<W>(
+        &mut self,
+        window: &W,
+        gpu_context: &GpuContext,
+        allow_software: Option<bool>,
+    ) -> anyhow::Result<()>
+    where
+        W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
+    {
         let window_handle = window
             .window_handle()
             .map_err(|e| anyhow::anyhow!("Failed to get window handle: {e}"))?;
 
-        let surface = if needs_new_context {
-            log::warn!("GPU device lost, recreating context...");
-
-            // Drop old resources to release Arc<Device>/Arc<Queue> and GPU resources
-            self.state = RendererState::Released;
-            *gpu_context.borrow_mut() = None;
-
-            // Wait briefly for the GPU driver to stabilize, then try to
-            // recreate the context without software renderers. If this fails
-            // the caller should request another frame and retry — the real GPU
-            // may need more time to come back (e.g. after suspend/resume).
-            std::thread::sleep(std::time::Duration::from_millis(350));
-
+        let surface = if let Some(allow_software) = allow_software {
             let instance = WgpuContext::instance(Some(Box::new(window.clone())));
             let surface = create_surface(&instance, window_handle.as_raw())?;
-            let new_context =
-                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?;
+            let new_context = if allow_software {
+                WgpuContext::new(instance, &surface, self.compositor_gpu)?
+            } else {
+                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?
+            };
             *gpu_context.borrow_mut() = Some(new_context);
             surface
         } else {
             let ctx_ref = gpu_context.borrow();
-            let instance = &ctx_ref.as_ref().unwrap().instance;
-            create_surface(instance, window_handle.as_raw())?
+            let Some(context) = ctx_ref.as_ref() else {
+                anyhow::bail!("the recovered GPU context is gone");
+            };
+            create_surface(&context.instance, window_handle.as_raw())?
         };
 
         let config = WgpuSurfaceConfig {
@@ -2391,7 +2448,9 @@ impl WgpuRenderer {
         };
         let gpu_context = Rc::clone(gpu_context);
         let ctx_ref = gpu_context.borrow();
-        let context = ctx_ref.as_ref().expect("context should exist");
+        let Some(context) = ctx_ref.as_ref() else {
+            anyhow::bail!("the recovered GPU context is gone");
+        };
 
         self.state = RendererState::Released;
         self.atlas.handle_device_lost(context);
@@ -2406,10 +2465,35 @@ impl WgpuRenderer {
             self.atlas.clone(),
         )?;
         self.set_subpixel_layout(is_bgr);
-
-        log::info!("GPU recovery complete");
         Ok(())
     }
+}
+
+/// What the application does once the renderer gives up: on Linux, Quill
+/// shows the alert it shows when no GPU works at launch, and exits.
+static DEVICE_GONE: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+/// Set the handler for a GPU that could not be recovered. The first call
+/// wins.
+pub fn on_device_gone(handler: fn(&str)) {
+    let _ = DEVICE_GONE.set(handler);
+}
+
+fn device_gone(detail: &str) {
+    log::error!("GPU device lost and could not be recreated: {detail}");
+    if let Some(handler) = DEVICE_GONE.get() {
+        handler(detail);
+    }
+}
+
+/// Quill: what [`WgpuRenderer::recover`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recovery {
+    Recovered,
+    /// Draw a frame again at this instant (call `recover` then).
+    RetryAt(Instant),
+    /// No GPU came back; stop drawing.
+    GaveUp,
 }
 
 #[cfg(all(

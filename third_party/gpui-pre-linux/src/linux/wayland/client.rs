@@ -628,6 +628,31 @@ impl WaylandClientStatePtr {
         }
     }
 
+    /// Quill: redraw `surface_id` at `at`, when its renderer's next GPU
+    /// recovery attempt is due.
+    pub fn schedule_recovery_retry(&self, surface_id: &ObjectId, at: Instant) {
+        let client = self.get_client();
+        let state = client.borrow();
+        let surface_id = surface_id.clone();
+        let this = self.clone();
+        if let Err(err) =
+            state
+                .loop_handle
+                .insert_source(Timer::from_deadline(at), move |_, _, _| {
+                    let Some(client) = this.0.upgrade() else {
+                        return TimeoutAction::Drop;
+                    };
+                    let window = get_window(&mut client.borrow_mut(), &surface_id);
+                    if let Some(window) = window {
+                        window.recovery_retry_due();
+                    }
+                    TimeoutAction::Drop
+                })
+        {
+            log::error!("cannot schedule a GPU recovery attempt: {err}");
+        }
+    }
+
     /// Queue a retry tick for `surface_id` one refresh interval from now. An immediate
     /// retry would spin against the frame-rate throttle that deferred the draw in the
     /// first place.

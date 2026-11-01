@@ -30,6 +30,20 @@ pub(crate) fn window_failed(error: &dyn std::fmt::Display) -> ! {
     std::process::exit(1)
 }
 
+/// A GPU lost mid-session that the renderer could not recreate (Linux)
+/// ends the way a launch with no usable GPU does.
+pub(crate) fn watch_gpu_loss() {
+    #[cfg(target_os = "linux")]
+    gpui_wgpu::on_device_gone(gpu_gone);
+}
+
+#[cfg(target_os = "linux")]
+fn gpu_gone(detail: &str) {
+    window_failed(&format!(
+        "the GPU device was lost and could not be recreated: {detail}"
+    ))
+}
+
 /// The alert's body, and a short version for a desktop notification (which
 /// shows only a few lines). On Linux a missing Vulkan loader, driver or
 /// usable device gets the package to install; other graphics errors get the

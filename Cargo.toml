@@ -51,6 +51,7 @@ ui = [
     "dep:ksni",
     "dep:zbus",
     "dep:ashpd",
+    "dep:gpui_wgpu",
     "dep:objc2-media-player",
     "dep:objc2-user-notifications",
     "dep:ureq",
@@ -228,6 +229,9 @@ x11rb = { version = "0.13", default-features = false, features = ["record", "com
 # Wayland (async-io and futures-lite are declared above);
 # libpipewire is loaded at run time (pipewire_dl.rs), so no build dependency.
 ashpd = { version = "0.13", optional = true, default-features = false, features = ["async-io", "screencast"] }
+# A GPU lost for good ends in the launch failure alert (src/ui/startup_failure.rs):
+# the renderer GPUI's Linux backend already links reports it.
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.10", optional = true, default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Security keys over IOKit HID (src/webauthn/ctap2/hid_macos.rs).

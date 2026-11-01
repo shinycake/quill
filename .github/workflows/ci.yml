@@ -101,6 +101,8 @@ jobs:
         run: bash scripts/test-window-list.sh
       - name: tests (vendored GPUI window messages)
         run: bash scripts/test-gpui-message.sh
+      - name: tests (vendored GPUI device recovery)
+        run: bash scripts/test-device-recovery.sh
       # Same for the notification extras shared by the macOS and Windows backends.
       - name: tests (vendored GPUI notification extras)
         run: bash scripts/test-notification-extras.sh

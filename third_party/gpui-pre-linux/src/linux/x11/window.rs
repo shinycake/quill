@@ -12,7 +12,7 @@ use gpui::{
     WindowDecorations, WindowKind, WindowParams, WindowVisibility, popup::PopupNotSupportedError,
     px,
 };
-use gpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig};
+use gpui_wgpu::{CompositorGpuHint, Recovery, WgpuRenderer, WgpuSurfaceConfig};
 
 use collections::FxHashSet;
 use gpui_util::{ResultExt, maybe};
@@ -299,6 +299,8 @@ pub struct X11WindowState {
     force_render_after_recovery: bool,
     // Quill: forces another frame after the swapchain refused one.
     present_retry: PresentRetry,
+    // Quill: when the next GPU recovery attempt is due.
+    recovery_retry_at: Option<Instant>,
     fullscreen: bool,
     client_side_decorations_supported: bool,
     decorations: WindowDecorations,
@@ -956,6 +958,7 @@ impl X11WindowState {
                 hovered: false,
                 force_render_after_recovery: false,
                 present_retry: PresentRetry::default(),
+                recovery_retry_at: None,
                 fullscreen: false,
                 maximized_vertical: false,
                 maximized_horizontal: false,
@@ -1298,7 +1301,9 @@ impl X11WindowStatePtr {
     /// the timer should park (stop until a frame demand). A pending forced render
     /// after GPU recovery keeps it running.
     pub(crate) fn frame_idle_after_refresh(&self) -> bool {
-        let recovering = self.state.borrow().force_render_after_recovery;
+        let state = self.state.borrow();
+        let recovering = state.force_render_after_recovery || state.recovery_retry_at.is_some();
+        drop(state);
         self.frame.after_frame(recovering)
     }
 
@@ -1307,8 +1312,17 @@ impl X11WindowStatePtr {
         if let Some(mut fun) = callback {
             // Expose events can present a frame before the refresh timer runs,
             // so every frame request must rebuild stale atlas references after recovery.
+            let mut state = self.state.borrow_mut();
+            if state
+                .recovery_retry_at
+                .is_some_and(|at| Instant::now() >= at)
+            {
+                state.recovery_retry_at = None;
+                state.force_render_after_recovery = true;
+            }
             request_frame_options.force_render |=
-                std::mem::take(&mut self.state.borrow_mut().force_render_after_recovery);
+                std::mem::take(&mut state.force_render_after_recovery);
+            drop(state);
             fun(request_frame_options);
             self.callbacks.borrow_mut().request_frame = Some(fun);
         }
@@ -1903,14 +1917,15 @@ impl PlatformWindow for X11Window {
                 window_id: self.0.x_window,
                 visual_id: inner.visual_id,
             };
+            inner.recovery_retry_at = None;
             match renderer.recover(&raw_window) {
-                Ok(()) => {}
-                Err(err) => {
-                    log::warn!("GPU recovery failed, will retry on next frame: {err}");
+                Recovery::Recovered => inner.force_render_after_recovery = true,
+                Recovery::RetryAt(at) => {
+                    inner.recovery_retry_at = Some(at);
+                    self.0.frame.demand();
                 }
+                Recovery::GaveUp => {}
             }
-
-            inner.force_render_after_recovery = true;
             return;
         }
 

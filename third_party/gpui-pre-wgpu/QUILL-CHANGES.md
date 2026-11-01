@@ -60,3 +60,20 @@ textures (`docs/decisions/images-left-behind.md`):
   `cargo test -p gpui-pre-wgpu --lib wgpu_atlas` with the `test-support`
   feature on and the crate's other test modules left out (they read fonts
   from the Zed tree or need `naga`).
+
+The Quill project also changed it in 2026 so a GPU that never comes back no
+longer keeps the UI thread asleep (sweep finding linux-windows-3):
+
+- `src/device_recovery.rs` (new, std-only; tests run with
+  `scripts/test-device-recovery.sh`): when to try again after a device loss.
+  The first attempt waits 350 ms (upstream's sleep), later ones back off to
+  8 s, a software adapter is accepted after 3 hardware-only failures (at
+  once when the lost device was already a CPU one), and after 8 failures
+  (about 35 s) the renderer gives up.
+- `src/wgpu_renderer.rs`: `recover` no longer sleeps on the UI thread and
+  returns a `Recovery` (`Recovered`, `RetryAt(instant)` or `GaveUp`) instead
+  of a `Result`; upstream retried on every frame forever, rejecting software
+  adapters so a real GPU returning late after resume is not traded for a CPU
+  renderer. Giving up calls the handler set with the new `on_device_gone`
+  (Quill shows its launch failure alert and exits). Also drops the
+  `expect`s in `recover`.

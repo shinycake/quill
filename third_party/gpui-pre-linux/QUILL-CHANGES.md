@@ -101,3 +101,16 @@ The Quill project also changed it in 2026 so X11 draws a refused frame again
   and a parked refresh timer is woken for it. Upstream ignored the result,
   so the window kept stale content until the next invalidation. Wayland
   already retries through `PresentationState`.
+
+The Quill project also changed it in 2026 for `WgpuRenderer::recover`'s new
+`Recovery` result (sweep finding linux-windows-3, see gpui-pre-wgpu's
+QUILL-CHANGES.md):
+
+- `src/linux/x11/window.rs`: while an attempt is not yet due the window
+  keeps its refresh timer running and forces a frame only once the attempt's
+  instant has passed, instead of forcing a full frame (and a 350 ms sleep)
+  on every refresh. After `GaveUp` nothing is forced and the timer parks.
+- `src/linux/wayland/window.rs`, `src/linux/wayland/client.rs`: a calloop
+  timer (`schedule_recovery_retry`) redraws the window when the attempt is
+  due, instead of redrawing every refresh interval. The device-lost path no
+  longer unwraps the surface's backend.
