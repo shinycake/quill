@@ -15,10 +15,10 @@ use crate::telegram::requests::{
     delete_messages, edit_media_content, edit_message_caption, edit_message_media,
     edit_message_scheduling_state, edit_message_text, fix_rich_message_with_ai, fix_text_with_ai,
     forward_messages_to_topic, get_chat_history, get_chat_scheduled_messages,
-    get_full_rich_message, input_message_photo, input_message_video, open_message_content,
-    recognize_speech, resend_messages, send_animation, send_document, send_local_animation,
-    send_message_album, send_photo, send_rich_message, send_sticker, send_text, send_video,
-    send_video_note, send_voice_note,
+    get_full_rich_message, input_message_document, input_message_photo, input_message_video,
+    open_message_content, recognize_speech, resend_messages, send_animation, send_document,
+    send_local_animation, send_message_album, send_photo, send_rich_message, send_sticker,
+    send_text, send_video, send_video_note, send_voice_note,
 };
 use crate::voice::VoiceDraft;
 
@@ -287,7 +287,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if snapshot.media.paid_stars > 0 {
             return self.send_paid_media_snapshot(snapshot);
         }
-        if snapshot.is_media_album() {
+        if snapshot.is_album() {
             return self.send_album_snapshot(snapshot);
         }
         let chat_id = snapshot.chat_id();
@@ -314,7 +314,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // MED4: caption-length gate (runtime option; the counter in the
         // composer shows the same limit). Only the caption-carrying
         // paths are gated — plain text has its own (untracked) limit.
-        if snapshot.attachment.is_some() || snapshot.is_media_album() {
+        if snapshot.attachment.is_some() || snapshot.is_album() {
             self.check_caption_length(caption)?;
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).

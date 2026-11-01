@@ -64,7 +64,13 @@ impl QuillApp {
                         serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
                     )
                 }
-                AttachmentKind::Document | AttachmentKind::VideoNote => continue,
+                AttachmentKind::Document => format!(
+                    r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":{},"is_outgoing":true,"media_album_id":"{album_id}","content":{{"@type":"messageDocument","document":{{"@type":"document","file_name":{},"mime_type":"text/plain","document":{file}}},"caption":{{"@type":"formattedText","text":{},"entities":[]}}}}{reply_json}}}}}"#,
+                    chat_id.0,
+                    serde_json::to_string(&att.file_name).unwrap_or_else(|_| "\"file\"".into()),
+                    serde_json::to_string(item_caption).unwrap_or_else(|_| "\"\"".into()),
+                ),
+                AttachmentKind::VideoNote => continue,
             };
             if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &dyn_sink) {
                 session.apply(owned);

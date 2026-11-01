@@ -206,10 +206,7 @@ impl QuillApp {
                         .flatten();
                     // MED1: the grouping toggle decides album vs separate
                     // sends (TGX `RememberAlbumSetting`).
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
+                    let albumable = ComposerAttachment::albumable(&attachments);
                     let grouped = self.composer_group_media_effective();
                     let reply = self.reply_for_send(cx);
                     let mut snaps = Vec::new();
@@ -392,10 +389,7 @@ impl QuillApp {
                     }
                     let reply = self.reply_for_send(cx);
                     // MED1: the grouping toggle applies to the demo too.
-                    let albumable = attachments.len() >= 2
-                        && attachments.iter().all(|att| {
-                            matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
-                        });
+                    let albumable = ComposerAttachment::albumable(&attachments);
                     let messages = if albumable && self.composer_group_media_effective() {
                         ComposerAttachment::split_for_send(&attachments, true).len()
                     } else {

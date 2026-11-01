@@ -205,7 +205,7 @@ impl ComposerSnapshot {
         }
     }
 
-    /// Freeze a 2–10 photo/video album. Caption is the composer text.
+    /// Freeze a 2–10 photo/video or file album. Caption is the composer text.
     pub fn capture_album(
         chat_id: ChatId,
         view_generation: ViewGeneration,
@@ -276,13 +276,10 @@ impl ComposerSnapshot {
         ChatId(self.chat_id)
     }
 
-    pub fn is_media_album(&self) -> bool {
-        let n = self.album.len();
-        (2..=crate::album::ALBUM_MAX_ITEMS).contains(&n)
-            && self
-                .album
-                .iter()
-                .all(|att| matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video))
+    /// 2–10 photos and videos, or 2–10 files.
+    pub fn is_album(&self) -> bool {
+        self.album.len() <= crate::album::ALBUM_MAX_ITEMS
+            && ComposerAttachment::albumable(&self.album)
     }
 
     pub fn is_empty(&self) -> bool {
