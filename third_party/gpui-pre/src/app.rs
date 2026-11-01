@@ -1527,6 +1527,27 @@ impl App {
             .insert(window_handle.id, tracked_entities);
     }
 
+    /// Quill: [`Self::record_entities_accessed`] for a frame that replaces
+    /// nothing the window last drew: what it read joins what is tracked.
+    pub(crate) fn add_entities_accessed(
+        &mut self,
+        window_handle: AnyWindowHandle,
+        invalidator: WindowInvalidator,
+        entities: &FxHashSet<EntityId>,
+    ) {
+        let tracked = self.tracked_entities.entry(window_handle.id).or_default();
+        for entity in entities {
+            if tracked.insert(*entity) {
+                self.window_invalidators_by_entity
+                    .entry(*entity)
+                    .or_default()
+                    .insert(window_handle.id, invalidator.clone());
+                self.current_window_by_entity
+                    .insert(*entity, window_handle.id);
+            }
+        }
+    }
+
     pub(crate) fn new_observer(&mut self, key: EntityId, value: Handler) -> Subscription {
         let (subscription, activate) = self.observers.insert(key, value);
         self.defer(move |_| activate());

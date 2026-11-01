@@ -74,6 +74,11 @@ fn arrive(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     frames(vcx);
 }
 
+fn let_the_history_settle(vcx: &mut VisualTestContext) {
+    vcx.update(|window, _| window.activate_window());
+    let _ = crate::ui::frame_clock::frames_over(vcx, 5);
+}
+
 fn unwatched(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: (i64, i64)) -> bool {
     app.update(vcx, |app, _| {
         app.session()
@@ -108,6 +113,24 @@ fn an_unread_message_plays_its_effect_once_when_it_shows(cx: &mut TestAppContext
     vcx.update(|window, cx| window.click(("message-effect", ARRIVING as u64), cx));
     frames(vcx);
     assert!(crate::ui::emoji_effect::message_effect_playing(key));
+}
+
+/// An effect plays over the history: its ticks render `QuillApp`, which
+/// draws it, and every slice replays.
+#[gpui_kit::test]
+fn the_ticks_of_an_effect_leave_the_slices_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    let key = (CHAT, ARRIVING);
+    let_the_history_settle(vcx);
+    arrive(&app, vcx);
+    let _ = crate::ui::frame_clock::frames_over(vcx, 1);
+    let drawn = crate::ui::frame_clock::frames_over(vcx, 2);
+    assert!(crate::ui::emoji_effect::message_effect_playing(key));
+    assert!(drawn.get("app").is_some_and(|app| *app > 5), "{drawn:?}");
+    for slice in ["sidebar", "conversation", "composer"] {
+        assert_eq!(drawn.get(slice), None, "{drawn:?}");
+    }
 }
 
 /// A message sent with an effect that arrives behind another app keeps its

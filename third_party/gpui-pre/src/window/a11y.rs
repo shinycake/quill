@@ -367,6 +367,23 @@ impl A11y {
         self.replayable = false;
     }
 
+    /// Quill: the last frame's tree still serves whoever wants one, so a
+    /// frame that only redraws live views can leave it alone.
+    pub(crate) fn tree_is_current(&self) -> bool {
+        let wanted = self.is_enabled() && (self.forced || self.active_flag.load(Ordering::SeqCst));
+        !wanted || self.replayable
+    }
+
+    /// Quill: nothing built from now on joins the tree, until
+    /// [`Self::resume_tree`] gets what this returned.
+    pub(crate) fn pause_tree(&mut self) -> bool {
+        mem::take(&mut self.active_this_frame)
+    }
+
+    pub(crate) fn resume_tree(&mut self, active: bool) {
+        self.active_this_frame = active;
+    }
+
     /// How far the frame being built has got.
     pub(crate) fn index(&self) -> A11yIndex {
         self.nodes.index()
