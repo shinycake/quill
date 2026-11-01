@@ -153,7 +153,7 @@ pub(super) fn picture(width: u32, height: u32, variant: usize) -> Vec<u8> {
 
 const CROWD_SCROLL: f32 = 2000.;
 
-fn listener(user_id: i64, row: usize) -> ParsedGroupCallParticipant {
+fn listener(row: usize) -> ParsedGroupCallParticipant {
     ParsedGroupCallParticipant {
         audio_source_id: 5_000 + row as i32,
         is_speaking: false,
@@ -161,7 +161,7 @@ fn listener(user_id: i64, row: usize) -> ParsedGroupCallParticipant {
         video_info: None,
         screen_sharing_enabled: false,
         screen_sharing_video_info: None,
-        ..participant(user_id, false)
+        ..participant(1_000 + row as i64, false)
     }
 }
 
@@ -221,14 +221,7 @@ impl QuillApp {
             .unwrap_or(1);
         let other = users.iter().copied().find(|id| *id != me).unwrap_or(me + 1);
         let mut participants = vec![participant(me, true), participant(other, false)];
-        participants.extend(
-            users
-                .iter()
-                .cycle()
-                .take(crowd)
-                .enumerate()
-                .map(|(row, user)| listener(*user, row)),
-        );
+        participants.extend((0..crowd).map(listener));
         session.calls.active_group_call = Some(ActiveGroupCall {
             is_joined: true,
             screen_sharing: true,
