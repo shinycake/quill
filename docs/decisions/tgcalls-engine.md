@@ -133,8 +133,10 @@ Where the build deliberately differs from tdesktop's:
   test crashed about every other run).
 - That wait has no limit, so no destroy runs on the UI thread. On hang-up the
   engine retires the call at once: its context drops further callbacks, the
-  feeder gate closes and its sound stops. The destroy, the camera and screen
-  references, the sound output and the context go to one reaper thread
+  feeder gate closes and its sound stops, and the camera is no longer sent
+  and Quill's reference to it goes, as turning the camera off does, so the
+  next call can open the device at once. The destroy, the screen
+  reference, the sound output and the context go to one reaper thread
   (`src/calls/engine/tgcalls/reaper.rs`). A rejoin or a retry creates its new
   instance while the old one may still be going, as tdesktop's
   `GroupCall::destroyController` does with `crl::async`. Quit waits for the
