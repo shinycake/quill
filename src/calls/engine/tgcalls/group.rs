@@ -139,8 +139,14 @@ fn apply_answer(api: &Loader, handle: Native<qc_group>, answer: &CString, mode: 
     }
 }
 
-/// Clears the preview and drops Quill's reference to the call's camera.
-fn release_camera(api: &Loader, call: &mut GroupCall) {
+/// Stops sending the camera and frees Quill's reference, as turning the
+/// camera off does, so the next join can open the device without waiting
+/// for this instance's destroy behind the reaper's backlog.
+fn stop_camera(api: &Loader, call: &mut GroupCall) {
+    if call.camera.is_some() {
+        // SAFETY: a live instance; NULL stops sending video.
+        unsafe { (api.qc_group_set_video_capture)(call.handle.as_ptr(), std::ptr::null_mut()) };
+    }
     if let Some(capture) = call.camera.take() {
         // SAFETY: Quill's live reference; once the preview is cleared no
         // picture reaches the context, then the reference goes.
@@ -187,6 +193,7 @@ pub(super) fn retire_group(api: &'static Loader, mut call: GroupCall) {
     }
     call.gate.close();
     call.context.sound.store(None);
+    stop_camera(api, &mut call);
     reaper::hand_off(move || destroy_group(api, &mut call));
 }
 
@@ -198,7 +205,6 @@ fn destroy_group(api: &Loader, call: &mut GroupCall) {
     // SAFETY: a live instance destroyed once, never from its own callback
     // (this runs on the reaper).
     unsafe { (api.qc_group_destroy)(call.handle.as_ptr()) };
-    release_camera(api, call);
 }
 
 impl TgcallsEngine {
@@ -367,7 +373,7 @@ impl TgcallsEngine {
                 let capture = unsafe { (api.qc_video_capture_camera)(device.as_ptr()) };
                 let capture = Native::new(capture).ok_or(EngineError::NoCamera)?;
                 // SAFETY: the context outlives the preview: it is cleared
-                // before the capture is freed (`release_camera`).
+                // before the capture is freed (`stop_camera`).
                 unsafe {
                     (api.qc_video_capture_set_preview)(
                         capture.as_ptr(),
@@ -381,11 +387,7 @@ impl TgcallsEngine {
                 Ok(())
             }
             (None, Some(_)) => {
-                // SAFETY: a live instance; NULL stops sending video.
-                unsafe {
-                    (api.qc_group_set_video_capture)(call.handle.as_ptr(), std::ptr::null_mut())
-                };
-                release_camera(api, call);
+                stop_camera(api, call);
                 Ok(())
             }
             (None, None) => Ok(()),

@@ -184,7 +184,7 @@ impl TgcallsEngine {
                 let capture = unsafe { (api.qc_video_capture_camera)(device.as_ptr()) };
                 let capture = Native::new(capture).ok_or(EngineError::NoCamera)?;
                 // SAFETY: the context outlives the preview: it is cleared
-                // before the capture is freed (`release_camera`).
+                // before the capture is freed (`stop_camera`).
                 unsafe {
                     (api.qc_video_capture_set_preview)(
                         capture.as_ptr(),
@@ -195,13 +195,7 @@ impl TgcallsEngine {
                 call.camera = Some(capture);
             }
             (None, Some(_)) => {
-                if let Some(handle) = call.handle {
-                    // SAFETY: a live call; NULL stops sending video.
-                    unsafe {
-                        (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut())
-                    };
-                }
-                release_camera(api, call);
+                stop_camera(api, call);
                 return Ok(());
             }
             (None, None) => return Ok(()),
@@ -214,8 +208,14 @@ impl TgcallsEngine {
     }
 }
 
-/// Clears the preview and drops Quill's reference to the call's camera.
-fn release_camera(api: &Loader, call: &mut P2pCall) {
+/// Stops sending the camera and frees Quill's reference, as turning the
+/// camera off does, so the next call can open the device without waiting
+/// for this one's destroy behind the reaper's backlog.
+fn stop_camera(api: &Loader, call: &mut P2pCall) {
+    if let (Some(handle), Some(_)) = (call.handle, call.camera) {
+        // SAFETY: a live call; NULL stops sending video.
+        unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
+    }
     if let Some(capture) = call.camera.take() {
         // SAFETY: Quill's live reference; once the preview is cleared no
         // picture reaches the context, then the reference goes.
@@ -248,7 +248,7 @@ impl P2pCall {
         old.sound.store(None);
         if let Some(camera) = self.camera {
             // SAFETY: Quill's live reference; the new context stays in the
-            // call until the preview is cleared (`release_camera`).
+            // call until the preview is cleared (`stop_camera`).
             unsafe {
                 (api.qc_video_capture_set_preview)(
                     camera.as_ptr(),
@@ -272,6 +272,7 @@ fn retire(api: &'static Loader, mut call: P2pCall) {
     call.context.retire();
     call.gate.close();
     call.context.sound.store(None);
+    stop_camera(api, &mut call);
     reaper::hand_off(move || destroy(api, &mut call));
 }
 
@@ -287,7 +288,6 @@ fn destroy(api: &Loader, call: &mut P2pCall) {
         // (this runs on the reaper).
         unsafe { (api.qc_p2p_destroy)(handle.as_ptr()) };
     }
-    release_camera(api, call);
     release_screen(api, call);
 }
 
