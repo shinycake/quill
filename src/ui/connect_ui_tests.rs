@@ -7,7 +7,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::auth::{StartupFailure, view_for};
+use quill::auth::StartupFailure;
 use quill::connect::ConnectBlocker;
 use quill::telegram::envelope::AuthorizationState;
 
@@ -42,6 +42,17 @@ fn shown(vcx: &mut VisualTestContext, id: &'static str) -> bool {
     vcx.update(|window, _| window.try_find(id).is_some())
 }
 
+/// Whether the card shows `text`, as a screen reader would read it.
+fn reads(vcx: &mut VisualTestContext, text: &str) -> bool {
+    let quoted = format!("{text:?}");
+    vcx.update(|window, cx| {
+        window.set_a11y_forced(true);
+        window.render_frame(cx);
+        let tree = window.a11y_tree_snapshot().expect("a tree");
+        format!("{:?}", tree.nodes).contains(&quoted)
+    })
+}
+
 #[gpui_kit::test]
 fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
@@ -63,12 +74,25 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
             app.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
             app.open_client(Err(blocker), cx);
         });
-        let auth = app.read_with(&vcx, |app, _| app.current_auth());
-        assert_eq!(auth, AuthorizationState::StartupFailed(failure));
-        assert_eq!(view_for(&auth).body, failure.reason());
+        assert!(reads(&mut vcx, failure.reason()), "{failure:?}");
         assert!(shown(&mut vcx, RETRY));
         assert!(!shown(&mut vcx, PHONE_FORM));
         assert!(app.read_with(&vcx, |app, _| app.connection.status_note().is_empty()));
+    }
+}
+
+#[gpui_kit::test]
+fn a_database_tdlib_refused_shows_its_reason_and_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    for failure in [StartupFailure::WrongKey, StartupFailure::DataFolder] {
+        app.update(&mut vcx, |app, cx| {
+            app.connection.status = ConnectUiStatus::Live;
+            app.auth_ui.demo_state = AuthorizationState::StartupFailed(failure);
+            cx.notify();
+        });
+        assert!(reads(&mut vcx, failure.reason()), "{failure:?}");
+        assert!(shown(&mut vcx, RETRY));
+        assert!(!shown(&mut vcx, PHONE_FORM));
     }
 }
 
