@@ -123,7 +123,8 @@ pub fn validate_send_date(send_date: i64, now: i64) -> Result<i64, ScheduleError
 /// from a unix instant to its UTC offset. A moment the clock shows twice,
 /// in the hour repeated when clocks go back, is the first showing after
 /// `now`: a time picked during the second pass of that hour means the one
-/// still ahead. A moment the clock skips lands as far past
+/// still ahead. When both showings are past it is the first, as in Qt's
+/// `QDateTime`. A moment the clock skips lands as far past
 /// the gap as it was into it, as Qt's `QDateTime` moves it.
 pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now: i64) -> i64 {
     let naive =
@@ -141,7 +142,7 @@ pub fn civil_to_unix_with(civil: &CivilTime, offset_at: impl Fn(i64) -> i32, now
         .iter()
         .copied()
         .find(|t| *t > now)
-        .or(showings.last().copied())
+        .or(showings.first().copied())
         .unwrap_or(early)
 }
 
@@ -361,9 +362,23 @@ mod tests {
         let picked = civil_to_unix_with(&one_fifteen, &zone, now);
         assert_eq!(picked, FALL_BACK + 900);
         assert_eq!(validate_send_date(picked, now), Ok(picked));
-        // 01:00 CST already passed twice; it stays in the past.
+    }
+
+    #[test]
+    fn a_repeated_hour_wholly_in_the_past_is_its_first_pass() {
+        let zone = chicago_fall_back(FALL_BACK);
+        // 01:05 CST: 01:00 already showed twice, as CDT and as CST.
         let one = civil(1, 0, FALL_BACK, -6 * 3600);
-        assert_eq!(civil_to_unix_with(&one, &zone, now), FALL_BACK);
+        assert_eq!(
+            civil_to_unix_with(&one, &zone, FALL_BACK + 300),
+            FALL_BACK - 3600
+        );
+        // A day later the whole hour is behind; 01:30 is 01:30 CDT.
+        let one_thirty = civil(1, 30, FALL_BACK, -6 * 3600);
+        assert_eq!(
+            civil_to_unix_with(&one_thirty, &zone, FALL_BACK + 86_400),
+            FALL_BACK - 1800
+        );
     }
 
     #[test]
