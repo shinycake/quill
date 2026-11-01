@@ -383,14 +383,6 @@ are not always what painting again would give:
   knows the orders primitives stored. A view that opens with a layer that drew
   nothing slides down as a whole on its first replay. With views that do not
   touch, that changed the batch count in 9 of 200 random cases, by -3 to +1.
-- The tree never sees a shadow's blur, so a tail can change sides with a
-  neighbour. Nothing here holds a tail to paint order: an earlier view's tail can
-  land over a later view's quad. On the same 777 frames, 263 of 4.46 million pairs
-  overlapping once blur is counted changed sides, none against paint order. 4 of
-  92 captures differed, by at most 9 of 255 levels. The shadow's alpha sets the
-  ceiling, since a tail's edge is half of it: about 13 levels on white at alpha
-  .10 and 32 at .25. A frame that paints fresh keeps the old order, so a tail can
-  shift between a painted frame and the next replay.
 - Painting never shows the tree a primitive past its layer's bounds, such as a
   glyph past its line, and a replayed box counts it. So a later view's quad over
   that overhang sorts above the glyph on a replay and can sort under it on a fresh
@@ -398,6 +390,11 @@ are not always what painting again would give:
   overlaps that differed in a model with offset glyphs. These are full-strength
   pixels, at glyph edges only, and they can change between a painted frame and
   the next replay.
+
+The tree sees a shadow's whole blur (`Primitive::painted_bounds`, the same margin as
+the shaders), on paint and on replay, so a tail keeps its side between a painted
+frame and the next replay. In random scenes that took 3,113 differing pairs to 0,
+for about 4% more batches.
 
 On a demo chat of 4,813 paint operations with a looping sticker, `Scene::replay`
 went from 283 to 75 µs a frame and `Window::draw` from 1,003 to 797 µs of CPU.

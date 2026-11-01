@@ -326,8 +326,20 @@ impl Primitive {
         }
     }
 
+    /// QUILL: the box the primitive draws in, which for a drop shadow reaches
+    /// as far as its blur (the shaders' margin). Draw order goes by this box,
+    /// so a tail sorts the same painted or replayed.
+    pub fn painted_bounds(&self) -> Bounds<ScaledPixels> {
+        match self {
+            Primitive::Shadow(shadow) if shadow.inset != 0 => shadow.element_bounds,
+            Primitive::Shadow(shadow) => shadow.bounds.dilate(shadow.blur_radius * 3.),
+            primitive => *primitive.bounds(),
+        }
+    }
+
     fn clipped_bounds(&self) -> Bounds<ScaledPixels> {
-        self.bounds().intersect(&self.content_mask().bounds)
+        self.painted_bounds()
+            .intersect(&self.content_mask().bounds)
     }
 
     fn order(&self) -> DrawOrder {

@@ -101,7 +101,7 @@ fn primitive(kind: Kind, tag: u32, bounds: Rect, clip: Rect) -> Primitive {
         .into(),
         Kind::Shadow => Shadow {
             order: 0,
-            blur_radius: ScaledPixels(0.),
+            blur_radius: ScaledPixels((tag % 3) as f32),
             bounds,
             corner_radii: Corners::default(),
             content_mask,
@@ -180,7 +180,7 @@ fn path_tag(path: &Path<ScaledPixels>) -> u32 {
 
 fn clipped(primitive: &Primitive) -> Rect {
     primitive
-        .bounds()
+        .painted_bounds()
         .intersect(&primitive.content_mask().bounds)
 }
 
