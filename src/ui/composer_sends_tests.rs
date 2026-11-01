@@ -424,6 +424,9 @@ fn a_photo_edit_saved_after_a_chat_switch_replaces_the_photo_it_was_opened_on(
             tray.push(attachment_at(photo_b.clone(), AttachmentKind::Photo))
         });
         app.save_photo_editor(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |app, window, cx| {
         assert_eq!(app.pending_attachments()[0].path, photo_b, "B untouched");
         app.select_listed_chat(A, window, cx);
         let edited = &app.pending_attachments()[0];

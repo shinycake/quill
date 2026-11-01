@@ -8,7 +8,7 @@
 use super::app::QuillApp;
 use super::composer_sends::TrayItem;
 use super::owned_image::OwnedImage;
-use super::photo_edit::{CropRect, Placed, Stroke, flip, render, rotate_ccw};
+use super::photo_edit::{CropRect, Orientation, Placed, RenderJob, Stroke, flip, rotate_ccw};
 use super::photo_editor_items::ItemDrag;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -79,7 +79,9 @@ enum CropDrag {
 
 pub(super) struct PhotoEditor {
     pub(super) purpose: EditorPurpose,
+    /// The picture as opened; `orientation` says how it shows.
     pub(super) working: RgbaImage,
+    pub(super) orientation: Orientation,
     preview: OwnedImage,
     pub(super) crop: CropRect,
     pub(super) strokes: Vec<Stroke>,
@@ -126,12 +128,30 @@ pub(super) fn preview_of(image: &RgbaImage) -> Arc<RenderImage> {
     )])))
 }
 
+/// `preview` turned by `turn`, from its own pixels, so a quarter turn never
+/// touches the full-size picture.
+fn turned_preview(
+    preview: &RenderImage,
+    turn: fn(&RgbaImage) -> RgbaImage,
+) -> Option<Arc<RenderImage>> {
+    let size = preview.size(0);
+    let (width, height) = (
+        u32::try_from(size.width.0).ok()?,
+        u32::try_from(size.height.0).ok()?,
+    );
+    let pixels = RgbaImage::from_raw(width, height, preview.as_bytes(0)?.to_vec())?;
+    Some(Arc::new(RenderImage::new(SmallVec::from_buf([
+        image::Frame::new(turn(&pixels)),
+    ]))))
+}
+
 impl PhotoEditor {
     pub(super) fn new(purpose: EditorPurpose, working: RgbaImage) -> Self {
         Self {
             purpose,
             preview: preview_of(&working).into(),
             working,
+            orientation: Orientation::default(),
             crop: CropRect::FULL,
             strokes: Vec::new(),
             current: None,
@@ -161,8 +181,34 @@ impl PhotoEditor {
         Self::new(purpose, canvas)
     }
 
+    /// The picture's size as it shows, turns included.
+    pub(super) fn dimensions(&self) -> (u32, u32) {
+        self.orientation.dimensions(self.working.dimensions())
+    }
+
+    /// Turn the preview the way `turn` turns the picture; the full-size
+    /// picture turns when it renders.
+    fn turn_preview(&mut self, turn: fn(&RgbaImage) -> RgbaImage) {
+        self.preview = match turned_preview(&self.preview, turn) {
+            Some(preview) => preview.into(),
+            None => preview_of(&self.orientation.apply(self.working.clone())).into(),
+        };
+    }
+
+    /// What "Done" renders, taken out of the editor so it runs off the UI
+    /// thread.
+    pub(super) fn into_render_job(self) -> RenderJob {
+        RenderJob {
+            placed: self.placed.into_iter().map(|(item, _)| item).collect(),
+            working: self.working,
+            orientation: self.orientation,
+            crop: self.crop,
+            strokes: self.strokes,
+        }
+    }
+
     pub(super) fn rotate(&mut self) {
-        let (width, height) = self.working.dimensions();
+        let (width, height) = self.dimensions();
         self.placed = self
             .placed
             .iter()
@@ -172,8 +218,8 @@ impl PhotoEditor {
                 (item, preview)
             })
             .collect();
-        self.working = rotate_ccw(&self.working);
-        self.preview = preview_of(&self.working).into();
+        self.orientation = self.orientation.rotated_ccw();
+        self.turn_preview(rotate_ccw);
         self.crop = self.crop.rotated_ccw();
         self.strokes = self.strokes.iter().map(Stroke::rotated_ccw).collect();
     }
@@ -188,8 +234,8 @@ impl PhotoEditor {
                 (item, preview)
             })
             .collect();
-        self.working = flip(&self.working);
-        self.preview = preview_of(&self.working).into();
+        self.orientation = self.orientation.flipped();
+        self.turn_preview(flip);
         self.crop = self.crop.flipped();
         self.strokes = self.strokes.iter().map(Stroke::flipped).collect();
     }
@@ -343,45 +389,69 @@ impl QuillApp {
     }
 
     /// Render the edit at full resolution into a new PNG and send that
-    /// instead of the original.
+    /// instead of the original. The render and the encode run off the UI
+    /// thread; the editor closes at once.
     pub(super) fn save_photo_editor(&mut self, cx: &mut Context<Self>) {
         let Some(editor) = self.viewer.photo_editor.take() else {
             return;
         };
-        let item = match &editor.purpose {
-            EditorPurpose::Attachment(item) => item.clone(),
-            EditorPurpose::Profile(target) => {
-                let target = *target;
-                self.finish_profile_crop(editor, target, cx);
-                return;
+        cx.notify();
+        match editor.purpose.clone() {
+            EditorPurpose::Attachment(item) => {
+                let job = editor.into_render_job();
+                // window-scope: the tray item names its own account and draft
+                self.run_off_ui_then(
+                    move || super::edit_media_tools::write_edited_png(&job.render()),
+                    move |this, saved, cx| this.finish_attachment_edit(&item, saved, cx),
+                    cx,
+                );
             }
+            EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
             EditorPurpose::MessageEdit => {
-                let placed: Vec<Placed> =
-                    editor.placed.iter().map(|(item, _)| item.clone()).collect();
-                let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
-                let saved = super::edit_media_tools::write_edited_png(&edited);
-                self.finish_edit_image(saved, cx);
-                return;
+                let edit_of = self.edited_message();
+                let job = editor.into_render_job();
+                self.run_off_ui_scoped_then(
+                    move || super::edit_media_tools::write_edited_png(&job.render()),
+                    move |this, saved, cx| {
+                        if this.edited_message() == edit_of {
+                            this.finish_edit_image(saved, cx);
+                        } else if let Some(saved) = saved {
+                            let _ = std::fs::remove_file(saved);
+                        }
+                    },
+                    cx,
+                );
             }
-            &EditorPurpose::Set { set_id, kind } => {
+            EditorPurpose::Set { set_id, kind } => {
                 // The canvas render and the fit run off the UI thread.
                 let job = editor.set_render_job();
                 self.finish_set_image(set_id, kind, job, editor.corners, cx);
-                return;
             }
-        };
-        let placed: Vec<Placed> = editor.placed.iter().map(|(item, _)| item.clone()).collect();
-        let edited = render(&editor.working, editor.crop, &editor.strokes, &placed);
-        let Some(saved) = super::edit_media_tools::write_edited_png(&edited) else {
+        }
+    }
+
+    /// The message whose media is being edited, if any.
+    fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
+        let edit = self.composer_ui.pending_edit.as_ref()?;
+        Some((edit.chat_id, edit.message_id))
+    }
+
+    /// The edit replaces the photo in the chat it was opened from, as long
+    /// as that photo is still in its tray.
+    fn finish_attachment_edit(
+        &mut self,
+        item: &TrayItem,
+        saved: Option<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = saved else {
             self.connection.set_note(StatusNote::error(tr(
                 keys::Q_MISC_COULDNT_SAVE_THE_EDITED_PHOTO,
             )));
             cx.notify();
             return;
         };
-        // The edit replaces the photo in the chat it was opened from, as
-        // long as that photo is still in its tray.
-        let replaced = self.composer_sends.update_item(&item, |attachment| {
+        let replaced = self.composer_sends.update_item(item, |attachment| {
             let stem = attachment
                 .path
                 .file_stem()
@@ -895,3 +965,8 @@ fn paint_editor_item(
         ));
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "photo_editor_tests.rs"]
+mod tests;

@@ -128,6 +128,71 @@ pub fn flip(image: &RgbaImage) -> RgbaImage {
     image::imageops::flip_horizontal(image)
 }
 
+/// The quarter turns and flip waiting for the full-size picture: Rotate and
+/// Flip turn only the preview, and the render applies these once, off the
+/// UI thread.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Orientation {
+    ccw_turns: u8,
+    flipped: bool,
+}
+
+impl Orientation {
+    /// After one more Rotate. A flipped picture turns the other way under
+    /// the flip, so the pending turn goes back one.
+    pub fn rotated_ccw(self) -> Self {
+        let step = if self.flipped { 3 } else { 1 };
+        Orientation {
+            ccw_turns: (self.ccw_turns + step) % 4,
+            ..self
+        }
+    }
+
+    pub fn flipped(self) -> Self {
+        Orientation {
+            flipped: !self.flipped,
+            ..self
+        }
+    }
+
+    /// The size of a `width`×`height` picture once oriented.
+    pub fn dimensions(self, (width, height): (u32, u32)) -> (u32, u32) {
+        if self.ccw_turns % 2 == 1 {
+            (height, width)
+        } else {
+            (width, height)
+        }
+    }
+
+    /// The picture as it shows: turned, then flipped.
+    pub fn apply(self, image: RgbaImage) -> RgbaImage {
+        let turned = match self.ccw_turns {
+            1 => image::imageops::rotate270(&image),
+            2 => image::imageops::rotate180(&image),
+            3 => image::imageops::rotate90(&image),
+            _ => image,
+        };
+        if self.flipped { flip(&turned) } else { turned }
+    }
+}
+
+/// The edit at full size: the picture, its pending turns and what was
+/// drawn and placed on it, ready to render off the UI thread.
+pub struct RenderJob {
+    pub working: RgbaImage,
+    pub orientation: Orientation,
+    pub crop: CropRect,
+    pub strokes: Vec<Stroke>,
+    pub placed: Vec<Placed>,
+}
+
+impl RenderJob {
+    pub fn render(self) -> RgbaImage {
+        let picture = self.orientation.apply(self.working);
+        render(&picture, self.crop, &self.strokes, &self.placed)
+    }
+}
+
 /// The final picture: strokes painted at full resolution, stickers and
 /// emoji laid over them, then cropped.
 pub fn render(
@@ -314,5 +379,25 @@ mod tests {
         let turned = dot.rotated_ccw(100, 50);
         assert!((turned.width - 0.4).abs() < 1e-6);
         assert_eq!(turned.center, (0.5, 0.5));
+    }
+
+    #[test]
+    fn a_pending_orientation_matches_turning_step_by_step() {
+        let image = RgbaImage::from_fn(5, 3, |x, y| Rgba([x as u8, y as u8, 7, 255]));
+        // R, F, R, R, F, R in every prefix: the recorded orientation lands
+        // on the same pixels as each step done in order.
+        let steps = [true, false, true, true, false, true, false];
+        let (mut stepped, mut pending) = (image.clone(), Orientation::default());
+        for rotate in steps {
+            if rotate {
+                stepped = rotate_ccw(&stepped);
+                pending = pending.rotated_ccw();
+            } else {
+                stepped = flip(&stepped);
+                pending = pending.flipped();
+            }
+            assert_eq!(pending.dimensions(image.dimensions()), stepped.dimensions());
+            assert_eq!(pending.apply(image.clone()), stepped);
+        }
     }
 }
