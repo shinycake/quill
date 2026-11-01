@@ -190,10 +190,29 @@ fn the_fall_is_measured_between_two_readings() {
 
 #[test]
 fn the_floors_keep_their_order() {
-    let floors = super::FLOORS;
-    assert!(floors.close < floors.open);
-    assert!(floors.open < floors.warn);
-    assert!(floors.warn < floors.warn_clear);
+    let gib = 1 << 30;
+    let big = super::DataUse {
+        accounts: 6,
+        largest_database: 3 * gib / 2,
+    };
+    for floors in [super::FLOORS, DiskFloors::for_data(big)] {
+        assert!(floors.close < floors.open, "{floors:?}");
+        assert!(floors.open < floors.warn, "{floors:?}");
+        assert!(floors.warn < floors.warn_clear, "{floors:?}");
+    }
+}
+
+#[test]
+fn a_disk_that_would_refuse_the_next_open_shows_the_bar_first() {
+    let gib: u64 = 1 << 30;
+    let floors = DiskFloors::for_data(super::DataUse {
+        accounts: 3,
+        largest_database: 3 * gib / 2,
+    });
+    let free = Some(floors.open - 1);
+    assert!(refuses_open(free, &floors));
+    assert_eq!(DiskState::Healthy.next(free, &floors), DiskState::Low);
+    assert_eq!(DiskFloors::for_data(super::DataUse::ONE).warn, gib);
 }
 
 #[cfg(unix)]
