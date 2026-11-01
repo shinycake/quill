@@ -424,6 +424,30 @@ impl WindowsPlatform {
         }
     }
 
+    /// Quill: a window built on a removed device fails to open, and the vsync thread can't
+    /// recover while this thread waits for it (recovery sends to the platform window). So make
+    /// new devices here. The vsync thread still recovers the open windows from its own check.
+    fn replace_removed_devices(&self) -> Result<()> {
+        let removed = self
+            .inner
+            .state
+            .directx_devices
+            .borrow()
+            .as_ref()
+            .is_some_and(|devices| check_device_lost(&devices.device));
+        if !removed {
+            return Ok(());
+        }
+        let devices = try_to_recover_from_device_lost(|| {
+            DirectXDevices::new().context("Recreating DirectX devices to open a window")
+        })?;
+        if let Some(text_system) = &self.direct_write_text_system {
+            text_system.handle_gpu_lost(&devices)?;
+        }
+        *self.inner.state.directx_devices.borrow_mut() = Some(devices);
+        Ok(())
+    }
+
     fn is_windowed(&self) -> bool {
         self.inner.state.directx_devices.borrow().is_some()
     }
@@ -869,6 +893,7 @@ impl Platform for WindowsPlatform {
             }
             return Err(anyhow!("cannot open windows while headless"));
         }
+        self.replace_removed_devices()?;
         let creation_info = self.generate_creation_info();
         let created_with = creation_info.directx_devices.device.clone();
         let window = WindowsWindow::new(handle, options, creation_info)?;
