@@ -43,7 +43,7 @@ type Opened = Result<Box<dyn LevelSource + Send>, String>;
 pub struct CallAudio {
     source: Option<Box<dyn LevelSource>>,
     /// A worker is opening the microphone; the pump picks up its answer.
-    opening: Option<Receiver<Opened>>,
+    pub(crate) opening: Option<Receiver<Opened>>,
     pub(crate) open_microphone: Arc<dyn Fn() -> Opened + Send + Sync>,
     /// A source injected by tests or demos; used instead of opening
     /// the microphone, and kept across close/open.

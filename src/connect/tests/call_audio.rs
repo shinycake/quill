@@ -51,11 +51,11 @@ fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
         "opened off the driver's thread"
     );
 
-    let give_up = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    while !driver.call_audio.is_open() && std::time::Instant::now() < give_up {
-        driver.pump_call_audio().unwrap();
-        std::thread::yield_now();
-    }
+    let answer = driver.call_audio.opening.take().unwrap().recv().unwrap();
+    let (worker, opening) = std::sync::mpsc::channel();
+    worker.send(answer).unwrap();
+    driver.call_audio.opening = Some(opening);
+    driver.pump_call_audio().unwrap();
     assert!(driver.call_audio.is_open(), "the pump took the source");
     let _ = std::fs::remove_dir_all(dir);
 }

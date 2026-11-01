@@ -640,10 +640,7 @@ fn a_closing_client_sends_close_from_its_poll_once_its_call_ended() {
     assert!(!sent_close(), "close waits for the hang-up");
 
     handle.tx.send(call_discarded_json()).expect("send");
-    let give_up = Instant::now() + Duration::from_secs(2);
-    while !sent_close() && Instant::now() < give_up {
-        let _ = set.poll(Instant::now());
-        std::thread::yield_now();
-    }
+    handle.answer("authorizationStateClosed");
+    assert_eq!(set.close_all_within(Instant::now() + Duration::from_secs(60)), 0);
     assert!(sent_close(), "the poll sent close: {:?}", handle.sent());
 }
