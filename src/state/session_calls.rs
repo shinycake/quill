@@ -1,6 +1,5 @@
 //! Call and group-call acceptors.
 use super::*;
-use std::sync::Arc;
 
 impl Session {
     /// Phase C1: `updateCall` state machine. Quill tracks at most one
@@ -297,7 +296,7 @@ impl Session {
         {
             tracked.is_muted_self = participant.is_muted_for_all_users;
         }
-        let participants = Arc::make_mut(&mut tracked.participants);
+        let participants = tracked.participants.edit();
         if participant.order.is_empty() {
             participants.retain(|p| p.participant_id != participant.participant_id);
         } else if let Some(existing) = participants
@@ -323,10 +322,13 @@ impl Session {
         let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };
-        Arc::make_mut(&mut tracked.participants).retain(|p| match p.participant_id {
-            MessageSender::User { user_id } => participant_user_ids.contains(&user_id),
-            MessageSender::Chat { .. } => true,
-        });
+        tracked
+            .participants
+            .edit()
+            .retain(|p| match p.participant_id {
+                MessageSender::User { user_id } => participant_user_ids.contains(&user_id),
+                MessageSender::Chat { .. } => true,
+            });
         tracked.sort_participants();
     }
 

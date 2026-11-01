@@ -303,9 +303,14 @@ impl PreviewSlot {
         inner.published_at = Some(frame.captured_at);
     }
 
-    /// The newest preview and its sequence number.
-    pub fn latest(&self) -> Option<(u64, Thumbnail)> {
-        self.inner.lock_or_recover().latest.clone()
+    /// The newest preview and its sequence number, unless it is `seen`.
+    pub fn latest_after(&self, seen: u64) -> Option<(u64, Thumbnail)> {
+        let inner = self.inner.lock_or_recover();
+        inner
+            .latest
+            .as_ref()
+            .filter(|(seq, _)| *seq != seen)
+            .cloned()
     }
 }
 

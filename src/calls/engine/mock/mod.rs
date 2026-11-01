@@ -57,6 +57,8 @@ struct MockInner {
     connected_chats: Vec<i64>,
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
+    /// Test-only failure injection for the next `sync_group_video`.
+    fail_group_video_sync: bool,
     engine_event_hook: Option<EngineEventCallback>,
     live_frame_hook: Option<LiveFrameCallback>,
     stream_qualities: Vec<(i64, StreamQuality)>,
@@ -227,6 +229,11 @@ impl MockEngine {
     /// Test-only: the next `connect_group_call` fails with `code`.
     pub fn fail_next_group_connect(&self, code: i32) {
         self.inner.lock_or_recover().fail_group_connect = Some(code);
+    }
+
+    /// Test-only: the next `sync_group_video` fails.
+    pub fn fail_next_group_video_sync(&self) {
+        self.inner.lock_or_recover().fail_group_video_sync = true;
     }
 
     pub fn group_playbacks(&self) -> Vec<(i32, Option<String>, bool)> {
@@ -672,6 +679,12 @@ impl CallEngine for MockEngine {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
+        }
+        if std::mem::take(&mut inner.fail_group_video_sync) {
+            return Err(EngineError::Engine {
+                op: "sync_group_video",
+                code: -1,
+            });
         }
         inner
             .group_video_syncs

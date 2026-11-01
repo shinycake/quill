@@ -1,6 +1,7 @@
 //! Call state types: 1:1 and group calls.
 use super::*;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Phase C1: the tracked live call (signaling only — no media
 /// transport; real audio/video is the C2 libtgvoip spike). States
@@ -150,7 +151,7 @@ pub struct ActiveGroupCall {
     /// Sorted: recent speakers first (in `recent_speakers` order),
     /// then by `order` descending (lexicographic — schema: "The
     /// bigger is order, the higher is user in the list").
-    pub participants: Arc<Vec<ParsedGroupCallParticipant>>,
+    pub participants: ParticipantList,
     /// Recent speakers as last reported by `updateGroupCall` (drives
     /// the participant ordering above).
     pub recent_speaker_order: Vec<MessageSender>,
@@ -305,7 +306,7 @@ impl ActiveGroupCall {
             is_owned: false,
             participant_count: 0,
             loaded_all_participants: false,
-            participants: Arc::default(),
+            participants: ParticipantList::default(),
             recent_speaker_order: Vec::new(),
             is_muted_self: false,
             is_my_video_enabled: false,
@@ -351,7 +352,7 @@ impl ActiveGroupCall {
     /// order), then by `order` descending (lexicographic).
     pub(crate) fn sort_participants(&mut self) {
         let recent = self.recent_speaker_order.clone();
-        Arc::make_mut(&mut self.participants).sort_by(|a, b| {
+        self.participants.edit().sort_by(|a, b| {
             let ra = recent.iter().position(|s| s == &a.participant_id);
             let rb = recent.iter().position(|s| s == &b.participant_id);
             match (ra, rb) {
@@ -362,6 +363,47 @@ impl ActiveGroupCall {
             }
         });
     }
+}
+
+/// A group call's participants. [`Self::edit`] is the only way to change
+/// them and moves the revision, so two equal revisions mean the same list.
+#[derive(Debug, Clone, Default)]
+pub struct ParticipantList {
+    rows: Arc<Vec<ParsedGroupCallParticipant>>,
+    revision: u64,
+}
+
+impl ParticipantList {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn edit(&mut self) -> &mut Vec<ParsedGroupCallParticipant> {
+        self.revision = next_participants_revision();
+        Arc::make_mut(&mut self.rows)
+    }
+}
+
+impl std::ops::Deref for ParticipantList {
+    type Target = [ParsedGroupCallParticipant];
+
+    fn deref(&self) -> &Self::Target {
+        &self.rows
+    }
+}
+
+impl From<Vec<ParsedGroupCallParticipant>> for ParticipantList {
+    fn from(rows: Vec<ParsedGroupCallParticipant>) -> Self {
+        Self {
+            rows: Arc::new(rows),
+            revision: next_participants_revision(),
+        }
+    }
+}
+
+fn next_participants_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl CallSummary {

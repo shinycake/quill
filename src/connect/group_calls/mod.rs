@@ -37,6 +37,22 @@ pub(crate) mod muted_hint;
 mod rtmp_start;
 pub(crate) mod stream;
 
+/// What the pump last did for a tracked group call, so an update that
+/// changed none of it costs nothing.
+#[derive(Default)]
+pub(crate) struct GroupCallSeen {
+    feeds: Option<live_feeds::FeedInputs>,
+    ssrc_owners: Option<(u64, bool)>,
+    videos: Option<VideoInputs>,
+}
+
+/// What the engine's incoming video follows.
+#[derive(PartialEq)]
+struct VideoInputs {
+    participants: Option<u64>,
+    story: Vec<GroupVideoSource>,
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase C2g: native group-call transport lifecycle, after every
     /// reducer update. Finishes the connect handshake once the join answer arrives,
@@ -72,6 +88,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             .is_some_and(|engine| engine.is_available());
         if !engine_available {
             return Ok(());
+        }
+        // A rejoin's new native instance starts with nothing.
+        let connected = self
+            .session
+            .calls
+            .group_call(group_call_id)
+            .is_some_and(|call| call.transport_ready);
+        if !connected {
+            let seen = self.group_seen.entry(group_call_id).or_default();
+            seen.ssrc_owners = None;
+            seen.videos = None;
         }
         self.sync_conference_ssrc_owners(group_call_id);
         // Finish the join handshake once the `joinVideoChat` answer is
@@ -199,30 +226,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
         }
-        // Incoming video follows the participants' `video_info` /
-        // `screen_sharing_video_info`; the engine diffs add/remove.
-        let sources: Vec<GroupVideoSource> = self
-            .session
-            .calls
-            .group_call(group_call_id)
-            .map(|call| group_video_sources(&call.participants))
-            .unwrap_or_default();
-        // A live story's streamer may not be in the participant list (and
-        // may be a channel): subscribe to its video as well.
-        let mut sources = sources;
-        for source in self.live_story_video_sources(group_call_id) {
-            if !sources.iter().any(|s| s.endpoint == source.endpoint) {
-                sources.push(source);
-            }
-        }
-        let Some(engine) = self.call_engine.as_deref_mut() else {
-            return Ok(());
-        };
-        if let Err(err) = engine.sync_group_video(group_call_id, &sources)
-            && let Some(call) = self.session.calls.group_call_mut(group_call_id)
-        {
-            call.transport_error = Some(err.to_string());
-        }
+        self.sync_incoming_video(group_call_id);
         // Finish the presentation handshake once the
         // `startGroupCallScreenSharing` answer is stored.
         let share_answer = self
@@ -271,5 +275,46 @@ impl<S: JsonSender> ConnectDriver<S> {
             let _ = engine.stop_screen_share(group_call_id);
         }
         Ok(())
+    }
+
+    /// Incoming video follows the participants' `video_info` /
+    /// `screen_sharing_video_info`; the engine diffs add/remove. A failed
+    /// sync is not remembered, so the next pump tries it again.
+    fn sync_incoming_video(&mut self, group_call_id: i32) {
+        let call = self.session.calls.group_call(group_call_id);
+        let inputs = VideoInputs {
+            participants: call.map(|call| call.participants.revision()),
+            story: self.live_story_video_sources(group_call_id),
+        };
+        let seen = self
+            .group_seen
+            .get(&group_call_id)
+            .and_then(|seen| seen.videos.as_ref());
+        if seen == Some(&inputs) {
+            return;
+        }
+        let mut sources = call
+            .map(|call| group_video_sources(&call.participants))
+            .unwrap_or_default();
+        // A live story's streamer may not be in the participant list (and
+        // may be a channel): subscribe to its video as well.
+        for source in &inputs.story {
+            if !sources.iter().any(|s| s.endpoint == source.endpoint) {
+                sources.push(source.clone());
+            }
+        }
+        let Some(engine) = self.call_engine.as_deref_mut() else {
+            return;
+        };
+        match engine.sync_group_video(group_call_id, &sources) {
+            Ok(()) => {
+                self.group_seen.entry(group_call_id).or_default().videos = Some(inputs);
+            }
+            Err(err) => {
+                if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+                    call.transport_error = Some(err.to_string());
+                }
+            }
+        }
     }
 }

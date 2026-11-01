@@ -478,12 +478,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let CaptureTarget::Group(group_call_id) = active.target else {
             return;
         };
-        let Some((seq, picture)) = active.preview.latest() else {
+        let Some((seq, picture)) = active.preview.latest_after(active.last_preview) else {
             return;
         };
-        if seq == active.last_preview {
-            return;
-        }
         active.last_preview = seq;
         let me = self
             .session

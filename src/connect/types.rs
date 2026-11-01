@@ -306,6 +306,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) group_camera_state: HashMap<i32, Option<String>>,
     /// Microphone mute state the group-call engine last applied, per call.
     pub(crate) group_mute_state: HashMap<i32, bool>,
+    /// What the pump last did per tracked group call (`group_calls`).
+    pub(crate) group_seen: HashMap<i32, super::group_calls::GroupCallSeen>,
     /// The conference call's frame encryption and the engine key it is
     /// under (`group_calls::conference`).
     pub(crate) conference_crypto: Option<super::group_calls::ConferenceCrypto>,

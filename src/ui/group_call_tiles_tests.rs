@@ -15,7 +15,6 @@ use gpui_kit::{
 };
 use quill::calls::tile_pin::TileKey;
 use quill::telegram::envelope::MessageSender;
-use std::sync::Arc;
 
 fn frames(vcx: &mut VisualTestContext) {
     vcx.run_until_parked();
@@ -136,7 +135,7 @@ fn crowd(app: &Entity<QuillApp>, count: i64, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
         let session = app.demo_session.as_mut().expect("the demo session");
         let call = session.calls.active_group_call.as_mut().expect("the call");
-        let participants = Arc::make_mut(&mut call.participants);
+        let participants = call.participants.edit();
         let listener = participants
             .iter()
             .find(|p| !p.is_current_user)
