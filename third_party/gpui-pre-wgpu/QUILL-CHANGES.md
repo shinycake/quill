@@ -94,3 +94,12 @@ longer keeps the UI thread asleep (sweep finding linux-windows-3):
   one closes, as on Windows. A successful recovery clears the state, so a
   later loss starts afresh. `Recovering` holds this wiring and its tests
   run with the policy's.
+- `try_recover` puts a recreated context in the shared slot only after the
+  window's renderer is built on it (sweep bundle B13, L09). Before, a build
+  that failed after the context was made left it installed: the window's
+  next `recover` saw a healthy context, switched to adopting it with its
+  failures reset (so the hardware-only and software steps started over),
+  and the other windows adopted a context the recreating window could not
+  draw with. Now the slot stays empty and the recreation backs off and falls
+  back as one sequence. Not run: there is no way to make the renderer build
+  fail on a working device here, and no GPU loss to recover from.

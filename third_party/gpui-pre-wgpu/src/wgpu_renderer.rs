@@ -2479,7 +2479,11 @@ impl WgpuRenderer {
     }
 
     /// One attempt: adopt the context another window recreated, or make a
-    /// new one, with or without CPU adapters.
+    /// new one, with or without CPU adapters. A new context becomes the
+    /// shared one only once this window's renderer is built on it. Installed
+    /// before, a failed build left a context that looked recovered: this
+    /// window's next call switched to adopting it, with its failures reset,
+    /// and the other windows adopted it too.
     #[cfg(not(target_family = "wasm"))]
     fn try_recover<W>(
         &mut self,
@@ -2493,25 +2497,6 @@ impl WgpuRenderer {
         let window_handle = window
             .window_handle()
             .map_err(|e| anyhow::anyhow!("Failed to get window handle: {e}"))?;
-
-        let surface = if let Attempt::Recreate { allow_software } = attempt {
-            let instance = WgpuContext::instance(Some(Box::new(window.clone())));
-            let surface = create_surface(&instance, window_handle.as_raw())?;
-            let new_context = if allow_software {
-                WgpuContext::new(instance, &surface, self.compositor_gpu)?
-            } else {
-                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?
-            };
-            *gpu_context.borrow_mut() = Some(new_context);
-            surface
-        } else {
-            let ctx_ref = gpu_context.borrow();
-            let Some(context) = ctx_ref.as_ref() else {
-                anyhow::bail!("the recovered GPU context is gone");
-            };
-            create_surface(&context.instance, window_handle.as_raw())?
-        };
-
         let config = WgpuSurfaceConfig {
             size: gpui::Size {
                 width: gpui::DevicePixels(self.surface_config.width as i32),
@@ -2520,18 +2505,44 @@ impl WgpuRenderer {
             transparent: self.surface_config.alpha_mode != wgpu::CompositeAlphaMode::Opaque,
             preferred_present_mode: Some(self.surface_config.present_mode),
         };
+
+        if let Attempt::Recreate { allow_software } = attempt {
+            let instance = WgpuContext::instance(Some(Box::new(window.clone())));
+            let surface = create_surface(&instance, window_handle.as_raw())?;
+            let context = if allow_software {
+                WgpuContext::new(instance, &surface, self.compositor_gpu)?
+            } else {
+                WgpuContext::new_rejecting_software(instance, &surface, self.compositor_gpu)?
+            };
+            self.rebuild(gpu_context, &context, surface, config)?;
+            *gpu_context.borrow_mut() = Some(context);
+            return Ok(());
+        }
+
         let gpu_context = Rc::clone(gpu_context);
         let ctx_ref = gpu_context.borrow();
         let Some(context) = ctx_ref.as_ref() else {
             anyhow::bail!("the recovered GPU context is gone");
         };
+        let surface = create_surface(&context.instance, window_handle.as_raw())?;
+        self.rebuild(&gpu_context, context, surface, config)
+    }
 
+    /// Replace this renderer with one on `context`, keeping its atlas and
+    /// subpixel layout.
+    #[cfg(not(target_family = "wasm"))]
+    fn rebuild(
+        &mut self,
+        gpu_context: &GpuContext,
+        context: &WgpuContext,
+        surface: wgpu::Surface<'static>,
+        config: WgpuSurfaceConfig,
+    ) -> anyhow::Result<()> {
         self.state = RendererState::Released;
         self.atlas.handle_device_lost(context);
-
         let is_bgr = self.is_bgr;
         *self = Self::new_internal(
-            Some(gpu_context.clone()),
+            Some(Rc::clone(gpu_context)),
             context,
             surface,
             config,
