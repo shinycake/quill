@@ -317,7 +317,9 @@ impl QuillApp {
                                 inset: false,
                             }])
                         })
-                        .on_click(cx.listener(|this, _, _, cx| this.press_update_control(cx)))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.press_update_control(window, cx);
+                        }))
                 })
                 .into_any_element(),
         )

@@ -14,8 +14,7 @@ use quill::export::account::{AccountProgress, AccountStage};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::RedrawNeed;
 
-/// The status note for an export that ended while its box was hidden.
-fn ended_note(progress: &AccountProgress) -> String {
+pub(super) fn ended_note(progress: &AccountProgress) -> String {
     match &progress.stage {
         AccountStage::Finished(summary) => tr_with(
             keys::Q_OPS_YOUR_DATA_WAS_EXPORTED_TO,

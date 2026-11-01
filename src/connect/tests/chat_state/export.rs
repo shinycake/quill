@@ -27,6 +27,35 @@ fn export_settings(dir: &std::path::Path) -> crate::export::ExportSettings {
 }
 
 #[test]
+fn an_account_off_screen_still_forwards_its_exports_requests() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, chat_worker) = crate::export::ChatExport::scripted();
+    let (account, account_worker) = crate::export::AccountExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    driver.session.settings.account_export = Some(account);
+
+    chat_worker
+        .send(serde_json::json!({"@type": "getChatHistory"}))
+        .unwrap();
+    account_worker
+        .send(serde_json::json!({"@type": "getSessions"}))
+        .unwrap();
+    driver.poll_ticks(
+        crate::connect::TickScope::Background,
+        std::time::Instant::now(),
+    );
+
+    let sent = recorder.snapshot();
+    assert!(sent.iter().any(|json| json.contains("getChatHistory")));
+    assert!(sent.iter().any(|json| json.contains("getSessions")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn chat_export_worker_requests_flow_through_the_driver() {
     // `parity:data-chat-export-html`: the worker's TDLib requests go out
     // tagged for the export, the answer is routed back to the worker, and an

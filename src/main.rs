@@ -398,7 +398,11 @@ fn install_main_window_tray(
                 cfg!(target_os = "macos"),
                 ui::window_control::hide_supported(window),
             ) {
-                CloseOutcome::Quit => true,
+                CloseOutcome::Quit => !view
+                    .update(cx, |this, cx| {
+                        this.exit_held_by_export(ui::export_quit::close_main_window, window, cx)
+                    })
+                    .unwrap_or(false),
                 CloseOutcome::HideApp => {
                     cx.hide();
                     false
@@ -492,7 +496,11 @@ fn install_main_window_tray(
                                 this.set_inapp_sounds_enabled(!on, cx);
                             });
                         }
-                        quill::tray::TrayAction::Quit => cx.quit(),
+                        quill::tray::TrayAction::Quit => {
+                            let _ = tray_view.update(cx, |this, cx| {
+                                this.exit_after_exports(|_, cx| cx.quit(), window, cx);
+                            });
+                        }
                     });
                 }
             }

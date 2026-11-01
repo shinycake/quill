@@ -80,6 +80,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
     }
 
+    pub(crate) fn pump_exports(&mut self) {
+        self.pump_chat_export();
+        self.pump_account_export();
+        self.pump_rich_html_exports();
+    }
+
     /// Send a worker's waiting request tagged for `purpose`; the answer
     /// comes back through `apply_common_payload`. One request at a time.
     /// `link` finds the worker's link in the session (each "Save as HTML"

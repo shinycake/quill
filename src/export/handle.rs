@@ -27,6 +27,13 @@ pub(crate) struct ChannelTdlib {
     cancelled: Arc<AtomicBool>,
 }
 
+impl ChannelTdlib {
+    #[cfg(test)]
+    pub(crate) fn into_requests(self) -> mpsc::Sender<Value> {
+        self.requests
+    }
+}
+
 impl Tdlib for ChannelTdlib {
     fn call(&mut self, request: Value, timeout: Duration) -> Result<Value, ExportError> {
         let cancelled = || self.cancelled.load(Ordering::Acquire);
@@ -182,5 +189,17 @@ impl ChatExport {
     /// Ask the worker to stop. It does so at its next step.
     pub fn cancel(&self) {
         self.link.cancel();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scripted() -> (Self, mpsc::Sender<Value>) {
+        let (link, worker) = WorkerLink::pair();
+        let export = Self {
+            link,
+            progress: Arc::new(Mutex::new(Progress::starting())),
+            folder: PathBuf::new(),
+            title: String::new(),
+        };
+        (export, worker.into_requests())
     }
 }

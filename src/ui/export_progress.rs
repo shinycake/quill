@@ -10,9 +10,9 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
-use quill::export::{Progress, Stage};
+use quill::export::{AccountExport, ChatExport, Progress, Stage};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RedrawNeed;
+use quill::state::{RedrawNeed, Session};
 
 pub(super) fn progress_redraw(changed: bool, settled: bool, hidden: bool) -> RedrawNeed {
     match (changed && !hidden, settled) {
@@ -33,6 +33,28 @@ fn ended_note(progress: &Progress) -> String {
         ),
         _ => progress.label(),
     }
+}
+
+pub(super) fn take_ended_exports(session: &mut Session) -> Vec<StatusNote> {
+    let settled = |progress: &Progress| progress.is_settled();
+    let chat = session.settings.chat_export.as_ref();
+    let chat = chat.map(ChatExport::progress).filter(settled);
+    let account = session.settings.account_export.as_ref();
+    let account = account
+        .map(AccountExport::progress)
+        .filter(|progress| progress.is_settled());
+    let mut notes = Vec::new();
+    if let Some(progress) = chat {
+        session.settings.chat_export = None;
+        notes.push(StatusNote::info(ended_note(&progress)));
+    }
+    if let Some(progress) = account {
+        session.settings.account_export = None;
+        notes.push(StatusNote::info(
+            super::account_export_progress::ended_note(&progress),
+        ));
+    }
+    notes
 }
 
 impl QuillApp {

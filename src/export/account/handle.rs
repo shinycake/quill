@@ -66,4 +66,15 @@ impl AccountExport {
     pub fn cancel(&self) {
         self.link.cancel();
     }
+
+    #[cfg(test)]
+    pub(crate) fn scripted() -> (Self, std::sync::mpsc::Sender<serde_json::Value>) {
+        let (link, worker) = WorkerLink::pair();
+        let export = Self {
+            link,
+            progress: Arc::new(Mutex::new(AccountProgress::starting())),
+            folder: PathBuf::new(),
+        };
+        (export, worker.into_requests())
+    }
 }

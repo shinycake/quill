@@ -482,9 +482,7 @@ impl QuillApp {
             progressed = true;
         }
         if let Some(live) = self.live.as_mut() {
-            live.driver.pump_chat_export();
             live.driver.pump_psa_labels();
-            live.driver.pump_account_export();
         }
         need = need.max(self.poll_chat_export_progress());
         // M1: a `messageLink` response lands here (`getMessageLink`) —

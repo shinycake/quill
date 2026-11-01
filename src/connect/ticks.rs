@@ -44,6 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.redraw(self.request_tick(now));
         // `parity:data-proxy-web`: carrier failures and hosting changes.
         outcome.redraw(self.carrier_tick());
+        self.pump_exports();
         let TickScope::OnScreen { settings_open } = scope else {
             return outcome;
         };
