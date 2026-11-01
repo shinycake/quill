@@ -387,10 +387,9 @@ fn turning_access_off_mid_drive_removes_the_takeover_at_once(cx: &mut TestAppCon
     takeover::reset_for_test();
 }
 
-/// The takeover is process-wide, so a window that shows no agents shares it
-/// with whatever drives another app in the process. Hiding redraws for the
-/// takeover only where it shows: a redraw here would reach every window that
-/// follows the app, a hidden chat window's clips included.
+/// The takeover is process-wide, and hiding redraws for it only where it
+/// shows: a redraw reaches every window that follows the app, and a hidden
+/// chat window's history pass wakes the clips asleep in it.
 #[gpui_kit::test]
 fn hiding_a_window_redraws_it_for_the_takeover_only_where_agents_show(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);

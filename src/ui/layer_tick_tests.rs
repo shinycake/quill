@@ -10,9 +10,9 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Context, Entity, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    Pixels, Point, Quad, Render, Styled, TestAppContext, VisualTestContext, Window, canvas, div,
-    hsla, point, px, size,
+    AnyElement, App, AppContext, Bounds, Context, Entity, Hsla, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, Point, Quad, Render, Styled, TestAppContext,
+    VisualTestContext, Window, canvas, div, hsla, point, px, size,
 };
 use quill::sticker_playback::player::DecodedFrames;
 use std::cell::{Cell, RefCell};
@@ -606,4 +606,171 @@ fn a_live_view_in_a_cached_view_keeps_its_latest_paint_through_a_whole_frame(
         vec![THIRD, SECOND],
         "the live view keeps what it last drew"
     );
+}
+
+/// How [`Retried`] throws its first prepaint away. `List` rolls back through
+/// `Window::transact` when it autoscrolls and prepaints again.
+#[derive(Clone, Copy)]
+enum Discard {
+    RolledBack,
+    Dropped,
+}
+
+/// What [`Retried`] prepainted first.
+#[derive(Clone, Copy)]
+enum First {
+    /// The live view it goes on to keep.
+    SameView,
+    /// A live view around that one, which it keeps as a plain view.
+    OuterLiveView,
+}
+
+fn prepaint(element: &mut AnyElement, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+    element.layout_as_root(bounds.size.into(), window, cx);
+    element.prepaint_at(bounds.origin, window, cx);
+}
+
+/// Prepaints `discarded` and throws it away, then keeps `kept`.
+struct Retried {
+    discarded: Rc<dyn Fn() -> AnyElement>,
+    kept: Rc<dyn Fn() -> AnyElement>,
+    discard: Discard,
+    renders: Rc<Cell<u32>>,
+}
+
+impl Render for Retried {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        let (discarded, kept) = (self.discarded.clone(), self.kept.clone());
+        let discard = self.discard;
+        div().size(px(10.)).child(
+            canvas(
+                move |bounds, window, cx| {
+                    let mut first = discarded();
+                    match discard {
+                        Discard::RolledBack => {
+                            let _ = window.transact(|window| {
+                                prepaint(&mut first, bounds, window, cx);
+                                Err::<(), ()>(())
+                            });
+                        }
+                        Discard::Dropped => prepaint(&mut first, bounds, window, cx),
+                    }
+                    let mut kept = kept();
+                    prepaint(&mut kept, bounds, window, cx);
+                    kept
+                },
+                |_, mut kept, window, cx| kept.paint(window, cx),
+            )
+            .size_full(),
+        )
+    }
+}
+
+/// What a tick of the live view inside [`Retried`] did: its renders, those
+/// of what holds it, and the hues shown.
+#[derive(Debug, PartialEq)]
+struct RetriedTick {
+    inner_renders: u32,
+    holder_renders: u32,
+    hues: Vec<f32>,
+}
+
+fn tick_retried(cx: &mut TestAppContext, discard: Discard, first: First) -> RetriedTick {
+    cx.update(gpui_kit::init);
+    let (inner_renders, holder_renders) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let (inner_counter, holder_counter) = (inner_renders.clone(), holder_renders.clone());
+    let slot = Rc::new(RefCell::new(None));
+    let slot_in = slot.clone();
+    let handle = cx.open_window(size(px(200.), px(200.)), move |_, cx| {
+        let inner = cx.new(|_| Live {
+            hue: FIRST,
+            renders: inner_counter,
+            kept: Rc::default(),
+        });
+        *slot_in.borrow_mut() = Some(inner.clone());
+        let (discarded, kept): (Rc<dyn Fn() -> AnyElement>, Rc<dyn Fn() -> AnyElement>) =
+            match first {
+                First::SameView => {
+                    let live: Rc<dyn Fn() -> AnyElement> =
+                        Rc::new(move || inner.clone().live().into_any_element());
+                    (live.clone(), live)
+                }
+                First::OuterLiveView => {
+                    let shell = cx.new(|_| Shell {
+                        inner,
+                        renders: Rc::default(),
+                    });
+                    let outer = shell.clone();
+                    (
+                        Rc::new(move || outer.clone().live().into_any_element()),
+                        Rc::new(move || shell.clone().into_any_element()),
+                    )
+                }
+            };
+        Retried {
+            discarded,
+            kept,
+            discard,
+            renders: holder_counter,
+        }
+    });
+    let inner = slot.borrow().clone().expect("the inner view");
+    let mut vcx = VisualTestContext::from_window(handle.into(), cx);
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.run_until_parked();
+    let (inner_before, holder_before) = (inner_renders.get(), holder_renders.get());
+
+    inner.update(&mut vcx, |live, cx| {
+        live.hue = SECOND;
+        cx.notify();
+    });
+    vcx.run_until_parked();
+
+    RetriedTick {
+        inner_renders: inner_renders.get() - inner_before,
+        holder_renders: holder_renders.get() - holder_before,
+        hues: vcx
+            .update(|window, _| window.painted_quads())
+            .iter()
+            .filter_map(|quad| quad.background.as_solid())
+            .map(|color| color.h)
+            .collect(),
+    }
+}
+
+fn redrew_alone() -> RetriedTick {
+    RetriedTick {
+        inner_renders: 1,
+        holder_renders: 0,
+        hues: vec![SECOND],
+    }
+}
+
+#[gpui_kit::test]
+fn a_live_view_prepainted_again_after_a_rollback_keeps_redrawing(cx: &mut TestAppContext) {
+    let tick = tick_retried(cx, Discard::RolledBack, First::SameView);
+    assert_eq!(tick, redrew_alone());
+}
+
+#[gpui_kit::test]
+fn a_live_view_prepainted_twice_is_not_nested_in_itself(cx: &mut TestAppContext) {
+    let tick = tick_retried(cx, Discard::Dropped, First::SameView);
+    assert_eq!(tick, redrew_alone());
+}
+
+#[gpui_kit::test]
+fn a_rolled_back_outer_live_view_leaves_no_trace_in_the_frame(cx: &mut TestAppContext) {
+    let tick = tick_retried(cx, Discard::RolledBack, First::OuterLiveView);
+    assert_eq!(tick, redrew_alone());
+}
+
+/// Nothing a patch draws holds this view, so its tick must not pass as one:
+/// a tick that redraws nothing never asks for the next.
+#[gpui_kit::test]
+fn a_tick_no_patch_can_reach_takes_a_whole_frame(cx: &mut TestAppContext) {
+    let tick = tick_retried(cx, Discard::Dropped, First::OuterLiveView);
+    assert!(tick.inner_renders > 0, "the notified view rendered");
+    assert!(tick.holder_renders > 0, "in a whole frame");
+    assert_eq!(tick.hues, vec![SECOND], "and shows its new paint");
 }
