@@ -586,6 +586,27 @@ fn a_call_answered_but_not_yet_moved_on_is_hung_up() {
 }
 
 #[test]
+fn a_call_whose_answer_failed_is_left_to_ring() {
+    let mut client = calling_driver().with_call(
+        false,
+        CallState::Pending {
+            is_created: true,
+            is_received: true,
+        },
+    );
+    client
+        .driver
+        .set_call_engine(Box::new(crate::calls::engine::MockEngine::new()));
+    let extra = client.driver.accept_call().expect("accept");
+    client.feed(&format!(
+        r#"{{"@type":"error","code":400,"message":"CALL_PROTOCOL_FLAGS_INVALID","@extra":"{}","@client_id":{CLIENT_ID}}}"#,
+        extra.0
+    ));
+    crate::connect::closing::begin_close(&mut client.driver);
+    assert_eq!(client.sent(), ["acceptCall", "setOption", "close"]);
+}
+
+#[test]
 fn an_outgoing_call_still_ringing_is_hung_up() {
     let mut client = calling_driver().with_call(
         true,

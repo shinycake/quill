@@ -45,6 +45,9 @@ impl Session {
                 self.calls.error = Some(call_request_error_line(err, "Could not start the call"));
             }
             Some(RequestPurpose::AcceptCall) => {
+                // The call was never answered and keeps ringing, so a
+                // close must leave it to ring.
+                self.calls.answered_call = None;
                 self.calls.error = Some(call_request_error_line(err, "Could not answer the call"));
             }
             Some(RequestPurpose::DiscardCall) => {
