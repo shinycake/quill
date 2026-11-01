@@ -23,9 +23,8 @@ fn new_demo_app(
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(height)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo)))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         let shell = cx.new(|_| QuillShell::new(view.clone()));
         *slot_in.borrow_mut() = Some(view);
         Root::new(shell, window, cx)
