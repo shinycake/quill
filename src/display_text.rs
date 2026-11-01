@@ -1,18 +1,23 @@
 //! What message text drops before it is shaped, after Telegram Desktop's
 //! `BlockParser::parseCurrentChar` (lib_ui `text_block_parser.cpp`):
-//! control and formatting characters that break shaping, combining marks
-//! past the second on one character (Zalgo text), and Unicode tag
+//! control and formatting characters that break shaping, generic combining
+//! marks past the second on one character (Zalgo text), a script's marks
+//! past the sixth, and Unicode tag
 //! characters. The emoji sequences keep what they need: ZWJ, U+FE0F, and
 //! the tags of a subdivision flag such as England's. Unlike tdesktop on
 //! macOS, U+FE0F stays everywhere, since Quill draws emoji with the system
 //! font, which needs it to pick the emoji form.
 #![deny(clippy::indexing_slicing)]
 
-use std::borrow::Cow;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
-/// tdesktop `kMaxDiacAfterSymbol`.
+/// tdesktop `kMaxDiacAfterSymbol`, for the generic combining marks that
+/// Zalgo text stacks.
 pub const MAX_MARKS_AFTER_SYMBOL: u8 = 2;
+/// The marks one letter of a script may carry: a fully pointed Hebrew
+/// letter with cantillation, or a Devanagari letter with nukta, vowel sign
+/// and candrabindu, has three or four.
+pub const MAX_SCRIPT_MARKS_AFTER_SYMBOL: u8 = 6;
 
 /// U+1F3F4 WAVING BLACK FLAG, the base of the subdivision flags.
 const BLACK_FLAG: char = '\u{1F3F4}';
@@ -28,45 +33,103 @@ pub struct FilterState {
     marks: u8,
 }
 
-/// `text` without what tdesktop drops before layout. Borrowed when nothing
-/// had to go, which is the usual case.
-pub fn filter_display_text<'a>(text: &'a str, state: &mut FilterState) -> Cow<'a, str> {
-    let mut kept: Option<String> = None;
+/// What a filtered string lost, by the offset in it where each dropped run
+/// was, so a range of it maps back to the source text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceMap {
+    dropped: Vec<(usize, String)>,
+}
+
+impl SourceMap {
+    pub fn is_empty(&self) -> bool {
+        self.dropped.is_empty()
+    }
+
+    fn note(&mut self, at: usize, ch: char) {
+        match self.dropped.last_mut() {
+            Some((last, text)) if *last == at => text.push(ch),
+            _ => self.dropped.push((at, ch.to_string())),
+        }
+    }
+
+    /// The source text of `filtered[range]`. What was dropped inside the
+    /// range or right at its end comes back; what was dropped right at its
+    /// start belongs to the character before it. `None` when `range` is
+    /// not on `filtered`'s char boundaries.
+    pub fn source_of(&self, filtered: &str, range: std::ops::Range<usize>) -> Option<String> {
+        let mut out = String::with_capacity(range.len());
+        let mut from = range.start;
+        for (at, text) in self
+            .dropped
+            .iter()
+            .filter(|(at, _)| range.start < *at && *at <= range.end)
+        {
+            out.push_str(filtered.get(from..*at)?);
+            out.push_str(text);
+            from = *at;
+        }
+        out.push_str(filtered.get(from..range.end)?);
+        Some(out)
+    }
+}
+
+/// Append `text` to `out` without what tdesktop drops before layout, and
+/// note in `map` what was dropped where.
+pub fn push_filtered(out: &mut String, text: &str, state: &mut FilterState, map: &mut SourceMap) {
+    let mut kept_from = 0;
     let mut chars = text.char_indices().peekable();
     while let Some((at, ch)) = chars.next() {
-        let keep = if is_tag(ch) {
+        let keep = if ch < '\u{300}' {
+            // Latin and ASCII: no mark, no tag, and only controls are bad.
+            let bad = is_bad(ch);
+            if !bad {
+                state.marks = 0;
+            }
+            !bad
+        } else if is_tag(ch) {
             false
         } else if ch == BLACK_FLAG {
-            let tags = flag_tags(text.get(at + ch.len_utf8()..).unwrap_or_default());
             state.marks = 0;
-            if let Some(tags) = tags {
-                // The whole tag sequence goes through with its flag.
+            // The whole tag sequence goes through with its flag.
+            if let Some(tags) = flag_tags(text.get(at + ch.len_utf8()..).unwrap_or_default()) {
                 let end = at + ch.len_utf8() + tags;
-                if let Some(out) = kept.as_mut() {
-                    out.push_str(text.get(at..end).unwrap_or_default());
-                }
                 while chars.peek().is_some_and(|&(next, _)| next < end) {
                     chars.next();
                 }
-                continue;
             }
             true
         } else if is_bad(ch) {
             false
         } else if ch.general_category() == GeneralCategory::NonspacingMark {
             state.marks = state.marks.saturating_add(1);
-            state.marks <= MAX_MARKS_AFTER_SYMBOL
+            let limit = if is_generic_mark(ch) {
+                MAX_MARKS_AFTER_SYMBOL
+            } else {
+                MAX_SCRIPT_MARKS_AFTER_SYMBOL
+            };
+            state.marks <= limit
         } else {
             state.marks = 0;
             true
         };
-        match (&mut kept, keep) {
-            (Some(out), true) => out.push(ch),
-            (None, false) => kept = Some(text.get(..at).unwrap_or_default().to_string()),
-            _ => {}
+        if !keep {
+            out.push_str(text.get(kept_from..at).unwrap_or_default());
+            map.note(out.len(), ch);
+            kept_from = at + ch.len_utf8();
         }
     }
-    kept.map_or(Cow::Borrowed(text), Cow::Owned)
+    out.push_str(text.get(kept_from..).unwrap_or_default());
+}
+
+/// The combining marks of no one script (Combining Diacritical Marks, its
+/// Extended and Supplement blocks, marks for symbols, half marks).
+fn is_generic_mark(ch: char) -> bool {
+    matches!(ch,
+        '\u{0300}'..='\u{036F}'
+        | '\u{1AB0}'..='\u{1AFF}'
+        | '\u{1DC0}'..='\u{1DFF}'
+        | '\u{20D0}'..='\u{20FF}'
+        | '\u{FE20}'..='\u{FE2F}')
 }
 
 /// The byte length of a valid subdivision tag run at the start of `rest`
@@ -110,11 +173,18 @@ mod tests {
     use super::*;
 
     fn filtered(text: &str) -> String {
-        filter_display_text(text, &mut FilterState::default()).into_owned()
+        let mut out = String::new();
+        push_filtered(
+            &mut out,
+            text,
+            &mut FilterState::default(),
+            &mut SourceMap::default(),
+        );
+        out
     }
 
     #[test]
-    fn zalgo_keeps_two_marks_per_letter() {
+    fn zalgo_keeps_two_generic_marks_per_letter() {
         let zalgo = "Z\u{0351}\u{036B}\u{0343}\u{036A}a\u{0306}\u{0310}\u{0357}l\u{0300}";
         assert_eq!(
             filtered(zalgo),
@@ -123,16 +193,48 @@ mod tests {
         // A thousand marks on one letter shape as at most two.
         let heavy = format!("x{}", "\u{0300}".repeat(1000));
         assert_eq!(filtered(&heavy), "x\u{0300}\u{0300}");
+        // Every generic block counts the same.
+        let mixed = "o\u{1AB0}\u{1DC0}\u{20D0}\u{FE20}\u{0301}";
+        assert_eq!(filtered(mixed), "o\u{1AB0}\u{1DC0}");
+    }
+
+    #[test]
+    fn script_marks_keep_up_to_six_counted_with_generic_ones() {
+        // Hebrew points past six on one letter go.
+        let piled = format!("\u{05E9}{}", "\u{05B8}".repeat(9));
+        assert_eq!(
+            filtered(&piled),
+            format!("\u{05E9}{}", "\u{05B8}".repeat(6))
+        );
+        // A generic mark third in the run goes; the script mark after it,
+        // fourth, stays.
+        assert_eq!(
+            filtered("\u{05E9}\u{05BC}\u{05C1}\u{0301}\u{05B8}"),
+            "\u{05E9}\u{05BC}\u{05C1}\u{05B8}"
+        );
+    }
+
+    #[test]
+    fn pointed_hebrew_and_devanagari_keep_every_mark() {
+        for text in [
+            // "the heavens", Genesis 1:1: shin with dagesh, shin dot and qamats.
+            "\u{05D4}\u{05B7}\u{05E9}\u{05BC}\u{05C1}\u{05B8}\u{05DE}\u{05B7}\u{05D9}\u{05B4}\u{05DD}",
+            // With cantillation: the tipcha stays.
+            "\u{05D1}\u{05BC}\u{05B0}\u{05E8}\u{05B5}\u{05D0}\u{05E9}\u{05C1}\u{05B4}\u{0596}\u{05D9}\u{05EA}",
+            // Nukta, u sign and candrabindu.
+            "\u{0915}\u{093C}\u{0941}\u{0901}",
+        ] {
+            assert_eq!(filtered(text), text);
+        }
     }
 
     #[test]
     fn marks_split_across_runs_count_once() {
-        let mut state = FilterState::default();
-        assert_eq!(filter_display_text("e\u{0301}", &mut state), "e\u{0301}");
-        assert_eq!(
-            filter_display_text("\u{0302}\u{0303}f", &mut state),
-            "\u{0302}f"
-        );
+        let (mut state, mut map) = (FilterState::default(), SourceMap::default());
+        let mut out = String::new();
+        push_filtered(&mut out, "e\u{0301}", &mut state, &mut map);
+        push_filtered(&mut out, "\u{0302}\u{0303}f", &mut state, &mut map);
+        assert_eq!(out, "e\u{0301}\u{0302}f");
     }
 
     #[test]
@@ -146,11 +248,34 @@ mod tests {
             "שָׁלוֹם",
             "Tiếng Việt",
         ] {
-            assert!(matches!(
-                filter_display_text(text, &mut FilterState::default()),
-                Cow::Borrowed(_)
-            ));
+            let mut map = SourceMap::default();
+            let mut out = String::new();
+            push_filtered(&mut out, text, &mut FilterState::default(), &mut map);
+            assert_eq!(out, text);
+            assert!(map.is_empty());
         }
+    }
+
+    #[test]
+    fn a_range_of_the_filtered_text_maps_back_to_its_source() {
+        let source = "ab\u{0300}\u{0300}\u{0300}\u{0300}c\u{2028}d";
+        let mut map = SourceMap::default();
+        let mut out = String::new();
+        push_filtered(&mut out, source, &mut FilterState::default(), &mut map);
+        assert_eq!(out, "ab\u{0300}\u{0300}cd");
+        assert_eq!(map.source_of(&out, 0..out.len()).as_deref(), Some(source));
+        // The marks dropped after "b" go with "b", not with "c".
+        let c = out.find('c').unwrap();
+        assert_eq!(
+            map.source_of(&out, 0..c).as_deref(),
+            Some("ab\u{0300}\u{0300}\u{0300}\u{0300}")
+        );
+        assert_eq!(
+            map.source_of(&out, c..out.len()).as_deref(),
+            Some("c\u{2028}d")
+        );
+        assert_eq!(map.source_of(&out, 1..2).as_deref(), Some("b"));
+        assert_eq!(map.source_of(&out, 0..3), None, "inside a mark");
     }
 
     #[test]
