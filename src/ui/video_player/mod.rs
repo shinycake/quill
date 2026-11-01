@@ -39,8 +39,7 @@ mod transport;
 #[cfg(target_os = "macos")]
 mod backend_avplayer;
 
-#[cfg(test)]
-#[cfg(feature = "demo-capture")]
+#[cfg(all(test, feature = "demo-capture"))]
 mod live_view_tests;
 #[cfg(test)]
 mod tests;
