@@ -412,6 +412,11 @@ impl QuillApp {
     /// time this frame started (`QuillApp::render`), for the clock's
     /// content grid ([`ClockTiming::sample`]).
     pub(super) fn note_frame_timing(&self, window: &Window, cx: &App) {
+        // Only macOS reports vsync times (`display_vsync`), so elsewhere the
+        // display lookup on every render would be thrown away.
+        if !cfg!(target_os = "macos") {
+            return;
+        }
         let Some(display) = window.display(cx).map(|display| u64::from(display.id())) else {
             return;
         };
