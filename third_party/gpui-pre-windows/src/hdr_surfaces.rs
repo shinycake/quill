@@ -175,11 +175,7 @@ fn upload(
     };
     let mut texture = None;
     // SAFETY: a valid descriptor; the call writes the out parameter.
-    unsafe {
-        devices
-            .device
-            .CreateTexture2D(&desc, None, Some(&mut texture))?
-    };
+    unsafe { devices.device.CreateTexture2D(&desc, None, Some(&mut texture))? };
     let texture = texture.context("creating the HDR still texture")?;
     let mut view = None;
     // SAFETY: as above, for a view of the texture just made.

@@ -65,10 +65,7 @@ impl<T> TimerQueue<T> {
     pub(crate) fn push(&mut self, deadline: Instant, item: T) -> bool {
         let seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
-        let earliest = self
-            .heap
-            .peek()
-            .is_none_or(|first| deadline < first.deadline);
+        let earliest = self.heap.peek().is_none_or(|first| deadline < first.deadline);
         self.heap.push(Entry {
             deadline,
             seq,

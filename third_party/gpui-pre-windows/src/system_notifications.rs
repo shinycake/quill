@@ -236,8 +236,7 @@ fn toast_document(
                 // background, like Telegram Desktop's fastReply, so typing a
                 // reply never brings the window forward.
                 action_element.SetAttribute(h!("content"), &input.send_label.as_str().into())?;
-                action_element
-                    .SetAttribute(h!("hint-inputId"), &input.action_id.as_str().into())?;
+                action_element.SetAttribute(h!("hint-inputId"), &input.action_id.as_str().into())?;
                 action_element.SetAttribute(h!("activationType"), h!("background"))?;
             } else {
                 action_element.SetAttribute(h!("content"), &action.label.as_ref().into())?;
@@ -257,10 +256,7 @@ fn toast_document(
 fn image_source(image: &Path) -> String {
     format!(
         "file:///{}",
-        image
-            .to_string_lossy()
-            .replace('\\', "/")
-            .trim_start_matches('/')
+        image.to_string_lossy().replace('\\', "/").trim_start_matches('/')
     )
 }
 
