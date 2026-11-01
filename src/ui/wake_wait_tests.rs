@@ -190,7 +190,11 @@ fn a_poke_after_a_short_rest_waits_its_gap_under_the_hold(cx: &mut TestAppContex
     assert_eq!((passes.get(), state()), (1, (1, 1)), "the gap runs held");
     cx.background_executor.advance_clock(ms(7));
     cx.run_until_parked();
-    assert_eq!((passes.get(), state()), (2, (1, 0)), "resting again lets go");
+    assert_eq!(
+        (passes.get(), state()),
+        (2, (1, 0)),
+        "resting again lets go"
+    );
 }
 
 /// A poke after a full gap of rest runs at once, and takes no hold.
