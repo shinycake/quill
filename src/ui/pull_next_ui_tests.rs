@@ -2,8 +2,10 @@
 //! `QuillApp`. Nothing is sent: the demo session has no sender.
 
 use crate::ui::app::QuillApp;
+use crate::ui::frame_clock::take_slice_renders;
 use crate::ui::history_row::HistoryRow;
 use crate::ui::keybindings::bind_keys;
+use crate::ui::media_panel::PanelTab;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
@@ -93,6 +95,50 @@ fn pull(cx: &mut VisualTestContext, at: Point<Pixels>, steps: usize) {
     for _ in 0..steps {
         wheel(cx, at, TouchPhase::Moved, 25.);
     }
+}
+
+fn own_the_channel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    app.update(cx, |app, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let seq = AtomicU64::new(9_100);
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":13,"is_channel":true,"status":{"@type":"chatMemberStatusCreator","custom_title":"","is_anonymous":false,"is_member":true}}}"#;
+        if let Some(owned) = quill::telegram::client::copy_and_parse(json, &seq, &sink) {
+            session.apply(owned);
+        }
+    });
+}
+
+fn open_emoji_panel(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Point<Pixels> {
+    app.update(cx, |app, cx| app.open_media_panel(PanelTab::Emoji, cx));
+    frames(cx);
+    app.read_with(cx, |app, _| {
+        let history = app.history.viewport.get().expect("history painted");
+        point(history.left() + px(100.), history.bottom() - px(100.))
+    })
+}
+
+#[gpui_kit::test]
+fn a_wheel_over_the_media_panel_is_the_panels_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_channel_with_a_next_one(&app, vcx);
+    own_the_channel(&app, vcx);
+    let at = open_emoji_panel(&app, vcx);
+    let panel_top = |app: &QuillApp| app.pickers.media_panel.list.logical_scroll_top();
+    let before = app.read_with(vcx, |app, _| panel_top(app));
+
+    let _ = take_slice_renders();
+    pull(vcx, at, 4);
+    vcx.run_until_parked();
+    let drawn = take_slice_renders();
+
+    assert_eq!(drawn.get("conversation"), None, "{drawn:?}");
+    app.read_with(vcx, |app, _| {
+        assert!(!app.history.pull.machine_for_tests().pulling());
+        assert_ne!(panel_top(app), before, "the panel scrolled");
+    });
 }
 
 #[gpui_kit::test]
