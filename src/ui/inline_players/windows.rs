@@ -19,6 +19,7 @@
 
 use super::{InlineVideos, Key, Panel, Slot, State};
 use gpui_kit::{App, Window};
+use quill::bubble_layout::HistoryWidth;
 use quill::ids::ChatId;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -57,13 +58,20 @@ pub(super) struct Pass {
     pub(super) window: Option<ChatId>,
     pub(super) list: List,
     pub(super) number: u64,
+    /// The list's width changed in its last [`RESIZE_PASSES`] passes. Rows
+    /// move in and out of the overdraw from frame to frame then, and each
+    /// return would open a new decoder, so no slot leaves on this pass.
+    pub(super) resizing: bool,
 }
+
+/// History passes after a width change that count as still resizing.
+const RESIZE_PASSES: u64 = 30;
 
 /// As `pass` begins: the slot for `key` leaves the pass's window when its
 /// row did not render in that window's previous pass of its list, and
 /// stays while any window still shows it.
 pub(super) fn survives(key: Key, windows: &mut Windows, pass: Pass) -> bool {
-    if List::of(key) == pass.list {
+    if List::of(key) == pass.list && !pass.resizing {
         windows.retain(|window, seen| {
             *window != pass.window || seen.pass.saturating_add(1) >= pass.number
         });
@@ -132,16 +140,37 @@ impl State {
         self.passes.get(&(window, list)).copied().unwrap_or(0)
     }
 
+    /// Note `window`'s history width at pass `number`; whether it is still
+    /// resizing.
+    pub(super) fn note_history_width(
+        &mut self,
+        window: Option<ChatId>,
+        width: HistoryWidth,
+        number: u64,
+    ) -> bool {
+        let entry = self.history_widths.entry(window).or_insert((width, 0));
+        if entry.0 != width {
+            *entry = (width, number);
+        }
+        entry.1 > 0 && number.saturating_sub(entry.1) <= RESIZE_PASSES
+    }
+
     /// Begin `window`'s next pass of `list`: the slots whose rows did not
     /// render in its last one leave it. Returns the slots no window shows
     /// any more, to drop once the borrow is released.
-    pub(super) fn begin_pass(&mut self, window: Option<ChatId>, list: List) -> HashMap<Key, Slot> {
+    pub(super) fn begin_pass(
+        &mut self,
+        window: Option<ChatId>,
+        list: List,
+        resizing: bool,
+    ) -> HashMap<Key, Slot> {
         let number = self.pass(window, list).saturating_add(1);
         self.passes.insert((window, list), number);
         let pass = Pass {
             window,
             list,
             number,
+            resizing,
         };
         self.retire(|key, windows| survives(key, windows, pass))
     }
@@ -173,7 +202,7 @@ impl InlineVideos {
     /// did not render in the last one there (results that left the panel)
     /// leave it. Called at the top of the panel's render.
     pub(in crate::ui) fn begin_panel_render(&self, window: Option<ChatId>, panel: Panel) {
-        let dropped = self.with(|state| state.begin_pass(window, List::Panel(panel)));
+        let dropped = self.with(|state| state.begin_pass(window, List::Panel(panel), false));
         drop(dropped);
     }
 
@@ -309,7 +338,10 @@ impl InlineVideos {
 
 #[cfg(test)]
 mod tests {
-    use super::{List, Panel, Pass, Seen, Sweep, Windows, note_sweep, survives, unseen};
+    use super::{
+        List, Panel, Pass, RESIZE_PASSES, Seen, State, Sweep, Windows, note_sweep, survives, unseen,
+    };
+    use quill::bubble_layout::HistoryWidth;
     use quill::ids::ChatId;
     use std::collections::HashSet;
 
@@ -338,7 +370,38 @@ mod tests {
             window,
             list,
             number,
+            resizing: false,
         }
+    }
+
+    #[test]
+    fn a_width_change_counts_as_resizing_for_a_stretch_of_passes() {
+        let mut state = State::default();
+        let (wide, narrow) = (HistoryWidth::new(500.), HistoryWidth::new(492.));
+        assert!(!state.note_history_width(MAIN, wide, 1), "the first width");
+        assert!(!state.note_history_width(MAIN, wide, 2));
+        assert!(state.note_history_width(MAIN, narrow, 3));
+        assert!(state.note_history_width(MAIN, narrow, 3 + RESIZE_PASSES));
+        assert!(!state.note_history_width(MAIN, narrow, 4 + RESIZE_PASSES));
+    }
+
+    #[test]
+    fn a_width_past_the_widest_layout_is_not_resizing() {
+        let mut state = State::default();
+        assert!(!state.note_history_width(MAIN, HistoryWidth::new(800.), 1));
+        assert!(!state.note_history_width(MAIN, HistoryWidth::new(792.), 2));
+    }
+
+    #[test]
+    fn a_resizing_pass_keeps_a_row_that_slipped_out_of_the_overdraw() {
+        let row = (11, 204);
+        let mut windows = shown(&[(MAIN, 3)]);
+        let resizing = Pass {
+            resizing: true,
+            ..pass(MAIN, List::History, 40)
+        };
+        assert!(survives(row, &mut windows, resizing));
+        assert!(!survives(row, &mut windows, pass(MAIN, List::History, 41)));
     }
 
     #[test]
