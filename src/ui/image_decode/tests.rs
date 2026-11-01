@@ -1,7 +1,6 @@
 use crate::ui::image_decode::{
     DecodeError, DecodeSize, MAX_TEXTURE_EDGE, Sniffed, decode_image, sniff, unpremultiply,
 };
-use image::Pixel;
 use std::path::Path;
 
 fn fixture(name: &str) -> Vec<u8> {

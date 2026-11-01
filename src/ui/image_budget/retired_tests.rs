@@ -347,7 +347,7 @@ mod windows {
 
     #[gpui_kit::test]
     fn a_sweep_frees_pixels_off_the_ui_thread(cx: &mut TestAppContext) {
-        cx.update(|cx| gpui_kit::init(cx));
+        cx.update(gpui_kit::init);
         let main = cx.open_window(size(px(200.), px(200.)), |_, _| MainWindow {
             own: Some(picture()),
             in_slice: None,
