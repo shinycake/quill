@@ -117,6 +117,10 @@ The package is a flat directory: `quill.exe` plus the DLLs beside it. Everything
 - `QUILL_TRACE_TOASTS=1` prints `toast window opened in <ms> ms` to stderr
   for each of Quill's own notification windows: how long opening it held
   the UI thread. On Windows that includes building the window's renderer.
+- `QUILL_DEBUG_NOTIFICATION=1 QUILL_DEBUG_NOTIFICATION_CUSTOM=20` posts the
+  developer check notification 20 times in Quill's own window, each
+  replacing the last, so 20 windows open in a row. With
+  `QUILL_TRACE_TOASTS=1` this prints 20 timing lines.
 
 ## Native TDLib (optional)
 

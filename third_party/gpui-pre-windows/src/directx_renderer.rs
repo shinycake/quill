@@ -2227,3 +2227,65 @@ mod dxgi {
         ))
     }
 }
+
+#[cfg(test)]
+mod shared_shader_tests {
+    use super::{SHARED_SHADERS, ShaderModule, shared_shaders};
+    use windows::Win32::{
+        Foundation::HMODULE,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_WARP,
+            Direct3D11::{
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+                ID3D11Device, ID3D11VertexShader,
+            },
+        },
+    };
+
+    fn warp_device() -> ID3D11Device {
+        let mut device: Option<ID3D11Device> = None;
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )
+        }
+        .expect("WARP device");
+        device.expect("WARP device")
+    }
+
+    fn owner(shader: &ID3D11VertexShader) -> ID3D11Device {
+        unsafe { shader.GetDevice() }.expect("shader device")
+    }
+
+    /// A device loss hands every window a new device: the shaders it gets
+    /// must be made on that device, and the lost device's shaders dropped.
+    #[::core::prelude::v1::test]
+    fn a_new_device_gets_its_own_shaders() {
+        let lost = warp_device();
+        let (first, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
+        let (again, _) = shared_shaders(&lost, ShaderModule::Quad).expect("shaders");
+        assert_eq!(first, again, "a second window on one device shares them");
+
+        let recovered = warp_device();
+        let (made, _) = shared_shaders(&recovered, ShaderModule::Quad).expect("shaders");
+        assert_ne!(made, first);
+        assert_eq!(owner(&made), recovered);
+        let (sprite, _) =
+            shared_shaders(&recovered, ShaderModule::MonochromeSprite).expect("shaders");
+        assert_eq!(owner(&sprite), recovered);
+        let held = SHARED_SHADERS.with_borrow(|shared| {
+            shared
+                .as_ref()
+                .map(|shared| (shared.device == recovered, shared.pairs.len()))
+        });
+        assert_eq!(held, Some((true, 2)), "only the new device's shaders stay");
+    }
+}
