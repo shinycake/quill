@@ -33,6 +33,8 @@ impl BackgroundAccounts {
     /// Send `close` to `live` and keep it until Closed. The caller makes
     /// sure something drains it (`QuillApp::close_later`).
     pub(super) fn push_closing(&mut self, key: AccountKey, live: LiveConnect, restart: bool) {
+        // Only the background poll drains closing clients (`reap_closing`).
+        live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
         self.closing.push(key, Box::new(live), restart);
     }
 
@@ -163,6 +165,7 @@ impl QuillApp {
             self.background.push_closing(key, live, false);
         }
         self.background.close_all_within(deadline);
+        quill::calls::engine::await_call_teardown(deadline);
     }
 
     /// The window's app is dropped without the quit observer having run:

@@ -11,6 +11,20 @@ use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_kit::*;
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, FileId, MessageId};
+
+/// How often the progress tick runs while a track plays.
+const PLAYBACK_TICK: Duration = Duration::from_millis(250);
+
+#[cfg(test)]
+thread_local! {
+    /// Passes of the progress tick on this thread, for tests.
+    pub(super) static TICK_PASSES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Runs once right after a pass drained the media commands, for tests:
+    /// stands in for the poke of a key pushed at that moment.
+    #[cfg(test)]
+    pub(super) static AFTER_DRAIN: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::Session;
@@ -19,6 +33,9 @@ use quill::voice::{self, format_voice_duration};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
+
+static AUDIO_BUILT: quill::wake::Signal = quill::wake::Signal::new();
+
 pub(super) fn apply_ready_audio(session: &mut Session, sink: &Arc<MemorySink>, seq: &AtomicU64) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
     let cover_path = demo_thumb_png_path();
@@ -134,7 +151,7 @@ impl QuillApp {
     /// `offset_secs`: builds the seek slider entity and starts the progress
     /// tick. The row becomes active even when the sound can't start; the
     /// engine then reports `Failed` and the UI shows exactly that. Returns
-    /// whether the sound is playing.
+    /// whether the sound is on its way.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn begin_track_playback(
         &mut self,
@@ -181,8 +198,9 @@ impl QuillApp {
     }
 
     /// Start the in-process player on `path` at `offset_secs` with the
-    /// current volume and speed. Returns true when it is playing; on false
-    /// the engine is `Failed` and `audio.error()` says why. The screenshot
+    /// current volume and speed. Returns true when the sound is on its way;
+    /// on false the engine is `Failed` and `audio.error()` says why. A file
+    /// that turns out unreadable says so when its build lands. The screenshot
     /// demos have no audio device and use the engine's explicit simulation,
     /// which keeps the app's time (the test clock in tests).
     pub(super) fn start_player(
@@ -199,6 +217,9 @@ impl QuillApp {
                 fail: std::env::var_os("QUILL_DEMO_AUDIO_FAIL").is_some(),
                 stall: std::env::var_os("QUILL_DEMO_AUDIO_STALL").is_some(),
             });
+        if simulation.is_none() {
+            self.watch_audio_builds(cx);
+        }
         self.playback.audio.set_simulation(simulation);
         let executor = cx.background_executor().clone();
         self.playback.audio.set_sim_time(move || executor.now());
@@ -213,6 +234,43 @@ impl QuillApp {
             // The engine keeps the reason (`audio.error()`).
             Err(_) => false,
         }
+    }
+
+    fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
+        if std::mem::replace(&mut self.playback.builds_watched, true) {
+            return;
+        }
+        self.playback.audio.set_on_built(|| AUDIO_BUILT.poke());
+        let mut seen = AUDIO_BUILT.epoch();
+        Self::spawn_main(cx, async move |this, cx| {
+            loop {
+                AUDIO_BUILT.wait_since(seen).await;
+                seen = AUDIO_BUILT.epoch();
+                let landed = this.update(cx, |this, cx| this.land_audio_build(cx));
+                if landed.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn land_audio_build(&mut self, cx: &mut Context<Self>) {
+        self.playback.audio.settle();
+        if !self.playback.audio.take_start_failed() {
+            self.notify_playback_position(cx);
+            return;
+        }
+        let note = if self.recording.preview.take().is_some() {
+            keys::Q_MISC_COULDNT_PLAY_THE_RECORDING
+        } else {
+            match self.active_playback_kind() {
+                PlaybackKind::Voice => keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED,
+                PlaybackKind::Audio => keys::Q_AV_AUDIO_CANT_BE_PLAYED,
+            }
+        };
+        self.connection.set_note(StatusNote::error(tr(note)));
+        cx.notify();
     }
 
     /// Pause the active track: hold the sound, keep the row active so the
@@ -240,6 +298,7 @@ impl QuillApp {
         self.sound_starts(cx);
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.resume(position);
+        // The progress tick sleeps while the track is paused.
         quill::wake::CHROME.poke();
     }
 
@@ -278,6 +337,7 @@ impl QuillApp {
         }
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.seek(offset, was_playing);
+        quill::wake::CHROME.poke();
         if was_playing {
             self.connection.set_note(StatusNote::silent(format!(
                 "{} — seek {}",
@@ -291,31 +351,58 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// 250 ms progress tick while a track is active: re-renders so the seek
-    /// bar follows the sound, and ends the track when the sound ran out.
+    /// Progress tick while a track is active: every 250 ms while it plays,
+    /// so the seek bar follows the sound and the track ends when the sound
+    /// ran out. A paused track waits for `wake::CHROME` alone: a media key
+    /// (`media_session`), a change to the chat list that may move Previous
+    /// or Next, or a resume or seek.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
         if self.playback.tick {
+            // A new track on a paused tick: it plays now.
+            quill::wake::CHROME.poke();
             return;
         }
         self.playback.tick = true;
         self.playback.tick_shown = None;
         Self::spawn_main(cx, async move |this, cx| {
+            let mut wait = Some(PLAYBACK_TICK);
+            let mut seen = quill::wake::CHROME.epoch();
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-                let cont = this
+                match wait {
+                    Some(wait) => {
+                        super::wake_wait::sleep_or_wake(
+                            cx.background_executor(),
+                            &quill::wake::CHROME,
+                            seen,
+                            wait,
+                        )
+                        .await
+                    }
+                    None => {
+                        let _ = quill::wake::CHROME.wait_since(seen).await;
+                    }
+                }
+                // Read before the pass drains the media commands, so a key
+                // pushed after the drain still ends the next wait.
+                seen = quill::wake::CHROME.epoch();
+                let next = this
                     .update(cx, |this, cx| {
+                        #[cfg(test)]
+                        TICK_PASSES.with(|passes| passes.set(passes.get() + 1));
                         let active = this.active_playback_id().is_some();
                         if !active {
                             quill::media_session::publish(None);
-                            return false;
+                            return None;
                         }
                         // Media keys and the OS Now Playing widget.
                         this.drain_media_commands(cx);
+                        #[cfg(test)]
+                        if let Some(hook) = AFTER_DRAIN.with(|hook| hook.borrow_mut().take()) {
+                            hook();
+                        }
                         if this.active_playback_id().is_none() {
                             quill::media_session::publish(None);
-                            return false;
+                            return None;
                         }
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
@@ -355,12 +442,14 @@ impl QuillApp {
                         } else if moved {
                             this.notify_playback_position(cx);
                         }
-                        true
+                        Some((!this.playback.held_paused()).then_some(PLAYBACK_TICK))
                     })
-                    .unwrap_or(false);
-                if !cont {
+                    .ok()
+                    .flatten();
+                let Some(next) = next else {
                     break;
-                }
+                };
+                wait = next;
             }
             let _ = this.update(cx, |this, _| {
                 this.playback.tick = false;
@@ -668,6 +757,11 @@ impl QuillApp {
     }
 }
 
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "audio_playback_tests.rs"]
+mod tests;
+
 /// What the row says for an engine error (sentence case, localized).
 fn audio_error_text(error: super::audio::AudioError) -> String {
     use super::audio::AudioError;
@@ -679,3 +773,8 @@ fn audio_error_text(error: super::audio::AudioError) -> String {
     }
     .to_string()
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "audio_playback_tick_tests.rs"]
+mod tick_tests;

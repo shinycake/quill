@@ -11,11 +11,6 @@ impl QuillApp {
     pub(super) fn frame_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(feature = "frame-profiler")]
         self.frame_profile_tick(window);
-        // Phase 8.1: feed OS window focus into the notification decision, then
-        // dispatch any notifications the reducer queued since the last frame.
-        if let Some(live) = self.live.as_mut() {
-            live.driver.session.app_active = window.is_window_active();
-        }
         self.flush_notifications(window, cx);
         self.sync_history_holds();
         self.fetch_missing_reply_target();
@@ -106,13 +101,9 @@ impl QuillApp {
         // Live-location countdowns: refreshed at the pace their labels
         // change, only while the open chat shows a running one.
         self.ensure_live_location_tick(cx);
-        // Phase C1: keep the call overlay's ringing / connected clock
-        // fresh while a call is tracked (same 1s task pattern).
-        self.ensure_call_tick(cx);
-        // The call window and its sounds follow the call.
+        // The call windows follow the call.
         self.sync_call_window(cx);
         self.sync_group_call_window(cx);
-        self.sync_call_sounds();
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
         self.maybe_prefetch_link_preview(cx);

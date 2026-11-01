@@ -29,6 +29,7 @@ mod global;
 #[cfg(gpui_hot_reload)]
 mod hot_reload;
 mod input;
+mod input_rate;
 mod inspector;
 mod interactive;
 mod key_dispatch;

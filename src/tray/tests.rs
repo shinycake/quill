@@ -382,13 +382,21 @@ fn tray_switches_hide_without_a_tray() {
 #[test]
 fn closing_runs_in_the_background_only_with_a_tray() {
     use CloseOutcome::*;
-    assert_eq!(close_outcome(false, true, true, true), Quit);
-    assert_eq!(close_outcome(true, false, true, true), Quit);
-    assert_eq!(close_outcome(true, false, false, true), Quit);
-    assert_eq!(close_outcome(true, true, true, true), HideApp);
-    assert_eq!(close_outcome(true, true, false, true), Hide);
-    // Linux and Windows cannot hide a GPUI window: minimize it.
-    assert_eq!(close_outcome(true, true, false, false), Minimize);
+    assert_eq!(close_outcome(false, true, false, true, true), Quit);
+    assert_eq!(close_outcome(true, false, false, true, true), Quit);
+    assert_eq!(close_outcome(true, true, false, true, false), Hide);
+    assert_eq!(close_outcome(true, true, true, true, false), Hide);
+    assert_eq!(close_outcome(true, true, false, false, true), Minimize);
+}
+
+#[test]
+fn a_mac_hides_while_an_account_is_signed_in_and_quits_without_one() {
+    use CloseOutcome::*;
+    // Default settings: "Run in the background" off.
+    assert_eq!(close_outcome(false, true, true, true, true), Hide);
+    assert_eq!(close_outcome(false, false, true, true, true), Hide);
+    assert_eq!(close_outcome(false, true, true, true, false), Quit);
+    assert_eq!(close_outcome(true, false, true, true, false), Quit);
 }
 
 #[test]

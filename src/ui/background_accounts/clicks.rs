@@ -19,7 +19,7 @@ impl QuillApp {
     pub(super) fn deliver_background(
         &mut self,
         account: &AccountKey,
-        drain: BackgroundDrain,
+        drain: NotifyDrain,
         cx: &mut Context<Self>,
     ) {
         for chat_id in drain.clears {

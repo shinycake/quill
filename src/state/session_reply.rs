@@ -17,6 +17,8 @@ pub enum ReplyTarget {
     Missing,
 }
 
+pub const MAX_REPLY_TARGETS_OUTSIDE_WINDOW: usize = 256;
+
 /// How far a reply strip got in resolving its target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyState {
@@ -576,6 +578,64 @@ impl Session {
             (chat_id.0, message_id.0),
             ReplyTarget::Loaded(Box::new(history_message(message, false))),
         );
+    }
+
+    /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s
+    /// reply targets outside its loaded windows (the main history, its
+    /// topics and the open thread), nearest first.
+    pub(crate) fn prune_reply_targets(&mut self, chat_id: ChatId) {
+        let server = |messages: &HistoryMessages| {
+            let mut ids = messages
+                .values()
+                .filter(|message| !message.pending && !message.failed)
+                .map(|message| message.id.0);
+            let oldest = ids.next()?;
+            Some((oldest, ids.next_back().unwrap_or(oldest)))
+        };
+        let main = self
+            .histories
+            .get(&chat_id.0)
+            .map(|history| &history.messages);
+        let topics = self.threads.topic_histories.iter();
+        let topics = topics
+            .filter(|((chat, _), _)| *chat == chat_id.0)
+            .map(|(_, topic)| &topic.messages);
+        let thread = self.threads.thread.iter();
+        let thread = thread
+            .filter(|thread| thread.chat_id == chat_id)
+            .map(|thread| &thread.history.messages);
+        let windows: Vec<&HistoryMessages> = main.into_iter().chain(topics).chain(thread).collect();
+        let spans: Vec<(i64, i64)> = windows
+            .iter()
+            .filter_map(|messages| server(messages))
+            .collect();
+        if spans.is_empty() {
+            return;
+        }
+        let distance = |id: i64| {
+            spans
+                .iter()
+                .map(|&(oldest, newest)| oldest.saturating_sub(id).max(id.saturating_sub(newest)))
+                .min()
+                .unwrap_or(i64::MAX)
+        };
+        let mut outside: Vec<(i64, i64)> = self
+            .messages
+            .reply_targets
+            .keys()
+            .filter(|(chat, id)| {
+                *chat == chat_id.0 && !windows.iter().any(|window| window.contains_key(id))
+            })
+            .map(|&(_, id)| (distance(id), id))
+            .filter(|&(distance, _)| distance > 0)
+            .collect();
+        if outside.len() <= MAX_REPLY_TARGETS_OUTSIDE_WINDOW {
+            return;
+        }
+        outside.sort_unstable();
+        for (_, id) in outside.split_off(MAX_REPLY_TARGETS_OUTSIDE_WINDOW) {
+            self.messages.reply_targets.remove(&(chat_id.0, id));
+        }
     }
 
     /// `getRepliedMessage` failed: the original is gone or unreachable.

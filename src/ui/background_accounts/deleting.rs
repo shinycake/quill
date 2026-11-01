@@ -264,6 +264,7 @@ impl QuillApp {
         for key in &keys {
             self.forget_account_sends(key);
         }
+        super::super::notifications::forget_cached_icons();
         let waiting = keys.clone();
         self.after_closing(
             cx,

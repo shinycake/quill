@@ -125,7 +125,7 @@ impl ChatWindows {
     }
 
     /// Every open chat window, as its chat and window.
-    fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
+    pub(super) fn open_windows(&self) -> impl Iterator<Item = (ChatId, AnyWindowHandle)> + '_ {
         self.open.iter().map(|open| (open.chat_id, open.handle))
     }
 
@@ -204,6 +204,10 @@ impl ChatWindows {
     /// A chat window is the active one (the frame clock runs for it).
     pub(super) fn any_active(&self) -> bool {
         self.open.iter().any(|open| open.slot.borrow().active)
+    }
+
+    pub(super) fn any_open(&self) -> bool {
+        !self.open.is_empty()
     }
 
     /// Whether the window `host` (`None`: the main window) may open the
@@ -562,9 +566,7 @@ impl QuillApp {
         self.message_ui.pending_delete = None;
         self.message_ui.pending_stop_poll = None;
         self.notify.ttl_picker_open = false;
-        if self.recording_here() {
-            self.cancel_recording(cx);
-        }
+        self.cancel_recording_here(cx);
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();
         self.leave_sticker_chat(

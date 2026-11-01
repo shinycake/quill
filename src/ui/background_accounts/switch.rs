@@ -24,6 +24,7 @@ impl QuillApp {
         if !status.stops_client() && !in_call && !live.bridge.stopped_unexpectedly() {
             let _ = live.driver.leave_for_background();
             let _ = live.driver.set_online(false);
+            live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
             let unread = AccountUnread::of(&live.driver.session);
             self.background.clients.push(BackgroundClient {
                 key,
@@ -32,9 +33,6 @@ impl QuillApp {
                 unread,
             });
         } else {
-            // Closed without waiting. An account closed for a call starts
-            // again in the background once Closed (`reap_closing`); one that
-            // needs a sign-in keeps only its status until it is switched to.
             self.close_live_later(live, !status.stops_client(), cx);
             if status.stops_client() {
                 self.background.clients.push(BackgroundClient {
@@ -95,6 +93,7 @@ impl QuillApp {
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();
         live.driver.set_stream_volume(self.playback.volume);
+        live.bridge.wake_with(&quill::wake::UPDATES);
         self.live = Some(live);
         self.reload_account_keybindings(cx);
         self.spawn_poll_loop(cx);

@@ -483,6 +483,7 @@ impl Session {
             let row = history_message(message.clone(), false);
             self.thread_upsert(row);
         }
+        let (chat_id, topic_id) = (message.chat_id, message.topic_id);
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
         } else {
@@ -490,13 +491,12 @@ impl Session {
             // forum-topic copy, but leave the main history alone.
             self.remember_files(&message.files);
             self.note_message_effect(&message, false);
-            if let Some(topic_id) = message.topic_id
+            if let Some(topic_id) = topic_id
                 && self
                     .threads
                     .topic_histories
-                    .contains_key(&(message.chat_id.0, topic_id))
+                    .contains_key(&(chat_id.0, topic_id))
             {
-                let chat_id = message.chat_id;
                 let row = history_message(message, false);
                 if let Some(topic_history) =
                     self.threads.topic_histories.get_mut(&(chat_id.0, topic_id))
@@ -505,6 +505,7 @@ impl Session {
                 }
             }
         }
+        self.trim_live_windows(chat_id, topic_id);
         if let Some(target) = force_reply {
             self.bots.pending_force_reply = Some(target);
         }

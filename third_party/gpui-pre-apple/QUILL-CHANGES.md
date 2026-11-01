@@ -95,6 +95,51 @@ textures (`docs/decisions/images-left-behind.md`):
   gone in. Test: `test_small_pictures_get_small_textures`; the tile-reuse
   test's keeper tile is 200² so it shares the large tiles' texture.
 
+The Quill project also changed it in 2026 so a failed Metal setup costs one
+window, not the app:
+
+- `src/metal_renderer.rs`: `MetalRenderer::new`, `from_layer` and
+  `new_headless` return `Result`. Building the library, locating a shader
+  function, creating a pipeline and creating the CoreVideo texture cache report
+  errors where 0.3.10 used `expect` and `assert_eq!`, and a device-less Mac gets
+  an error where 0.3.10 called `process::exit`. `with_shaders` retries a failed
+  setup once, since `MTLCompilerService` can fail under load. A failed build
+  of the pipelines for an EDR drawable is remembered in `failed_format`, keeps
+  the stashed set, and takes the layer back to 8-bit with
+  `leave_extended_range`, so the window goes on drawing and never rebuilds per
+  frame. `MetalHeadlessRenderer::new` keeps its `expect`, because the registry
+  crate gpui-pre-platform calls it without a `Result`. It is test support only.
+  Tests: `shaders_that_do_not_compile_are_an_error`,
+  `a_library_without_our_functions_is_an_error`,
+  `one_failed_library_build_is_retried`,
+  `a_failed_edr_switch_leaves_edr_and_still_draws`,
+  `a_format_that_failed_is_not_built_again`,
+  `a_failed_switch_keeps_the_stashed_pipelines`.
+- `src/metal_renderer.rs`: `new_renderer` drops its `_native_window` and
+  `_native_view` parameters and its `unsafe`. `MacWindow::open` now builds the
+  renderer before those objects exist, so a re-vendor whose `new_renderer` uses
+  them must fail to compile here instead of dereferencing null at window open.
+- `Cargo.toml`, `src/thermal.rs`, `src/metal_renderer.rs`: so CI can run
+  `cargo test -p gpui-pre-apple` on its own, `runtime_shaders` is a default
+  feature (Quill always builds with it, through gpui-kit), and the thermal test
+  and `MetalHeadlessRenderer` no longer need `cfg(test)` to mean
+  `gpui/test-support`, which the command line can't turn on for a crate outside
+  the workspace.
+
+The Quill project also changed it in 2026 so a new user's first launch doesn't
+compile the shaders on the main thread:
+
+- `build.rs`: gpui-kit forces `runtime_shaders` on, which turned the metallib
+  off. The script now tries `xcrun metal` whatever the feature says and sets
+  `cfg(quill_metallib)` on success. A machine without the Metal toolchain
+  carries on with the source, unless `QUILL_REQUIRE_METALLIB` is set, as it is
+  in `.github/workflows/package-macos.yml` and in `ci.yml`'s `macos-metal` job.
+- `src/metal_renderer.rs`: `built_in_library` loads the metallib under that cfg
+  and falls back to compiling the source if it doesn't load. Test:
+  `the_precompiled_shaders_build_every_pipeline`, which needs the toolchain.
+  Redo this at each GPUI re-vendor. The metallib's minimum version stays the
+  crate's `10.15.7`.
+
 The Quill project also changed it in 2026 to stop rebuilding CoreText's font
 caches for every line:
 

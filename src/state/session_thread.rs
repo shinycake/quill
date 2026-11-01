@@ -181,6 +181,12 @@ impl Session {
             // newest reply; older pages leave the newest row as it is.
             thread.refresh_has_newer();
         }
+        let far_end = if newer {
+            WindowEnd::Oldest
+        } else {
+            WindowEnd::Newest
+        };
+        let trimmed = thread.trim_after_page(far_end) > 0;
         thread.history.total_count = thread.history.messages.len() as i32;
         // The page around the saved position landed without its reply
         // (deleted): load the default first page instead.
@@ -193,6 +199,11 @@ impl Session {
         }
         if thread.status == ThreadStatus::LoadingHistory {
             thread.status = ThreadStatus::Ready;
+        }
+        if trimmed {
+            let chat_id = thread.chat_id;
+            self.drop_thread_pages_past(&[far_end]);
+            self.prune_reply_targets(chat_id);
         }
     }
 
@@ -339,8 +350,37 @@ impl Session {
     /// thread's rows, or hold it outside a window that stops short of the
     /// newest replies.
     pub(crate) fn thread_upsert(&mut self, row: HistoryMessage) {
+        if let Some(thread) = self.threads.thread.as_mut()
+            && thread.note_live(row)
+        {
+            let chat_id = thread.chat_id;
+            let moved = thread.trim_live();
+            self.drop_thread_pages_past(&moved);
+            if !moved.is_empty() {
+                self.prune_reply_targets(chat_id);
+            }
+        }
+    }
+
+    fn drop_thread_pages_past(&mut self, ends: &[WindowEnd]) {
+        let Some(thread) = self.threads.thread.as_ref() else {
+            return;
+        };
+        let message_id = thread.origin_message_id.0;
+        let purposes: Vec<RequestPurpose> = ends
+            .iter()
+            .map(|end| match end {
+                WindowEnd::Oldest => RequestPurpose::GetMessageThreadHistory { message_id },
+                WindowEnd::Newest => {
+                    RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer {
+                        message_id,
+                    })
+                }
+            })
+            .collect();
+        let stale = self.requests.ids_for_chat(&purposes, thread.origin_chat_id);
         if let Some(thread) = self.threads.thread.as_mut() {
-            thread.note_live(row);
+            thread.stale_pages.extend(stale.into_iter().map(|id| id.0));
         }
     }
 

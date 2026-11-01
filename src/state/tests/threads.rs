@@ -612,3 +612,149 @@ fn the_replies_menu_entry_follows_tdesktop() {
     assert_eq!(replies_menu_label(1), "View 1 Reply");
     assert_eq!(replies_menu_label(12), "View 12 Replies");
 }
+
+fn reply(id: i64) -> String {
+    format!(
+        r#"{{"@type":"updateNewMessage","message":{}}}"#,
+        msg(id, 14, 40, "live")
+    )
+}
+
+fn long_thread(last: i64) -> (Session, Arc<MemorySink>, AtomicU64) {
+    let (mut session, sink, seq) = unread_group_thread();
+    let ids: Vec<i64> = (40..=last).rev().collect();
+    thread_page(&mut session, &seq, &sink, false, &ids);
+    let thread = session.threads.thread.as_mut().unwrap();
+    assert!(thread.history.loaded_complete, "reached the root");
+    thread.unread_anchor = None;
+    (session, sink, seq)
+}
+
+#[test]
+fn a_thread_left_open_at_the_tail_stays_within_the_cap_and_keeps_its_root() {
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    let (mut session, sink, seq) = long_thread(40 + cap - 1);
+    for id in 40 + cap..=40 + cap + 3 {
+        apply_json(&mut session, &seq, &sink, &reply(id));
+    }
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(thread.history.messages.len() <= crate::state::HISTORY_WINDOW_CAP);
+    assert!(thread.history.messages.contains_key(&40), "the pinned root");
+    assert_eq!(thread.newest_loaded_id(), Some(MessageId(40 + cap + 3)));
+    assert!(!thread.has_newer);
+    assert!(
+        !thread.history.loaded_complete,
+        "older replies page back in"
+    );
+    let oldest_reply = thread.history.messages.keys().nth(1).copied().unwrap();
+    assert_eq!(thread.history.next_from_message_id, MessageId(oldest_reply));
+    assert_eq!(thread.ordered().first().map(|m| m.id.0), Some(oldest_reply));
+}
+
+#[test]
+fn a_thread_reader_near_the_top_keeps_the_root_and_the_tail_waits() {
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    let (mut session, sink, seq) = long_thread(40 + cap - 1);
+    let key = (14, None, 40);
+    session.note_history_reader(key, ReaderPosition::Away { top: MessageId(45) });
+    apply_json(&mut session, &seq, &sink, &reply(40 + cap));
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(thread.history.loaded_complete, "the rows above stay");
+    assert!(thread.has_newer, "paged back in below");
+    let newest = thread.newest_loaded_id().unwrap();
+    assert!(newest.0 < 40 + cap);
+    apply_json(&mut session, &seq, &sink, &reply(40 + cap + 1));
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert_eq!(thread.newest_loaded_id(), Some(newest));
+    assert_eq!(thread.last_message_id, 40 + cap + 1);
+}
+
+#[test]
+fn a_page_on_the_way_past_a_live_trim_does_not_land_across_a_gap() {
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    let (mut session, sink, seq) = long_thread(40 + cap - 1);
+    session
+        .threads
+        .thread
+        .as_mut()
+        .unwrap()
+        .history
+        .loaded_complete = false;
+    let older = session.request(
+        RequestPurpose::GetMessageThreadHistory { message_id: 40 },
+        Some(ChatId(14)),
+    );
+    apply_json(&mut session, &seq, &sink, &reply(40 + cap));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            older.0,
+            msg(41, 14, 40, "from before the trim")
+        ),
+    );
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(!thread.history.messages.contains_key(&41));
+}
+
+#[test]
+fn reading_far_back_and_forth_through_a_thread_keeps_its_window_bounded() {
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    let (mut session, sink, seq) = unread_group_thread();
+    let top = 5_000 + cap - 1;
+    let ids: Vec<i64> = (5_000..top).rev().collect();
+    thread_page(&mut session, &seq, &sink, false, &ids);
+    session.threads.thread.as_mut().unwrap().unread_anchor = None;
+
+    let older: Vec<i64> = (4_800..5_000).rev().chain([40]).collect();
+    thread_page(&mut session, &seq, &sink, false, &older);
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(thread.history.messages.len() < crate::state::HISTORY_WINDOW_CAP);
+    assert_eq!(thread.ordered().first().map(|m| m.id.0), Some(40));
+    assert!(thread.history.loaded_complete);
+    assert_eq!(thread.last_message_id, top - 1, "the end is remembered");
+    assert!(thread.has_newer, "scrolling down pages it back in");
+    let newest = thread.newest_loaded_id().unwrap().0;
+
+    let newer: Vec<i64> = (newest..top).rev().collect();
+    thread_page(&mut session, &seq, &sink, true, &newer);
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(thread.history.messages.len() < crate::state::HISTORY_WINDOW_CAP);
+    assert!(thread.history.messages.contains_key(&40), "the pinned root");
+    assert!(!thread.has_newer);
+    assert!(!thread.history.loaded_complete);
+    let oldest = thread.history.messages.keys().nth(1).copied().unwrap();
+    assert_eq!(thread.history.next_from_message_id, MessageId(oldest));
+    assert_eq!(thread.ordered().first().map(|m| m.id.0), Some(oldest));
+    assert_eq!(thread.newest_loaded_id(), Some(MessageId(top - 1)));
+}
+
+#[test]
+fn a_page_on_the_way_past_a_page_trim_does_not_land_across_a_gap() {
+    let cap = crate::state::HISTORY_WINDOW_CAP as i64;
+    let (mut session, sink, seq) = unread_group_thread();
+    let top = 5_000 + cap - 1;
+    let ids: Vec<i64> = (5_000..top).rev().collect();
+    thread_page(&mut session, &seq, &sink, false, &ids);
+    session.threads.thread.as_mut().unwrap().last_message_id = top + 100;
+    let newer = session.request(
+        RequestPurpose::Threads(ThreadsPurpose::GetMessageThreadHistoryNewer { message_id: 40 }),
+        Some(ChatId(14)),
+    );
+    let older: Vec<i64> = (4_900..5_000).rev().collect();
+    thread_page(&mut session, &seq, &sink, false, &older);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{}]}}"#,
+            newer.0,
+            msg(top, 14, 40, "from before the trim")
+        ),
+    );
+    let thread = session.thread_for_chat(ChatId(14)).unwrap();
+    assert!(!thread.history.messages.contains_key(&top));
+}

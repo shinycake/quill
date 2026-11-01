@@ -44,6 +44,12 @@ impl CpalMic {
     pub fn error(&self) -> Option<String> {
         self.error.lock_or_recover().clone()
     }
+
+    /// Where the stream reports that error, for an owner that hands the
+    /// microphone to another thread.
+    pub fn error_slot(&self) -> Arc<Mutex<Option<String>>> {
+        self.error.clone()
+    }
 }
 
 impl MicCapture for CpalMic {

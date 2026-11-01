@@ -2,8 +2,9 @@
 //! like page loads.
 use super::common::session;
 use super::{
-    ChatId, FileId, HISTORY_WINDOW_CAP, MessageContent, MessageId, ParsedFile, ParsedMessage,
-    Session,
+    ChatId, FileId, HISTORY_WINDOW_CAP, HISTORY_WINDOW_TRIM_TO, MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
+    MessageContent, MessageId, ParsedFile, ParsedMessage, ReaderPosition, Session, WindowEnd,
+    history_message,
 };
 use crate::telegram::LocalFileState;
 
@@ -68,11 +69,247 @@ fn a_chat_nobody_has_open_stays_within_the_cap() {
     assert!(!history.loaded_complete, "older ones page back in");
 }
 
+fn feed_live(session: &mut Session, chat: i64, ids: std::ops::RangeInclusive<i64>) {
+    for id in ids {
+        session.apply_update_new_message(live(chat, id, Vec::new()));
+    }
+}
+
 #[test]
-fn the_open_chat_is_not_trimmed_by_live_messages() {
+fn a_page_landing_in_a_shown_chat_is_not_trimmed_row_by_row() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(7));
     let total = HISTORY_WINDOW_CAP as i64 + 10;
     feed(&mut session, 7, total);
     assert_eq!(session.histories[&7].messages.len() as i64, total);
+}
+
+#[test]
+fn a_chat_left_open_at_the_tail_stays_within_the_cap() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let total = HISTORY_WINDOW_CAP as i64 + 400;
+    feed_live(&mut session, 7, 1..=total);
+    let history = &session.histories[&7];
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert_eq!(history.newest_id(), Some(MessageId(total)));
+    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!session.history_has_newer(ChatId(7)), "still at the latest");
+}
+
+#[test]
+fn a_reader_in_the_middle_keeps_their_rows_while_old_ones_go() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let cap = HISTORY_WINDOW_CAP as i64;
+    feed_live(&mut session, 7, 1..=cap);
+    session.note_history_reader(
+        (7, None, 0),
+        ReaderPosition::Away {
+            top: MessageId(1_000),
+        },
+    );
+    feed_live(&mut session, 7, cap + 1..=cap + 1);
+    let history = &session.histories[&7];
+    assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
+    assert!(
+        history.oldest_id() < Some(MessageId(800)),
+        "rows above stay"
+    );
+    assert_eq!(history.newest_id(), Some(MessageId(cap + 1)));
+    assert!(!session.history_has_newer(ChatId(7)));
+}
+
+#[test]
+fn a_reader_near_the_top_keeps_the_oldest_rows_and_the_tail_waits() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let cap = HISTORY_WINDOW_CAP as i64;
+    feed_live(&mut session, 7, 1..=cap);
+    session.histories.get_mut(&7).unwrap().loaded_complete = true;
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(50) });
+    feed_live(&mut session, 7, cap + 1..=cap + 1);
+    assert_eq!(session.histories[&7].oldest_id(), Some(MessageId(1)));
+    assert!(session.histories[&7].loaded_complete);
+    assert!(session.history_has_newer(ChatId(7)), "paged back in below");
+    feed_live(&mut session, 7, cap + 2..=cap + 500);
+    let history = &session.histories[&7];
+    assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
+    assert_eq!(history.latest_seen, cap + 500);
+}
+
+fn outgoing(chat: i64, id: i64) -> ParsedMessage {
+    let mut message = live(chat, id, Vec::new());
+    message.is_outgoing = true;
+    message
+}
+
+#[test]
+fn a_trim_away_from_the_tail_keeps_a_send_in_flight_at_the_newest_end() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let cap = HISTORY_WINDOW_CAP as i64;
+    feed_live(&mut session, 7, 1..=cap);
+    session.upsert_message(outgoing(7, cap + 1), true);
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(1) });
+    feed_live(&mut session, 7, cap + 2..=cap + 2);
+    let history = &session.histories[&7];
+    assert!(history.contains(MessageId(cap + 1)), "the send stays");
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert_eq!(history.oldest_id(), Some(MessageId(1)), "the reader's rows");
+}
+
+#[test]
+fn a_trim_at_the_tail_keeps_a_send_in_flight_while_the_oldest_rows_go() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let cap = HISTORY_WINDOW_CAP as i64;
+    feed_live(&mut session, 7, 1..=cap - 1);
+    session.upsert_message(outgoing(7, cap), true);
+    feed_live(&mut session, 7, cap + 1..=cap + 2);
+    let history = &session.histories[&7];
+    assert!(history.contains(MessageId(cap)), "the send stays");
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert_eq!(history.newest_id(), Some(MessageId(cap + 2)));
+}
+
+#[test]
+fn a_failed_send_left_in_an_open_chat_does_not_turn_the_cap_off() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    feed_live(&mut session, 7, 1..=10);
+    let mut failed = history_message(outgoing(7, 11), true);
+    failed.failed = true;
+    session.history_entry(ChatId(7)).upsert(failed);
+    feed_live(&mut session, 7, 12..=4_000);
+    let history = &session.histories[&7];
+    assert!(history.messages.len() <= HISTORY_WINDOW_CAP);
+    assert!(history.contains(MessageId(11)), "the failed send stays");
+    assert_eq!(history.newest_id(), Some(MessageId(4_000)));
+    assert!(
+        history.oldest_id() > Some(MessageId(11)),
+        "older pages start from a server row"
+    );
+}
+
+#[test]
+fn reply_strips_stay_near_the_window_while_paging_through_a_long_chat() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let page = 100;
+    let replied = |session: &mut Session, id: i64| {
+        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+    };
+    let mut newest = 0;
+    for _ in 0..200 {
+        for id in newest + 1..=newest + page {
+            session.upsert_message(live(7, id, Vec::new()), false);
+            replied(&mut session, id);
+        }
+        newest += page;
+        session.trim_history_window(ChatId(7), WindowEnd::Oldest);
+    }
+    let window = session.histories[&7].messages.len();
+    assert!(window <= HISTORY_WINDOW_CAP);
+    let kept = session.messages.reply_targets.len();
+    assert!(
+        kept <= window + MAX_REPLY_TARGETS_OUTSIDE_WINDOW,
+        "{kept} kept"
+    );
+
+    let oldest = session.histories[&7].oldest_id().unwrap().0;
+    let above = oldest - 1;
+    assert!(session.messages.reply_targets.contains_key(&(7, above)));
+    let far = oldest - MAX_REPLY_TARGETS_OUTSIDE_WINDOW as i64 - 1;
+    assert!(!session.messages.reply_targets.contains_key(&(7, far)));
+}
+
+#[test]
+fn reply_strips_of_a_loaded_topic_stay() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    let topic_row = 5;
+    let total = HISTORY_WINDOW_CAP as i64 + 2000;
+    session
+        .topic_history_entry(ChatId(7), 3)
+        .upsert(history_message(live(7, topic_row, Vec::new()), false));
+    for id in 1..=MAX_REPLY_TARGETS_OUTSIDE_WINDOW as i64 + 10 {
+        session.accept_replied_message(ChatId(7), MessageId(id), live(7, 1, Vec::new()));
+    }
+    for id in 1_000..=1_000 + total {
+        session.upsert_message(live(7, id, Vec::new()), false);
+    }
+    session.trim_history_window(ChatId(7), WindowEnd::Oldest);
+    let kept = &session.messages.reply_targets;
+    assert!(
+        kept.contains_key(&(7, topic_row)),
+        "the topic still shows it"
+    );
+    assert_eq!(kept.len(), MAX_REPLY_TARGETS_OUTSIDE_WINDOW + 1);
+}
+
+#[test]
+fn a_reopened_chat_starts_at_the_tail_again() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(7));
+    session.note_history_reader((7, None, 0), ReaderPosition::Away { top: MessageId(5) });
+    session.open_chat(ChatId(8));
+    session.open_chat(ChatId(7));
+    assert_eq!(session.histories[&7].reader, ReaderPosition::Tail);
+}
+
+#[test]
+fn a_forum_topic_on_screen_drops_only_rows_above_its_reader() {
+    let (mut session, _sink) = session();
+    let cap = HISTORY_WINDOW_CAP as i64;
+    session.topic_history_entry(ChatId(7), 3);
+    for id in 1..=cap + 1 {
+        let mut message = live(7, id, Vec::new());
+        message.topic_id = Some(3);
+        session.apply_update_new_message(message);
+    }
+    let topic = &session.threads.topic_histories[&(7, 3)];
+    assert_eq!(topic.messages.len(), HISTORY_WINDOW_TRIM_TO, "at the tail");
+    assert_eq!(topic.messages.keys().last(), Some(&(cap + 1)));
+    assert_eq!(topic.next_from_message_id, MessageId(cap + 2 - 1200));
+
+    session.note_history_reader(
+        (7, Some(3), 0),
+        ReaderPosition::Away {
+            top: MessageId(cap + 2 - 1200 + 5),
+        },
+    );
+    for id in cap + 2..=cap + 400 {
+        let mut message = live(7, id, Vec::new());
+        message.topic_id = Some(3);
+        session.apply_update_new_message(message);
+    }
+    let topic = &session.threads.topic_histories[&(7, 3)];
+    assert_eq!(
+        topic.messages.len(),
+        1200 + 399,
+        "the reader keeps their rows"
+    );
+}
+
+#[test]
+fn reply_strips_of_trimmed_topic_rows_go_when_only_the_topic_is_loaded() {
+    let (mut session, _sink) = session();
+    session.topic_history_entry(ChatId(7), 3);
+    let total = HISTORY_WINDOW_CAP as i64 * 2;
+    for id in 1_000_000..1_000_000 + total {
+        let mut message = live(7, id, Vec::new());
+        message.topic_id = Some(3);
+        session.apply_update_new_message(message);
+        session.histories.remove(&7);
+        session.accept_replied_message(ChatId(7), MessageId(id - 500_000), live(7, 1, Vec::new()));
+    }
+    let window = session.threads.topic_histories[&(7, 3)].messages.len();
+    assert!(window <= HISTORY_WINDOW_CAP);
+    assert!(
+        session.messages.reply_targets.len()
+            <= MAX_REPLY_TARGETS_OUTSIDE_WINDOW + HISTORY_WINDOW_CAP - HISTORY_WINDOW_TRIM_TO,
+        "at most the bound plus the rows since the last trim: {} strips kept",
+        session.messages.reply_targets.len()
+    );
 }

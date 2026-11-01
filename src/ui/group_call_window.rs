@@ -13,6 +13,7 @@
 use super::app::QuillApp;
 use super::calls::stream_view::StreamPictureView;
 use super::frame_clock::{follow_app, trace_slice_render};
+use super::group_call_members_view::GroupCallMembers;
 use super::group_call_panel::BG;
 use super::group_call_stream_layout::{
     leave_stream_full, stream_full, stream_viewport, uses_stream_layout,
@@ -184,6 +185,7 @@ impl QuillApp {
                             ),
                             pinned_on_top: false,
                             title: None,
+                            members: cx.new(|cx| GroupCallMembers::new(&render_owner, cx)),
                         }
                     });
                     let picture = cx.new(|cx| StreamPictureView::new(&render_owner, cx));
@@ -293,6 +295,7 @@ pub(super) struct GroupCallPanel {
     pinned_on_top: bool,
     /// The title the window was given (a stream's follows its chat).
     title: Option<String>,
+    members: Entity<GroupCallMembers>,
 }
 
 impl QuillApp {
@@ -300,6 +303,8 @@ impl QuillApp {
     /// Returns it, whether it animates, and the stream's title.
     fn group_call_window_body(
         &mut self,
+        panel: EntityId,
+        members: &Entity<GroupCallMembers>,
         fullscreen: bool,
         stream_full: bool,
         window: &mut Window,
@@ -311,10 +316,9 @@ impl QuillApp {
             return (body.element, body.animating, Some(title));
         }
         let wants_stage = fullscreen || self.demo_ui.group_stage;
-        let call = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.clone())
-            .filter(|_| wants_stage);
+        let call = wants_stage
+            .then(|| self.session()?.calls.active_group_call.clone())
+            .flatten();
         let stage = call.and_then(|call| self.group_call_stage(&call, cx));
         // The stage closed: its volume slider goes with it.
         if stage.is_none() {
@@ -322,7 +326,7 @@ impl QuillApp {
         }
         let body = match stage {
             Some(stage) => stage,
-            None => self.group_call_panel_body(cx),
+            None => self.group_call_panel_body(panel, members, window, cx),
         };
         (body, false, None)
     }
@@ -342,9 +346,11 @@ impl Render for GroupCallPanel {
         // tdesktop treats a maximized stream window as full screen too.
         let stream_full = stream_full(window, owner.read(cx));
         let panel = cx.entity_id();
+        let members = self.members.clone();
         let (body, animating, stream_title) = owner.update(cx, |app, cx| {
             app.frame.tick_view.set(Some(panel));
-            let body = app.group_call_window_body(fullscreen, stream_full, window, cx);
+            let body =
+                app.group_call_window_body(panel, &members, fullscreen, stream_full, window, cx);
             app.frame.tick_view.set(None);
             body
         });

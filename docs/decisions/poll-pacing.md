@@ -35,8 +35,6 @@ Things that relied on the ramp without knowing it:
 
 - A paid reaction's countdown and commit: `poll_ticks` reported progress on every pass while one
   waited, which kept the loop at 10 ms. `next_deadline` now names the next change of the number.
-- An account export reports progress with no poke, so `poll_live` still asks for the next pass
-  while one runs. Same cadence as before.
 - `poll_device_qr` and `drain_account_notices` read what the reducer set, and ran before the
   drain, so they needed a second pass. They run after it now.
 - A user avatar a render finds missing is claimed for the next pass, and the pass that led to
@@ -44,8 +42,8 @@ Things that relied on the ramp without knowing it:
   failed file and data saver do not, or a list with a stuck download would poke every frame.
   `avatar_claim_sends` decides for the poke and the send alike, so the two cannot disagree. A
   pass that sends a download asks for no redraw, so the poke cannot feed itself.
-- The chat export worker writes its progress and last stage to a slot only a pass reads, and the
-  Writing stage can go a long way with no request. Both writes poke now.
+- An export worker writes its progress and last stage to a slot only a pass reads, and the Writing
+  stage can go a long way with no request. Both writes poke now.
 - These clicks leave work for the next pass, so they poke: a queued deep link, the Translate
   toggle and any Translate setting, opening Settings for the grams probe, and a linked media
   timestamp. That timestamp counted 100 passes before giving up, which is 200 s on a quiet

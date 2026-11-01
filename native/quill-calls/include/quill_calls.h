@@ -402,8 +402,9 @@ QC_EXPORT qc_group *qc_group_create(const char *config_json, const qc_group_call
  * tdesktop's GroupJoinPayload: JSON with "ufrag", "pwd", "fingerprints"
  * ([{"hash", "setup", "fingerprint"}]), "ssrc" (the audio ssrc as a signed
  * 32-bit number, as Telegram sends ssrcs) and "ssrc-groups" for video. Blocks until tgcalls has made
- * it; never call it from a callback. Stores the audio ssrc it announces
- * in `audio_ssrc` when that is not NULL. Free with qc_string_free.
+ * it, at most 2 seconds, and returns NULL if it did not; never call it from
+ * a callback. Stores the audio ssrc it announces in `audio_ssrc` when that
+ * is not NULL. Free with qc_string_free.
  */
 QC_EXPORT char *qc_group_join_payload(qc_group *group, uint32_t *audio_ssrc);
 

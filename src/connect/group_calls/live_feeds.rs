@@ -200,7 +200,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = call else {
             return;
         };
-        for participant in &call.participants {
+        for participant in call.participants.iter() {
             let MessageSender::User { user_id } = participant.participant_id else {
                 continue;
             };

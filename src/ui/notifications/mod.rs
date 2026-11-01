@@ -88,12 +88,16 @@ pub(super) struct PolledRedraw {
     full: RedrawNeed,
     /// A chat-list redraw is owed.
     list: bool,
+    /// A conversation redraw is owed (only in front: behind another app
+    /// it waits as an urgent full redraw does, folded into `full`).
+    conversation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PolledAction {
     Wait,
     ChatList,
+    Conversation,
     Full,
 }
 
@@ -108,6 +112,7 @@ impl PolledRedraw {
             last_list: now,
             full: RedrawNeed::Nothing,
             list: false,
+            conversation: false,
         }
     }
 
@@ -117,7 +122,7 @@ impl PolledRedraw {
             RedrawNeed::Now if active => Some(Duration::ZERO),
             RedrawNeed::Now => Some(INACTIVE_REDRAW),
             RedrawNeed::Later => Some(gap_for(LATER_REDRAW, active)),
-            RedrawNeed::Nothing | RedrawNeed::ChatList => None,
+            RedrawNeed::Nothing | RedrawNeed::ChatList | RedrawNeed::Conversation => None,
         }
     }
 
@@ -132,7 +137,8 @@ impl PolledRedraw {
             |gap: Duration, last: std::time::Instant| gap.saturating_sub(now.duration_since(last));
         let full = self.full_gap(active).map(|gap| left(gap, self.last_full));
         let list = self.list_gap(active).map(|gap| left(gap, self.last_list));
-        full.into_iter().chain(list).min()
+        let conversation = self.conversation.then_some(Duration::ZERO);
+        full.into_iter().chain(list).chain(conversation).min()
     }
 
     /// Record `need` and say what to redraw now.
@@ -145,6 +151,8 @@ impl PolledRedraw {
         match need {
             RedrawNeed::Nothing => {}
             RedrawNeed::ChatList => self.list = true,
+            RedrawNeed::Conversation if active => self.conversation = true,
+            RedrawNeed::Conversation => self.full = self.full.max(RedrawNeed::Now),
             RedrawNeed::Later | RedrawNeed::Now => self.full = self.full.max(need),
         }
         let since = |last: std::time::Instant| now.duration_since(last);
@@ -162,16 +170,19 @@ impl PolledRedraw {
             self.last_list = now;
             return PolledAction::ChatList;
         }
+        if std::mem::take(&mut self.conversation) {
+            return PolledAction::Conversation;
+        }
         PolledAction::Wait
     }
 
     /// A full redraw now, whatever is pending and however recently the
-    /// window drew: for what only a render hands out (desktop
-    /// notifications, their sounds, forced replies), which must not wait
-    /// for the inactive window's interval.
+    /// window drew: for what only a render hands out (a forced reply),
+    /// which must not wait for the inactive window's interval.
     pub(super) fn drawn(&mut self, now: std::time::Instant) -> PolledAction {
         self.full = RedrawNeed::Nothing;
         self.list = false;
+        self.conversation = false;
         self.last_full = now;
         self.last_list = now;
         PolledAction::Full
@@ -253,6 +264,10 @@ impl QuillApp {
         match action {
             PolledAction::Wait => {}
             PolledAction::ChatList => self.notify_chat_list(cx),
+            // The media viewer draws in the root render and shows the
+            // progress of the download it waits for.
+            PolledAction::Conversation if self.viewer.state.is_open() => cx.notify(),
+            PolledAction::Conversation => self.notify_conversations(cx),
             PolledAction::Full => cx.notify(),
         }
     }
@@ -293,10 +308,17 @@ impl QuillApp {
         self.drain_background_clicks(cx);
         self.drain_account_clicks(cx);
         let settings_open = self.settings.open;
+        // Asked of the platform: a hidden or minimized main window does not
+        // draw, so its last render may predate its deactivation.
+        let main_active = self
+            .windows
+            .main
+            .is_some_and(|main| cx.active_window() == Some(main));
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
             return false;
         };
+        live.driver.session.app_active = main_active;
         let prev_auth = live.driver.session.auth.clone();
         let mut progressed = live
             .driver
@@ -333,7 +355,7 @@ impl QuillApp {
                     .unwrap_or_default();
                 super::frame_clock::trace_ingested(name);
             }
-            need = need.max(quill::state::redraw_need(
+            need = need.join(quill::state::redraw_need(
                 &live.driver.session,
                 &owned.envelope,
             ));
@@ -382,19 +404,9 @@ impl QuillApp {
         if ticks.redraw_now {
             need = RedrawNeed::Now;
         }
-        // A desktop notification, its sound or a forced reply is handed
-        // out by the next render (`flush_notifications`): draw it now,
-        // whatever the updates were and whether or not the window is in
-        // front.
-        let deliver = !live
-            .driver
-            .session
-            .settings
-            .pending_notifications
-            .is_empty()
-            || live.driver.session.bots.pending_force_reply.is_some()
-            || !live.driver.session.settings.pending_sound_plays.is_empty()
-            || live.driver.session.settings.tone_upload.is_settled();
+        // A forced reply arms the composer at the next render
+        // (`flush_notifications`): draw it now, whatever the updates were.
+        let deliver = live.driver.session.bots.pending_force_reply.is_some();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.folders.tab
@@ -442,7 +454,6 @@ impl QuillApp {
         // From here on, `progressed` marks results the UI drains (status
         // notes, finished exports, links): those redraw at once.
         let ingested = std::mem::take(&mut progressed);
-        let mut work_left = budget_hit;
         // Picture-in-Picture: its account logging out, or its message
         // deleted (tdesktop `sessionChanges`, `itemRemoved`), handled here
         // too because the root render does not run while the main window
@@ -471,27 +482,10 @@ impl QuillApp {
             self.present_forward_result(result, cx);
             progressed = true;
         }
-        // `parity:data-chat-export-html` — forward the export worker's
-        // requests, keep its progress box fresh, and report how it ended.
         if let Some(live) = self.live.as_mut() {
-            live.driver.pump_chat_export();
             live.driver.pump_psa_labels();
-            live.driver.pump_account_export();
-            if live
-                .driver
-                .session
-                .settings
-                .account_export
-                .as_ref()
-                .is_some_and(|e| !e.finished.load(std::sync::atomic::Ordering::Acquire))
-            {
-                progressed = true;
-                work_left = true;
-            }
         }
-        if self.poll_chat_export_progress() {
-            progressed = true;
-        }
+        need = need.max(self.poll_chat_export_progress());
         // M1: a `messageLink` response lands here (`getMessageLink`) —
         // copy the link to the clipboard, exactly like tdesktop's "Copy
         // Message Link".
@@ -745,13 +739,14 @@ impl QuillApp {
         if progressed {
             self.progress_inline_mode(cx);
         }
+        self.deliver_notifications(None, cx);
         self.redraw_polled(need, deliver, cx);
         self.discard_stopped_media_playback(cx);
         self.resume_play_intent(cx);
         if logged_out {
             self.restart_live_connection(cx);
         }
-        work_left
+        budget_hit
     }
 
     /// Slice auth-logout-warning: drop the logged-out client and start a
@@ -770,12 +765,13 @@ impl QuillApp {
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup.
         quill::local_path::sweep_media_caches();
+        avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }
 
-    /// Phase 8.1: drain notification click callbacks (focus the chat) and
-    /// dispatch newly queued notifications on worker threads. Runs from
-    /// `render`, which is the only UI path with a `&mut Window`.
+    /// Phase 8.1: run notification clicks and a forced reply, which open
+    /// things in the window, then hand out what is still queued. Runs
+    /// from `render`, which is the only UI path with a `&mut Window`.
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
@@ -799,19 +795,7 @@ impl QuillApp {
         }
         // Other accounts: switches asked for by their notifications.
         self.flush_background_accounts(window, cx);
-        self.flush_call_notifications(window, cx);
-        // Notifications whose chat was read elsewhere (or removed by TDLib)
-        // are withdrawn from the OS notification center.
-        let clears: Vec<ChatId> = self
-            .live
-            .as_mut()
-            .map(|live| {
-                std::mem::take(&mut live.driver.session.settings.pending_notification_clears)
-            })
-            .unwrap_or_default();
-        for chat_id in clears {
-            self.dismiss_os_notification(chat_id, cx);
-        }
+        self.answer_call_picks(window, cx);
         // B1: force-reply — an incoming message demanded a reply; drain
         // from the live or demo session and arm the composer.
         let force_target = self
@@ -826,122 +810,7 @@ impl QuillApp {
         if let Some(target) = force_target {
             self.drain_force_reply(target, window, cx);
         }
-        let queued: Vec<QueuedNotification> = self
-            .live
-            .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_notifications))
-            .unwrap_or_default();
-        // tdesktop skips its own sound and the Dock bounce / taskbar flash
-        // while the system is in Do Not Disturb; the OS banner is the OS's.
-        let wants_attention = self.live.as_mut().is_some_and(|live| {
-            std::mem::take(&mut live.driver.session.settings.pending_attention)
-        });
-        // Only probe the OS when there is something to decide about.
-        let dnd = quill::notify_focus::needs_probe(wants_attention, queued.len())
-            && quill::notify_focus::dnd_active();
-        if wants_attention
-            && quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
-                flash_enabled: true,
-                sound_wanted: false,
-                dnd,
-            })
-            .flash
-        {
-            window.request_attention();
-        }
-        for queued in queued {
-            let plan = quill::notify_focus::plan_alert(quill::notify_focus::AlertInput {
-                flash_enabled: false,
-                sound_wanted: queued.sound.is_some(),
-                dnd,
-            });
-            if let (true, Some(kind)) = (plan.sound, queued.sound) {
-                self.play_notification_sound(kind, queued.chat_id);
-            }
-            self.spawn_os_notification(queued, cx);
-        }
-        // Parity slice: custom sounds whose downloads just completed.
-        let plays: Vec<PathBuf> = self
-            .live
-            .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.settings.pending_sound_plays))
-            .unwrap_or_default();
-        for path in plays {
-            self.notify
-                .notification_sounds
-                .play(NotificationSound::File(path));
-        }
-        self.settle_tone_upload(cx);
-    }
-
-    /// Incoming-call notifications: answer the picks, then announce a new
-    /// ringing call when no Quill window is in front, and withdraw the
-    /// notification once the call stops ringing.
-    fn flush_call_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
-            .calls
-            .notify_clicks
-            .lock_or_recover()
-            .drain(..)
-            .collect();
-        let ringing = self.session().and_then(|s| {
-            let call = s.calls.active_call.as_ref()?;
-            (matches!(
-                call.state,
-                quill::telegram::envelope::CallState::Pending { .. }
-            ) && !call.is_outgoing)
-                .then_some((call.id, call.user_id, call.is_video))
-        });
-        for (call_id, action) in picks {
-            // A stale pick (the call already ended or was answered) is
-            // ignored: accepting must never act on a different call.
-            if ringing.map(|r| r.0) != Some(call_id) {
-                continue;
-            }
-            match action {
-                quill::notify_call::CallNotificationAction::Accept => self.accept_incoming_call(cx),
-                quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),
-                quill::notify_call::CallNotificationAction::Open => {
-                    self.calls.window_closed_by_user = None;
-                    cx.activate(true);
-                    window.activate_window();
-                    if let Some(handle) = self.calls.window {
-                        let _ = handle.update(cx, |_, window, _| window.activate_window());
-                    }
-                }
-            }
-        }
-        let Some((call_id, user_id, is_video)) = ringing else {
-            // Not ringing any more: take the toast down (macOS and Windows;
-            // a Linux `notify-send` toast expires on its own).
-            if let Some(call_id) = self.calls.notified.take()
-                && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
-            {
-                let account = self
-                    .session()
-                    .map(|s| s.account.0.clone())
-                    .unwrap_or_else(|| "primary".to_string());
-                cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
-                    &account, call_id,
-                ));
-            }
-            return;
-        };
-        let caller = self.call_peer_name(user_id);
-        let Some(notification) =
-            quill::notify_call::decide_call_notify(&quill::notify_call::CallNotifyInput {
-                call_id,
-                caller: &caller,
-                is_video,
-                app_active: cx.active_window().is_some(),
-                last_notified: self.calls.notified,
-                locked: self.account.passcode.locked,
-            })
-        else {
-            return;
-        };
-        self.calls.notified = Some(call_id);
-        self.spawn_call_notification(notification, cx);
+        self.deliver_notifications(Some(window), cx);
     }
 }
 
@@ -956,7 +825,9 @@ fn logout_restart_trigger(saw_logging_out: bool, new_auth: &AuthorizationState) 
 
 mod account_notifications;
 mod avatar_icon;
+pub(in crate::ui) use avatar_icon::forget_cached_icons;
 mod debug_notification;
+mod deliver;
 mod inline_reply;
 #[cfg(target_os = "linux")]
 mod linux_dbus;
@@ -964,7 +835,13 @@ mod linux_dbus;
 pub(in crate::ui) use linux_dbus::linux_service_capabilities;
 mod native_extras;
 mod photo_preview;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod ringtone_tests;
 mod spawn_call_notification;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod viewer_progress_tests;
 
 #[cfg(test)]
 mod tests {
@@ -975,6 +852,27 @@ mod tests {
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    #[test]
+    fn conversation_progress_redraws_only_the_conversation_and_holds_nothing_back() {
+        let start = Instant::now();
+        let mut redraw = PolledRedraw::new(start);
+        assert_eq!(
+            redraw.decide(RedrawNeed::Conversation, true, start + ms(1)),
+            PolledAction::Conversation
+        );
+        assert_eq!(redraw.next_due(true, start + ms(1)), None);
+        // An urgent update in the same poll still redraws everything.
+        let _ = redraw.decide(RedrawNeed::Conversation, false, start + ms(2));
+        assert_eq!(
+            redraw.decide(RedrawNeed::Now, true, start + ms(3)),
+            PolledAction::Full
+        );
+        assert_eq!(redraw.next_due(true, start + ms(3)), None);
+        // Behind another app it waits as long as an urgent redraw would.
+        let _ = redraw.decide(RedrawNeed::Conversation, false, start + ms(4));
+        assert!(redraw.next_due(false, start + ms(4)).is_some());
     }
 
     #[test]
@@ -1075,7 +973,7 @@ mod tests {
             match redraw.decide(need, true, start + ms(tick * 10)) {
                 PolledAction::ChatList => lists += 1,
                 PolledAction::Full => fulls += 1,
-                PolledAction::Wait => {}
+                PolledAction::Conversation | PolledAction::Wait => {}
             }
         }
         assert_eq!(fulls, 0);
@@ -1256,7 +1154,7 @@ mod tests {
                     let owed = owed_full.get_or_insert((at, need));
                     owed.1 = owed.1.max(need);
                 }
-                RedrawNeed::Nothing => {}
+                RedrawNeed::Conversation | RedrawNeed::Nothing => {}
             }
             match redraw.decide(need, active, at) {
                 PolledAction::Full => {
@@ -1264,7 +1162,7 @@ mod tests {
                     owed_full = None;
                 }
                 PolledAction::ChatList => owed_list = None,
-                PolledAction::Wait => {}
+                PolledAction::Conversation | PolledAction::Wait => {}
             }
             // The longest an owed redraw may wait, plus one poll gap.
             let slack = POLL_PACE.gap;

@@ -19,6 +19,7 @@ pub mod handle;
 pub mod html;
 pub mod html_media;
 pub mod json;
+pub mod loaded_files;
 pub mod model;
 pub mod names;
 pub mod settings;

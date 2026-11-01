@@ -15,7 +15,7 @@ pub use external::*;
 pub use mock::*;
 pub use stream::*;
 pub use stream_feeder::*;
-pub use tgcalls::{TgcallsEngine, preload_tgcalls};
+pub use tgcalls::{TgcallsEngine, await_call_teardown, preload_tgcalls};
 pub use types::*;
 
 /// Group-call and stream frames go to live feeds as planes.

@@ -580,7 +580,7 @@ impl QuillApp {
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
             this.follow_windows(cx);
-            super::glyph_sweep::window_activation(active);
+            super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);
             // The system accent may have changed while another app was in
             // front.
@@ -594,6 +594,7 @@ impl QuillApp {
         // Remember the window's geometry when the user moves or resizes it.
         cx.observe_window_bounds(window, |this, window, cx| {
             this.schedule_window_state_save(window, cx);
+            this.main_window_placed(window, cx);
         })
         .detach();
         // The main window's display, and displays added, removed or resized.

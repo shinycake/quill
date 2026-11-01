@@ -378,11 +378,10 @@ pub fn tray_setting_switches(tray_available: bool, tray_enabled: bool) -> TraySe
 pub enum CloseOutcome {
     /// Close the window and quit.
     Quit,
-    /// macOS: hide the whole app; the tray and Dock keep it reachable.
-    HideApp,
-    /// Windows and X11: hide the window (off the taskbar and the switcher);
-    /// the tray icon's "Open Quill" shows it again
-    /// (`ui/window_control.rs`).
+    /// Hide the window (tdesktop `closeWithoutDestroy`), and only that one:
+    /// call and Picture-in-Picture windows stay. The tray icon's "Open
+    /// Quill" shows it again, and on macOS the Dock too
+    /// (`ui/window_control.rs`, `ui/link_inbox.rs`).
     Hide,
     /// Wayland: xdg-shell cannot hide a toplevel, so the window is
     /// minimized and "Open Quill" asks the compositor to raise it.
@@ -392,18 +391,22 @@ pub enum CloseOutcome {
 /// tdesktop "Run in the background" (`CloseBehavior::RunInBackground`): the
 /// window close button keeps the app alive when a tray icon exists.
 /// `hide_supported` is what `ui::window_control::hide_supported` says of
-/// the window.
+/// the window. On macOS an app with an account signed in hides whatever
+/// the setting says, and one with none quits (tdesktop
+/// `MainWindow::hideNoQuit`): a Mac app keeps running without a window, so
+/// closing it must not leave a running app with nothing to show.
 pub fn close_outcome(
     run_in_background: bool,
     tray_available: bool,
     macos: bool,
     hide_supported: bool,
+    signed_in: bool,
 ) -> CloseOutcome {
-    match (run_in_background && tray_available, macos, hide_supported) {
-        (false, _, _) => CloseOutcome::Quit,
-        (true, true, _) => CloseOutcome::HideApp,
-        (true, false, true) => CloseOutcome::Hide,
-        (true, false, false) => CloseOutcome::Minimize,
+    let background = run_in_background && tray_available;
+    match (background || (macos && signed_in), hide_supported) {
+        (false, _) => CloseOutcome::Quit,
+        (true, true) => CloseOutcome::Hide,
+        (true, false) => CloseOutcome::Minimize,
     }
 }
 

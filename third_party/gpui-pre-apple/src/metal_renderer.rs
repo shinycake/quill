@@ -40,7 +40,7 @@ use std::{
 // Exported to metal
 pub(crate) type PointF = gpui::Point<f32>;
 
-#[cfg(not(feature = "runtime_shaders"))]
+#[cfg(quill_metallib)]
 const SHADERS_METALLIB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/shaders.metallib"));
 #[cfg(feature = "runtime_shaders")]
 const SHADERS_SOURCE_FILE: &str = include_str!(concat!(env!("OUT_DIR"), "/stitched_shaders.metal"));
@@ -69,14 +69,12 @@ unsafe impl objc2::encode::Encode for SurfaceRef {
 pub type Context = Arc<Mutex<InstanceBufferPool>>;
 pub type Renderer = MetalRenderer;
 
-pub unsafe fn new_renderer(
+pub fn new_renderer(
     context: self::Context,
-    _native_window: *mut c_void,
-    _native_view: *mut c_void,
     _bounds: gpui::Size<f32>,
     transparent: bool,
     use_display_p3: bool,
-) -> Renderer {
+) -> Result<Renderer> {
     MetalRenderer::new(context, transparent, use_display_p3)
 }
 
@@ -155,10 +153,12 @@ pub struct MetalRenderer {
     // QUILL: HDR still images (`64RGBAHalf` surfaces), and the drawable
     // format the pipelines above were built for. A float (EDR) layer swaps
     // in a set built for `RGBA16Float`; the other set is kept for the way
-    // back.
+    // back. A format whose set failed to build is not tried again, because
+    // the attempt would repeat on every frame.
     hdr_surfaces_pipeline_state: metal::RenderPipelineState,
     drawable_format: MTLPixelFormat,
     other_pipelines: Option<DrawablePipelines>,
+    failed_format: Option<MTLPixelFormat>,
     library: metal::Library,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
@@ -191,8 +191,8 @@ impl MetalRenderer {
         instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
         transparent: bool,
         use_display_p3: bool,
-    ) -> Self {
-        let device = Self::create_device();
+    ) -> Result<Self> {
+        let device = Self::create_device()?;
         let layer = metal::MetalLayer::new();
         Self::configure_layer(&layer, &device, transparent, use_display_p3);
         Self::new_internal(device, Some(layer), !transparent, instance_buffer_pool)
@@ -205,8 +205,8 @@ impl MetalRenderer {
         instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
         layer: &objc2_quartz_core::CAMetalLayer,
         transparent: bool,
-    ) -> Self {
-        let device = Self::create_device();
+    ) -> Result<Self> {
+        let device = Self::create_device()?;
         // Both types bind the same Objective-C class, so this only changes which
         // Rust wrapper views the live layer. `to_owned` retains it.
         let layer = unsafe {
@@ -270,13 +270,13 @@ impl MetalRenderer {
     /// This renderer can render scenes to images without requiring a CAMetalLayer,
     /// window, or AppKit. Use `render_scene_to_image()` to render scenes.
     #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
-    pub fn new_headless(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>) -> Self {
-        let device = Self::create_device();
+    pub fn new_headless(instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>) -> Result<Self> {
+        let device = Self::create_device()?;
         Self::new_internal(device, None, true, instance_buffer_pool)
     }
 
     #[cfg(target_os = "macos")]
-    fn create_device() -> metal::Device {
+    fn create_device() -> Result<metal::Device> {
         // Prefer low‐power integrated GPUs on Intel Mac. On Apple
         // Silicon, there is only ever one GPU, so this is equivalent to
         // `metal::Device::system_default()`.
@@ -284,7 +284,7 @@ impl MetalRenderer {
             .into_iter()
             .min_by_key(|d| (d.is_removable(), !d.is_low_power()))
         {
-            d
+            Ok(d)
         } else {
             // For some reason `all()` can return an empty list, see https://github.com/zed-industries/zed/issues/37689
             // In that case, we fall back to the system default device.
@@ -296,15 +296,12 @@ impl MetalRenderer {
     }
 
     #[cfg(target_os = "ios")]
-    fn create_device() -> metal::Device {
+    fn create_device() -> Result<metal::Device> {
         Self::system_default_device()
     }
 
-    fn system_default_device() -> metal::Device {
-        metal::Device::system_default().unwrap_or_else(|| {
-            log::error!("unable to access a compatible graphics device");
-            std::process::exit(1);
-        })
+    fn system_default_device() -> Result<metal::Device> {
+        metal::Device::system_default().context("no compatible graphics device")
     }
 
     fn new_internal(
@@ -312,16 +309,42 @@ impl MetalRenderer {
         layer: Option<metal::MetalLayer>,
         opaque: bool,
         instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
-    ) -> Self {
-        #[cfg(feature = "runtime_shaders")]
-        let library = device
-            .new_library_with_source(&SHADERS_SOURCE_FILE, &metal::CompileOptions::new())
-            .expect("error building metal library");
-        #[cfg(not(feature = "runtime_shaders"))]
-        let library = device
-            .new_library_with_data(SHADERS_METALLIB)
-            .expect("error building metal library");
+    ) -> Result<Self> {
+        Self::with_shaders(device, layer, opaque, instance_buffer_pool, built_in_library)
+    }
 
+    /// QUILL: a window that can't get a renderer comes back as an `Err` the
+    /// caller handles, in place of 0.3.10's `expect`s, which aborted the app.
+    /// `MTLCompilerService` can fail under load, so one failure gets a retry.
+    fn with_shaders(
+        device: metal::Device,
+        layer: Option<metal::MetalLayer>,
+        opaque: bool,
+        instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+        library: impl Fn(&metal::DeviceRef) -> Result<metal::Library>,
+    ) -> Result<Self> {
+        let attempt = || {
+            Self::build(
+                device.clone(),
+                layer.clone(),
+                opaque,
+                instance_buffer_pool.clone(),
+                library(&device)?,
+            )
+        };
+        attempt().or_else(|error| {
+            log::warn!("Metal setup failed, trying once more: {error:#}");
+            attempt()
+        })
+    }
+
+    fn build(
+        device: metal::Device,
+        layer: Option<metal::MetalLayer>,
+        opaque: bool,
+        instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
+        library: metal::Library,
+    ) -> Result<Self> {
         fn to_float2_bits(point: PointF) -> u64 {
             let mut output = point.y.to_bits() as u64;
             output <<= 32;
@@ -367,7 +390,7 @@ impl MetalRenderer {
             "path_rasterization_fragment",
             MTLPixelFormat::BGRA8Unorm,
             PATH_SAMPLE_COUNT,
-        );
+        )?;
         let path_sprites_pipeline_state = build_path_sprite_pipeline_state(
             &device,
             &library,
@@ -375,7 +398,7 @@ impl MetalRenderer {
             "path_sprite_vertex",
             "path_sprite_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let shadows_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -383,7 +406,7 @@ impl MetalRenderer {
             "shadow_vertex",
             "shadow_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let quads_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -391,7 +414,7 @@ impl MetalRenderer {
             "quad_vertex",
             "quad_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let underlines_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -399,7 +422,7 @@ impl MetalRenderer {
             "underline_vertex",
             "underline_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let monochrome_sprites_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -407,7 +430,7 @@ impl MetalRenderer {
             "monochrome_sprite_vertex",
             "monochrome_sprite_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let polychrome_sprites_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -415,7 +438,7 @@ impl MetalRenderer {
             "polychrome_sprite_vertex",
             "polychrome_sprite_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
         let surfaces_pipeline_state = build_pipeline_state(
             &device,
             &library,
@@ -423,7 +446,7 @@ impl MetalRenderer {
             "surface_vertex",
             "surface_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
 
         let hdr_surfaces_pipeline_state = build_pipeline_state(
             &device,
@@ -432,7 +455,7 @@ impl MetalRenderer {
             "surface_vertex",
             "hdr_surface_fragment",
             MTLPixelFormat::BGRA8Unorm,
-        );
+        )?;
 
         let command_queue = device.new_command_queue();
         let supports_shared_storage = cfg!(target_os = "ios") || is_apple_gpu;
@@ -450,14 +473,16 @@ impl MetalRenderer {
                 None,
                 ptr::NonNull::from(&mut cache),
             );
-            assert_eq!(
-                status, kCVReturnSuccess,
-                "failed to create CoreVideo Metal texture cache"
+            anyhow::ensure!(
+                status == kCVReturnSuccess,
+                "failed to create the CoreVideo Metal texture cache: {status}"
             );
-            CFRetained::from_raw(ptr::NonNull::new(cache).expect("CoreVideo returned a null cache"))
+            CFRetained::from_raw(
+                ptr::NonNull::new(cache).context("CoreVideo returned a null texture cache")?,
+            )
         };
 
-        Self {
+        Ok(Self {
             device,
             layer,
             presents_with_transaction: false,
@@ -476,6 +501,7 @@ impl MetalRenderer {
             hdr_surfaces_pipeline_state,
             drawable_format: MTLPixelFormat::BGRA8Unorm,
             other_pipelines: None,
+            failed_format: None,
             library,
             unit_vertices,
             instance_buffer_pool,
@@ -487,7 +513,7 @@ impl MetalRenderer {
             #[cfg(any(test, feature = "bench-support", feature = "test-support"))]
             headless_render_target: None,
             drawables_handed_out: Vec::new(),
-        }
+        })
     }
 
     pub fn layer(&self) -> Option<&metal::MetalLayerRef> {
@@ -670,7 +696,7 @@ impl MetalRenderer {
         );
         // QUILL: free spares a burst left before taking the next drawable.
         self.trim_spare_drawables();
-        let drawable = if let Some(drawable) = layer.next_drawable() {
+        let drawable = if let Some(drawable) = self.next_usable_drawable(&layer) {
             drawable
         } else {
             log::error!(
@@ -699,13 +725,30 @@ impl MetalRenderer {
         }
     }
 
+    /// QUILL: the next drawable, in a format the pipelines can draw. When the
+    /// float set can't be built, the layer leaves extended range for the
+    /// 8-bit set, which the frame in hand and every later one draws with. The
+    /// HDR picture comes out clamped to standard range.
+    fn next_usable_drawable<'a>(
+        &mut self,
+        layer: &'a metal::MetalLayerRef,
+    ) -> Option<&'a metal::MetalDrawableRef> {
+        let drawable = layer.next_drawable()?;
+        let Err(error) = self.match_drawable_format(drawable.texture().pixel_format()) else {
+            return Some(drawable);
+        };
+        log::error!("leaving extended range: {error:#}");
+        leave_extended_range(layer);
+        layer.next_drawable()
+    }
+
     fn render_frame(
         &mut self,
         scene: &Scene,
         texture: &metal::TextureRef,
         viewport_size: Size<DevicePixels>,
     ) -> Result<metal::CommandBuffer> {
-        self.match_drawable_format(texture.pixel_format());
+        self.match_drawable_format(texture.pixel_format())?;
         let mut writer = InstanceBufferWriter::new(
             &self.device,
             &self.instance_buffer_pool,
@@ -763,8 +806,8 @@ impl MetalRenderer {
             (viewport_size.width.ceil() as i32).into(),
             (viewport_size.height.ceil() as i32).into(),
         );
-        let drawable = layer
-            .next_drawable()
+        let drawable = self
+            .next_usable_drawable(&layer)
             .ok_or_else(|| anyhow::anyhow!("Failed to get drawable for render_to_image"))?;
 
         let command_buffer = self.render_frame(scene, drawable.texture(), viewport_size)?;
@@ -1537,13 +1580,21 @@ impl MetalRenderer {
     /// QUILL: rebuild (or swap back) the pipelines that draw into the
     /// drawable when its pixel format changes (an EDR float layer and back).
     /// Path rasterization keeps its own 8-bit intermediate.
-    fn match_drawable_format(&mut self, format: MTLPixelFormat) {
+    fn match_drawable_format(&mut self, format: MTLPixelFormat) -> Result<()> {
         if format == self.drawable_format {
-            return;
+            return Ok(());
         }
-        let incoming = match self.other_pipelines.take() {
-            Some(pipelines) if pipelines.format == format => pipelines,
-            _ => DrawablePipelines::build(&self.device, &self.library, format),
+        anyhow::ensure!(
+            self.failed_format != Some(format),
+            "the {format:?} pipelines did not build earlier"
+        );
+        let stashed = self
+            .other_pipelines
+            .take_if(|pipelines| pipelines.format == format);
+        let incoming = match stashed {
+            Some(pipelines) => pipelines,
+            None => DrawablePipelines::build(&self.device, &self.library, format)
+                .inspect_err(|_| self.failed_format = Some(format))?,
         };
         let outgoing = DrawablePipelines {
             format: self.drawable_format,
@@ -1564,6 +1615,22 @@ impl MetalRenderer {
         };
         self.other_pipelines = Some(outgoing);
         self.drawable_format = format;
+        Ok(())
+    }
+}
+
+/// QUILL: the state Quill's `set_window_edr` puts back when the viewer closes.
+/// That code only touches the layer when the viewer's state changes, so the
+/// layer stays 8-bit after this.
+fn leave_extended_range(layer: &metal::MetalLayerRef) {
+    layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+    layer.set_wants_extended_dynamic_range_content(false);
+    // SAFETY: `layer` is a live CAMetalLayer, and nil is its default colorspace.
+    unsafe {
+        let _: () = objc2::msg_send![
+            layer.as_ptr().cast::<AnyObject>(),
+            setColorspace: ptr::null::<c_void>()
+        ];
     }
 }
 
@@ -1581,11 +1648,15 @@ struct DrawablePipelines {
 }
 
 impl DrawablePipelines {
-    fn build(device: &metal::DeviceRef, library: &metal::LibraryRef, format: MTLPixelFormat) -> Self {
+    fn build(
+        device: &metal::DeviceRef,
+        library: &metal::LibraryRef,
+        format: MTLPixelFormat,
+    ) -> Result<Self> {
         let plain = |label: &str, vertex: &str, fragment: &str| {
             build_pipeline_state(device, library, label, vertex, fragment, format)
         };
-        Self {
+        Ok(Self {
             format,
             path_sprites: build_path_sprite_pipeline_state(
                 device,
@@ -1594,23 +1665,23 @@ impl DrawablePipelines {
                 "path_sprite_vertex",
                 "path_sprite_fragment",
                 format,
-            ),
-            shadows: plain("shadows", "shadow_vertex", "shadow_fragment"),
-            quads: plain("quads", "quad_vertex", "quad_fragment"),
-            underlines: plain("underlines", "underline_vertex", "underline_fragment"),
+            )?,
+            shadows: plain("shadows", "shadow_vertex", "shadow_fragment")?,
+            quads: plain("quads", "quad_vertex", "quad_fragment")?,
+            underlines: plain("underlines", "underline_vertex", "underline_fragment")?,
             monochrome_sprites: plain(
                 "monochrome_sprites",
                 "monochrome_sprite_vertex",
                 "monochrome_sprite_fragment",
-            ),
+            )?,
             polychrome_sprites: plain(
                 "polychrome_sprites",
                 "polychrome_sprite_vertex",
                 "polychrome_sprite_fragment",
-            ),
-            surfaces: plain("surfaces", "surface_vertex", "surface_fragment"),
-            hdr_surfaces: plain("hdr_surfaces", "surface_vertex", "hdr_surface_fragment"),
-        }
+            )?,
+            surfaces: plain("surfaces", "surface_vertex", "surface_fragment")?,
+            hdr_surfaces: plain("hdr_surfaces", "surface_vertex", "hdr_surface_fragment")?,
+        })
     }
 }
 
@@ -1746,6 +1817,28 @@ fn half_to_f32(bits: u16) -> f32 {
     if bits & 0x8000 != 0 { -magnitude } else { magnitude }
 }
 
+fn built_in_library(device: &metal::DeviceRef) -> Result<metal::Library> {
+    #[cfg(quill_metallib)]
+    let library = device.new_library_with_data(SHADERS_METALLIB);
+    #[cfg(all(quill_metallib, feature = "runtime_shaders"))]
+    let library = library.or_else(|error| {
+        log::warn!("the precompiled shaders did not load: {error}");
+        device.new_library_with_source(SHADERS_SOURCE_FILE, &metal::CompileOptions::new())
+    });
+    #[cfg(not(quill_metallib))]
+    let library = device.new_library_with_source(SHADERS_SOURCE_FILE, &metal::CompileOptions::new());
+    library
+        .map_err(anyhow::Error::msg)
+        .context("building the Metal shader library")
+}
+
+fn shader_function(library: &metal::LibraryRef, name: &str) -> Result<metal::Function> {
+    library
+        .get_function(name, None)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("locating shader function {name}"))
+}
+
 fn build_pipeline_state(
     device: &metal::DeviceRef,
     library: &metal::LibraryRef,
@@ -1753,19 +1846,18 @@ fn build_pipeline_state(
     vertex_fn_name: &str,
     fragment_fn_name: &str,
     pixel_format: metal::MTLPixelFormat,
-) -> metal::RenderPipelineState {
-    let vertex_fn = library
-        .get_function(vertex_fn_name, None)
-        .expect("error locating vertex function");
-    let fragment_fn = library
-        .get_function(fragment_fn_name, None)
-        .expect("error locating fragment function");
+) -> Result<metal::RenderPipelineState> {
+    let vertex_fn = shader_function(library, vertex_fn_name)?;
+    let fragment_fn = shader_function(library, fragment_fn_name)?;
 
     let descriptor = metal::RenderPipelineDescriptor::new();
     descriptor.set_label(label);
     descriptor.set_vertex_function(Some(vertex_fn.as_ref()));
     descriptor.set_fragment_function(Some(fragment_fn.as_ref()));
-    let color_attachment = descriptor.color_attachments().object_at(0).unwrap();
+    let color_attachment = descriptor
+        .color_attachments()
+        .object_at(0)
+        .context("a pipeline descriptor has no color attachment")?;
     color_attachment.set_pixel_format(pixel_format);
     color_attachment.set_blending_enabled(true);
     color_attachment.set_rgb_blend_operation(metal::MTLBlendOperation::Add);
@@ -1777,7 +1869,8 @@ fn build_pipeline_state(
 
     device
         .new_render_pipeline_state(&descriptor)
-        .expect("could not create render pipeline state")
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("creating render pipeline {label}"))
 }
 
 fn build_path_sprite_pipeline_state(
@@ -1787,19 +1880,18 @@ fn build_path_sprite_pipeline_state(
     vertex_fn_name: &str,
     fragment_fn_name: &str,
     pixel_format: metal::MTLPixelFormat,
-) -> metal::RenderPipelineState {
-    let vertex_fn = library
-        .get_function(vertex_fn_name, None)
-        .expect("error locating vertex function");
-    let fragment_fn = library
-        .get_function(fragment_fn_name, None)
-        .expect("error locating fragment function");
+) -> Result<metal::RenderPipelineState> {
+    let vertex_fn = shader_function(library, vertex_fn_name)?;
+    let fragment_fn = shader_function(library, fragment_fn_name)?;
 
     let descriptor = metal::RenderPipelineDescriptor::new();
     descriptor.set_label(label);
     descriptor.set_vertex_function(Some(vertex_fn.as_ref()));
     descriptor.set_fragment_function(Some(fragment_fn.as_ref()));
-    let color_attachment = descriptor.color_attachments().object_at(0).unwrap();
+    let color_attachment = descriptor
+        .color_attachments()
+        .object_at(0)
+        .context("a pipeline descriptor has no color attachment")?;
     color_attachment.set_pixel_format(pixel_format);
     color_attachment.set_blending_enabled(true);
     color_attachment.set_rgb_blend_operation(metal::MTLBlendOperation::Add);
@@ -1811,7 +1903,8 @@ fn build_path_sprite_pipeline_state(
 
     device
         .new_render_pipeline_state(&descriptor)
-        .expect("could not create render pipeline state")
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("creating render pipeline {label}"))
 }
 
 fn build_path_rasterization_pipeline_state(
@@ -1822,13 +1915,9 @@ fn build_path_rasterization_pipeline_state(
     fragment_fn_name: &str,
     pixel_format: metal::MTLPixelFormat,
     path_sample_count: u32,
-) -> metal::RenderPipelineState {
-    let vertex_fn = library
-        .get_function(vertex_fn_name, None)
-        .expect("error locating vertex function");
-    let fragment_fn = library
-        .get_function(fragment_fn_name, None)
-        .expect("error locating fragment function");
+) -> Result<metal::RenderPipelineState> {
+    let vertex_fn = shader_function(library, vertex_fn_name)?;
+    let fragment_fn = shader_function(library, fragment_fn_name)?;
 
     let descriptor = metal::RenderPipelineDescriptor::new();
     descriptor.set_label(label);
@@ -1838,7 +1927,10 @@ fn build_path_rasterization_pipeline_state(
         descriptor.set_raster_sample_count(path_sample_count as _);
         descriptor.set_alpha_to_coverage_enabled(false);
     }
-    let color_attachment = descriptor.color_attachments().object_at(0).unwrap();
+    let color_attachment = descriptor
+        .color_attachments()
+        .object_at(0)
+        .context("a pipeline descriptor has no color attachment")?;
     color_attachment.set_pixel_format(pixel_format);
     color_attachment.set_blending_enabled(true);
     color_attachment.set_rgb_blend_operation(metal::MTLBlendOperation::Add);
@@ -1850,7 +1942,8 @@ fn build_path_rasterization_pipeline_state(
 
     device
         .new_render_pipeline_state(&descriptor)
-        .expect("could not create render pipeline state")
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("creating render pipeline {label}"))
 }
 
 #[derive(Clone)]
@@ -2072,21 +2165,22 @@ pub struct SurfaceBounds {
     pub content_mask: ContentMask<ScaledPixels>,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 pub struct MetalHeadlessRenderer {
     renderer: MetalRenderer,
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 impl MetalHeadlessRenderer {
     pub fn new() -> Self {
         let instance_buffer_pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
-        let renderer = MetalRenderer::new_headless(instance_buffer_pool);
+        let renderer = MetalRenderer::new_headless(instance_buffer_pool)
+            .expect("test support: gpui-pre-platform calls this without a Result");
         Self { renderer }
     }
 }
 
-#[cfg(any(test, feature = "bench-support", feature = "test-support"))]
+#[cfg(any(feature = "bench-support", feature = "test-support"))]
 impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
     fn render_scene_to_image(
         &mut self,
@@ -2108,12 +2202,158 @@ impl gpui::PlatformHeadlessRenderer for MetalHeadlessRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use objc2_core_foundation::{CFDictionary, CFType};
     use objc2_core_video::{
         CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
         CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
         CVPixelBufferUnlockBaseAddress, kCVPixelBufferIOSurfacePropertiesKey,
     };
+
+    fn renderer_from(
+        library: impl Fn(&metal::DeviceRef) -> Result<metal::Library>,
+    ) -> Result<MetalRenderer> {
+        MetalRenderer::with_shaders(
+            MetalRenderer::create_device()?,
+            None,
+            true,
+            Arc::new(Mutex::new(InstanceBufferPool::default())),
+            library,
+        )
+    }
+
+    fn library_from_source(device: &metal::DeviceRef, source: &str) -> Result<metal::Library> {
+        device
+            .new_library_with_source(source, &metal::CompileOptions::new())
+            .map_err(anyhow::Error::msg)
+    }
+
+    #[test]
+    fn shaders_that_do_not_compile_are_an_error() {
+        let tries = Cell::new(0);
+        let result = renderer_from(|device| {
+            tries.set(tries.get() + 1);
+            library_from_source(device, "this is not a shader")
+        });
+        assert!(result.is_err());
+        assert_eq!(tries.get(), 2);
+    }
+
+    #[test]
+    fn a_library_without_our_functions_is_an_error() {
+        let error = renderer_from(|device| library_from_source(device, "#include <metal_stdlib>"))
+            .err()
+            .expect("the renderer needs its shader functions");
+        assert!(format!("{error:#}").contains("locating shader function"));
+    }
+
+    #[cfg(quill_metallib)]
+    #[test]
+    fn the_precompiled_shaders_build_every_pipeline() {
+        renderer_from(|device| {
+            device
+                .new_library_with_data(SHADERS_METALLIB)
+                .map_err(anyhow::Error::msg)
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn one_failed_library_build_is_retried() {
+        let tries = Cell::new(0);
+        let result = renderer_from(|device| {
+            tries.set(tries.get() + 1);
+            if tries.get() == 1 {
+                library_from_source(device, "this is not a shader")
+            } else {
+                built_in_library(device)
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(tries.get(), 2);
+    }
+
+    fn library_without_functions(device: &metal::DeviceRef) -> metal::Library {
+        library_from_source(device, "#include <metal_stdlib>").unwrap()
+    }
+
+    fn renderer_on_a_float_layer() -> MetalRenderer {
+        let renderer = MetalRenderer::new(Default::default(), false, false).unwrap();
+        let layer = renderer.layer().unwrap();
+        layer.set_drawable_size(CGSize::new(16.0, 16.0));
+        layer.set_framebuffer_only(false);
+        layer.set_pixel_format(MTLPixelFormat::RGBA16Float);
+        layer.set_wants_extended_dynamic_range_content(true);
+        renderer
+    }
+
+    fn empty_scene() -> Scene {
+        let mut scene = Scene::default();
+        scene.finish();
+        scene
+    }
+
+    #[test]
+    fn a_failed_edr_switch_leaves_edr_and_still_draws() {
+        let mut renderer = renderer_on_a_float_layer();
+        renderer.library = library_without_functions(&renderer.device);
+
+        let image = renderer.render_to_image(&empty_scene()).unwrap();
+
+        let layer = renderer.layer().unwrap();
+        assert_eq!(layer.pixel_format(), MTLPixelFormat::BGRA8Unorm);
+        assert!(!layer.wants_extended_dynamic_range_content());
+        assert_eq!(image.dimensions(), (16, 16));
+    }
+
+    #[test]
+    fn a_format_that_failed_is_not_built_again() {
+        let mut renderer = renderer_on_a_float_layer();
+        let library = mem::replace(
+            &mut renderer.library,
+            library_without_functions(&renderer.device),
+        );
+        renderer.draw(&empty_scene());
+        assert_eq!(
+            renderer.layer().unwrap().pixel_format(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+
+        // A rebuild would work now, and would keep the layer on float.
+        renderer.library = library;
+        renderer
+            .layer()
+            .unwrap()
+            .set_pixel_format(MTLPixelFormat::RGBA16Float);
+        renderer.draw(&empty_scene());
+
+        assert_eq!(
+            renderer.layer().unwrap().pixel_format(),
+            MTLPixelFormat::BGRA8Unorm
+        );
+    }
+
+    #[test]
+    fn a_failed_switch_keeps_the_stashed_pipelines() {
+        let mut renderer = MetalRenderer::new_headless(Default::default()).unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
+        renderer
+            .match_drawable_format(MTLPixelFormat::BGRA8Unorm)
+            .unwrap();
+        renderer.library = library_without_functions(&renderer.device);
+
+        assert!(
+            renderer
+                .match_drawable_format(MTLPixelFormat::RGBA8Unorm)
+                .is_err()
+        );
+
+        renderer
+            .match_drawable_format(MTLPixelFormat::RGBA16Float)
+            .unwrap();
+    }
 
     #[test]
     fn render_core_video_surface() {
@@ -2168,7 +2408,8 @@ mod tests {
         drop(image_buffer);
         scene.finish();
 
-        let mut renderer = MetalRenderer::new_headless(Arc::new(Mutex::new(Default::default())));
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(Default::default()))).unwrap();
         let image = renderer
             .render_scene_to_image(&scene, size(DevicePixels(16), DevicePixels(16)))
             .unwrap();

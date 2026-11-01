@@ -625,11 +625,18 @@ impl Render for AnimationLayer {
         let Some(app) = self.app.upgrade() else {
             return painter.into_any_element();
         };
-        app.update(cx, |app, cx| {
+        // A patch can land while input in a chat window has its state in
+        // place; the layer is the main window's, as in `QuillApp::render`.
+        let content = app.update(cx, |app, cx| {
+            let outer_scope = app.windows.scope;
+            app.set_window_scope(None);
             app.main_frame_starts(window, super::image_budget::MainDraw::Patch, cx);
             super::image_budget::slice_rendered(id);
-            app.slices.painter_scope(id, painter)
-        })
+            let content = app.slices.painter_scope(id, painter);
+            app.set_window_scope(outer_scope);
+            content
+        });
+        super::chat_window::WindowScope::new(self.app.clone(), None, content).into_any_element()
     }
 }
 
