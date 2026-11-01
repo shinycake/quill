@@ -99,7 +99,7 @@ fn app_wide_actions(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| app.dialogs.export_stop_open)
+    app.read_with(vcx, |app, _| app.dialogs.export_stop.is_some())
 }
 
 #[gpui_kit::test]
@@ -282,6 +282,42 @@ fn an_os_quit_during_an_export_is_refused_and_stop_ends_the_app(cx: &mut TestApp
     vcx.simulate_keystrokes("enter");
     settle(vcx);
     assert!(vcx.cx.windows().is_empty(), "Stop ends the app");
+    let export = app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().unwrap();
+        session.settings.chat_export.take().unwrap()
+    });
+    wait_for_the_end(|| export.progress().is_settled());
+    drop(export);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn cmd_q_with_the_box_focused_becomes_what_stop_does(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app_wide_actions(&app, vcx);
+    let dir = scratch("cmd-q");
+    let export = running_chat_export(&dir);
+    app.update(vcx, |app, _| {
+        app.demo_session.as_mut().unwrap().settings.chat_export = Some(export);
+    });
+    let restart = ask(&app, vcx);
+    assert!(box_open(&app, vcx));
+
+    let quit = if cfg!(target_os = "macos") {
+        "cmd-q"
+    } else {
+        "ctrl-q"
+    };
+    vcx.simulate_keystrokes(quit);
+    settle(vcx);
+    assert!(box_open(&app, vcx), "the box stays up");
+    assert!(!vcx.cx.windows().is_empty(), "still running");
+
+    vcx.simulate_keystrokes("enter");
+    settle(vcx);
+    assert!(!restart.get(), "the first request gave way");
+    assert!(vcx.cx.windows().is_empty(), "Stop quits");
     let export = app.update(vcx, |app, _| {
         let session = app.demo_session.as_mut().unwrap();
         session.settings.chat_export.take().unwrap()
