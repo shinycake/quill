@@ -165,9 +165,40 @@ pub fn other_accounts_unread() -> AccountUnread {
 /// The app-wide badge: the account on screen plus every background one.
 pub fn total_unread(active: Option<&Session>) -> AccountUnread {
     active
-        .map(AccountUnread::of)
+        .map(|session| ACTIVE_UNREAD.with_borrow_mut(|memo| memo.get(session)))
         .unwrap_or_default()
         .combine(other_accounts_unread())
+}
+
+thread_local! {
+    /// The tray and the icon badge both ask on every wake of their loop.
+    static ACTIVE_UNREAD: std::cell::RefCell<UnreadMemo> = Default::default();
+}
+
+/// Memo for [`AccountUnread::of`]: the count walks every chat and forum
+/// topic, and only changes when the session applies an update
+/// (`Session::revision`), the badge preferences change, or another session
+/// is asked about.
+#[derive(Debug, Default)]
+pub struct UnreadMemo {
+    key: Option<(usize, u64, usize, BadgePrefs)>,
+    unread: AccountUnread,
+}
+
+impl UnreadMemo {
+    pub fn get(&mut self, session: &Session) -> AccountUnread {
+        let key = (
+            std::ptr::from_ref(session) as usize,
+            session.revision,
+            session.chats.len(),
+            session.settings.badge_prefs,
+        );
+        if self.key.as_ref() != Some(&key) {
+            self.unread = AccountUnread::of(session);
+            self.key = Some(key);
+        }
+        self.unread
+    }
 }
 
 /// What one poll of a background account hands the UI.

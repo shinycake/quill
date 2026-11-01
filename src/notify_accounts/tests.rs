@@ -368,3 +368,26 @@ fn only_an_incoming_pending_call_rings() {
         Some((6, 7, true))
     );
 }
+
+/// The tray and the icon badge ask on every wake: a wake with no applied
+/// update reuses the count, and the first wake after one has the new count.
+#[test]
+fn the_unread_memo_recounts_only_after_an_applied_update() {
+    let mut account = Background::new("memo");
+    account.ready_with_chat(7, false);
+    account.ingest(
+        r#"{"@type":"updateUnreadMessageCount","chat_list":{"@type":"chatListMain"},"unread_count":5,"unread_unmuted_count":2}"#,
+    );
+    let mut memo = UnreadMemo::default();
+    assert_eq!(memo.get(&account.driver.session).count, 5);
+    // Not through an update: nothing tells the memo, so it does not count.
+    account.driver.session.chat_list.unread_totals.main.messages = None;
+    assert_eq!(memo.get(&account.driver.session).count, 5);
+    account.ingest(
+        r#"{"@type":"updateUnreadMessageCount","chat_list":{"@type":"chatListMain"},"unread_count":3,"unread_unmuted_count":1}"#,
+    );
+    assert_eq!(memo.get(&account.driver.session).count, 3);
+    // The account's badge preferences are part of the key.
+    account.driver.session.settings.badge_prefs.include_muted = false;
+    assert_eq!(memo.get(&account.driver.session).count, 1);
+}

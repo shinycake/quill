@@ -46,3 +46,13 @@ forum topics, once per list and up to twice per `AccountUnread::of`. It now
 walks only the chats with loaded topics (`threads.forum_topics`), which are
 the only ones `forum_topics_unread` can count, so an account without forums
 pays nothing. A chat window's title uses the window title's `BadgeCache`.
+
+## Tray and dock badge
+
+`sync_tray` and `sync_icon_badge` each counted the account on screen on
+every `wake::CHROME`. `total_unread` now goes through `UnreadMemo`, keyed
+like `BadgeCache` on the session, its revision, its chat count and its
+badge preferences. The two syncs of one wake count once, and a wake with
+no applied update counts nothing. The count still lands on the first wake
+after an update. The throttle the finding suggested would sit in
+`main.rs`, a hotspot, and is not needed once an idle wake costs nothing.
