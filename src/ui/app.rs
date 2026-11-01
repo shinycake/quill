@@ -74,6 +74,7 @@ pub struct QuillApp {
     pub(super) focus_sidebar: FocusHandle,
     /// Connection status, the status line and presence sync (`ui/connection_state.rs`).
     pub(super) connection: super::connection_state::ConnectionUi,
+    pub(super) disk: super::disk_state::DiskUi,
     pub(super) live: Option<LiveConnect>,
     /// Slice auth-logout-warning: the startup credentials, kept so a
     /// `logOut`-driven Closed can restart the live connection and return

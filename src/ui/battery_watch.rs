@@ -1,9 +1,11 @@
 //! Watches the system battery saver (tdesktop `base::BatterySaving`) and
 //! forces every power-saving flag on while it is on.
 //!
-//! tdesktop is notified by the platform; here a task asks every half minute
-//! while the switch is on, and not at all while it is off (the first probe
-//! still runs so the switch is offered when the platform has a saver).
+//! tdesktop is notified by the platform. On Linux so is this watcher, when
+//! the portal or power-profiles-daemon answers (`quill::battery_signal`);
+//! elsewhere, or without either, a task asks every half minute while the
+//! switch is on, and not at all while it is off (the first probe still runs
+//! so the switch is offered when the platform has a saver).
 //! While an agent drives the window it also asks every half minute, because
 //! the takeover glow's sweep stops in the system's low-power mode even with
 //! the switch off (`agent_takeover_glow::sweep_allowed`).
@@ -36,6 +38,7 @@ pub(crate) fn watch(cx: &mut App) {
         return;
     }
     watch_thermal(cx);
+    quill::battery_saving::start_events();
     cx.spawn(async move |cx| {
         loop {
             let seen = quill::wake::BATTERY.epoch();
@@ -50,7 +53,9 @@ pub(crate) fn watch(cx: &mut App) {
             // drives (a new session pokes the wake as well).
             let takeover_shown = quill::agent::ui_driver::takeover::current()
                 != quill::agent::ui_driver::takeover::Phase::Idle;
-            let wait = if quill::battery_saving::ignored() && !takeover_shown {
+            let wait = if quill::battery_saving::event_driven()
+                || (quill::battery_saving::ignored() && !takeover_shown)
+            {
                 PARKED
             } else {
                 POLL

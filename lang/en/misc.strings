@@ -459,6 +459,9 @@
 "qll_misc_quill_can_bring_back_the" = "Quill can bring back the chat windows that were open last time, now and on every launch.";
 "qll_misc_quill_closed_unexpectedly_last_time" = "Quill closed unexpectedly last time";
 "qll_misc_quill_could_not_open_a" = "Quill could not open a window";
+"qll_misc_gpu_stopped_working" = "Quill closed because the graphics card stopped working";
+"qll_misc_gpu_stopped_working_detail" = "The graphics card stopped responding and Quill could not start drawing with it again. Start Quill again; if this keeps happening, update your graphics driver.\n\nDetails: {detail}";
+"qll_misc_gpu_stopped_working_summary" = "The graphics card stopped responding. Start Quill again.";
 "qll_misc_quill_could_not_open_a_gpu" = "Quill needs Vulkan graphics to draw its window, and none was found. Install the Vulkan driver for your graphics card, then start Quill again:\n\n- AMD or Intel: Mesa Vulkan drivers (mesa-vulkan-drivers on Debian and Ubuntu, vulkan-radeon or vulkan-intel on Arch and Fedora)\n- NVIDIA: the proprietary NVIDIA driver\n- No GPU or a virtual machine: the lavapipe software driver (mesa-vulkan-drivers, or vulkan-swrast on Arch)\n\nDetails: {detail}";
 "qll_misc_vulkan_no_loader" = "Quill draws its window with Vulkan graphics, and the Vulkan loader is not installed.";
 "qll_misc_vulkan_no_driver" = "Quill draws its window with Vulkan graphics, and no Vulkan driver is installed.";

@@ -2,12 +2,13 @@ use std::{
     fs::File,
     io::{ErrorKind, Write},
     os::fd::{AsRawFd, BorrowedFd, OwnedFd},
+    time::{Duration, Instant},
 };
 
 use calloop::{LoopHandle, PostAction};
 use filedescriptor::Pipe;
 use strum::IntoEnumIterator;
-use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
+use wayland_client::{Connection, backend::WaylandError, protocol::wl_data_offer::WlDataOffer};
 use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
 
 use crate::linux::platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
@@ -77,14 +78,23 @@ impl<T: ReceiveData> DataOffer<T> {
     }
 
     fn read_bytes(&self, connection: &Connection, mime_type: &str) -> Option<Vec<u8>> {
-        let pipe = Pipe::new().unwrap();
+        let pipe = match Pipe::new() {
+            Ok(pipe) => pipe,
+            Err(err) => {
+                log::error!("cannot read the clipboard, no pipe: {err:?}");
+                return None;
+            }
+        };
         self.inner.receive_data(mime_type.to_string(), unsafe {
             BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
         });
         let fd = pipe.read;
         drop(pipe.write);
 
-        connection.flush().unwrap();
+        if let Err(err) = flush_for_reply(connection, PIPE_READ_TIMEOUT) {
+            log::error!("cannot read the clipboard, flushing the request failed: {err:?}");
+            return None;
+        }
 
         match read_fd_with_timeout(fd, PIPE_READ_TIMEOUT) {
             Ok(bytes) => Some(bytes),
@@ -253,5 +263,71 @@ impl Clipboard {
                 },
             )
             .unwrap();
+    }
+}
+
+/// Quill: what one `wl_display_flush` means for a request that needs a reply.
+#[derive(Debug)]
+pub(crate) enum FlushOutcome {
+    Sent,
+    /// The socket is full (`WouldBlock`); libwayland keeps the rest queued.
+    SocketFull,
+    Failed(WaylandError),
+}
+
+pub(crate) fn flush_outcome(result: Result<(), WaylandError>) -> FlushOutcome {
+    match result {
+        Ok(()) => FlushOutcome::Sent,
+        Err(WaylandError::Io(err)) if err.kind() == ErrorKind::WouldBlock => {
+            FlushOutcome::SocketFull
+        }
+        Err(err) => FlushOutcome::Failed(err),
+    }
+}
+
+/// Quill: flushes until the queued requests reach the compositor, waiting for
+/// the socket to drain while it is full. The reply is read on this thread
+/// before the event loop flushes again, so a request left queued would only
+/// time out.
+pub(crate) fn flush_for_reply(connection: &Connection, timeout: Duration) -> anyhow::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match flush_outcome(connection.flush()) {
+            FlushOutcome::Sent => return Ok(()),
+            FlushOutcome::Failed(err) => return Err(err.into()),
+            FlushOutcome::SocketFull => {}
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("the Wayland socket stayed full for {timeout:?}");
+        }
+        let mut poll_fds = [filedescriptor::pollfd {
+            fd: connection.backend().poll_fd().as_raw_fd(),
+            events: filedescriptor::POLLOUT,
+            revents: 0,
+        }];
+        match filedescriptor::poll(&mut poll_fds, Some(remaining)) {
+            Ok(_) => {}
+            Err(filedescriptor::Error::Poll(err)) if err.kind() == ErrorKind::Interrupted => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_socket_is_not_a_failed_flush() {
+        let full = Err(WaylandError::Io(std::io::Error::from(
+            ErrorKind::WouldBlock,
+        )));
+        assert!(matches!(flush_outcome(full), FlushOutcome::SocketFull));
+        assert!(matches!(flush_outcome(Ok(())), FlushOutcome::Sent));
+        let closed = Err(WaylandError::Io(std::io::Error::from(
+            ErrorKind::BrokenPipe,
+        )));
+        assert!(matches!(flush_outcome(closed), FlushOutcome::Failed(_)));
     }
 }

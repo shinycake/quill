@@ -102,14 +102,19 @@ impl NoticeGate {
 /// notification layer is read by the root).
 fn show_crash(root: &Path, crash: &PendingCrash, window: &mut Window, cx: &mut App) {
     quill::crash_log::acknowledge(root, crash);
-    window.push_notification(notice(crash.path.clone()), cx);
+    window.push_notification(notice(crash), cx);
 }
 
-fn notice(report: std::path::PathBuf) -> Notification {
+fn notice(crash: &PendingCrash) -> Notification {
+    let report = crash.path.clone();
     Notification::new()
         .id::<CrashNotice>()
         .title(tr(keys::Q_MISC_QUILL_CLOSED_UNEXPECTEDLY_LAST_TIME))
-        .message(tr(keys::Q_MISC_A_CRASH_REPORT_WAS_SAVED))
+        .message(tr(if crash.disk_full {
+            keys::Q_DISK_FULL_LAST_TIME
+        } else {
+            keys::Q_MISC_A_CRASH_REPORT_WAS_SAVED
+        }))
         .action(move |_, _, cx| {
             let report = report.clone();
             Button::new("crash-notice-show-log")

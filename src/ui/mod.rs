@@ -285,6 +285,7 @@ mod demo;
 mod demo_stream;
 mod demos;
 mod derived_state_tests;
+mod disk_state;
 mod downloads;
 mod draft_timer;
 mod drafts;

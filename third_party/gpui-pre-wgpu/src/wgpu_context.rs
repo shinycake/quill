@@ -51,6 +51,12 @@ impl DeviceErrorState {
         errors
     }
 
+    /// Quill: report this device lost although it works, so every renderer
+    /// on it recovers onto the GPU that came back (`probe_hardware`).
+    pub(crate) fn retire(&self) {
+        self.lost.store(true, Ordering::Relaxed);
+    }
+
     /// Returns true if the GPU device was lost (e.g., due to driver crash, suspend/resume).
     pub fn device_lost(&self) -> bool {
         self.lost.load(Ordering::Relaxed)
