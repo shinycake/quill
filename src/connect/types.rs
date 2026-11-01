@@ -156,7 +156,7 @@ impl ConnectBlocker {
             ConnectBlocker::LockedStore => Some(StartupFailure::KeyLocked),
             ConnectBlocker::StoreError => Some(StartupFailure::KeyUnreadable),
             ConnectBlocker::ReceiveThread => Some(StartupFailure::NoThread),
-            ConnectBlocker::DataFolder => Some(StartupFailure::DataFolder),
+            ConnectBlocker::DataFolder => Some(StartupFailure::DataFolder { detail: None }),
         }
     }
 

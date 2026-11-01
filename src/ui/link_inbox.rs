@@ -21,26 +21,7 @@ pub fn install_link_inbox(
         let view = view.downgrade();
         let window_handle = window.window_handle();
         async move |cx| {
-            loop {
-                // Asleep until a link, activation or quit request arrives
-                // (the OS callback and the single-instance listener poke
-                // `wake::LINKS`); links waiting behind another flow are
-                // retried at the old cadence.
-                let seen = quill::wake::LINKS.epoch();
-                let wait = if quill::deep_link_inbox::has_pending_links() {
-                    std::time::Duration::from_millis(250)
-                } else {
-                    std::time::Duration::from_secs(60)
-                };
-                super::wake_wait::sleep_or_wake(
-                    cx.background_executor(),
-                    &quill::wake::LINKS,
-                    seen,
-                    wait,
-                )
-                .await;
-                // A second launch waits for this before it is acknowledged.
-                quill::single_instance::UI.beat();
+            answer_wakes(cx, &quill::wake::LINKS, &quill::single_instance::UI, |cx| {
                 let alive = view
                     .update(cx, |this, _| {
                         if this.pending_deep_link.is_none()
@@ -50,17 +31,46 @@ pub fn install_link_inbox(
                         }
                     })
                     .is_ok();
-                if !alive {
-                    quill::single_instance::UI.stop();
-                    break;
-                }
-                if quill::deep_link_inbox::take_activation() {
+                if alive && quill::deep_link_inbox::take_activation() {
                     let _ = window_handle.update(cx, |_, window, cx| raise_main_window(window, cx));
                 }
-            }
+                alive
+            })
+            .await;
         }
     })
     .detach();
+}
+
+/// Runs `turn` each time `signal` wakes the loop, until it returns false.
+/// A second launch waits for `ui` to beat before it is acknowledged. The
+/// epoch the next sleep waits past is read before the beat: a launch marks
+/// after some beat and pokes after its mark, so its poke ends the next
+/// sleep even when it lands while `turn` runs.
+async fn answer_wakes(
+    cx: &mut gpui_kit::AsyncApp,
+    signal: &'static quill::wake::Signal,
+    ui: &quill::single_instance::Heartbeat,
+    mut turn: impl FnMut(&mut gpui_kit::AsyncApp) -> bool,
+) {
+    let mut seen = signal.epoch();
+    loop {
+        // Asleep until a link, activation or quit request arrives (the OS
+        // callback and the single-instance listener poke `signal`); links
+        // waiting behind another flow are retried at the old cadence.
+        let wait = if quill::deep_link_inbox::has_pending_links() {
+            std::time::Duration::from_millis(250)
+        } else {
+            std::time::Duration::from_secs(60)
+        };
+        super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
+        seen = signal.epoch();
+        ui.beat();
+        if !turn(cx) {
+            ui.stop();
+            return;
+        }
+    }
 }
 
 /// Brings the main window to the front, restoring it from the tray, the

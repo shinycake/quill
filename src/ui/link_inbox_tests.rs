@@ -5,7 +5,7 @@
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
 use super::{
-    MainWindow, main_window_on_activation, note_main_window, raise_main_window_if,
+    MainWindow, answer_wakes, main_window_on_activation, note_main_window, raise_main_window_if,
     take_hide_after_full_screen,
 };
 use crate::ui::actions::QuitApp;
@@ -224,6 +224,7 @@ fn quit_with_the_main_window_closed_asks_during_an_export(cx: &mut TestAppContex
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+<<<<<<< HEAD
 fn drop_with_link(cx: &mut TestAppContext, link: &str, from_agent: bool) -> Option<String> {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     app.update(&mut vcx, |app, _| {
@@ -246,4 +247,32 @@ fn a_link_the_closed_main_window_had_not_opened_goes_to_the_next(cx: &mut TestAp
         None,
         "an agent's link is not the user's"
     );
+=======
+#[gpui_kit::test]
+fn a_launch_that_pokes_while_the_inbox_works_ends_the_next_sleep(cx: &mut TestAppContext) {
+    static SIGNAL: quill::wake::Signal = quill::wake::Signal::new();
+    static UI: quill::single_instance::Heartbeat = quill::single_instance::Heartbeat::new();
+    UI.start();
+    let turns = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = turns.clone();
+    cx.update(|cx| {
+        cx.spawn(async move |cx| {
+            answer_wakes(cx, &SIGNAL, &UI, |_| {
+                counted.set(counted.get() + 1);
+                // A second launch marks the beat and pokes mid-turn.
+                if counted.get() == 1 {
+                    SIGNAL.poke();
+                }
+                true
+            })
+            .await;
+        })
+        .detach();
+    });
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 0, "asleep until a poke");
+    SIGNAL.poke();
+    cx.run_until_parked();
+    assert_eq!(turns.get(), 2, "the mid-turn poke woke the loop again");
+>>>>>>> origin/claude/sweep-b10
 }

@@ -30,7 +30,7 @@ pub struct TdError {
     /// which can carry secrets, never lands here.
     pub server_type: Option<String>,
     /// TDLib's words about a database or file it could not open, with the
-    /// quoted paths cut out ([`crate::auth::database_error_detail`]). The
+    /// quoted path cut out ([`crate::auth::database_error_detail`]). The
     /// startup card shows it under the reason.
     pub database_detail: Option<String>,
 }
