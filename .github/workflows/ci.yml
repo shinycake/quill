@@ -275,6 +275,40 @@ jobs:
     needs: quill-calls
     uses: ./.github/workflows/package-macos.yml
 
+  # The Metal renderer's tests against the hosted Mac's device. On pushes, and on
+  # PRs that touch the renderer. Not a required check.
+  macos-metal:
+    name: macos-metal
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: renderer code changed
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ] || git diff --name-only "$BASE"...HEAD | grep -qE '^third_party/gpui-pre-apple/|^\.github/workflows/ci\.yml$'; then
+            echo run=true >> "$GITHUB_OUTPUT"
+          else
+            echo run=false >> "$GITHUB_OUTPUT"
+          fi
+      - uses: dtolnay/rust-toolchain@master
+        if: steps.changed.outputs.run == 'true'
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      # The guard keeps the metallib test from dropping out of the run unnoticed.
+      - name: tests (Metal renderer)
+        if: steps.changed.outputs.run == 'true'
+        env:
+          QUILL_REQUIRE_METALLIB: '1'
+        run: cargo test -p gpui-pre-apple --lib --locked -- metal_renderer::tests
+
   # Packaging runs on pushes to main only; PRs get the Linux check. The macOS UI
   # build runs after merge through quill-ui-build.yml (push to main). Public PR
   # workflows must never target the personal Mac.

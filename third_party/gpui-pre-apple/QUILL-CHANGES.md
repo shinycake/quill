@@ -110,6 +110,12 @@ window, not the app:
   Tests: `shaders_that_do_not_compile_are_an_error`,
   `a_library_without_our_functions_is_an_error`,
   `one_failed_library_build_is_retried`.
+- `Cargo.toml`, `src/thermal.rs`, `src/metal_renderer.rs`: so CI can run
+  `cargo test -p gpui-pre-apple` on its own, `runtime_shaders` is a default
+  feature (Quill always builds with it, through gpui-kit), and the thermal test
+  and `MetalHeadlessRenderer` no longer need `cfg(test)` to mean
+  `gpui/test-support`, which the command line can't turn on for a crate outside
+  the workspace.
 
 The Quill project also changed it in 2026 so a new user's first launch doesn't
 compile the shaders on the main thread:
@@ -118,7 +124,7 @@ compile the shaders on the main thread:
   off. The script now tries `xcrun metal` whatever the feature says and sets
   `cfg(quill_metallib)` on success. A machine without the Metal toolchain
   carries on with the source, unless `QUILL_REQUIRE_METALLIB` is set, as it is
-  in `.github/workflows/package-macos.yml`.
+  in `.github/workflows/package-macos.yml` and in `ci.yml`'s `macos-metal` job.
 - `src/metal_renderer.rs`: `built_in_library` loads the metallib under that cfg
   and falls back to compiling the source if it doesn't load. Test:
   `the_precompiled_shaders_build_every_pipeline`, which needs the toolchain.

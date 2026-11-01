@@ -69,7 +69,7 @@ impl Drop for ThermalObserver {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use std::{cell::Cell, rc::Rc};
