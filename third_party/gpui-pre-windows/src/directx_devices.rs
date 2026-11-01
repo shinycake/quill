@@ -16,7 +16,7 @@ use windows::Win32::{
         },
         Dxgi::{
             CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
-            IDXGIAdapter1, IDXGIFactory6,
+            DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIFactory6,
         },
     },
 };
@@ -113,8 +113,23 @@ fn get_adapter(
     ID3D11DeviceContext,
     D3D_FEATURE_LEVEL,
 )> {
+    // Quill: the search ends at DXGI_ERROR_NOT_FOUND instead of returning it,
+    // and an adapter that fails is skipped, so the error names the last reason.
+    let mut last_error = None;
     for adapter_index in 0.. {
-        let adapter: IDXGIAdapter1 = unsafe { dxgi_factory.EnumAdapters(adapter_index)?.cast()? };
+        let adapter = match unsafe { dxgi_factory.EnumAdapters(adapter_index) } {
+            Ok(adapter) => adapter,
+            Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(error) => return Err(error).context("Enumerating GPU adapters"),
+        };
+        let adapter: IDXGIAdapter1 = match adapter.cast() {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                log::warn!("Skipping GPU adapter {adapter_index}: {error}");
+                last_error = Some(anyhow::Error::from(error));
+                continue;
+            }
+        };
         if let Ok(desc) = unsafe { adapter.GetDesc1() } {
             let gpu_name = String::from_utf16_lossy(&desc.Description)
                 .trim_matches(char::from(0))
@@ -125,20 +140,31 @@ fn get_adapter(
         // the device if it does.
         let mut context: Option<ID3D11DeviceContext> = None;
         let mut feature_level = D3D_FEATURE_LEVEL::default();
-        let device = get_device(
+        match get_device(
             &adapter,
             Some(&mut context),
             Some(&mut feature_level),
             debug_layer_available,
-        )
-        .log_err();
-        // Quill: an adapter whose device came back without a context is skipped, not unwrapped.
-        if let (Some(device), Some(context)) = (device, context) {
-            return Ok((adapter, device, context, feature_level));
+        ) {
+            Ok(device) => match context {
+                Some(context) => return Ok((adapter, device, context, feature_level)),
+                None => {
+                    last_error = Some(anyhow::anyhow!(
+                        "D3D11CreateDevice succeeded without a device context"
+                    ))
+                }
+            },
+            Err(error) => {
+                log::warn!("Skipping GPU adapter {adapter_index}: {error:#}");
+                last_error = Some(error);
+            }
         }
     }
 
-    Err(anyhow::anyhow!("No GPU adapter supports Direct3D 11"))
+    Err(match last_error {
+        Some(last) => anyhow::anyhow!("No GPU adapter supports Direct3D 11: {last:#}"),
+        None => anyhow::anyhow!("No GPU adapter supports Direct3D 11"),
+    })
 }
 
 #[inline]
