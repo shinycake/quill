@@ -204,7 +204,7 @@ pub(crate) fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<(
         drop(file);
         // `std::fs::rename` replaces an existing target on every platform
         // (POSIX rename; MoveFileExW with MOVEFILE_REPLACE_EXISTING on Windows).
-        std::fs::rename(&tmp, path)
+        crate::fs_retry::rename_retrying(&tmp, path, crate::fs_retry::SHORT)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);

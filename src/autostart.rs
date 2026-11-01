@@ -180,7 +180,7 @@ pub(crate) fn write_atomic(path: &Path, content: &str) -> io::Result<()> {
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
-        std::fs::rename(&tmp, path)
+        crate::fs_retry::rename_retrying(&tmp, path, crate::fs_retry::SHORT)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);

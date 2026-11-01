@@ -117,7 +117,7 @@ pub fn save(dir: &Path, name: &str, file: &ThemeFile) -> Result<PathBuf, StoreEr
     let path = theme_path(dir, name);
     let temp = path.with_extension(format!("{EXTENSION}.part"));
     std::fs::write(&temp, file.to_zip())?;
-    std::fs::rename(&temp, &path)?;
+    crate::fs_retry::rename_retrying(&temp, &path, crate::fs_retry::SHORT)?;
     Ok(path)
 }
 

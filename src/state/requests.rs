@@ -522,6 +522,9 @@ pub struct RequestRegistry {
     /// main window's). `Session::enter_view` keeps it; every request
     /// registered meanwhile carries it (`PendingRequest::window`).
     pub(crate) window: Option<ChatId>,
+    /// In-flight `DownloadFile` requests per file id, so the
+    /// already-downloading check does not scan `pending`.
+    downloads: HashMap<i32, u32>,
 }
 
 impl RequestRegistry {
@@ -538,6 +541,65 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.secret_chat_id == Some(secret_chat_id))
     }
 
+    /// A request with every correlation field empty, under the next id.
+    fn blank(
+        &mut self,
+        account_generation: AccountGeneration,
+        purpose: RequestPurpose,
+    ) -> PendingRequest {
+        self.next += 1;
+        PendingRequest {
+            id: RequestId(self.next),
+            account_generation,
+            purpose,
+            chat_id: None,
+            view_generation: None,
+            file_id: None,
+            search_generation: None,
+            around_message_id: None,
+            forum_topic_id: None,
+            user_id: None,
+            supergroup_id: None,
+            community_id: None,
+            story_id: None,
+            story_ids: None,
+            story_album_id: None,
+            folder_id: None,
+            scope: None,
+            secret_chat_id: None,
+            rollback: None,
+            window: self.window,
+            created_at: Instant::now(),
+        }
+    }
+
+    fn insert(&mut self, pending: PendingRequest) -> RequestId {
+        let id = pending.id;
+        if let Some(file_id) = download_file_id(&pending) {
+            *self.downloads.entry(file_id).or_default() += 1;
+        }
+        self.pending.insert(id.0, pending);
+        id
+    }
+
+    fn remove(&mut self, key: u64) -> Option<PendingRequest> {
+        let pending = self.pending.remove(&key)?;
+        self.forget_download(&pending);
+        Some(pending)
+    }
+
+    fn forget_download(&mut self, pending: &PendingRequest) {
+        let Some(file_id) = download_file_id(pending) else {
+            return;
+        };
+        if let Some(count) = self.downloads.get_mut(&file_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.downloads.remove(&file_id);
+            }
+        }
+    }
+
     pub fn register(
         &mut self,
         account_generation: AccountGeneration,
@@ -545,35 +607,12 @@ impl RequestRegistry {
         chat_id: Option<ChatId>,
         view_generation: Option<ViewGeneration>,
     ) -> RequestId {
-        self.next += 1;
-        let id = RequestId(self.next);
-        self.pending.insert(
-            id.0,
-            PendingRequest {
-                id,
-                account_generation,
-                purpose,
-                chat_id,
-                view_generation,
-                file_id: None,
-                search_generation: None,
-                around_message_id: None,
-                forum_topic_id: None,
-                user_id: None,
-                supergroup_id: None,
-                community_id: None,
-                story_id: None,
-                story_ids: None,
-                story_album_id: None,
-                folder_id: None,
-                scope: None,
-                secret_chat_id: None,
-                rollback: None,
-                window: self.window,
-                created_at: Instant::now(),
-            },
-        );
-        id
+        let blank = self.blank(account_generation, purpose);
+        self.insert(PendingRequest {
+            chat_id,
+            view_generation,
+            ..blank
+        })
     }
 
     pub fn register_search(
@@ -582,35 +621,11 @@ impl RequestRegistry {
         purpose: RequestPurpose,
         search_generation: u64,
     ) -> RequestId {
-        self.next += 1;
-        let id = RequestId(self.next);
-        self.pending.insert(
-            id.0,
-            PendingRequest {
-                id,
-                account_generation,
-                purpose,
-                chat_id: None,
-                view_generation: None,
-                file_id: None,
-                search_generation: Some(search_generation),
-                around_message_id: None,
-                forum_topic_id: None,
-                user_id: None,
-                supergroup_id: None,
-                community_id: None,
-                story_id: None,
-                story_ids: None,
-                story_album_id: None,
-                folder_id: None,
-                scope: None,
-                secret_chat_id: None,
-                rollback: None,
-                window: self.window,
-                created_at: Instant::now(),
-            },
-        );
-        id
+        let blank = self.blank(account_generation, purpose);
+        self.insert(PendingRequest {
+            search_generation: Some(search_generation),
+            ..blank
+        })
     }
 
     pub fn register_chat_search(
@@ -620,35 +635,12 @@ impl RequestRegistry {
         chat_id: ChatId,
         search_generation: u64,
     ) -> RequestId {
-        self.next += 1;
-        let id = RequestId(self.next);
-        self.pending.insert(
-            id.0,
-            PendingRequest {
-                id,
-                account_generation,
-                purpose,
-                chat_id: Some(chat_id),
-                view_generation: None,
-                file_id: None,
-                search_generation: Some(search_generation),
-                around_message_id: None,
-                forum_topic_id: None,
-                user_id: None,
-                supergroup_id: None,
-                community_id: None,
-                story_id: None,
-                story_ids: None,
-                story_album_id: None,
-                folder_id: None,
-                scope: None,
-                secret_chat_id: None,
-                rollback: None,
-                window: self.window,
-                created_at: Instant::now(),
-            },
-        );
-        id
+        let blank = self.blank(account_generation, purpose);
+        self.insert(PendingRequest {
+            chat_id: Some(chat_id),
+            search_generation: Some(search_generation),
+            ..blank
+        })
     }
 
     pub fn register_around(
@@ -658,35 +650,13 @@ impl RequestRegistry {
         view_generation: ViewGeneration,
         around_message_id: MessageId,
     ) -> RequestId {
-        self.next += 1;
-        let id = RequestId(self.next);
-        self.pending.insert(
-            id.0,
-            PendingRequest {
-                id,
-                account_generation,
-                purpose: RequestPurpose::GetHistoryAround,
-                chat_id: Some(chat_id),
-                view_generation: Some(view_generation),
-                file_id: None,
-                search_generation: None,
-                around_message_id: Some(around_message_id),
-                forum_topic_id: None,
-                user_id: None,
-                supergroup_id: None,
-                community_id: None,
-                story_id: None,
-                story_ids: None,
-                story_album_id: None,
-                folder_id: None,
-                scope: None,
-                secret_chat_id: None,
-                rollback: None,
-                window: self.window,
-                created_at: Instant::now(),
-            },
-        );
-        id
+        let blank = self.blank(account_generation, RequestPurpose::GetHistoryAround);
+        self.insert(PendingRequest {
+            chat_id: Some(chat_id),
+            view_generation: Some(view_generation),
+            around_message_id: Some(around_message_id),
+            ..blank
+        })
     }
 
     pub fn register_download(
@@ -694,39 +664,15 @@ impl RequestRegistry {
         account_generation: AccountGeneration,
         file_id: FileId,
     ) -> RequestId {
-        self.next += 1;
-        let id = RequestId(self.next);
-        self.pending.insert(
-            id.0,
-            PendingRequest {
-                id,
-                account_generation,
-                purpose: RequestPurpose::DownloadFile,
-                chat_id: None,
-                view_generation: None,
-                file_id: Some(file_id.0),
-                search_generation: None,
-                around_message_id: None,
-                forum_topic_id: None,
-                user_id: None,
-                supergroup_id: None,
-                community_id: None,
-                story_id: None,
-                story_ids: None,
-                story_album_id: None,
-                folder_id: None,
-                scope: None,
-                secret_chat_id: None,
-                rollback: None,
-                window: self.window,
-                created_at: Instant::now(),
-            },
-        );
-        id
+        let blank = self.blank(account_generation, RequestPurpose::DownloadFile);
+        self.insert(PendingRequest {
+            file_id: Some(file_id.0),
+            ..blank
+        })
     }
 
     pub fn take(&mut self, id: RequestId) -> Option<PendingRequest> {
-        self.pending.remove(&id.0)
+        self.remove(id.0)
     }
 
     /// Drop the in-flight request with the given purpose, if any (Phase
@@ -739,12 +685,19 @@ impl RequestRegistry {
             .iter()
             .find(|(_, req)| req.purpose == purpose)
             .map(|(key, _)| *key)?;
-        self.pending.remove(&key)
+        self.remove(key)
     }
 
     pub(crate) fn invalidate_auth(&mut self) {
-        self.pending
-            .retain(|_, request| !is_auth_submit(request.purpose));
+        let auth: Vec<u64> = self
+            .pending
+            .values()
+            .filter(|request| is_auth_submit(request.purpose))
+            .map(|request| request.id.0)
+            .collect();
+        for key in auth {
+            self.remove(key);
+        }
     }
 
     /// R5: drop sweepable requests (see [`RequestPurpose::is_sweepable`])
@@ -771,7 +724,7 @@ impl RequestRegistry {
             .collect();
         stale
             .into_iter()
-            .filter_map(|key| self.pending.remove(&key))
+            .filter_map(|key| self.remove(key))
             .collect()
     }
 
@@ -785,6 +738,7 @@ impl RequestRegistry {
     /// Take every pending request, oldest first, so the reducer can settle
     /// what each one guarded ([`Session::settle_account_requests`]).
     pub(crate) fn drain_all(&mut self) -> Vec<PendingRequest> {
+        self.downloads.clear();
         let mut all: Vec<PendingRequest> = self.pending.drain().map(|(_, p)| p).collect();
         all.sort_by_key(|p| p.id.0);
         all
@@ -981,8 +935,12 @@ impl RequestRegistry {
     }
 
     pub fn has_download(&self, file_id: FileId) -> bool {
-        self.pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::DownloadFile && p.file_id == Some(file_id.0))
+        self.downloads.contains_key(&file_id.0)
     }
+}
+
+fn download_file_id(pending: &PendingRequest) -> Option<i32> {
+    (pending.purpose == RequestPurpose::DownloadFile)
+        .then_some(pending.file_id)
+        .flatten()
 }

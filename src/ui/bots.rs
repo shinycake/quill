@@ -160,15 +160,18 @@ impl QuillApp {
             } else {
                 StatusNote::info(answer.text)
             });
+            cx.notify();
         } else {
-            self.connection
-                .set_note(if quill::platform::open_external_url(&answer.url) {
+            let open = quill::platform::open_external_url(&answer.url);
+            self.when_os_answers(open, cx, |this, opened, cx| {
+                this.connection.set_note(if opened {
                     StatusNote::info(tr(keys::Q_MEDIA_OPENED_LINK))
                 } else {
                     StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_OPEN_LINK))
                 });
+                cx.notify();
+            });
         }
-        cx.notify();
     }
 
     /// B1: login-URL button (`inlineKeyboardButtonTypeLoginUrl`, schema

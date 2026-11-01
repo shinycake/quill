@@ -285,7 +285,8 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), PasscodeError> {
         file.write_all(bytes).map_err(|_| PasscodeError::Io)?;
         file.sync_all().map_err(|_| PasscodeError::Io)?;
     }
-    std::fs::rename(&tmp, path).map_err(|_| PasscodeError::Io)?;
+    crate::fs_retry::rename_retrying(&tmp, path, crate::fs_retry::SHORT)
+        .map_err(|_| PasscodeError::Io)?;
     restrict_file(path);
     Ok(())
 }

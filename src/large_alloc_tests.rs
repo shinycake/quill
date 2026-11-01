@@ -2,14 +2,17 @@
 //! binary's global allocator too, so `Vec` exercises it directly.
 
 use super::{
-    CLASSES, LARGE, LargeAlloc, MAX_SHIFT, PAGE, Slot, arena, class_of, owner, reserve, served,
-    slots,
+    CLASSES, GLOBAL, LARGE, LargeAlloc, MAX_SHIFT, PAGE, Slot, class_of, reserve, served, slots,
 };
 use std::alloc::{GlobalAlloc, Layout};
 
 /// Whether any page of the range is in memory. Darwin's `mincore` reports
 /// unmapped and inaccessible pages as not resident rather than failing.
-fn resident(ptr: *const u8, len: usize) -> bool {
+fn resident(a: &LargeAlloc, ptr: *const u8, len: usize) -> bool {
+    assert!(
+        !std::ptr::eq(a, &GLOBAL),
+        "a parallel test can claim and fill a slot of the global arena"
+    );
     const MINCORE_INCORE: i8 = 1;
     // One flag byte per page; 4 KiB is the smallest page size.
     let mut pages = vec![0_i8; len.div_ceil(4096)];
@@ -20,11 +23,11 @@ fn resident(ptr: *const u8, len: usize) -> bool {
 }
 
 fn in_arena(ptr: *const u8) -> bool {
-    matches!(owner(ptr as *mut u8), Some(Ok(_)))
+    in_arena_of(&GLOBAL, ptr)
 }
 
-fn touch(bytes: &mut [u8]) {
-    bytes.iter_mut().step_by(4096).for_each(|b| *b = 1);
+fn in_arena_of(a: &LargeAlloc, ptr: *const u8) -> bool {
+    matches!(a.owner(ptr as *mut u8), Some(Ok(_)))
 }
 
 fn layout(size: usize, align: usize) -> Layout {
@@ -35,14 +38,21 @@ fn layout(size: usize, align: usize) -> Layout {
 /// Quill's footprint) after it was dropped. Now its pages are gone.
 #[test]
 fn a_freed_full_size_photo_is_unmapped() {
-    let len = 2560 * 1920 * 4;
-    let mut photo = vec![0_u8; len];
-    touch(&mut photo);
-    let ptr = photo.as_ptr();
-    assert!(in_arena(ptr));
-    assert!(resident(ptr, len));
-    drop(photo);
-    assert!(!resident(ptr, len), "freed photo pages are still resident");
+    let a = LargeAlloc::new();
+    let photo = layout(2560 * 1920 * 4, 1);
+    // SAFETY: a non-zero layout; the block is written within its size and
+    // freed with that layout, and `resident` only asks the kernel about it.
+    unsafe {
+        let ptr = a.alloc(photo);
+        assert!(in_arena_of(&a, ptr));
+        std::ptr::write_bytes(ptr, 1, photo.size());
+        assert!(resident(&a, ptr, photo.size()));
+        a.dealloc(ptr, photo);
+        assert!(
+            !resident(&a, ptr, photo.size()),
+            "freed photo pages are still resident"
+        );
+    }
 }
 
 #[test]
@@ -75,24 +85,36 @@ fn growing_from_malloc_into_the_arena_keeps_the_contents() {
 
 #[test]
 fn shrinking_out_of_the_arena_keeps_the_contents_and_frees_the_slot() {
-    let mut bytes: Vec<u8> = (0..LARGE * 3).map(|i| (i % 239) as u8).collect();
-    let old = bytes.as_ptr();
-    assert!(in_arena(old));
-    bytes.truncate(1000);
-    bytes.shrink_to_fit();
-    assert!(!in_arena(bytes.as_ptr()));
-    assert!(bytes.iter().enumerate().all(|(i, b)| *b == (i % 239) as u8));
-    assert!(!resident(old, LARGE * 3), "the old slot still holds pages");
+    let a = LargeAlloc::new();
+    let start = layout(LARGE * 3, 1);
+    let kept = 1000;
+    // SAFETY: a non-zero layout; the old block is not read after `realloc`
+    // (`resident` only asks the kernel about it) and the new one is freed
+    // with its size.
+    unsafe {
+        let old = a.alloc(start);
+        assert!(in_arena_of(&a, old));
+        (0..start.size()).for_each(|i| old.add(i).write((i % 239) as u8));
+        let new = a.realloc(old, start, kept);
+        assert!(!new.is_null() && !in_arena_of(&a, new));
+        let bytes = std::slice::from_raw_parts(new, kept);
+        assert!(bytes.iter().enumerate().all(|(i, b)| *b == (i % 239) as u8));
+        assert!(
+            !resident(&a, old, start.size()),
+            "the old slot still holds pages"
+        );
+        a.dealloc(new, layout(kept, 1));
+    }
 }
 
 #[test]
 fn realloc_within_a_size_class_stays_in_place_and_drops_the_tail() {
-    let a = LargeAlloc;
+    let a = LargeAlloc::new();
     let start = layout(LARGE + 4096, 8);
     // SAFETY: non-zero layouts; every block is freed with its last layout.
     unsafe {
         let ptr = a.alloc(start);
-        assert!(in_arena(ptr));
+        assert!(in_arena_of(&a, ptr));
         std::ptr::write_bytes(ptr, 0xAB, start.size());
         let grown = a.realloc(ptr, start, 2 * LARGE);
         assert_eq!(grown, ptr, "same 128 KiB slot");
@@ -103,14 +125,14 @@ fn realloc_within_a_size_class_stays_in_place_and_drops_the_tail() {
         assert_eq!(*shrunk, 0xAB);
         assert_eq!(*shrunk.add(LARGE + 99), 0xAB);
         let tail = (LARGE + 100).next_multiple_of(PAGE);
-        assert!(!resident(shrunk.add(tail), 2 * LARGE - tail));
+        assert!(!resident(&a, shrunk.add(tail), 2 * LARGE - tail));
         a.dealloc(shrunk, layout(LARGE + 100, 8));
     }
 }
 
 #[test]
 fn alignments_up_to_64_kib_come_from_the_arena_and_above_from_system() {
-    let a = LargeAlloc;
+    let a = &GLOBAL;
     for align in [1, 16, 4096, 16 << 10, LARGE] {
         let l = layout(LARGE * 2, align);
         assert!(served(l).is_some());
@@ -138,7 +160,7 @@ fn alignments_up_to_64_kib_come_from_the_arena_and_above_from_system() {
 
 #[test]
 fn zeroed_blocks_are_zero_even_in_a_reused_slot() {
-    let a = LargeAlloc;
+    let a = &GLOBAL;
     let l = layout(LARGE * 5, 1);
     // SAFETY: non-zero layouts, freed with the same layout.
     unsafe {
@@ -160,25 +182,26 @@ fn zeroed_blocks_are_zero_even_in_a_reused_slot() {
 /// the wrong (small) size still releases its whole slot.
 #[test]
 fn dealloc_trusts_the_address_not_the_layout() {
-    let a = LargeAlloc;
+    let a = LargeAlloc::new();
     // SAFETY: `malloc` returns a block `System` (which is `malloc` on
     // macOS for this alignment) can free; the arena block is freed once.
     unsafe {
-        let foreign = libc::malloc(LARGE * 4).cast::<u8>();
-        assert!(!foreign.is_null() && !in_arena(foreign));
-        a.dealloc(foreign, layout(LARGE * 4, 1));
-
         let l = layout(LARGE * 4, 1);
         let ptr = a.alloc(l);
         std::ptr::write_bytes(ptr, 1, l.size());
+
+        let foreign = libc::malloc(LARGE * 4).cast::<u8>();
+        assert!(!foreign.is_null() && !in_arena_of(&a, foreign));
+        a.dealloc(foreign, l);
+
         a.dealloc(ptr, layout(100, 1));
-        assert!(!resident(ptr, l.size()), "wrong size left pages behind");
+        assert!(!resident(&a, ptr, l.size()), "wrong size left pages behind");
     }
 }
 
 #[test]
 fn interior_pointers_are_left_alone() {
-    let a = LargeAlloc;
+    let a = &GLOBAL;
     let l = layout(LARGE * 2, 1);
     // SAFETY: the interior free is ignored by design; the block is then
     // freed properly.
@@ -194,7 +217,7 @@ fn interior_pointers_are_left_alone() {
 /// A full size class falls back to `System` instead of failing.
 #[test]
 fn a_full_size_class_falls_back_to_system() {
-    let a = LargeAlloc;
+    let a = &GLOBAL;
     let l = layout(1 << MAX_SHIFT, 1);
     // SAFETY: untouched 1 GiB blocks cost address space only; each is
     // freed with its layout.
@@ -211,7 +234,7 @@ fn a_full_size_class_falls_back_to_system() {
 #[test]
 fn failures_return_none_or_null_without_panicking() {
     assert_eq!(reserve(usize::MAX / 2), None);
-    let a = LargeAlloc;
+    let a = &GLOBAL;
     // 64 TiB: past the arena, and more than `System` will hand out.
     // `black_box` keeps LLVM from folding the doomed `malloc` away in
     // release builds.
@@ -223,7 +246,7 @@ fn failures_return_none_or_null_without_panicking() {
         unsafe { a.dealloc(ptr, big) };
     }
     assert!(ptr.is_null());
-    assert!(arena().is_some(), "the arena reserved its address space");
+    assert!(a.arena().is_some(), "the arena reserved its address space");
 }
 
 /// Many threads allocating, filling, checking and freeing at once never
