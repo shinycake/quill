@@ -51,6 +51,7 @@ These edits are small. They could not be compiled or run on their own platform h
 - The `gpui-pre-wgpu` GPU tests (`yuv_surfaces`, `wgpu_atlas`): 15 passed on lavapipe. They ran from a scratch copy of the crate with its own `[workspace]`, the repo's patches, a naga dev-dependency and stand-in font files. The crate's own test target needs Zed's font assets, which are not in this repo.
 - `cargo test --lib` filtered to topic, threads, history, reply, edit, bubble_headers, tray, badge, notify, unread, ids, subsection, deep_link, supergroup and forum: all passed.
 - `cargo test --features demo-capture --bin quill` filtered to gif_clip, on_demand, inline_playback, inline_players, tray and badge: all passed.
+- `cargo clippy --all-targets -D warnings` with `--features demo-capture` and with `--no-default-features`: clean. The first run found three issues in this branch's code, fixed in the commit "Satisfy clippy on this branch's fixes".
 - `scripts/check-hotspots.sh origin/sweep-all`: OK. `scripts/check-file-size.sh`: OK. The fixes had taken `src/video_decode/mod.rs` to 1021 lines, so `Clock` moved, unchanged, to `src/video_decode/clock.rs`. `cargo fmt`: clean.
 
 ## Measurements
