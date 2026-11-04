@@ -115,6 +115,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let view_after = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::Messages { .. }) => true,
             EnvelopePayload::Messages(MessagesPayload::UpdateNewMessage(_)) => shown_message,
+            EnvelopePayload::Messages(MessagesPayload::UpdateMessageUnreadReactions {
+                newest: Some(_),
+                ..
+            }) => true,
             EnvelopePayload::Ok | EnvelopePayload::Error(_)
                 if view_purpose == Some(RequestPurpose::ViewMessages) =>
             {

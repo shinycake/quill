@@ -229,6 +229,7 @@ impl Session {
         history.viewing.clear();
         history.visible.clear();
         history.visible_reported = false;
+        history.on_screen.clear();
         history.reader = ReaderPosition::Tail;
         history.unread_anchor = unread_anchor;
         history.opened_with_unread = history.unread_anchor.is_some();
@@ -250,13 +251,14 @@ impl Session {
         let due =
             |id: i64| id > 0 && !history.viewed.contains(&id) && !history.viewing.contains(&id);
         if history.visible_reported {
-            return history
+            let mut ids: BTreeSet<i64> = history
                 .visible
                 .iter()
                 .copied()
                 .filter(|id| due(*id))
-                .map(MessageId)
                 .collect();
+            ids.extend(history.on_screen.iter().copied().filter(|id| due(*id)));
+            return ids.into_iter().map(MessageId).collect();
         }
         // Opened at the first unread message: nothing is read until the
         // UI reports what is actually on screen.
@@ -284,6 +286,7 @@ impl Session {
         }
         let history = self.history_entry(chat_id);
         history.visible_reported = true;
+        history.on_screen = ids.iter().map(|id| id.0).filter(|id| *id > 0).collect();
         for id in ids {
             if id.0 > 0 && !history.viewed.contains(&id.0) && !history.viewing.contains(&id.0) {
                 history.visible.insert(id.0);
@@ -309,6 +312,25 @@ impl Session {
         for id in ids {
             history.visible.remove(&id.0);
             history.viewing.insert(id.0);
+        }
+    }
+
+    /// The UI no longer shows `chat_id`'s rows (its window went inactive):
+    /// none of them reads a reaction until the next report.
+    pub fn leave_screen(&mut self, chat_id: ChatId) {
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.on_screen.clear();
+        }
+    }
+
+    /// A message of a shown chat got a new unread reaction: it is due for
+    /// `viewMessages` again, which reads the reaction once the row is on
+    /// screen. A view already in flight was sent before the reaction, so it
+    /// no longer counts either.
+    pub(crate) fn reaction_unread(&mut self, chat_id: ChatId, message_id: MessageId) {
+        if let Some(history) = self.histories.get_mut(&chat_id.0) {
+            history.viewed.remove(&message_id.0);
+            history.viewing.remove(&message_id.0);
         }
     }
 

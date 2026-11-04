@@ -462,6 +462,14 @@ impl QuillApp {
     pub(super) fn report_visible_history(&mut self, window_active: bool, cx: &mut Context<Self>) {
         self.history.window_active = window_active;
         if !window_active {
+            // Nothing is on screen behind another app: a reaction that
+            // comes now stays unread until the window is back, which then
+            // reports its rows afresh.
+            if let Some((chat_id, _)) = self.history.reported_visible.take()
+                && let Some(live) = self.live.as_mut()
+            {
+                live.driver.session.leave_screen(chat_id);
+            }
             return;
         }
         let Some(chat_id) = self.viewed_chat() else {
