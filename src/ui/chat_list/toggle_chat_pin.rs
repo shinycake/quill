@@ -84,12 +84,10 @@ impl QuillApp {
     }
 
     /// Slice CL1: Mark as read / Mark as unread from the chat-row
-    /// context menu. Mark-as-read follows Telegram X
-    /// (`Tdlib.markChatAsRead` with `MessageSourceChatList`):
-    /// `viewMessages` over the newest known message reads real unread
-    /// history, plus `toggleChatIsMarkedAsUnread(false)` clears the
-    /// manual marker. Mark-as-unread is the plain toggle (TGX only
-    /// offers it when `unreadCount == 0`, which the menu label gates).
+    /// context menu. Mark-as-read reads the whole chat
+    /// (`ConnectDriver::mark_chat_as_read`, tdesktop `MarkAsReadThread`).
+    /// Mark-as-unread is the plain toggle (TGX only offers it when
+    /// `unreadCount == 0`, which the menu label gates).
     pub(in crate::ui) fn toggle_chat_marked_as_unread(
         &mut self,
         chat_id: ChatId,
@@ -99,18 +97,17 @@ impl QuillApp {
             .session()
             .and_then(|session| session.chats.get(&chat_id.0))
             .is_some_and(|chat| chat.is_marked_as_unread || chat.unread_count > 0);
-        // Slice CL1 review nit: server-side unread with no cached history
-        // can't be marked read (the driver has nothing to view and sends
-        // nothing); say so honestly instead of "request already in flight".
+        // Server-side unread with nothing known to read till (no last
+        // message, no loaded rows, no loaded topics) can't be marked read;
+        // say so instead of "request already in flight".
         let nothing_to_view = self.session().is_some_and(|session| {
-            session
-                .chats
-                .get(&chat_id.0)
-                .is_some_and(|c| c.unread_count > 0 && !c.is_marked_as_unread)
-                && !session
-                    .histories
-                    .get(&chat_id.0)
-                    .is_some_and(|h| !h.messages.is_empty())
+            session.chats.get(&chat_id.0).is_some_and(|c| {
+                c.unread_count > 0
+                    && !c.is_marked_as_unread
+                    && c.unread_mention_count == 0
+                    && c.unread_reaction_count == 0
+            }) && session.mark_read_target(chat_id).is_none()
+                && session.unread_forum_topics(chat_id).is_empty()
         });
         if marked && nothing_to_view && self.live.is_some() {
             self.connection.set_note(StatusNote::silent(tr(

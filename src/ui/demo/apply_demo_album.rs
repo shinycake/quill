@@ -733,8 +733,8 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        // Mark-as-read also clears real unread, like TDLib's
-        // `updateChatReadInbox` would after `viewMessages`.
+        // Mark-as-read also clears real unread, mentions and reactions,
+        // like TDLib's updates after `viewMessages` + `readAllChat*`.
         let jsons = if marked {
             vec![format!(
                 r#"{{"@type":"updateChatIsMarkedAsUnread","chat_id":{},"is_marked_as_unread":{marked}}}"#,
@@ -748,6 +748,14 @@ impl QuillApp {
                 ),
                 format!(
                     r#"{{"@type":"updateChatReadInbox","chat_id":{},"last_read_inbox_message_id":0,"unread_count":0}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatUnreadMentionCount","chat_id":{},"unread_mention_count":0}}"#,
+                    chat_id.0
+                ),
+                format!(
+                    r#"{{"@type":"updateChatUnreadReactionCount","chat_id":{},"unread_reaction_count":0}}"#,
                     chat_id.0
                 ),
             ]

@@ -14,6 +14,7 @@ use std::sync::atomic::AtomicU64;
 mod clear_history;
 mod export;
 mod list_ops;
+mod mark_read;
 mod rich_html;
 
 #[test]

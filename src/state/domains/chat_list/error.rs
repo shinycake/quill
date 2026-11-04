@@ -96,6 +96,12 @@ impl Session {
                     err.code
                 ));
             }
+            Some(RequestPurpose::ReadChatInbox) => {
+                self.chats_state.chat_action_error = Some(format!(
+                    "could not mark the chat as read (error {})",
+                    err.code
+                ));
+            }
             Some(RequestPurpose::ReadChatList) => {
                 self.chats_state.chat_action_error = Some(format!(
                     "could not mark all chats as read (error {})",

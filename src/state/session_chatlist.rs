@@ -306,6 +306,48 @@ impl Session {
         }
     }
 
+    /// The message "Mark as read" reads the chat till: the chat's last
+    /// message (tdesktop `Histories::readInbox` reads till
+    /// `lastServerMessage`), or the newest loaded row when that is newer.
+    /// The loaded window alone is not enough: a chat opened at its first
+    /// unread holds an older page, and reading till its end left the rest
+    /// of the chat unread.
+    pub fn mark_read_target(&self, chat_id: ChatId) -> Option<MessageId> {
+        let last = self
+            .chats
+            .get(&chat_id.0)
+            .and_then(|chat| chat.last_message.as_ref())
+            .map(|last| last.id.0);
+        let loaded = self
+            .histories
+            .get(&chat_id.0)
+            .and_then(|history| history.messages.keys().next_back().copied());
+        last.into_iter()
+            .chain(loaded)
+            .filter(|id| *id > 0)
+            .max()
+            .map(MessageId)
+    }
+
+    /// The loaded forum topics of `chat_id` with unread messages, which
+    /// "Mark as read" reads one by one (tdesktop `forum->enumerateTopics`).
+    pub fn unread_forum_topics(&self, chat_id: ChatId) -> Vec<i32> {
+        if !self.chat_has_topics(chat_id) {
+            return Vec::new();
+        }
+        self.threads
+            .forum_topics
+            .get(&chat_id.0)
+            .map(|topics| {
+                topics
+                    .iter()
+                    .filter(|topic| topic.unread_count > 0 && topic.last_message_id != 0)
+                    .map(|topic| topic.forum_topic_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// After a successful `viewMessages` send, hold ids until TDLib ok/error.
     pub fn begin_viewing(&mut self, chat_id: ChatId, ids: &[MessageId]) {
         let history = self.history_entry(chat_id);
