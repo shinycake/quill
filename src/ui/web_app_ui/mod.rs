@@ -24,6 +24,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::deep_link_types::is_telegram_link;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
@@ -329,15 +330,6 @@ fn popup(title: &str, message: String, buttons: Vec<(&str, &str, &str)>) -> Popu
             })
             .collect(),
     }
-}
-
-/// Whether `url` is one of Telegram's own that the deep-link handler
-/// resolves (`tg:` or a `t.me` link).
-fn is_telegram_link(url: &str) -> bool {
-    let lower = url.trim().to_ascii_lowercase();
-    lower.starts_with("tg:")
-        || quill::link_policy::host_of(&lower)
-            .is_some_and(|host| host == "t.me" || host == "telegram.me" || host == "telegram.dog")
 }
 
 impl QuillApp {
@@ -926,7 +918,7 @@ mod spawn_mini_app_window;
 #[cfg(test)]
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
-    use super::{data_store_id, hsla_rgb, is_telegram_link, popup};
+    use super::{data_store_id, hsla_rgb, popup};
     use quill::web_app::theme::Rgb;
 
     #[test]
@@ -940,15 +932,6 @@ mod tests {
         assert_ne!(data_store_id("acc", 42), data_store_id("acc", 43));
         assert_ne!(data_store_id("acc", 42), data_store_id("other", 42));
         assert_eq!(data_store_id("acc", 42).len(), 32);
-    }
-
-    #[test]
-    fn telegram_links_are_told_apart_from_the_web() {
-        assert!(is_telegram_link("tg://resolve?domain=x"));
-        assert!(is_telegram_link("https://t.me/durov"));
-        assert!(is_telegram_link("HTTPS://T.ME/+abc"));
-        assert!(!is_telegram_link("https://example.com/t.me"));
-        assert!(!is_telegram_link("https://evil.t.me.example/"));
     }
 
     #[test]

@@ -109,6 +109,11 @@ impl QuillApp {
         let chat_id = ChatId(msg_key.0);
         let message_id = MessageId(msg_key.1 as i64);
         match link {
+            LinkTarget::Url { url, .. }
+                if self.live.is_some() && quill::deep_link_types::is_telegram_link(&url) =>
+            {
+                self.open_link(&url, cx);
+            }
             LinkTarget::Url { .. } => match open_decision(&link) {
                 OpenDecision::Open => {
                     if let LinkTarget::Url { url, .. } = &link {

@@ -134,6 +134,12 @@ pub enum InternalLink {
         draft_text: String,
     },
     SavedMessages,
+    /// `t.me/iv?url=...`: the page in the Instant View reader, or
+    /// `fallback_url` in the browser when it has none.
+    InstantView {
+        url: String,
+        fallback_url: String,
+    },
     UnknownDeepLink {
         link: String,
     },
@@ -225,6 +231,16 @@ pub enum DeepLinkUi {
     /// Nothing is paid until the user confirms in it.
     Invoice {
         name: String,
+    },
+    /// `iv`: the Instant View reader, `fallback` in the browser without one.
+    InstantView {
+        url: String,
+        fallback: String,
+    },
+    /// A web link Quill has no screen for: its page in the browser, as
+    /// Telegram Desktop leaves a `t.me` link it cannot convert.
+    Browser {
+        url: String,
     },
 }
 
@@ -432,6 +448,10 @@ pub fn parse_internal_link(value: &Value) -> Option<InternalLink> {
             draft_text: text(value, "draft_text"),
         },
         "SavedMessages" => InternalLink::SavedMessages,
+        "InstantView" => InternalLink::InstantView {
+            url: text(value, "url"),
+            fallback_url: text(value, "fallback_url"),
+        },
         "UnknownDeepLink" => InternalLink::UnknownDeepLink {
             link: text(value, "link"),
         },
@@ -750,8 +770,63 @@ pub fn route(link: &InternalLink, original: &str) -> LinkRoute {
         } else {
             link.clone()
         }),
-        InternalLink::Other(_) => LinkRoute::Message(format!("This link {NOT_SUPPORTED}")),
+        InternalLink::InstantView { url, fallback_url } => {
+            let fallback = [fallback_url.as_str(), original]
+                .into_iter()
+                .find(|link| crate::text::openable_http_url(link))
+                .unwrap_or_default()
+                .to_string();
+            LinkRoute::Ui(DeepLinkUi::InstantView {
+                url: url.clone(),
+                fallback,
+            })
+        }
+        // A sign-in token for another device: its web page is no use.
+        InternalLink::Other(kind) if kind == "QrCodeAuthentication" => {
+            LinkRoute::Message(format!("This link {NOT_SUPPORTED}"))
+        }
+        InternalLink::Other(_) => unsupported(original),
     }
+}
+
+/// A link Quill can't act on: a web link opens its page in the browser,
+/// anything else (`tg:`) says so.
+pub fn unsupported(original: &str) -> LinkRoute {
+    if crate::text::openable_http_url(original) {
+        LinkRoute::Ui(DeepLinkUi::Browser {
+            url: original.to_string(),
+        })
+    } else {
+        LinkRoute::Message(format!("This link {NOT_SUPPORTED}"))
+    }
+}
+
+/// Whether `url` is one of Telegram's own links, which Quill opens itself
+/// (tdesktop `TryConvertUrlToLocal`): `tg:`, or `t.me`, `telegram.me`,
+/// `telegram.dog` and `<username>.t.me` on the web.
+pub fn is_telegram_link(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    if lower.starts_with("tg:") {
+        return true;
+    }
+    let web = lower.starts_with("https://") || lower.starts_with("http://");
+    // Schemeless (`t.me/x`) is fine; any other scheme is not the web.
+    if !web
+        && lower
+            .split(['/', '?', '#'])
+            .next()
+            .is_some_and(|head| head.contains(':') || head.contains('@'))
+    {
+        return false;
+    }
+    crate::link_policy::host_of(&lower).is_some_and(|host| {
+        matches!(host.as_str(), "t.me" | "telegram.me" | "telegram.dog")
+            || host.strip_suffix(".t.me").is_some_and(|name| {
+                name.len() > 1
+                    && name != "www"
+                    && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            })
+    })
 }
 
 /// Query names the local parsers (`connect::deep_links`) do not understand.

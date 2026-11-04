@@ -457,13 +457,22 @@ impl QuillApp {
                                 } else {
                                     footer.child(
                                         Button::new("sticker-set-toggle")
-                                            .label(if installed {
-                                                tr(keys::Q_MEDIA_REMOVE_STICKERS).to_string()
-                                            } else {
-                                                tr_with(
-                                                    keys::Q_MEDIA_ADD_STICKERS,
+                                            .label(match (installed, kind) {
+                                                (true, SetKind::Stickers) => {
+                                                    tr(keys::Q_MEDIA_REMOVE_STICKERS).to_string()
+                                                }
+                                                (true, SetKind::Emoji) => {
+                                                    tr(keys::Q_MEDIA_REMOVE_EMOJI).to_string()
+                                                }
+                                                (false, kind) => tr_with(
+                                                    match kind {
+                                                        SetKind::Stickers => {
+                                                            keys::Q_MEDIA_ADD_STICKERS
+                                                        }
+                                                        SetKind::Emoji => keys::Q_MEDIA_ADD_EMOJI,
+                                                    },
                                                     &[("count", &count.to_string())],
-                                                )
+                                                ),
                                             })
                                             .when(installed, |button| button.danger())
                                             .when(!installed, |button| button.primary())

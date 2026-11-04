@@ -188,6 +188,23 @@ impl TextEntity {
         };
         openable_http_url(raw).then_some(raw.trim())
     }
+
+    /// A text link to a `tg:` address, which Quill opens itself (tdesktop
+    /// hands every `tg://` link to `openLocalUrl`).
+    pub fn tg_href(&self) -> Option<&str> {
+        let TextEntityKind::TextUrl { url } = &self.kind else {
+            return None;
+        };
+        let url = url.trim();
+        let tg = url
+            .get(..3)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("tg:"));
+        (tg && url.len() > 3
+            && url
+                .chars()
+                .all(|ch| !ch.is_whitespace() && !ch.is_control()))
+        .then_some(url)
+    }
 }
 
 /// What a clickable entity does (everything `TextEntityKind` marks as
@@ -375,18 +392,22 @@ pub fn styled_runs(text: &str, entities: &[TextEntity]) -> Vec<TextRun> {
             match &entity.kind {
                 TextEntityKind::Url | TextEntityKind::TextUrl { .. } => {
                     if href.is_none() {
-                        href = entity.open_href(text).map(str::to_string).or_else(|| {
-                            // A bare `example.com` entity has no scheme;
-                            // Telegram Desktop opens it as `http://…`.
-                            matches!(entity.kind, TextEntityKind::Url)
-                                .then(|| {
-                                    schemeless_url(
-                                        text.get(entity.utf8_start..entity.utf8_end)
-                                            .unwrap_or_default(),
-                                    )
-                                })
-                                .flatten()
-                        });
+                        href = entity
+                            .open_href(text)
+                            .or_else(|| entity.tg_href())
+                            .map(str::to_string)
+                            .or_else(|| {
+                                // A bare `example.com` entity has no scheme;
+                                // Telegram Desktop opens it as `http://…`.
+                                matches!(entity.kind, TextEntityKind::Url)
+                                    .then(|| {
+                                        schemeless_url(
+                                            text.get(entity.utf8_start..entity.utf8_end)
+                                                .unwrap_or_default(),
+                                        )
+                                    })
+                                    .flatten()
+                            });
                         if link.is_none() {
                             link = href.as_ref().map(|url| LinkTarget::Url {
                                 url: url.clone(),

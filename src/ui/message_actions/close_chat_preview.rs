@@ -783,6 +783,12 @@ impl QuillApp {
             return;
         }
         let url = preview.url.clone();
+        // A sticker set, theme, channel or other Telegram page opens in
+        // Quill (tdesktop's preview button runs the page's own link).
+        if quill::deep_link_types::is_telegram_link(&url) {
+            self.open_link(&url, cx);
+            return;
+        }
         let mode = self
             .live
             .as_ref()
