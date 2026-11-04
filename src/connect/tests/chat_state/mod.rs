@@ -419,3 +419,119 @@ fn view_messages_reports_only_what_is_shown() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_new_reaction_on_a_shown_message_is_read_by_viewing_it_again() {
+    // tdesktop reads a reaction as soon as the reacted message is on screen
+    // (`HistoryInner::paintEvent` → `markContentsRead`), so the corner heart
+    // never lingers over a reaction the user can already see. TDLib reads
+    // it on `viewMessages`; the row was viewed before the reaction came.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    };
+    let views = |recorder: &RecordingSender| -> Vec<(String, Vec<i64>)> {
+        recorder
+            .snapshot()
+            .iter()
+            .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+            .filter(|v| v["@type"] == "viewMessages")
+            .map(|v| {
+                let ids = v["message_ids"]
+                    .as_array()
+                    .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+                    .unwrap_or_default();
+                (v["@extra"].as_str().unwrap_or_default().to_string(), ids)
+            })
+            .collect()
+    };
+    let reaction = |count: i32, unread: &str| {
+        format!(
+            r#"{{"@type":"updateMessageUnreadReactions","chat_id":7,"message_id":12,"unread_reactions":[{unread}],"unread_reaction_count":{count}}}"#
+        )
+    };
+    let smile = r#"{"@type":"unreadReaction","type":{"@type":"reactionTypeEmoji","emoji":"😁"},"sender_id":{"@type":"messageSenderUser","user_id":7},"is_big":false}"#;
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    let history = driver
+        .select_chat(ChatId(7))
+        .unwrap()
+        .expect("history request");
+    let row = |id: i64, out: bool| {
+        format!(
+            r#"{{"id":{id},"chat_id":7,"is_outgoing":{out},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}"#
+        )
+    };
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            history.0,
+            row(12, true),
+            row(11, false)
+        ),
+    );
+    let sent = views(&recorder);
+    assert_eq!(sent.len(), 1);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[0].0),
+    );
+    driver
+        .view_messages(ChatId(7), &[MessageId(11), MessageId(12)])
+        .unwrap();
+    let sent = views(&recorder);
+    assert_eq!(sent.last().map(|s| s.1.clone()), Some(vec![11]));
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[1].0),
+    );
+
+    // Our message on screen gets a reaction: it is viewed again.
+    ingest(&mut driver, &reaction(1, smile));
+    assert_eq!(driver.session.chats[&7].unread_reaction_count, 1);
+    let sent = views(&recorder);
+    assert_eq!(sent.len(), 3, "the reacted row is viewed again");
+    assert_eq!(sent[2].1, vec![12]);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[2].0),
+    );
+    ingest(&mut driver, &reaction(0, ""));
+    assert_eq!(driver.session.chats[&7].unread_reaction_count, 0);
+    assert_eq!(views(&recorder).len(), 3, "a read reaction views nothing");
+
+    // A reaction on a row scrolled off screen waits until the UI shows it.
+    driver.view_messages(ChatId(7), &[MessageId(11)]).unwrap();
+    ingest(&mut driver, &reaction(1, smile));
+    assert_eq!(views(&recorder).len(), 3);
+    driver
+        .view_messages(ChatId(7), &[MessageId(11), MessageId(12)])
+        .unwrap();
+    let sent = views(&recorder);
+    assert_eq!(sent[3].1, vec![12]);
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent[3].0),
+    );
+    ingest(&mut driver, &reaction(0, ""));
+
+    // Behind another app nothing is on screen: the reaction stays unread
+    // until the window is back and reports its rows.
+    driver.session.leave_screen(ChatId(7));
+    ingest(&mut driver, &reaction(1, smile));
+    assert_eq!(views(&recorder).len(), 4);
+    driver
+        .view_messages(ChatId(7), &[MessageId(11), MessageId(12)])
+        .unwrap();
+    assert_eq!(views(&recorder)[4].1, vec![12]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

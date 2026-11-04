@@ -517,6 +517,11 @@ pub struct HistoryState {
     /// The UI has reported visible rows this open generation; from then on
     /// only reported rows are viewed (before that, only the newest row).
     pub visible_reported: bool,
+    /// The rows of the UI's latest report: what is on screen now. A row
+    /// here that gets a new unread reaction is viewed again, which reads
+    /// the reaction (tdesktop `HistoryInner::paintEvent` →
+    /// `markContentsRead` for a shown `hasUnreadReaction` item).
+    pub on_screen: BTreeSet<i64>,
     /// TDLib answered a newer page from the window's newest message with
     /// nothing newer while the chat's latest known message was newer (it
     /// is not visible to us): `(latest, newest)`. While no newer message is

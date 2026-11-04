@@ -78,10 +78,13 @@ impl Session {
             }
             MessagesPayload::UpdateMessageUnreadReactions {
                 chat_id,
+                message_id,
                 unread_reaction_count,
                 newest,
-                ..
             } => {
+                if newest.is_some() {
+                    self.reaction_unread(chat_id, message_id);
+                }
                 let previous = self
                     .chats
                     .get(&chat_id.0)
