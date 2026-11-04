@@ -58,6 +58,11 @@ pub enum ChatListPurpose {
     /// Response is `ok`; badges clear via `updateChatReadInbox` /
     /// `updateChatUnreadMentionCount`.
     ReadChatList,
+    /// Chat-row "Mark as read": `viewMessages` with `force_read` on the
+    /// chat's last message. Response is `ok`; the badge clears via
+    /// `updateChatReadInbox`. Separate from the open chat's
+    /// `ViewMessages`, so an on-screen view in flight never blocks it.
+    ReadChatInbox,
     /// Slice CL2: `clearRecentlyFoundChats` (schema 1.8.67, line 11671).
     /// Response is `ok`; the local recents were already cleared
     /// optimistically (TGX `SearchManager.clearRecentlyFoundChats`).
@@ -153,6 +158,7 @@ flat_purposes!(ChatList(ChatListPurpose) {
     LeaveBeforeDelete,
     SetPinnedChats,
     ReadChatList,
+    ReadChatInbox,
     ClearRecentlyFoundChats,
     GetArchiveChatListSettings,
     SetArchiveChatListSettings,

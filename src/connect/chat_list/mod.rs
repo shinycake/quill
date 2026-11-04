@@ -15,6 +15,7 @@ use crate::telegram::requests::{
 };
 
 mod folders;
+mod mark_read;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Select a chat, inform TDLib it is open, and request history.
@@ -249,91 +250,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.touch_unread();
         }
         Ok(Some(extra))
-    }
-
-    /// Slice CL1: mark a chat as read the way Telegram X does
-    /// (`Tdlib.markChatAsRead` with `MessageSourceChatList`): `viewMessages`
-    /// over the newest known message reads real unread history, and the
-    /// manual marked-unread flag is cleared when set. Honest noop when the
-    /// chat has nothing unread.
-    pub fn mark_chat_as_read(
-        &mut self,
-        chat_id: ChatId,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let (supported, unread, marked) = self
-            .session
-            .chats
-            .get(&chat_id.0)
-            .map(|chat| {
-                (
-                    chat.supported(),
-                    chat.unread_count > 0,
-                    chat.is_marked_as_unread,
-                )
-            })
-            .unwrap_or((false, false, false));
-        if !supported {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !unread && !marked {
-            return Ok(None);
-        }
-        let mut sent: Option<RequestId> = None;
-        // TGX: viewing the newest known message reads the real unread
-        // history. The loaded window has it when there is one; a chat whose
-        // history was dropped (closed chats keep a bounded set) or never
-        // loaded falls back to the chat summary's last message, which is
-        // what TGX views (`chat.lastMessage`). The authoritative
-        // `updateChatReadInbox` then confirms.
-        if unread {
-            let newest = self
-                .session
-                .histories
-                .get(&chat_id.0)
-                .and_then(|history| history.messages.keys().next_back().copied())
-                .map(MessageId)
-                .or_else(|| {
-                    self.session
-                        .chats
-                        .get(&chat_id.0)
-                        .and_then(|chat| chat.last_message)
-                        .map(|last| last.id)
-                        .filter(|id| id.0 > 0)
-                });
-            if let Some(id) = newest
-                && !self
-                    .session
-                    .requests
-                    .has_purpose_for_chat(RequestPurpose::ViewMessages, chat_id)
-            {
-                let extra = self
-                    .session
-                    .request(RequestPurpose::ViewMessages, Some(chat_id));
-                match self.sender.send_json(&view_messages(
-                    extra,
-                    chat_id,
-                    &[id],
-                    "messageSourceChatList",
-                    true,
-                )) {
-                    Ok(()) => {
-                        self.session.begin_viewing(chat_id, &[id]);
-                        sent = Some(extra);
-                    }
-                    Err(err) => {
-                        self.session.requests.take(extra);
-                        return Err(err);
-                    }
-                }
-            }
-        }
-        if marked {
-            sent = self.toggle_chat_marked_as_unread(chat_id, false)?.or(sent);
-        }
-        Ok(sent)
     }
 
     /// Slice CL2: `setPinnedChats` (schema 1.8.67, line 13681) — drag
