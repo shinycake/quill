@@ -219,6 +219,13 @@ impl Sim {
             .update(&mut self.vcx, |app, _| app.history.landing.is_some())
     }
 
+    /// The reader presses the jump-down button.
+    fn press_jump_down(&mut self) {
+        self.app
+            .update(&mut self.vcx, |app, cx| app.jump_down_messages(cx));
+        self.frames();
+    }
+
     fn following(&mut self) -> bool {
         self.app.update(&mut self.vcx, |app, cx| {
             app.history.scroller.read(cx).is_following_tail()
@@ -521,4 +528,32 @@ fn a_failed_send_leaves_the_view(cx: &mut TestAppContext) {
         before.top(),
         after.top()
     );
+}
+
+/// tdesktop `CornerButtons::downClick` → `insideJumpToEndInsteadOfToUnread`:
+/// landed on the bar, the first unread message is already on screen, so
+/// the jump-down button goes to the latest message.
+#[gpui_kit::test]
+fn the_jump_button_on_the_bar_goes_to_the_latest(cx: &mut TestAppContext) {
+    let mut sim = Sim::landed(cx);
+    assert!(!sim.following(), "landed on the bar");
+    sim.press_jump_down();
+    assert!(sim.following());
+    assert!(sim.shows_the_end());
+}
+
+/// Scrolled up above the first unread message, the first press brings the
+/// bar back to the top and the second goes to the latest.
+#[gpui_kit::test]
+fn the_jump_button_goes_to_the_bar_then_the_latest(cx: &mut TestAppContext) {
+    let mut sim = Sim::landed(cx);
+    for _ in 0..3 {
+        sim.wheel(500.);
+    }
+    sim.press_jump_down();
+    let gap = sim.bar_gap();
+    assert_at_top(gap);
+    sim.press_jump_down();
+    assert!(sim.following());
+    assert!(sim.shows_the_end());
 }
