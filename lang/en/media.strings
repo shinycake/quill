@@ -176,6 +176,7 @@
 "qll_media_add_details_optional" = "Add details (optional)";
 "qll_media_add_details_or_cancel_the" = "add details or cancel the report";
 "qll_media_add_option" = "Add option";
+"qll_media_add_emoji" = "Add {count} Emoji";
 "qll_media_add_stickers" = "Add {count} Stickers";
 "qll_media_add_stories_to_album" = "add stories to album";
 "qll_media_add_tasks" = "Add Tasks";
@@ -592,6 +593,7 @@
 "qll_media_remove_from_favorites" = "Remove from favorites";
 "qll_media_remove_from_menu" = "Remove from menu";
 "qll_media_remove_option" = "Remove option";
+"qll_media_remove_emoji" = "Remove Emoji";
 "qll_media_remove_stickers" = "Remove Stickers";
 "qll_media_remove_story_from_album" = "remove story from album";
 "qll_media_remove_task" = "Remove task";

@@ -87,8 +87,23 @@ impl Session {
                     pending.map(|p| p.purpose),
                     Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { .. }))
                 ) && self.note_premium_limit(err, pending);
+                // A web link TDLib calls not internal (`t.me/` itself, a
+                // page it can't type) opens in the browser, as tdesktop
+                // leaves a `t.me` link it can't convert.
+                let web_fallback =
+                    matches!(
+                        pending.map(|p| p.purpose),
+                        Some(RequestPurpose::Chats(
+                            ChatsPurpose::DeepLinkInternalType { .. }
+                        ))
+                    ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
                 if !stale && limit_box {
                     self.chats_state.deep_link = None;
+                } else if !stale && web_fallback {
+                    let url = std::mem::take(&mut self.chats_state.deep_link_original);
+                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
+                        crate::deep_link_types::DeepLinkUi::Browser { url },
+                    ));
                 } else if !stale {
                     let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
                     self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));

@@ -1,6 +1,6 @@
 use super::{
     DeepLinkAction, DeepLinkUi, InternalLink, LinkRoute, SettingsTarget, invite_hash,
-    login_code_from_link, needs_internal_resolution, parse_internal_link, route,
+    is_telegram_link, login_code_from_link, needs_internal_resolution, parse_internal_link, route,
 };
 use crate::peer_color::PeerColorTab;
 use serde_json::{Value, json};
@@ -399,7 +399,7 @@ fn an_auction_link_opens_the_auction_and_an_empty_one_is_broken() {
 }
 
 #[test]
-fn unsupported_targets_say_so_and_never_open_a_browser() {
+fn targets_without_a_page_of_their_own_say_so() {
     for ty in [
         "internalLinkTypePremiumGiftCode",
         "internalLinkTypeVideoChat",
@@ -563,5 +563,61 @@ fn a_call_link_asks_to_join_the_conference() {
         LinkRoute::Ui(DeepLinkUi::ConferenceCall {
             link: "https://t.me/call/abc".into()
         })
+    );
+}
+
+#[test]
+fn telegram_links_are_told_apart_from_the_web() {
+    for link in [
+        "tg://resolve?domain=x",
+        "https://t.me/durov",
+        "HTTPS://T.ME/+abc",
+        "https://t.me/addemoji/CandyFontEmoji",
+        "http://telegram.me/addstickers/Pack",
+        "https://telegram.dog/durov",
+        "https://durov.t.me/",
+        "t.me/quill",
+    ] {
+        assert!(is_telegram_link(link), "{link}");
+    }
+    for link in [
+        "https://example.com/t.me",
+        "https://evil.t.me.example/",
+        "https://www.t.me/x",
+        "ftp://t.me/x",
+        "mailto:x@t.me",
+        "https://telegram.org/faq",
+    ] {
+        assert!(!is_telegram_link(link), "{link}");
+    }
+}
+
+#[test]
+fn an_instant_view_link_opens_the_reader_with_its_fallback() {
+    assert_eq!(
+        route_of(json!({
+            "@type": "internalLinkTypeInstantView",
+            "url": "https://example.com/a",
+            "fallback_url": "https://t.me/iv?url=https%3A%2F%2Fexample.com%2Fa"
+        })),
+        LinkRoute::Ui(DeepLinkUi::InstantView {
+            url: "https://example.com/a".into(),
+            fallback: "https://t.me/iv?url=https%3A%2F%2Fexample.com%2Fa".into(),
+        })
+    );
+}
+
+#[test]
+fn a_link_quill_has_no_screen_for_opens_its_web_page() {
+    let link = parsed(json!({"@type": "internalLinkTypeSomethingNew"}));
+    assert_eq!(
+        route(&link, "https://t.me/new/thing"),
+        LinkRoute::Ui(DeepLinkUi::Browser {
+            url: "https://t.me/new/thing".into()
+        })
+    );
+    assert_eq!(
+        route(&link, "tg://new?x=1"),
+        LinkRoute::Message("This link isn't supported by Quill yet.".into())
     );
 }

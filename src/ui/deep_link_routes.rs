@@ -89,6 +89,13 @@ impl QuillApp {
             }
             DeepLinkUi::LanguagePack { id } => self.open_language_pack_link(id, cx),
             DeepLinkUi::Invoice { name } => self.open_invoice_link(&name, window, cx),
+            DeepLinkUi::InstantView { url, fallback } => {
+                self.open_instant_view_link(&url, &fallback, cx)
+            }
+            // Straight to the browser: `open_link` would route it back here.
+            DeepLinkUi::Browser { url } => {
+                self.open_web_link(&url, tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK), cx);
+            }
             DeepLinkUi::Settings(SettingsTarget::ChangePhone) => self.open_change_phone_dialog(cx),
             DeepLinkUi::Settings(SettingsTarget::QrCode) => self.open_own_qr_box(cx),
             DeepLinkUi::Settings(SettingsTarget::PeerColor(tab)) => {
@@ -107,6 +114,23 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// `t.me/iv?url=`: the page in the Instant View reader, or its
+    /// fallback in the browser when TDLib has no Instant View for it.
+    fn open_instant_view_link(&mut self, url: &str, fallback: &str, cx: &mut Context<Self>) {
+        let requested = self.live.as_mut().is_some_and(|live| {
+            matches!(
+                live.driver.open_instant_view(url),
+                quill::connect::InstantViewOutcome::Requested
+            )
+        });
+        if requested {
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_LOADING_INSTANT_VIEW)));
+        } else if !fallback.is_empty() {
+            self.open_web_link(fallback, tr(keys::Q_CHAT_COULD_NOT_OPEN_LINK), cx);
+        }
     }
 
     /// Chat picked in the share chooser: open it with the text in the

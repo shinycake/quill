@@ -124,6 +124,34 @@ fn failed_links_use_tdesktop_wording() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn a_web_link_tdlib_cannot_type_opens_in_the_browser() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let extra = driver
+        .request_deep_link_info("https://t.me/addtheme/Night")
+        .unwrap()
+        .unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 404, "message": "Not Found"}),
+    );
+    assert_eq!(
+        driver.session.chats_state.deep_link,
+        Some(DeepLinkState::Ui(
+            crate::deep_link_types::DeepLinkUi::Browser {
+                url: "https://t.me/addtheme/Night".into()
+            }
+        ))
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Open `link`, answer `getInternalLinkType` with `answer`, return the state.
 fn open_with(
     driver: &mut ConnectDriver<Arc<RecordingSender>>,

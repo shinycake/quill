@@ -13,11 +13,16 @@ use quill::lang::{keys, tr};
 use quill::platform::OsOpen;
 
 impl QuillApp {
-    /// Open a link the user pressed: a web link in the browser, a
-    /// `mailto:` link in the mail client. Every link Quill opens goes
+    /// Open a link the user pressed: a Telegram link in Quill, a web link
+    /// in the browser, a `mailto:` link in the mail client. Every link Quill opens goes
     /// through here, so a refused or failed open is never silent.
     pub(in crate::ui) fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
-        if url.starts_with("mailto:") {
+        // Telegram's own links open in Quill, as tdesktop converts them
+        // with `TryConvertUrlToLocal` before anything reaches the browser.
+        if self.live.is_some() && quill::deep_link_types::is_telegram_link(url) {
+            self.queue_deep_link(url.trim().to_string());
+            cx.notify();
+        } else if url.starts_with("mailto:") {
             let open = quill::platform::open_mailto_url(url);
             self.report_failed_open(open, tr(keys::Q_OPS_COULD_NOT_OPEN_THE_MAIL), cx);
         } else {
