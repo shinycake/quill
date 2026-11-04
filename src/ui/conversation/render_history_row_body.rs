@@ -415,19 +415,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The jump-down button: the first unread message under the "Unread
-    /// messages" bar while any are left (the scroller re-anchors there, or
-    /// when the window around it lands), else the latest. A thread keeps
-    /// jumping to its latest replies.
+    /// The jump-down button (tdesktop `CornerButtons::downClick`): the
+    /// first unread message under the "Unread messages" bar while it is
+    /// still below the view (the scroller re-anchors there, or when the
+    /// window around it lands), else the latest, so a second press goes to
+    /// the bottom. A thread keeps jumping to its latest replies.
     pub(in crate::ui) fn jump_down_messages(&mut self, cx: &mut Context<Self>) {
         let unread = !self.thread_active()
-            && self.session().is_some_and(|session| {
-                session
-                    .open_chat
-                    .and_then(|chat| session.chats.get(&chat.0))
-                    .and_then(quill::state::ChatSummary::unread_anchor)
-                    .is_some()
-            });
+            && self
+                .session()
+                .and_then(|session| session.open_chat)
+                .is_some_and(|chat| self.first_unread_below_view(chat));
         if !unread {
             self.jump_to_latest_messages(cx);
             return;

@@ -43,12 +43,27 @@ impl QuillApp {
         {
             return;
         }
+        if self.first_unread_below_view(chat) {
+            self.jump_down_messages(cx);
+        } else {
+            self.jump_to_latest_messages(cx);
+        }
+    }
+
+    /// The open chat's first unread message starts below the view, or past
+    /// the loaded window (tdesktop `insideJumpToEndInsteadOfToUnread`:
+    /// once it is on screen or above, going "to the unread" goes to the
+    /// end instead).
+    pub(in crate::ui) fn first_unread_below_view(&self, chat: ChatId) -> bool {
+        let Some(session) = self.session() else {
+            return false;
+        };
         let anchor = session
             .chats
             .get(&chat.0)
             .and_then(quill::state::ChatSummary::unread_anchor);
         let rows = &self.history.rows;
-        let unread_below = anchor.is_some_and(|anchor| {
+        anchor.is_some_and(|anchor| {
             let first_unread = rows.iter().position(|row| {
                 row.messages()
                     .iter()
@@ -67,12 +82,7 @@ impl QuillApp {
                     .find_map(HistoryRow::last_id)
                     .is_none_or(|id| id.0 <= anchor.0),
             }
-        });
-        if unread_below {
-            self.jump_down_messages(cx);
-        } else {
-            self.jump_to_latest_messages(cx);
-        }
+        })
     }
 
     /// The reader sent a message or jumped to the latest: the position left
