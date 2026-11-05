@@ -185,6 +185,8 @@ pub(crate) struct Surfaces {
     /// The status toast of each window (`None`: the main window).
     pub(crate) toasts:
         std::cell::RefCell<std::collections::HashMap<Option<i64>, Presence<super::status_note::StatusNote>>>,
+    /// How far in the toast drawn by the window rendering now is.
+    pub(crate) toast_shown: Cell<f32>,
     pub(crate) edit_bar: std::cell::RefCell<Presence<quill::composer::ComposerEdit>>,
     pub(crate) reply_bar: std::cell::RefCell<Presence<quill::composer::ComposerReplyTo>>,
     pub(crate) forward_bar: std::cell::RefCell<Presence<()>>,
@@ -206,6 +208,7 @@ impl Surfaces {
     pub(crate) fn new(now: Instant) -> Self {
         Self {
             toasts: Default::default(),
+            toast_shown: Cell::new(1.),
             edit_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
             reply_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
             forward_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
@@ -267,15 +270,15 @@ pub(crate) enum Attached {
 /// `content` sliding open to `shown` of its height, attached to `edge`,
 /// with its content fading in. The height comes from the last frame
 /// (`measured`, kept current by the element itself), `guess` until then.
-/// `gap`: the flex gap before this child, folded into the slide so the
-/// siblings do not jump when the surface starts. Fully shown, the content
-/// is returned as is.
+/// `gap_after`: the flex gap between this child and the next, folded into
+/// the slide so the siblings do not jump when the surface starts. Fully
+/// shown, the content is returned as is.
 pub(crate) fn slide_open(
     content: AnyElement,
     shown: f32,
     measured: Rc<Cell<Pixels>>,
     guess: Pixels,
-    gap: Pixels,
+    gap_after: Pixels,
     edge: Attached,
 ) -> AnyElement {
     let measure = MeasureSize {
@@ -306,7 +309,7 @@ pub(crate) fn slide_open(
         .flex_none()
         .overflow_hidden()
         .h(full * shown)
-        .mt(-gap * (1. - shown))
+        .mb(-gap_after * (1. - shown))
         .child(inner)
         .into_any_element()
 }

@@ -7,6 +7,7 @@
 use super::geometry::{CAPTION_GAP, GROUP_STRIP_ROOM, lane_width};
 use super::layer::ViewerGeometry;
 use super::*;
+use crate::ui::pressable::PressableDiv;
 use crate::ui::video_player::controls::hide_cursor;
 use quill::lang::{keys, tr};
 use quill::media_viewer::ViewerTtl;
@@ -188,8 +189,10 @@ impl QuillApp {
                     .when_some(sender_profile, |this, profile| {
                         this.role(Role::Button)
                             .aria_label(tr(keys::Q_AV_OPEN_PROFILE))
+                            .tab_index(0)
                             .cursor_pointer()
                             .hover(|style| style.opacity(0.8))
+                            .focus_ring_visible(cx.theme())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_viewer_sender_profile(profile, window, cx);
                             }))

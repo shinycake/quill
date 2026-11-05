@@ -19,6 +19,7 @@ use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use super::pressable::PressableDiv;
 use quill::ids::AccountKey;
 use quill::lang::{Key, keys, tr};
 use quill::settings::{
@@ -398,6 +399,7 @@ impl QuillApp {
             .role(gpui_kit::Role::Button)
             .aria_label(label.clone())
             .tab_index(0)
+            .focus_ring_visible(theme)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
             .child(div().text_sm().child(label))
@@ -432,6 +434,7 @@ impl QuillApp {
             ))
             .tab_index(0)
             .cursor_pointer()
+            .focus_ring_visible(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
             .child(
                 div()

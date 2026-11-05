@@ -3,7 +3,37 @@
 use super::*;
 use crate::ui::lean_buttons::ghost_text_button;
 use crate::ui::status_note::StatusNote;
+use crate::ui::surface_reveal::{self, PinnedShown};
 use quill::lang::{keys, tr, tr_with, trn};
+
+/// The pinned bar's height until it was laid out once.
+const PINNED_BAR_GUESS: Pixels = px(48.);
+/// `st::msgReplyBarSkip`: how far the swapped text slides.
+const PINNED_SWAP_SHIFT: f32 = 10.;
+
+/// The bar's title over its one-line preview.
+fn pinned_bar_lines_block(title: String, preview: String) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .min_w_0()
+        .child(
+            div()
+                .text_xs()
+                .font_medium()
+                .text_color(accent())
+                .child(title),
+        )
+        .child(
+            div()
+                .text_sm()
+                .truncate()
+                .text_color(text_primary())
+                .child(crate::ui::bidi_line::one_line_plain(
+                    crate::ui::search_ui::one_line_preview(&preview),
+                )),
+        )
+}
 
 impl QuillApp {
     pub(in crate::ui) fn unpin_from_banner(
@@ -46,20 +76,35 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.session()?.pinned_list(chat_id).first()?;
-        self.pinned_message_banner_body(chat_id, cx)
+        // The bar slides open and shut (`Ui::SlideWrap` in tdesktop's
+        // `PinnedBar`, `slideWrapDuration` 150 ms) and keeps drawing the
+        // last pinned message while it slides shut (`surface_reveal`).
+        let state = self.pinned_bar_state(chat_id);
+        let now = surface_reveal::now();
+        let animate = surface_reveal::animate(cx);
+        let (drawn, moving) = {
+            let mut presence = self.frame.surfaces.pinned_bar.borrow_mut();
+            let drawn = presence.follow(state, chat_id.0 as u64, animate, now);
+            (drawn, presence.moving(now))
+        };
+        if moving {
+            self.request_animation_tick(60, cx);
+        }
+        let drawn = drawn?;
+        let content = self.pinned_message_banner_body(chat_id, &drawn, cx)?;
+        Some(surface_reveal::slide_open(
+            content,
+            drawn.shown,
+            self.frame.surfaces.pinned_bar_size.height.clone(),
+            PINNED_BAR_GUESS,
+            px(0.),
+            surface_reveal::Attached::Top,
+        ))
     }
 
-    /// `pinned_message_banner` past its cheap check. A debug build reserves this
-    /// builder's whole frame on entry, so frames that show nothing skip
-    /// it (docs/decisions/main-thread-stack.md).
-    /// The outer function repeats this body's first check; keep the two in step.
-    #[inline(never)]
-    fn pinned_message_banner_body(
-        &self,
-        chat_id: ChatId,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// Which pinned message the bar shows, `None` while it shows none:
+    /// nothing pinned, or the newest pin hidden.
+    fn pinned_bar_state(&self, chat_id: ChatId) -> Option<PinnedShown> {
         let session = self.session()?;
         let list = session.pinned_list(chat_id);
         let newest = list.first()?.id;
@@ -73,30 +118,68 @@ impl QuillApp {
             .get(&chat_id.0)
             .copied()
             .unwrap_or(0)
-            .min(count - 1);
-        let item = *list.get(index)?;
-        let message_id = item.id;
-        let preview = effective_preview(item);
-        let title = if index == 0 {
+            .min(count.saturating_sub(1));
+        let message = list.get(index)?.id.0;
+        Some(PinnedShown {
+            chat: chat_id.0,
+            message,
+            index,
+            count,
+        })
+    }
+
+    /// The title and preview of the pinned message `shown`, if the list
+    /// still holds it.
+    fn pinned_bar_lines(&self, chat_id: ChatId, shown: PinnedShown) -> Option<(String, String)> {
+        let session = self.session()?;
+        let list = session.pinned_list(chat_id);
+        let item = list.get(shown.index).filter(|item| item.id.0 == shown.message)?;
+        let title = if shown.index == 0 {
             tr(keys::PINNED_MESSAGE).to_string()
-        } else if count == 2 {
+        } else if shown.count == 2 {
             tr(keys::Q_CHAT_PREVIOUS_MESSAGE).to_string()
         } else {
             tr_with(
                 keys::Q_CHAT_PINNED_MESSAGE,
-                &[("count_index", &(count - index).to_string())],
+                &[(
+                    "count_index",
+                    &shown.count.saturating_sub(shown.index).to_string(),
+                )],
             )
         };
+        Some((title, effective_preview(item)))
+    }
+
+    /// `pinned_message_banner` past its cheap check. A debug build reserves this
+    /// builder's whole frame on entry, so frames that show nothing skip
+    /// it (docs/decisions/main-thread-stack.md).
+    #[inline(never)]
+    fn pinned_message_banner_body(
+        &self,
+        chat_id: ChatId,
+        drawn: &surface_reveal::Drawn<PinnedShown>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let session = self.session()?;
+        let shown = drawn.value;
+        let list = session.pinned_list(chat_id);
+        let newest = list.first()?.id;
+        let count = shown.count;
+        let index = shown.index;
+        let message_id = MessageId(shown.message);
+        let (title, preview) = self.pinned_bar_lines(chat_id, shown)?;
         let can_pin = session
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.can_pin_messages());
         // Up to four segments, oldest on top; the window follows the
         // shown message.
-        let shown = count.min(4);
-        let position = count - 1 - index;
-        let start = position.saturating_sub(shown - 1).min(count - shown);
-        let segments = (0..shown).map(|segment| {
+        let shown_segments = count.min(4);
+        let position = count.saturating_sub(1).saturating_sub(index);
+        let start = position
+            .saturating_sub(shown_segments.saturating_sub(1))
+            .min(count.saturating_sub(shown_segments));
+        let segments = (0..shown_segments).map(|segment| {
             div()
                 .flex_1()
                 .w(px(2.))
@@ -111,6 +194,47 @@ impl QuillApp {
             pinned_bar_close_button(can_pin, chat_id, message_id, newest, cx)
         } else {
             pinned_bar_list_button(self.history.pinned_list_open, cx)
+        };
+        // Stepping to another pinned message swaps the text the way
+        // tdesktop's `MessageBar` does: the old lines slide out towards the
+        // message that was shown, the new ones slide in from the other
+        // side, cross-fading over `defaultMessageBar.duration` (160 ms).
+        let previous = drawn
+            .previous
+            .filter(|_| drawn.swap < 1.)
+            .and_then(|previous| {
+                let lines = self.pinned_bar_lines(chat_id, previous)?;
+                let up = previous.index < index;
+                Some((lines, up))
+            });
+        let text = match previous {
+            None => pinned_bar_lines_block(title, preview).into_any_element(),
+            Some(((old_title, old_preview), up)) => {
+                let swap = drawn.swap;
+                let sign = if up { -1. } else { 1. };
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(34.))
+                    .child(
+                        pinned_bar_lines_block(old_title, old_preview)
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .top(px(sign * PINNED_SWAP_SHIFT * swap))
+                            .opacity(1. - swap),
+                    )
+                    .child(
+                        pinned_bar_lines_block(title, preview)
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .top(px(-sign * PINNED_SWAP_SHIFT * (1. - swap)))
+                            .opacity(swap),
+                    )
+                    .into_any_element()
+            }
         };
         Some(
             div()
@@ -139,7 +263,7 @@ impl QuillApp {
                             this.jump_to_pinned_message(message_id, cx);
                             this.history
                                 .pinned_cursor
-                                .insert(chat_id.0, (index + 1) % count);
+                                .insert(chat_id.0, (index + 1) % count.max(1));
                             cx.notify();
                         }))
                         .child(
@@ -150,26 +274,7 @@ impl QuillApp {
                                 .h(px(34.))
                                 .children(segments),
                         )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_medium()
-                                        .text_color(accent())
-                                        .child(title),
-                                )
-                                .child(
-                                    div().text_sm().truncate().text_color(text_primary()).child(
-                                        super::bidi_line::one_line_plain(
-                                            super::search_ui::one_line_preview(&preview),
-                                        ),
-                                    ),
-                                ),
-                        ),
+                        .child(text),
                 )
                 .child(right)
                 .into_any_element(),

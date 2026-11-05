@@ -6,6 +6,7 @@
 use super::*;
 use crate::ui::status_note::{NoteKind, StatusNote};
 use gpui_kit::TestSupportExt;
+use crate::ui::surface_reveal;
 use quill::ids::ChatId;
 
 /// The pill's widest line, so a long failure wraps instead of stretching.
@@ -14,6 +15,8 @@ const TOAST_MAX_WIDTH: f32 = 440.;
 const TOAST_MAX_LINES: usize = 3;
 /// Clear space between the toast and the composer's top border.
 const TOAST_GAP: f32 = 16.;
+/// How far below its place the toast starts as it fades in.
+const TOAST_RISE: f32 = 8.;
 
 /// Space the toast keeps from the window's left, right and bottom edges.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,8 +94,31 @@ impl QuillApp {
         host: Option<ChatId>,
         cx: &mut Context<Self>,
     ) -> Option<StatusNote> {
-        let note = self.status_toast_visible(cx)?;
-        (self.connection.toasts.visible_host() == Some(host)).then_some(note)
+        let note = self
+            .status_toast_visible(cx)
+            .filter(|_| self.connection.toasts.visible_host() == Some(host));
+        // The toast fades in over 200 ms and rises into place; a toast
+        // that is gone fades out in 120 ms (`surface_reveal`). The note
+        // stays the truth: this only follows it.
+        let now = surface_reveal::now();
+        let animate = surface_reveal::animate(cx);
+        let (drawn, moving) = {
+            let mut toasts = self.frame.surfaces.toasts.borrow_mut();
+            let toast = toasts.entry(host.map(|chat| chat.0)).or_insert_with(|| {
+                surface_reveal::Presence::new(
+                    surface_reveal::ENTER,
+                    surface_reveal::EXIT,
+                    now,
+                )
+            });
+            (toast.follow(note, 0, animate, now), toast.moving(now))
+        };
+        if moving {
+            self.request_animation_tick(60, cx);
+        }
+        let drawn = drawn?;
+        self.frame.surfaces.toast_shown.set(drawn.shown);
+        Some(drawn.value)
     }
 
     /// A chat window's toast. Put in the box around its compose field, it
@@ -172,11 +198,15 @@ impl QuillApp {
         } = insets;
         let error = note.kind() == NoteKind::Error;
         let role = if error { Role::Alert } else { Role::Status };
+        // How far in the toast is (`status_toast_in`): it rises the last
+        // `TOAST_RISE` px while it fades in.
+        let shown = self.frame.surfaces.toast_shown.get();
         div()
             .absolute()
             .left(left)
             .right(right)
-            .bottom(bottom)
+            .bottom(bottom - px(TOAST_RISE * (1. - shown)))
+            .opacity(shown)
             .px_4()
             .flex()
             .justify_center()

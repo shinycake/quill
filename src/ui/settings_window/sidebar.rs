@@ -9,6 +9,7 @@ use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::ui::pressable::PressableDiv;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
 
@@ -129,7 +130,10 @@ impl QuillApp {
                 .py_2()
                 .rounded(cx.theme().radius)
                 .cursor_pointer()
+                .role(Role::Button)
+                .tab_index(0)
                 .hover(|this| this.bg(cx.theme().sidebar_accent))
+                .focus_ring_visible(cx.theme())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.show_settings_page(Page::Account, cx);
                 }))

@@ -24,6 +24,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use super::pressable::PressableDiv;
 use quill::state::ActiveGroupCall;
 
 use crate::ui::app_theme::call_chrome;
@@ -278,6 +279,9 @@ impl QuillApp {
                                     .items_center()
                                     .justify_center()
                                     .cursor_pointer()
+                                    .role(Role::Button)
+                                    .tab_index(0)
+                                    .pressable(cx.theme())
                                     .text_color(rgb(ACTIVE_FG))
                                     .text_size(px(13.))
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -342,6 +346,9 @@ impl QuillApp {
                     .bg(call_chrome::danger_tint())
                     .text_size(px(13.))
                     .cursor_pointer()
+                    .role(Role::Button)
+                    .tab_index(0)
+                    .pressable(cx.theme())
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss_group_call_error(cx)))
                     .child(error)
             });
@@ -356,6 +363,9 @@ impl QuillApp {
                 .text_size(px(13.))
                 .text_color(white())
                 .cursor_pointer()
+                .role(Role::Button)
+                .tab_index(0)
+                .pressable(cx.theme())
                 .on_click(cx.listener(|this, _, _, cx| this.rejoin_active_group_call(cx)))
                 .child(tr(keys::Q_AV_CONNECTION_LOST_CLICK_TO_REJOIN))
         });
@@ -536,7 +546,9 @@ impl QuillApp {
     ) -> impl IntoElement {
         let (from, to) = state.colors();
         let joined = call.is_joined;
+        let ring = super::pressable::focus_ring(cx.theme());
         let side = |id: &'static str, icon: IconName, label: &'static str, bg: Hsla| {
+            let ring = ring.clone();
             div()
                 .id(id)
                 .w(px(68.))
@@ -547,6 +559,8 @@ impl QuillApp {
                 .cursor_pointer()
                 .role(Role::Button)
                 .aria_label(label)
+                .tab_index(0)
+                .focus_visible(move |style| style.shadow(vec![ring]))
                 .child(
                     div()
                         .size(px(44.))
@@ -622,6 +636,8 @@ impl QuillApp {
             .cursor_pointer()
             .role(Role::Button)
             .aria_label(state.label())
+            .tab_index(0)
+            .focus_ring_visible(cx.theme())
             .on_click(cx.listener(move |this, _, _, cx| match state {
                 MuteState::Join => this.join_active_group_call(cx),
                 MuteState::Live | MuteState::Muted => this.toggle_group_call_self_mute(cx),

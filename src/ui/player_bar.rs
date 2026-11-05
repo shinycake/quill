@@ -25,6 +25,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use super::pressable::PressableDiv;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::media_session::{self, Command, NowPlaying};
@@ -463,6 +464,7 @@ impl QuillApp {
             .aria_label(tr(keys::Q_AV_GO_TO_MESSAGE))
             .tab_index(0)
             .cursor_pointer()
+            .focus_ring_visible(cx.theme())
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_playing(window, cx)))
             .child(
                 div()

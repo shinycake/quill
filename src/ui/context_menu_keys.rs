@@ -38,9 +38,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use std::cell::{Cell, RefCell};
 
-/// Width of the focus ring drawn inside an item's edge.
-const RING_WIDTH: f32 = 2.;
-
 /// Focus handles of the enabled items of the open menu. Handles are kept by
 /// claim position so they survive re-renders; `begin` runs at the top of
 /// every frame and each enabled item drawn after it claims the next slot,
@@ -243,13 +240,7 @@ impl ContextMenuItems {
 }
 
 fn focus_ring(cx: &App) -> BoxShadow {
-    BoxShadow {
-        color: cx.theme().ring,
-        offset: point(px(0.), px(0.)),
-        blur_radius: px(0.),
-        spread_radius: px(RING_WIDTH),
-        inset: true,
-    }
+    super::pressable::focus_ring(cx.theme())
 }
 
 /// Makes a hand-built menu row reachable by keyboard: it joins the open
