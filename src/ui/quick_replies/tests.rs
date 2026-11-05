@@ -215,7 +215,7 @@ fn adding_a_message_without_a_live_session_says_so(cx: &mut TestAppContext) {
     });
     assert_eq!(
         error(&app, vcx).as_deref(),
-        Some("Quick replies need a live session.")
+        Some("Quick replies need a connection to Telegram.")
     );
 }
 
