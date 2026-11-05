@@ -1,6 +1,6 @@
 //! The one look for a list or panel with nothing to show yet: a kit icon in
 //! a soft round tile (or a spinner while it loads), a title, a hint and an
-//! optional action. Telegram Desktop pairs a centered picture with one line
+//! optional action, composed from the kit's `Empty`. Telegram Desktop pairs a centered picture with one line
 //! and a button (`Dialogs::InnerWidget::refreshEmpty`: "You have no
 //! conversations yet." over New Message, "Edit folder" under an empty
 //! folder); Quill draws the picture with Lucide icons instead of emoji so it
@@ -8,9 +8,11 @@
 #![deny(clippy::indexing_slicing)]
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::empty::{
+    Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle,
+};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 /// Size of the round tile behind the icon.
@@ -82,69 +84,53 @@ impl RenderOnce for EmptyState {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
         let muted = theme.muted_foreground;
-        let picture = match self.picture {
-            Picture::Icon(icon) => div()
+        // The kit's icon frame, grown into a round tile; a spinner sits
+        // unframed in the same space while loading.
+        let media = match self.picture {
+            Picture::Icon(icon) => EmptyMedia::new()
+                .with_variant(EmptyMediaVariant::Icon)
                 .size(px(TILE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
                 .rounded_full()
                 .bg(theme.secondary)
-                .child(Icon::new(icon).size(px(ICON)).text_color(muted))
-                .into_any_element(),
-            Picture::Loading => div()
+                .child(Icon::new(icon).size(px(ICON)).text_color(muted)),
+            Picture::Loading => EmptyMedia::new()
                 .size(px(TILE))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(Spinner::new().large().color(muted))
-                .into_any_element(),
+                .child(Spinner::new().large().color(muted)),
         };
         let label = self
             .title
             .clone()
             .or_else(|| self.hints.first().cloned())
             .unwrap_or_default();
+        let mut header = EmptyHeader::new().max_w(px(300.)).media(media);
+        if let Some(title) = self.title {
+            header = header.title(EmptyTitle::new().text_base().font_semibold().child(title));
+        }
+        if !self.hints.is_empty() {
+            header = header.description(
+                EmptyDescription::new()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .children(self.hints.into_iter().map(|line| div().child(line))),
+            );
+        }
+        let mut empty = Empty::new()
+            .flex_1()
+            .w_full()
+            .border_0()
+            .px_6()
+            .py_10()
+            .header(header);
+        if let Some(action) = self.action {
+            empty = empty.content(EmptyContent::new().child(action));
+        }
         div()
             .id(self.id)
             .flex_1()
             .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .px_6()
-            .py_10()
             .role(Role::Status)
             .aria_label(label)
-            .child(div().pb_1().child(picture))
-            .when_some(self.title, |this, title| {
-                this.child(
-                    div()
-                        .max_w(px(300.))
-                        .text_center()
-                        .font_semibold()
-                        .text_color(theme.foreground)
-                        .child(title),
-                )
-            })
-            .when(!self.hints.is_empty(), |this| {
-                this.child(
-                    div()
-                        .max_w(px(300.))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .text_sm()
-                        .text_center()
-                        .text_color(muted)
-                        .children(self.hints.into_iter().map(|line| div().child(line))),
-                )
-            })
-            .when_some(self.action, |this, action| {
-                this.child(div().pt_2().child(action))
-            })
+            .child(empty)
     }
 }
