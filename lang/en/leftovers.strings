@@ -110,7 +110,6 @@
 "qll_leftovers_mark_option_correct" = "Mark option {number} as the correct answer";
 "qll_leftovers_mb" = "{cap} MB";
 "qll_leftovers_messages_selected" = "{n} messages selected";
-"qll_leftovers_missed" = "missed";
 "qll_leftovers_missed_calls_busy#one" = "Missed call from {names} — declined because another call was active.";
 "qll_leftovers_missed_calls_busy#other" = "Missed calls from {names} — declined because another call was active.";
 "qll_leftovers_muted" = "Muted";

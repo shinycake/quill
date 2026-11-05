@@ -247,7 +247,7 @@ pub fn call_entry_label(
 }
 
 /// mm:ss (or h:mm:ss) for call durations.
-pub(crate) fn format_duration(total_secs: i32) -> String {
+pub fn format_duration(total_secs: i32) -> String {
     let total_secs = total_secs.max(0) as i64;
     let (h, m, s) = (total_secs / 3600, (total_secs / 60) % 60, total_secs % 60);
     if h > 0 {

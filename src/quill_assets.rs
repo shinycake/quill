@@ -163,7 +163,9 @@ gpui_kit::assets::icon_assets!(
         Archive,
         SearchX,
         Music,
-        CircleDashed
+        CircleDashed,
+        ArrowDownLeft,
+        ArrowUpRight
     ]
 );
 

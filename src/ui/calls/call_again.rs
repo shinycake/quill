@@ -1,9 +1,13 @@
 //! Methods moved out of `calls.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::bidi_line::name_line;
+use crate::ui::chat_row::chat_avatar;
+use crate::ui::pressable::PressableDiv;
 use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
+use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -193,48 +197,91 @@ impl QuillApp {
                     ..
                 }
             );
+        // tdesktop's call row: userpic, name, an arrow for the direction
+        // (red when missed) before the date, and a phone or camera button
+        // that calls back (`Calls::BoxController::Row`).
+        let now = quill::local_time::civil_local(quill::local_time::now_unix());
+        let when = quill::local_time::civil_local(i64::from(entry.date));
+        let mut status = quill::chatlist_calls::call_status(&when, &now);
+        if let MessageContent::Call { duration, .. } = &entry.content
+            && *duration > 0
+        {
+            status = format!(
+                "{status} · {}",
+                quill::telegram::envelope::format_duration(*duration)
+            );
+        }
+        let (arrow, arrow_color) = if missed {
+            (IconName::ArrowDownLeft, Hsla::from(danger_soft()))
+        } else if entry.is_outgoing {
+            (IconName::ArrowUpRight, cx.theme().success)
+        } else {
+            (IconName::ArrowDownLeft, cx.theme().success)
+        };
+        let photo = self
+            .session()
+            .and_then(|s| s.chat_photo_path(entry.chat_id))
+            .and_then(|path| {
+                quill::local_path::sandboxed_display_path(path, &self.media_display_roots())
+            });
+        let chat_id = entry.chat_id;
         div()
             .id(("call-row", entry.id.0 as u64))
             .px_2()
-            .py_2()
+            .py_1p5()
             .rounded_md()
             .flex()
             .items_center()
-            .gap_2()
+            .gap_3()
+            .cursor_pointer()
+            .pressable(cx.theme())
+            .role(gpui_kit::Role::Button)
+            .aria_label(format!("{name}, {label}, {status}"))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.select_listed_chat(chat_id, window, cx);
+            }))
+            .child(chat_avatar(&name, photo.as_deref(), 40.))
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .min_w_0()
                     .flex_1()
-                    .child(div().font_medium().text_sm().child(name))
                     .child(
                         div()
+                            .font_medium()
+                            .text_sm()
+                            .overflow_hidden()
+                            .child(name_line(&name)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(label),
+                            .child(Icon::new(arrow).size(px(12.)).text_color(arrow_color))
+                            .child(div().truncate().child(status)),
                     ),
             )
-            .child(if missed {
-                div()
-                    .text_xs()
-                    .font_medium()
-                    .text_color(danger_soft())
-                    .child(tr(keys::Q_LEFTOVERS_MISSED))
-                    .into_any_element()
-            } else {
-                div().into_any_element()
-            })
-            .child(if let Some((user_id, _)) = peer {
-                Button::new(("call-again", entry.id.0 as u64))
-                    .label(tr(keys::Q_OPS_CALL_AGAIN))
-                    .ghost()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.call_again(user_id, is_video, cx);
-                    }))
-                    .into_any_element()
-            } else {
-                div().into_any_element()
+            .when_some(peer, |this, (user_id, _)| {
+                let icon = if is_video {
+                    IconName::Video
+                } else {
+                    IconName::Phone
+                };
+                this.child(
+                    Button::new(("call-again", entry.id.0 as u64))
+                        .icon(icon)
+                        .ghost()
+                        .tooltip(tr(keys::Q_OPS_CALL_AGAIN))
+                        .accessibility_label(tr(keys::Q_OPS_CALL_AGAIN))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.call_again(user_id, is_video, cx);
+                        })),
+                )
             })
     }
 }
