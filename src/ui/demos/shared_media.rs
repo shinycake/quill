@@ -266,6 +266,26 @@ fn fill_tab(
     }
 }
 
+/// Answer `tab`'s first page with an error, as TDLib does when the
+/// connection drops mid-request.
+fn fail_tab(
+    session: &mut Session,
+    sink: &std::sync::Arc<dyn DiagnosticSink>,
+    seq: &AtomicU64,
+    tab: SharedMediaTab,
+) {
+    let generation = session.media.shared_media.begin_fetch(tab);
+    let extra = session.request(
+        RequestPurpose::GetSharedMedia { tab, generation },
+        Some(ChatId(CHAT)),
+    );
+    let answer = json!({ "@type": "error", "@extra": extra.0, "code": 500,
+        "message": "Request timeout" });
+    if let Some(owned) = copy_and_parse(&answer.to_string(), seq, sink) {
+        session.apply(owned);
+    }
+}
+
 impl QuillApp {
     fn demo_ready_shared_media(
         &mut self,
@@ -287,7 +307,16 @@ impl QuillApp {
             }
             session.open_chat(ChatId(CHAT));
             session.media.shared_media.open_for_tab(ChatId(CHAT), tab);
-            fill_tab(session, &sink, &seq, tab, tab_messages(tab));
+            // QUILL_DEMO_SHARED_MEDIA_STATE=loading leaves the first page on
+            // its way; =failed answers it with an error; =empty finds nothing.
+            match std::env::var("QUILL_DEMO_SHARED_MEDIA_STATE").as_deref() {
+                Ok("loading") => {
+                    let _ = session.media.shared_media.begin_fetch(tab);
+                }
+                Ok("failed") => fail_tab(session, &sink, &seq, tab),
+                Ok("empty") => fill_tab(session, &sink, &seq, tab, Vec::new()),
+                _ => fill_tab(session, &sink, &seq, tab, tab_messages(tab)),
+            }
             // QUILL_DEMO_SHARED_MEDIA_LOADING_MORE=1 shows the next page on its way.
             if std::env::var_os("QUILL_DEMO_SHARED_MEDIA_LOADING_MORE").is_some() {
                 let _ = session.media.shared_media.begin_fetch_more(tab);

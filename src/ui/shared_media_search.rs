@@ -5,7 +5,9 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::empty_state::EmptyState;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -64,26 +66,20 @@ impl QuillApp {
     pub(super) fn shared_media_search_empty_state(
         &self,
         tab: SharedMediaTab,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
+        let mut state = EmptyState::new(
+            ("shared-media-search-empty", tab.index() as u64),
+            IconName::SearchX,
+        );
+        if let Some(key) = search_empty_key(tab) {
+            state = state.hint(tr(key));
+        }
         div()
-            .id(("shared-media-search-empty", tab.index() as u64))
             .debug_selector(|| "shared-media-search-empty".into())
             .flex_1()
             .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .px_6()
-            .py_10()
-            .child(div().text_3xl().child(tab.glyph()))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .children(search_empty_key(tab).map(tr)),
-            )
+            .child(state)
             .into_any_element()
     }
 

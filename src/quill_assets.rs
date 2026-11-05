@@ -159,7 +159,11 @@ gpui_kit::assets::icon_assets!(
         Sparkles,
         SpellCheck,
         HatGlasses,
-        RotateCcwClock
+        RotateCcwClock,
+        Archive,
+        SearchX,
+        Music,
+        CircleDashed
     ]
 );
 

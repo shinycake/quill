@@ -5,8 +5,8 @@ use super::app::QuillApp;
 use super::app::{ChatListFilter, PaneMode};
 use super::chat_row::PinnedChatDrag;
 use super::chat_row::{
-    ChatListItem, chat_list_caption, chat_list_empty_state, chat_list_skeleton_row,
-    chat_row_has_tags, chat_row_height, chat_row_height_tagged, chat_row_tags, static_chat_row,
+    ChatListItem, chat_list_caption, chat_list_skeleton_row, chat_row_has_tags, chat_row_height,
+    chat_row_height_tagged, chat_row_tags, static_chat_row,
 };
 use super::notifications::notification_settings_json;
 use super::*;

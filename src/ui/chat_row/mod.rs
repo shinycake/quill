@@ -117,40 +117,6 @@ pub(super) fn chat_list_skeleton_row(index: usize) -> impl IntoElement {
         )
 }
 
-/// kit Phase 9: centered empty state for the chat list (no chats / empty
-/// folder / no unread), composed from kit `Skeleton`-free primitives with
-/// theme tokens — glyph, title, hint.
-pub(super) fn chat_list_empty_state(
-    glyph: &'static str,
-    title: &'static str,
-    hint: &'static str,
-    cx: &mut Context<QuillApp>,
-) -> impl IntoElement {
-    div()
-        .id("chat-list-empty")
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .px_6()
-        .py_10()
-        .child(div().text_3xl().child(glyph))
-        .child(
-            div()
-                .font_semibold()
-                .text_color(cx.theme().foreground)
-                .child(title),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_center()
-                .text_color(cx.theme().muted_foreground)
-                .child(hint),
-        )
-}
-
 /// Section caption above the chat list, shown only where it adds
 /// information the list itself doesn't (search mode, connecting).
 pub(super) fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> Option<SharedString> {

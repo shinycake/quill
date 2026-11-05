@@ -211,12 +211,11 @@ impl QuillApp {
                         .size(px(TILE))
                         .object_fit(ObjectFit::Cover),
                     ),
-                    None => base
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_xl()
-                        .child(tab.glyph()),
+                    None => base.flex().items_center().justify_center().child(
+                        Icon::new(super::shared_media::tab_icon(tab))
+                            .size(px(22.))
+                            .text_color(cx.theme().muted_foreground),
+                    ),
                 }
             }
             SharedMediaVisual::Gift(gift) => {

@@ -42,6 +42,7 @@
 "lng_filters_by_link_title" = "Add Folder";
 "lng_filters_chats_count#one" = "{count} chat";
 "lng_filters_chats_count#other" = "{count} chats";
+"lng_filters_context_edit" = "Edit folder";
 "lng_filters_create_button" = "Create";
 "lng_filters_delete_sure" = "Are you sure you want to delete this folder? This will also deactivate all the invite links created to share this folder.";
 "lng_filters_edit" = "Edit Folder";
@@ -90,6 +91,7 @@
 "lng_from_you" = "You";
 "lng_menu_calls" = "Calls";
 "lng_menu_contacts" = "Contacts";
+"lng_no_conversations_button" = "New Message";
 "lng_recent_chats" = "Chats";
 "lng_saved_messages" = "Saved Messages";
 "lng_settings_archive_title" = "Archive Settings";

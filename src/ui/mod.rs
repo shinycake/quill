@@ -73,6 +73,8 @@ mod display_events;
 mod earn;
 mod earn_state;
 mod editor_art;
+mod empty_state;
+mod empty_state_demo;
 mod esc_stack;
 mod folders_state;
 mod force_reply;
