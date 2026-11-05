@@ -259,6 +259,7 @@ mod chat_swipe_ui;
 mod chat_wide_ui;
 mod chatlist_global;
 mod chatlist_style;
+mod checklist_box;
 mod checklists;
 mod collectible_info_ui;
 mod command_shortcuts;

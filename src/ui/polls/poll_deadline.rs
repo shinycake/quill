@@ -104,11 +104,6 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .p_3()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().primary)
-                .bg(cx.theme().background)
                 .child(
                     div()
                         .text_sm()

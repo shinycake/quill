@@ -509,6 +509,21 @@ where
     }
 }
 
+/// Focus `input` once the dialog has mounted. A kit dialog takes focus when
+/// it opens, so a field focused at open time loses it; the box keeps the
+/// field to focus until its first render and hands it here.
+pub(crate) fn focus_after_mount(
+    input: Option<Entity<gpui_kit::component::input::TextareaState>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Some(input) = input {
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |input, cx| input.focus(window, cx));
+        });
+    }
+}
+
 /// Plain GPUI text does not become an accessible name. Use this for every
 /// dialog title so its visible heading is also available to screen readers.
 pub(crate) fn dialog_title(title: impl Into<SharedString>) -> impl IntoElement {

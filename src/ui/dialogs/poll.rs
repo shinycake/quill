@@ -127,6 +127,9 @@ pub struct PollDialog {
     pub(crate) hide_results_until_closes: bool,
     /// B15: "Restrict to Subscribers" (`members_only`, channels only).
     pub(crate) members_only: bool,
+    /// Focus the question once the dialog has mounted: the kit dialog
+    /// takes focus when it opens, so focusing at open time is lost.
+    pub(crate) focus_question: bool,
     /// "Limit Duration" is on: the poll closes at `close`.
     pub(crate) limit_duration: bool,
     pub(crate) close: PollClose,
@@ -146,6 +149,8 @@ pub struct PollAddOption {
     pub(crate) input: Entity<TextareaState>,
     pub(crate) attach: OptionAttach,
     pub(crate) error: Option<&'static str>,
+    /// Focus the field once the dialog has mounted.
+    pub(crate) focus_on_mount: bool,
 }
 
 impl PollDialog {
@@ -206,6 +211,7 @@ impl PollDialog {
             allow_adding_options: !in_channel && lock != QuizLock::Quiz,
             hide_results_until_closes: false,
             members_only: false,
+            focus_question: true,
             limit_duration: false,
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
             deadline_box: None,
