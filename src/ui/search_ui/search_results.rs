@@ -116,7 +116,10 @@ impl QuillApp {
             _ if tab == SearchTab::Posts && query.trim().is_empty() => tab.idle_hint().to_string(),
             SearchStatus::Idle if tab != SearchTab::Chats => tab.idle_hint().to_string(),
             SearchStatus::Idle if recents && has_results => String::new(),
-            SearchStatus::Idle => tab.idle_hint().to_string(),
+            SearchStatus::Idle if query.trim().is_empty() => tab.idle_hint().to_string(),
+            // Typed, waiting for the debounce: the search is on its way.
+            SearchStatus::Idle if has_results => String::new(),
+            SearchStatus::Idle => tr_with(keys::Q_CHAT_SEARCHING_3, &[("query", &query.to_string())]),
             SearchStatus::Searching if has_results => String::new(),
             SearchStatus::Searching if recents => tr(keys::Q_CHAT_LOADING_RECENT_CHATS).to_string(),
             SearchStatus::Searching if browsing_media => tr(keys::Q_CHAT_LOADING_2).to_string(),

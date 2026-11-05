@@ -54,8 +54,12 @@ impl QuillApp {
             media.label().to_lowercase()
         };
         let caption = match status {
-            SearchStatus::Idle => tr(keys::Q_CHAT_TYPE_TO_SEARCH_THIS_CHAT).to_string(),
-            SearchStatus::Searching => {
+            SearchStatus::Idle if query.is_empty() => {
+                tr(keys::Q_CHAT_TYPE_TO_SEARCH_THIS_CHAT).to_string()
+            }
+            // Typed, waiting for the debounce: the search is on its way, so
+            // say so instead of asking for typing that already happened.
+            SearchStatus::Idle | SearchStatus::Searching => {
                 tr_with(keys::Q_CHAT_SEARCHING, &[("subject", &subject.to_string())])
             }
             SearchStatus::Ready => {
