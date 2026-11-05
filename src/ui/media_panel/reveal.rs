@@ -39,7 +39,10 @@ pub(super) fn opening(shown: f32) -> (f32, f32, f32) {
 impl QuillApp {
     /// The panel over the composer this frame: the open one, or the one
     /// fading out after it closed. `None` once it is gone.
-    pub(in crate::ui) fn media_panel_reveal(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::ui) fn media_panel_reveal(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let state = self
             .media_panel_over_composer()
             .then_some(self.pickers.media_panel.tab);

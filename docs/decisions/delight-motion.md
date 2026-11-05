@@ -65,9 +65,9 @@ folds the column gap into the slide so siblings do not jump.
   swatches, the settings profile row.
 
 Reduced motion (`cx.reduce_motion()`, the OS setting) and interface
-animations off (power saving, `Glide::go`) snap. Under `cfg(test)` a
-presence snaps unless the test set a clock (`set_test_clock`), as
-`panel_reveal` does, so the UI tests stay deterministic.
+animations off (power saving, `Glide::go`) snap. Under `cfg(test)` every
+presence snaps, so the UI tests draw settled surfaces and stay
+deterministic; `Presence` itself is tested with injected instants.
 
 Not done: the chat-list unread badge. It already scales and fades in
 (`quill::row_fx`, 150 ms); the exit was left as a snap on purpose
@@ -76,19 +76,28 @@ count after the state dropped it, for hundreds of rows.
 
 ## Verified
 
-Screenshot demos with `QUILL_MOTION_HOLD_MS` to freeze every motion at a
-mid point, and settled frames, light and dark:
+Screenshot demos with `QUILL_MOTION_HOLD_MS=60` to freeze every motion at
+60 ms, and settled frames, light and dark (contact sheets in the PR):
 
-- `ready-status-toast-info`: the toast at 60 ms (faint, 2 px low) and
+- `ready-status-toast-info`: the toast at 60 ms (faint, lower) and
   settled.
-- `ready-composer-bars`: the reply bar at 60 ms of its slide (half open,
-  content faint) and settled; after a click on its close button at 60 ms
-  of the exit.
-- `ready-pin`: the pinned bar at 60 ms and settled.
-- `ready-stickers` / `ready-chats-composer` with a click on the emoji
-  button: the panel at 60 ms (grown from the corner, faint) and settled.
-- `ready-unread-landing`: the jump button in the corner, the corner
-  stack above it.
+- `ready-chats-composer`, right-click a message and pick Reply: the reply
+  bar at 60 ms of its slide (40 % open, content faint) and settled;
+  `ready-composer-bars` with a click on the bar's close button: at 60 ms
+  of the exit (half shut).
+- `ready-pin`: the bar settled, and at 60 ms of its exit after Unpin
+  (half shut, its lines still drawn with the list already empty).
+- `ready-chats-composer` with a click on the emoji button: the panel at
+  60 ms (grown from its corner, header still clipped), settled, and at
+  60 ms of its fade after a second click.
+- `ready-unread-landing`: the jump button in the corner under the "@"
+  stack's place, off the last message.
+
+A surface the demo sets before the first frame snaps (first sight in a
+chat): the pinned bar's entrance and the corner buttons' motion were not
+captured, only their logic unit-tested. The pinned text swap needs two
+pins and a click; no demo has two, so it is unit-tested through
+`Presence::follow` only.
 
 Not verified: a live TDLib session (the demos inject state), Linux and
 Windows (no platform code in this change), screen-reader focus order

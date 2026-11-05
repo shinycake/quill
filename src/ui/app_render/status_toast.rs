@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::ui::status_note::{NoteKind, StatusNote};
-use gpui_kit::TestSupportExt;
 use crate::ui::surface_reveal;
+use gpui_kit::TestSupportExt;
 use quill::ids::ChatId;
 
 /// The pill's widest line, so a long failure wraps instead of stretching.

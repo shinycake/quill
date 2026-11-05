@@ -10,6 +10,7 @@
 
 use super::QuillApp;
 use super::chat_theme::{set_high_contrast, set_theme_mode};
+use super::pressable::PressableDiv;
 use super::synthetic::BubbleLook;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
@@ -19,7 +20,6 @@ use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeMode};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use super::pressable::PressableDiv;
 use quill::ids::AccountKey;
 use quill::lang::{Key, keys, tr};
 use quill::settings::{

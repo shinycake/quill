@@ -3,13 +3,13 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
+use crate::ui::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use crate::ui::pressable::PressableDiv;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
 

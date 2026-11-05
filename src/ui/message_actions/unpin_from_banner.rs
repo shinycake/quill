@@ -24,15 +24,9 @@ fn pinned_bar_lines_block(title: String, preview: String) -> Div {
                 .text_color(accent())
                 .child(title),
         )
-        .child(
-            div()
-                .text_sm()
-                .truncate()
-                .text_color(text_primary())
-                .child(crate::ui::bidi_line::one_line_plain(
-                    crate::ui::search_ui::one_line_preview(&preview),
-                )),
-        )
+        .child(div().text_sm().truncate().text_color(text_primary()).child(
+            crate::ui::bidi_line::one_line_plain(crate::ui::search_ui::one_line_preview(&preview)),
+        ))
 }
 
 impl QuillApp {
@@ -154,7 +148,9 @@ impl QuillApp {
         let shown = &drawn.value;
         let list = session.pinned_list(chat_id);
         // While the bar slides shut after an unpin the list may be empty.
-        let newest = list.first().map_or(MessageId(shown.message), |item| item.id);
+        let newest = list
+            .first()
+            .map_or(MessageId(shown.message), |item| item.id);
         let count = shown.count;
         let index = shown.index;
         let message_id = MessageId(shown.message);

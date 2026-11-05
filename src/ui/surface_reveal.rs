@@ -201,8 +201,9 @@ pub(crate) struct Measured {
 /// across a call into GPUI.
 pub(crate) struct Surfaces {
     /// The status toast of each window (`None`: the main window).
-    pub(crate) toasts:
-        std::cell::RefCell<std::collections::HashMap<Option<i64>, Presence<super::status_note::StatusNote>>>,
+    pub(crate) toasts: std::cell::RefCell<
+        std::collections::HashMap<Option<i64>, Presence<super::status_note::StatusNote>>,
+    >,
     /// How far in the toast drawn by the window rendering now is.
     pub(crate) toast_shown: Cell<f32>,
     pub(crate) edit_bar: std::cell::RefCell<Presence<quill::composer::ComposerEdit>>,
@@ -249,34 +250,18 @@ impl Surfaces {
     }
 }
 
-/// The frame's time: the test clock where a test set one, else now.
+/// The frame's time.
 pub(crate) fn now() -> Instant {
-    #[cfg(test)]
-    if let Some(now) = TEST_CLOCK.with(Cell::get) {
-        return now;
-    }
     Instant::now()
 }
 
-/// Whether surfaces may move: not with motion reduced, and in a test only
-/// on its clock (the wall clock would make it flaky).
+/// Whether surfaces may move: not with motion reduced, and never in a
+/// test, where the wall clock would make the drawn frame flaky.
 pub(crate) fn animate(cx: &App) -> bool {
-    #[cfg(test)]
-    if TEST_CLOCK.with(Cell::get).is_none() {
+    if cfg!(test) {
         return false;
     }
     !cx.reduce_motion() && !quill::power_saving::reduce_motion_now()
-}
-
-#[cfg(test)]
-thread_local! {
-    static TEST_CLOCK: Cell<Option<Instant>> = const { Cell::new(None) };
-}
-
-/// Tests on this thread draw surfaces at `now`, and they move.
-#[cfg(test)]
-pub(crate) fn set_test_clock(now: Option<Instant>) {
-    TEST_CLOCK.with(|clock| clock.set(now));
 }
 
 /// The edge a sliding surface is attached to: its content stays put

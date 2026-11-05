@@ -46,13 +46,18 @@ impl QuillApp {
 
     /// The edit bar, sliding open over the composer when an edit starts
     /// and shut when it ends.
-    pub(in crate::ui) fn composer_edit_bar_slot(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(in crate::ui) fn composer_edit_bar_slot(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let drawn = self.follow_bar(
             &self.frame.surfaces.edit_bar,
             self.composer_ui.pending_edit.clone(),
             cx,
         )?;
-        let content = self.composer_edit_banner(&drawn.value, cx).into_any_element();
+        let content = self
+            .composer_edit_banner(&drawn.value, cx)
+            .into_any_element();
         Some(slide_open(
             content,
             drawn.shown,
@@ -73,7 +78,9 @@ impl QuillApp {
             self.composer_ui.reply().cloned(),
             cx,
         )?;
-        let content = self.composer_reply_banner(&drawn.value, cx).into_any_element();
+        let content = self
+            .composer_reply_banner(&drawn.value, cx)
+            .into_any_element();
         Some(slide_open(
             content,
             drawn.shown,
