@@ -126,7 +126,7 @@ impl QuillApp {
                             .min_w_0()
                             .text_sm()
                             .truncate()
-                            .child(super::bidi_line::one_line_plain(title.clone())),
+                            .child(super::bidi_line::name_line(title.clone())),
                     )
                     .child(
                         Button::new((

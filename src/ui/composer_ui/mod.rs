@@ -342,7 +342,7 @@ fn composer_context_bar_rich(
                         .font_semibold()
                         .text_color(color)
                         .truncate()
-                        .child(super::bidi_line::one_line_plain(title.into())),
+                        .child(super::bidi_line::name_line(title.into())),
                 )
                 .child(
                     div()
@@ -854,7 +854,7 @@ impl QuillApp {
                             .text_sm()
                             .font_medium()
                             .truncate()
-                            .child(super::bidi_line::one_line_plain(name)),
+                            .child(super::bidi_line::name_line(name)),
                     )
                     .when(!username.is_empty(), |this| {
                         this.child(

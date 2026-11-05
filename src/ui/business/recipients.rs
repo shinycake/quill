@@ -368,7 +368,7 @@ impl QuillApp {
                     .min_w_0()
                     .text_sm()
                     .truncate()
-                    .child(crate::ui::bidi_line::one_line_plain(title.clone())),
+                    .child(crate::ui::bidi_line::name_line(title.clone())),
             )
             .child(
                 Button::new(SharedString::from(id))

@@ -334,7 +334,7 @@ impl QuillApp {
                                 .text_sm()
                                 .text_color(text_menu())
                                 .truncate()
-                                .child(super::bidi_line::one_line_plain(title)),
+                                .child(super::bidi_line::name_line(title)),
                         )
                         .child(div().text_xs().text_color(text_muted()).child(format!(
                             "{detail} · {}",
@@ -551,7 +551,7 @@ impl QuillApp {
                                 div()
                                     .text_sm()
                                     .truncate()
-                                    .child(super::bidi_line::one_line_plain(name)),
+                                    .child(super::bidi_line::name_line(name)),
                             )
                             .child(
                                 div()

@@ -108,7 +108,7 @@ pub(super) fn search_result_row(
                                 .min_w_0()
                                 .truncate()
                                 .font_medium()
-                                .child(super::bidi_line::one_line_plain(title)),
+                                .child(super::bidi_line::name_line(title)),
                         )
                         .when_some(stamp, |this, stamp| {
                             this.child(
@@ -907,7 +907,7 @@ impl QuillApp {
                             .min_w_0()
                             .truncate()
                             .text_sm()
-                            .child(super::bidi_line::one_line_plain(name)),
+                            .child(super::bidi_line::name_line(name)),
                     ),
             );
         }

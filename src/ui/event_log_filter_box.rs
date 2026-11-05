@@ -247,7 +247,7 @@ impl QuillApp {
                                 photo.as_deref(),
                                 px(ADMIN_AVATAR),
                             ))
-                            .child(super::bidi_line::one_line_plain(name)),
+                            .child(super::bidi_line::name_line(name)),
                     )
                     .on_click(cx.listener(move |this, &on, _, cx| {
                         this.edit_event_log_filter(cx, |draft, _| draft.toggle_admin(user_id, on));

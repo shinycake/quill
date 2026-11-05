@@ -470,7 +470,7 @@ impl QuillApp {
                     .font_medium()
                     .truncate()
                     .text_color(text_primary())
-                    .child(super::bidi_line::one_line_plain(meta.title)),
+                    .child(super::bidi_line::name_line(meta.title)),
             )
             .when(!meta.subtitle.is_empty(), |this| {
                 this.child(

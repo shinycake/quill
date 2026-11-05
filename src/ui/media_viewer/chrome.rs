@@ -198,7 +198,7 @@ impl QuillApp {
                         div()
                             .font_semibold()
                             .truncate()
-                            .child(crate::ui::bidi_line::one_line_plain(name)),
+                            .child(crate::ui::bidi_line::name_line(name)),
                     )
                     .child(div().text_xs().opacity(0.7).truncate().child({
                         // `lng_mediaview_ttl_in` follows the date

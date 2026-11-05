@@ -23,7 +23,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, trn};
+use quill::lang::{keys, tr, tr_with, trn};
 use quill::schedule::ScheduleKind;
 use quill::share_box::ShareSend;
 use std::path::PathBuf;
@@ -45,9 +45,9 @@ const MIN_ROWS: f32 = 3.;
 const CHROME_HEIGHT: f32 = 330.;
 const CHECK_POP: Duration = Duration::from_millis(160);
 
-/// One chat the box offers, already resolved for drawing.
-struct DestRow {
-    id: ChatId,
+/// One chat a chooser offers, already resolved for drawing.
+pub(super) struct DestRow {
+    pub(super) id: ChatId,
     title: String,
     saved: bool,
     photo: Option<PathBuf>,
@@ -55,9 +55,18 @@ struct DestRow {
     checked: bool,
 }
 
+/// What a click on a chooser row does.
+#[derive(Clone, Copy)]
+pub(super) enum RowPick {
+    /// Tick or untick the chat (forward box).
+    Toggle,
+    /// Take the reply to this chat ("Reply in Another Chat").
+    Reply,
+}
+
 /// The list height for a window `viewport` tall: up to [`VISIBLE_ROWS`],
 /// never fewer than [`MIN_ROWS`].
-fn list_height(viewport: Pixels) -> Pixels {
+pub(super) fn list_height(viewport: Pixels) -> Pixels {
     let room = (f32::from(viewport) - CHROME_HEIGHT).max(MIN_ROWS * ROW_HEIGHT);
     px(room.min(VISIBLE_ROWS * ROW_HEIGHT))
 }
@@ -107,7 +116,12 @@ fn userpic_with_check(row: &DestRow, cx: &App) -> Div {
         })
 }
 
-fn forward_dest_row(row: DestRow, cx: &mut Context<QuillApp>) -> impl IntoElement {
+/// One chat of a chooser: userpic, name and status line.
+pub(super) fn chooser_row(
+    row: DestRow,
+    pick: RowPick,
+    cx: &mut Context<QuillApp>,
+) -> impl IntoElement {
     let theme = cx.theme();
     let (muted, primary) = (theme.muted_foreground, theme.primary);
     let selected_fill = theme.primary.opacity(0.10);
@@ -117,14 +131,17 @@ fn forward_dest_row(row: DestRow, cx: &mut Context<QuillApp>) -> impl IntoElemen
     } else {
         row.title.clone()
     };
-    let label = format!(
-        "{shown_title}, {}",
-        if row.checked {
-            tr(keys::Q_OPS_SELECTED)
-        } else {
-            tr(keys::Q_OPS_NOT_SELECTED)
-        }
-    );
+    let label = match pick {
+        RowPick::Toggle => format!(
+            "{shown_title}, {}",
+            if row.checked {
+                tr(keys::Q_OPS_SELECTED)
+            } else {
+                tr(keys::Q_OPS_NOT_SELECTED)
+            }
+        ),
+        RowPick::Reply => tr_with(keys::FORUM_REPLY_IN, &[("topic", &shown_title)]),
+    };
     let pic = userpic_with_check(&row, cx);
     // Name and status sit in rows of their own and keep their natural
     // width, so a right-to-left name starts next to the userpic instead of
@@ -149,7 +166,13 @@ fn forward_dest_row(row: DestRow, cx: &mut Context<QuillApp>) -> impl IntoElemen
         )
     });
     div()
-        .id(("forward-dest", id.0 as u64))
+        .id((
+            match pick {
+                RowPick::Toggle => "forward-dest",
+                RowPick::Reply => "reply-dest",
+            },
+            id.0 as u64,
+        ))
         .flex()
         .flex_none()
         .items_center()
@@ -163,8 +186,12 @@ fn forward_dest_row(row: DestRow, cx: &mut Context<QuillApp>) -> impl IntoElemen
         .tab_index(0)
         .when(row.checked, |this| this.bg(selected_fill))
         .pressable(cx.theme())
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.toggle_share_destination(id, cx);
+        .on_click(cx.listener(move |this, _, window, cx| match pick {
+            RowPick::Toggle => this.toggle_share_destination(id, cx),
+            RowPick::Reply => {
+                this.choose_reply_chat(id, window, cx);
+                this.close_kit_dialog_if_done(DialogKind::ReplyElsewhere, window, cx);
+            }
         }))
         .child(pic)
         .child(
@@ -180,8 +207,34 @@ fn forward_dest_row(row: DestRow, cx: &mut Context<QuillApp>) -> impl IntoElemen
 }
 
 impl QuillApp {
-    /// The chats the box lists for the typed query, ready to draw.
-    fn forward_box_rows(&self, query: &str) -> Vec<DestRow> {
+    /// The chooser's search field with its magnifier.
+    pub(super) fn chooser_search(&self, label: &'static str, cx: &App) -> Div {
+        let muted = cx.theme().muted_foreground;
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .child(
+                Textarea::new(&self.share.search_input)
+                    .aria_label(label)
+                    .w_full()
+                    .pl(px(30.))
+                    .h(px(36.)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(10.))
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .child(Icon::new(IconName::Search).size(px(14.)).text_color(muted)),
+            )
+    }
+
+    /// The chats a chooser lists for the typed query, ready to draw.
+    pub(super) fn chooser_rows(&self, query: &str) -> Vec<DestRow> {
         let Some(session) = self.session() else {
             return Vec::new();
         };
@@ -215,32 +268,12 @@ impl QuillApp {
             return self.schedule_popup(cx);
         }
         let query = self.share.search_input.read(cx).value().to_string();
-        let rows = self.forward_box_rows(&query);
+        let rows = self.chooser_rows(&query);
         let searching = self
             .session()
             .is_some_and(|s| s.messages.share_search.is_searching());
         let muted = cx.theme().muted_foreground;
-        let search = div()
-            .relative()
-            .flex()
-            .items_center()
-            .child(
-                Textarea::new(&self.share.search_input)
-                    .aria_label(tr(keys::Q_OPS_SEARCH_FORWARDING_DESTINATIONS))
-                    .w_full()
-                    .pl(px(30.))
-                    .h(px(36.)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(10.))
-                    .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .child(Icon::new(IconName::Search).size(px(14.)).text_color(muted)),
-            );
+        let search = self.chooser_search(tr(keys::Q_OPS_SEARCH_FORWARDING_DESTINATIONS), cx);
         let mut list = div()
             .id("forward-dest-list")
             .flex()
@@ -264,7 +297,7 @@ impl QuillApp {
             );
         } else {
             for row in rows {
-                list = list.child(forward_dest_row(row, cx));
+                list = list.child(chooser_row(row, RowPick::Toggle, cx));
             }
         }
         div()

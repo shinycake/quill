@@ -444,7 +444,7 @@ impl QuillApp {
                     .text_color(chrome::fg())
                     .min_w_0()
                     .truncate()
-                    .child(super::bidi_line::one_line_plain(name.clone())),
+                    .child(super::bidi_line::name_line(name.clone())),
             )
             .children(counter.map(|counter| {
                 div()

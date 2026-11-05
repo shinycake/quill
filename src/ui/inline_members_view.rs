@@ -304,7 +304,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .truncate()
-                            .child(super::bidi_line::one_line_plain(row.name.clone())),
+                            .child(super::bidi_line::name_line(row.name.clone())),
                     )
                     .when(!status_text.is_empty(), |this| {
                         this.child(

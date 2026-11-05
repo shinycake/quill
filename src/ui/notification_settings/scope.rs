@@ -779,7 +779,7 @@ impl QuillApp {
                             .text_sm()
                             .min_w_0()
                             .truncate()
-                            .child(crate::ui::bidi_line::one_line_plain(title)),
+                            .child(crate::ui::bidi_line::name_line(title)),
                     )
                     .child(
                         Button::new(format!("exception-reset-{id}"))
