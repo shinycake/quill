@@ -160,8 +160,7 @@ impl QuillApp {
                         .relative()
                         // The emoji / sticker / GIF popover floats above the
                         // composer, anchored to its left edge.
-                        .when(self.media_panel_over_composer(), |this| {
-                            let panel = self.media_panel(cx);
+                        .when_some(self.media_panel_reveal(cx), |this, panel| {
                             // Over the history: animations under it are
                             // drawn by the conversation (`anim_layer`).
                             this.child(
@@ -170,7 +169,7 @@ impl QuillApp {
                                     .left(px(8.))
                                     .bottom(relative(1.))
                                     .pb_1()
-                                    .child(super::anim_layer::occluder(panel)),
+                                    .child(panel),
                             )
                         })
                         // tdesktop shows the recording video message as a
@@ -219,9 +218,7 @@ impl QuillApp {
                                 })
                             },
                         )
-                        .when(self.forward_bar_here(), |this| {
-                            this.child(self.forward_bar(cx))
-                        })
+                        .children(self.forward_bar_slot(cx))
                         .when(self.composer_ui.send_as_open, |this| {
                             this.child(self.send_as_panel(cx))
                         })
@@ -244,12 +241,8 @@ impl QuillApp {
                                 && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
-                        .when_some(self.composer_ui.pending_edit.clone(), |this, edit| {
-                            this.child(self.composer_edit_banner(&edit, cx))
-                        })
-                        .when_some(self.composer_ui.reply().cloned(), |this, reply| {
-                            this.child(self.composer_reply_banner(&reply, cx))
-                        })
+                        .children(self.composer_edit_bar_slot(cx))
+                        .children(self.composer_reply_bar_slot(cx))
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
                         .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
                         // Phase 4.2: poll creation dialog above the composer.

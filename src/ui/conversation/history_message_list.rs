@@ -324,6 +324,8 @@ impl QuillApp {
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
             chat.as_ref().map_or(0, |c| c.unread_poll_vote_count),
+            unread_count,
+            has_newer,
             cx,
         );
         // kit Phase 3: only visible rows render. Row 0 becoming visible
@@ -506,8 +508,19 @@ impl QuillApp {
                     }
                 })
                 // What animates under the jump button, while it shows, is
-                // drawn by the conversation.
-                .wrap_jump_button(|button| super::anim_layer::occluder(button).into_any_element())
+                // drawn by the conversation. The button sits at the
+                // bottom-right corner, where tdesktop puts it
+                // (`historyToDownPosition`), under the "@" / heart stack,
+                // not over the middle of the last message.
+                .wrap_jump_button(|button| {
+                    div()
+                        .w_full()
+                        .flex()
+                        .justify_end()
+                        .pr_4()
+                        .child(super::anim_layer::occluder(button))
+                        .into_any_element()
+                })
                 .size_full()
                 .min_h_0(),
             ))

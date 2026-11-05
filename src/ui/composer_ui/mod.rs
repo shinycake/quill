@@ -366,6 +366,12 @@ fn composer_context_bar_rich(
             let (kind, run) = (clicks.kind, clicks.run);
             let on_right = run.clone();
             this.cursor_pointer()
+                .role(Role::Button)
+                .tab_index(0)
+                .focus_visible({
+                    let ring = super::pressable::focus_ring(cx.theme());
+                    move |style| style.shadow(vec![ring])
+                })
                 .on_click(move |event, window, cx| {
                     let click = if event.modifiers().secondary(cx) {
                         BarClick::LeftModified
@@ -871,6 +877,7 @@ impl QuillApp {
     }
 }
 
+mod bar_slide;
 mod command_menu_view;
 mod send_sticker_pick;
 mod text_limit;

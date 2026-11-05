@@ -18,6 +18,7 @@ use super::app::QuillApp;
 use super::message_media::{AudioScrubber, ScrubberFace};
 use super::playback::PlaybackKind;
 use super::playback_state::SeekSite;
+use super::pressable::PressableDiv;
 use super::*;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -463,6 +464,7 @@ impl QuillApp {
             .aria_label(tr(keys::Q_AV_GO_TO_MESSAGE))
             .tab_index(0)
             .cursor_pointer()
+            .focus_ring_visible(cx.theme())
             .on_click(cx.listener(|this, _, window, cx| this.jump_to_playing(window, cx)))
             .child(
                 div()

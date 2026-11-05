@@ -3,65 +3,117 @@
 //! buttons stacked above the scroll-to-bottom arrow, each with an unread
 //! count badge. A click jumps to the oldest unread mention / reaction;
 //! right-click offers "Mark all as read". The buttons show whenever the
-//! chat has unread markers (they do not wait for a scroll), without a
-//! fade so nothing keeps the window redrawing.
+//! chat has unread markers (they do not wait for a scroll). Each fades
+//! and rises in over `historyToDownDuration` (150 ms) and fades out in
+//! 120 ms (`surface_reveal`); the stack sits above the jump-to-bottom
+//! button while that shows, moving with it (`CornerButtons::updatePositions`).
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
 use super::chat_row::compact_count;
+use super::surface_reveal;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::state::UnreadJumpKind;
 
 /// tdesktop `historyToDownBadgeSize`.
 const BADGE_SIZE: f32 = 22.;
+/// How far a corner button starts below its place as it fades in.
+const RISE: f32 = 8.;
+/// The jump-to-bottom button's height and the gap the stack keeps above
+/// it (`historyToDownPosition.y`): what the stack rises by while that
+/// button shows.
+const JUMP_BUTTON_ROOM: f32 = 32. + 12.;
+/// The stack's inset from the history's bottom-right corner.
+const CORNER_INSET: f32 = 16.;
 
 impl QuillApp {
+    /// Whether the kit's jump-to-bottom button shows this frame, by its
+    /// own rule (`MessageScroller::render`): scrolled up past
+    /// `historyToDownShownAfter` (480 px) from the bottom, any distance
+    /// while unread messages are below, or always while the window
+    /// stops short of the latest message.
+    fn jump_button_shown(&self, unread_count: i32, has_newer: bool, cx: &App) -> bool {
+        if has_newer {
+            return true;
+        }
+        let state = self.history.scroller.read(cx);
+        let shown_after = px(if unread_count > 0 { 0. } else { 480. });
+        let far_enough = state
+            .distance_to_edges()
+            .is_none_or(|(_, below, _)| below > shown_after);
+        state.is_scrolled_up() && far_enough
+    }
+
     /// The "@" / heart stack for the open chat, bottom-right of the
-    /// history; `None` when nothing is unread.
+    /// history; `None` when nothing is unread and nothing is fading out.
     pub(super) fn jump_corner_buttons(
         &self,
         mentions: i32,
         reactions: i32,
         poll_votes: i32,
+        unread_count: i32,
+        has_newer: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if mentions <= 0 && reactions <= 0 && poll_votes <= 0 {
+        let now = surface_reveal::now();
+        let animate = surface_reveal::animate(cx);
+        let scope = self.open_chat_id().map_or(0, |chat| chat.0 as u64);
+        let lift_to = if self.jump_button_shown(unread_count, has_newer, cx) {
+            1.
+        } else {
+            0.
+        };
+        let (drawn, lift, moving) = {
+            let mut corners = self.frame.surfaces.corners.borrow_mut();
+            let mut lift = self.frame.surfaces.corner_lift.borrow_mut();
+            lift.go(lift_to, surface_reveal::CORNER, animate, now);
+            let mut moving = lift.animating(now);
+            let mut drawn = Vec::with_capacity(3);
+            for (presence, (kind, count)) in corners.iter_mut().zip([
+                (UnreadJumpKind::Mention, mentions),
+                (UnreadJumpKind::Reaction, reactions),
+                (UnreadJumpKind::PollVote, poll_votes),
+            ]) {
+                let state = (count > 0).then_some(count);
+                if let Some(button) = presence.follow(state, scope, animate, now) {
+                    drawn.push((kind, button));
+                }
+                moving |= presence.moving(now);
+            }
+            (drawn, lift.value(now).clamp(0., 1.), moving)
+        };
+        if moving {
+            self.request_animation_tick(60, cx);
+        }
+        if drawn.is_empty() {
             return None;
         }
         let weak = cx.weak_entity();
         Some(
             div()
                 .absolute()
-                .right_4()
-                .bottom_4()
+                .right(px(CORNER_INSET))
+                .bottom(px(CORNER_INSET + JUMP_BUTTON_ROOM * lift))
                 .flex()
                 .flex_col()
                 .items_end()
                 .gap_3()
-                .when(mentions > 0, |this| {
-                    this.child(corner_button(
-                        UnreadJumpKind::Mention,
-                        mentions,
-                        weak.clone(),
-                    ))
-                })
-                .when(reactions > 0, |this| {
-                    this.child(corner_button(
-                        UnreadJumpKind::Reaction,
-                        reactions,
-                        weak.clone(),
-                    ))
-                })
-                .when(poll_votes > 0, |this| {
-                    this.child(corner_button(UnreadJumpKind::PollVote, poll_votes, weak))
-                })
+                .children(drawn.into_iter().map(|(kind, button)| {
+                    let rise = RISE * (1. - button.shown);
+                    div()
+                        .opacity(button.shown)
+                        // Rises into place; the margins cancel, so the
+                        // stack keeps its height while a button moves.
+                        .mt(px(rise))
+                        .mb(px(-rise))
+                        .child(corner_button(kind, button.value, weak.clone()))
+                }))
                 .into_any_element(),
         )
     }

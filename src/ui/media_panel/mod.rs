@@ -968,6 +968,7 @@ mod categories;
 mod custom_emoji_cell;
 mod reaction_packs_demo;
 mod reaction_rows;
+mod reveal;
 mod status;
 #[cfg(feature = "demo-capture")]
 mod status_demo;

@@ -71,6 +71,8 @@ pub(crate) struct FrameUi {
     pub(super) sidebar: super::sidebar_reveal::SidebarReveal,
     /// The side panel column's slide (`panel_reveal`).
     pub(super) panels: super::panel_reveal::PanelReveal,
+    /// Surfaces that come and go with their state (`surface_reveal`).
+    pub(super) surfaces: super::surface_reveal::Surfaces,
     /// The main window's content width as last drawn (`shell_layout`).
     pub(super) main_width: Pixels,
     /// A debounced `window_state.json` save is scheduled.
@@ -127,6 +129,7 @@ impl FrameUi {
                 std::time::Instant::now(),
             ),
             panels: super::panel_reveal::PanelReveal::new(std::time::Instant::now()),
+            surfaces: super::surface_reveal::Surfaces::new(std::time::Instant::now()),
             main_width: px(0.),
             window_state_save_pending: false,
             capture_blocked: false,

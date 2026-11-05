@@ -446,7 +446,8 @@ fn jump_button(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Bounds<Pi
 /// One press on the jump button floating over a clip jumps to the latest
 /// message and leaves the clip alone: the button takes the click, the
 /// media viewer under it stays closed. A press on the clip beside the
-/// button still opens the viewer.
+/// button still opens the viewer. The button sits in the bottom-right
+/// corner, so the clip it can cover is one you sent.
 #[gpui_kit::test]
 fn the_jump_button_over_a_clip_takes_the_click(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -457,11 +458,17 @@ fn the_jump_button_over_a_clip_takes_the_click(cx: &mut TestAppContext) {
     // They are the last two, so the button goes down to the latest.
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let read = session
-            .histories
-            .get(&TILE.0)
-            .and_then(|history| history.messages.keys().rev().nth(2).copied())
+        let history = session.histories.get_mut(&TILE.0).expect("the history");
+        let read = history
+            .messages
+            .keys()
+            .rev()
+            .nth(2)
+            .copied()
             .expect("messages");
+        if let Some(clip) = history.messages.get_mut(&TILE.1) {
+            clip.is_outgoing = true;
+        }
         let chat = session.chats.get_mut(&TILE.0).expect("the chat");
         chat.unread_count = 2;
         chat.last_read_inbox_message_id = quill::ids::MessageId(read);

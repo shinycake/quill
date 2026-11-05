@@ -3,6 +3,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
+use crate::ui::pressable::PressableDiv;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
@@ -129,7 +130,10 @@ impl QuillApp {
                 .py_2()
                 .rounded(cx.theme().radius)
                 .cursor_pointer()
+                .role(Role::Button)
+                .tab_index(0)
                 .hover(|this| this.bg(cx.theme().sidebar_accent))
+                .focus_ring_visible(cx.theme())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.show_settings_page(Page::Account, cx);
                 }))
