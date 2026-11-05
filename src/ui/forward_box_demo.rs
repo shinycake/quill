@@ -13,6 +13,41 @@ impl QuillApp {
     fn demo_ready_forward_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use quill::composer::ForwardDraft;
         use quill::ids::MessageId;
+        self.demo_seed_share_chats();
+        if let Some(mut draft) = ForwardDraft::from_message(ChatId(11), MessageId(101), false) {
+            draft.toggle(ChatId(11), MessageId(102), false);
+            self.share.pending_forward = Some(draft);
+        }
+        self.open_forward_picker(window, cx);
+        if std::env::var("QUILL_DEMO_FORWARD_BOX").as_deref() != Ok("empty") {
+            self.share.selection.toggle(ChatId(61));
+            self.share.selection.toggle(ChatId(63));
+        }
+    }
+
+    /// Demo: right-to-left names in lists and the chat header, with the
+    /// Hebrew group open (`bidi_line::name_line`). Type into the sidebar
+    /// search to list the chats as search results.
+    fn demo_ready_rtl_names(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.demo_seed_share_chats();
+        if let Some(session) = self.demo_session.as_mut() {
+            session.open_chat(ChatId(63));
+        }
+    }
+
+    /// Demo: "Reply in Another Chat" for a message of chat 11.
+    fn demo_ready_reply_elsewhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use quill::composer::ComposerReplyTo;
+        use quill::ids::MessageId;
+        self.demo_seed_share_chats();
+        self.composer_ui
+            .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
+        self.open_reply_elsewhere(window, cx);
+    }
+
+    /// Saved Messages, people (online, last seen, a bot), groups and
+    /// right-to-left names for the demos above.
+    fn demo_seed_share_chats(&mut self) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
@@ -77,15 +112,6 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        if let Some(mut draft) = ForwardDraft::from_message(ChatId(11), MessageId(101), false) {
-            draft.toggle(ChatId(11), MessageId(102), false);
-            self.share.pending_forward = Some(draft);
-        }
-        self.open_forward_picker(window, cx);
-        if std::env::var("QUILL_DEMO_FORWARD_BOX").as_deref() != Ok("empty") {
-            self.share.selection.toggle(ChatId(61));
-            self.share.selection.toggle(ChatId(63));
-        }
     }
 }
 
@@ -95,4 +121,14 @@ crate::ui::screenshot_demo::register_demos![
         "screenshot demo — forward box over the chat"
     )
     .setup(QuillApp::demo_ready_forward_box),
+    crate::ui::screenshot_demo::DemoSpec::chats(
+        "ready-rtl-names",
+        "screenshot demo — right-to-left names in lists"
+    )
+    .setup(QuillApp::demo_ready_rtl_names),
+    crate::ui::screenshot_demo::DemoSpec::chats(
+        "ready-reply-elsewhere",
+        "screenshot demo — reply in another chat"
+    )
+    .setup(QuillApp::demo_ready_reply_elsewhere),
 ];

@@ -43,7 +43,8 @@
   the message split into lines and sentences (`quote_segments`, UTF-16
   positions, 1024 character cap). One click sets the quote, another click on
   the chosen part clears it.
-- Reply in Another Chat: a chooser panel above the composer with search
+- Reply in Another Chat: a modal chooser (`DialogKind::ReplyElsewhere`,
+  `src/ui/reply_elsewhere_box.rs`, the forward box's rows and search) with search
   (`searchChatsOnServer` through the share box path), the message author and
   the chat list. Secret chats are left out. Picking one opens that chat with
   the reply attached. The message menu has the same row, gated on TDLib's

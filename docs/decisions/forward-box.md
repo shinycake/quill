@@ -46,6 +46,20 @@ show or hide sender names and captions, send without sound, schedule.
 - The silent "forward to…" and "forward picker closed" status notes are gone:
   the box itself is the feedback.
 
+## Names in lists
+
+`bidi_line::name_line` draws a right-to-left name from the left edge of its
+box, next to the userpic, instead of resting it against the far end. Chat
+header, search results, members, contacts, accounts, admins, folders,
+statistics, story viewers, mention suggestions and the other name rows use
+it; message previews keep `one_line_plain`, which rests right-to-left text at
+the end as tdesktop does. Demo: `ready-rtl-names`.
+
+"Reply in Another Chat" is the same kind of box (`reply_elsewhere_box.rs`):
+the author first, then the chat list, one click takes the reply there. Agents
+in the granted scope can still use it (`GRANTED_DIALOGS`); its rows are
+tagged by chat, so only granted chats show.
+
 ## Differences from tdesktop
 
 - Clicking a row ticks it (tdesktop: a click with nothing chosen opens that

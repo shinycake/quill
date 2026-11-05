@@ -834,7 +834,6 @@
 "qll_ops_remove_from_channel" = "Remove from channel";
 "qll_ops_removed_as_administrator" = "removed {name} as administrator";
 "qll_ops_replies_from_another_chat_cant" = "Replies from another chat can't go to secret chats.";
-"qll_ops_reply_in" = "reply in…";
 "qll_ops_reply_options" = "Reply options";
 "qll_ops_replying_from_another_chat" = "replying from another chat";
 "qll_ops_report_not_available_for_this" = "report not available for this row";

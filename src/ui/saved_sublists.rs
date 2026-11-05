@@ -508,7 +508,7 @@ impl QuillApp {
                                     .min_w_0()
                                     .font_semibold()
                                     .truncate()
-                                    .child(super::bidi_line::one_line_plain(title)),
+                                    .child(super::bidi_line::name_line(title)),
                             )
                             .when(pinned, |this| {
                                 this.child(Icon::new(IconName::Pin).size(px(14.)).text_color(muted))

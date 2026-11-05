@@ -740,7 +740,7 @@ impl QuillApp {
                     .min_w_0()
                     .truncate()
                     .text_sm()
-                    .child(super::bidi_line::one_line_plain(name)),
+                    .child(super::bidi_line::name_line(name)),
             )
             .child(
                 div()

@@ -214,6 +214,10 @@ pub(super) const GRANTED_LAYERS: &[&str] = &[
     "pending-edit",
 ];
 
+/// Kit dialogs the granted scope allows: the "Reply in Another Chat" chooser
+/// tags its rows by chat, so only granted chats show (`redact::LIST`).
+pub(super) const GRANTED_DIALOGS: &[&str] = &["ReplyElsewhere"];
+
 /// The user-facing name of a layer, for the blocked note.
 fn layer_name(layer: &str) -> String {
     match layer {
@@ -308,7 +312,9 @@ impl QuillApp {
             if dialog == "AgentRequest" {
                 return blocked("a request to the user");
             }
-            if scope == DriverScope::Granted || HARD_DIALOGS.contains(&dialog) {
+            if HARD_DIALOGS.contains(&dialog)
+                || (scope == DriverScope::Granted && !GRANTED_DIALOGS.contains(&dialog))
+            {
                 return blocked(&format!("a dialog ({dialog})"));
             }
         }
@@ -334,7 +340,7 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRANTED_LAYERS, HARD_DIALOGS, HARD_LAYERS};
+    use super::{GRANTED_DIALOGS, GRANTED_LAYERS, HARD_DIALOGS, HARD_LAYERS};
     use crate::ui::esc_stack::ESC_LAYERS;
     use crate::ui::shell::QuillShell;
 
@@ -343,6 +349,7 @@ mod tests {
         let names = QuillShell::dialog_names();
         let missing: Vec<_> = HARD_DIALOGS
             .iter()
+            .chain(GRANTED_DIALOGS)
             .filter(|name| !names.contains(name))
             .collect();
         assert!(missing.is_empty(), "unknown dialogs: {missing:?}");

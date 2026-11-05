@@ -199,7 +199,7 @@ impl QuillApp {
                     div()
                         .text_sm()
                         .truncate()
-                        .child(super::bidi_line::one_line_plain(title)),
+                        .child(super::bidi_line::name_line(title)),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.dismiss_profile_modal();

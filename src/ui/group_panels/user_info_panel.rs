@@ -168,7 +168,7 @@ impl QuillApp {
                                     }))
                                     .max_w_full()
                                     .truncate()
-                                    .child(super::bidi_line::one_line_plain(name.clone())),
+                                    .child(super::bidi_line::name_line(name.clone())),
                             )
                             .children(badges),
                     )

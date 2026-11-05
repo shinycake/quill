@@ -45,6 +45,7 @@ pub(crate) fn one_line(
             runs: Rc::from([]),
             measured: Rc::default(),
             paragraph: None,
+            at_start: false,
         }
         .into_any_element();
     }
@@ -52,6 +53,30 @@ pub(crate) fn one_line(
         .with_highlights(highlights)
         .with_font_family_overrides(font_families)
         .into_any_element()
+}
+
+/// A name in a list row (chat, member, contact, account): one line, laid out for its
+/// direction, but always drawn from the start edge, next to the userpic. A box wider than
+/// the name would otherwise rest a Hebrew or Arabic name against its far end, away from
+/// the picture it belongs to.
+pub(crate) fn name_line(text: impl Into<SharedString>) -> AnyElement {
+    let text: SharedString = text.into();
+    let text: SharedString = match quill::display_text::filtered(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(shown) => shown.into(),
+    };
+    if quill::text::has_rtl_text(&text) {
+        return BidiLine {
+            text,
+            source: BidiSource::default(),
+            runs: Rc::from([]),
+            measured: Rc::default(),
+            paragraph: None,
+            at_start: true,
+        }
+        .into_any_element();
+    }
+    StyledText::new(text).into_any_element()
 }
 
 /// [`one_line`] for plain text, without what message text drops before
@@ -210,6 +235,8 @@ struct BidiLine {
     /// draws the paragraph laid out for that room when the final width allows.
     measured: Rc<Cell<Option<(Pixels, Pixels)>>>,
     paragraph: Option<Rc<BidiParagraph>>,
+    /// Draw from the start edge even when the box is wider than the line ([`name_line`]).
+    at_start: bool,
 }
 
 fn metrics(window: &Window) -> (TextStyle, Pixels, Pixels) {
@@ -323,7 +350,12 @@ impl Element for BidiLine {
         cx: &mut App,
     ) {
         if let Some(paragraph) = &self.paragraph {
-            paragraph.paint(bounds.origin, bounds.size.width, window, cx);
+            let width = if self.at_start {
+                paragraph.width().min(bounds.size.width)
+            } else {
+                bounds.size.width
+            };
+            paragraph.paint(bounds.origin, width, window, cx);
         }
     }
 }

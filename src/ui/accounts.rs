@@ -334,7 +334,7 @@ impl QuillApp {
                                 .font_semibold()
                                 .text_sm()
                                 .truncate()
-                                .child(super::bidi_line::one_line_plain(name.clone())),
+                                .child(super::bidi_line::name_line(name.clone())),
                         )
                         .children(badge),
                 )

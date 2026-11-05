@@ -251,9 +251,6 @@ impl QuillApp {
                             this.child(self.composer_reply_banner(&reply, cx))
                         })
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
-                        .when_some(self.reply_elsewhere_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
                         // Phase 4.2: poll creation dialog above the composer.
                         .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))

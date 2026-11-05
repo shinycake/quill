@@ -51,7 +51,7 @@ impl QuillApp {
                 div()
                     .font_semibold()
                     .truncate()
-                    .child(super::super::bidi_line::one_line_plain(title)),
+                    .child(super::super::bidi_line::name_line(title)),
             )
             .children(badges.into_iter().map(|badge| {
                 let emoji = match badge {

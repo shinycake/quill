@@ -141,7 +141,7 @@ impl QuillApp {
                                             .font_medium()
                                             .text_sm()
                                             .truncate()
-                                            .child(super::bidi_line::one_line_plain(name)),
+                                            .child(super::bidi_line::name_line(name)),
                                     )
                                     .child(
                                         div()

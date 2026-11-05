@@ -409,7 +409,7 @@ impl QuillApp {
                                     .text_sm()
                                     .font_medium()
                                     .text_color(text_primary())
-                                    .child(super::bidi_line::one_line_plain(from)),
+                                    .child(super::bidi_line::name_line(from)),
                             )
                             .child(
                                 div()
@@ -599,7 +599,7 @@ impl QuillApp {
                                 div()
                                     .truncate()
                                     .font_medium()
-                                    .child(super::bidi_line::one_line_plain(title)),
+                                    .child(super::bidi_line::name_line(title)),
                             )
                             .child(
                                 div()

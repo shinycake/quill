@@ -390,7 +390,7 @@ pub(super) fn row_text(title: impl Into<SharedString>, status: impl Into<SharedS
             div()
                 .text_sm()
                 .truncate()
-                .child(super::bidi_line::one_line_plain(title.into().to_string())),
+                .child(super::bidi_line::name_line(title.into().to_string())),
         )
         .child(
             div()
