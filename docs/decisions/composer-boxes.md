@@ -24,7 +24,7 @@ every panel looked slightly different.
 - The primary action sits at the right of a footer pinned under the
   scrolling content, with Cancel beside it, as in other kit dialogs.
 - A kit dialog takes focus when it opens, so the field to type in is kept
-  until the first render and focused then (`shell::focus_after_mount`).
+  until the first render and focused then (`dialog_focus::focus_after_mount`).
 - Their Escape layers are gone: a kit dialog closes on Escape itself. Add
   Link and Choose Date were layers an agent in the granted scope could use,
   so `ComposerLink` and `ComposerDate` join `GRANTED_DIALOGS`. The poll and

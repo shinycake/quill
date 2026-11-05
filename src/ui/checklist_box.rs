@@ -6,7 +6,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::shell::{DialogKind, QuillShell, focus_after_mount};
+use super::dialog_focus::focus_after_mount;
+use super::shell::{DialogKind, QuillShell};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::lang::{keys, tr};

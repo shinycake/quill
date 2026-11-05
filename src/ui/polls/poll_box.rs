@@ -75,7 +75,7 @@ impl QuillApp {
                             std::mem::take(&mut dialog.focus_question)
                                 .then(|| dialog.question_input.clone())
                         });
-                        crate::ui::shell::focus_after_mount(question, window, cx);
+                        crate::ui::dialog_focus::focus_after_mount(question, window, cx);
                         this.poll_dialog_panel(cx)
                     });
                     content.child(

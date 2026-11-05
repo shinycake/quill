@@ -172,6 +172,7 @@ pub(crate) use accounts::*;
 pub(crate) use chat_theme::*;
 pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
 
+mod dialog_focus;
 mod dialogs;
 mod direct_messages_admin;
 mod direct_messages_chat;
