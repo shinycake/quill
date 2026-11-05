@@ -177,13 +177,16 @@ fn state_is_none(shown: &Glide) -> bool {
     shown.target() <= 0.
 }
 
-/// Which pinned message the pinned bar shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Which pinned message the pinned bar shows, with its lines: the bar
+/// draws them while it slides shut after the message was unpinned.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PinnedShown {
     pub(crate) chat: i64,
     pub(crate) message: i64,
     pub(crate) index: usize,
     pub(crate) count: usize,
+    pub(crate) title: String,
+    pub(crate) preview: String,
 }
 
 /// The size a surface was laid out at last frame.

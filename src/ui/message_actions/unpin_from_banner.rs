@@ -119,35 +119,25 @@ impl QuillApp {
             .copied()
             .unwrap_or(0)
             .min(count.saturating_sub(1));
-        let message = list.get(index)?.id.0;
-        Some(PinnedShown {
-            chat: chat_id.0,
-            message,
-            index,
-            count,
-        })
-    }
-
-    /// The title and preview of the pinned message `shown`, if the list
-    /// still holds it.
-    fn pinned_bar_lines(&self, chat_id: ChatId, shown: PinnedShown) -> Option<(String, String)> {
-        let session = self.session()?;
-        let list = session.pinned_list(chat_id);
-        let item = list.get(shown.index).filter(|item| item.id.0 == shown.message)?;
-        let title = if shown.index == 0 {
+        let item = list.get(index)?;
+        let title = if index == 0 {
             tr(keys::PINNED_MESSAGE).to_string()
-        } else if shown.count == 2 {
+        } else if count == 2 {
             tr(keys::Q_CHAT_PREVIOUS_MESSAGE).to_string()
         } else {
             tr_with(
                 keys::Q_CHAT_PINNED_MESSAGE,
-                &[(
-                    "count_index",
-                    &shown.count.saturating_sub(shown.index).to_string(),
-                )],
+                &[("count_index", &count.saturating_sub(index).to_string())],
             )
         };
-        Some((title, effective_preview(item)))
+        Some(PinnedShown {
+            chat: chat_id.0,
+            message: item.id.0,
+            index,
+            count,
+            title,
+            preview: effective_preview(item),
+        })
     }
 
     /// `pinned_message_banner` past its cheap check. A debug build reserves this
@@ -161,13 +151,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let session = self.session()?;
-        let shown = drawn.value;
+        let shown = &drawn.value;
         let list = session.pinned_list(chat_id);
-        let newest = list.first()?.id;
+        // While the bar slides shut after an unpin the list may be empty.
+        let newest = list.first().map_or(MessageId(shown.message), |item| item.id);
         let count = shown.count;
         let index = shown.index;
         let message_id = MessageId(shown.message);
-        let (title, preview) = self.pinned_bar_lines(chat_id, shown)?;
+        let (title, preview) = (shown.title.clone(), shown.preview.clone());
         let can_pin = session
             .chats
             .get(&chat_id.0)
@@ -201,11 +192,11 @@ impl QuillApp {
         // side, cross-fading over `defaultMessageBar.duration` (160 ms).
         let previous = drawn
             .previous
+            .as_ref()
             .filter(|_| drawn.swap < 1.)
-            .and_then(|previous| {
-                let lines = self.pinned_bar_lines(chat_id, previous)?;
-                let up = previous.index < index;
-                Some((lines, up))
+            .map(|previous| {
+                let lines = (previous.title.clone(), previous.preview.clone());
+                (lines, previous.index < index)
             });
         let text = match previous {
             None => pinned_bar_lines_block(title, preview).into_any_element(),
