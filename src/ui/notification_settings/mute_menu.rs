@@ -33,13 +33,13 @@ impl QuillApp {
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
         self.notify.mute_menu_open = true;
         self.notify.mute_chat = None;
+        self.notify.ttl_picker_open = false;
+        self.folders.menu_open = false;
         self.notify.mute_custom_open = false;
         self.queue_mute_time_inputs(cx);
         if let Some(chat_id) = self.session().and_then(|session| session.open_chat) {
             self.ensure_chat_volume_slider(chat_id, cx);
         }
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_PREFS_MUTE_FOR)));
         cx.notify();
     }
 
@@ -75,6 +75,19 @@ impl QuillApp {
                 StatusNote::silent(tr(keys::Q_LEFTOVERS_MUTED))
             });
             cx.notify();
+        }
+    }
+
+    /// The mute dialog's title: "Notifications", with the chat's name when
+    /// a chat row opened it.
+    pub(in crate::ui) fn mute_menu_title(&self) -> String {
+        let row_chat = self
+            .notify
+            .mute_chat
+            .and_then(|id| self.session()?.chats.get(&id.0));
+        match row_chat {
+            Some(chat) => format!("{} · {}", tr(keys::CHART_TITLE_MUTE), chat.title),
+            None => tr(keys::CHART_TITLE_MUTE).to_string(),
         }
     }
 
@@ -248,35 +261,6 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().font_semibold().child(
-                        match (self.notify.mute_chat, open_chat_summary) {
-                            (Some(_), Some(chat)) => {
-                                format!("{} · {}", tr(keys::CHART_TITLE_MUTE), chat.title)
-                            }
-                            _ => tr(keys::CHART_TITLE_MUTE).to_string(),
-                        },
-                    ))
-                    .child(
-                        Button::new("close-mute-menu")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .tooltip(tr(keys::CLOSE))
-                            .accessibility_label(tr(keys::CLOSE))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_mute_menu(cx);
-                            })),
-                    ),
-            )
             .child(
                 div()
                     .text_xs()
@@ -297,7 +281,7 @@ impl QuillApp {
             )
             .child(preset_row)
             .children(custom_row)
-            .child(sound_toggle)
+            .child(div().flex().child(sound_toggle))
             .child(
                 div()
                     .flex()
@@ -471,6 +455,7 @@ impl QuillApp {
                 .label(tr(keys::Q_PREFS_DEFAULTS_FOR_ALL_CHATS))
                 .ghost()
                 .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_mute_menu(cx);
                     this.open_notification_settings(cx);
                 })),
         )

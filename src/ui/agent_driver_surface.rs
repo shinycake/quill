@@ -214,9 +214,11 @@ pub(super) const GRANTED_LAYERS: &[&str] = &[
     "pending-edit",
 ];
 
-/// Kit dialogs the granted scope allows: the "Reply in Another Chat" chooser
-/// tags its rows by chat, so only granted chats show (`redact::LIST`).
-pub(super) const GRANTED_DIALOGS: &[&str] = &["ReplyElsewhere"];
+/// Kit dialogs the granted scope allows: the open chat's notification and
+/// auto-delete settings (they were granted layers as panels), and the
+/// "Reply in Another Chat" chooser, which tags its rows by chat so only
+/// granted chats show (`redact::LIST`).
+pub(super) const GRANTED_DIALOGS: &[&str] = &["ReplyElsewhere", "MuteMenu", "TtlPicker"];
 
 /// The user-facing name of a layer, for the blocked note.
 fn layer_name(layer: &str) -> String {
