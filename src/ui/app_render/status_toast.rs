@@ -108,6 +108,7 @@ impl QuillApp {
                 surface_reveal::Presence::new(
                     surface_reveal::ENTER,
                     surface_reveal::EXIT,
+                    crate::ui::motion::linear,
                     now,
                 )
             });

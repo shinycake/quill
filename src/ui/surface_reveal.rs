@@ -20,7 +20,7 @@
 //! [`Presence::moving`]. Tests step a presence on an explicit clock.
 #![deny(clippy::indexing_slicing)]
 
-use super::motion::{Glide, ease_out_circ, elapsed_since, progress};
+use super::motion::{Glide, ease_out_circ, elapsed_since, linear, progress};
 use gpui_kit::*;
 use std::cell::Cell;
 use std::rc::Rc;
@@ -79,19 +79,33 @@ pub(crate) struct Presence<T> {
     scope: u64,
     enter: Duration,
     exit: Duration,
+    ease: fn(f32) -> f32,
+    exit_ease: fn(f32) -> f32,
 }
 
 impl<T: Clone + PartialEq> Presence<T> {
-    pub(crate) fn new(enter: Duration, exit: Duration, now: Instant) -> Self {
+    /// `ease`: `linear` for tdesktop's `SlideWrap`, toast and corner
+    /// buttons (`Animations::Simple`'s default), `ease_out_circ` for its
+    /// `PanelAnimation`.
+    pub(crate) fn new(enter: Duration, exit: Duration, ease: fn(f32) -> f32, now: Instant) -> Self {
         Self {
-            shown: Glide::settled(0., now, ease_out_circ),
+            shown: Glide::settled(0., now, ease),
             last: None,
             previous: None,
             changed: None,
             scope: 0,
             enter,
             exit,
+            ease,
+            exit_ease: ease,
         }
+    }
+
+    /// Leave on `ease` instead (tdesktop's panel opens on `easeOutCirc`
+    /// and fades out linearly).
+    pub(crate) fn with_exit_ease(mut self, ease: fn(f32) -> f32) -> Self {
+        self.exit_ease = ease;
+        self
     }
 
     /// Once per frame: follow `state` in `scope`. `animate` false snaps
@@ -110,7 +124,7 @@ impl<T: Clone + PartialEq> Presence<T> {
             self.changed = None;
             self.last = state.clone();
             let at = if state.is_some() { 1. } else { 0. };
-            self.shown = Glide::settled(at, now, ease_out_circ);
+            self.shown = Glide::settled(at, now, self.ease);
             return self.last.clone().map(Drawn::settled);
         }
         match state {
@@ -121,10 +135,11 @@ impl<T: Clone + PartialEq> Presence<T> {
                     self.changed = swaps.then_some(now);
                     self.last = Some(value);
                 }
-                self.shown.go(1., self.enter, animate, now);
+                self.shown.go_eased(1., self.enter, animate, now, self.ease);
             }
             None => {
-                self.shown.go(0., self.exit, animate, now);
+                self.shown
+                    .go_eased(0., self.exit, animate, now, self.exit_ease);
                 if self.shown.value(now) <= 0. {
                     self.last = None;
                     self.previous = None;
@@ -209,17 +224,19 @@ impl Surfaces {
         Self {
             toasts: Default::default(),
             toast_shown: Cell::new(1.),
-            edit_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
-            reply_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
-            forward_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
-            pinned_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, now)),
-            media_panel: std::cell::RefCell::new(Presence::new(ENTER, EXIT, now)),
+            edit_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
+            reply_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
+            forward_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
+            pinned_bar: std::cell::RefCell::new(Presence::new(SLIDE, EXIT, linear, now)),
+            media_panel: std::cell::RefCell::new(
+                Presence::new(ENTER, EXIT, ease_out_circ, now).with_exit_ease(linear),
+            ),
             corners: std::cell::RefCell::new([
-                Presence::new(CORNER, EXIT, now),
-                Presence::new(CORNER, EXIT, now),
-                Presence::new(CORNER, EXIT, now),
+                Presence::new(CORNER, EXIT, linear, now),
+                Presence::new(CORNER, EXIT, linear, now),
+                Presence::new(CORNER, EXIT, linear, now),
             ]),
-            corner_lift: std::cell::RefCell::new(Glide::settled(0., now, ease_out_circ)),
+            corner_lift: std::cell::RefCell::new(Glide::settled(0., now, linear)),
             edit_bar_size: Measured::default(),
             reply_bar_size: Measured::default(),
             forward_bar_size: Measured::default(),
@@ -386,6 +403,7 @@ impl Element for MeasureSize {
 #[cfg(test)]
 mod tests {
     use super::{ENTER, EXIT, Presence, SWAP};
+    use crate::ui::motion::linear;
     use std::time::{Duration, Instant};
 
     fn ms(n: u64) -> Duration {
@@ -395,7 +413,7 @@ mod tests {
     #[test]
     fn appearing_glides_in_and_settles() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         assert_eq!(p.follow(None::<u8>, 0, true, t0), None);
         let start = p.follow(Some(7), 0, true, t0).unwrap();
         assert_eq!((start.value, start.shown, start.leaving), (7, 0., false));
@@ -410,7 +428,7 @@ mod tests {
     #[test]
     fn leaving_keeps_the_last_value_until_it_is_out() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         p.follow(Some("a"), 0, false, t0);
         let out = p.follow(None, 0, true, t0).unwrap();
         assert_eq!((out.value, out.shown, out.leaving), ("a", 1., true));
@@ -428,7 +446,7 @@ mod tests {
     #[test]
     fn reappearing_mid_exit_turns_back_from_where_it_is() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         p.follow(Some(1), 0, false, t0);
         p.follow(None, 0, true, t0);
         let mid = p.follow(None, 0, true, t0 + ms(60)).unwrap().shown;
@@ -441,7 +459,7 @@ mod tests {
     #[test]
     fn a_new_value_while_shown_swaps_without_sliding() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         p.follow(Some(1), 0, false, t0);
         let swap = p.follow(Some(2), 0, true, t0).unwrap();
         assert_eq!((swap.value, swap.shown, swap.swap), (2, 1., 0.));
@@ -458,7 +476,7 @@ mod tests {
     #[test]
     fn another_scope_snaps() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         p.follow(Some(1), 11, true, t0);
         // Shown at once in a chat it was never shown in.
         let other = p.follow(Some(5), 12, true, t0).unwrap();
@@ -472,7 +490,7 @@ mod tests {
     #[test]
     fn without_animation_it_snaps() {
         let t0 = Instant::now();
-        let mut p = Presence::new(ENTER, EXIT, t0);
+        let mut p = Presence::new(ENTER, EXIT, linear, t0);
         let on = p.follow(Some(1), 0, false, t0).unwrap();
         assert_eq!(on.shown, 1.);
         assert!(!p.moving(t0));

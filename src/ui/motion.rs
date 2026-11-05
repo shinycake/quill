@@ -143,6 +143,19 @@ impl Glide {
     /// `full` scaled by the distance left (tdesktop's `change`), or snaps
     /// when `animate` is false.
     pub(crate) fn go(&mut self, to: f32, full: Duration, animate: bool, now: Instant) {
+        self.go_eased(to, full, animate, now, self.ease);
+    }
+
+    /// [`Self::go`] on a curve of its own: the new run uses `ease`, from
+    /// where the old curve had got to.
+    pub(crate) fn go_eased(
+        &mut self,
+        to: f32,
+        full: Duration,
+        animate: bool,
+        now: Instant,
+        ease: fn(f32) -> f32,
+    ) {
         if self.to == to {
             return;
         }
@@ -150,6 +163,7 @@ impl Glide {
         self.from = from;
         self.to = to;
         self.since = now;
+        self.ease = ease;
         // "Interface animations" off in Battery and animations: snap.
         let animate = animate && !interface_animations_off();
         self.duration = if animate {
