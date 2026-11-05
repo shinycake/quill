@@ -507,7 +507,6 @@ impl QuillApp {
         cx.notify();
     }
 
-
     pub(super) fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.poll_dialog = None;
         cx.notify();

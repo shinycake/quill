@@ -198,8 +198,6 @@ pub(super) const GRANTED_LAYERS: &[&str] = &[
     "context-menus",
     "link-popup",
     "composer-code-language",
-    "composer-date-dialog",
-    "composer-link-dialog",
     "gif-panel",
     "sticker-panel",
     "mute-menu",
@@ -215,10 +213,17 @@ pub(super) const GRANTED_LAYERS: &[&str] = &[
 ];
 
 /// Kit dialogs the granted scope allows: the open chat's notification and
-/// auto-delete settings (they were granted layers as panels), and the
+/// auto-delete settings and the composer's Add Link and Choose Date boxes
+/// (they were granted layers as panels), and the
 /// "Reply in Another Chat" chooser, which tags its rows by chat so only
 /// granted chats show (`redact::LIST`).
-pub(super) const GRANTED_DIALOGS: &[&str] = &["ReplyElsewhere", "MuteMenu", "TtlPicker"];
+pub(super) const GRANTED_DIALOGS: &[&str] = &[
+    "ReplyElsewhere",
+    "MuteMenu",
+    "TtlPicker",
+    "ComposerLink",
+    "ComposerDate",
+];
 
 /// The user-facing name of a layer, for the blocked note.
 fn layer_name(layer: &str) -> String {
