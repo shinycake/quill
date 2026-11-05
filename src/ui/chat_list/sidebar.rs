@@ -9,6 +9,8 @@
 //! (docs/decisions/main-thread-stack.md).
 
 use super::*;
+use crate::ui::empty_state::EmptyState;
+use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -277,12 +279,11 @@ impl QuillApp {
             }
             self.keep_frozen_order(&mut archived, |chat| chat.id.0);
             if archived.is_empty() && filter == ChatListFilter::Archived {
-                list = list.child(chat_list_empty_state(
-                    "📦",
-                    tr(keys::Q_CHATLIST_NO_ARCHIVED_CHATS),
-                    tr(keys::Q_CHATLIST_CHATS_YOU_ARCHIVE_STAY_HERE),
-                    cx,
-                ));
+                list = list.child(
+                    EmptyState::new("chat-list-empty", IconName::Archive)
+                        .title(tr(keys::Q_CHATLIST_NO_ARCHIVED_CHATS))
+                        .hint(tr(keys::Q_CHATLIST_CHATS_YOU_ARCHIVE_STAY_HERE)),
+                );
             }
             for chat in archived {
                 items.push(ChatListItem::Chat {
@@ -336,48 +337,56 @@ impl QuillApp {
         folder: Option<i32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (glyph, title, hint) = if let ChatListFilter::Community(community_id) = filter {
+        let id = "chat-list-empty";
+        let state = if let ChatListFilter::Community(community_id) = filter {
             // Parity slice `parity:communities-chatlist-mode`: a missing
             // pack means the fetch hasn't landed yet (entering the mode
-            // fires `getCommunityFullInfo` when live) — "Loading…", like
-            // the community info panel. An empty pack / no matching loaded
+            // fires `getCommunityFullInfo` when live), so it spins like the
+            // community info panel. An empty pack / no matching loaded
             // chats is the genuine empty state, never a crash.
             if self
                 .session()
                 .is_some_and(|s| !s.groups.community_full_infos.contains_key(&community_id))
             {
-                (
-                    "⏳",
-                    tr(keys::Q_CHATLIST_LOADING_COMMUNITY),
-                    tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS),
-                )
+                EmptyState::loading(id)
+                    .title(tr(keys::Q_CHATLIST_LOADING_COMMUNITY))
+                    .hint(tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS))
             } else {
-                (
-                    "👥",
-                    tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_COMMUNITY),
-                    tr(keys::Q_CHATLIST_CHATS_ADDED_TO_THE_COMMUNITY),
-                )
+                EmptyState::new(id, IconName::Users)
+                    .title(tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_COMMUNITY))
+                    .hint(tr(keys::Q_CHATLIST_CHATS_ADDED_TO_THE_COMMUNITY))
             }
         } else if filter == ChatListFilter::Unread {
-            (
-                "🔕",
-                tr(keys::Q_CHATLIST_NO_UNREAD_CHATS),
-                tr(keys::Q_CHATLIST_YOU_ARE_ALL_CAUGHT_UP),
-            )
-        } else if folder.is_some() {
-            (
-                "📁",
-                tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_FOLDER),
-                tr(keys::Q_CHATLIST_ADD_CHATS_TO_THE_FOLDER),
-            )
+            EmptyState::new(id, IconName::CheckCheck)
+                .title(tr(keys::Q_CHATLIST_NO_UNREAD_CHATS))
+                .hint(tr(keys::Q_CHATLIST_YOU_ARE_ALL_CAUGHT_UP))
+        } else if let Some(folder_id) = folder {
+            // tdesktop puts "Edit folder" under an empty folder.
+            EmptyState::new(id, IconName::Folder)
+                .title(tr(keys::Q_CHATLIST_NO_CHATS_IN_THIS_FOLDER))
+                .hint(tr(keys::Q_CHATLIST_ADD_CHATS_TO_THE_FOLDER))
+                .action(
+                    Button::new("chat-list-empty-edit-folder")
+                        .label(tr(keys::FILTERS_CONTEXT_EDIT))
+                        .outline()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_folder_edit(folder_id, window, cx);
+                        })),
+                )
         } else {
-            (
-                "💬",
-                tr(keys::Q_CHATLIST_NO_CHATS_YET),
-                tr(keys::Q_CHATLIST_START_A_CONVERSATION_TO_SEE),
-            )
+            // tdesktop's empty account shows New Message, which opens the
+            // contacts.
+            EmptyState::new(id, IconName::MessagesSquare)
+                .title(tr(keys::Q_CHATLIST_NO_CHATS_YET))
+                .hint(tr(keys::Q_CHATLIST_START_A_CONVERSATION_TO_SEE))
+                .action(
+                    Button::new("chat-list-empty-new-message")
+                        .label(tr(keys::NO_CONVERSATIONS_BUTTON))
+                        .primary()
+                        .on_click(cx.listener(|this, _, _, cx| this.open_contacts_tab(cx))),
+                )
         };
-        chat_list_empty_state(glyph, title, hint, cx).into_any_element()
+        state.into_any_element()
     }
 
     /// The virtual list of chat rows with its pointer handlers and the

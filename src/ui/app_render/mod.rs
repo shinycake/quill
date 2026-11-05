@@ -638,7 +638,13 @@ impl Render for QuillApp {
                             .justify_center()
                             .gap(px(6.))
                             .py(px(4.))
-                            .child(div().size(px(8.)).rounded_full().bg(cx.theme().warning))
+                            // tdesktop's connecting widget spins
+                            // (`Window::ConnectionState`).
+                            .child(
+                                gpui_kit::component::spinner::Spinner::new()
+                                    .xsmall()
+                                    .color(cx.theme().muted_foreground),
+                            )
                             .child(
                                 div()
                                     .text_sm()

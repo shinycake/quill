@@ -2,12 +2,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::{PaneMode, QuillApp};
-use super::pressable::PressableDiv;
-use super::*;
+use crate::ui::empty_state::EmptyState;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
+use gpui_kit::component::button::*;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{SharedMediaTab, SharedMediaTabStatus};
@@ -158,74 +158,34 @@ impl QuillApp {
             })
             .children(self.shared_media_search_row(active_tab, cx));
 
+        let tab_name = active_tab.label_in(is_channel).to_lowercase();
         let content: AnyElement = match status {
-            SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading => div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .px_6()
-                .py_10()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr_with(
-                    keys::Q_OPS_LOADING_2,
-                    &[(
-                        "to_lowercase",
-                        &(active_tab.label_in(is_channel).to_lowercase()).to_string(),
-                    )],
-                ))
-                .into_any_element(),
-            SharedMediaTabStatus::Failed => div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .px_6()
-                .py_10()
-                .child(div().text_3xl().child("⚠"))
-                .child(
-                    div()
-                        .font_semibold()
-                        .text_color(cx.theme().foreground)
-                        .child(tr_with(
-                            keys::Q_LEFTOVERS_COULD_NOT_LOAD_MEDIA,
-                            &[(
-                                "tab",
-                                &(active_tab.label_in(is_channel).to_lowercase()).to_string(),
-                            )],
-                        )),
-                )
-                .when(!error.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .text_xs()
-                            .text_center()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(error.clone()),
+            SharedMediaTabStatus::Idle | SharedMediaTabStatus::Loading => {
+                EmptyState::loading("shared-media-loading")
+                    .hint(tr_with(
+                        keys::Q_OPS_LOADING_2,
+                        &[("to_lowercase", &tab_name)],
+                    ))
+                    .into_any_element()
+            }
+            SharedMediaTabStatus::Failed => {
+                EmptyState::new("shared-media-failed", IconName::TriangleAlert)
+                    .title(tr_with(
+                        keys::Q_LEFTOVERS_COULD_NOT_LOAD_MEDIA,
+                        &[("tab", &tab_name)],
+                    ))
+                    .hint(error.clone())
+                    .action(
+                        Button::new("shared-media-retry")
+                            .label(tr(keys::Q_OPS_RETRY))
+                            .outline()
+                            .accessibility_label(tr(keys::Q_OPS_RETRY_LOADING_SHARED_MEDIA))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.retry_shared_media_ui(cx);
+                            })),
                     )
-                })
-                .child(
-                    div()
-                        .id("shared-media-retry")
-                        .role(gpui_kit::Role::Button)
-                        .aria_label(tr(keys::Q_OPS_RETRY_LOADING_SHARED_MEDIA))
-                        .tab_index(0)
-                        .cursor_pointer()
-                        .pressable(cx.theme())
-                        .px_3()
-                        .py_1()
-                        .rounded_md()
-                        .text_sm()
-                        .text_color(accent())
-                        .child(tr(keys::Q_OPS_RETRY))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.retry_shared_media_ui(cx);
-                        })),
-                )
-                .into_any_element(),
+                    .into_any_element()
+            }
             SharedMediaTabStatus::Empty if searching => {
                 self.shared_media_search_empty_state(active_tab, cx)
             }
@@ -266,34 +226,11 @@ impl QuillApp {
         &self,
         tab: SharedMediaTab,
         is_channel: bool,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut body = div()
-            .flex_1()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .px_6()
-            .py_10()
-            .child(div().text_3xl().child(tab.glyph()))
-            .child(
-                div()
-                    .font_semibold()
-                    .text_color(cx.theme().foreground)
-                    .child(tab.empty_title()),
-            );
-        for line in tab.empty_hint(is_channel).split('\n') {
-            body = body.child(
-                div()
-                    .text_sm()
-                    .text_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(line.to_string()),
-            );
-        }
-        body.id(("shared-media-empty", tab.index() as u64))
+        EmptyState::new(("shared-media-empty", tab.index() as u64), tab_icon(tab))
+            .title(tab.empty_title())
+            .hint(tab.empty_hint(is_channel))
             .into_any_element()
     }
 
@@ -411,5 +348,21 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+}
+
+/// The icon a shared media tab's empty state shows.
+pub(super) fn tab_icon(tab: SharedMediaTab) -> IconName {
+    match tab {
+        SharedMediaTab::Media | SharedMediaTab::Photos => IconName::Image,
+        SharedMediaTab::Videos => IconName::Film,
+        SharedMediaTab::Files => IconName::File,
+        SharedMediaTab::Music => IconName::Music,
+        SharedMediaTab::Links => IconName::Link,
+        SharedMediaTab::Polls => IconName::ChartBar,
+        SharedMediaTab::Voice => IconName::Mic,
+        SharedMediaTab::Gifs => IconName::SquarePlay,
+        SharedMediaTab::Stories => IconName::CircleDashed,
+        SharedMediaTab::Gifts => IconName::Gift,
     }
 }
