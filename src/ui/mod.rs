@@ -561,6 +561,7 @@ mod statistics_posts;
 mod status_emoji;
 mod status_note;
 mod sticker_player;
+mod surface_reveal;
 mod sticker_set_box;
 mod stickers_ui;
 mod stories_menu_ui;
