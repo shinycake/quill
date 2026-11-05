@@ -293,12 +293,6 @@ impl QuillApp {
                         // until the wait expires; the send button shows the
                         // remaining time (`composer_send_button`) and
                         // `ensure_slow_mode_tick` re-renders every second.
-                        .when_some(self.composer_link_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.composer_date_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         .when_some(self.code_language_panel(cx), |this, panel| {
                             this.child(panel)
                         })

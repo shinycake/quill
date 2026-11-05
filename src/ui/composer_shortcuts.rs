@@ -33,6 +33,8 @@ pub(super) struct ComposerLinkDialog {
     /// The text in that range, to detect a draft that changed meanwhile.
     selected: String,
     input: Entity<TextareaState>,
+    /// Focus the field once the dialog has mounted.
+    focus_on_mount: bool,
 }
 
 /// The "Code Language" box (tdesktop `EditCodeLanguageBox`): one field,
@@ -149,11 +151,11 @@ impl QuillApp {
             }
         })
         .detach();
-        input.update(cx, |input, cx| input.focus(window, cx));
         self.composer_ui.link_dialog = Some(ComposerLinkDialog {
             range,
             selected,
             input,
+            focus_on_mount: true,
         });
         cx.notify();
     }
@@ -218,18 +220,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The dialog panel, above the composer input row.
-    pub(super) fn composer_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.composer_ui.link_dialog.as_ref()?;
-        self.composer_link_dialog_panel_body(cx)
+    /// The link field, once, for the dialog to focus after it mounts.
+    pub(super) fn take_link_focus(&mut self) -> Option<Entity<TextareaState>> {
+        let dialog = self.composer_ui.link_dialog.as_mut()?;
+        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
     }
 
-    /// `composer_link_dialog_panel` past its cheap check. A debug build reserves this
-    /// builder's whole frame on entry, so frames that show nothing skip
-    /// it (docs/decisions/main-thread-stack.md).
-    /// The outer function repeats this body's first check; keep the two in step.
-    #[inline(never)]
-    fn composer_link_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The link box's body: what the link is for and the address field.
+    pub(super) fn composer_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.link_dialog.as_ref()?;
         Some(
             div()
@@ -237,44 +235,43 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .p_3()
-                .rounded_md()
-                .border_1()
-                .border_color(accent())
-                .bg(bg_canvas())
                 .child(
                     div()
                         .text_sm()
-                        .font_semibold()
-                        .child(tr(keys::Q_CHAT_ADD_LINK)),
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr_with(
+                            keys::Q_CHAT_LINK_FOR,
+                            &[("selected", &dialog.selected.to_string())],
+                        )),
                 )
-                .child(div().text_xs().opacity(0.7).child(tr_with(
-                    keys::Q_CHAT_LINK_FOR,
-                    &[("selected", &dialog.selected.to_string())],
-                )))
                 .child(Textarea::new(&dialog.input).aria_label(tr(keys::Q_CHAT_LINK_ADDRESS)))
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(
-                            Button::new("composer-link-save")
-                                .label(tr(keys::SETTINGS_SAVE))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_composer_link(window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("composer-link-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_composer_link_dialog(window, cx);
-                                })),
-                        ),
-                )
                 .into_any_element(),
         )
+    }
+
+    /// Cancel and Save under the link box.
+    pub(super) fn composer_link_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("composer-link-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_composer_link_dialog(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("composer-link-save")
+                    .label(tr(keys::SETTINGS_SAVE))
+                    .primary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.apply_composer_link(window, cx);
+                    })),
+            )
+            .into_any_element()
     }
 
     /// Open the "Code Language" box for the block under the caret.

@@ -264,6 +264,7 @@ mod checklists;
 mod collectible_info_ui;
 mod command_shortcuts;
 mod composer;
+mod composer_boxes;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod composer_bundle_tests;
