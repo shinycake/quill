@@ -319,9 +319,16 @@ impl QuillApp {
                         // schedule picker opens above the input.
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
-                        .when(self.composer_ui.schedule_popup_open, |this| {
-                            this.child(self.schedule_popup(cx))
-                        })
+                        // The share box's schedule step shows inside its dialog.
+                        .when(
+                            self.composer_ui.schedule_popup_open
+                                && !self.composer_ui.schedule_picker.as_ref().is_some_and(
+                                    |picker| {
+                                        picker.target == super::scheduled::ScheduleTarget::Share
+                                    },
+                                ),
+                            |this| this.child(self.schedule_popup(cx)),
+                        )
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
@@ -610,9 +617,6 @@ impl QuillApp {
                 open.filter(|_| self.history.pinned_list_open)
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
-            .when(self.share.forward_picker_open, |this| {
-                this.child(self.forward_picker_panel(cx))
-            })
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
             .when(chat_search_open, |this| {
                 this.child(self.chat_search_bar(cx))

@@ -1,4 +1,5 @@
-//! Share box (multi-destination forward), forward bar and "send as" picker.
+//! Share box logic (the box itself is `forward_box`), forward bar and
+//! "send as" picker.
 //!
 //! Mirrors tdesktop's `ShareBox` (boxes/share_box.cpp), `ForwardPanel`
 //! (history/view/controls/history_view_forward_panel.cpp) and
@@ -9,88 +10,19 @@
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
 use super::pressable::PressableDiv;
-use super::scheduled::ScheduleTarget;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
-use quill::lang::{keys, tr, tr_with, trn, trn_with};
-use quill::schedule::ScheduleKind;
+use quill::lang::{keys, tr, tr_with};
 use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
 use quill::telegram::envelope::{ChatKind, MessageSender};
 use std::path::PathBuf;
-
-/// Tick circle of a share box row.
-fn share_check(id: ChatId, checked: bool) -> impl IntoElement {
-    div()
-        .id(("share-check", id.0 as u64))
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded_full()
-        .border_1()
-        .border_color(accent_strong())
-        .bg(if checked {
-            accent_strong()
-        } else {
-            bg_black().opacity(0.0)
-        })
-        .text_color(text_bright())
-        .size(px(20.))
-        .when(checked, |this| {
-            this.child(Icon::new(gpui_kit::assets::IconName::Check).small())
-        })
-}
-
-fn share_dest_row(
-    id: ChatId,
-    title: String,
-    photo: Option<PathBuf>,
-    checked: bool,
-    cx: &mut Context<QuillApp>,
-) -> impl IntoElement {
-    div()
-        .id(("share-dest", id.0 as u64))
-        .flex()
-        .items_center()
-        .gap_2()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .role(gpui_kit::Role::Button)
-        .a11y_tag(quill::agent::ui_driver::redact::chat_tag(id.0))
-        .aria_label(format!(
-            "{title}, {}",
-            if checked {
-                "selected"
-            } else {
-                tr(keys::Q_OPS_NOT_SELECTED)
-            }
-        ))
-        .tab_index(0)
-        .cursor_pointer()
-        .pressable(cx.theme())
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.toggle_share_destination(id, cx);
-        }))
-        .child(share_check(id, checked))
-        .child(chat_avatar(&title, photo.as_deref(), 28.))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .font_medium()
-                .child(super::bidi_line::one_line_plain(title)),
-        )
-}
 
 impl QuillApp {
     pub(super) fn toggle_share_destination(&mut self, id: ChatId, cx: &mut Context<Self>) {
@@ -347,6 +279,35 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "Hide sender name": forward as copies (`forwardMessages.send_copy`);
+    /// showing names again shows captions too.
+    pub(super) fn set_forward_send_copy(&mut self, on: bool, cx: &mut Context<Self>) {
+        if let Some(draft) = self.share.pending_forward.as_mut() {
+            draft.send_copy = on;
+            if !on {
+                draft.remove_caption = false;
+            }
+        }
+        cx.notify();
+    }
+
+    fn forward_remove_caption(&self) -> bool {
+        self.share
+            .pending_forward
+            .as_ref()
+            .is_some_and(|draft| draft.remove_caption)
+    }
+
+    /// "Hide captions" (`remove_caption`), which only copies can drop.
+    pub(super) fn toggle_forward_remove_caption(&mut self, cx: &mut Context<Self>) {
+        if let Some(draft) = self.share.pending_forward.as_mut()
+            && draft.send_copy
+        {
+            draft.remove_caption = !draft.remove_caption;
+        }
+        cx.notify();
+    }
+
     /// "Hide sender name" / "Hide captions" (`forwardMessages.send_copy` /
     /// `remove_caption`; captions only drop on copies).
     fn forward_option_checkboxes(&self, prefix: &'static str, cx: &mut Context<Self>) -> Div {
@@ -375,13 +336,7 @@ impl QuillApp {
                     })
                     .checked(send_copy)
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        if let Some(draft) = this.share.pending_forward.as_mut() {
-                            draft.send_copy = on;
-                            if !on {
-                                draft.remove_caption = false;
-                            }
-                        }
-                        cx.notify();
+                        this.set_forward_send_copy(on, cx);
                     })),
             )
             .child(
@@ -394,203 +349,10 @@ impl QuillApp {
                     .checked(remove_caption)
                     .disabled(!send_copy)
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        if let Some(draft) = this.share.pending_forward.as_mut()
-                            && draft.send_copy
-                        {
-                            draft.remove_caption = on;
+                        if this.forward_remove_caption() != on {
+                            this.toggle_forward_remove_caption(cx);
                         }
-                        cx.notify();
                     })),
-            )
-    }
-
-    /// The share box: search, ticked destinations, comment and the send
-    /// choices (Send, Send without sound, Schedule, Copy link).
-    pub(super) fn forward_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let query = self.share.search_input.read(cx).value().to_string();
-        let draft = self.forward_draft();
-        let count = draft.as_ref().map(|d| d.count()).unwrap_or(0);
-        let from_title = draft
-            .as_ref()
-            .and_then(|d| {
-                self.session()
-                    .and_then(|s| s.chats.get(&d.from_chat_id.0).map(|c| c.title.clone()))
-            })
-            .unwrap_or_else(|| tr(keys::Q_OPS_THIS_CHAT).into());
-        let session = self.session();
-        let dests: Vec<(ChatId, String, Option<PathBuf>)> = session
-            .map(|session| {
-                session
-                    .share_destinations(&query)
-                    .into_iter()
-                    .map(|chat| {
-                        let photo = session.chat_photo_path(chat.id).map(PathBuf::from);
-                        (chat.id, chat.title.clone(), photo)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let searching = session.is_some_and(|s| s.messages.share_search.is_searching());
-        let selected = self.share.selection.len();
-        let single_saved = self
-            .share
-            .selection
-            .single()
-            .and_then(|id| session.map(|s| s.is_saved_messages(id)))
-            .unwrap_or(false);
-        let schedule_label = match ScheduleKind::for_saved_messages(single_saved) {
-            ScheduleKind::Reminder => tr(keys::Q_OPS_REMIND_ME),
-            ScheduleKind::Schedule => tr(keys::Q_OPS_SCHEDULE),
-        };
-        let heading = if count == 1 {
-            tr_with(
-                keys::Q_OPS_FORWARD_1_MESSAGE_FROM,
-                &[("from_title", &from_title.to_string())],
-            )
-        } else {
-            trn_with(
-                keys::Q_OPS_FORWARD_MESSAGES_FROM,
-                count,
-                &[("from_title", &from_title.to_string())],
-            )
-        };
-        let summary = match selected {
-            0 => tr(keys::Q_OPS_CHOOSE_ONE_OR_MORE_CHATS).to_string(),
-            1 => tr(keys::Q_OPS_1_CHAT_SELECTED).to_string(),
-            n => trn(keys::Q_OPS_CHATS_SELECTED, n),
-        };
-        let mut list = div()
-            .id("forward-dest-list")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .max_h(px(220.))
-            .overflow_y_scroll();
-        if dests.is_empty() {
-            list = list.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(if searching {
-                        tr(keys::Q_OPS_SEARCHING)
-                    } else {
-                        tr(keys::Q_OPS_NO_MATCHING_CHATS)
-                    }),
-            );
-        } else {
-            for (id, title, photo) in dests {
-                let checked = self.share.selection.contains(id);
-                list = list.child(share_dest_row(id, title, photo, checked, cx));
-            }
-        }
-        let can_link = count == 1 && self.live.is_some();
-        div()
-            .id("forward-picker")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .text_color(accent())
-                            .child(tr(keys::Q_OPS_FORWARD_TO)),
-                    )
-                    .child(
-                        Button::new("cancel-forward-picker")
-                            .label(tr(keys::CANCEL))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.close_forward_picker(window, cx);
-                            })),
-                    ),
-            )
-            .child(div().text_xs().text_color(text_primary()).child(heading))
-            .child(
-                Textarea::new(&self.share.search_input)
-                    .aria_label(tr(keys::Q_OPS_SEARCH_FORWARDING_DESTINATIONS))
-                    .h(px(36.)),
-            )
-            .child(list)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(summary),
-            )
-            .child(
-                Textarea::new(&self.share.comment_input)
-                    .aria_label(tr(keys::Q_OPS_COMMENT))
-                    .h(px(36.)),
-            )
-            .child(self.forward_option_checkboxes("forward-option", cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .when(can_link, |row| {
-                        row.child(
-                            Button::new("share-copy-link")
-                                .label(tr(keys::CONTEXT_COPY_LINK))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.share_copy_link(cx);
-                                })),
-                        )
-                    })
-                    .child(div().flex_1())
-                    // tdesktop `ShareBox::createButtons`: Send exists only
-                    // while a chat is ticked, so no disabled copies here.
-                    .when(selected > 0, |row| {
-                        row.child(
-                            Button::new("share-schedule")
-                                .label(schedule_label)
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_schedule_picker(ScheduleTarget::Share, window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("share-silent")
-                                .label(tr(keys::Q_OPS_SEND_WITHOUT_SOUND))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_share(ShareSend::Silent, cx);
-                                })),
-                        )
-                    })
-                    .when(selected == 1, |row| {
-                        row.child(
-                            Button::new("share-continue")
-                                .label(tr(keys::Q_OPS_OPEN_CHAT))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.share_continue_in_chat(window, cx);
-                                })),
-                        )
-                    })
-                    .when(selected > 0, |row| {
-                        row.child(
-                            Button::new("share-send")
-                                .label(tr(keys::SHARE_CONFIRM))
-                                .primary()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_share(ShareSend::Normal, cx);
-                                })),
-                        )
-                    }),
             )
     }
 

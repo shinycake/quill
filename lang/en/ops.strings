@@ -616,10 +616,7 @@
 "qll_ops_for" = "{noun} for {when}, {repeat_period_text}";
 "qll_ops_format" = "Format";
 "qll_ops_forward" = "Forward";
-"qll_ops_forward_1_message_from" = "Forward 1 message from {from_title}";
 "qll_ops_forward_bar_ready_press_send" = "forward bar ready — press Send";
-"qll_ops_forward_messages_from#one" = "Forward {count} message from {from_title}";
-"qll_ops_forward_messages_from#other" = "Forward {count} messages from {from_title}";
 "qll_ops_forward_to" = "Forward to…";
 "qll_ops_forwarding" = "forwarding…";
 "qll_ops_france" = "France";
@@ -761,6 +758,7 @@
 "qll_ops_no_storage_data_yet" = "No storage data yet.";
 "qll_ops_not_available" = "Not available";
 "qll_ops_not_selected" = "not selected";
+"qll_ops_selected" = "selected";
 "qll_ops_note_only_visible_to_you" = "Note (only visible to you)";
 "qll_ops_nothing_has_been_sent_or" = "Nothing has been sent or received yet.";
 "qll_ops_nothing_to_cancel" = "nothing to cancel";
@@ -975,7 +973,6 @@
 "qll_ops_the_media_will_unlock_for" = "The media will unlock for {price} Stars";
 "qll_ops_the_time_zones_are_still" = "The time zones are still loading.";
 "qll_ops_this_cant_be_undone" = "This can't be undone.";
-"qll_ops_this_chat" = "this chat";
 "qll_ops_this_is_a_one_time" = "This is a one-time process using your phone's camera. Open the verification bot in Telegram for Android or iOS. Your selfie will not be stored by Telegram.";
 "qll_ops_this_message_cannot_be_forwarded" = "This message cannot be forwarded to secret chats.";
 "qll_ops_thread_info" = "Thread info";

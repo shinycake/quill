@@ -137,6 +137,7 @@ impl QuillApp {
             return;
         }
         self.share.forward_picker_open = true;
+        self.share.focus_search = true;
         self.share.selection.clear();
         self.share
             .comment_input
@@ -145,19 +146,23 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_TO_2)));
         cx.notify();
     }
 
     pub(super) fn close_forward_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .composer_ui
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target == super::scheduled::ScheduleTarget::Share)
+        {
+            self.close_schedule_picker(cx);
+        }
         self.share.forward_picker_open = false;
         self.share.selection.clear();
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_PICKER_CLOSED)));
         cx.notify();
     }
 

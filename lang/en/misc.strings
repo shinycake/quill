@@ -282,10 +282,8 @@
 "qll_misc_font_family" = "Font family";
 "qll_misc_forgot_password" = "Forgot password?";
 "qll_misc_forward_cancelled" = "forward cancelled";
-"qll_misc_forward_picker_closed" = "forward picker closed";
 "qll_misc_forward_result_dismissed" = "forward result dismissed";
 "qll_misc_forward_to" = "Forward to…";
-"qll_misc_forward_to_2" = "forward to…";
 "qll_misc_forwarded_from" = "Forwarded from {name}";
 "qll_misc_forwarded_from_2" = "Forwarded from";
 "qll_misc_forwarded_message" = "Forwarded message";

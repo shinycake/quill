@@ -68,6 +68,16 @@ impl Session {
             .into_iter()
             .filter(|chat| Self::can_share_to(chat))
             .collect();
+        // tdesktop's forward box lists Saved Messages first
+        // (`ShowForwardMessagesBox` pushes `session->user()` before the
+        // dialogs).
+        if let Some(index) = result
+            .iter()
+            .position(|chat| self.is_saved_messages(chat.id))
+            && let Some(saved) = (index > 0).then(|| result.remove(index))
+        {
+            result.insert(0, saved);
+        }
         if query.trim().is_empty() || self.messages.share_search.query != query.trim() {
             return result;
         }
@@ -87,6 +97,40 @@ impl Session {
             }
         }
         result
+    }
+
+    /// The second line of a share box row (tdesktop `PeerListRow` status):
+    /// presence for a person, "bot" for a bot, the member count for a group
+    /// or channel, nothing for Saved Messages. The flag marks "online",
+    /// which tdesktop draws in the accent color.
+    pub fn share_row_status(&self, chat: &ChatSummary) -> Option<(String, bool)> {
+        use crate::telegram::envelope::ChatKind;
+        if self.is_saved_messages(chat.id) {
+            return None;
+        }
+        match chat.kind {
+            ChatKind::Private { user_id } | ChatKind::Secret { user_id, .. } => {
+                let user = self.user(user_id.0)?;
+                if user.is_bot {
+                    return Some((
+                        crate::lang::tr(crate::lang::keys::STATUS_BOT).to_string(),
+                        false,
+                    ));
+                }
+                let line = user.status.display();
+                (!line.is_empty()).then(|| (line, user.status.is_online()))
+            }
+            ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. } => {
+                let (members, _) = self.group_member_counts(chat)?;
+                (members > 0).then(|| {
+                    (
+                        crate::inline_members::member_status_line(members, chat.is_channel(), 0),
+                        false,
+                    )
+                })
+            }
+            ChatKind::Unknown => None,
+        }
     }
 
     /// Distinct original senders of the forwarded messages, in order, for
@@ -199,3 +243,7 @@ impl Session {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "share_rows_tests.rs"]
+mod share_rows_tests;
