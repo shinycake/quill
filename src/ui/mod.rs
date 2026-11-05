@@ -251,6 +251,8 @@ mod chat_list_keys;
 mod chat_list_keys_tests;
 mod chat_look_ui;
 mod chat_row;
+mod chat_setting_dialogs;
+mod chat_setting_dialogs_demo;
 mod chat_swipe_ui;
 mod chat_wide_ui;
 mod chatlist_global;

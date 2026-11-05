@@ -27,6 +27,9 @@ impl QuillApp {
             0
         };
         self.set_step_slider(StepSlider::AutoDelete, start, cx);
+        // One of a chat's setting dialogs at a time.
+        self.close_mute_menu(cx);
+        self.folders.menu_open = false;
         self.notify.ttl_picker_open = true;
         cx.notify();
     }
@@ -41,6 +44,19 @@ impl QuillApp {
             .unwrap_or(0)
     }
 
+    /// The picker dialog's title: the self-destruct timer for a secret chat.
+    pub(in crate::ui) fn ttl_picker_title(&self) -> &'static str {
+        let secret = self
+            .session()
+            .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
+            .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
+        if secret {
+            tr(keys::SETTINGS_TTL_AFTER_SUBTITLE)
+        } else {
+            tr(keys::Q_PREFS_AUTO_DELETE_TIMER)
+        }
+    }
+
     pub(in crate::ui) fn ttl_picker_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open_chat = session.as_ref().and_then(|s| s.open_chat);
@@ -51,11 +67,6 @@ impl QuillApp {
         let current = open_chat_summary
             .and_then(|chat| chat.ttl_status_line())
             .unwrap_or_else(|| tr(keys::SETTINGS_TTL_AFTER_OFF).to_string());
-        let title = if is_secret {
-            tr(keys::SETTINGS_TTL_AFTER_SUBTITLE)
-        } else {
-            tr(keys::Q_PREFS_AUTO_DELETE_TIMER)
-        };
         let about = if is_secret {
             tr(keys::Q_PREFS_MESSAGES_AUTO_DELETE_AFTER_THE).to_string()
         } else {
@@ -72,30 +83,7 @@ impl QuillApp {
             .id("ttl-picker")
             .flex()
             .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().font_semibold().child(title))
-                    .child(
-                        Button::new("close-ttl-picker")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .tooltip(tr(keys::CLOSE))
-                            .accessibility_label(tr(keys::CLOSE))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.notify.ttl_picker_open = false;
-                                cx.notify();
-                            })),
-                    ),
-            )
+            .gap_3()
             .child(
                 div()
                     .text_xs()

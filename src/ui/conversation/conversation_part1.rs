@@ -593,18 +593,6 @@ impl QuillApp {
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
             .children(self.saved_tags_bar(cx))
             .when_some(self.bot_info_panel(cx), |this, panel| this.child(panel))
-            .when(self.notify.mute_menu_open, |this| {
-                this.child(self.mute_menu_panel(cx))
-            })
-            // Phase B4: self-destruct / auto-delete timer picker below
-            // the header.
-            .when(self.notify.ttl_picker_open, |this| {
-                this.child(self.ttl_picker_panel(cx))
-            })
-            // Parity slice: per-chat folder picker below the header.
-            .when(self.folders.menu_open, |this| {
-                this.child(self.folder_menu_panel(cx))
-            })
             .children(
                 open.map(|chat_id| self.chat_top_bars(chat_id, cx))
                     .unwrap_or_default(),

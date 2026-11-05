@@ -208,6 +208,8 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn open_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.close_mute_menu(cx);
+        self.notify.ttl_picker_open = false;
         self.folders.menu_open = true;
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
@@ -297,37 +299,7 @@ impl QuillApp {
     pub(in crate::ui) fn folder_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let open = session.as_ref().and_then(|s| s.open_chat);
-        let mut panel = div()
-            .id("folder-menu")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .px_4()
-            .py_2()
-            .border_b_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().sidebar)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .font_semibold()
-                            .child(tr(keys::Q_CHATLIST_CHAT_FOLDERS)),
-                    )
-                    .child(
-                        Button::new("close-folder-menu")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .tooltip(tr(keys::CLOSE))
-                            .accessibility_label(tr(keys::CLOSE))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_folder_menu(cx);
-                            })),
-                    ),
-            );
+        let mut panel = div().id("folder-menu").flex().flex_col().gap_1();
         let (Some(session), Some(chat_id)) = (session, open) else {
             return panel
                 .child(
