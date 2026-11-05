@@ -136,8 +136,6 @@ pub struct PollDialog {
     /// The custom deadline box, while it is open.
     pub(crate) deadline_box: Option<DeadlineBox>,
     pub(crate) confirming_discard: bool,
-    /// The window's height at the last frame, to cap the panel.
-    pub(crate) viewport_height: Pixels,
     baseline: Option<PollToggles>,
 }
 
@@ -216,7 +214,6 @@ impl PollDialog {
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
             deadline_box: None,
             confirming_discard: false,
-            viewport_height: window.viewport_size().height,
             baseline: None,
         };
         dialog.baseline = Some(dialog.toggles());

@@ -81,7 +81,6 @@ impl Render for QuillApp {
         self.sync_emoji_style(cx);
         let image_cache = self.slices.image_cache();
         self.sync_capture_block(window);
-        self.sync_poll_dialog_height(window);
         self.sync_viewer_hdr(window);
         self.sync_speech_trial_hint(window, cx);
         self.sync_window_title(window);

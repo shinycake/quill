@@ -507,12 +507,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Keep the poll panel's height cap in step with the window.
-    pub(super) fn sync_poll_dialog_height(&mut self, window: &Window) {
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
-            dialog.viewport_height = window.viewport_size().height;
-        }
-    }
 
     pub(super) fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.poll_dialog = None;
