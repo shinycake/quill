@@ -244,6 +244,7 @@ pub(super) fn sponsored_message_row(
         .id(("sponsored-row", row_id))
         .flex()
         .flex_col()
+        .max_w(px(room.outer() as f32))
         .gap_1()
         .px_3()
         .py_2()
