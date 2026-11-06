@@ -732,14 +732,14 @@ impl QuillApp {
             .flex_col()
             .gap_2()
             .child(
-                Textarea::new(&dialog.description_input)
-                    .aria_label(tr(keys::Q_MEDIA_POLL_DESCRIPTION))
-                    .h(px(40.)),
-            )
-            .child(
                 Textarea::new(&dialog.question_input)
                     .aria_label(tr(keys::Q_MEDIA_POLL_QUESTION))
                     .h(px(64.)),
+            )
+            .child(
+                Textarea::new(&dialog.description_input)
+                    .aria_label(tr(keys::Q_MEDIA_POLL_DESCRIPTION))
+                    .h(px(40.)),
             );
         let is_quiz = dialog.is_quiz;
         let quiz_correct_rows = dialog.quiz_correct_rows.clone();
@@ -783,8 +783,9 @@ impl QuillApp {
             if dialog.option_inputs.len() > POLL_OPTIONS_MIN {
                 row = row.child(
                     Button::new(format!("poll-remove-option-{index}"))
-                        .label("✕")
+                        .icon(gpui_kit::assets::IconName::X)
                         .ghost()
+                        .accessibility_label(tr(keys::Q_MEDIA_REMOVE_OPTION))
                         .tooltip(tr(keys::Q_MEDIA_REMOVE_OPTION))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.remove_poll_option_row(index, cx);
@@ -799,8 +800,11 @@ impl QuillApp {
         if dialog.option_inputs.len() < POLL_OPTIONS_MAX {
             panel = panel.child(
                 Button::new("poll-add-option")
+                    .icon(gpui_kit::assets::IconName::Plus)
                     .label(tr(keys::Q_MEDIA_ADD_OPTION))
                     .ghost()
+                    .self_start()
+                    .text_color(cx.theme().primary)
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.add_poll_option_row(window, cx);
                     })),
