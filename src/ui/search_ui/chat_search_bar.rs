@@ -589,99 +589,6 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
-        let mut types = Vec::new();
-        if tab.has_chat_type() {
-            // "Channels" is a tab of its own.
-            for kind in SearchChatType::ALL
-                .into_iter()
-                .filter(|kind| *kind != SearchChatType::Channels)
-            {
-                types.push(
-                    Self::filter_chip(
-                        ("search-filter-type", kind as u64),
-                        kind.label(),
-                        filters.chat_type == kind,
-                        move |this, _, cx| {
-                            let mut next = this
-                                .session()
-                                .map(|s| s.search.search.filters)
-                                .unwrap_or_default();
-                            next.chat_type = kind;
-                            this.set_search_filters(next, cx);
-                        },
-                        cx,
-                    )
-                    .into_any_element(),
-                );
-            }
-        }
-        types.push(
-            Self::filter_chip(
-                "search-filter-archived",
-                tr(keys::SEARCH_FILTER_FROM_ARCHIVE),
-                filters.archived,
-                move |this, _, cx| {
-                    let mut next = this
-                        .session()
-                        .map(|s| s.search.search.filters)
-                        .unwrap_or_default();
-                    next.archived = !next.archived;
-                    this.set_search_filters(next, cx);
-                },
-                cx,
-            )
-            .into_any_element(),
-        );
-        let mut dates = Vec::new();
-        for range in SearchDateRange::ALL {
-            dates.push(
-                Self::filter_chip(
-                    ("search-filter-date", range as u64),
-                    range.label(),
-                    filters.date == range,
-                    move |this, _, cx| {
-                        let mut next = this
-                            .session()
-                            .map(|s| s.search.search.filters)
-                            .unwrap_or_default();
-                        next.date = range;
-                        this.set_search_filters(next, cx);
-                    },
-                    cx,
-                )
-                .into_any_element(),
-            );
-        }
-        let muted = cx.theme().muted_foreground;
-        let group = |label: &'static str, chips: Vec<AnyElement>| {
-            div()
-                .flex()
-                .items_start()
-                .gap_1()
-                .child(
-                    div()
-                        .w(px(56.))
-                        .flex_none()
-                        // Same height as an xsmall chip, so the label sits on
-                        // the chips' first line.
-                        .h_5()
-                        .flex()
-                        .items_center()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap_1()
-                        .children(chips),
-                )
-        };
         // Apps and Posts have no chat-type, archive or date narrowing.
         let narrowing = tab.searches_messages();
         Some(
@@ -690,12 +597,19 @@ impl QuillApp {
                 .flex_col()
                 .gap_1()
                 .child(strip)
-                .when(!scopes.is_empty(), |this| {
-                    this.child(group(tr(keys::Q_CHAT_SEARCH), scopes))
-                })
-                .when(narrowing, |this| {
-                    this.child(group(tr(keys::RECENT_CHATS), types))
-                        .child(group(tr(keys::Q_CHAT_DATE), dates))
+                .when(!scopes.is_empty() || narrowing, |this| {
+                    this.child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_1()
+                            .children(scopes)
+                            .when(narrowing, |row| {
+                                row.child(Self::search_type_menu(filters, tab, cx))
+                                    .child(Self::search_date_menu(filters, cx))
+                            }),
+                    )
                 })
                 .into_any_element(),
         )
