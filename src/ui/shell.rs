@@ -565,7 +565,6 @@ mod tests {
         DialogKind::ReceivedGifts,
         DialogKind::PremiumFeatures,
         DialogKind::Marketplace,
-        DialogKind::CreateChat,
         DialogKind::Restrict,
         DialogKind::Member,
         DialogKind::Permissions,
@@ -578,6 +577,8 @@ mod tests {
         DialogKind::ForumManage,
         DialogKind::SavedTagName,
         DialogKind::FactCheck,
+        // Moved here (5450) so the photo crop and video editor show over it.
+        DialogKind::CreateChat,
         DialogKind::PollVoters,
         DialogKind::MessageReport,
         DialogKind::StickerSet,
@@ -606,6 +607,32 @@ mod tests {
             .filter(|kind| LEGACY_ORDER.contains(kind))
             .collect();
         assert_eq!(order, LEGACY_ORDER);
+    }
+
+    #[test]
+    fn the_photo_crop_and_video_editor_show_over_every_photo_owner() {
+        // A dialog that hands a picked photo to the crop or video editor
+        // must rank after them, or the editor never shows and the photo
+        // is dropped (New Group did, before 5450).
+        let priority = |kind: DialogKind| {
+            registry()
+                .iter()
+                .find(|spec| spec.kind == kind)
+                .map(|spec| spec.priority)
+        };
+        let editors = [DialogKind::ProfilePhotoCrop, DialogKind::VideoEditor].map(priority);
+        for owner in [
+            DialogKind::CreateChat,
+            DialogKind::GroupEditBox,
+            DialogKind::EditProfile,
+        ] {
+            for editor in editors {
+                assert!(
+                    priority(owner) > editor,
+                    "{owner:?} outranks a photo editor"
+                );
+            }
+        }
     }
 
     #[test]

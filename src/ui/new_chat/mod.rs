@@ -510,10 +510,10 @@ impl QuillApp {
 }
 
 crate::ui::shell::register_dialogs! {
-    // Under the photo crop (5444) and the video editor, which show over
-    // it and hand it back.
+    // Lower wins, so this sits after the video editor (5442) and the
+    // photo crop (5444): they show over it and hand the photo back.
     CreateChat => DialogSpec::new(
-        4200,
+        5450,
         |app| app.new_chat_dialog().is_some(),
         QuillApp::build_new_chat_dialog,
     ),
