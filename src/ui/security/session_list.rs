@@ -526,14 +526,14 @@ impl QuillApp {
 
 crate::ui::shell::register_dialogs! {
     SessionDetails => DialogSpec::new(
-        610,
+        614,
         |app| app.details_session().is_some(),
         QuillApp::build_session_details_dialog,
     )
     .closes(|app, _, cx| app.close_session_details(cx)),
 
     SessionsConfirm => DialogSpec::new(
-        620,
+        615,
         |app| app.privacy.sessions_confirm.is_some(),
         QuillApp::build_sessions_confirm_dialog,
     ),
