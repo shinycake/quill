@@ -177,3 +177,12 @@ trimming, `capture_scene`, `built_in_library` and the one setup retry. Upstream
 also made `render_to_image` render offscreen, so the float texture readback is
 gone: a capture is always `BGRA8Unorm`. `src/thermal.rs` became upstream's
 `process_info.rs`, whose test keeps its plain `cfg(test)`.
+
+The Quill project also changed it in 2026 so a launch's first frame does not
+rasterize its text again (`docs/decisions/launch-time-macos-appkit.md`):
+`src/glyph_cache.rs` holds the glyph bitmaps the last launch drew, keyed by
+the font's PostScript name and the render parameters. The app calls `load`
+before the first window draws and `save` once its first full frame is up.
+`AppleTextSystemState::rasterize_glyph` takes a bitmap from there when its
+size matches the glyph's raster bounds, and records every bitmap it draws
+until `save`. Without a `load` call nothing changes.

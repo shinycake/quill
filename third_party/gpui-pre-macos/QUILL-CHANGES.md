@@ -189,3 +189,5 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
 - `src/gpui_macos.rs`: `on_frame_presented` sets a hook that `draw` in
   `src/window.rs` calls after each presented frame, so Quill's startup trace
   can mark when the first frames reach the screen.
+- `src/gpui_macos.rs`: re-exports `gpui_apple::glyph_cache` (with the
+  `font-kit` feature) so the app can load and save the launch glyph cache.

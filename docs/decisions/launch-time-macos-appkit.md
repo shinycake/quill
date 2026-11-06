@@ -104,3 +104,24 @@ slower) and sending `loadChats` with the open request (401 Unauthorized).
 What is left on the warm path is drawing that first frame, about 80 ms: color emoji
 rasterized on the main thread on atlas misses (about 20 ms), layout (about 20 ms), line
 shaping (about 13 ms) and the Core Animation commit (about 18 ms).
+
+## Round 3: glyphs from the last launch
+Drawing the first frame took about 80 ms. A third of it went to Core Text rasterizing every
+glyph and color emoji the chat list shows, one at a time on the main thread, because the
+glyph atlas starts empty. Those are the same glyphs on almost every launch.
+
+The macOS text system now keeps them (`gpui-pre-apple/src/glyph_cache.rs`). The prewarm
+worker reads `<app data>/launch-glyphs.bin` before the first frame. The frame after the
+chat list has drawn writes every bitmap rasterized or reused so far back to that file, on a
+worker; recording then stops and unused bitmaps are dropped. A bitmap is named by the
+font's PostScript name and all the render parameters (size, scale, subpixel offset,
+dilation, emoji), and is used only when its size matches the glyph's raster bounds. The
+file carries the OS build and the executable's modification time, so an OS or Quill update
+starts over. The file was about 220 KB for the real account.
+
+In a System Trace of a warm launch, glyph and emoji rasterization went from about 35 of the
+first frame's samples to none, and the frame drew in about 29 ms instead of about 50.
+
+Tried and dropped: shaping and drawing a line of mixed scripts and emoji on the prewarm
+worker to load Core Text's font fallback and the emoji font early. The first frame's font
+fallback work did not shrink, because it is per string, not first-use.

@@ -64,6 +64,10 @@ pub fn present_timing(
     }
 }
 
+/// Quill: glyph bitmaps kept between launches (`gpui_apple::glyph_cache`).
+#[cfg(feature = "font-kit")]
+pub use gpui_apple::glyph_cache;
+
 static PRESENT_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 
 /// Quill: `hook` runs on the main thread each time a window has handed a

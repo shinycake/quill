@@ -747,6 +747,15 @@ impl QuillApp {
                 }
             }
             SliceKind::Sidebar => {
+                if quill::launch_prewarm::glyphs_pending()
+                    && self
+                        .session()
+                        .is_some_and(|session| !session.main_order.is_empty())
+                {
+                    // Once this frame has drawn the chats, its glyphs are kept
+                    // for the next launch's first frame.
+                    window.on_next_frame(|_, _| quill::launch_prewarm::chat_list_drawn());
+                }
                 if quill::startup_trace::enabled()
                     && self
                         .session()
