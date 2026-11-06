@@ -219,10 +219,6 @@ pub fn accent_strong() -> Rgba {
     pick_key(K::WindowBgActive, 0x1f6feb, 0x0969da, Some(0xb3d91))
 }
 #[inline]
-pub fn accent_light() -> Rgba {
-    pick(0x2f81f7, 0x2f81f7, Some(0xffd60a))
-}
-#[inline]
 pub fn accent_info() -> Rgba {
     pick_key(K::WindowActiveTextFg, 0x9ecbff, 0x0969da, Some(0xffd60a))
 }

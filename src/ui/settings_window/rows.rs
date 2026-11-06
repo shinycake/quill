@@ -11,7 +11,7 @@ use gpui_kit::*;
 
 /// A titled group of rows on an outlined surface (the fill is too close to
 /// the page in dark themes).
-pub(super) fn group(
+pub(in crate::ui) fn group(
     title: Option<&'static str>,
     rows: impl IntoIterator<Item = AnyElement>,
 ) -> GroupBox {
@@ -68,7 +68,7 @@ pub(in crate::ui) fn link_row(
 
 /// A row that acts at once (Log out): icon and title in the danger color,
 /// no chevron.
-pub(super) fn danger_row(
+pub(in crate::ui) fn danger_row(
     id: impl Into<ElementId>,
     icon: IconName,
     title: &'static str,
