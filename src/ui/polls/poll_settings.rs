@@ -114,6 +114,8 @@ impl QuillApp {
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_w_0()
                     .child(div().text_sm().child(title))
                     .child(div().text_xs().text_color(muted).child(about)),
             )
