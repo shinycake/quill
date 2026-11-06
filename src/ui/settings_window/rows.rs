@@ -11,7 +11,7 @@ use gpui_kit::*;
 
 /// A titled group of rows on an outlined surface (the fill is too close to
 /// the page in dark themes).
-pub(super) fn group(
+pub(in crate::ui) fn group(
     title: Option<&'static str>,
     rows: impl IntoIterator<Item = AnyElement>,
 ) -> GroupBox {
@@ -66,9 +66,55 @@ pub(in crate::ui) fn link_row(
         .into_any_element()
 }
 
+/// A link row with a second line under the title: what the row opens is
+/// set to now (an auto-download network's caps, an export in progress).
+pub(in crate::ui) fn detail_row(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    caption: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Button {
+    let title: SharedString = title.into();
+    Button::new(id)
+        .ghost()
+        .w_full()
+        .h_auto()
+        .accessibility_label(title.clone())
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .w_full()
+                .py(px(6.))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_sm().truncate().child(title))
+                        .child(
+                            div()
+                                .text_xs()
+                                .truncate()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(caption.into()),
+                        ),
+                )
+                .child(
+                    Icon::new(IconName::ChevronRight)
+                        .size_4()
+                        .text_color(cx.theme().muted_foreground),
+                ),
+        )
+        .on_click(on_click)
+}
+
 /// A row that acts at once (Log out): icon and title in the danger color,
 /// no chevron.
-pub(super) fn danger_row(
+pub(in crate::ui) fn danger_row(
     id: impl Into<ElementId>,
     icon: IconName,
     title: &'static str,

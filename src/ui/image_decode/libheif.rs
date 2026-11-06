@@ -25,8 +25,8 @@ impl HeifError {
         match self.code {
             0 => Ok(()),
             // `heif_error_Unsupported_filetype` / `_Unsupported_feature` /
-            // `_Plugin_loading_error`: no codec plugin for this file (libheif
-            // without libde265, or a decoder plugin that fails to load).
+            // `_Plugin_loading_error`: no codec plugin for this file
+            // (libheif without libde265, or a plugin that failed to load).
             3 | 4 | 11 => Err(DecodeError::Unsupported),
             code => Err(DecodeError::Failed(format!("libheif error {code}"))),
         }

@@ -821,6 +821,7 @@ pub(super) fn demo_file_json(id: i32, path: &str, completed: bool) -> String {
 /// screenshot demo — the current device, two other sessions, and one
 /// incomplete login attempt (injected, no live Telegram).
 pub(super) fn demo_sessions() -> Vec<ParsedSession> {
+    use quill::telegram::envelope::SessionDevice;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i32)
@@ -833,6 +834,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
+            device_type: SessionDevice::Desktop,
             device_model: "ThinkPad X1 Carbon".into(),
             application_name: "Quill".into(),
             application_version: "0.1.0".into(),
@@ -851,6 +853,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             is_unconfirmed: false,
             can_accept_secret_chats: true,
             can_accept_calls: false,
+            device_type: SessionDevice::Phone,
             device_model: "iPhone 15 Pro".into(),
             application_name: "Quill".into(),
             application_version: "0.1.0".into(),
@@ -869,6 +872,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: true,
+            device_type: SessionDevice::Phone,
             device_model: "Pixel 8".into(),
             application_name: "Quill".into(),
             application_version: "0.0.9".into(),
@@ -887,6 +891,7 @@ pub(super) fn demo_sessions() -> Vec<ParsedSession> {
             is_unconfirmed: false,
             can_accept_secret_chats: false,
             can_accept_calls: false,
+            device_type: SessionDevice::Other,
             device_model: "".into(),
             application_name: "".into(),
             application_version: "".into(),

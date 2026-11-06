@@ -165,7 +165,12 @@ gpui_kit::assets::icon_assets!(
         Music,
         CircleDashed,
         ArrowDownLeft,
-        ArrowUpRight
+        ArrowUpRight,
+        // Session device pictures and the session box (`ui::security::session_list`).
+        Smartphone,
+        Tablet,
+        Laptop,
+        AppWindow
     ]
 );
 

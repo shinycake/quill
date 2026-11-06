@@ -1,10 +1,12 @@
 //! New Group / New Channel: the group's Next leads to the members step and
 //! back, an empty name blocks the first step, and a created channel walks
-//! the type and subscribers steps into the new chat.
+//! the type and subscribers steps into the new chat. A picked photo goes
+//! through the crop shown over the dialog and lands on it.
 
 use super::demo::NEW_CHANNEL;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
+use crate::ui::profile_photo_sources::PhotoTarget;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -107,4 +109,24 @@ fn a_created_channel_walks_type_and_subscribers(cx: &mut TestAppContext) {
         app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat)),
         Some(chat)
     );
+}
+
+#[gpui_kit::test]
+fn a_picked_photo_opens_the_crop_and_lands_on_the_new_group(cx: &mut TestAppContext) {
+    let (app, shell, mut vcx) = open_demo(cx, "ready-new-group");
+    let vcx = &mut vcx;
+    let picture = image::RgbaImage::from_pixel(900, 600, image::Rgba([40, 120, 200, 255]));
+    app.update(vcx, |app, cx| {
+        app.open_profile_photo_crop(PhotoTarget::NewChat, picture, cx)
+    });
+    frames(vcx);
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog
+        == Some(DialogKind::ProfilePhotoCrop)));
+    click(vcx, "photo-editor-done");
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::CreateChat)));
+    assert_eq!(step(&app, vcx), Some(NewChatStep::Info));
+    assert!(app.read_with(vcx, |app, _| {
+        app.new_chat_dialog()
+            .is_some_and(|dialog| dialog.photo.is_some())
+    }));
 }
