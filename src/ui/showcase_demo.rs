@@ -189,8 +189,10 @@ pub(super) fn apply_ready_showcase(
         let small = demo_file_json(2000 + i as i32, &fixture(avatar), true);
         jsons.push(format!(r#"{{"@type":"updateFile","file":{small}}}"#));
         jsons.push(format!(
-            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":{status},"profile_photo":{{"@type":"profilePhoto","id":{pid},"small":{small},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}},"is_contact":true,"type":{{"@type":"userTypeRegular"}}}}}}"#,
-            pid = 9000 + i
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","usernames":null,"phone_number":"","status":{status},"profile_photo":{{"@type":"profilePhoto","id":{pid},"small":{small},"big":null,"minithumbnail":null,"has_animation":false,"is_personal":false}},"is_contact":true,"accent_color_id":{accent},"type":{{"@type":"userTypeRegular"}}}}}}"#,
+            pid = 9000 + i,
+            // Telegram gives a user without a chosen color its id mod 7.
+            accent = id % 7,
         ));
     }
 

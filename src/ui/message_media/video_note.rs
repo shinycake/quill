@@ -191,6 +191,7 @@ pub(in crate::ui) fn video_note_attachment(
             message_id,
             &note.transcription,
             cx.theme().primary,
+            false,
             cx,
         ))
         .into_any_element()
