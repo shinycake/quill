@@ -62,7 +62,7 @@ fn confirm_box(
         // Enter confirms; returning false leaves the closing to the shell,
         // so `on_close` (which cancels) never runs after a confirm.
         .on_ok(move |_, _, cx| {
-            ok_app.update(cx, |this, cx| confirm(this, cx));
+            ok_app.update(cx, confirm);
             false
         })
         .content(move |content, _, _| {
