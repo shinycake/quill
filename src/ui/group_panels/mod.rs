@@ -600,7 +600,7 @@ impl QuillApp {
 
 /// `+15550101031` → `+1 555 010 1031`-style grouping for readability;
 /// numbers that don't look like E.164 pass through unchanged.
-pub(super) fn format_phone(raw: &str) -> String {
+pub(in crate::ui) fn format_phone(raw: &str) -> String {
     // Grouping by country code, as Telegram's phone formatter does for the
     // common ones; other codes keep their digits.
     const PATTERNS: [(&str, &[usize]); 14] = [

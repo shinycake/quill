@@ -173,7 +173,8 @@ impl QuillApp {
             input.set_selected_range(8..15, cx);
         });
         // `QUILL_DEMO_COMPOSER_BOX=link` opens the Add Link box instead,
-        // `code` the Code Language box over a fenced block.
+        // `code` the Code Language box over a fenced block, `contact` the
+        // contact chooser.
         match std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() {
             Ok("link") => self.open_composer_link_dialog(window, cx),
             Ok("code") => {
@@ -183,6 +184,12 @@ impl QuillApp {
                     input.set_selected_range(12..12, cx);
                 });
                 self.open_code_language_dialog(window, cx);
+            }
+            Ok("contact") => {
+                if let Some(session) = self.demo_session.as_mut() {
+                    demo_contacts(session, &self.demo_ui.sink, &self.demo_ui.seq);
+                }
+                self.open_share_contact_panel(window, cx);
             }
             _ => self.open_composer_date_dialog(window, cx),
         }
@@ -227,6 +234,31 @@ impl QuillApp {
             )
             .into_any_element()
     }
+}
+
+/// Three address-book contacts with phone numbers for the contact chooser.
+fn demo_contacts(
+    session: &mut quill::state::Session,
+    sink: &std::sync::Arc<quill::diagnostics::MemorySink>,
+    seq: &std::sync::atomic::AtomicU64,
+) {
+    use quill::diagnostics::DiagnosticSink;
+    let sink: std::sync::Arc<dyn DiagnosticSink> = sink.clone();
+    seq.store(session.last_seq, std::sync::atomic::Ordering::SeqCst);
+    let people = [
+        (41, "Mira", "Stone"),
+        (42, "Theo", "Lark"),
+        (43, "Ines", "Moreau"),
+    ];
+    for (id, first, last) in people {
+        let json = format!(
+            r#"{{"@type":"updateUser","user":{{"@type":"user","id":{id},"first_name":"{first}","last_name":"{last}","phone_number":"155501000{id}","is_contact":true,"type":{{"@type":"userTypeRegular"}}}}}}"#
+        );
+        if let Some(owned) = quill::telegram::client::copy_and_parse(&json, seq, &sink) {
+            session.apply(owned);
+        }
+    }
+    session.users_state.contacts = Some(people.iter().map(|(id, _, _)| *id).collect());
 }
 
 #[cfg(test)]

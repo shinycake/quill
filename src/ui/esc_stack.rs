@@ -159,11 +159,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.viewer.state.is_open(),
         |app, _, cx| app.close_media_viewer(cx)
     ),
-    layer!(
-        "share-content-dialog",
-        |app| app.share.content_dialog.is_some(),
-        |app, _, cx| app.close_share_content_dialog(cx)
-    ),
     layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
         app.close_open_country_boxes(cx)
     }),
