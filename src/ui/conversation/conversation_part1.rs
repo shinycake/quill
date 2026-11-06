@@ -231,8 +231,6 @@ impl QuillApp {
                         .children(self.composer_reply_bar_slot(cx))
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
                         .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
-                        // Phase D3b: admin-management dialog above the composer.
-                        .when_some(self.admin_dialog_panel(cx), |this, panel| this.child(panel))
                         // B1: bot custom keyboard (`replyMarkupShowKeyboard`)
                         // above the composer.
                         .when_some(self.custom_keyboard_panel(cx), |this, panel| {

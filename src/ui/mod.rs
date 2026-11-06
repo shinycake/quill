@@ -201,6 +201,7 @@ pub(crate) use story_page::StoryPage;
 
 mod actions;
 mod activity_indicator;
+mod admin_boxes;
 mod ai_compose;
 mod app;
 mod app_demo;
