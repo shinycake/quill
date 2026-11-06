@@ -178,16 +178,14 @@ impl QuillApp {
                     this.open_group_edit_box(chat_id, window, cx);
                 })),
             );
-        } else if is_member {
+        } else if is_member && is_channel {
+            // A group lists its members inline right below (tdesktop's
+            // info has no separate row for them); a channel does not.
             section = section.child(
                 action_row(
                     "g1-open-members",
                     Some(I::Users),
-                    if is_channel {
-                        tr(keys::Q_PEOPLE_SUBSCRIBERS)
-                    } else {
-                        tr(keys::Q_PEOPLE_MEMBERS)
-                    },
+                    tr(keys::Q_PEOPLE_SUBSCRIBERS),
                     false,
                     cx,
                 )
