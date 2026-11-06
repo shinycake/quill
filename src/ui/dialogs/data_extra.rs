@@ -4,9 +4,9 @@
 //! tdesktop has no such screen).
 
 use super::super::app::QuillApp;
-use super::data_storage::{format_storage_bytes, section_header};
+use super::data_storage::format_storage_bytes;
+use crate::ui::settings_window::rows::{group, switch_row};
 use gpui_kit::component::button::*;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -19,7 +19,7 @@ use quill::voice::format_voice_duration;
 impl QuillApp {
     /// "Download folder": where saved files go, and the switch that asks
     /// for a place every time instead.
-    pub(super) fn download_folder_section(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn download_folder_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let prefs = file_prefs::current();
         let configured = file_prefs::configured_download_dir();
         let shown = match (&configured, quill::media_viewer::os_downloads_dir()) {
@@ -31,86 +31,69 @@ impl QuillApp {
             (None, None) => tr(keys::Q_OPS_NOT_AVAILABLE).to_string(),
         };
         let stale = prefs.download_dir.is_some() && configured.is_none();
-        let section = div().flex().flex_col().gap_2();
         let folder = div()
             .flex()
-            .flex_col()
-            .gap_2()
-            .child(section_header(tr(keys::Q_OPS_DOWNLOAD_FOLDER)))
-            .child(div().id("download-folder-path").text_sm().child(shown))
-            .when(stale, |this| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_THE_CHOSEN_FOLDER_IS_MISSING)),
-                )
-            })
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(
-                        Button::new("download-folder-choose")
-                            .label(tr(keys::Q_OPS_CHOOSE_FOLDER))
-                            .outline()
-                            .small()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.choose_download_folder(cx);
-                            })),
-                    )
-                    .when(prefs.download_dir.is_some(), |this| {
-                        this.child(
-                            Button::new("download-folder-default")
-                                .label(tr(keys::Q_OPS_USE_DEFAULT))
-                                .ghost()
-                                .small()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    file_prefs::update(|p| p.download_dir = None);
-                                    cx.notify();
-                                    let _ = this;
-                                })),
-                        )
-                    }),
-            );
-        let section = section.child(self.setting_spot(&["data.download_folder"], folder, cx));
-        section.child(
-            self.setting_spot(
-                &["data.ask_where_to_save"],
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .child(tr(keys::Q_OPS_ASK_WHERE_TO_SAVE_EACH)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(tr(keys::Q_OPS_CHOOSE_A_FOLDER_EVERY_TIME)),
-                            ),
+                            .id("download-folder-path")
+                            .text_sm()
+                            .truncate()
+                            .child(shown),
                     )
-                    .child(
-                        Switch::new("download-folder-ask")
-                            .checked(prefs.ask_download_path)
-                            .accessibility_label(tr(keys::Q_OPS_ASK_WHERE_TO_SAVE_EACH))
-                            .on_click(cx.listener(|_, &on: &bool, _, cx| {
-                                file_prefs::update(|p| p.ask_download_path = on);
-                                cx.notify();
-                            })),
-                    ),
-                cx,
-            ),
-        )
+                    .when(stale, |this| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_OPS_THE_CHOSEN_FOLDER_IS_MISSING)),
+                        )
+                    }),
+            )
+            .when(prefs.download_dir.is_some(), |this| {
+                this.child(
+                    Button::new("download-folder-default")
+                        .label(tr(keys::Q_OPS_USE_DEFAULT))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            file_prefs::update(|p| p.download_dir = None);
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(
+                Button::new("download-folder-choose")
+                    .label(tr(keys::Q_OPS_CHOOSE_FOLDER))
+                    .outline()
+                    .small()
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_download_folder(cx))),
+            );
+        let ask = switch_row(
+            "download-folder-ask",
+            tr(keys::Q_OPS_ASK_WHERE_TO_SAVE_EACH),
+            Some(tr(keys::Q_OPS_CHOOSE_A_FOLDER_EVERY_TIME)),
+            prefs.ask_download_path,
+            |&on, _, cx| {
+                file_prefs::update(|p| p.ask_download_path = on);
+                cx.refresh_windows();
+            },
+            cx,
+        );
+        let rows = [
+            self.setting_spot(&["data.download_folder"], folder, cx),
+            self.setting_spot(&["data.ask_where_to_save"], ask, cx),
+        ];
+        group(Some(tr(keys::Q_OPS_DOWNLOAD_FOLDER)), rows).into_any_element()
     }
 
     /// The folder picker (the native directory dialog on macOS, Windows
@@ -139,17 +122,21 @@ impl QuillApp {
 
     /// "Network usage": bytes sent and received per network and category
     /// since the last reset, with a confirmed reset.
-    pub(super) fn network_usage_section(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn network_usage_section(&self, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.network_usage_body(cx).into_any_element();
+        self.setting_spot(
+            &["data.network_usage"],
+            group(Some(tr(keys::Q_OPS_NETWORK_USAGE)), [body]),
+            cx,
+        )
+    }
+
+    fn network_usage_body(&self, cx: &mut Context<Self>) -> Div {
         let session = self.session();
         let usage: Option<NetworkUsage> =
             session.and_then(|s| s.settings.privacy_data.network_usage.clone());
         let loading = session.is_some_and(|s| s.settings.privacy_data.network_loading);
-        let mut section = div().flex().flex_col().gap_2();
-        section = section.child(self.setting_spot(
-            &["data.network_usage"],
-            section_header(tr(keys::Q_OPS_NETWORK_USAGE)),
-            cx,
-        ));
+        let mut section = div().flex().flex_col().gap_2().px_3().py_2();
         let Some(usage) = usage else {
             return section.child(
                 div()
