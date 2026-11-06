@@ -160,7 +160,8 @@ fn write_clip(
     }
 }
 
-fn logo() -> Arc<Image> {
+/// The app icon, shared by the welcome card and the sign-in card.
+pub(super) fn logo() -> Arc<Image> {
     static LOGO: OnceLock<Arc<Image>> = OnceLock::new();
     LOGO.get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Png, LOGO_PNG.to_vec())))
         .clone()

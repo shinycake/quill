@@ -48,19 +48,7 @@ impl QuillApp {
             .flex_col()
             .items_center()
             .gap_4()
-            .child(
-                div()
-                    .size(px(72.))
-                    .rounded_full()
-                    .bg(cx.theme().primary)
-                    .text_color(gpui_kit::white())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(34.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Q"),
-            )
+            .child(img(ImageSource::Image(super::first_run_ui::logo())).size(px(72.)))
             .child(
                 div()
                     .flex()
