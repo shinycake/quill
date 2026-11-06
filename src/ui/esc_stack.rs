@@ -84,11 +84,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.earn_layer_open(),
         |app, window, cx| app.earn_layer_escape(window, cx)
     ),
-    layer!(
-        "composer-code-language",
-        |app| app.composer_ui.code_language.is_some(),
-        |app, window, cx| app.close_code_language_dialog(window, cx)
-    ),
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
@@ -363,7 +358,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
 const FOCUS_RETURN_LAYERS: &[&str] = &[
     "profile-modal",
     "earn-layer",
-    "composer-code-language",
     "gif-panel",
     "sticker-panel",
     "reply-panels",

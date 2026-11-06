@@ -172,11 +172,19 @@ impl QuillApp {
             input.set_value(tr(keys::Q_CHAT_SEE_YOU_TONIGHT), window, cx);
             input.set_selected_range(8..15, cx);
         });
-        // `QUILL_DEMO_COMPOSER_BOX=link` opens the Add Link box instead.
-        if std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() == Ok("link") {
-            self.open_composer_link_dialog(window, cx);
-        } else {
-            self.open_composer_date_dialog(window, cx);
+        // `QUILL_DEMO_COMPOSER_BOX=link` opens the Add Link box instead,
+        // `code` the Code Language box over a fenced block.
+        match std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() {
+            Ok("link") => self.open_composer_link_dialog(window, cx),
+            Ok("code") => {
+                self.composer_ui.rich_editor_open = true;
+                self.composer.update(cx, |input, cx| {
+                    input.set_value("```rust\nfn main() {}\n```", window, cx);
+                    input.set_selected_range(12..12, cx);
+                });
+                self.open_code_language_dialog(window, cx);
+            }
+            _ => self.open_composer_date_dialog(window, cx),
         }
     }
 
