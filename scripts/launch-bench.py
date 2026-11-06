@@ -12,6 +12,10 @@ the default data folder, with QUILL_STARTUP_TRACE set (src/startup_trace.rs).
 Every milestone is printed as the median, min and max ms after `open` was
 called; `chat_list` is the first frame that draws the chat list.
 
+`--onscreen` adds `onscreen`, the moment WindowServer first lists Quill's
+window as on screen, seen from outside by scripts/winwatch.swift (built
+with swiftc on first use). It polls every 2 ms.
+
 `--cold` empties the file cache (`sudo -n /usr/sbin/purge`, so sudo must
 allow it without a password) before every launch, as after a reboot. The
 shared system libraries stay mapped, so this is close to, not exactly, a
@@ -74,8 +78,19 @@ def running(pattern=None):
 
 def quit_quill(app):
     # Only the bundle this script launched: another Quill (the user's, or
-    # one started outside this script) is left alone.
+    # one started outside this script) is left alone. It is asked to quit
+    # the way the Dock asks, so it records a clean exit: a signal would
+    # leave a crash notice for the account's next launch.
     pattern = str(app / "Contents/MacOS/quill")
+    pids = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True).stdout.split()
+    for pid in pids:
+        script = ("ObjC.import('AppKit'); "
+                  f"$.NSRunningApplication.runningApplicationWithProcessIdentifier({int(pid)}).terminate")
+        subprocess.run(["osascript", "-l", "JavaScript", "-e", script], capture_output=True)
+    for _ in range(80):
+        if not running(pattern):
+            return
+        time.sleep(0.25)
     subprocess.run(["pkill", "-TERM", "-f", pattern])
     for _ in range(80):
         if not running(pattern):
@@ -120,9 +135,21 @@ def evict(paths):
                     os.close(fd)
 
 
+def winwatch():
+    """The outside-in window timer, built from scripts/winwatch.swift."""
+    binary = WORK / "winwatch"
+    source = REPO / "scripts/winwatch.swift"
+    if not binary.exists() or binary.stat().st_mtime < source.stat().st_mtime:
+        WORK.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["swiftc", "-O", source, "-o", binary], check=True)
+    return binary
+
+
 def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="chat_list", extra_env=(),
-           evict_paths=()):
+           evict_paths=(), onscreen=False):
     trace.unlink(missing_ok=True)
+    seen = trace.with_suffix(".onscreen")
+    seen.unlink(missing_ok=True)
     if cold:
         subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
         time.sleep(1)
@@ -137,6 +164,10 @@ def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="c
     for pair in extra_env:
         args += ["--env", pair]
     env = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+    watcher = None
+    if onscreen:
+        watcher = subprocess.Popen([winwatch(), app.stem, seen, str(timeout)])
+        time.sleep(0.2)
     start = time.time()
     subprocess.run(args, env=env, check=True)
     marks = {}
@@ -147,6 +178,15 @@ def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="c
                 if micros.strip().isdigit():
                     marks[name] = (int(micros) / 1e6 - start) * 1000.0
         time.sleep(0.02)
+    if watcher:
+        try:
+            watcher.wait(timeout=max(1.0, start + timeout - time.time()))
+        except subprocess.TimeoutExpired:
+            watcher.kill()
+        if seen.exists():
+            name, _, micros = seen.read_text().strip().partition(" ")
+            if micros.isdigit():
+                marks[name] = (int(micros) / 1e6 - start) * 1000.0
     # Let the launch's tail (first syncs, avatars) finish before quitting.
     time.sleep(3)
     quit_quill(app)
@@ -163,6 +203,8 @@ def main():
     parser.add_argument("--data-root", help="QUILL_DATA_ROOT for the launches (default: the real account)")
     parser.add_argument("--until", default="chat_list",
                         help="the milestone that ends a launch (first_render for a signed-out data root)")
+    parser.add_argument("--onscreen", action="store_true",
+                        help="also time when the window is first on screen, from outside (scripts/winwatch.swift)")
     parser.add_argument("sides", nargs="+", metavar="LABEL=BINARY")
     opts = parser.parse_args()
     if running() and not opts.data_root:
@@ -180,12 +222,13 @@ def main():
     # One unrecorded launch each: a newly signed binary is assessed by the
     # system on its first launch (~0.7 s), which is not Quill's launch time.
     for label, app in sides:
-        launch(app, WORK / f"trace-{label}.txt", creds, data_root=opts.data_root, until=opts.until, extra_env=envs[label])
+        launch(app, WORK / f"trace-{label}.txt", creds, data_root=opts.data_root, until=opts.until, extra_env=envs[label],
+               onscreen=opts.onscreen)
     for run in range(opts.runs):
         for label, app in sides:
             marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold,
                            data_root=opts.data_root, until=opts.until, extra_env=envs[label],
-                           evict_paths=evict_paths)
+                           evict_paths=evict_paths, onscreen=opts.onscreen)
             results[label].append(marks)
             shown = f"{marks[opts.until]:.0f} ms" if opts.until in marks else "NOT REACHED"
             print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",

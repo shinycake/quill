@@ -276,8 +276,14 @@ fn ui_main(args: &[String]) {
         };
         #[cfg(any(windows, target_os = "linux"))]
         ui::startup_failure::recover_after_gpu_loss(cx, reopen_main_window);
+        // macOS calls this before AppKit finishes launching, and the window
+        // opened here is on screen while it does (launch-window-first.md).
+        #[cfg(target_os = "macos")]
+        open_main_window(cx, launch)
+            .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
+        #[cfg(not(target_os = "macos"))]
         cx.spawn(async move |cx| {
-            open_main_window(cx, launch)
+            cx.update(|cx| open_main_window(cx, launch))
                 .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
         })
         .detach();
@@ -294,12 +300,8 @@ struct MainWindowLaunch {
 }
 
 #[cfg(feature = "ui")]
-fn main_window_options(
-    cx: &mut gpui_kit::AsyncApp,
-    start_in_tray: bool,
-) -> gpui_kit::WindowOptions {
-    let window_bounds =
-        cx.update(|cx| restored_window_bounds(quill::settings::load_window_state(), cx));
+fn main_window_options(cx: &mut gpui_kit::App, start_in_tray: bool) -> gpui_kit::WindowOptions {
+    let window_bounds = restored_window_bounds(quill::settings::load_window_state(), cx);
     gpui_kit::WindowOptions {
         window_bounds: Some(window_bounds),
         app_id: Some(quill::desktop_app_id::get().into()),
@@ -315,12 +317,12 @@ fn reopen_main_window(
     cx: &mut gpui_kit::AsyncApp,
     kept: gpui_kit::KeptWindow,
 ) -> gpui_kit::Result<()> {
-    let options = main_window_options(cx, false);
+    let options = cx.update(|cx| main_window_options(cx, false));
     ui::startup_failure::reopen_main_window(options, kept, cx)
 }
 
 #[cfg(feature = "ui")]
-fn open_main_window(cx: &mut gpui_kit::AsyncApp, launch: MainWindowLaunch) -> gpui_kit::Result<()> {
+fn open_main_window(cx: &mut gpui_kit::App, launch: MainWindowLaunch) -> gpui_kit::Result<()> {
     use gpui_kit::*;
     let options = main_window_options(cx, launch.start_in_tray);
     cx.open_window(options, move |window, cx| {
@@ -523,14 +525,22 @@ fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
     let platform = gpui_kit::platform::current_platform(false);
     quill::startup_trace::mark("platform_ready");
     #[cfg(target_os = "macos")]
-    gpui_macos::on_frame_presented(quill::startup_trace::frame_presented);
+    {
+        gpui_macos::on_frame_presented(quill::startup_trace::frame_presented);
+        gpui_macos::on_launch_mark(|label| {
+            quill::startup_trace::mark(label);
+        });
+    }
     // The kit's theme init lists the installed fonts; started now, the list
     // is ready by then instead of being built on the main thread.
     gpui_kit::component::theme::prefetch_installed_font_names(
         std::sync::Arc::new(gpui_kit::TextSystem::new(platform.text_system())),
         &platform.background_executor(),
     );
-    gpui_kit::Application::with_platform(std::rc::Rc::new(ZoomPlatform::new(platform)))
+    let application =
+        gpui_kit::Application::with_platform(std::rc::Rc::new(ZoomPlatform::new(platform)));
+    quill::startup_trace::mark("app_built");
+    application
 }
 
 #[cfg(feature = "ui")]

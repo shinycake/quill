@@ -593,6 +593,23 @@ impl Platform for MacPlatform {
                 .load_ptr::<*mut c_void>(&*app_delegate)
                 .write(self_ptr);
 
+            disable_autofill_heuristics();
+
+            // Quill: the app opens its windows here, before `run`, and
+            // their first frame is committed to the window server. `run`
+            // calls `finishLaunching`, which waits for the
+            // open-application Apple Event and sets up the menu bar and
+            // AppKit's text input (hundreds of ms on a cold launch); the
+            // windows are on screen meanwhile. `did_finish_launching` then
+            // finds no callback left.
+            let callback = self.0.lock().finish_launching.take();
+            if let Some(callback) = callback {
+                autoreleasepool(|_| {
+                    callback();
+                    let _: () = msg_send![class!(CATransaction), flush];
+                });
+            }
+            crate::launch_mark("ns_run");
             autoreleasepool(|_| {
                 let _: () = msg_send![app, run];
             });
@@ -1341,13 +1358,19 @@ fn mac_platform_ivar(object: &AnyObject) -> &Ivar {
 }
 
 extern "C-unwind" fn will_finish_launching(_this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    crate::launch_mark("will_finish");
+}
+
+/// The autofill heuristic controller causes slowdown and high CPU usage.
+/// We don't know exactly why. This disables the full heuristic controller.
+///
+/// Adapted from: https://github.com/ghostty-org/ghostty/pull/8625
+///
+/// Quill: called from `run` before the app opens any window (it used to run
+/// in `applicationWillFinishLaunching:`, which now comes after the windows).
+fn disable_autofill_heuristics() {
     unsafe {
         let user_defaults: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
-
-        // The autofill heuristic controller causes slowdown and high CPU usage.
-        // We don't know exactly why. This disables the full heuristic controller.
-        //
-        // Adapted from: https://github.com/ghostty-org/ghostty/pull/8625
         let name = ns_string("NSAutoFillHeuristicControllerEnabled");
         let existing_value: *mut AnyObject = msg_send![user_defaults, objectForKey: name];
         if existing_value.is_null() {
@@ -1358,6 +1381,7 @@ extern "C-unwind" fn will_finish_launching(_this: &AnyObject, _: Sel, _: *mut An
 }
 
 extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    crate::launch_mark("did_finish");
     unsafe {
         let app: *mut AnyObject = msg_send![APP_CLASS, sharedApplication];
         let policy = get_mac_platform(this).0.lock().activation_policy;

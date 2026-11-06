@@ -191,3 +191,22 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
   can mark when the first frames reach the screen.
 - `src/gpui_macos.rs`: re-exports `gpui_apple::glyph_cache` (with the
   `font-kit` feature) so the app can load and save the launch glyph cache.
+- `src/platform.rs`: `run` calls the app's launch callback before
+  `[NSApp run]` instead of from `applicationDidFinishLaunching:`, then
+  flushes the Core Animation transaction, so the windows the app opens
+  there reach the screen before `finishLaunching` (which waits for the
+  open-application Apple Event and loads AppKit's text input, hundreds of
+  ms on a cold launch). `did_finish_launching` finds no callback left
+  (`docs/decisions/launch-window-first.md`).
+  The `NSAutoFillHeuristicControllerEnabled` default is written at the
+  start of that block (`disable_autofill_heuristics`) instead of in
+  `applicationWillFinishLaunching:`, so it is set before any window exists.
+- `src/window.rs`: the view answers `isEditable` with NO until a window has
+  drawn its first frame. `-[NSView _inputContext]` makes no
+  `NSTextInputContext` for a view that says it is not editable, and the
+  class's first use loads the Writing Tools framework; ordering the first
+  window front asked for one. AppKit makes and activates the context on
+  its next window update.
+- `src/gpui_macos.rs`: `on_launch_mark` sets a hook that hears AppKit's
+  launch steps (`ns_run`, `will_finish`, `did_finish`, `window_ordered`,
+  `first_display`) for Quill's startup trace.

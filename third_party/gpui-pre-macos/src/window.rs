@@ -271,6 +271,7 @@ unsafe fn build_classes() {
                 sel!(characterIndexForPoint:),
                 character_index_for_point as extern "C" fn(_, Sel, NSPoint) -> NSUInteger,
             );
+            decl.add_method(sel!(isEditable), is_editable as extern "C" fn(_, Sel) -> Bool);
             decl.register()
         };
         BLURRED_VIEW_CLASS = {
@@ -1336,6 +1337,7 @@ impl MacWindow {
             } else if show {
                 let _: () = msg_send![native_window, orderFront: ptr::null_mut::<AnyObject>()];
             }
+            crate::launch_mark("window_ordered");
 
             // Set the initial position of the window to the specified origin.
             // Although we already specified the position using `initWithContentRect_styleMask_backing_defer_screen_`,
@@ -2172,6 +2174,7 @@ impl PlatformWindow for MacWindow {
         let mut this = self.0.lock();
         this.renderer.draw(scene);
         drop(this);
+        FRAME_DRAWN.store(true, Ordering::Release);
         crate::frame_presented();
         crate::platform::read_keyboard_layout_after_first_frame();
     }
@@ -3448,7 +3451,21 @@ extern "C" fn set_frame_size(this: &AnyObject, _: Sel, size: NSSize) {
     };
 }
 
+/// Quill: set once any window has drawn a frame (see `is_editable`).
+static FRAME_DRAWN: AtomicBool = AtomicBool::new(false);
+
+/// Quill: `-[NSView _inputContext]` makes a view's `NSTextInputContext`
+/// unless the view answers `isEditable` with NO, and the first use of that
+/// class loads the Writing Tools framework (about 280 ms on a cold launch).
+/// Ordering the first window front asks for the context, so until a window
+/// has drawn a frame the view is not editable; AppKit makes the context on
+/// its next update, with the window already on screen.
+extern "C" fn is_editable(_: &AnyObject, _: Sel) -> Bool {
+    FRAME_DRAWN.load(Ordering::Acquire).to_objc()
+}
+
 extern "C" fn display_layer(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    crate::launch_mark("first_display");
     let signal_at = PlatformFrameSignal::capture(scheduler::Instant::now);
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.lock();
