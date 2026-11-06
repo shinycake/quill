@@ -311,10 +311,9 @@ type Hint = (
 /// window's display.
 #[cfg(target_os = "macos")]
 fn present_hint(window: &Window, cx: &App, now: Instant) -> Hint {
-    let Some(display) = window.display(cx) else {
+    let Some(display) = window.display_id().map(u64::from) else {
         return (None, window.refresh_interval(cx), None);
     };
-    let display = u64::from(display.id());
     let (hint, period) = gpui_macos::present_timing(display);
     let grid = hint.zip(period).and_then(|((at, _), period)| {
         Some((display, display_grid(display, Vsync { at, period }, now)?))
