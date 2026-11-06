@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::privacy::PrivacyEditorTarget;
+use super::settings_window::rows::{link_row, switch_row};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::{status_note::StatusNote, user_error::user_error_for};
 use gpui_kit::component::button::*;
@@ -564,45 +565,18 @@ impl QuillApp {
                     .px_1()
                     .child(tr(keys::Q_PREFS_MEDIA_SETTINGS)),
             )
-            .child(
-                self.setting_spot(
-                    // Phase 6: kit Switch (was: clickable row with a ●/○ bullet).
-                    &["chats.hq_round_videos"],
-                    div()
-                        .id("media-pref-hq-round")
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .child(
-                            Switch::new("media-pref-hq-round-switch")
-                                .checked(hq)
-                                .accessibility_label(tr(keys::Q_PREFS_RECORD_HQ_ROUND_VIDEOS))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_hq_round_videos(on, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .child(tr(keys::Q_PREFS_RECORD_HQ_ROUND_VIDEOS)),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tr(keys::Q_PREFS_CAPTURE_ROUND_VIDEO_NOTES_AT)),
-                                ),
-                        ),
+            .child(self.setting_spot(
+                &["chats.hq_round_videos"],
+                switch_row(
+                    "media-pref-hq-round-switch",
+                    tr(keys::Q_PREFS_RECORD_HQ_ROUND_VIDEOS),
+                    Some(tr(keys::Q_PREFS_CAPTURE_ROUND_VIDEO_NOTES_AT)),
+                    hq,
+                    cx.listener(|this, &on, _, cx| this.set_hq_round_videos(on, cx)),
                     cx,
                 ),
-            )
+                cx,
+            ))
             .child(
                 self.setting_spot(
                     &["chats.instant_view"],
@@ -638,16 +612,17 @@ impl QuillApp {
                     cx,
                 ),
             )
-            .child(
-                self.setting_spot(
-                    &["chats.emoji_packs"],
-                    Button::new("open-emoji-sets")
-                        .label(tr(keys::Q_PREFS_EMOJI_SETS))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| this.open_emoji_sets(cx))),
+            .child(self.setting_spot(
+                &["chats.emoji_packs"],
+                link_row(
+                    "open-emoji-sets",
+                    tr(keys::Q_PREFS_EMOJI_SETS),
+                    None,
+                    cx.listener(|this, _, _, cx| this.open_emoji_sets(cx)),
                     cx,
                 ),
-            )
+                cx,
+            ))
             .child(self.setting_spot(&["chats.double_click"], self.quick_action_radios(cx), cx))
             .child(self.setting_spot(
                 &["chats.quick_reaction"],
@@ -659,86 +634,61 @@ impl QuillApp {
             .child(
                 self.setting_spot(
                     &["chats.autoplay_gifs"],
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .child(
-                            Switch::new("media-pref-autoplay-gifs")
-                                .checked(
-                                    self.session()
-                                        .is_none_or(|s| s.settings.media_prefs.autoplay_gifs),
-                                )
-                                .accessibility_label(tr(keys::Q_PREFS_AUTOPLAY_GIFS))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
-                                    if !on {
-                                        this.stop_animation_playback();
-                                        this.playback.inline_videos.clear();
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(div().text_sm().child(tr(keys::Q_PREFS_AUTOPLAY_GIFS))),
+                    switch_row(
+                        "media-pref-autoplay-gifs",
+                        tr(keys::Q_PREFS_AUTOPLAY_GIFS),
+                        None,
+                        self.session()
+                            .is_none_or(|s| s.settings.media_prefs.autoplay_gifs),
+                        cx.listener(|this, &on, _, cx| {
+                            this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
+                            if !on {
+                                this.stop_animation_playback();
+                                this.playback.inline_videos.clear();
+                            }
+                            cx.notify();
+                        }),
+                        cx,
+                    ),
                     cx,
                 ),
             )
             .child(
                 self.setting_spot(
                     &["chats.autoplay_videos"],
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .child(
-                            Switch::new("media-pref-autoplay-videos")
-                                .checked(
-                                    self.session()
-                                        .is_none_or(|s| s.settings.media_prefs.autoplay_videos),
-                                )
-                                .accessibility_label(tr(keys::Q_PREFS_AUTOPLAY_VIDEOS))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
-                                    if !on {
-                                        this.playback.inline_videos.clear();
-                                    }
-                                    cx.notify();
-                                })),
-                        )
-                        .child(div().text_sm().child(tr(keys::Q_PREFS_AUTOPLAY_VIDEOS))),
+                    switch_row(
+                        "media-pref-autoplay-videos",
+                        tr(keys::Q_PREFS_AUTOPLAY_VIDEOS),
+                        None,
+                        self.session()
+                            .is_none_or(|s| s.settings.media_prefs.autoplay_videos),
+                        cx.listener(|this, &on, _, cx| {
+                            this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
+                            if !on {
+                                this.playback.inline_videos.clear();
+                            }
+                            cx.notify();
+                        }),
+                        cx,
+                    ),
                     cx,
                 ),
             )
             .child(
                 self.setting_spot(
                     &["chats.loop_stickers"],
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .child(
-                            Switch::new("media-pref-loop-stickers")
-                                .checked(
-                                    self.session().is_none_or(|s| {
-                                        s.settings.media_prefs.loop_animated_stickers
-                                    }),
-                                )
-                                .accessibility_label(tr(keys::SETTINGS_LOOP_STICKERS))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.stop_sticker_playback();
-                                    this.set_media_pref(
-                                        |prefs| prefs.loop_animated_stickers = on,
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .child(div().text_sm().child(tr(keys::SETTINGS_LOOP_STICKERS))),
+                    switch_row(
+                        "media-pref-loop-stickers",
+                        tr(keys::SETTINGS_LOOP_STICKERS),
+                        None,
+                        self.session()
+                            .is_none_or(|s| s.settings.media_prefs.loop_animated_stickers),
+                        cx.listener(|this, &on, _, cx| {
+                            this.stop_sticker_playback();
+                            this.set_media_pref(|prefs| prefs.loop_animated_stickers = on, cx);
+                        }),
+                        cx,
+                    ),
                     cx,
                 ),
             )

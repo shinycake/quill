@@ -416,7 +416,6 @@
 "qll_prefs_everyone" = "Everyone";
 "qll_prefs_exception_reset" = "Exception reset…";
 "qll_prefs_exception_reset_2" = "Exception reset";
-"qll_prefs_exceptions" = "Exceptions: {exceptions_label}";
 "qll_prefs_exceptions_2" = "{label} · {label_2} exceptions";
 "qll_prefs_exceptions_unavailable_reopen_the_dialog" = "Exceptions unavailable — reopen the dialog to retry.";
 "qll_prefs_export" = "Export";
@@ -698,6 +697,7 @@
 "qll_prefs_silent_send" = "Silent send";
 "qll_prefs_solid_color_behind_the_message" = "Solid color behind the message list — dark colors pair best with the dark theme.";
 "qll_prefs_sound" = "Sound: {sound_label}";
+"qll_prefs_sound_title" = "Sound";
 "qll_prefs_sound_previews" = "{is_muted_forever} · Sound: {sound_label} · Previews: {if_preview_on_on_else_off}";
 "qll_prefs_sound_updated" = "Sound updated…";
 "qll_prefs_sound_updated_2" = "Sound updated";
@@ -782,7 +782,6 @@
 "qll_prefs_username_optional" = "Username (optional)";
 "qll_prefs_video_messages" = "Video messages";
 "qll_prefs_videos" = "Videos";
-"qll_prefs_view" = "View";
 "qll_prefs_voice_messages" = "Voice messages";
 "qll_prefs_web_proxies_arent_supported_yet" = "Web proxies aren't supported in this version yet.";
 "qll_prefs_well_send_a_code_to" = "We'll send a code to your recovery email. It is the only way to recover a forgotten password.";

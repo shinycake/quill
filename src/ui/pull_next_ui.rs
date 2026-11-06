@@ -10,7 +10,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -710,26 +709,16 @@ impl QuillApp {
         let on = self
             .session()
             .is_none_or(|s| s.settings.media_prefs.pull_to_next_channel);
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .child(
-                Switch::new("media-pref-pull-next")
-                    .checked(on)
-                    .accessibility_label(tr(keys::SETTINGS_PULL_TO_NEXT_CHANNEL))
-                    .on_click(cx.listener(|this, &on, _, cx| {
-                        this.set_media_pref(|prefs| prefs.pull_to_next_channel = on, cx);
-                    })),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .child(tr(keys::SETTINGS_PULL_TO_NEXT_CHANNEL)),
-            )
-            .into_any_element()
+        super::settings_window::rows::switch_row(
+            "media-pref-pull-next",
+            tr(keys::SETTINGS_PULL_TO_NEXT_CHANNEL),
+            None,
+            on,
+            cx.listener(|this, &on, _, cx| {
+                this.set_media_pref(|prefs| prefs.pull_to_next_channel = on, cx);
+            }),
+            cx,
+        )
     }
 }
 
