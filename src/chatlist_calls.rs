@@ -54,6 +54,33 @@ pub fn call_status(date: &CivilTime, now: &CivilTime) -> String {
     }
 }
 
+/// Runs of neighbouring calls that share one row: the same chat, the
+/// same kind (incoming, outgoing, missed) and the same day, as
+/// `Calls::BoxController::Row::canAddItem` groups them. `keys` holds one
+/// key per call, newest first; each range covers one row's calls.
+pub fn call_runs<K: PartialEq>(keys: &[K]) -> Vec<std::ops::Range<usize>> {
+    let mut runs: Vec<std::ops::Range<usize>> = Vec::new();
+    for (ix, key) in keys.iter().enumerate() {
+        match runs.last_mut() {
+            Some(run) if keys.get(run.start) == Some(key) => run.end = ix + 1,
+            _ => runs.push(ix..ix + 1),
+        }
+    }
+    runs
+}
+
+/// The status line of a row that stands for `count` calls: "(3) 12:34".
+pub fn grouped_status(count: usize, status: String) -> String {
+    if count > 1 {
+        tr_with(
+            keys::CALL_BOX_STATUS_GROUP,
+            &[("amount", &count.to_string()), ("status", &status)],
+        )
+    } else {
+        status
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +104,26 @@ mod tests {
         );
         assert!(call_status(&older, &now).ends_with(&format!(" at {}", hhmm(&older))));
         assert!(call_status(&older, &now).starts_with(month_name(older.month)));
+    }
+
+    #[test]
+    fn neighbouring_calls_of_one_kind_share_a_row() {
+        let keys = [
+            (1, 'o', 9),
+            (1, 'o', 9),
+            (2, 'o', 9),
+            (1, 'o', 9),
+            (1, 'm', 9),
+            (1, 'm', 8),
+        ];
+        assert_eq!(call_runs(&keys), vec![0..2, 2..3, 3..4, 4..5, 5..6]);
+        assert!(call_runs::<u8>(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_shared_row_counts_its_calls() {
+        assert_eq!(grouped_status(3, "12:34".into()), "(3) 12:34");
+        assert_eq!(grouped_status(1, "12:34".into()), "12:34");
     }
 
     #[test]

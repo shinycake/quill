@@ -122,7 +122,7 @@ pub fn arrange(rows: &[ContactRow], mode: SortMode, query: &str) -> Vec<ListItem
 
 /// Heights used to place items without measuring the laid-out list.
 pub const HEADER_HEIGHT: f32 = 28.;
-pub const ROW_HEIGHT: f32 = 52.;
+pub const ROW_HEIGHT: f32 = 60.;
 
 pub fn item_height(item: &ListItem) -> f32 {
     match item {
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(visible_letters(&stops, total, 0., 100.), ['A']);
         assert_eq!(visible_letters(&stops, total, 150., 100.), ['A', 'B']);
         assert_eq!(visible_letters(&stops, total, total - 50., 50.), ['B']);
-        assert_eq!(jump_offset(&stops[1], total, 200.), total - 200.);
+        assert_eq!(jump_offset(&stops[1], total, 250.), total - 250.);
         assert_eq!(jump_offset(&stops[1], total, 10_000.), 0.);
     }
 

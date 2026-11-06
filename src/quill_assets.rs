@@ -58,6 +58,7 @@ gpui_kit::assets::icon_assets!(
         ChevronLeft,
         ChevronRight,
         Clock,
+        ArrowDownAZ,
         CalendarClock,
         ListClock,
         Star,

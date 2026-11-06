@@ -949,7 +949,7 @@ pub(super) fn with_presence_dot_scaled(
 
 /// Chat-row avatar edge (px). Row heights in `chatlist_style` leave room
 /// for it plus vertical padding.
-pub(super) const CHAT_ROW_AVATAR: f32 = 46.;
+pub(in crate::ui) const CHAT_ROW_AVATAR: f32 = 46.;
 
 mod folder_tag_context;
 mod pin_lift;

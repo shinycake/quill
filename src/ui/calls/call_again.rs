@@ -152,8 +152,18 @@ impl QuillApp {
                     .child(tr(keys::Q_OPS_NO_RECENT_CALLS)),
             );
         } else {
-            for entry in &entries {
-                list = list.child(self.recent_call_row(entry, cx));
+            let now = quill::local_time::civil_local(quill::local_time::now_unix());
+            let keys: Vec<_> = entries
+                .iter()
+                .map(|entry| {
+                    let day = quill::local_time::civil_local(i64::from(entry.date)).day_number();
+                    (entry.chat_id, call_kind(entry), day)
+                })
+                .collect();
+            for run in quill::chatlist_calls::call_runs(&keys) {
+                if let Some(entry) = entries.get(run.start) {
+                    list = list.child(self.recent_call_row(entry, run.len(), &now, cx));
+                }
             }
             if has_more {
                 list = list.child(loading_row("calls-loading-more", cx));
@@ -168,6 +178,8 @@ impl QuillApp {
     pub(in crate::ui) fn recent_call_row(
         &self,
         entry: &ParsedMessage,
+        count: usize,
+        now: &quill::local_time::CivilTime,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (label, is_video) = match &entry.content {
@@ -176,7 +188,12 @@ impl QuillApp {
                 discard_reason,
                 duration,
             } => (
-                call_entry_label(*is_video, discard_reason, *duration, entry.is_outgoing),
+                call_entry_label(
+                    *is_video,
+                    discard_reason,
+                    if count > 1 { 0 } else { *duration },
+                    entry.is_outgoing,
+                ),
                 *is_video,
             ),
             MessageContent::GroupCallInvitation { .. } => {
@@ -189,28 +206,16 @@ impl QuillApp {
             .as_ref()
             .map(|(_, name)| name.clone())
             .unwrap_or_else(|| tr(keys::PROFILE_ACTION_SHORT_CALL).to_owned());
-        let missed = !entry.is_outgoing
-            && matches!(
-                entry.content,
-                MessageContent::Call {
-                    discard_reason: CallDiscardReason::Missed,
-                    ..
-                }
-            );
+        let missed = call_kind(entry) == CallKind::Missed;
         // tdesktop's call row: userpic, name, an arrow for the direction
         // (red when missed) before the date, and a phone or camera button
         // that calls back (`Calls::BoxController::Row`).
-        let now = quill::local_time::civil_local(quill::local_time::now_unix());
         let when = quill::local_time::civil_local(i64::from(entry.date));
-        let mut status = quill::chatlist_calls::call_status(&when, &now);
-        if let MessageContent::Call { duration, .. } = &entry.content
-            && *duration > 0
-        {
-            status = format!(
-                "{status} · {}",
-                quill::telegram::envelope::format_duration(*duration)
-            );
-        }
+        // The full date for screen readers; the row shows the chat list's
+        // short stamp beside the name.
+        let spoken = quill::chatlist_calls::call_status(&when, now);
+        let stamp = quill::local_time::chat_list_stamp(&when, now);
+        let status = quill::chatlist_calls::grouped_status(count, label.clone());
         let (arrow, arrow_color) = if missed {
             (IconName::ArrowDownLeft, Hsla::from(danger_soft()))
         } else if entry.is_outgoing {
@@ -228,7 +233,7 @@ impl QuillApp {
         div()
             .id(("call-row", entry.id.0 as u64))
             .px_2()
-            .py_1p5()
+            .py_2()
             .rounded_md()
             .flex()
             .items_center()
@@ -236,32 +241,52 @@ impl QuillApp {
             .cursor_pointer()
             .pressable(cx.theme())
             .role(gpui_kit::Role::Button)
-            .aria_label(format!("{name}, {label}, {status}"))
+            .aria_label(format!("{name}, {status}, {spoken}"))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.select_listed_chat(chat_id, window, cx);
             }))
-            .child(chat_avatar(&name, photo.as_deref(), 40.))
+            .child(chat_avatar(
+                &name,
+                photo.as_deref(),
+                crate::ui::chat_row::CHAT_ROW_AVATAR,
+            ))
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .gap_0p5()
                     .min_w_0()
                     .flex_1()
                     .child(
                         div()
-                            .font_medium()
-                            .text_sm()
-                            .overflow_hidden()
-                            .child(name_line(&name)),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .font_semibold()
+                                    .overflow_hidden()
+                                    .when(missed, |this| this.text_color(Hsla::from(danger_soft())))
+                                    .child(name_line(&name)),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(stamp),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_1()
-                            .text_xs()
+                            .text_sm()
                             .text_color(cx.theme().muted_foreground)
-                            .child(Icon::new(arrow).size(px(12.)).text_color(arrow_color))
+                            .child(Icon::new(arrow).size(px(14.)).text_color(arrow_color))
                             .child(div().truncate().child(status)),
                     ),
             )
@@ -283,5 +308,24 @@ impl QuillApp {
                         })),
                 )
             })
+    }
+}
+
+/// tdesktop's three call row kinds (`Calls::BoxController::Row::Type`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CallKind {
+    Out,
+    In,
+    Missed,
+}
+
+fn call_kind(entry: &ParsedMessage) -> CallKind {
+    match entry.content {
+        _ if entry.is_outgoing => CallKind::Out,
+        MessageContent::Call {
+            discard_reason: CallDiscardReason::Missed,
+            ..
+        } => CallKind::Missed,
+        _ => CallKind::In,
     }
 }
