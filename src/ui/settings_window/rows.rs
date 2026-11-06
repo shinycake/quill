@@ -24,7 +24,7 @@ pub(super) fn group(
 
 /// A row that opens a screen or a page: title, current value, chevron. A
 /// kit button, for its hover fill, focus ring and keyboard press.
-pub(super) fn link_row(
+pub(in crate::ui) fn link_row(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,
     value: Option<SharedString>,
@@ -96,7 +96,7 @@ pub(super) fn danger_row(
 }
 
 /// A row with a switch on the right, and an optional line under the title.
-pub(super) fn switch_row(
+pub(in crate::ui) fn switch_row(
     id: impl Into<ElementId>,
     title: &'static str,
     caption: Option<&'static str>,

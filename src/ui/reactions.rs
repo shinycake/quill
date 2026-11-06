@@ -6,7 +6,6 @@ use super::app::QuillApp;
 use super::menu_states::MessageMenuState;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -261,46 +260,38 @@ impl QuillApp {
                 s.settings.media_prefs.corner_reaction,
             )
         });
-        let row = || div().flex().items_center().gap_2().px_2().py_1();
+        use super::settings_window::rows::switch_row;
         div()
             .flex()
             .flex_col()
-            .child(
-                self.setting_spot(
-                    &["chats.reply_button"],
-                    row()
-                        .child(
-                            Switch::new("media-pref-corner-reply")
-                                .checked(reply)
-                                .accessibility_label(tr(keys::SETTINGS_CHAT_CORNER_REPLY))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_media_pref(|prefs| prefs.corner_reply = on, cx);
-                                })),
-                        )
-                        .child(div().text_sm().child(tr(keys::SETTINGS_CHAT_CORNER_REPLY))),
+            .child(self.setting_spot(
+                &["chats.reply_button"],
+                switch_row(
+                    "media-pref-corner-reply",
+                    tr(keys::SETTINGS_CHAT_CORNER_REPLY),
+                    None,
+                    reply,
+                    cx.listener(|this, &on, _, cx| {
+                        this.set_media_pref(|prefs| prefs.corner_reply = on, cx);
+                    }),
                     cx,
                 ),
-            )
-            .child(
-                self.setting_spot(
-                    &["chats.reaction_button"],
-                    row()
-                        .child(
-                            Switch::new("media-pref-corner-reaction")
-                                .checked(react)
-                                .accessibility_label(tr(keys::SETTINGS_CHAT_CORNER_REACTION))
-                                .on_click(cx.listener(|this, &on, _, cx| {
-                                    this.set_media_pref(|prefs| prefs.corner_reaction = on, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(tr(keys::SETTINGS_CHAT_CORNER_REACTION)),
-                        ),
+                cx,
+            ))
+            .child(self.setting_spot(
+                &["chats.reaction_button"],
+                switch_row(
+                    "media-pref-corner-reaction",
+                    tr(keys::SETTINGS_CHAT_CORNER_REACTION),
+                    None,
+                    react,
+                    cx.listener(|this, &on, _, cx| {
+                        this.set_media_pref(|prefs| prefs.corner_reaction = on, cx);
+                    }),
                     cx,
                 ),
-            )
+                cx,
+            ))
             .into_any_element()
     }
 

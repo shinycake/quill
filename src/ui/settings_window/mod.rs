@@ -19,7 +19,7 @@ mod log_out;
 mod notifications;
 mod pages;
 mod privacy;
-mod rows;
+pub(in crate::ui) mod rows;
 mod search;
 mod sidebar;
 
