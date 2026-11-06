@@ -5,9 +5,9 @@
 
 use super::QuillApp;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::theme::{ActiveTheme, Theme, installed_font_names};
-use gpui_kit::component::{IndexPath, StyledExt as _};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::power_saving::{Flag, GROUPS, with_flag};
@@ -216,23 +216,19 @@ impl QuillApp {
                     })),
             );
         }
-        let title = div()
-            .font_semibold()
-            .text_sm()
-            .child(tr(keys::SETTINGS_POWER_MENU))
+        // The page heading already says "Battery and Animations"; the card
+        // opens with tdesktop's subtitle instead of repeating it.
+        let subtitle = div()
+            .text_xs()
+            .text_color(muted)
+            .child(tr(keys::SETTINGS_POWER_SUBTITLE))
             .into_any_element();
-        let title = self.setting_stand_in(saver.is_none(), &["power.save_power"], title, cx);
+        let subtitle = self.setting_stand_in(saver.is_none(), &["power.save_power"], subtitle, cx);
         let mut body = div()
             .flex()
             .flex_col()
             .gap_2()
-            .child(title)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(tr(keys::SETTINGS_POWER_SUBTITLE)),
-            )
+            .child(subtitle)
             .child(groups);
         if saver.is_some() {
             body = body

@@ -163,7 +163,9 @@ impl QuillApp {
         body = body.child(
             self.setting_spot(
                 &["appearance.high_contrast"],
-                self.appearance_section(
+                // Title and line on the left, the switch on the right
+                // (was: a heading with the switch under it).
+                self.appearance_toggle_section(
                     cx,
                     tr(keys::Q_MISC_HIGH_CONTRAST),
                     tr(keys::Q_MISC_BLACK_SURFACES_AND_WHITE_TEXT),
