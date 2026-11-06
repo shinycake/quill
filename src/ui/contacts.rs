@@ -395,28 +395,28 @@ impl QuillApp {
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_3()
                     .child(super::chat_row::with_presence_dot(
-                        chat_avatar(&name, photo.as_deref(), 32.),
+                        chat_avatar(&name, photo.as_deref(), CONTACT_AVATAR),
                         online,
-                        10.,
+                        12.,
                         cx,
                     ))
                     .child(
                         div()
                             .flex()
                             .flex_col()
+                            .gap_0p5()
                             .min_w_0()
                             .child(
                                 div()
                                     .font_medium()
-                                    .text_sm()
                                     .truncate()
                                     .child(super::bidi_line::name_line(name)),
                             )
                             .child(
                                 div()
-                                    .text_xs()
+                                    .text_sm()
                                     .text_color(if online {
                                         cx.theme().primary
                                     } else {
@@ -541,3 +541,6 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_add_contact_dialog,
     ),
 }
+
+/// tdesktop's `contactsPhotoSize`.
+const CONTACT_AVATAR: f32 = 42.;

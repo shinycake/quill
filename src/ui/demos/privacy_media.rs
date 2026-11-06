@@ -171,6 +171,8 @@ impl QuillApp {
             "accent" => {
                 self.appearance.accent_rgb = 0x8b5cf6;
             }
+            "calls" => self.demo_showcase_calls(),
+            "contacts" => self.demo_showcase_contacts(),
             _ => {}
         }
         // The README captures carry no debug caption.

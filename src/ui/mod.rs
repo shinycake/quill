@@ -544,6 +544,8 @@ mod shell;
 mod shell_layout;
 mod shortcuts;
 mod showcase_demo;
+#[cfg(feature = "demo-capture")]
+mod showcase_lists_demo;
 mod showcase_polls_demo;
 mod sidebar_hide_tests;
 mod sidebar_reveal;

@@ -1054,6 +1054,7 @@
 "qll_ops_gif" = "GIF";
 "qll_ops_unknown_track" = "Unknown Track";
 "lng_call_box_status_date" = "{date} at {time}";
+"lng_call_box_status_group" = "({amount}) {status}";
 "lng_call_box_status_today" = "{time}";
 "lng_call_box_status_yesterday" = "yesterday at {time}";
 "lng_month_day" = "{month} {day}";

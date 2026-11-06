@@ -117,13 +117,20 @@ impl QuillApp {
                             })),
                     ),
             )
-            .child(
-                Button::new("contacts-invite")
-                    .icon(IconName::UserPlus)
-                    .label(tr(keys::Q_CHATLIST_INVITE_FRIENDS))
-                    .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| this.copy_invitation(cx))),
-            );
+            .child(contacts_action(
+                "contacts-add",
+                IconName::UserPlus,
+                tr(keys::Q_PEOPLE_ADD_CONTACT),
+                cx.listener(|this, _, window, cx| this.open_new_contact_dialog(window, cx)),
+                cx,
+            ))
+            .child(contacts_action(
+                "contacts-invite",
+                IconName::Share2,
+                tr(keys::Q_CHATLIST_INVITE_FRIENDS),
+                cx.listener(|this, _, _, cx| this.copy_invitation(cx)),
+                cx,
+            ));
         let mut scroll = div()
             .id("contacts-scroll")
             .size_full()
@@ -285,4 +292,39 @@ impl QuillApp {
         }
         self.notify_sidebar(cx);
     }
+}
+
+/// An action at the top of the Contacts tab (tdesktop's "Add contact"
+/// and invite rows): an accent icon and label on a full-width ghost
+/// button, lined up with the contact rows below.
+fn contacts_action(
+    id: &'static str,
+    icon: IconName,
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> Button {
+    let primary = cx.theme().primary;
+    Button::new(id)
+        .ghost()
+        .w_full()
+        .h(px(40.))
+        .accessibility_label(label)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .w_full()
+                .text_color(primary)
+                .child(
+                    div()
+                        .w(px(42.))
+                        .flex()
+                        .justify_center()
+                        .child(Icon::new(icon).size_5().text_color(primary)),
+                )
+                .child(div().font_medium().child(label)),
+        )
+        .on_click(on_click)
 }
