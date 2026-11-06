@@ -63,11 +63,6 @@ impl QuillApp {
             return;
         }
         self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
-        if let Some(dialog) = &self.composer_ui.checklist_dialog {
-            dialog
-                .title_input
-                .update(cx, |input, cx| input.focus(window, cx));
-        }
         cx.notify();
     }
 
@@ -88,11 +83,6 @@ impl QuillApp {
             window,
             cx,
         ));
-        if let Some(dialog) = self.composer_ui.checklist_dialog.as_ref()
-            && let Some(first) = dialog.task_inputs.first()
-        {
-            first.update(cx, |input, cx| input.focus(window, cx));
-        }
         cx.notify();
     }
 
@@ -319,21 +309,7 @@ impl QuillApp {
                 .unwrap_or(CHECKLIST_TASKS_MAX),
             None => CHECKLIST_TASKS_MAX,
         };
-        let mut panel = div()
-            .id("checklist-dialog")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(div().text_sm().font_semibold().child(if adding {
-                tr(keys::Q_MEDIA_ADD_TASKS)
-            } else {
-                tr(keys::Q_MEDIA_NEW_CHECKLIST)
-            }));
+        let mut panel = div().id("checklist-dialog").flex().flex_col().gap_2();
         if !adding {
             panel = panel.child(
                 Textarea::new(&dialog.title_input)
@@ -446,42 +422,49 @@ impl QuillApp {
                     .child(error),
             );
         }
-        Some(
-            panel
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(
-                            Button::new("checklist-create")
-                                .label(if adding {
-                                    tr(keys::Q_MEDIA_ADD)
-                                } else {
-                                    tr(keys::Q_MEDIA_CREATE)
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.submit_checklist_dialog(cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("checklist-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.close_checklist_dialog(cx);
-                                })),
-                        ),
-                )
-                .into_any_element(),
-        )
+        Some(panel.into_any_element())
+    }
+
+    /// Cancel and Create (or Add), pinned under the checklist box.
+    pub(super) fn checklist_box_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let adding = self
+            .composer_ui
+            .checklist_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.add_to.is_some());
+        div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("checklist-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_checklist_dialog(cx);
+                    })),
+            )
+            .child(
+                Button::new("checklist-create")
+                    .label(if adding {
+                        tr(keys::Q_MEDIA_ADD)
+                    } else {
+                        tr(keys::Q_MEDIA_CREATE)
+                    })
+                    .primary()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.submit_checklist_dialog(cx);
+                    })),
+            )
+            .into_any_element()
     }
 
     // ------------------------------------------------------------------
     // Poll: "Add an Option"
     // ------------------------------------------------------------------
 
-    /// Open the inline "Add an Option" panel (`lng_polls_add_option`).
-    pub(super) fn open_poll_add_option(
+    /// Open the "Add an Option" box (`lng_polls_add_option`).
+    pub(in crate::ui) fn open_poll_add_option(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
@@ -494,13 +477,13 @@ impl QuillApp {
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         });
-        input.update(cx, |input, cx| input.focus(window, cx));
         self.message_ui.poll_add_option = Some(PollAddOption {
             chat_id,
             message_id,
             input,
             attach: Default::default(),
             error: None,
+            focus_on_mount: true,
         });
         cx.notify();
     }
@@ -610,17 +593,6 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(tr(keys::Q_MEDIA_ADD_AN_OPTION)),
-            )
             .child(
                 div()
                     .flex()
@@ -647,28 +619,31 @@ impl QuillApp {
                     .child(error),
             );
         }
-        Some(
-            body.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("poll-add-option-save")
-                            .label(tr(keys::SETTINGS_SAVE))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_poll_add_option(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("poll-add-option-cancel")
-                            .label(tr(keys::CANCEL))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_poll_add_option(cx);
-                            })),
-                    ),
+        Some(body.into_any_element())
+    }
+
+    /// Cancel and Save, pinned under the "Add an Option" box.
+    pub(super) fn poll_add_option_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("poll-add-option-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_poll_add_option(cx);
+                    })),
             )
-            .into_any_element(),
-        )
+            .child(
+                Button::new("poll-add-option-save")
+                    .label(tr(keys::SETTINGS_SAVE))
+                    .primary()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.submit_poll_add_option(cx);
+                    })),
+            )
+            .into_any_element()
     }
 }

@@ -11,6 +11,8 @@ register_demos![
     // The message menu's item rows (injected, no live Telegram).
     // `QUILL_DEMO_ITEMS` is `poll`, `task`, `contact` or `author`: which
     // message the menu facts (what TDLib allowed) are injected for.
+    // `checklist`, `add-tasks` and `add-option` open the New Checklist,
+    // Add Tasks and poll Add an Option boxes instead of a menu.
     DemoSpec::chats(
         "ready-item-menus",
         "screenshot demo — menu over a poll option, task, contact and post author (injected, no live Telegram)"
@@ -19,7 +21,7 @@ register_demos![
 ];
 
 impl QuillApp {
-    fn demo_item_menus(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn demo_item_menus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
         let mode = std::env::var("QUILL_DEMO_ITEMS").unwrap_or_else(|_| "poll".into());
         if let Some(session) = self.demo_session.as_mut() {
@@ -27,6 +29,20 @@ impl QuillApp {
             apply_item_menus(session, &self.demo_ui.sink, &self.demo_ui.seq);
             session.open_chat(if mode == "author" { CHANNEL } else { GROUP });
             crate::ui::message_menu_ui::item_rows::inject_menu_facts(session, &mode);
+        }
+        use crate::ui::ChecklistDialog;
+        match mode.as_str() {
+            "checklist" => {
+                self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
+            }
+            "add-tasks" => {
+                let add_to = Some((GROUP, quill::ids::MessageId(21)));
+                self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(add_to, window, cx));
+            }
+            "add-option" => {
+                self.open_poll_add_option(GROUP, quill::ids::MessageId(20), window, cx);
+            }
+            _ => {}
         }
         cx.notify();
     }

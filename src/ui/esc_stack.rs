@@ -89,16 +89,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.composer_ui.code_language.is_some(),
         |app, window, cx| app.close_code_language_dialog(window, cx)
     ),
-    layer!(
-        "composer-date-dialog",
-        |app| app.composer_ui.date_dialog.is_some(),
-        |app, window, cx| app.close_composer_date_dialog(window, cx)
-    ),
-    layer!(
-        "composer-link-dialog",
-        |app| app.composer_ui.link_dialog.is_some(),
-        |app, window, cx| app.close_composer_link_dialog(window, cx)
-    ),
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
@@ -175,33 +165,13 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app, _, cx| app.close_media_viewer(cx)
     ),
     layer!(
-        "checklist-dialog",
-        |app| app.composer_ui.checklist_dialog.is_some(),
-        |app, _, cx| app.close_checklist_dialog(cx)
-    ),
-    layer!(
         "share-content-dialog",
         |app| app.share.content_dialog.is_some(),
         |app, _, cx| app.close_share_content_dialog(cx)
     ),
-    layer!(
-        "poll-add-option",
-        |app| app.message_ui.poll_add_option.is_some(),
-        |app, _, cx| app.close_poll_add_option(cx)
-    ),
-    layer!(
-        "poll-deadline",
-        |app| app.poll_deadline_box_open(),
-        |app, _, cx| app.close_poll_deadline_box(cx)
-    ),
     layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
         app.close_open_country_boxes(cx)
     }),
-    layer!(
-        "poll-dialog",
-        |app| app.composer_ui.poll_dialog.is_some(),
-        |app, _, cx| app.request_close_poll_dialog(cx)
-    ),
     // Slice P1: the checkout and receipt dialogs.
     layer!(
         "payment-dialog",
@@ -405,8 +375,6 @@ const FOCUS_RETURN_LAYERS: &[&str] = &[
     "profile-modal",
     "earn-layer",
     "composer-code-language",
-    "composer-date-dialog",
-    "composer-link-dialog",
     "gif-panel",
     "sticker-panel",
     "reply-panels",

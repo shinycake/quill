@@ -11,7 +11,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_theme::{accent, bg_canvas};
 use super::composer_field::field_doc;
 use super::scheduled::{TimePicker, picked_unix};
 use crate::ui::status_note::StatusNote;
@@ -19,7 +18,6 @@ use crate::ui::wall_clock::WallClock;
 use gpui_kit::component::button::*;
 use gpui_kit::component::date_picker::{DatePicker, DatePickerState};
 use gpui_kit::component::time_field::{HourCycle, TimePrecision};
-use gpui_kit::component::*;
 use gpui_kit::{TestSupportExt, *};
 use quill::composer::{FormatAction, apply_format_markup, date_link, date_link_time};
 use quill::composer_doc::ComposerTag;
@@ -34,7 +32,7 @@ super::screenshot_demo::register_demos![
 /// The latest date the box takes (tdesktop `.max`).
 const MAX_DATE: i64 = 2_114_380_800;
 
-/// The date box above the composer.
+/// The date box (a kit dialog, `composer_boxes.rs`).
 pub(super) struct ComposerDateDialog {
     /// The text that becomes the date when the box opened.
     range: Range<usize>,
@@ -174,66 +172,52 @@ impl QuillApp {
             input.set_value(tr(keys::Q_CHAT_SEE_YOU_TONIGHT), window, cx);
             input.set_selected_range(8..15, cx);
         });
-        self.open_composer_date_dialog(window, cx);
+        // `QUILL_DEMO_COMPOSER_BOX=link` opens the Add Link box instead.
+        if std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() == Ok("link") {
+            self.open_composer_link_dialog(window, cx);
+        } else {
+            self.open_composer_date_dialog(window, cx);
+        }
     }
 
-    /// The box, above the composer input row.
-    pub(super) fn composer_date_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.composer_ui.date_dialog.as_ref()?;
-        self.composer_date_dialog_panel_body(cx)
-    }
-
-    /// `composer_date_dialog_panel` past its cheap check. A debug build reserves this
-    /// builder's whole frame on entry, so frames that show nothing skip
-    /// it (docs/decisions/main-thread-stack.md).
-    /// The outer function repeats this body's first check; keep the two in step.
-    #[inline(never)]
-    fn composer_date_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The date box's body: the date and time picker.
+    pub(super) fn composer_date_dialog_panel(&self, _: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.composer_ui.date_dialog.as_ref()?;
         Some(
             div()
                 .id("composer-date-dialog")
                 .test_support()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .p_3()
-                .rounded_md()
-                .border_1()
-                .border_color(accent())
-                .bg(bg_canvas())
-                .child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .child(tr(keys::FORMATTING_DATE_TITLE)),
-                )
                 .child(
                     DatePicker::new(&dialog.picker.state)
                         .placeholder(tr(keys::Q_CHAT_PICK_A_DATE_AND_TIME_2)),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(
-                            Button::new("composer-date-save")
-                                .label(tr(keys::SETTINGS_SAVE))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_composer_date(window, cx)
-                                })),
-                        )
-                        .child(
-                            Button::new("composer-date-cancel")
-                                .label(tr(keys::CANCEL))
-                                .ghost()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_composer_date_dialog(window, cx);
-                                })),
-                        ),
-                )
                 .into_any_element(),
         )
+    }
+
+    /// Cancel and Save under the date box.
+    pub(super) fn composer_date_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("composer-date-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.close_composer_date_dialog(window, cx);
+                    })),
+            )
+            .child(
+                Button::new("composer-date-save")
+                    .label(tr(keys::SETTINGS_SAVE))
+                    .primary()
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.apply_composer_date(window, cx)),
+                    ),
+            )
+            .into_any_element()
     }
 }
 

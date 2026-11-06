@@ -245,16 +245,6 @@ impl QuillApp {
                         .children(self.composer_reply_bar_slot(cx))
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
                         .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
-                        // Phase 4.2: poll creation dialog above the composer.
-                        .when_some(self.poll_dialog_panel(cx), |this, panel| this.child(panel))
-                        // B15: checklist composer / "Add Tasks" and the poll
-                        // "Add an Option" row above the composer.
-                        .when_some(self.checklist_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.poll_add_option_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         // The attach menu's Contact / Location panel.
                         .when_some(self.share_content_panel(cx), |this, panel| {
                             this.child(panel)
@@ -296,12 +286,6 @@ impl QuillApp {
                         // until the wait expires; the send button shows the
                         // remaining time (`composer_send_button`) and
                         // `ensure_slow_mode_tick` re-renders every second.
-                        .when_some(self.composer_link_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
-                        .when_some(self.composer_date_dialog_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         .when_some(self.code_language_panel(cx), |this, panel| {
                             this.child(panel)
                         })

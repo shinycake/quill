@@ -300,17 +300,7 @@ impl QuillApp {
             tr(keys::POLLS_CREATE_ALLOWED_COUNTRIES),
             cx,
         )?;
-        Some(
-            div()
-                .id("poll-dialog")
-                .p_3()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().primary)
-                .bg(cx.theme().background)
-                .child(view)
-                .into_any_element(),
-        )
+        Some(div().id("poll-dialog").child(view).into_any_element())
     }
 
     /// The box itself: search, chips (several), rows, and the buttons.

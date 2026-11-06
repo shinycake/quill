@@ -504,19 +504,7 @@ impl QuillApp {
             .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
         self.composer_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
-        if let Some(dialog) = &self.composer_ui.poll_dialog {
-            dialog
-                .question_input
-                .update(cx, |input, cx| input.focus(window, cx));
-        }
         cx.notify();
-    }
-
-    /// Keep the poll panel's height cap in step with the window.
-    pub(super) fn sync_poll_dialog_height(&mut self, window: &Window) {
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
-            dialog.viewport_height = window.viewport_size().height;
-        }
     }
 
     pub(super) fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
@@ -787,7 +775,7 @@ impl QuillApp {
             )
     }
 
-    /// Phase 4.2: the poll creation dialog, rendered above the composer.
+    /// Phase 4.2: the body of the poll creation box (`poll_box.rs`).
     /// Question field, description field, dynamic option rows (2–10),
     /// quiz mode (correct-option radios + explanation), duration / country
     /// fields, anonymous / multiple-answers / revoting / shuffle / quiz
@@ -810,20 +798,12 @@ impl QuillApp {
         if dialog.deadline_box.is_some() {
             return self.poll_deadline_panel(cx);
         }
-        let title = if dialog.is_quiz {
-            tr(keys::Q_MEDIA_NEW_QUIZ)
-        } else {
-            tr(keys::POLLS_CREATE_TITLE)
-        };
-        // The fields and settings scroll when the window is short; the
-        // title and the Create / Cancel buttons stay in view.
+        // The box scrolls as a whole when the window is short.
         let mut panel = div()
             .id("poll-dialog-body")
             .flex()
             .flex_col()
             .gap_2()
-            .min_h_0()
-            .overflow_y_scroll()
             .child(
                 Textarea::new(&dialog.description_input)
                     .aria_label(tr(keys::Q_MEDIA_POLL_DESCRIPTION))
@@ -909,68 +889,46 @@ impl QuillApp {
         if let Some(settings) = self.poll_settings(cx) {
             panel = panel.child(settings);
         }
-        let mut outer = div()
-            .id("poll-dialog")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .min_h_0()
-            .max_h((dialog.viewport_height - px(160.)).max(px(240.)))
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(div().text_sm().font_semibold().child(title))
-            .child(panel);
-        if dialog.confirming_discard {
-            outer = outer.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_sm().child(tr(keys::Q_MEDIA_DISCARD_THIS_POLL)))
-                    .child(
-                        Button::new("poll-discard-yes")
-                            .label(tr(keys::Q_MEDIA_DISCARD))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_poll_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("poll-discard-no")
-                            .label(tr(keys::Q_MEDIA_KEEP_EDITING))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
-                                    dialog.confirming_discard = false;
-                                }
-                                cx.notify();
-                            })),
-                    ),
-            );
-        }
-        outer = outer.child(
+        Some(
             div()
+                .id("poll-dialog")
                 .flex()
+                .flex_col()
                 .gap_2()
-                .child(
-                    Button::new("poll-create")
-                        .label(tr(keys::POLLS_CREATE))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_poll_dialog(window, cx);
-                        })),
-                )
-                .child(
-                    Button::new("poll-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.request_close_poll_dialog(cx);
-                        })),
-                ),
-        );
-        Some(outer.into_any_element())
+                .min_h_0()
+                .child(panel)
+                .into_any_element(),
+        )
+    }
+
+    /// Cancel and Create, pinned under the scrolling box. The country and
+    /// deadline pickers bring their own buttons, so they get none.
+    pub(super) fn poll_box_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        if dialog.country_box.is_some() || dialog.deadline_box.is_some() {
+            return None;
+        }
+        let footer = div()
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                Button::new("poll-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.request_close_poll_dialog(cx);
+                    })),
+            )
+            .child(
+                Button::new("poll-create")
+                    .label(tr(keys::POLLS_CREATE))
+                    .primary()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_poll_dialog(window, cx);
+                    })),
+            );
+        Some(footer.into_any_element())
     }
 }
 
@@ -983,6 +941,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod demo;
+mod poll_box;
 mod poll_deadline;
 mod poll_settings;
 #[cfg(test)]

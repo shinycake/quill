@@ -19,6 +19,9 @@ pub struct ChecklistDialog {
     pub(crate) others_can_add_tasks: bool,
     pub(crate) others_can_mark_tasks_as_done: bool,
     pub(crate) error: Option<&'static str>,
+    /// The field to focus once the dialog has mounted (the kit dialog
+    /// takes focus when it opens, so focusing at open time is lost).
+    pub(crate) focus_on_mount: Option<Entity<TextareaState>>,
 }
 
 impl ChecklistDialog {
@@ -29,10 +32,16 @@ impl ChecklistDialog {
     ) -> Self {
         let title_input = Self::textarea(window, cx, tr(keys::Q_MEDIA_TITLE));
         let task_inputs = vec![Self::textarea(window, cx, tr(keys::Q_MEDIA_ADD_A_TASK))];
+        let focus_on_mount = if add_to.is_some() {
+            task_inputs.first().cloned()
+        } else {
+            Some(title_input.clone())
+        };
         Self {
             add_to,
             title_input,
             task_inputs,
+            focus_on_mount,
             others_can_add_tasks: false,
             others_can_mark_tasks_as_done: false,
             error: None,

@@ -595,7 +595,7 @@ fn a_surface_that_keeps_what_it_made_is_named(cx: &mut TestAppContext) {
     assert_eq!(never_opens, "box that never opens did not open");
     assert!(
         stays_open.starts_with("box that stays open did not close: [")
-            && stays_open.contains(r#""poll-dialog""#),
+            && stays_open.contains(r#""PollCreate""#),
         "{stays_open}"
     );
 }

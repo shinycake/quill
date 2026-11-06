@@ -172,6 +172,7 @@ pub(crate) use accounts::*;
 pub(crate) use chat_theme::*;
 pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
 
+mod dialog_focus;
 mod dialogs;
 mod direct_messages_admin;
 mod direct_messages_chat;
@@ -259,10 +260,12 @@ mod chat_swipe_ui;
 mod chat_wide_ui;
 mod chatlist_global;
 mod chatlist_style;
+mod checklist_box;
 mod checklists;
 mod collectible_info_ui;
 mod command_shortcuts;
 mod composer;
+mod composer_boxes;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod composer_bundle_tests;
