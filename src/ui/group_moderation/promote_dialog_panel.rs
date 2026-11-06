@@ -43,19 +43,7 @@ impl QuillApp {
             .id("admin-promote-dialog")
             .flex()
             .flex_col()
-            .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .text_color(text_bright())
-                    .child(tr(keys::Q_PEOPLE_PROMOTE_MEMBER)),
-            )
+            .gap_3()
             .child(
                 div()
                     .flex()
@@ -71,8 +59,7 @@ impl QuillApp {
                     .child(
                         Button::new("admin-promote-search")
                             .label(tr(keys::Q_PEOPLE_SEARCH))
-                            .ghost()
-                            .text_color(text_bright())
+                            .outline()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.search_promote_members(cx);
                             })),
@@ -179,28 +166,7 @@ impl QuillApp {
                         &[("summary", &summary.to_string())],
                     )),
             )
-            .child(self.rights_checkboxes(rights, "admin-right", cx))
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("admin-promote-submit")
-                            .label(tr(keys::COMMUNITY_ADMIN_PROMOTE))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_admin_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("admin-promote-cancel")
-                            .label(tr(keys::CANCEL))
-                            .ghost()
-                            .text_color(text_bright())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_admin_dialog(cx);
-                            })),
-                    ),
-            );
+            .child(self.rights_checkboxes(rights, "admin-right", cx));
         panel.into_any_element()
     }
 
@@ -216,11 +182,6 @@ impl QuillApp {
         staged: Option<ChatAdminRights>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let name = self
-            .session()
-            .and_then(|session| session.user(user_id))
-            .map(|user| user.display_name())
-            .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
         let cached = self
             .session()
             .and_then(|session| session.groups.admin_rights.get(&(chat_id.0, user_id)))
@@ -229,26 +190,7 @@ impl QuillApp {
                 _ => None,
             });
         let rights = staged.or(cached);
-        let mut panel = div()
-            .id("admin-rights-dialog")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .text_color(text_bright())
-                    .child(tr_with(
-                        keys::Q_PEOPLE_EDIT_RIGHTS,
-                        &[("name", &name.to_string())],
-                    )),
-            );
+        let mut panel = div().id("admin-rights-dialog").flex().flex_col().gap_3();
         match rights {
             None => {
                 panel = panel.child(
@@ -269,88 +211,6 @@ impl QuillApp {
                     .child(self.rights_checkboxes(&rights, "admin-edit-right", cx));
             }
         }
-        panel = panel.child(
-            div()
-                .flex()
-                .gap_2()
-                .child(
-                    Button::new("admin-rights-save")
-                        .label(tr(keys::SETTINGS_SAVE))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.submit_admin_dialog(cx);
-                        })),
-                )
-                .child(
-                    Button::new("admin-rights-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .text_color(text_bright())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_admin_dialog(cx);
-                        })),
-                ),
-        );
         panel.into_any_element()
-    }
-
-    /// Phase D3b: demote confirmation for one administrator.
-    pub(in crate::ui) fn demote_confirm_panel(
-        &self,
-        user_id: i64,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let name = self
-            .session()
-            .and_then(|session| session.user(user_id))
-            .map(|user| user.display_name())
-            .unwrap_or_else(|| tr_with(keys::Q_PEOPLE_USER, &[("user_id", &user_id.to_string())]));
-        div()
-            .id("admin-demote-dialog")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .text_color(text_bright())
-                    .child(tr_with(
-                        keys::Q_PEOPLE_DEMOTE,
-                        &[("name", &name.to_string())],
-                    )),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_PEOPLE_THEY_WILL_BECOME_A_REGULAR)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("admin-demote-submit")
-                            .label(tr(keys::Q_PEOPLE_DEMOTE_2))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_admin_dialog(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("admin-demote-cancel")
-                            .label(tr(keys::CANCEL))
-                            .ghost()
-                            .text_color(text_bright())
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.close_admin_dialog(cx);
-                            })),
-                    ),
-            )
-            .into_any_element()
     }
 }

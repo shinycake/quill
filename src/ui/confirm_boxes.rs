@@ -13,19 +13,19 @@ use quill::lang::{keys, tr};
 /// tdesktop `boxWidth`.
 const BOX_WIDTH: f32 = 380.;
 
-type Step = fn(&mut QuillApp, &mut Context<QuillApp>);
+pub(super) type Step = fn(&mut QuillApp, &mut Context<QuillApp>);
 
 /// What a confirm box asks: its title, the line under it and the button.
-struct Ask {
-    title: SharedString,
-    text: SharedString,
-    confirm: SharedString,
+pub(super) struct Ask {
+    pub(super) title: SharedString,
+    pub(super) text: SharedString,
+    pub(super) confirm: SharedString,
 }
 
 /// The shared shape: title, text (plus `extra`), Cancel and a red confirm
 /// button; Enter confirms, Escape and ✕ cancel. The open flag clears in
 /// `confirm` or `cancel`, and the shell closes the box from it.
-fn confirm_box(
+pub(super) fn confirm_box(
     app: &Entity<QuillApp>,
     shell: &Entity<QuillShell>,
     dialog: Dialog,

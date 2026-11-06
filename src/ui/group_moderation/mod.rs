@@ -547,35 +547,6 @@ impl QuillApp {
         list.into_any_element()
     }
 
-    /// Phase D3b: the admin-management dialog, rendered above the
-    /// composer like the poll / invite-link dialogs. Three flows share
-    /// one slot: the promote member picker (search + member list +
-    /// rights checkboxes), the rights editor for an existing admin, and
-    /// the demote confirmation. All element IDs are namespaced
-    /// `admin-*` so the screenshot/replay harnesses can find them.
-    pub(super) fn admin_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.admin.admin_dialog.as_ref()?;
-        match &dialog.kind {
-            AdminDialogKind::Promote {
-                search_input,
-                rights,
-                selected_user,
-            } => Some(self.promote_dialog_panel(
-                dialog.chat_id,
-                search_input,
-                rights,
-                *selected_user,
-                cx,
-            )),
-            AdminDialogKind::EditRights { user_id, rights } => {
-                Some(self.rights_editor_panel(dialog.chat_id, *user_id, *rights, cx))
-            }
-            AdminDialogKind::DemoteConfirm { user_id } => {
-                Some(self.demote_confirm_panel(*user_id, cx))
-            }
-        }
-    }
-
     /// Phase D3b: 18 rights checkboxes for a dialog's staged rights, bound
     /// to a toggle handler. `id_prefix` namespaces the button IDs
     /// (`{id_prefix}-{index}`).

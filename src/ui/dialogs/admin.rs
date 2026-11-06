@@ -4,8 +4,8 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::telegram::envelope::ChatAdminRights;
-/// Phase D3b: admin-management dialog above the composer. Three flows
-/// share one slot:
+/// Phase D3b: admin management, shown as a box over the window
+/// (`admin_boxes.rs`). Three flows share one slot:
 /// - `Promote`: member picker (search + member list from
 ///   `getSupergroupMembers`) followed by the rights checkboxes; the
 ///   checkboxes start with every right enabled (mirrors the official
@@ -24,6 +24,8 @@ pub enum AdminDialogKind {
         search_input: Entity<TextareaState>,
         rights: ChatAdminRights,
         selected_user: Option<i64>,
+        /// Hand focus to the search field once the dialog has mounted.
+        focus_on_mount: bool,
     },
     EditRights {
         user_id: i64,
@@ -52,6 +54,7 @@ impl AdminDialog {
                 search_input,
                 rights: ChatAdminRights::all(),
                 selected_user: None,
+                focus_on_mount: true,
             },
         }
     }

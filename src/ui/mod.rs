@@ -201,6 +201,7 @@ pub(crate) use story_page::StoryPage;
 
 mod actions;
 mod activity_indicator;
+mod admin_boxes;
 mod ai_compose;
 mod app;
 mod app_demo;
@@ -509,6 +510,7 @@ mod search_ui;
 mod secret_chats;
 mod security;
 mod security_recovery;
+mod send_as_ui;
 mod send_box_media_check;
 mod send_box_options;
 mod send_box_state;

@@ -237,7 +237,7 @@ impl QuillApp {
 }
 
 /// Three address-book contacts with phone numbers for the contact chooser.
-fn demo_contacts(
+pub(super) fn demo_contacts(
     session: &mut quill::state::Session,
     sink: &std::sync::Arc<quill::diagnostics::MemorySink>,
     seq: &std::sync::atomic::AtomicU64,
