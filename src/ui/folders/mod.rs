@@ -4,14 +4,15 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::settings_window::rows::{group, switch_row};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::folder_picker::PickerMode;
 use quill::ids::ChatId;
@@ -316,196 +317,218 @@ impl QuillApp {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut list = div().id("folder-manage-list").flex().flex_col().gap_1();
+            let muted = cx.theme().muted_foreground;
+            // tdesktop `FilterRowButton`: icon, name and chat count; the
+            // row opens the editor, the buttons on the right reorder,
+            // share and delete.
+            let mut rows: Vec<AnyElement> = vec![
+                Button::new("folder-create")
+                    .ghost()
+                    .w_full()
+                    .h(px(40.))
+                    .accessibility_label(tr(keys::FILTERS_NEW))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .w_full()
+                            .text_sm()
+                            .text_color(cx.theme().primary)
+                            .child(Icon::new(IconName::Plus).size_4())
+                            .child(tr(keys::FILTERS_NEW)),
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_folder_create(window, cx);
+                    }))
+                    .into_any_element(),
+            ];
             if folders.is_empty() {
-                list = list.child(
+                rows.push(
                     div()
+                        .px_3()
+                        .py_2()
                         .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_CHATLIST_NO_FOLDERS_YET_CREATE_ONE)),
+                        .text_color(muted)
+                        .child(tr(keys::Q_CHATLIST_NO_FOLDERS_YET_CREATE_ONE))
+                        .into_any_element(),
                 );
             }
+            let icon_button = |id: String, icon: IconName, label: &'static str| {
+                Button::new(id)
+                    .icon(icon)
+                    .ghost()
+                    .small()
+                    .tooltip(label)
+                    .accessibility_label(label)
+            };
             for (index, (folder_id, name, count, icon)) in folders.iter().enumerate() {
                 let folder_id = *folder_id;
                 let is_first = index == 0;
                 let is_last = index + 1 == folders.len();
-                let name_label = format!("{name} ({count})");
                 let glyph = super::folder_glyphs::folder_glyph(icon);
-                list = list.child(
+                let chats = trn(keys::FILTERS_CHATS_COUNT, *count);
+                let open = Button::new(format!("folder-edit-{folder_id}"))
+                    .ghost()
+                    .w_full()
+                    .h_auto()
+                    .tooltip(tr(keys::FILTERS_EDIT))
+                    .accessibility_label(name.clone())
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .w_full()
+                            .py(px(6.))
+                            .child(Icon::new(glyph).size(px(18.)).text_color(muted))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .min_w_0()
+                                    .child(div().text_sm().truncate().child(name.clone()))
+                                    .child(div().text_xs().text_color(muted).child(chats)),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_folder_edit(folder_id, window, cx);
+                    }));
+                rows.push(
                     div()
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
+                        .gap_1()
+                        .w_full()
+                        .pr_1()
+                        .child(div().flex_1().min_w_0().child(open))
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .min_w_0()
-                                .child(
-                                    Icon::new(glyph)
-                                        .size(px(16.))
-                                        .text_color(cx.theme().muted_foreground),
-                                )
-                                .child(div().text_sm().font_medium().truncate().child(name_label)),
+                            icon_button(
+                                format!("folder-up-{folder_id}"),
+                                IconName::ArrowUp,
+                                tr(keys::Q_MISC_MOVE_UP),
+                            )
+                            .disabled(is_first)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.move_folder(folder_id, true, cx);
+                                },
+                            )),
+                        )
+                        .child(
+                            icon_button(
+                                format!("folder-down-{folder_id}"),
+                                IconName::ArrowDown,
+                                tr(keys::Q_MISC_MOVE_DOWN),
+                            )
+                            .disabled(is_last)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.move_folder(folder_id, false, cx);
+                                },
+                            )),
+                        )
+                        .child(
+                            icon_button(
+                                format!("folder-share-{folder_id}"),
+                                IconName::Link,
+                                tr(keys::FILTERS_LINK),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.open_folder_share(folder_id, window, cx);
+                                },
+                            )),
+                        )
+                        .child(
+                            icon_button(
+                                format!("folder-delete-{folder_id}"),
+                                IconName::Trash,
+                                tr(keys::BOX_DELETE),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.open_folder_delete(folder_id, cx);
+                                },
+                            )),
+                        )
+                        .into_any_element(),
+                );
+            }
+            let list = div()
+                .id("folder-manage-list")
+                .child(group(Some(tr(keys::FILTERS_SUBTITLE)), rows));
+            let tabs_settings = this.folder_tabs_settings(cx);
+            let recommended_shown = !recommended.is_empty();
+            let recommended_rows: Vec<AnyElement> = recommended
+                .into_iter()
+                .map(|(ix, name, description, icon)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px_3()
+                        .py_2()
+                        .child(
+                            Icon::new(super::folder_glyphs::folder_glyph(&icon))
+                                .size(px(18.))
+                                .text_color(muted),
                         )
                         .child(
                             div()
                                 .flex()
-                                .flex_none()
-                                .gap_1()
-                                .child(
-                                    Button::new(format!("folder-up-{folder_id}"))
-                                        .label("↑")
-                                        .ghost()
-                                        .when(is_first, |this| this.disabled(true))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.move_folder(folder_id, true, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(format!("folder-down-{folder_id}"))
-                                        .label("↓")
-                                        .ghost()
-                                        .when(is_last, |this| this.disabled(true))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.move_folder(folder_id, false, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(format!("folder-edit-{folder_id}"))
-                                        .label(tr(keys::FILTERS_SETUP))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.open_folder_edit(folder_id, window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(format!("folder-share-{folder_id}"))
-                                        .icon(gpui_kit::assets::IconName::Link)
-                                        .ghost()
-                                        .tooltip(tr(keys::FILTERS_LINK))
-                                        .accessibility_label(tr(keys::FILTERS_LINK))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.open_folder_share(folder_id, window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(format!("folder-delete-{folder_id}"))
-                                        .label(tr(keys::BOX_DELETE))
-                                        .ghost()
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_folder_delete(folder_id, cx);
-                                        })),
-                                ),
-                        ),
-                );
-            }
-            let tabs_settings = this.folder_tabs_settings(cx);
-            let recommended_shown = !recommended.is_empty();
-            let mut recommended_section = div().flex().flex_col().gap_1();
-            if recommended_shown {
-                recommended_section = recommended_section.child(
-                    div()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::FILTERS_RECOMMENDED)),
-                );
-            }
-            for (ix, name, description, icon) in recommended {
-                recommended_section = recommended_section.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
+                                .flex_col()
+                                .flex_1()
                                 .min_w_0()
-                                .child(
-                                    Icon::new(super::folder_glyphs::folder_glyph(&icon))
-                                        .size(px(16.))
-                                        .text_color(cx.theme().muted_foreground),
-                                )
+                                .child(div().text_sm().truncate().child(name))
                                 .child(
                                     div()
-                                        .flex()
-                                        .flex_col()
-                                        .min_w_0()
-                                        .child(div().text_sm().font_medium().truncate().child(name))
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .truncate()
-                                                .child(description),
-                                        ),
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .truncate()
+                                        .child(description),
                                 ),
                         )
                         .child(
                             Button::new(("folder-recommended-add", ix))
                                 .label(tr(keys::FILTERS_RECOMMENDED_ADD))
+                                .outline()
                                 .small()
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.add_recommended_folder(ix, cx);
                                 })),
-                        ),
-                );
-            }
-            let list = this.setting_spot(&["folders.manage"], list, cx);
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            let list = this.setting_spot(&["folders.manage", "folders.new_folder"], list, cx);
             let list =
                 this.setting_stand_in(!recommended_shown, &["folders.recommended"], list, cx);
-            let recommended_section =
-                this.setting_spot(&["folders.recommended"], recommended_section, cx);
+            let recommended_section = this.setting_spot(
+                &["folders.recommended"],
+                group(Some(tr(keys::FILTERS_RECOMMENDED)), recommended_rows),
+                cx,
+            );
+            let owner = cx.entity().downgrade();
+            let tags = switch_row(
+                "folder-tags-toggle",
+                tr(keys::FILTERS_ENABLE_TAGS),
+                None,
+                tags_enabled,
+                move |&on, _, cx| {
+                    if on != tags_enabled {
+                        let _ = owner.update(cx, |this, cx| this.toggle_folder_tags_ui(cx));
+                    }
+                },
+                cx,
+            );
             div()
                 .flex()
                 .flex_col()
-                .gap_2()
+                .gap_4()
                 .child(list)
                 .children(recommended_shown.then_some(recommended_section))
-                .child(
-                    this.setting_spot(
-                        &["folders.folder_tags"],
-                        div().flex().items_center().gap_2().child(
-                            // Phase 6: kit Checkbox (was: ghost button with ☑/☐ label).
-                            Checkbox::new("folder-tags-toggle")
-                                .checked(tags_enabled)
-                                .label(tr(keys::FILTERS_ENABLE_TAGS))
-                                .on_click(cx.listener(move |this, &on, _, cx| {
-                                    if on != tags_enabled {
-                                        this.toggle_folder_tags_ui(cx);
-                                    }
-                                })),
-                        ),
-                        cx,
-                    ),
-                )
-                .child(
-                    this.setting_spot(
-                        &["folders.new_folder"],
-                        div().flex().child(
-                            Button::new("folder-create")
-                                .icon(gpui_kit::assets::IconName::Plus)
-                                .label(tr(keys::FILTERS_NEW))
-                                .outline()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_folder_create(window, cx);
-                                })),
-                        ),
-                        cx,
-                    ),
-                )
+                .child(this.setting_spot(&["folders.folder_tags"], group(None, [tags]), cx))
                 .child(tabs_settings)
                 .into_any_element()
         }
