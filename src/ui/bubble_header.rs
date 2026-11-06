@@ -153,15 +153,15 @@ pub(super) fn reply_header_strip(
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_xs()
-                                    .font_medium()
+                                    .text_sm()
+                                    .font_semibold()
                                     .text_color(color)
                                     .child(name),
                             )
                             .when(header.is_quote, |this| {
                                 this.child(
                                     Icon::new(gpui_kit::assets::IconName::Quote)
-                                        .size(px(10.))
+                                        .size(px(12.))
                                         .text_color(color)
                                         .flex_none(),
                                 )
@@ -170,7 +170,7 @@ pub(super) fn reply_header_strip(
                 })
                 .child(
                     div()
-                        .text_xs()
+                        .text_sm()
                         .truncate()
                         .text_color(if state == ReplyState::Ready {
                             body
@@ -179,7 +179,7 @@ pub(super) fn reply_header_strip(
                         })
                         .when(state != ReplyState::Ready, |this| this.italic())
                         .child(quote_line.unwrap_or_else(|| {
-                            super::emoji_sprites::one_line(&text, px(12.)).unwrap_or_else(|| {
+                            super::emoji_sprites::one_line(&text, px(14.)).unwrap_or_else(|| {
                                 super::bidi_line::one_line_plain(text).into_any_element()
                             })
                         })),
@@ -278,7 +278,7 @@ pub(super) fn forward_header_line(
         .flex_wrap()
         .items_baseline()
         .gap_x_1()
-        .text_xs()
+        .text_sm()
         .when(known, |this| {
             this.child(
                 div()

@@ -99,10 +99,12 @@ impl BubbleRoom {
 /// line with the unread dot and the time's skip block, and a full
 /// 100-bar waveform with the row's disc and padding. The waveform then
 /// fills whatever is left of it. `status_width` is the duration label's
-/// width, `info_width` the time footer's (0 when hidden).
+/// width, `info_width` the time footer's (0 when hidden),
+/// `transcribe_width` the transcribe button's with its skip (0 without).
 pub(in crate::ui) fn voice_row_width(
     status_width: i32,
     info_width: i32,
+    transcribe_width: i32,
     room: BubbleRoom,
 ) -> Pixels {
     let outer = file_max_width(FileContext {
@@ -111,7 +113,7 @@ pub(in crate::ui) fn voice_row_width(
         name_width: 0,
         status_width,
         skip_block_width: skip_block_width(info_width),
-        transcribe_width: 0,
+        transcribe_width,
     });
     content_for_outer(room.cap(outer), room.plain)
 }
@@ -468,11 +470,13 @@ mod tests {
     fn a_voice_row_is_as_wide_as_a_full_waveform() {
         // 100 bars of 3 px, the row's 12 + 10 padding, the 44 px disc and
         // its 11 px skip: 377, as Telegram Desktop; 351 inside the bubble.
-        assert_eq!(voice_row_width(40, 30, PLAIN), px(377.));
-        assert_eq!(voice_row_width(40, 30, PADDED), px(351.));
+        assert_eq!(voice_row_width(40, 30, 0, PLAIN), px(377.));
+        assert_eq!(voice_row_width(40, 30, 0, PADDED), px(351.));
         // A very wide status line (a long "played / total") still wins.
         // 67 text left + 300 status + 12 unread dot + 40 skip block + 11.
-        assert_eq!(voice_row_width(300, 30, PLAIN), px(430.));
+        assert_eq!(voice_row_width(300, 30, 0, PLAIN), px(430.));
+        // The transcribe button and its skip widen the row by their width.
+        assert_eq!(voice_row_width(40, 30, 38, PLAIN), px(415.));
     }
 
     #[test]
@@ -644,7 +648,7 @@ mod tests {
         assert_eq!(file_row_bounds(own), (px(242.), px(258.)));
         assert_eq!(poll_min_width(group), px(226.));
         // A voice row narrows (its waveform takes fewer bars).
-        assert_eq!(voice_row_width(40, 30, group), px(226.));
+        assert_eq!(voice_row_width(40, 30, 0, group), px(226.));
         // A link preview card and its large photo.
         assert_eq!(preview_inner_max(group), 252 - 26 - 18);
         let (w, h) = preview_photo_frame((1100, 740), group);

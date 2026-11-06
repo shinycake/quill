@@ -8,6 +8,7 @@ gpui_kit::assets::icon_assets!(
         X,
         Languages,
         CircleQuestionMark,
+        Captions,
         TextSearch,
         RotateCcw,
         AtSign,

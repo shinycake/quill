@@ -19,9 +19,20 @@ pub(in crate::ui) fn transcription_row(
     message_id: MessageId,
     transcription: &Option<SpeechRecognition>,
     accent: Hsla,
+    // The row already carries a [`transcribe_button`]: nothing to offer
+    // until there is text or an error.
+    inline_button: bool,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let row = message_id.0 as u64;
+    let nothing_yet = match transcription {
+        None => true,
+        Some(SpeechRecognition::Pending { partial_text }) => partial_text.is_empty(),
+        _ => false,
+    };
+    if inline_button && nothing_yet {
+        return div().into_any_element();
+    }
     match transcription {
         None => div()
             .flex()
@@ -80,6 +91,74 @@ pub(in crate::ui) fn transcription_row(
             )
             .into_any_element(),
     }
+}
+
+/// Telegram Desktop's transcribe button (`historyTranscribeSize`,
+/// `historyTranscribeRadius`), right of a voice note's waveform.
+const TRANSCRIBE_SIZE: (f32, f32) = (28., 22.);
+/// `historyTranscribeSkip`: the gap between the waveform and the button.
+const TRANSCRIBE_SKIP: f32 = 10.;
+
+/// The width a voice row gives its transcribe button, its skip included.
+pub(in crate::ui) fn transcribe_button_width() -> i32 {
+    (TRANSCRIBE_SIZE.0 + TRANSCRIBE_SKIP) as i32
+}
+
+/// Offers `recognizeSpeech` for a voice note; spins while TDLib works.
+fn transcribe_button(
+    chat_id: ChatId,
+    message_id: MessageId,
+    pending: bool,
+    outgoing: bool,
+    cx: &mut Context<QuillApp>,
+) -> AnyElement {
+    let accent = bubble_accent(outgoing, cx);
+    let fill = if outgoing {
+        gpui_kit::white().opacity(0.22)
+    } else {
+        accent.opacity(0.14)
+    };
+    div()
+        .id(("transcribe", message_id.0 as u64))
+        .flex_none()
+        .ml(px(TRANSCRIBE_SKIP))
+        .w(px(TRANSCRIBE_SIZE.0))
+        .h(px(TRANSCRIBE_SIZE.1))
+        .rounded(px(4.))
+        .bg(fill)
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(accent)
+        .role(gpui_kit::Role::Button)
+        .aria_label(tr(keys::Q_AV_TRANSCRIBE))
+        .when(pending, |this| {
+            this.child(
+                gpui_kit::component::spinner::Spinner::new()
+                    .xsmall()
+                    .color(accent),
+            )
+        })
+        .when(!pending, |this| {
+            this.tab_index(0)
+                .cursor_pointer()
+                .hover(|style| style.opacity(0.8))
+                .child(
+                    Icon::new(gpui_kit::assets::IconName::Captions)
+                        .size(px(16.))
+                        .text_color(accent),
+                )
+                .tooltip(|window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(tr(
+                        keys::Q_AV_SEND_SPEECH_RECOGNITION_REQUEST_TO,
+                    ))
+                    .build(window, cx)
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.request_transcription(chat_id, message_id, cx);
+                }))
+        })
+        .into_any_element()
 }
 
 /// Voice waveform bars at a fixed pitch (the record bar); the first
@@ -187,7 +266,17 @@ pub(in crate::ui) fn voice_note_row(
         FontWeight::NORMAL,
         0,
     );
-    let width = crate::ui::history::bubble_width::voice_row_width(status_width, info_width, room);
+    let offer = matches!(
+        note.transcription,
+        None | Some(SpeechRecognition::Pending { .. })
+    );
+    let pending = matches!(note.transcription, Some(SpeechRecognition::Pending { .. }));
+    let width = crate::ui::history::bubble_width::voice_row_width(
+        status_width,
+        info_width,
+        if offer { transcribe_button_width() } else { 0 },
+        room,
+    );
     div()
         .id(("voice-note", row_key))
         .mt_1()
@@ -250,7 +339,12 @@ pub(in crate::ui) fn voice_note_row(
                                     this.child(div().size(px(6.)).rounded_full().bg(accent))
                                 }),
                         ),
-                ),
+                )
+                .when(offer, |this| {
+                    this.child(transcribe_button(
+                        chat_id, message_id, pending, outgoing, cx,
+                    ))
+                }),
         )
         // MED1: speed + mute on the active row.
         .when(active, |this| {
@@ -263,6 +357,7 @@ pub(in crate::ui) fn voice_note_row(
             message_id,
             &note.transcription,
             accent,
+            true,
             cx,
         ))
         .into_any_element()
