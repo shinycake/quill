@@ -5,12 +5,13 @@ use super::app::QuillApp;
 use super::demo::{demo_sessions, demo_storage_stats, demo_websites};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::settings_window::rows::{danger_row, group};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::input::{Input, InputContentType};
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::table::{Table, TableBody, TableRow};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -152,7 +153,7 @@ impl QuillApp {
                 .collect();
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
-            let mut body = div().flex().flex_col().gap_2();
+            let mut body = div().flex().flex_col().gap_4();
             if let Some(notice) = this.privacy.device_link_notice {
                 body = body.child(
                     div()
@@ -254,9 +255,6 @@ impl QuillApp {
                         .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
-            if let Some(confirm) = this.privacy.sessions_confirm {
-                body = body.child(this.sessions_confirm_banner(confirm, mutating, cx));
-            }
             if sessions.is_empty() {
                 body = body.child(
                     this.setting_spot(
@@ -282,9 +280,10 @@ impl QuillApp {
                     ),
                 );
             } else {
-                // The list shows several kinds of session, each with the
-                // controls the catalog names.
-                let mut list = div().flex().flex_col().gap_2();
+                // tdesktop `SessionsContent`: this device with "Terminate
+                // all other sessions" under it, the incomplete login
+                // attempts, then the other devices, each a group of rows.
+                let mut list = div().flex().flex_col().gap_4();
                 // A terminate just landed: the old list stays visible while
                 // the authoritative refetch is in flight (never an optimistic
                 // delete).
@@ -296,30 +295,23 @@ impl QuillApp {
                             .child(tr(keys::Q_PREFS_REFRESHING)),
                     );
                 }
-                // Phase 6: each session group is a one-column kit Table
-                // hosting the rich session rows (was: bare rows).
                 let has_current = current.is_some();
+                let any_other = sessions.iter().any(|s| !s.is_current);
                 if let Some(current) = current {
-                    let group = div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_medium()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(keys::Q_PREFS_CURRENT_SESSION)),
-                        )
-                        .child(
-                            Table::new()
-                                .with_ix(0)
-                                .accessibility_label(tr(keys::Q_PREFS_CURRENT_SESSION))
-                                .w_full()
-                                .child(TableBody::new().child(TableRow::new().child(
-                                    Self::table_cell(this.session_row(current, mutating, true, cx)),
-                                ))),
-                        );
+                    let mut rows = vec![this.session_row(current, mutating, cx)];
+                    if any_other {
+                        rows.push(this.setting_spot(
+                            &["devices.terminate_others"],
+                            danger_row(
+                                "terminate-all-sessions",
+                                IconName::LogOut,
+                                tr(keys::SESSIONS_TERMINATE_ALL),
+                                cx.listener(|this, _, _, cx| this.begin_terminate_all_sessions(cx)),
+                                cx,
+                            ),
+                            cx,
+                        ));
+                    }
                     list = list.child(this.setting_spot(
                         &[
                             "devices.current_session",
@@ -327,73 +319,44 @@ impl QuillApp {
                             "devices.accept_calls",
                             "devices.rename_device",
                         ],
-                        group,
+                        group(Some(tr(keys::Q_PREFS_CURRENT_SESSION)), rows),
                         cx,
                     ));
                 }
                 let has_incomplete = !incomplete.is_empty();
                 if has_incomplete {
-                    let mut incomplete_body = TableBody::new();
-                    for s in incomplete {
-                        incomplete_body = incomplete_body.child(
-                            TableRow::new()
-                                .child(Self::table_cell(this.session_row(s, mutating, false, cx))),
-                        );
-                    }
-                    let group = div()
+                    let rows: Vec<AnyElement> = incomplete
+                        .into_iter()
+                        .map(|s| this.session_row(s, mutating, cx))
+                        .collect();
+                    let section = div()
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_medium()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(keys::Q_PREFS_INCOMPLETE_LOGIN_ATTEMPTS)),
-                        )
+                        .gap_1()
+                        .child(group(
+                            Some(tr(keys::Q_PREFS_INCOMPLETE_LOGIN_ATTEMPTS)),
+                            rows,
+                        ))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tr(keys::Q_PREFS_THESE_DEVICES_HAVE_NO_ACCESS)),
-                        )
-                        .child(
-                            Table::new()
-                                .with_ix(1)
-                                .accessibility_label(tr(keys::Q_PREFS_INCOMPLETE_LOGIN_ATTEMPTS_2))
-                                .w_full()
-                                .child(incomplete_body),
                         );
-                    list = list.child(this.setting_spot(&["devices.incomplete_logins"], group, cx));
+                    list =
+                        list.child(this.setting_spot(&["devices.incomplete_logins"], section, cx));
                 }
                 let has_others = !others.is_empty();
                 if has_others {
-                    let mut others_body = TableBody::new();
-                    for s in others {
-                        others_body = others_body.child(
-                            TableRow::new()
-                                .child(Self::table_cell(this.session_row(s, mutating, true, cx))),
-                        );
-                    }
-                    let group = div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_medium()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(keys::Q_PREFS_OTHER_SESSIONS)),
-                        )
-                        .child(
-                            Table::new()
-                                .with_ix(2)
-                                .accessibility_label(tr(keys::Q_PREFS_OTHER_SESSIONS))
-                                .w_full()
-                                .child(others_body),
-                        );
-                    list = list.child(this.setting_spot(&["devices.terminate_session"], group, cx));
+                    let rows: Vec<AnyElement> = others
+                        .into_iter()
+                        .map(|s| this.session_row(s, mutating, cx))
+                        .collect();
+                    list = list.child(this.setting_spot(
+                        &["devices.terminate_session"],
+                        group(Some(tr(keys::Q_PREFS_OTHER_SESSIONS)), rows),
+                        cx,
+                    ));
                 }
                 let list = this.setting_spot(&["devices.sessions"], list, cx);
                 let list = this.setting_stand_in(
@@ -415,55 +378,26 @@ impl QuillApp {
                 );
                 let list =
                     this.setting_stand_in(!has_others, &["devices.terminate_session"], list, cx);
-                body = body.child(list);
-                let any_other = sessions.iter().any(|s| !s.is_current);
-                body = body.child(
-                    this.setting_spot(
-                        &["devices.terminate_others"],
-                        div().flex().justify_end().child(
-                            Button::new("terminate-all-sessions")
-                                .label(tr(keys::SESSIONS_TERMINATE_ALL))
-                                .danger()
-                                .disabled(!any_other || mutating)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.begin_terminate_all_sessions(cx);
-                                })),
-                        ),
-                        cx,
-                    ),
+                let list = this.setting_stand_in(
+                    !(has_current && any_other),
+                    &["devices.terminate_others"],
+                    list,
+                    cx,
                 );
+                body = body.child(list);
             }
-            // B13: a tapped session opens its details instead of the list.
-            let details = this
-                .privacy
-                .extra
-                .session_details
-                .and_then(|id| sessions.iter().find(|s| s.id == id))
-                .map(|s| this.session_details_body(s, mutating, cx));
-            if details.is_none() {
-                this.privacy.extra.session_details = None;
-                let ttl = this.sessions_ttl_section(cx);
-                body = body.child(this.setting_spot(&["devices.terminate_old"], ttl, cx));
-            }
-            match details {
-                Some(details) => div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(details)
-                    .into_any_element(),
-                None => body
-                    .child(
-                        div().flex().child(
-                            Button::new("sessions-refresh")
-                                .label(tr(keys::Q_PREFS_REFRESH))
-                                .outline()
-                                .small()
-                                .on_click(cx.listener(|this, _, _, cx| this.refresh_sessions(cx))),
-                        ),
-                    )
-                    .into_any_element(),
-            }
+            let ttl = this.sessions_ttl_section(cx);
+            body.child(this.setting_spot(&["devices.terminate_old"], ttl, cx))
+                .child(
+                    div().flex().child(
+                        Button::new("sessions-refresh")
+                            .label(tr(keys::Q_PREFS_REFRESH))
+                            .outline()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh_sessions(cx))),
+                    ),
+                )
+                .into_any_element()
         }
     }
 
@@ -878,5 +812,6 @@ crate::ui::shell::register_dialogs! {
 mod passkey_ceremony;
 mod passkey_login;
 pub(in crate::ui) mod passkeys;
+mod session_list;
 mod twofa_status_body;
 mod websites_dialog;

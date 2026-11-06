@@ -9,11 +9,38 @@ use serde_json::Value;
 /// platform:string system_version:string log_in_date:int32
 /// last_active_date:int32 ip_address:string location:string = Session;`,
 /// schema 1.8.67, line 9144). Only the fields the sessions list renders
-/// are kept; `is_unconfirmed`/`can_accept_*`/`device_type`/`log_in_date`
-/// are out of this slice (per-session toggles are A4).
+/// are kept.
 /// `is_password_pending` marks an incomplete login attempt — TGX
 /// (`Tdlib.java` `SessionsInfo`) treats exactly these as the
 /// "Incomplete Login Attempts" section.
+/// What a session runs on, from its `sessionDeviceType`: the picture its
+/// row shows (tdesktop `IconForType`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SessionDevice {
+    Phone,
+    Tablet,
+    Mac,
+    Desktop,
+    Browser,
+    #[default]
+    Other,
+}
+
+impl SessionDevice {
+    fn from_type(tag: &str) -> Self {
+        match tag.strip_prefix("sessionDeviceType").unwrap_or_default() {
+            "Android" | "Iphone" => Self::Phone,
+            "Ipad" => Self::Tablet,
+            "Mac" | "Apple" => Self::Mac,
+            "Windows" | "Linux" | "Ubuntu" => Self::Desktop,
+            "Chrome" | "Edge" | "Firefox" | "Safari" | "Brave" | "Opera" | "Vivaldi" => {
+                Self::Browser
+            }
+            _ => Self::Other,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedSession {
     pub id: i64,
@@ -28,6 +55,8 @@ pub struct ParsedSession {
     /// Slice A4: `can_accept_calls` (schema 1.8.67, line 9144) — the
     /// `toggleSessionCanAcceptCalls` target state.
     pub can_accept_calls: bool,
+    /// `device_type`, folded into the kinds that draw differently.
+    pub device_type: SessionDevice,
     pub device_model: String,
     pub application_name: String,
     pub application_version: String,
@@ -89,6 +118,13 @@ pub(crate) fn parse_session(value: &Value) -> Option<ParsedSession> {
         is_unconfirmed: bool_field("is_unconfirmed"),
         can_accept_secret_chats: bool_field("can_accept_secret_chats"),
         can_accept_calls: bool_field("can_accept_calls"),
+        device_type: SessionDevice::from_type(
+            value
+                .get("device_type")
+                .and_then(|kind| kind.get("@type"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
         device_model: str_field("device_model"),
         application_name: str_field("application_name"),
         application_version: str_field("application_version"),

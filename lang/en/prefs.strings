@@ -669,6 +669,7 @@
 "qll_prefs_search" = "Search";
 "qll_prefs_search_in_chat" = "Search in chat";
 "qll_prefs_secret_chats" = "Secret Chats";
+"qll_prefs_session_accepts" = "Accept on this device";
 "qll_prefs_security_and_content" = "Security and content";
 "qll_prefs_select_the_focused_message" = "Select the focused message";
 "qll_prefs_selected" = ", selected";
