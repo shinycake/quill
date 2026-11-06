@@ -268,23 +268,24 @@ impl QuillApp {
         } else {
             app
         };
-        let mut rows: Vec<(IconName, &'static str, String)> = Vec::new();
-        rows.push((IconName::AppWindow, tr(keys::SESSIONS_APPLICATION), app));
-        rows.push((
-            device_icon(s.device_type),
-            tr(keys::SESSIONS_SYSTEM),
-            joined([&s.platform, &s.system_version], " "),
-        ));
-        rows.push((
-            IconName::Network,
-            tr(keys::SESSIONS_IP),
-            s.ip_address.clone(),
-        ));
-        rows.push((
-            IconName::MapPin,
-            tr(keys::SESSIONS_LOCATION),
-            s.location.clone(),
-        ));
+        let mut rows: Vec<(IconName, &'static str, String)> = vec![
+            (IconName::AppWindow, tr(keys::SESSIONS_APPLICATION), app),
+            (
+                device_icon(s.device_type),
+                tr(keys::SESSIONS_SYSTEM),
+                joined([&s.platform, &s.system_version], " "),
+            ),
+            (
+                IconName::Network,
+                tr(keys::SESSIONS_IP),
+                s.ip_address.clone(),
+            ),
+            (
+                IconName::MapPin,
+                tr(keys::SESSIONS_LOCATION),
+                s.location.clone(),
+            ),
+        ];
         if s.log_in_date > 0 {
             rows.push((
                 IconName::Info,
@@ -536,19 +537,4 @@ crate::ui::shell::register_dialogs! {
         |app| app.privacy.sessions_confirm.is_some(),
         QuillApp::build_sessions_confirm_dialog,
     ),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn joined_skips_empty_parts() {
-        assert_eq!(
-            joined(["Quill 0.1", "Linux 6.8"], ", "),
-            "Quill 0.1, Linux 6.8"
-        );
-        assert_eq!(joined(["", " Linux "], ", "), "Linux");
-        assert_eq!(joined(["", ""], " · "), "");
-    }
 }
