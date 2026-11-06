@@ -219,9 +219,6 @@ impl QuillApp {
                             },
                         )
                         .children(self.forward_bar_slot(cx))
-                        .when(self.composer_ui.send_as_open, |this| {
-                            this.child(self.send_as_panel(cx))
-                        })
                         // Phase S2: inline-bot warning banner for secret chats.
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.

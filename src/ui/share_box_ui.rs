@@ -8,21 +8,17 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_row::chat_avatar;
-use super::pressable::PressableDiv;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
-use quill::telegram::envelope::{ChatKind, MessageSender};
-use std::path::PathBuf;
+use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
     pub(super) fn toggle_share_destination(&mut self, id: ChatId, cx: &mut Context<Self>) {
@@ -455,198 +451,5 @@ impl QuillApp {
             self.share.selection.toggle(dest);
         }
         cx.notify();
-    }
-
-    // ---- send as ---------------------------------------------------
-
-    /// Composer button showing the current "send as" identity; only for
-    /// chats where TDLib reports a selectable sender.
-    pub(super) fn send_as_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let session = self.session()?;
-        let chat_id = session.open_chat?;
-        let sender = session.selected_message_sender(chat_id)?;
-        let name = session.message_sender_title(sender);
-        let photo = match sender {
-            MessageSender::Chat { chat_id } => session.chat_photo_path(ChatId(chat_id)),
-            MessageSender::User { user_id } => session
-                .user_photo_path(user_id)
-                .or_else(|| session.chat_photo_path(ChatId(user_id))),
-        }
-        .map(PathBuf::from);
-        Some(
-            div()
-                .id("composer-send-as")
-                .flex_none()
-                .rounded_full()
-                .role(gpui_kit::Role::Button)
-                .aria_label(tr_with(keys::Q_OPS_SEND_AS, &[("name", &name.to_string())]))
-                .tab_index(0)
-                .cursor_pointer()
-                .child(chat_avatar(&name, photo.as_deref(), 28.))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_send_as(cx)))
-                .into_any_element(),
-        )
-    }
-
-    pub(super) fn toggle_send_as(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.send_as_open = !self.composer_ui.send_as_open;
-        if self.composer_ui.send_as_open {
-            let chat = self.session().and_then(|s| s.open_chat);
-            if let (Some(chat), Some(live)) = (chat, self.live.as_mut()) {
-                let _ = live.driver.get_chat_available_message_senders(chat);
-            }
-        }
-        cx.notify();
-    }
-
-    fn choose_message_sender(
-        &mut self,
-        chat_id: ChatId,
-        sender: MessageSender,
-        locked: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if locked {
-            self.connection.set_note(StatusNote::info(tr(
-                keys::Q_OPS_SUBSCRIBE_TO_TELEGRAM_PREMIUM_TO,
-            )));
-            cx.notify();
-            return;
-        }
-        if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.set_chat_message_sender(chat_id, sender) {
-                    Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CHANGING_SENDER)),
-                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER)),
-                });
-        } else {
-            self.apply_demo_message_sender(chat_id, sender);
-        }
-        self.composer_ui.send_as_open = false;
-        cx.notify();
-    }
-
-    /// "Send message as…": one row per identity (`chatMessageSender`),
-    /// the current one ticked, premium-only ones dimmed.
-    pub(super) fn send_as_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let session = self.session();
-        let chat_id = session.and_then(|s| s.open_chat);
-        let current = chat_id.and_then(|id| session.and_then(|s| s.selected_message_sender(id)));
-        let mut list = div()
-            .id("send-as-list")
-            .flex()
-            .flex_col()
-            .gap_1()
-            .max_h(px(240.))
-            .overflow_y_scroll();
-        let senders = match (session, chat_id) {
-            (Some(session), Some(chat_id)) => session.available_message_senders(chat_id),
-            _ => &[],
-        };
-        if senders.is_empty() {
-            list = list.child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(keys::Q_OPS_LOADING)),
-            );
-        }
-        for (index, entry) in senders.iter().enumerate() {
-            let (Some(session), Some(chat_id)) = (session, chat_id) else {
-                break;
-            };
-            let sender = entry.sender;
-            let title = session.message_sender_title(sender);
-            let status = session.message_sender_status(chat_id, entry);
-            let photo = match sender {
-                MessageSender::Chat { chat_id } => session.chat_photo_path(ChatId(chat_id)),
-                MessageSender::User { user_id } => session
-                    .user_photo_path(user_id)
-                    .or_else(|| session.chat_photo_path(ChatId(user_id))),
-            }
-            .map(PathBuf::from);
-            let locked = entry.needs_premium;
-            let selected = current == Some(sender);
-            list = list.child(
-                div()
-                    .id(("send-as-row", index))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(tr_with(
-                        keys::Q_OPS_SEND_AS_2,
-                        &[("title", &title.to_string()), ("status", status)],
-                    ))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .when(locked, |row| row.opacity(0.6))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_message_sender(chat_id, sender, locked, cx);
-                    }))
-                    .child(chat_avatar(&title, photo.as_deref(), 32.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .truncate()
-                                    .font_medium()
-                                    .child(super::bidi_line::name_line(title)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(status),
-                            ),
-                    )
-                    .when(selected, |row| {
-                        row.child(Icon::new(gpui_kit::assets::IconName::Check).small())
-                    }),
-            );
-        }
-        div()
-            .id("send-as-panel")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().popover)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_semibold()
-                            .child(tr(keys::Q_OPS_SEND_MESSAGE_AS)),
-                    )
-                    .child(
-                        Button::new("send-as-close")
-                            .icon(gpui_kit::assets::IconName::X)
-                            .xsmall()
-                            .ghost()
-                            .accessibility_label(tr(keys::CLOSE))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.composer_ui.send_as_open = false;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .child(list)
     }
 }

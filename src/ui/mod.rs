@@ -509,6 +509,7 @@ mod search_ui;
 mod secret_chats;
 mod security;
 mod security_recovery;
+mod send_as_ui;
 mod send_box_media_check;
 mod send_box_options;
 mod send_box_state;
