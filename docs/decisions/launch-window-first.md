@@ -30,14 +30,20 @@ appeared at the same time.
 - `third_party/gpui-pre-macos/src/platform.rs`: `run` calls the app's launch callback before
   `[NSApp run]` and flushes the Core Animation transaction, so the windows opened there reach
   the screen while `finishLaunching` waits for the open-application Apple Event and loads text
-  input. `did_finish_launching` finds no callback left.
+  input. `did_finish_launching` finds no callback left. GPUI's
+  `NSAutoFillHeuristicControllerEnabled` default, written in `applicationWillFinishLaunching:`
+  before, is now written in `run` ahead of the callback, so it is still set before any window
+  or text input exists.
 - `third_party/gpui-pre-macos/src/window.rs`: `GPUIView` answers `isEditable` with NO until a
   window has drawn a frame. The Writing Tools load moves to `finishLaunching`, after the window
   is on screen. AppKit makes and activates the view's input context on its next window update;
   right after launch, cold and warm, the key view's context was AppKit's current one and
   active (checked with `lldb` on the launched bundle). Synthetic key events typed "café" into
   chat search, the é through the Option-E dead key, a few hundred ms after the window
-  appeared.
+  appeared, and again after revealing a window started in the tray (`--start-minimized`).
+  The view used not to implement `isEditable`, which AppKit treats as editable; the Edit menu,
+  AppKit's AutoFill, Start Dictation and Emoji & Symbols items included, has the same items
+  enabled with nothing focused as before the change.
 - `src/main.rs`: on macOS the main window opens straight from the launch callback. It used to
   be spawned onto the next main-queue turn, which only runs inside `[NSApp run]`. Linux and
   Windows still spawn it.
@@ -52,7 +58,9 @@ appeared at the same time.
 The window now shows before the app has activated. Over eleven launches with another app
 frontmost, Quill came to the front in ten. In the other its window stayed behind the browser;
 macOS keeps a launching app behind when the user clicks another app meanwhile, which is the
-likely cause, but that is a guess. It did not happen again in ten more tries.
+likely cause, but that is a guess. It did not happen again in ten more tries. Quill does not
+force activation when launching finishes: the old order did not either, and it would override
+a user who switched to another app while Quill was starting.
 
 ## Measuring
 `scripts/launch-bench.py --onscreen` adds `onscreen`, when WindowServer first lists Quill's

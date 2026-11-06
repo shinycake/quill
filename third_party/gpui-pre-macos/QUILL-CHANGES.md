@@ -198,6 +198,9 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
   open-application Apple Event and loads AppKit's text input, hundreds of
   ms on a cold launch). `did_finish_launching` finds no callback left
   (`docs/decisions/launch-window-first.md`).
+  The `NSAutoFillHeuristicControllerEnabled` default is written at the
+  start of that block (`disable_autofill_heuristics`) instead of in
+  `applicationWillFinishLaunching:`, so it is set before any window exists.
 - `src/window.rs`: the view answers `isEditable` with NO until a window has
   drawn its first frame. `-[NSView _inputContext]` makes no
   `NSTextInputContext` for a view that says it is not editable, and the
