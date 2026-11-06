@@ -19,7 +19,9 @@ impl QuillApp {
             .gap_2()
             .child(
                 Button::new(("media-viewer-zoom-out", row_id))
-                    .label("−")
+                    .icon(IconName::Minus)
+                    .small()
+                    .tooltip(tr(keys::MEDIA_ZOOM_OUT))
                     .accessibility_label(tr(keys::MEDIA_ZOOM_OUT))
                     .ghost()
                     .text_color(gpui_kit::white())
@@ -28,14 +30,20 @@ impl QuillApp {
                     })),
             )
             .child(
+                // Fixed width, so the buttons beside it hold still while
+                // the number changes.
                 div()
+                    .w(px(48.))
+                    .text_center()
                     .text_sm()
                     .text_color(gpui_kit::white())
                     .child(zoom_pct),
             )
             .child(
                 Button::new(("media-viewer-zoom-in", row_id))
-                    .label("+")
+                    .icon(IconName::Plus)
+                    .small()
+                    .tooltip(tr(keys::MEDIA_ZOOM_IN))
                     .accessibility_label(tr(keys::MEDIA_ZOOM_IN))
                     .ghost()
                     .text_color(gpui_kit::white())
@@ -46,7 +54,12 @@ impl QuillApp {
             .child(
                 Button::new(("media-viewer-zoom-reset", row_id))
                     .label(tr(keys::Q_AV_RESET))
+                    .small()
                     .ghost()
+                    // Nothing to reset while the picture fits the window.
+                    // The white text would hide the disabled look, so dim it.
+                    .disabled(zoom.is_fitted())
+                    .when(zoom.is_fitted(), |button| button.opacity(0.4))
                     .text_color(gpui_kit::white())
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.viewer_reset_zoom(cx);

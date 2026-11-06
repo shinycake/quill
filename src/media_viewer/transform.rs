@@ -243,6 +243,12 @@ impl ViewerZoom {
         self.zoom * self.levels.map_or(1.0, |levels| levels.fit()) * 100.0
     }
 
+    /// `true` while the picture sits as it opened: fitted and centred, so
+    /// Reset has nothing to do.
+    pub fn is_fitted(&self) -> bool {
+        self.zoom == VIEWER_ZOOM_MIN && self.pan == (0.0, 0.0)
+    }
+
     /// `true` when the visual is magnified (pan is meaningful).
     pub fn is_zoomed(&self) -> bool {
         self.zoom > VIEWER_ZOOM_MIN
@@ -390,6 +396,16 @@ pub fn fit_within(natural: (f32, f32), frame: (f32, f32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_moved_or_zoomed_picture_has_something_to_reset() {
+        let mut zoom = ViewerZoom::new();
+        assert!(zoom.is_fitted());
+        zoom.step(true, (720.0, 480.0));
+        assert!(!zoom.is_fitted());
+        zoom.reset();
+        assert!(zoom.is_fitted());
+    }
 
     #[test]
     fn zoom_defaults_to_fit_and_steps_around_center() {
