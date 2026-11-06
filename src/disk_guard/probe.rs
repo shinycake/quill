@@ -36,6 +36,17 @@ pub fn read_volume(path: &Path) -> Volume {
     read_available(nearest_existing(path))
 }
 
+/// [`read_volume`] without what only a slow query can add: on macOS the
+/// purgeable space, which `NSURL` asks CacheDelete for (tens of ms, and it
+/// holds the process-wide file cache lock that AppKit's launch waits on).
+/// It is never more than [`read_volume`], so enough room here is enough.
+pub fn read_volume_quick(path: &Path) -> Volume {
+    #[cfg(target_os = "macos")]
+    return statfs_available(nearest_existing(path));
+    #[cfg(not(target_os = "macos"))]
+    return read_volume(path);
+}
+
 pub(super) fn nearest_existing(path: &Path) -> &Path {
     path.ancestors()
         .find(|folder| folder.exists())

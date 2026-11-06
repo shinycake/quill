@@ -65,6 +65,23 @@ pub fn mark(label: &'static str) -> bool {
     true
 }
 
+/// Whether `label` has been recorded.
+pub fn reached(label: &'static str) -> bool {
+    trace().is_some_and(|trace| trace.lock_or_recover().seen.contains(&label))
+}
+
+/// A frame went to the compositor: the first one is `presented`, and the
+/// first after the chat list frame is `chat_list_presented`.
+pub fn frame_presented() {
+    if !enabled() {
+        return;
+    }
+    mark("presented");
+    if reached("chat_list") {
+        mark("chat_list_presented");
+    }
+}
+
 /// When the kernel started this process, in µs since the Unix epoch.
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code, reason = "proc_pidinfo fills a plain C struct")]

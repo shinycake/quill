@@ -41,7 +41,9 @@ thread_local! {
 pub fn begin(credentials: Option<TelegramCredentials>) {
     let (done, early) = oneshot::channel();
     let spawned = quill::thread_guard::spawn_guarded("quill-early-connect", move || {
-        let _ = done.send(prepare(credentials));
+        let prepared = prepare(credentials);
+        quill::startup_trace::mark("early_prepared");
+        let _ = done.send(prepared);
         // After the send: the client must not wait for the call engine.
         quill::calls::engine::preload_tgcalls();
     });

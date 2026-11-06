@@ -2172,6 +2172,7 @@ impl PlatformWindow for MacWindow {
         let mut this = self.0.lock();
         this.renderer.draw(scene);
         drop(this);
+        crate::frame_presented();
         crate::platform::read_keyboard_layout_after_first_frame();
     }
 

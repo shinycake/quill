@@ -67,3 +67,40 @@ Half a Dock bounce (about 150 to 250 ms) is not reachable cold with these change
 400 ms goes before `main` and about 300 ms to AppKit and WindowServer. The levers left are
 the size of the binary that is paged in (an order file that groups launch code, or fewer
 pages touched before `main`) and anything that lets AppKit show the window sooner.
+
+## Round 2: chats in the first frame
+A System Trace of a warm launch showed three more waits the main thread did not need:
+
+- `App::new` asks WindowServer for the display list and the first window asks Metal for its
+  devices. Both are XPC round trips. `src/launch_prewarm.rs` makes the same two calls on a
+  worker at the top of `ui_main`, so the main thread finds them answered. The first frame
+  came about 30 ms sooner.
+- The disk guard's open check read free space through `NSURL` resource values (the
+  CacheDelete "important" capacity). That holds the file cache lock AppKit's window setup
+  also takes. The open check now reads `statfs` first and only asks for the purgeable
+  figure when `statfs` says the disk is short. The watcher's first read waits for the first
+  frame.
+- The first chat page was asked for by the main thread after it had built the window.
+  TDLib answers a `loadChats` sent before authorization is restored with 401, so it cannot
+  go with the open request. Instead the hub's receive thread sends it the moment
+  `authorizationStateReady` arrives (`Routes::on_ready`), while the main thread is still in
+  AppKit's launch. The page has no request id; the chats come in as updates.
+
+`QUILL_STARTUP_TRACE` gained `presented` and `chat_list_presented`, written when the macOS
+backend hands a frame to the compositor (`gpui_macos::on_frame_presented`).
+
+Warm launches against the real account, median of 8, ms after `open`:
+
+| mark | before | after |
+| --- | --- | --- |
+| first frame drawn | 372 | 358 |
+| chat list on screen (`chat_list_presented`) | 472 | 437 |
+
+With the change, the first frame that reaches the screen already holds the chat list.
+
+Tried and dropped: opening TDLib before `application.run` (the launch got about 25 ms
+slower) and sending `loadChats` with the open request (401 Unauthorized).
+
+What is left on the warm path is drawing that first frame, about 80 ms: color emoji
+rasterized on the main thread on atlas misses (about 20 ms), layout (about 20 ms), line
+shaping (about 13 ms) and the Core Animation commit (about 18 ms).

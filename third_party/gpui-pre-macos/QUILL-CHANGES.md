@@ -186,3 +186,6 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
   text input items, which loads the Writing Tools framework before the app
   delegate hears `didFinishLaunching`. Quill installs its real menu after the
   first frame.
+- `src/gpui_macos.rs`: `on_frame_presented` sets a hook that `draw` in
+  `src/window.rs` calls after each presented frame, so Quill's startup trace
+  can mark when the first frames reach the screen.

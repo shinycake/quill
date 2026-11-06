@@ -64,6 +64,21 @@ pub fn present_timing(
     }
 }
 
+static PRESENT_HOOK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+/// Quill: `hook` runs on the main thread each time a window has handed a
+/// frame to the compositor, so the app can time its launch to the first
+/// frames that reach the screen. The first hook set stays.
+pub fn on_frame_presented(hook: fn()) {
+    let _ = PRESENT_HOOK.set(hook);
+}
+
+pub(crate) fn frame_presented() {
+    if let Some(hook) = PRESENT_HOOK.get() {
+        hook();
+    }
+}
+
 trait BoolExt {
     fn to_objc(self) -> Bool;
 }

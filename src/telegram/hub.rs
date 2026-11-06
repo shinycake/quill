@@ -70,10 +70,15 @@ struct Route {
     wake: &'static crate::wake::Signal,
 }
 
+/// A request sent from the receive thread the moment its client reports
+/// `authorizationStateReady`, before the envelope reaches the main thread.
+pub type OnReady = Box<dyn FnOnce() + Send>;
+
 /// Client id → the channel its envelopes go to.
 #[derive(Default)]
 pub struct Routes {
     map: Mutex<HashMap<i32, Route>>,
+    on_ready: Mutex<HashMap<i32, OnReady>>,
     /// Signalled when a route is added, so an idle receive thread wakes.
     changed: Condvar,
 }
@@ -106,6 +111,23 @@ impl Routes {
 
     pub fn unregister(&self, client_id: i32) {
         lock(&self.map).remove(&client_id);
+        lock(&self.on_ready).remove(&client_id);
+    }
+
+    /// Run `send` on the receive thread when `client_id` next reports
+    /// `authorizationStateReady`, before that envelope is routed.
+    pub fn on_ready(&self, client_id: i32, send: OnReady) {
+        lock(&self.on_ready).insert(client_id, send);
+    }
+
+    fn take_on_ready(&self, owned: &OwnedEnvelope) -> Option<OnReady> {
+        use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
+        let EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(AuthorizationState::Ready)) =
+            &owned.envelope.payload
+        else {
+            return None;
+        };
+        lock(&self.on_ready).remove(&owned.client_id?)
     }
 
     pub fn is_registered(&self, client_id: i32) -> bool {
@@ -414,6 +436,9 @@ fn receive_one(
         return;
     };
     exit::note_received(&owned);
+    if let Some(send) = routes.take_on_ready(&owned) {
+        send();
+    }
     let note = match routes.deliver(owned) {
         Delivery::Delivered => return,
         Delivery::Unrouted => "unrouted-client",
