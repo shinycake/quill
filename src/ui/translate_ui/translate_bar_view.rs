@@ -2,6 +2,7 @@
 
 use super::pump_scan::PumpKey;
 use super::*;
+use crate::ui::settings_window::rows::{group, link_row, switch_row};
 use quill::lang::{keys, tr, tr_with, trn};
 
 impl QuillApp {
@@ -449,34 +450,16 @@ impl QuillApp {
                 .map(|code| language_name(code))
                 .unwrap_or_default()
         };
-        let switch_row = |title: &'static str, hint: &'static str, control: AnyElement| {
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_2()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .child(div().text_sm().child(title))
-                        .child(muted_text(hint, cx)),
-                )
-                .child(control)
-        };
         let skip_shown = prefs.show_button || prefs.translate_chats;
         let show = switch_row(
+            "translate-show-button",
             tr(keys::TRANSLATE_SETTINGS_SHOW),
-            tr(keys::TRANSLATE_SETTINGS_ABOUT),
-            Switch::new("translate-show-button")
-                .checked(prefs.show_button)
-                .accessibility_label(tr(keys::TRANSLATE_SETTINGS_SHOW))
-                .on_click(cx.listener(|this, &on, _, cx| {
-                    this.set_translate_prefs(cx, |p| p.show_button = on);
-                }))
-                .into_any_element(),
+            Some(tr(keys::TRANSLATE_SETTINGS_ABOUT)),
+            prefs.show_button,
+            cx.listener(|this, &on, _, cx| {
+                this.set_translate_prefs(cx, |p| p.show_button = on);
+            }),
+            cx,
         );
         let show = self.setting_spot(
             &["language.translate_button"],
@@ -489,64 +472,39 @@ impl QuillApp {
             cx,
         );
         let chats = switch_row(
+            "translate-chats",
             tr(keys::TRANSLATE_SETTINGS_CHAT),
-            if premium {
+            Some(if premium {
                 tr(keys::Q_TRANSLATE_CHATS_HINT)
             } else {
                 tr(keys::Q_TRANSLATE_CHATS_PREMIUM)
-            },
-            Switch::new("translate-chats")
-                .checked(prefs.translate_chats && premium)
-                .accessibility_label(tr(keys::TRANSLATE_SETTINGS_CHAT))
-                .on_click(cx.listener(|this, &on, _, cx| {
-                    // tdesktop `ShowPremiumPreviewToBuy(RealTimeTranslation)`.
-                    if !this.session().is_some_and(Session::is_premium) {
-                        this.open_premium_to_buy(
-                            quill::premium_hub::PremiumFeature::RealTimeChatTranslation,
-                            cx,
-                        );
-                        return;
-                    }
-                    this.set_translate_prefs(cx, |p| p.translate_chats = on);
-                }))
-                .into_any_element(),
+            }),
+            prefs.translate_chats && premium,
+            cx.listener(|this, &on, _, cx| {
+                // tdesktop `ShowPremiumPreviewToBuy(RealTimeTranslation)`.
+                if !this.session().is_some_and(Session::is_premium) {
+                    this.open_premium_to_buy(
+                        quill::premium_hub::PremiumFeature::RealTimeChatTranslation,
+                        cx,
+                    );
+                    return;
+                }
+                this.set_translate_prefs(cx, |p| p.translate_chats = on);
+            }),
+            cx,
         );
         let chats = self.setting_spot(&["language.translate_chats"], chats.into_any_element(), cx);
-        let skip_row = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .child(div().text_sm().child(tr(keys::TRANSLATE_SETTINGS_CHOOSE)))
-            .child(
-                Button::new("translate-skip-languages")
-                    .label(skip_label)
-                    .ghost()
-                    .small()
-                    .accessibility_label(tr(keys::Q_TRANSLATE_SKIP_LABEL))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_translate_skip_list(window, cx);
-                    })),
-            );
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .font_semibold()
-                    .text_sm()
-                    .child(tr(keys::TRANSLATE_SETTINGS_SUBTITLE)),
-            )
-            .child(show)
-            .child(chats)
-            .when(skip_shown, |column| {
-                column.child(self.setting_spot(
-                    &["language.do_not_translate"],
-                    skip_row.into_any_element(),
-                    cx,
-                ))
-            })
-            .into_any_element()
+        let skip_row = link_row(
+            "translate-skip-languages",
+            tr(keys::TRANSLATE_SETTINGS_CHOOSE),
+            Some(skip_label.into()),
+            cx.listener(|this, _, window, cx| this.open_translate_skip_list(window, cx)),
+            cx,
+        );
+        let mut rows = vec![show, chats];
+        if skip_shown {
+            rows.push(self.setting_spot(&["language.do_not_translate"], skip_row, cx));
+        }
+        group(Some(tr(keys::TRANSLATE_SETTINGS_SUBTITLE)), rows).into_any_element()
     }
 }

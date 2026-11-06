@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::settings_window::rows::{group, link_row, switch_row};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
@@ -19,86 +20,54 @@ impl QuillApp {
     /// the export and the Experimental settings entry; Quill's update
     /// switches live in the update section.
     pub(super) fn advanced_settings_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let experimental = link_row(
+            "settings-experimental",
+            tr(keys::SETTINGS_EXPERIMENTAL),
+            None,
+            cx.listener(|this, _, _, cx| {
+                this.show_settings_sub(super::settings_window::SubPage::Experimental, cx);
+            }),
+            cx,
+        );
+        let replay = link_row(
+            "settings-replay-intro",
+            tr(keys::Q_FIRST_RUN_REPLAY),
+            None,
+            cx.listener(|this, _, window, cx| this.replay_first_run(window, cx)),
+            cx,
+        );
+        let mut more = vec![
+            self.setting_spot(&["advanced.experimental"], experimental, cx),
+            self.setting_spot(&["advanced.welcome_intro"], replay, cx),
+        ];
+        more.extend(self.agent_access_advanced_row(cx));
         div()
             .flex()
             .flex_col()
             .gap_4()
             .child(self.performance_section(cx))
-            .child(
-                self.setting_spot(
-                    &["advanced.experimental"],
-                    super::nav_row::nav_row(
-                        "settings-experimental",
-                        tr(keys::SETTINGS_EXPERIMENTAL),
-                        cx,
-                        |this, _, cx| {
-                            this.show_settings_sub(
-                                super::settings_window::SubPage::Experimental,
-                                cx,
-                            );
-                        },
-                    )
-                    .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["advanced.welcome_intro"],
-                    super::nav_row::nav_row(
-                        "settings-replay-intro",
-                        tr(keys::Q_FIRST_RUN_REPLAY),
-                        cx,
-                        |this, window, cx| this.replay_first_run(window, cx),
-                    )
-                    .into_any_element(),
-                    cx,
-                ),
-            )
-            .children(self.agent_access_advanced_row(cx))
+            .child(group(None, more))
             .into_any_element()
     }
 
     fn performance_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let label = tr(keys::SETTINGS_ENABLE_HWACCEL);
-        // The nav rows below are kit buttons; this inset is their padding,
-        // so labels and trailing controls share one edge.
+        let hardware = switch_row(
+            "advanced-hardware-video",
+            tr(keys::SETTINGS_ENABLE_HWACCEL),
+            None,
+            hardware_video::enabled(),
+            cx.listener(|_, &on: &bool, _, cx| {
+                hardware_video::set_enabled(on);
+                cx.notify();
+            }),
+            cx,
+        );
         div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .px_2p5()
-            .child(
-                div()
-                    .id("advanced-performance")
-                    .role(Role::Heading)
-                    .aria_label(tr(keys::SETTINGS_PERFORMANCE))
-                    .text_sm()
-                    .font_semibold()
-                    .child(tr(keys::SETTINGS_PERFORMANCE)),
-            )
-            .child(
-                self.setting_spot(
-                    &["advanced.hardware_decoding"],
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_3()
-                        .child(div().flex_1().min_w_0().text_sm().child(label))
-                        .child(
-                            Switch::new("advanced-hardware-video")
-                                .checked(hardware_video::enabled())
-                                .accessibility_label(label)
-                                .on_click(cx.listener(|_, &on: &bool, _, cx| {
-                                    hardware_video::set_enabled(on);
-                                    cx.notify();
-                                })),
-                        )
-                        .into_any_element(),
-                    cx,
-                ),
-            )
+            .id("advanced-performance")
+            .child(group(
+                Some(tr(keys::SETTINGS_PERFORMANCE)),
+                [self.setting_spot(&["advanced.hardware_decoding"], hardware, cx)],
+            ))
             .into_any_element()
     }
 

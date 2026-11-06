@@ -7,7 +7,9 @@
 //! restarts itself.
 #![deny(clippy::indexing_slicing)]
 use super::QuillApp;
+use crate::ui::settings_window::rows::{group, icon_row};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::progress::Progress as ProgressBar;
 use gpui_kit::component::*;
@@ -427,102 +429,112 @@ impl QuillApp {
         )
     }
 
-    /// "About Quill": version, the unofficial-client and no-warranty notice,
-    /// and the bundled open-source license notices.
+    /// "About Quill": the app icon and version, the unofficial-client and
+    /// no-warranty notice, then what's new, sharing, the source and the
+    /// bundled open-source license notices.
     pub(in crate::ui) fn about_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let version = tr_with(
             keys::Q_OPS_QUILL,
             &[("quill_version_app", (quill::version::APP))],
         );
+        let muted = cx.theme().muted_foreground;
+        let hero = div()
+            .id("about-quill-heading")
+            .role(Role::Group)
+            .aria_label(tr(keys::Q_OPS_ABOUT_QUILL))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .pt_2()
+            .pb_1()
+            .child(img(super::first_run_ui::logo()).size(px(72.)).mb_2())
+            .child(
+                div()
+                    .id("about-quill-version")
+                    .role(Role::Label)
+                    .aria_label(version.clone())
+                    .text_lg()
+                    .font_semibold()
+                    .child(version),
+            )
+            .child(
+                div()
+                    .id("about-quill-disclaimer")
+                    .role(Role::Label)
+                    .aria_label(quill::about::DISCLAIMER)
+                    .max_w(px(460.))
+                    .mt_2()
+                    .text_xs()
+                    .text_center()
+                    .text_color(muted)
+                    .child(quill::about::DISCLAIMER),
+            );
+        let hero = self.setting_spot(&["about.version", "about.about_quill"], hero, cx);
+        let rows = [
+            self.setting_spot(
+                &["about.whats_new"],
+                icon_row(
+                    "about-whats-new",
+                    IconName::Sparkles,
+                    tr(keys::Q_PREFS_WHATS_NEW),
+                    IconName::ChevronRight,
+                    cx.listener(|this, _, _, cx| this.open_whats_new(cx)),
+                    cx,
+                ),
+                cx,
+            ),
+            self.setting_spot(
+                &["about.share"],
+                icon_row(
+                    "about-share-quill",
+                    IconName::Share2,
+                    tr(keys::Q_SETTINGS_ABOUT_SHARE_QUILL),
+                    IconName::Copy,
+                    cx.listener(|this, _, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            quill::about::WEBSITE_URL.to_string(),
+                        ));
+                        this.set_status_note(
+                            StatusNote::info(tr(keys::Q_SETTINGS_ABOUT_LINK_COPIED)),
+                            cx,
+                        );
+                    }),
+                    cx,
+                ),
+                cx,
+            ),
+            self.setting_spot(
+                &["about.source_code"],
+                icon_row(
+                    "about-source-code",
+                    IconName::Github,
+                    tr(keys::Q_SETTINGS_ABOUT_SOURCE_CODE),
+                    IconName::ExternalLink,
+                    cx.listener(|this, _, _, cx| this.open_link(quill::about::SOURCE_URL, cx)),
+                    cx,
+                ),
+                cx,
+            ),
+            self.setting_spot(
+                &["about.licenses"],
+                icon_row(
+                    "open-source-licenses",
+                    IconName::FileText,
+                    tr(keys::Q_OPS_OPEN_SOURCE_LICENSES),
+                    IconName::ExternalLink,
+                    cx.listener(|this, _, _, cx| this.open_license_notices(cx)),
+                    cx,
+                ),
+                cx,
+            ),
+        ];
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .id("about-quill-heading")
-                    .role(Role::Heading)
-                    .aria_label(tr(keys::Q_OPS_ABOUT_QUILL))
-                    .font_semibold()
-                    .child(tr(keys::Q_OPS_ABOUT_QUILL)),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.version"],
-                    div()
-                        .id("about-quill-version")
-                        .role(Role::Label)
-                        .aria_label(version.clone())
-                        .text_sm()
-                        .child(version)
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.about_quill"],
-                    div()
-                        .id("about-quill-disclaimer")
-                        .role(Role::Label)
-                        .aria_label(quill::about::DISCLAIMER)
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(quill::about::DISCLAIMER)
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.whats_new"],
-                    Button::new("about-whats-new")
-                        .label(tr(keys::Q_PREFS_WHATS_NEW))
-                        .on_click(cx.listener(|this, _, _, cx| this.open_whats_new(cx)))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.share"],
-                    Button::new("about-share-quill")
-                        .label(tr(keys::Q_SETTINGS_ABOUT_SHARE_QUILL))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                quill::about::WEBSITE_URL.to_string(),
-                            ));
-                            this.set_status_note(
-                                StatusNote::info(tr(keys::Q_SETTINGS_ABOUT_LINK_COPIED)),
-                                cx,
-                            );
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.source_code"],
-                    Button::new("about-source-code")
-                        .label(tr(keys::Q_SETTINGS_ABOUT_SOURCE_CODE))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_link(quill::about::SOURCE_URL, cx)
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.licenses"],
-                    Button::new("open-source-licenses")
-                        .label(tr(keys::Q_OPS_OPEN_SOURCE_LICENSES))
-                        .on_click(cx.listener(|this, _, _, cx| this.open_license_notices(cx)))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
+            .gap_4()
+            .child(hero)
+            .child(group(None, rows))
             .into_any_element()
     }
 
