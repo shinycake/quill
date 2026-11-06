@@ -482,7 +482,8 @@ impl QuillApp {
         if !cfg!(target_os = "macos") {
             return;
         }
-        let Some(display) = window.display(cx).map(|display| u64::from(display.id())) else {
+        // The id GPUI keeps: `display` asks WindowServer for every display.
+        let Some(display) = window.display_id().map(u64::from) else {
             return;
         };
         if let Some(vsync) = display_vsync(display) {

@@ -577,3 +577,9 @@ The Quill project also changed it in 2026 to follow the power mode
 (`docs/decisions/gpui-kit-0-9-0.md`): `src/app.rs` adds `App::on_power_mode_change`
 and `App::set_low_power_frame_cap`, and applies the platform's report in a
 foreground task that waits for the app, since it can arrive with the app borrowed.
+
+The Quill project also changed it in 2026 so a frame does not ask for the
+display list (`docs/decisions/launch-time-macos-appkit.md`): `src/window.rs`
+adds `Window::display_id`, the id the window already keeps, for callers that
+need only the id. `Window::display` lists every display through the platform,
+a WindowServer round trip on macOS.

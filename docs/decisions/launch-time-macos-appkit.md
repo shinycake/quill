@@ -125,3 +125,14 @@ first frame's samples to none, and the frame drew in about 29 ms instead of abou
 Tried and dropped: shaping and drawing a line of mixed scripts and emoji on the prewarm
 worker to load Core Text's font fallback and the emoji font early. The first frame's font
 fallback work did not shrink, because it is per string, not first-use.
+
+## Round 4: the display list on every frame
+The main window's frame clock and the video player asked `Window::display` for the window's
+display on every frame. That lists every display through WindowServer; in the first frame
+of a launch it blocked the main thread for about 7 ms. Both now use `Window::display_id`
+(new in the vendored GPUI), the id the window already keeps up to date when it moves.
+
+Tried and dropped: opening the fonts the glyph cache names on the prewarm worker, to fetch
+their variation axes from the font server before the first frame's layout. The round trips
+in that layout dropped from about 16 ms to about 10, but the window opened about 30 ms later:
+the worker held the font server and Core Text while the main thread was listing fonts.

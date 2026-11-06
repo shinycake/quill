@@ -3503,6 +3503,12 @@ impl Window {
         self.platform_window.set_document_path(path);
     }
 
+    /// QUILL: the id of the display the window is on, as last seen when the
+    /// window moved, without asking the platform for its display list.
+    pub fn display_id(&self) -> Option<DisplayId> {
+        self.display_id
+    }
+
     /// Determine the display on which the window is visible.
     pub fn display(&self, cx: &App) -> Option<Rc<dyn PlatformDisplay>> {
         cx.platform
