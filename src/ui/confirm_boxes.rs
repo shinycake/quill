@@ -149,7 +149,8 @@ crate::ui::shell::register_dialogs! {
         2944,
         |app| app.message_ui.pending_stop_poll.is_some(),
         QuillApp::build_stop_poll_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_stop_poll(cx)),
     CloseSecretChat => DialogSpec::new(
         2945,
         |app| app.chat_list.pending_close_secret_chat.is_some(),
