@@ -2171,6 +2171,8 @@ impl PlatformWindow for MacWindow {
         self.2.drew.store(true, Ordering::Relaxed);
         let mut this = self.0.lock();
         this.renderer.draw(scene);
+        drop(this);
+        crate::platform::read_keyboard_layout_after_first_frame();
     }
 
     // Quill: GPUI asks for another frame (the window is still dirty, or

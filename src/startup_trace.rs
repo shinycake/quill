@@ -26,10 +26,17 @@ fn trace() -> Option<&'static Mutex<Trace>> {
                 .append(true)
                 .open(path)
                 .ok()?;
-            Some(Mutex::new(Trace {
+            let mut trace = Trace {
                 file,
                 seen: Vec::new(),
-            }))
+            };
+            // The kernel's start time of this process, before dyld loaded
+            // anything: `main` minus `exec` is the time spent before main.
+            if let Some(micros) = process_start_micros() {
+                let _ = writeln!(trace.file, "exec {micros}");
+                trace.seen.push("exec");
+            }
+            Some(Mutex::new(trace))
         })
         .as_ref()
 }
@@ -40,18 +47,50 @@ pub fn enabled() -> bool {
     trace().is_some()
 }
 
-/// Record `label` the first time it is reached in this process.
-pub fn mark(label: &'static str) {
+/// Record `label` the first time it is reached in this process; true
+/// that first time.
+pub fn mark(label: &'static str) -> bool {
     let Some(trace) = trace() else {
-        return;
+        return false;
     };
     let micros = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_micros());
     let mut trace = trace.lock_or_recover();
     if trace.seen.contains(&label) {
-        return;
+        return false;
     }
     trace.seen.push(label);
     let _ = writeln!(trace.file, "{label} {micros}");
+    true
+}
+
+/// When the kernel started this process, in µs since the Unix epoch.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code, reason = "proc_pidinfo fills a plain C struct")]
+fn process_start_micros() -> Option<u128> {
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = i32::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    // SAFETY: `info` is a writable buffer of exactly `size` bytes for the
+    // PROC_PIDTBSDINFO flavor, and proc_pidinfo writes at most that many.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            libc::getpid(),
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: proc_pidinfo filled the whole struct (checked above).
+    let info = unsafe { info.assume_init() };
+    Some(u128::from(info.pbi_start_tvsec) * 1_000_000 + u128::from(info.pbi_start_tvusec))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn process_start_micros() -> Option<u128> {
+    None
 }

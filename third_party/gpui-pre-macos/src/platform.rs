@@ -246,8 +246,11 @@ impl MacPlatform {
             Arc::new(gpui::NoopTextSystem::new())
         };
 
-        let keyboard_layout = MacKeyboardLayout::new();
-        let keyboard_mapper = Rc::new(MacKeyboardMapper::new(keyboard_layout.id()));
+        // Quill: reading the input source starts the Text Services Manager,
+        // which blocks ~90 ms on a cold launch. The layout is read once the
+        // first window has drawn (`read_keyboard_layout_after_first_frame`);
+        // until then it is unknown and keys map as on a US layout.
+        let keyboard_mapper = Rc::new(MacKeyboardMapper::new(""));
 
         let state = Mutex::new(MacPlatformState {
             headless,
@@ -569,6 +572,18 @@ impl Platform for MacPlatform {
             }
             let app_delegate: *mut AnyObject = msg_send![APP_DELEGATE_CLASS, new];
             let _: () = msg_send![app, setDelegate: app_delegate];
+
+            // Quill: with no main menu, `finishLaunching` makes a default one
+            // and adds AppKit's text input items to it, which loads the
+            // Writing Tools framework on the main thread (~100 ms cold). An
+            // empty menu is left alone; the app's `set_menus` gets those
+            // items when it installs the real menu.
+            let main_menu: *mut AnyObject = msg_send![app, mainMenu];
+            if main_menu.is_null() {
+                let empty: *mut AnyObject = msg_send![class!(NSMenu), new];
+                let _: () = msg_send![app, setMainMenu: empty];
+                let _: () = msg_send![empty, release];
+            }
 
             let self_ptr = self as *const Self as *mut c_void;
             mac_platform_ivar(&*app)
@@ -1147,7 +1162,11 @@ impl Platform for MacPlatform {
     }
 
     fn keyboard_layout(&self) -> Box<dyn PlatformKeyboardLayout> {
-        Box::new(MacKeyboardLayout::new())
+        if KEYBOARD_LAYOUT_READ.load(Ordering::Acquire) {
+            Box::new(MacKeyboardLayout::new())
+        } else {
+            Box::new(MacKeyboardLayout::unknown())
+        }
     }
 
     fn keyboard_mapper(&self) -> Rc<dyn PlatformKeyboardMapper> {
@@ -1504,7 +1523,37 @@ extern "C-unwind" fn will_terminate(this: &AnyObject, _: Sel, _: *mut AnyObject)
     }
 }
 
+/// Quill: whether the keyboard layout has been read from the input source.
+static KEYBOARD_LAYOUT_READ: AtomicBool = AtomicBool::new(false);
+
+/// Quill: called after a window draws. The first time, the keyboard layout
+/// is read on a later turn of the main run loop, through the same path as a
+/// layout change, so the first frame does not wait for the Text Services
+/// Manager.
+pub(crate) fn read_keyboard_layout_after_first_frame() {
+    static ASKED: AtomicBool = AtomicBool::new(false);
+    if ASKED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // SAFETY: called on the main thread from a window draw; the delegate is
+    // the GPUI app delegate, whose class declares `onKeyboardLayoutChange:`.
+    unsafe {
+        let app: *mut AnyObject = msg_send![APP_CLASS, sharedApplication];
+        let delegate: *mut AnyObject = msg_send![app, delegate];
+        if delegate.is_null() {
+            KEYBOARD_LAYOUT_READ.store(true, Ordering::Release);
+            return;
+        }
+        let _: () = msg_send![delegate,
+            performSelectorOnMainThread: sel!(onKeyboardLayoutChange:),
+            withObject: ptr::null_mut::<AnyObject>(),
+            waitUntilDone: Bool::NO
+        ];
+    }
+}
+
 extern "C-unwind" fn on_keyboard_layout_change(this: &AnyObject, _: Sel, _: *mut AnyObject) {
+    KEYBOARD_LAYOUT_READ.store(true, Ordering::Release);
     let platform = unsafe { get_mac_platform(this) };
     let mut lock = platform.0.lock();
     let keyboard_layout = MacKeyboardLayout::new();

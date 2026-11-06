@@ -169,3 +169,20 @@ source, and the display's latest frame time for `present_timing`. Mentions of
 the link runs, in `run_step`, and upstream's `MetalFrames` pausing is not used.
 `MacWindowState` now lives in an `Rc` as upstream's does, so the
 delayed drawable release carries its weak handle in `dispatch2::MainThreadBound`.
+
+The Quill project also changed it in 2026 so a cold launch draws its first
+frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
+
+- `src/platform.rs`: `MacPlatform::new` no longer reads the keyboard layout.
+  `TISCopyCurrentKeyboardLayoutInputSource` starts the Text Services Manager,
+  about 90 ms on the main thread on a cold launch. The mapper starts with an
+  empty layout id (keys map as on a US layout) and `keyboard_layout` answers
+  `MacKeyboardLayout::unknown()` until `read_keyboard_layout_after_first_frame`
+  has run the delegate's `onKeyboardLayoutChange:` on a later run loop turn.
+- `src/window.rs`: `draw` calls `read_keyboard_layout_after_first_frame` once
+  the scene is presented. Only the first call does anything.
+- `src/platform.rs`: `run` sets an empty `NSMenu` as the main menu when there
+  is none. Without one, `finishLaunching` builds a default menu and adds the
+  text input items, which loads the Writing Tools framework before the app
+  delegate hears `didFinishLaunching`. Quill installs its real menu after the
+  first frame.
