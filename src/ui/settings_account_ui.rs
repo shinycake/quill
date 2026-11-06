@@ -4,98 +4,68 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::settings_window::rows::{group, icon_row};
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    /// Help rows and the version footer, below the Settings list.
+    /// The Help group under About: FAQ, Features, the privacy policy and
+    /// Ask a Question.
     pub(super) fn settings_help_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .mt_2()
-            .child(
-                self.setting_spot(
-                    &["about.faq"],
-                    Button::new("settings-faq")
-                        .label(tr(keys::SETTINGS_FAQ))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_link(quill::settings_account::FAQ_URL, cx)
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
+        let web = |id: &'static str, icon, title, url: &'static str, cx: &mut Context<Self>| {
+            icon_row(
+                id,
+                icon,
+                title,
+                IconName::ExternalLink,
+                cx.listener(move |this, _, _, cx| this.open_link(url, cx)),
+                cx,
             )
-            .child(
-                self.setting_spot(
-                    &["about.features"],
-                    Button::new("settings-features")
-                        .label(tr(keys::SETTINGS_FEATURES))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_link(quill::settings_account::FEATURES_URL, cx)
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.privacy_policy"],
-                    Button::new("settings-privacy-policy")
-                        .label(tr(keys::Q_PREFS_PRIVACY_POLICY))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_link(quill::settings_account::PRIVACY_POLICY_URL, cx)
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                self.setting_spot(
-                    &["about.ask_question"],
-                    Button::new("settings-ask-question")
-                        .label(tr(keys::SETTINGS_ASK_QUESTION))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.show_settings_sub(
-                                super::settings_window::SubPage::AskQuestion,
-                                cx,
-                            );
-                        }))
-                        .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px_2()
-                    .pt_2()
-                    .child(
-                        div()
-                            .id("settings-version")
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(quill::settings_account::current_version_line()),
-                    )
-                    .child(
-                        Button::new("settings-changelog")
-                            .label(tr(keys::Q_PREFS_WHATS_NEW))
-                            .small()
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| this.open_whats_new(cx))),
-                    ),
-            )
-            .into_any_element()
+        };
+        let faq = web(
+            "settings-faq",
+            IconName::CircleQuestionMark,
+            tr(keys::SETTINGS_FAQ),
+            quill::settings_account::FAQ_URL,
+            cx,
+        );
+        let features = web(
+            "settings-features",
+            IconName::Lightbulb,
+            tr(keys::SETTINGS_FEATURES),
+            quill::settings_account::FEATURES_URL,
+            cx,
+        );
+        let privacy = web(
+            "settings-privacy-policy",
+            IconName::Shield,
+            tr(keys::Q_PREFS_PRIVACY_POLICY),
+            quill::settings_account::PRIVACY_POLICY_URL,
+            cx,
+        );
+        let ask = icon_row(
+            "settings-ask-question",
+            IconName::MessageCircle,
+            tr(keys::SETTINGS_ASK_QUESTION),
+            IconName::ChevronRight,
+            cx.listener(|this, _, _, cx| {
+                this.show_settings_sub(super::settings_window::SubPage::AskQuestion, cx);
+            }),
+            cx,
+        );
+        group(
+            Some(tr(keys::Q_SETTINGS_ABOUT_SEC_HELP)),
+            [
+                self.setting_spot(&["about.faq"], faq, cx),
+                self.setting_spot(&["about.features"], features, cx),
+                self.setting_spot(&["about.ask_question"], ask, cx),
+                self.setting_spot(&["about.privacy_policy"], privacy, cx),
+            ],
+        )
+        .into_any_element()
     }
 
     /// The "Ask a Question" subpage: volunteers answer slowly, so offer

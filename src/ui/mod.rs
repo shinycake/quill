@@ -108,7 +108,6 @@ mod lru;
 mod message_state;
 mod mini_image;
 mod motion;
-mod nav_row;
 mod nested_click;
 mod new_contact;
 mod notify_state;

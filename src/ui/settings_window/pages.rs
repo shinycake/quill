@@ -178,7 +178,7 @@ impl QuillApp {
                 .child(self.shortcuts_reference(cx)),
             Page::Telegram => column.child(group(None, self.telegram_rows(cx))),
             Page::About => column
-                .children(cards([self.about_settings_section(cx)]))
+                .child(self.about_settings_section(cx))
                 .child(self.settings_help_footer(cx)),
             Page::Advanced => column.child(self.advanced_settings_page(cx)),
         }

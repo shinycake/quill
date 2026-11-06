@@ -112,6 +112,37 @@ pub(in crate::ui) fn detail_row(
         .on_click(on_click)
 }
 
+/// A row with a leading icon that acts or opens something: a chevron for a
+/// screen inside Quill, an external-link mark for a browser page, a copy
+/// mark when it copies.
+pub(in crate::ui) fn icon_row(
+    id: impl Into<ElementId>,
+    icon: IconName,
+    title: &'static str,
+    trailing: IconName,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    let muted = cx.theme().muted_foreground;
+    Button::new(id)
+        .ghost()
+        .w_full()
+        .h(px(40.))
+        .accessibility_label(title)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .w_full()
+                .child(Icon::new(icon).size_4().text_color(muted))
+                .child(div().flex_1().min_w_0().text_sm().truncate().child(title))
+                .child(Icon::new(trailing).size_4().text_color(muted)),
+        )
+        .on_click(on_click)
+        .into_any_element()
+}
+
 /// A row that acts at once (Log out): icon and title in the danger color,
 /// no chevron.
 pub(in crate::ui) fn danger_row(

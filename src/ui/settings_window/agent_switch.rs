@@ -7,8 +7,6 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
-use gpui_kit::component::switch::Switch;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::agent::access;
 use quill::lang::{keys, tr};
@@ -24,37 +22,17 @@ impl QuillApp {
             return None;
         }
         let title = tr(keys::Q_AGENT_ACCESS);
-        // The Advanced page's rows share this inset (`advanced_ui.rs`).
         let row = div()
             .id("advanced-agent-access")
             .debug_selector(|| "advanced-agent-access".into())
-            .flex()
-            .items_center()
-            .gap_3()
-            .px_2p5()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_0p5()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().text_sm().child(title))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(keys::Q_AGENT_ACCESS_SWITCH_HINT)),
-                    ),
-            )
-            .child(
-                Switch::new("advanced-agent-access-switch")
-                    .checked(false)
-                    .accessibility_label(title)
-                    .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                        this.set_agent_access(on, cx);
-                    })),
-            )
+            .child(super::rows::switch_row(
+                "advanced-agent-access-switch",
+                title,
+                Some(tr(keys::Q_AGENT_ACCESS_SWITCH_HINT)),
+                false,
+                cx.listener(|this, &on: &bool, _, cx| this.set_agent_access(on, cx)),
+                cx,
+            ))
             .into_any_element();
         Some(self.setting_spot(&[AGENT_SWITCH], row, cx))
     }

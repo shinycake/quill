@@ -517,16 +517,16 @@ impl QuillApp {
         div()
             .flex()
             .flex_col()
-            .gap_3()
+            .gap_4()
             .child(self.translate_settings_section(cx))
-            .child(div().h(px(1.)).bg(border))
             .child(
                 Textarea::new(&search)
                     .aria_label(tr(keys::PARTICIPANT_FILTER))
                     .h(px(40.)),
             )
-            .child(
-                self.setting_spot(
+            .child(crate::ui::settings_window::rows::group(
+                None,
+                [self.setting_spot(
                     &["language.interface_language"],
                     div()
                         .id("language-rows")
@@ -552,8 +552,8 @@ impl QuillApp {
                         })
                         .into_any_element(),
                     cx,
-                ),
-            )
+                )],
+            ))
             .into_any_element()
     }
 }

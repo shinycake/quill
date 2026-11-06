@@ -17,7 +17,6 @@
 "lng_translate_settings_about" = "The 'Translate' button will appear in the context menu of messages containing text.";
 "qll_translate_chats_hint" = "Offer to translate whole conversations with a bar above the chat.";
 "qll_translate_chats_premium" = "Translating entire chats requires Telegram Premium.";
-"qll_translate_skip_label" = "Choose languages not to translate";
 
 // The t.me/setlanguage box (tdesktop lang/lang_cloud_manager.cpp).
 "lng_language_switch_title" = "Change language?";
