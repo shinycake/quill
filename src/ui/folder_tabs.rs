@@ -560,27 +560,16 @@ impl QuillApp {
 
     /// "Tabs view" and "Tabs appearance" (tdesktop Settings > Folders).
     pub(super) fn folder_tabs_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::settings_window::rows::group;
         use gpui_kit::component::radio::{Radio, RadioGroup};
-        let muted = cx.theme().muted_foreground;
         let view = self.appearance.folder_tabs_view;
         let mode = self.appearance.folder_tabs_mode;
-        let heading = |text: &'static str| {
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(muted)
-                .child(text)
-        };
         let views = [
             (FolderTabsView::Left, tr(keys::FILTERS_VERTICAL)),
             (FolderTabsView::Top, tr(keys::FILTERS_HORIZONTAL)),
         ];
-        let view_group = div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(heading(tr(keys::FILTERS_VIEW_SUBTITLE)))
-            .child(
+        let view_group =
+            div().flex().flex_col().px_3().py_2().child(
                 RadioGroup::vertical("folder-tabs-view")
                     .selected_index(views.iter().position(|(v, _)| *v == view))
                     .children(views.iter().map(|(v, label)| {
@@ -593,28 +582,32 @@ impl QuillApp {
                         }
                     })),
             );
-        let mode_group =
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .child(heading(tr(keys::FILTERS_TABS_SUBTITLE)))
-                .child(
-                    RadioGroup::vertical("folder-tabs-mode")
-                        .selected_index(FolderTabsMode::ALL.iter().position(|m| *m == mode))
-                        .children(FolderTabsMode::ALL.iter().map(|m| {
-                            Radio::new(("folder-tabs-mode", *m as usize)).label(m.label())
-                        }))
-                        .on_click(cx.listener(|this, &ix: &usize, _, cx| {
-                            if let Some(m) = FolderTabsMode::ALL.get(ix).copied() {
-                                this.set_appearance(cx, |a| a.folder_tabs_mode = m);
-                            }
-                        })),
-                );
+        let mode_group = div().flex().flex_col().px_3().py_2().child(
+            RadioGroup::vertical("folder-tabs-mode")
+                .selected_index(FolderTabsMode::ALL.iter().position(|m| *m == mode))
+                .children(
+                    FolderTabsMode::ALL
+                        .iter()
+                        .map(|m| Radio::new(("folder-tabs-mode", *m as usize)).label(m.label())),
+                )
+                .on_click(cx.listener(|this, &ix: &usize, _, cx| {
+                    if let Some(m) = FolderTabsMode::ALL.get(ix).copied() {
+                        this.set_appearance(cx, |a| a.folder_tabs_mode = m);
+                    }
+                })),
+        );
+        let view_group = group(
+            Some(tr(keys::FILTERS_VIEW_SUBTITLE)),
+            [view_group.into_any_element()],
+        );
+        let mode_group = group(
+            Some(tr(keys::FILTERS_TABS_SUBTITLE)),
+            [mode_group.into_any_element()],
+        );
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_4()
             .child(self.setting_spot(&["folders.tabs_view"], view_group, cx))
             .child(self.setting_spot(&["folders.tabs_appearance"], mode_group, cx))
             .into_any_element()
