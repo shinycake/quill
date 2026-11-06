@@ -436,7 +436,17 @@ fn receive_one(
         return;
     };
     exit::note_received(&owned);
+    if crate::startup_trace::enabled() {
+        use crate::telegram::envelope::{ChatListPayload, EnvelopePayload};
+        if matches!(
+            owned.envelope.payload,
+            EnvelopePayload::ChatList(ChatListPayload::UpdateChatPosition(_))
+        ) {
+            crate::startup_trace::mark("td_chat_position");
+        }
+    }
     if let Some(send) = routes.take_on_ready(&owned) {
+        crate::startup_trace::mark("td_ready");
         send();
     }
     let note = match routes.deliver(owned) {

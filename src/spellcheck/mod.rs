@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -808,20 +808,26 @@ pub fn match_capitalization(original: &str, suggestion: &str) -> String {
 /// (accented or other-script words are never flagged), suggestions from
 /// Damerau-Levenshtein edits ranked by word frequency.
 pub struct WordlistBackend {
-    /// Frequency rank (0 = most common) for suggestion ranking.
-    rank_of: HashMap<&'static str, u32>,
+    /// Frequency rank (0 = most common) for suggestion ranking. Built on
+    /// the first check: the launch's provisional checker is this backend,
+    /// and the platform engine usually replaces it before any text is checked.
+    rank_of: LazyLock<HashMap<&'static str, u32>>,
 }
 
 impl WordlistBackend {
     pub fn new() -> Self {
-        let mut rank_of = HashMap::new();
-        for (rank, line) in WORDLIST.lines().enumerate() {
-            let w = line.trim();
-            if !w.is_empty() {
-                rank_of.insert(w, rank as u32);
-            }
+        Self {
+            rank_of: LazyLock::new(|| {
+                let mut rank_of = HashMap::new();
+                for (rank, line) in WORDLIST.lines().enumerate() {
+                    let w = line.trim();
+                    if !w.is_empty() {
+                        rank_of.insert(w, rank as u32);
+                    }
+                }
+                rank_of
+            }),
         }
-        Self { rank_of }
     }
 
     /// Words known to the checker (dictionary size), for tests/diagnostics.

@@ -83,6 +83,21 @@ pub(crate) fn frame_presented() {
     }
 }
 
+static LAUNCH_MARK_HOOK: std::sync::OnceLock<fn(&'static str)> = std::sync::OnceLock::new();
+
+/// Quill: `hook` gets the names of AppKit launch steps as they happen
+/// (`ns_run`, `will_finish`, `did_finish`, `window_ordered`,
+/// `first_display`), for launch timing. The first hook set stays.
+pub fn on_launch_mark(hook: fn(&'static str)) {
+    let _ = LAUNCH_MARK_HOOK.set(hook);
+}
+
+pub(crate) fn launch_mark(label: &'static str) {
+    if let Some(hook) = LAUNCH_MARK_HOOK.get() {
+        hook(label);
+    }
+}
+
 trait BoolExt {
     fn to_objc(self) -> Bool;
 }
