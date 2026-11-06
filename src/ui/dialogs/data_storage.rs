@@ -15,7 +15,7 @@
 use super::super::app::QuillApp;
 use super::super::index_sliders::{StepSlider, cap_slider_start};
 use super::super::*;
-use gpui_kit::assets::IconName;
+use crate::ui::settings_window::rows::{detail_row, group, switch_row};
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -226,7 +226,7 @@ impl QuillApp {
     /// breakdown (totals, per-type, per-chat), and clear cache.
     pub(crate) fn data_storage_body(&self, cx: &mut Context<Self>) -> Div {
         let session = self.session();
-        let mut body = div().flex().flex_col().gap_3();
+        let mut body = div().flex().flex_col().gap_4();
         // Failures surface here, never as toasts (the S3 pattern).
         if let Some(err) = session
             .as_ref()
@@ -244,52 +244,32 @@ impl QuillApp {
             .as_ref()
             .and_then(|s| s.settings.account_export.as_ref())
             .map(|export| export.progress().label());
-        body = body
-            .child(section_header(tr(keys::SETTINGS_EXPORT_DATA)))
-            .child(
-                div()
-                    .text_xs()
-                    .child(tr(keys::Q_OPS_SAVE_YOUR_ACCOUNT_INFORMATION_CONTACTS)),
-            );
-        if let Some(label) = &running {
-            body = body.child(
-                div()
-                    .id("account-export-status")
-                    .role(Role::Status)
-                    .aria_label(label.clone())
-                    .text_sm()
-                    .child(label.clone()),
-            );
-        }
-        body = body.child(
-            self.setting_spot(
-                &["data.export"],
-                div().flex().child(
-                    Button::new("account-export-open")
-                        .label(if running.is_some() {
-                            tr(keys::Q_OPS_SHOW_EXPORT_PROGRESS)
-                        } else {
-                            tr(keys::Q_OPS_EXPORT_TELEGRAM_DATA)
-                        })
-                        .outline()
-                        .small()
-                        .disabled(self.live.is_none())
-                        .on_click(cx.listener(|this, _, _, cx| this.open_account_export(cx))),
-                ),
-                cx,
-            ),
-        );
-        // --- Automatic downloads ---
-        // The size caps are in the per-network editor.
+        let export = detail_row(
+            "account-export-open",
+            if running.is_some() {
+                tr(keys::Q_OPS_SHOW_EXPORT_PROGRESS)
+            } else {
+                tr(keys::Q_OPS_EXPORT_TELEGRAM_DATA)
+            },
+            running
+                .unwrap_or_else(|| tr(keys::Q_OPS_SAVE_YOUR_ACCOUNT_INFORMATION_CONTACTS).into()),
+            cx.listener(|this, _, _, cx| this.open_account_export(cx)),
+            cx,
+        )
+        .disabled(self.live.is_none())
+        .into_any_element();
         body = body.child(self.setting_spot(
-            &["data.max_file_size"],
-            section_header(tr(keys::Q_OPS_AUTOMATIC_DOWNLOADS)),
+            &["data.export"],
+            group(Some(tr(keys::SETTINGS_EXPORT_DATA)), [export]),
             cx,
         ));
+        // --- Automatic downloads ---
+        // The size caps are in the per-network editor.
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
+        let mut downloads: Vec<AnyElement> = Vec::new();
         if !prefs.is_some_and(|p| p.seeded) {
             let loading = session.is_some_and(|s| s.settings.auto_download_presets_loading);
-            body = body.child(
+            downloads.push(
                 self.setting_spot(
                     &[
                         "data.auto_download_mobile",
@@ -298,6 +278,8 @@ impl QuillApp {
                         "data.less_data_calls",
                     ],
                     div()
+                        .px_3()
+                        .py_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .child(if loading {
@@ -315,108 +297,77 @@ impl QuillApp {
                     NetworkKind::Roaming => &["data.auto_download_roaming"],
                     NetworkKind::WiFi => &["data.auto_download_wifi"],
                 };
-                let row = self
-                    .data_storage_network_row(cx, network, &prefs.network_summary(network))
-                    .into_any_element();
-                body = body.child(self.setting_spot(ids, row, cx));
+                let row =
+                    self.data_storage_network_row(cx, network, &prefs.network_summary(network));
+                downloads.push(self.setting_spot(ids, row, cx));
             }
             // One toggle drives all three networks' `use_less_data_for_calls`
             // (TGX keeps a single switch); each network keeps its own caps.
             let all_on = NetworkKind::ALL
                 .iter()
                 .all(|n| prefs.for_network(*n).use_less_data_for_calls);
-            body = body.child(
-                self.setting_spot(
-                    &["data.less_data_calls"],
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .py_1()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .child(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS)),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(tr(keys::Q_OPS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
-                                ),
-                        )
-                        .child(
-                            Switch::new("data-storage-less-data-calls")
-                                .checked(all_on)
-                                .accessibility_label(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS))
-                                .on_click(cx.listener(move |this, &on, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        // Send failures land on
-                                        // `data_storage_error`, shown on
-                                        // this dialog (the S3 pattern).
-                                        let _ = live.driver.set_less_data_for_calls(on);
-                                    } else if let Some(demo) = this.demo_session.as_mut() {
-                                        for n in NetworkKind::ALL {
-                                            demo.settings
-                                                .data_storage
-                                                .for_network_mut(n)
-                                                .use_less_data_for_calls = on;
-                                        }
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
+            let owner = cx.entity().downgrade();
+            downloads.push(self.setting_spot(
+                &["data.less_data_calls"],
+                switch_row(
+                    "data-storage-less-data-calls",
+                    tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS),
+                    Some(tr(keys::Q_OPS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
+                    all_on,
+                    move |&on, _, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            if let Some(live) = this.live.as_mut() {
+                                // Send failures land on `data_storage_error`,
+                                // shown on this page (the S3 pattern).
+                                let _ = live.driver.set_less_data_for_calls(on);
+                            } else if let Some(demo) = this.demo_session.as_mut() {
+                                for n in NetworkKind::ALL {
+                                    demo.settings
+                                        .data_storage
+                                        .for_network_mut(n)
+                                        .use_less_data_for_calls = on;
+                                }
+                            }
+                            cx.notify();
+                        });
+                    },
                     cx,
                 ),
-            );
+                cx,
+            ));
         }
+        body = body.child(self.setting_spot(
+            &["data.max_file_size"],
+            group(Some(tr(keys::Q_OPS_AUTOMATIC_DOWNLOADS)), downloads),
+            cx,
+        ));
         // --- Download folder (B13) ---
         body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
         let stats = session
             .as_ref()
             .and_then(|s| s.settings.storage_stats.clone());
-        let usage = self.setting_spot(
-            &["data.storage_usage"],
-            div()
-                .id("storage-usage")
-                .anchor_scroll(Some(self.settings.storage_scroll.usage.clone()))
-                .child(section_header(tr(keys::Q_OPS_STORAGE_USAGE))),
-            cx,
-        );
-        body = body.child(self.setting_stand_in(
-            stats.is_none(),
-            &["data.clear_cache", "data.size_limit", "data.clear_older"],
-            usage,
-            cx,
-        ));
         let loading = session.is_some_and(|s| s.settings.storage_stats_loading);
-        match stats {
-            None => {
-                body = body.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(if loading {
-                            tr(keys::Q_OPS_LOADING)
-                        } else {
-                            tr(keys::Q_OPS_NO_STORAGE_DATA_YET)
-                        }),
-                );
-            }
-            Some(stats) => {
-                body = body.child(self.local_storage_section(cx, &stats));
-            }
-        }
+        let mut usage = div().flex().flex_col().gap_2().px_3().py_2();
+        let has_stats = stats.is_some();
+        usage = match stats {
+            None => usage.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(if loading {
+                        tr(keys::Q_OPS_LOADING)
+                    } else {
+                        tr(keys::Q_OPS_NO_STORAGE_DATA_YET)
+                    }),
+            ),
+            Some(stats) => usage.child(self.local_storage_section(cx, &stats)),
+        };
         // Telegram Desktop keeps no message database; TDLib's stays and
         // is not part of the cache above, so its size is shown apart.
         if let Some(bytes) = self.disk.database_bytes {
             let size = format_storage_bytes(i64::try_from(bytes).unwrap_or(i64::MAX));
-            body = body.child(
+            usage = usage.child(
                 div()
                     .id("storage-database-size")
                     .debug_selector(|| "storage-database-size".into())
@@ -425,6 +376,23 @@ impl QuillApp {
                     .child(tr_with(keys::Q_DISK_DATABASE_SIZE, &[("size", &size)])),
             );
         }
+        let usage = self.setting_spot(
+            &["data.storage_usage"],
+            div()
+                .id("storage-usage")
+                .anchor_scroll(Some(self.settings.storage_scroll.usage.clone()))
+                .child(group(
+                    Some(tr(keys::Q_OPS_STORAGE_USAGE)),
+                    [usage.into_any_element()],
+                )),
+            cx,
+        );
+        body = body.child(self.setting_stand_in(
+            !has_stats,
+            &["data.clear_cache", "data.size_limit", "data.clear_older"],
+            usage,
+            cx,
+        ));
         // --- Network usage (B13) ---
         body = body.child(self.network_usage_section(cx));
         body
@@ -437,38 +405,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
         network: NetworkKind,
         summary: &str,
-    ) -> impl IntoElement {
-        div()
-            .id(format!(
-                "data-storage-net-{}",
-                network.label().replace(' ', "-")
-            ))
-            .test_support()
-            .role(gpui_kit::Role::Button)
-            .aria_label(tr_with(
-                keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,
-                &[("label", (network.label()))],
-            ))
-            .tab_index(0)
-            .cursor_pointer()
-            .flex()
-            .items_center()
-            .justify_between()
-            .py_1()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(div().text_sm().child(network.label()))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(summary.to_string()),
-                    ),
-            )
-            .child(Icon::new(IconName::ChevronRight).size_4())
-            .on_click(cx.listener(move |this, _, _, cx| {
+    ) -> AnyElement {
+        detail_row(
+            format!("data-storage-net-{}", network.label().replace(' ', "-")),
+            network.label(),
+            summary.to_string(),
+            cx.listener(move |this, _, _, cx| {
                 let draft = this
                     .session()
                     .map(|s| *s.settings.data_storage.for_network(network));
@@ -489,7 +431,14 @@ impl QuillApp {
                     this.settings.data_storage_editor = Some((network, draft));
                     cx.notify();
                 }
-            }))
+            }),
+            cx,
+        )
+        .accessibility_label(tr_with(
+            keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,
+            &[("label", (network.label()))],
+        ))
+        .into_any_element()
     }
 
     /// Slice S4: the per-network editor — the enable switch, the three
