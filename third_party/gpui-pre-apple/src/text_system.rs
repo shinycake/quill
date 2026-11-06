@@ -459,6 +459,24 @@ impl AppleTextSystemState {
         if glyph_bounds.size.width.0 == 0 || glyph_bounds.size.height.0 == 0 {
             anyhow::bail!("glyph bounds are empty");
         } else {
+            // QUILL: a bitmap the last launch drew (crate::glyph_cache).
+            let cache_key = self
+                .postscript_names_by_font_id
+                .get(&params.font_id)
+                .map(|font| crate::glyph_cache::Key::new(font, params));
+            let mut cached_size = glyph_bounds.size;
+            if params.subpixel_variant.x > 0 {
+                cached_size.width += DevicePixels(1);
+            }
+            if params.subpixel_variant.y > 0 {
+                cached_size.height += DevicePixels(1);
+            }
+            if let Some(found) = cache_key
+                .as_ref()
+                .and_then(|key| crate::glyph_cache::take(key, cached_size))
+            {
+                return Ok(found);
+            }
             // Add an extra pixel when the subpixel variant isn't zero to make room for anti-aliasing.
             let mut bitmap_size = glyph_bounds.size;
             if params.subpixel_variant.x > 0 {
@@ -541,6 +559,9 @@ impl AppleTextSystemState {
                 for pixel in bytes.chunks_exact_mut(4) {
                     swap_rgba_pa_to_bgra(pixel);
                 }
+            }
+            if let Some(key) = cache_key {
+                crate::glyph_cache::record(key, bitmap_size, &bytes);
             }
 
             Ok((bitmap_size, bytes))
