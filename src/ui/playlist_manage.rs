@@ -16,6 +16,7 @@ use super::context_menu_keys::context_menu_item;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -436,10 +437,7 @@ impl QuillApp {
             .min_w(px(200.))
             .px_1()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
+            .menu_surface(cx)
             .children(rows);
         div()
             .id("playlist-menu-overlay")

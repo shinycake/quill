@@ -871,7 +871,7 @@ impl Render for QuillApp {
             .when_some(self.link_popup_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
-            .when_some(self.link_tooltip_overlay(), |this, overlay| {
+            .when_some(self.link_tooltip_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
             // Middle-click autoscroll: the anchor mark, and any other press

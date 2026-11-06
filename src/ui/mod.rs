@@ -425,6 +425,7 @@ mod masks_ui;
 mod media_panel;
 mod media_viewer;
 mod member_moderation;
+mod menu_surface;
 mod message_actions;
 mod message_checklist;
 mod message_effect_badge;

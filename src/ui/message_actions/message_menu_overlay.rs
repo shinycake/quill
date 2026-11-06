@@ -1,6 +1,7 @@
 //! Methods moved out of `message_actions.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::menu_surface::MenuSurface;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -69,10 +70,7 @@ impl QuillApp {
             .min_w(px(180.))
             .px_1()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas());
+            .menu_surface(cx);
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
@@ -943,11 +941,8 @@ impl QuillApp {
                                     div()
                                         .id("message-menu-reactions")
                                         .occlude()
+                                        .menu_surface(cx)
                                         .rounded_xl()
-                                        .border_1()
-                                        .border_color(accent())
-                                        .bg(bg_canvas())
-                                        .shadow_md()
                                         .child(strip),
                                 )
                             })

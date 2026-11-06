@@ -9,6 +9,7 @@ use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::auth::AuthView;
@@ -18,6 +19,9 @@ use quill::signin;
 use quill::state::AuthRequestError;
 use quill::telegram::envelope::{AuthorizationState, CodeDelivery, EmailResetState};
 use std::time::{Duration, Instant};
+
+/// The country list under the 380 px sign-in card's button.
+const PICKER_WIDTH: f32 = 356.;
 
 /// Per-screen UI state for the sign-in steps. Nothing here is a secret:
 /// the phone is shown on screen anyway and the code is never kept.
@@ -48,11 +52,27 @@ pub(super) struct SignInUi {
 impl SignInUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(tr(keys::Q_OPS_SEARCH)));
-        cx.subscribe(&search, |_this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })
+        cx.subscribe_in(
+            &search,
+            window,
+            |this, state, event: &InputEvent, window, cx| {
+                match event {
+                    InputEvent::Change => cx.notify(),
+                    // Enter picks the first country that matches.
+                    InputEvent::PressEnter { .. } => {
+                        let query = state.read(cx).value().to_string();
+                        let countries = this.signin_countries();
+                        let first = phone::search_countries(&countries, &query)
+                            .first()
+                            .map(|country| country.iso.clone());
+                        if let Some(iso) = first {
+                            this.signin_pick_country(&iso, window, cx);
+                        }
+                    }
+                    _ => {}
+                }
+            },
+        )
         .detach();
         Self {
             search,
@@ -275,10 +295,11 @@ impl QuillApp {
     fn signin_toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.auth_ui.signin.picker_open = !self.auth_ui.signin.picker_open;
         if self.auth_ui.signin.picker_open {
-            self.auth_ui
-                .signin
-                .search
-                .update(cx, |input, cx| input.focus(window, cx));
+            // The popover mounts on the next frame and takes focus then.
+            let search = self.auth_ui.signin.search.clone();
+            window.defer(cx, move |window, cx| {
+                search.update(cx, |input, cx| input.focus(window, cx));
+            });
         }
         cx.notify();
     }
@@ -505,17 +526,41 @@ impl QuillApp {
             None => tr(keys::Q_OPS_SELECT_COUNTRY).to_string(),
         };
         let mut out: Vec<AnyElement> = Vec::new();
+        // The country list drops down over the card from a field-shaped
+        // button (tdesktop's country field), so opening it does not push
+        // the card around.
+        let view = cx.entity().downgrade();
+        let list_view = view.clone();
         out.push(
-            Button::new("country-select")
-                .label(label)
-                .ghost()
-                .w_full()
-                .on_click(cx.listener(|this, _, window, cx| this.signin_toggle_picker(window, cx)))
+            Popover::new("country-select-menu")
+                .anchor(Anchor::TopLeft)
+                .open(self.auth_ui.signin.picker_open)
+                .on_open_change(move |open, window, cx| {
+                    let open = *open;
+                    let _ = view.update(cx, |this, cx| {
+                        if this.auth_ui.signin.picker_open != open {
+                            this.signin_toggle_picker(window, cx);
+                        }
+                    });
+                })
+                .trigger(
+                    Button::new("country-select")
+                        .label(label)
+                        .outline()
+                        .w_full()
+                        .h(px(40.))
+                        .dropdown_caret(true),
+                )
+                .content(move |_, _, cx| {
+                    list_view
+                        .update(cx, |this, cx| {
+                            let countries = this.signin_countries();
+                            this.country_picker(&countries, cx)
+                        })
+                        .unwrap_or_else(|_| div().into_any_element())
+                })
                 .into_any_element(),
         );
-        if self.auth_ui.signin.picker_open {
-            out.push(self.country_picker(&countries, cx));
-        }
         out.push(
             Textarea::new(&self.auth_ui.phone_input)
                 .aria_label(tr(keys::Q_OPS_PHONE_NUMBER))
@@ -609,14 +654,10 @@ impl QuillApp {
         }
         div()
             .id("country-picker")
-            .w_full()
-            .p_2()
+            .w(px(PICKER_WIDTH))
             .flex()
             .flex_col()
             .gap_2()
-            .rounded_lg()
-            .border_1()
-            .border_color(cx.theme().border)
             .child(
                 Input::new(&self.auth_ui.signin.search)
                     .aria_label(tr(keys::Q_OPS_SEARCH_COUNTRIES)),
