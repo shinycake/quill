@@ -222,17 +222,6 @@ impl QuillApp {
                         .when(self.composer_ui.send_as_open, |this| {
                             this.child(self.send_as_panel(cx))
                         })
-                        .when_some(self.message_ui.pending_delete.clone(), |this, _| {
-                            this.child(self.delete_confirm_banner(cx))
-                        })
-                        // B4: stop-poll / stop-quiz confirm banner.
-                        .when_some(self.message_ui.pending_stop_poll, |this, _| {
-                            this.child(self.stop_poll_confirm_banner(cx))
-                        })
-                        // Phase B1: close-secret-chat confirm banner.
-                        .when_some(self.chat_list.pending_close_secret_chat, |this, _| {
-                            this.child(self.close_secret_chat_confirm_banner(cx))
-                        })
                         // Phase S2: inline-bot warning banner for secret chats.
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.

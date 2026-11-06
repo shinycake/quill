@@ -31,10 +31,10 @@ mod option_media;
 pub(in crate::ui) mod option_thumb;
 
 impl QuillApp {
-    /// B4: open the "Stop poll" / "Stop quiz" confirm banner. TGX
+    /// B4: open the "Stop poll" / "Stop quiz" confirm box. TGX
     /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and
     /// the action can't be undone.
-    pub(super) fn begin_stop_poll(
+    pub(in crate::ui) fn begin_stop_poll(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
@@ -42,15 +42,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.message_ui.pending_stop_poll = Some((chat_id, message_id, is_quiz));
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MEDIA_CONFIRM_STOP_POLL)));
         cx.notify();
     }
 
     pub(super) fn cancel_stop_poll(&mut self, cx: &mut Context<Self>) {
         self.message_ui.pending_stop_poll = None;
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_MEDIA_STOP_CANCELLED)));
         cx.notify();
     }
 
@@ -704,75 +700,6 @@ impl QuillApp {
             keys::Q_MEDIA_POLLS_NEED_A_LIVE_CONNECTION,
         )));
         cx.notify();
-    }
-
-    /// B4: "Stop poll" / "Stop quiz" confirm banner, styled like the
-    /// delete confirm. TGX `StopPollWarn` / `StopQuizWarn`: nobody can
-    /// vote afterwards, and the action can't be undone.
-    pub(super) fn stop_poll_confirm_banner(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_quiz = self
-            .message_ui
-            .pending_stop_poll
-            .is_some_and(|(_, _, is_quiz)| is_quiz);
-        let title = if is_quiz {
-            tr(keys::Q_MEDIA_STOP_THIS_QUIZ)
-        } else {
-            tr(keys::Q_MEDIA_STOP_THIS_POLL)
-        };
-        let warning = if is_quiz {
-            tr(keys::Q_MEDIA_IF_YOU_STOP_THIS_QUIZ)
-        } else {
-            tr(keys::POLLS_STOP_WARNING)
-        };
-        div()
-            .id("stop-poll-confirm")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(danger())
-            .bg(danger_bg())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(danger())
-                            .child(title),
-                    )
-                    .child(div().text_sm().text_color(text_primary()).child(warning)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("cancel-stop-poll")
-                            .label(tr(keys::CANCEL))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cancel_stop_poll(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("confirm-stop-poll")
-                            .label(if is_quiz {
-                                tr(keys::Q_MEDIA_STOP_QUIZ)
-                            } else {
-                                tr(keys::POLLS_STOP)
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.confirm_stop_poll(cx);
-                            })),
-                    ),
-            )
     }
 
     /// Phase 4.2: the body of the poll creation box (`poll_box.rs`).

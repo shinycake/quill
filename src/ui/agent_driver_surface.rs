@@ -27,6 +27,8 @@ use quill::telegram::envelope::{ChannelMemberStatus, ChatKind};
 /// Kit dialogs agents never see or use, in any mode (`register_dialogs!`
 /// names). A test checks every name is registered.
 pub(super) const HARD_DIALOGS: &[&str] = &[
+    // Stopping a poll cannot be undone.
+    "StopPollConfirm",
     "AgentRequest",
     "AgentConsent",
     "AgentResetToken",
@@ -90,8 +92,6 @@ pub(super) const HARD_LAYERS: &[&str] = &[
     "privacy",
     "earn-layer",
     "screen-privacy",
-    "pending-delete",
-    "pending-stop-poll",
 ];
 
 /// A hard dialog or layer an agent's step opened, waiting for the shell to

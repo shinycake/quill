@@ -303,13 +303,6 @@ impl QuillApp {
             .unwrap_or(4096)
     }
 
-    pub(in crate::ui) fn cancel_delete(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.pending_delete = None;
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_DELETE_CANCELLED)));
-        cx.notify();
-    }
-
     pub(in crate::ui) fn confirm_delete(&mut self, cx: &mut Context<Self>) {
         let Some(confirm) = self.message_ui.pending_delete.take() else {
             return;

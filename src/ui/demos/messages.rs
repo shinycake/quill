@@ -206,6 +206,11 @@ impl QuillApp {
             message_id: MessageId(102),
             position: point(px(420.), px(200.)),
         });
+        // `QUILL_DEMO_SECRET_CLOSE=1`: the Close Secret Chat box instead.
+        if std::env::var_os("QUILL_DEMO_SECRET_CLOSE").is_some() {
+            self.message_ui.menu = None;
+            self.open_close_secret_chat_confirm(ChatId(11), cx);
+        }
     }
 
     fn demo_ready_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {

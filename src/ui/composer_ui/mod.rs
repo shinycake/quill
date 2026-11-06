@@ -259,42 +259,6 @@ impl QuillApp {
     }
 }
 
-/// Slim bar above the composer for what the next send will do (reply,
-/// edit, delete confirm): icon, accent rule, title and one-line preview,
-/// optional trailing controls, and a close button.
-#[allow(clippy::too_many_arguments)]
-fn composer_context_bar(
-    id: &'static str,
-    icon: gpui_kit::assets::IconName,
-    color: Hsla,
-    title: impl Into<SharedString>,
-    preview: impl Into<SharedString>,
-    trailing: Option<AnyElement>,
-    close: Button,
-    cx: &App,
-) -> impl IntoElement {
-    let preview: SharedString = preview.into();
-    composer_context_bar_rich(
-        id,
-        icon,
-        color,
-        title,
-        div()
-            .text_sm()
-            .truncate()
-            .text_color(cx.theme().muted_foreground)
-            .child(super::bidi_line::one_line_plain(
-                super::search_ui::one_line_preview(&preview),
-            ))
-            .into_any_element(),
-        None,
-        trailing,
-        close,
-        None,
-        cx,
-    )
-}
-
 /// What the body of a context bar does when clicked
 /// (`quill::composer::bar_click_action`).
 pub(super) struct BarClicks {

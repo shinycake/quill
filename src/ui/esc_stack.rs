@@ -267,17 +267,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.share.forward_picker_open,
         |app, window, cx| app.close_forward_picker(window, cx)
     ),
-    layer!(
-        "pending-delete",
-        |app| app.message_ui.pending_delete.is_some(),
-        |app, _, cx| app.cancel_delete(cx)
-    ),
-    // B4: Escape cancels the stop-poll confirm too.
-    layer!(
-        "pending-stop-poll",
-        |app| app.message_ui.pending_stop_poll.is_some(),
-        |app, _, cx| app.cancel_stop_poll(cx)
-    ),
     // The chat list peeking over the conversation (`sidebar_reveal`).
     layer!(
         "sidebar-peek",
