@@ -7,6 +7,7 @@
 use super::*;
 use crate::ui::context_menu_keys::ContextMenuItems;
 use crate::ui::menu_states::{ChatMenuState, ChatMenuSubmenu};
+use crate::ui::menu_surface::MenuSurface;
 use gpui_kit::TestSupportExt;
 use gpui_kit::assets::IconName;
 use quill::chatlist_menu::{ExitEntry, exit_entry, mute_offered};
@@ -64,7 +65,7 @@ pub(super) fn menu_row(
         .child(div().flex_1().child(label))
 }
 
-fn submenu_panel(rows: Vec<AnyElement>) -> AnyElement {
+fn submenu_panel(rows: Vec<AnyElement>, cx: &App) -> AnyElement {
     anchored()
         .offset(point(px(MENU_WIDTH - PANEL_PADDING), px(-PANEL_PADDING)))
         .snap_to_window_with_margin(px(8.))
@@ -76,10 +77,7 @@ fn submenu_panel(rows: Vec<AnyElement>) -> AnyElement {
                 .flex_col()
                 .w(px(MENU_WIDTH))
                 .p_1()
-                .rounded_md()
-                .border_1()
-                .border_color(accent())
-                .bg(bg_canvas())
+                .menu_surface(cx)
                 .children(rows),
         )
         .into_any_element()
@@ -309,7 +307,7 @@ impl QuillApp {
             }))
             .into_any_element(),
         );
-        Some(parent.child(submenu_panel(rows)).into_any_element())
+        Some(parent.child(submenu_panel(rows, cx)).into_any_element())
     }
 
     /// The "Add to folder" row (order 45) with a submenu that lists every
@@ -380,7 +378,7 @@ impl QuillApp {
                 .into_any_element(),
             );
         }
-        Some(parent.child(submenu_panel(rows)).into_any_element())
+        Some(parent.child(submenu_panel(rows, cx)).into_any_element())
     }
 
     /// The delete or leave row (order 90): "Delete chat" for a user,

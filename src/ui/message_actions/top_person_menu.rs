@@ -6,6 +6,7 @@
 use super::chat_menu_submenus::{MENU_WIDTH, menu_row};
 use super::*;
 use crate::ui::menu_states::ChatMenuState;
+use crate::ui::menu_surface::MenuSurface;
 use gpui_kit::assets::IconName as Lucide;
 use quill::lang::{keys, tr};
 use quill::state::SearchConfirm;
@@ -41,10 +42,7 @@ impl QuillApp {
             .w(px(MENU_WIDTH))
             .px_1()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
+            .menu_surface(cx)
             .children(rows);
         div()
             .id("chat-menu-overlay")

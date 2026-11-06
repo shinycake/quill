@@ -15,6 +15,7 @@
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -434,7 +435,7 @@ impl QuillApp {
     }
 
     /// The link tooltip, once the pointer has rested on the link.
-    pub(super) fn link_tooltip_overlay(&self) -> Option<AnyElement> {
+    pub(super) fn link_tooltip_overlay(&self, cx: &App) -> Option<AnyElement> {
         let tooltip = self.message_ui.link_tooltip.as_ref().filter(|t| t.shown)?;
         Some(
             div()
@@ -445,10 +446,7 @@ impl QuillApp {
                 .max_w(px(420.))
                 .px_2()
                 .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(accent())
-                .bg(bg_canvas())
+                .menu_surface(cx)
                 .text_xs()
                 .text_color(text_menu())
                 .child(tooltip.text.clone())
@@ -548,10 +546,7 @@ impl QuillApp {
                                 .min_w(px(180.))
                                 .px_1()
                                 .py_1()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(accent())
-                                .bg(bg_canvas())
+                                .menu_surface(cx)
                                 .when(!card_title.is_empty(), |panel| {
                                     panel.child(
                                         div()

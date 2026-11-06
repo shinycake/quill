@@ -166,7 +166,7 @@ impl QuillApp {
             .when_some(self.link_popup_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
-            .when_some(self.link_tooltip_overlay(), |this, overlay| {
+            .when_some(self.link_tooltip_overlay(cx), |this, overlay| {
                 this.child(overlay)
             })
             .into_any_element()

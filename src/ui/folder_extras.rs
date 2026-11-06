@@ -6,11 +6,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_theme::{accent, bg_canvas, peer_name_color, text_menu};
+use super::chat_theme::{accent, peer_name_color, text_menu};
 use super::context_menu_keys::context_menu_item;
 use super::folder_share::{chat_title, finish_dialog};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::assets::IconName;
@@ -221,10 +222,7 @@ impl QuillApp {
             .min_w(px(200.))
             .px_1()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
+            .menu_surface(cx)
             .children(rows);
         div()
             .id("folder-tab-menu-overlay")

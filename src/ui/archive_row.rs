@@ -11,6 +11,7 @@ use super::chat_row::chat_row_height;
 use super::context_menu_keys::context_menu_item;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
@@ -328,10 +329,7 @@ impl QuillApp {
             .min_w(px(200.))
             .px_1()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas())
+            .menu_surface(cx)
             .children(rows);
         div()
             .id("archive-menu-overlay")
