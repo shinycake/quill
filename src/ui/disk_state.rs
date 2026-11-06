@@ -61,7 +61,13 @@ impl DiskUi {
         if !cfg!(test)
             && let Some(root) = quill::settings::safe_app_root()
         {
-            watch(root, cx);
+            // The first read waits for the first frame: its purgeable-space
+            // query holds the file cache lock that AppKit's launch takes.
+            let (drawn, first_frame) = futures_channel::oneshot::channel::<()>();
+            window.on_next_frame(move |_, _| {
+                let _ = drawn.send(());
+            });
+            watch(root, first_frame, cx);
         }
         Self {
             state: DiskState::default(),
@@ -109,8 +115,13 @@ impl DiskUi {
     }
 }
 
-fn watch(root: PathBuf, cx: &Context<QuillApp>) {
+fn watch(
+    root: PathBuf,
+    first_frame: futures_channel::oneshot::Receiver<()>,
+    cx: &Context<QuillApp>,
+) {
     QuillApp::spawn_main(cx, async move |this, cx| {
+        let _ = first_frame.await;
         let mut device = None;
         loop {
             let folder = root.clone();

@@ -177,6 +177,8 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    quill::launch_prewarm::start();
+
     // An update is being installed beside this executable: its helper starts
     // Quill when it is done.
     if quill::update_install::update_in_progress() {
@@ -504,7 +506,11 @@ fn install_main_window_tray(
         }
     })
     .detach();
-    view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
+    // A shown window gets its tray from the chrome loop's first pass, once
+    // it has drawn.
+    if !after_first_frame {
+        view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
+    }
 }
 
 /// The GPUI application on the OS platform wrapped in the interface-scale
@@ -516,6 +522,8 @@ fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
     set_initial_zoom(zoom_for_percent(interface_scale_pct));
     let platform = gpui_kit::platform::current_platform(false);
     quill::startup_trace::mark("platform_ready");
+    #[cfg(target_os = "macos")]
+    gpui_macos::on_frame_presented(quill::startup_trace::frame_presented);
     // The kit's theme init lists the installed fonts; started now, the list
     // is ready by then instead of being built on the main thread.
     gpui_kit::component::theme::prefetch_installed_font_names(

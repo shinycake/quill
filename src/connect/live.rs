@@ -155,6 +155,7 @@ pub fn start_prepared_live_connect(
     live.driver
         .kickoff()
         .map_err(|_| ConnectBlocker::TdjsonLoad)?;
+    live.load_chats_when_ready();
     Ok(live)
 }
 
@@ -174,6 +175,23 @@ pub fn start_background_live_connect(
 }
 
 impl LiveConnect {
+    /// The first chat page, asked for from the receive thread as soon as
+    /// TDLib is ready: the main thread may still be finishing the app's
+    /// launch, and the chat list then lands in the first frame. It carries
+    /// no request id, so its answer is ignored; the chats arrive as updates
+    /// and the driver pages on from its own `loadChats` after `Ready`.
+    fn load_chats_when_ready(&self) {
+        let api = self._live.api.clone();
+        let client_id = self._live.client_id;
+        let request = crate::telegram::requests::load_chats_untracked(MAIN_CHAT_LOAD_LIMIT);
+        self._live.hub.routes().on_ready(
+            client_id,
+            Box::new(move || {
+                let _ = api.send(client_id, &request);
+            }),
+        );
+    }
+
     /// Load and install the native call engine (once; a client that already
     /// has one keeps it). Without the library calls run signaling-only.
     pub fn attach_call_engine(&mut self, diagnostics: &dyn DiagnosticSink) {

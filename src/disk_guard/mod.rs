@@ -12,6 +12,7 @@ pub use folders::database_size;
 mod linux;
 mod probe;
 
+use probe::read_volume_quick;
 pub use probe::{Volume, available_bytes, read_volume};
 
 /// One read of the data folders.
@@ -27,7 +28,11 @@ pub struct DataReading {
 /// Reads the data folders under `root` (`folders::data_folders`).
 /// `device` is where the root was last seen ([`data_root_device`]).
 pub fn read_data(root: &Path, device: Option<u64>) -> DataReading {
-    let mut reading = folders::tightest(&folders::data_folders(root), read_volume);
+    read_data_with(root, device, read_volume)
+}
+
+fn read_data_with(root: &Path, device: Option<u64>, read: impl Fn(&Path) -> Volume) -> DataReading {
+    let mut reading = folders::tightest(&folders::data_folders(root), read);
     reading.unwritable |= folders::volume_gone(root, device) || folders::dangling_link(root);
     reading
 }
@@ -45,6 +50,16 @@ pub fn data_free_bytes(root: &Path) -> Option<u64> {
     } else {
         reading.free
     }
+}
+
+/// Whether the data folders under `root` are too full for TDLib to open.
+/// The quick read decides when it already shows enough room, so a launch
+/// does not wait on the slow purgeable-space query (`read_volume_quick`).
+pub fn open_refused(root: &Path) -> bool {
+    let floors = data_floors(root);
+    let quick = read_data_with(root, None, read_volume_quick);
+    let room = !quick.unwritable && quick.free.is_some_and(|free| free >= floors.open);
+    !room && refuses_open(data_free_bytes(root), &floors)
 }
 
 /// The floors for what is under the data root `root` now.

@@ -38,6 +38,7 @@ import time
 
 WORK = pathlib.Path.home() / "Library/Caches/quill-launch-bench"
 REPO = pathlib.Path(__file__).resolve().parent.parent
+DEFAULT_DATA = pathlib.Path.home() / "Library/Application Support/org.shinycake.Quill"
 
 
 def credentials():
@@ -84,10 +85,49 @@ def quit_quill(app):
     time.sleep(2)
 
 
-def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="chat_list", extra_env=()):
+def evict(paths):
+    """Drop the files under `paths` from the file cache and leave the rest of the
+    system (the dyld shared cache, other apps) cached, as on a Dock click a while
+    after Quill last ran. `--cold` runs `purge`, which empties everything."""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int,
+                          ctypes.c_int, ctypes.c_longlong]
+    libc.msync.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
+    libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    prot_read, map_shared, ms_invalidate = 0x1, 0x1, 0x2
+    for root in paths:
+        for dirpath, _, names in os.walk(root):
+            for name in names:
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path):
+                    continue
+                try:
+                    fd = os.open(path, os.O_RDONLY)
+                except OSError:
+                    continue
+                try:
+                    size = os.fstat(fd).st_size
+                    if size == 0:
+                        continue
+                    base = libc.mmap(None, size, prot_read, map_shared, fd, 0)
+                    if base in (None, ctypes.c_void_p(-1).value):
+                        continue
+                    libc.msync(base, size, ms_invalidate)
+                    libc.munmap(base, size)
+                finally:
+                    os.close(fd)
+
+
+def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="chat_list", extra_env=(),
+           evict_paths=()):
     trace.unlink(missing_ok=True)
     if cold:
         subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
+        time.sleep(1)
+    elif evict_paths:
+        evict([app, *evict_paths])
         time.sleep(1)
     args = ["/usr/bin/open", "-n", "-a", app, "--env", f"QUILL_STARTUP_TRACE={trace}"]
     for key, value in creds.items():
@@ -117,6 +157,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--cold", action="store_true", help="empty the file cache before every launch")
+    parser.add_argument("--evict", action="store_true",
+                        help="drop only the bundle and the data folder from the file cache before every launch")
     parser.add_argument("--template", default=str(REPO / "dist/Quill.app"))
     parser.add_argument("--data-root", help="QUILL_DATA_ROOT for the launches (default: the real account)")
     parser.add_argument("--until", default="chat_list",
@@ -134,6 +176,7 @@ def main():
         envs[label] = extra
         sides.append((label, make_bundle(label, binary, opts.template)))
     results = {label: [] for label, _ in sides}
+    evict_paths = [opts.data_root or DEFAULT_DATA] if opts.evict else []
     # One unrecorded launch each: a newly signed binary is assessed by the
     # system on its first launch (~0.7 s), which is not Quill's launch time.
     for label, app in sides:
@@ -141,7 +184,8 @@ def main():
     for run in range(opts.runs):
         for label, app in sides:
             marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold,
-                           data_root=opts.data_root, until=opts.until, extra_env=envs[label])
+                           data_root=opts.data_root, until=opts.until, extra_env=envs[label],
+                           evict_paths=evict_paths)
             results[label].append(marks)
             shown = f"{marks[opts.until]:.0f} ms" if opts.until in marks else "NOT REACHED"
             print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",

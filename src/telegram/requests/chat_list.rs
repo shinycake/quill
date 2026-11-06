@@ -5,6 +5,18 @@ pub fn load_chats(extra: RequestId, limit: i32) -> String {
     load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
 }
 
+/// `loadChats(chatListMain)` with no `@extra`: its answer matches no
+/// request, for a page asked for outside the session's bookkeeping
+/// (`LiveConnect::load_chats_when_ready`).
+pub fn load_chats_untracked(limit: i32) -> String {
+    json!({
+        "@type": "loadChats",
+        "chat_list": { "@type": "chatListMain" },
+        "limit": limit,
+    })
+    .to_string()
+}
+
 /// `loadChats(chatListArchive)` — TDLib reports archived chats' positions
 /// only once the archive list is loaded.
 pub fn load_archive_chats(extra: RequestId, limit: i32) -> String {
