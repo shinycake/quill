@@ -937,6 +937,7 @@ impl QuillApp {
 }
 
 mod chat_search_bar;
+mod filter_menus;
 mod search_results;
 mod tab_results;
 mod tab_strip;
