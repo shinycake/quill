@@ -7,6 +7,8 @@ use quill::lang::{keys, tr};
 /// chooser): the search over the address book.
 pub struct ShareContentDialog {
     pub(crate) query: Entity<TextareaState>,
+    /// Focus the search field once the dialog has mounted.
+    pub(crate) focus_on_mount: bool,
 }
 
 impl ShareContentDialog {
@@ -18,6 +20,7 @@ impl ShareContentDialog {
                     .auto_grow(1, 1)
                     .submit_on_enter(false)
             }),
+            focus_on_mount: true,
         }
     }
 }

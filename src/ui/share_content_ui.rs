@@ -1,5 +1,5 @@
-//! The attach menu's Contact item: an inline panel above the composer that
-//! sends an `inputMessageContact` (tdesktop `Ui::attach` menu: "Contact"
+//! The attach menu's Contact item: a contact chooser box over the window
+//! that sends an `inputMessageContact` (tdesktop `Ui::attach` menu: "Contact"
 //! opens the contact chooser; "Location" opens `ui/location_picker`). The
 //! dice has no menu item: like
 //! tdesktop, a message that is just a dice emoji rolls a die
@@ -7,17 +7,23 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::chat_theme::{accent, bg_canvas};
+use super::dialog_focus::focus_after_mount;
 use super::pressable::PressableDiv;
+use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Textarea;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::requests::ContactShare;
+
+/// tdesktop `boxWidth`.
+const BOX_WIDTH: f32 = 380.;
 
 /// Most contacts listed in the chooser at once; the search narrows them.
 const CONTACT_LIST_MAX: usize = 8;
@@ -38,9 +44,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let dialog = ShareContentDialog::contact(window, cx);
-        dialog.query.update(cx, |input, cx| input.focus(window, cx));
-        self.share.content_dialog = Some(dialog);
+        self.share.content_dialog = Some(ShareContentDialog::contact(window, cx));
         cx.notify();
     }
 
@@ -150,32 +154,14 @@ impl QuillApp {
             .collect()
     }
 
-    pub(super) fn share_content_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.share.content_dialog.as_ref()?;
-        self.share_content_panel_body(cx)
-    }
-
-    /// `share_content_panel` past its cheap check. A debug build reserves this
-    /// builder's whole frame on entry, so frames that show nothing skip
-    /// it (docs/decisions/main-thread-stack.md).
-    /// The outer function repeats this body's first check; keep the two in step.
-    #[inline(never)]
-    fn share_content_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The contact chooser's body: the search field and up to
+    /// `CONTACT_LIST_MAX` contacts, one click sends.
+    fn share_content_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.share.content_dialog.as_ref()?;
-        let mut body = div()
-            .id("share-content-panel")
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .rounded_md()
-            .border_1()
-            .border_color(accent())
-            .bg(bg_canvas());
         let query = &dialog.query;
         let typed = query.read(cx).value().to_string();
         let rows = self.share_contact_rows(&typed);
-        let mut list = div().flex().flex_col().gap_0p5();
+        let mut list = div().id("share-contact-list").flex().flex_col();
         for (user_id, name, phone) in rows.iter().cloned() {
             let photo = self
                 .session()
@@ -188,9 +174,9 @@ impl QuillApp {
                     .id(("share-contact", user_id as u64))
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_3()
+                    .h(px(52.))
                     .px_2()
-                    .py_1()
                     .rounded_md()
                     .role(gpui_kit::Role::Button)
                     .aria_label(tr_with(keys::Q_OPS_SEND, &[("name", &name.to_string())]))
@@ -203,51 +189,97 @@ impl QuillApp {
                     .child(super::message_text::kit_avatar_element(
                         &name,
                         photo.as_deref(),
-                        px(28.),
+                        px(40.),
                     ))
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .min_w_0()
-                            .child(div().text_sm().font_medium().truncate().child(name))
-                            .child(div().text_xs().text_color(text_muted()).child(phone)),
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_medium()
+                                    .child(super::bidi_line::name_line(name)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(text_muted())
+                                    .child(super::group_panels::format_phone(&phone)),
+                            ),
                     ),
             );
         }
-        if rows.is_empty() {
-            list = list.child(
-                div()
-                    .text_xs()
-                    .text_color(text_muted())
-                    .child(tr(keys::Q_OPS_NO_CONTACTS_WITH_A_PHONE)),
-            );
-        }
-        body = body
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(tr(keys::Q_OPS_SEND_CONTACT)),
-            )
-            .child(
-                Textarea::new(query)
-                    .aria_label(tr(keys::Q_OPS_SEARCH_CONTACTS))
-                    .h(px(36.)),
-            )
-            .child(list);
+        let list = if rows.is_empty() {
+            super::empty_state::EmptyState::new("share-contact-empty", IconName::Contact)
+                .hint(tr(keys::Q_OPS_NO_CONTACTS_WITH_A_PHONE))
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
         Some(
-            body.child(
-                div().flex().gap_2().child(
-                    Button::new("share-content-cancel")
-                        .label(tr(keys::CANCEL))
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_share_content_dialog(cx);
-                        })),
-                ),
-            )
-            .into_any_element(),
+            div()
+                .id("share-content-panel")
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    Textarea::new(query)
+                        .aria_label(tr(keys::Q_OPS_SEARCH_CONTACTS))
+                        .h(px(36.)),
+                )
+                .child(list)
+                .into_any_element(),
         )
     }
+
+    fn build_share_contact_dialog(
+        app: &Entity<QuillApp>,
+        shell: &Entity<QuillShell>,
+        dialog: Dialog,
+        cx: &mut App,
+    ) -> Dialog {
+        let on_close =
+            QuillShell::on_close_kind(app, shell, DialogKind::ShareContact, |this, _, cx| {
+                this.close_share_content_dialog(cx);
+            });
+        let footer = app.update(cx, |_, cx| {
+            div().flex().justify_end().child(
+                Button::new("share-content-cancel")
+                    .label(tr(keys::CANCEL))
+                    .ghost()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_share_content_dialog(cx);
+                    })),
+            )
+        });
+        let body_app = app.clone();
+        dialog
+            .overlay(true)
+            .w(px(BOX_WIDTH))
+            .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_SEND_CONTACT)))
+            .content(crate::ui::shell::scrollable_dialog_content(
+                move |content, window, cx| {
+                    let body = body_app.update(cx, |this, cx| {
+                        let focus = this.share.content_dialog.as_mut().and_then(|dialog| {
+                            std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.query.clone())
+                        });
+                        focus_after_mount(focus, window, cx);
+                        this.share_content_panel(cx)
+                    });
+                    content.children(body)
+                },
+            ))
+            .footer(footer)
+            .on_close(on_close)
+    }
+}
+
+crate::ui::shell::register_dialogs! {
+    ShareContact => DialogSpec::new(
+        2947,
+        |app| app.share.content_dialog.is_some(),
+        QuillApp::build_share_contact_dialog,
+    ),
 }

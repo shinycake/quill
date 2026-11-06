@@ -222,17 +222,6 @@ impl QuillApp {
                         .when(self.composer_ui.send_as_open, |this| {
                             this.child(self.send_as_panel(cx))
                         })
-                        .when_some(self.message_ui.pending_delete.clone(), |this, _| {
-                            this.child(self.delete_confirm_banner(cx))
-                        })
-                        // B4: stop-poll / stop-quiz confirm banner.
-                        .when_some(self.message_ui.pending_stop_poll, |this, _| {
-                            this.child(self.stop_poll_confirm_banner(cx))
-                        })
-                        // Phase B1: close-secret-chat confirm banner.
-                        .when_some(self.chat_list.pending_close_secret_chat, |this, _| {
-                            this.child(self.close_secret_chat_confirm_banner(cx))
-                        })
                         // Phase S2: inline-bot warning banner for secret chats.
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
@@ -245,10 +234,6 @@ impl QuillApp {
                         .children(self.composer_reply_bar_slot(cx))
                         .when_some(self.suggest_bar_panel(cx), |this, bar| this.child(bar))
                         .when_some(self.reply_quote_panel(cx), |this, panel| this.child(panel))
-                        // The attach menu's Contact / Location panel.
-                        .when_some(self.share_content_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         // Phase D3b: admin-management dialog above the composer.
                         .when_some(self.admin_dialog_panel(cx), |this, panel| this.child(panel))
                         // B1: bot custom keyboard (`replyMarkupShowKeyboard`)
@@ -286,9 +271,6 @@ impl QuillApp {
                         // until the wait expires; the send button shows the
                         // remaining time (`composer_send_button`) and
                         // `ensure_slow_mode_tick` re-renders every second.
-                        .when_some(self.code_language_panel(cx), |this, panel| {
-                            this.child(panel)
-                        })
                         // Non-default send options as clearable chips; the
                         // schedule picker opens above the input.
                         // Pickers open directly above the input, next to the

@@ -11,8 +11,9 @@ register_demos![
     // The message menu's item rows (injected, no live Telegram).
     // `QUILL_DEMO_ITEMS` is `poll`, `task`, `contact` or `author`: which
     // message the menu facts (what TDLib allowed) are injected for.
-    // `checklist`, `add-tasks` and `add-option` open the New Checklist,
-    // Add Tasks and poll Add an Option boxes instead of a menu.
+    // `checklist`, `add-tasks`, `add-option` and `stop-poll` open the New
+    // Checklist, Add Tasks, poll Add an Option and Stop Poll boxes instead
+    // of a menu.
     DemoSpec::chats(
         "ready-item-menus",
         "screenshot demo — menu over a poll option, task, contact and post author (injected, no live Telegram)"
@@ -38,6 +39,9 @@ impl QuillApp {
             "add-tasks" => {
                 let add_to = Some((GROUP, quill::ids::MessageId(21)));
                 self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(add_to, window, cx));
+            }
+            "stop-poll" => {
+                self.begin_stop_poll(GROUP, quill::ids::MessageId(20), false, cx);
             }
             "add-option" => {
                 self.open_poll_add_option(GROUP, quill::ids::MessageId(20), window, cx);

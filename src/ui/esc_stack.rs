@@ -84,11 +84,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.earn_layer_open(),
         |app, window, cx| app.earn_layer_escape(window, cx)
     ),
-    layer!(
-        "composer-code-language",
-        |app| app.composer_ui.code_language.is_some(),
-        |app, window, cx| app.close_code_language_dialog(window, cx)
-    ),
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
@@ -163,11 +158,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "media-viewer",
         |app| app.viewer.state.is_open(),
         |app, _, cx| app.close_media_viewer(cx)
-    ),
-    layer!(
-        "share-content-dialog",
-        |app| app.share.content_dialog.is_some(),
-        |app, _, cx| app.close_share_content_dialog(cx)
     ),
     layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
         app.close_open_country_boxes(cx)
@@ -267,17 +257,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.share.forward_picker_open,
         |app, window, cx| app.close_forward_picker(window, cx)
     ),
-    layer!(
-        "pending-delete",
-        |app| app.message_ui.pending_delete.is_some(),
-        |app, _, cx| app.cancel_delete(cx)
-    ),
-    // B4: Escape cancels the stop-poll confirm too.
-    layer!(
-        "pending-stop-poll",
-        |app| app.message_ui.pending_stop_poll.is_some(),
-        |app, _, cx| app.cancel_stop_poll(cx)
-    ),
     // The chat list peeking over the conversation (`sidebar_reveal`).
     layer!(
         "sidebar-peek",
@@ -374,7 +353,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
 const FOCUS_RETURN_LAYERS: &[&str] = &[
     "profile-modal",
     "earn-layer",
-    "composer-code-language",
     "gif-panel",
     "sticker-panel",
     "reply-panels",

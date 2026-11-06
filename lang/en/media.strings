@@ -258,7 +258,6 @@
 "qll_media_collapse_fact_check" = "Collapse fact check";
 "qll_media_confirm" = "Confirm";
 "qll_media_confirm_delete" = "Confirm delete";
-"qll_media_confirm_stop_poll" = "Confirm stop poll";
 "qll_media_correct_answer" = "{option_label} · correct answer";
 "qll_media_could_not_add_the_tasks" = "Couldn't add the tasks";
 "qll_media_could_not_archive_the_sticker" = "Couldn't archive the sticker set";
@@ -675,7 +674,6 @@
 "qll_media_stickers" = "{title} · {size} stickers";
 "qll_media_stickers_2" = "Stickers";
 "qll_media_stickers_you_send_appear_here" = "Stickers you send appear here.";
-"qll_media_stop_cancelled" = "Stop cancelled";
 "qll_media_stop_generating" = "Stop generating";
 "qll_media_stop_quiz" = "Stop quiz";
 "qll_media_stop_this_poll" = "Stop this poll?";

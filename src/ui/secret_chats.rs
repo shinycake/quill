@@ -2,9 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::*;
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -43,25 +41,20 @@ impl QuillApp {
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
     }
 
-    /// Phase B1: open the "Close secret chat" confirm banner for the
+    /// Phase B1: open the "Close secret chat" confirm box for the
     /// given secret chat.
-    pub(super) fn open_close_secret_chat_confirm(
+    pub(in crate::ui) fn open_close_secret_chat_confirm(
         &mut self,
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
         self.chat_list.pending_close_secret_chat = Some(chat_id);
-        self.connection.set_note(StatusNote::silent(tr(
-            keys::Q_OPS_CONFIRM_CLOSE_SECRET_CHAT,
-        )));
         cx.notify();
     }
 
     /// Phase B1: cancel the "Close secret chat" confirm.
     pub(super) fn cancel_close_secret_chat(&mut self, cx: &mut Context<Self>) {
         self.chat_list.pending_close_secret_chat = None;
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_OPS_CLOSE_CANCELLED)));
         cx.notify();
     }
 
@@ -214,65 +207,6 @@ impl QuillApp {
             keys::Q_OPS_CUSTOM_NOTIFICATION_SETTINGS_FOR_THE,
             &[("name", &name.to_string())],
         ))
-    }
-
-    /// Phase B1: "Close secret chat" confirm banner, styled like the
-    /// delete confirm. Closing is permanent — the chat can never send
-    /// again once `secretChatStateClosed` lands.
-    ///
-    /// Phase S1: distinct TGX copy per secret-chat state
-    /// (`DeleteSecretChatPendingConfirm` / `DeleteSecretChatClosedConfirm` /
-    /// `DeleteSecretChatConfirm`).
-    pub(super) fn close_secret_chat_confirm_banner(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let (title, body, confirm_label) = self.secret_close_copy();
-        div()
-            .id("close-secret-confirm")
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(danger())
-            .bg(danger_bg())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_medium()
-                            .text_color(danger())
-                            .child(title),
-                    )
-                    .child(div().text_sm().text_color(text_primary()).child(body)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        Button::new("cancel-close-secret")
-                            .label(tr(keys::CANCEL))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cancel_close_secret_chat(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("confirm-close-secret")
-                            .label(confirm_label)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.confirm_close_secret_chat(cx);
-                            })),
-                    ),
-            )
     }
 
     /// Phase S1: close-confirm copy keyed on the secret chat's state, with

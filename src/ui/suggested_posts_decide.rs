@@ -334,10 +334,12 @@ impl QuillApp {
             })
     }
 
-    /// The delete banner's warning over a paid suggested post younger
-    /// than `suggested_post_lifetime_min` ("Stars will be lost").
-    pub(super) fn paid_post_delete_warning(&self) -> Option<(&'static str, &'static str)> {
-        let pending = self.message_ui.pending_delete.as_ref()?;
+    /// The delete box's warning over a paid suggested post younger than
+    /// `suggested_post_lifetime_min` ("Stars will be lost").
+    pub(super) fn paid_post_delete_warning(
+        &self,
+        pending: &quill::composer::DeleteConfirm,
+    ) -> Option<(&'static str, &'static str)> {
         let session = self.session()?;
         let message = session
             .histories

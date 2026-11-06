@@ -413,7 +413,6 @@
 "qll_ops_clear_the_cached_files_of" = "Clear the cached files of {storage_chat_title}?";
 "qll_ops_cleared_the_description" = "cleared the description";
 "qll_ops_click_to_view_details" = "Click to view details ›";
-"qll_ops_close_cancelled" = "Close cancelled";
 "qll_ops_close_chat" = "Close chat";
 "qll_ops_close_downloads" = "Close downloads";
 "qll_ops_close_playlist" = "Close playlist";
@@ -428,7 +427,6 @@
 "qll_ops_communities" = "Communities";
 "qll_ops_community_not_found" = "Community not found";
 "qll_ops_confirm_call" = "Confirm call";
-"qll_ops_confirm_close_secret_chat" = "Confirm close secret chat";
 "qll_ops_confirm_your_age_to_continue" = "Confirm your age to continue.";
 "qll_ops_connect_to_export_a_chat" = "Connect to export a chat";
 "qll_ops_connect_to_export_your_data" = "Connect to export your data";

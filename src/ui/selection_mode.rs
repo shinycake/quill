@@ -702,6 +702,8 @@ impl QuillApp {
             }
         });
         let revoke = std::rc::Rc::new(std::cell::Cell::new(confirm.revoke));
+        // A paid suggested post deleted too early loses its payment.
+        let warning = self.paid_post_delete_warning(&confirm);
         // Report Spam / Delete all / Ban: unchecked until the admin ticks them.
         let choice = std::rc::Rc::new(std::cell::Cell::new(
             quill::connect::ModerationChoice::default(),
@@ -714,7 +716,16 @@ impl QuillApp {
             let on_ok_choice = choice.clone();
             let on_ok_offer = moderation.clone();
             alert
-                .description(tr(keys::SELECTED_DELETE_SURE_THIS))
+                .when_some(warning, |alert, (title, text)| {
+                    alert.title(title).description(
+                        div()
+                            .debug_selector(|| "delete-paid-warning".to_string())
+                            .child(text),
+                    )
+                })
+                .when(warning.is_none(), |alert| {
+                    alert.description(tr(keys::SELECTED_DELETE_SURE_THIS))
+                })
                 .when(label.is_some() || moderation_offer.is_some(), |alert| {
                     let label = label.clone();
                     alert.content(move |content, _, _| {
@@ -807,7 +818,11 @@ impl QuillApp {
                         content
                     })
                 })
-                .ok_text(tr(keys::BOX_DELETE))
+                .ok_text(if warning.is_some() {
+                    quill::suggested_posts::DELETE_ANYWAY
+                } else {
+                    tr(keys::BOX_DELETE)
+                })
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
@@ -839,6 +854,11 @@ impl QuillApp {
         });
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "selection_mode_delete_tests.rs"]
+mod delete_tests;
 
 mod save_destination;
 use save_destination::unique_destination;

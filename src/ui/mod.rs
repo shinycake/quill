@@ -285,6 +285,7 @@ mod composer_suggest;
 mod composer_system_replace;
 mod composer_ui;
 mod composer_unicode;
+mod confirm_boxes;
 mod connect_ui;
 mod contacts;
 mod contacts_import;

@@ -152,7 +152,6 @@
 "qll_chat_block_user" = "Block user";
 "qll_chat_bold" = "Bold";
 "qll_chat_call" = "Call";
-"qll_chat_cancel_delete" = "Cancel delete";
 "qll_chat_cancel_editing" = "Cancel editing";
 "qll_chat_cancel_reply" = "Cancel reply";
 "qll_chat_cancel_upload" = "Cancel Upload";
@@ -240,10 +239,8 @@
 "qll_chat_ctrl_shift_v" = "Ctrl+Shift+V";
 "qll_chat_date" = "Date";
 "qll_chat_delete" = "Delete {count}";
-"qll_chat_delete_cancelled" = "Delete cancelled";
 "qll_chat_delete_chat" = "Delete chat";
 "qll_chat_delete_for_everyone" = "Delete for everyone";
-"qll_chat_delete_message" = "Delete message?";
 "qll_chat_delete_reaction" = "Delete reaction";
 "qll_chat_delete_this_chat" = "Delete this chat";
 "qll_chat_deleting" = "Deleting…";
@@ -322,8 +319,6 @@
 "qll_chat_instant_view" = "Instant View";
 "qll_chat_is_an_admin_of_a" = "{name} is an admin of {title}, a {what} you requested to join.";
 "qll_chat_is_now_blocked" = "{user_id} is now blocked";
-"qll_chat_it_will_be_deleted_for" = "It will be deleted for everyone in this chat.";
-"qll_chat_it_will_be_deleted_for_2" = "It will be deleted for you only.";
 "qll_chat_italic" = "Italic";
 "qll_chat_join" = "Join";
 "qll_chat_join_requests_2" = "Join requests";
