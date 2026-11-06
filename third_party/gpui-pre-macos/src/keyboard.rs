@@ -54,6 +54,15 @@ impl PlatformKeyboardMapper for MacKeyboardMapper {
 }
 
 impl MacKeyboardLayout {
+    /// Quill: the layout before the first frame, when the input source is
+    /// not read yet (see `platform::read_keyboard_layout_after_first_frame`).
+    pub(crate) fn unknown() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+        }
+    }
+
     pub(crate) fn new() -> Self {
         unsafe {
             let current_keyboard = TISCopyCurrentKeyboardLayoutInputSource();

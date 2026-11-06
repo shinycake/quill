@@ -202,6 +202,7 @@ fn ui_main(args: &[String]) {
         return;
     }
 
+    quill::startup_trace::mark("instance_checked");
     // Crash handlers go in before GPUI, AppKit and TDLib start (crash_log).
     quill::crash_log::begin_app_run();
 
@@ -218,6 +219,7 @@ fn ui_main(args: &[String]) {
     // Files named on the command line ("Send to", `quill photo.png`) wait
     // for a chat to be picked (see `ui::start_files_ui`).
     quill::start_files::push_launch_files(args);
+    quill::startup_trace::mark("sweeps_done");
 
     let credentials = quill::credentials::load();
     ui::early_connect::begin(credentials.clone());
@@ -226,6 +228,7 @@ fn ui_main(args: &[String]) {
     ui::window_frame::set_native(appearance.native_window_frame);
     let start_in_tray =
         args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;
+    quill::startup_trace::mark("prefs_loaded");
     let application = quill_application(appearance.interface_scale_pct).with_assets(QuillAssets);
     // macOS delivers `tg:` / `t.me` URLs (Info.plist CFBundleURLTypes) here,
     // both on cold launch and to the running app; Linux/Windows pass them
@@ -258,9 +261,12 @@ fn ui_main(args: &[String]) {
         cx.on_system_wake(|_| quill::net_watch::system_woke())
             .detach();
         // kit Phase 7: File / Edit / View / Window / Help — native on
-        // macOS, kit `AppMenuBar` data on Linux/Windows.
+        // macOS, kit `AppMenuBar` data on Linux/Windows. The native menu
+        // waits for the main window (`install_app_menus`).
+        #[cfg(not(target_os = "macos"))]
         ui::setup_app_menus(cx);
         ui::flush_settings_on_quit(cx);
+        quill::startup_trace::mark("kit_ready");
         let launch = MainWindowLaunch {
             credentials,
             pending_deep_link,
@@ -325,7 +331,9 @@ fn open_main_window(cx: &mut gpui_kit::AsyncApp, launch: MainWindowLaunch) -> gp
             app
         });
         quill::startup_trace::mark("app_new");
-        install_main_window_tray(window, cx, &view);
+        #[cfg(target_os = "macos")]
+        install_app_menus(window, cx, launch.start_in_tray);
+        install_main_window_tray(window, cx, &view, !launch.start_in_tray);
         install_link_inbox(window, cx, &view);
         if window.focused(cx).is_none() {
             window.focus(&view.focus_handle(cx), cx);
@@ -392,14 +400,38 @@ fn single_instance(args: &[String]) -> quill::single_instance::Launch {
     Launch::after(&acquired)
 }
 
+/// The macOS menu bar, once the main window has drawn its first frame. The
+/// first menu with an Edit menu makes AppKit add its text input items, which
+/// loads the Writing Tools framework: ~100 ms on a cold launch. A window that
+/// starts in the tray draws nothing, so its menus go in now.
+#[cfg(all(feature = "ui", target_os = "macos"))]
+fn install_app_menus(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, start_in_tray: bool) {
+    if start_in_tray {
+        ui::setup_app_menus(cx);
+    } else {
+        window.on_next_frame(|_, cx| ui::setup_app_menus(cx));
+    }
+}
+
 #[cfg(feature = "ui")]
 fn install_main_window_tray(
     window: &mut gpui_kit::Window,
     cx: &mut gpui_kit::App,
     view: &gpui_kit::Entity<ui::QuillApp>,
+    after_first_frame: bool,
 ) {
     ui::link_inbox::attach_main_window(window, cx, view);
     quill::notify_focus::warm();
+    // Creating the status item takes ~30 ms on a cold launch: on a shown
+    // window it waits for the first frame. A window that starts in the tray
+    // draws nothing, and the tray is its only way back.
+    let first_frame = after_first_frame.then(|| {
+        let (drawn, first_frame) = futures_channel::oneshot::channel::<()>();
+        window.on_next_frame(move |_, _| {
+            let _ = drawn.send(());
+        });
+        first_frame
+    });
     // parity:platform-tray-icon — system tray icon with
     // unread count, synced when `wake::CHROME` is poked. The
     // tray module no-ops when the count is unchanged or
@@ -408,6 +440,9 @@ fn install_main_window_tray(
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
+            if let Some(first_frame) = first_frame {
+                let _ = first_frame.await;
+            }
             // Fallback for what no event announces (a tray host that
             // appears late, the menu bar theme); everything else pokes
             // `wake::CHROME` (applied updates, tray menu clicks, settings).
@@ -480,6 +515,7 @@ fn quill_application(interface_scale_pct: u16) -> gpui_kit::Application {
     use ui::interface_zoom::{ZoomPlatform, set_initial_zoom, zoom_for_percent};
     set_initial_zoom(zoom_for_percent(interface_scale_pct));
     let platform = gpui_kit::platform::current_platform(false);
+    quill::startup_trace::mark("platform_ready");
     // The kit's theme init lists the installed fonts; started now, the list
     // is ready by then instead of being built on the main thread.
     gpui_kit::component::theme::prefetch_installed_font_names(
@@ -612,7 +648,7 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 ui::QuillApp::new_with_demo(window, cx, None, Some(kind))
                             });
                             if kind.installs_tray() {
-                                install_main_window_tray(window, cx, &view);
+                                install_main_window_tray(window, cx, &view, false);
                             }
                             if window.focused(cx).is_none() {
                                 window.focus(&view.focus_handle(cx), cx);

@@ -36,7 +36,6 @@ import subprocess
 import sys
 import time
 
-BUNDLE_ID = "org.shinycake.quill"
 WORK = pathlib.Path.home() / "Library/Caches/quill-launch-bench"
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -67,22 +66,25 @@ def make_bundle(label, binary, template):
     return app
 
 
-def running():
-    return subprocess.run(["pgrep", "-x", "quill"], capture_output=True).returncode == 0
+def running(pattern=None):
+    args = ["pgrep", "-f", pattern] if pattern else ["pgrep", "-x", "quill"]
+    return subprocess.run(args, capture_output=True).returncode == 0
 
 
-def quit_quill():
-    subprocess.run(["osascript", "-e", f'tell application id "{BUNDLE_ID}" to quit'],
-                   capture_output=True)
+def quit_quill(app):
+    # Only the bundle this script launched: another Quill (the user's, or
+    # one started outside this script) is left alone.
+    pattern = str(app / "Contents/MacOS/quill")
+    subprocess.run(["pkill", "-TERM", "-f", pattern])
     for _ in range(80):
-        if not running():
+        if not running(pattern):
             return
         time.sleep(0.25)
-    subprocess.run(["pkill", "-TERM", "-x", "quill"])
+    subprocess.run(["pkill", "-KILL", "-f", pattern])
     time.sleep(2)
 
 
-def launch(app, trace, creds, cold=False, timeout=40.0):
+def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="chat_list", extra_env=()):
     trace.unlink(missing_ok=True)
     if cold:
         subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
@@ -90,11 +92,15 @@ def launch(app, trace, creds, cold=False, timeout=40.0):
     args = ["/usr/bin/open", "-n", "-a", app, "--env", f"QUILL_STARTUP_TRACE={trace}"]
     for key, value in creds.items():
         args += ["--env", f"{key}={value}"]
+    if data_root:
+        args += ["--env", f"QUILL_DATA_ROOT={data_root}"]
+    for pair in extra_env:
+        args += ["--env", pair]
     env = {"HOME": os.environ["HOME"], "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
     start = time.time()
     subprocess.run(args, env=env, check=True)
     marks = {}
-    while time.time() < start + timeout and "chat_list" not in marks:
+    while time.time() < start + timeout and until not in marks:
         if trace.exists():
             for line in trace.read_text().splitlines():
                 name, _, micros = line.partition(" ")
@@ -103,7 +109,7 @@ def launch(app, trace, creds, cold=False, timeout=40.0):
         time.sleep(0.02)
     # Let the launch's tail (first syncs, avatars) finish before quitting.
     time.sleep(3)
-    quit_quill()
+    quit_quill(app)
     return marks
 
 
@@ -112,31 +118,38 @@ def main():
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--cold", action="store_true", help="empty the file cache before every launch")
     parser.add_argument("--template", default=str(REPO / "dist/Quill.app"))
+    parser.add_argument("--data-root", help="QUILL_DATA_ROOT for the launches (default: the real account)")
+    parser.add_argument("--until", default="chat_list",
+                        help="the milestone that ends a launch (first_render for a signed-out data root)")
     parser.add_argument("sides", nargs="+", metavar="LABEL=BINARY")
     opts = parser.parse_args()
-    if running():
-        sys.exit("a Quill is running; quit it first")
+    if running() and not opts.data_root:
+        sys.exit("a Quill is running; quit it first (or pass --data-root)")
     creds = credentials()
     sides = []
+    envs = {}
     for side in opts.sides:
         label, _, binary = side.partition("=")
+        binary, *extra = binary.split("@")
+        envs[label] = extra
         sides.append((label, make_bundle(label, binary, opts.template)))
     results = {label: [] for label, _ in sides}
     # One unrecorded launch each: a newly signed binary is assessed by the
     # system on its first launch (~0.7 s), which is not Quill's launch time.
     for label, app in sides:
-        launch(app, WORK / f"trace-{label}.txt", creds)
+        launch(app, WORK / f"trace-{label}.txt", creds, data_root=opts.data_root, until=opts.until, extra_env=envs[label])
     for run in range(opts.runs):
         for label, app in sides:
-            marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold)
+            marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold,
+                           data_root=opts.data_root, until=opts.until, extra_env=envs[label])
             results[label].append(marks)
-            shown = f"{marks['chat_list']:.0f} ms" if "chat_list" in marks else "NOT REACHED"
-            print(f"{label} run {run}: chat_list {shown}, load {os.getloadavg()[0]:.1f}",
+            shown = f"{marks[opts.until]:.0f} ms" if opts.until in marks else "NOT REACHED"
+            print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",
                   flush=True)
             time.sleep(2)
     for label, runs in results.items():
-        reached = sum("chat_list" in m for m in runs)
-        print(f"\n{label}: {reached}/{len(runs)} runs reached chat_list")
+        reached = sum(opts.until in m for m in runs)
+        print(f"\n{label}: {reached}/{len(runs)} runs reached {opts.until}")
         names = {name for m in runs for name in m}
         order = sorted(names, key=lambda n: statistics.median(m[n] for m in runs if n in m))
         for name in order:

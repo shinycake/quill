@@ -751,8 +751,12 @@ impl QuillApp {
                     && self
                         .session()
                         .is_some_and(|session| !session.main_order.is_empty())
+                    && quill::startup_trace::mark("chat_list")
                 {
-                    quill::startup_trace::mark("chat_list");
+                    // The next frame starts once this one is on screen.
+                    window.on_next_frame(|_, _| {
+                        quill::startup_trace::mark("chat_list_shown");
+                    });
                 }
                 let auth_state = self.current_auth();
                 let auth = quill::auth::view_for(&auth_state);
