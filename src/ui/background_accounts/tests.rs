@@ -368,3 +368,39 @@ fn a_pick_on_one_accounts_call_leaves_the_same_id_on_another(cx: &mut TestAppCon
         assert_eq!(app.calls.notify_clicks.lock().unwrap().len(), 1);
     });
 }
+
+/// The on-screen pass of the call picks answers only its own call. A pick
+/// for the call ringing on a background account stays queued for that
+/// account's pass, and a stale one is dropped.
+#[gpui_kit::test]
+fn the_on_screen_call_pass_keeps_a_background_accounts_pick(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let on_screen = app.read_with(&vcx, |app, _| app.session().unwrap().account.clone());
+    app.update_in(&mut vcx, |app, window, cx| {
+        let ringing = ring();
+        let call_id = ringing.call_id;
+        app.background.ringing = Some(ringing);
+        let background_pick = CallPick {
+            account: other_account(),
+            call_id,
+            action: CallNotificationAction::Decline,
+        };
+        app.calls.notify_clicks.lock().unwrap().extend([
+            background_pick.clone(),
+            CallPick {
+                account: on_screen.clone(),
+                call_id,
+                action: CallNotificationAction::Accept,
+            },
+        ]);
+        app.answer_call_picks(window, cx);
+        assert_eq!(
+            app.calls.notify_clicks.lock().unwrap().clone(),
+            vec![background_pick],
+            "the background pick waits; the stale on-screen one is gone"
+        );
+        app.flush_background_call_picks(window, cx);
+        assert!(app.background_ring_account().is_none(), "declined");
+        assert!(app.calls.notify_clicks.lock().unwrap().is_empty());
+    });
+}

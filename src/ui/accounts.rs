@@ -119,6 +119,9 @@ impl QuillApp {
         if self.background.wiping {
             return;
         }
+        // Boxes, viewers and the mini app act for the account on screen:
+        // they end while `self.live` is still that account's client.
+        self.end_account_surfaces(window, cx);
         let Some(root) = safe_app_root() else {
             self.fail_account_switch(tr(keys::Q_OPS_COULD_NOT_SWITCH_ACCOUNT_NO), window, cx);
             return;
