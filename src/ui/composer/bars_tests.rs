@@ -85,11 +85,11 @@ fn begin_edit(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
 }
 
 fn editing(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
-    app.read_with(cx, |app, _| app.composer_ui.pending_edit.is_some())
+    app.read_with(cx, |app, _| app.composer_ui.is_editing())
 }
 
 fn confirm_open(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
-    app.read_with(cx, |app, _| app.composer_ui.cancel_edit_confirm)
+    app.read_with(cx, |app, _| app.composer_ui.cancel_edit_confirm_open())
 }
 
 fn set_field(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
@@ -200,6 +200,29 @@ fn answering_yes_drops_the_edit(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn leaving_the_chat_with_the_box_open_leaves_no_box_and_no_edit(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    set_field(&app, vcx, "something else entirely");
+    escape(&app, vcx);
+    assert!(confirm_open(&app, vcx));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.leave_open_chat(window, cx));
+    });
+    frames(vcx);
+    assert!(!editing(&app, vcx));
+    assert!(!confirm_open(&app, vcx));
+}
+
+#[test]
+fn the_cancel_box_cannot_open_without_an_edit() {
+    let mut ui = crate::ui::composer_state::ComposerUi::new();
+    ui.set_cancel_edit_confirm(true);
+    assert!(!ui.cancel_edit_confirm_open());
+}
+
+#[gpui_kit::test]
 fn a_second_escape_does_not_reopen_or_cancel(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -299,9 +322,7 @@ fn clicking_the_edit_bar_jumps_to_the_edited_message(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     begin_edit(&app, vcx);
     let edited = app.read_with(vcx, |app, _| {
-        app.composer_ui
-            .pending_edit
-            .as_ref()
+        app.composer_ui.pending_edit()
             .map(|edit| edit.message_id)
     });
     assert_eq!(edited, Some(MessageId(11)));

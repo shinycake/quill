@@ -226,7 +226,7 @@ impl QuillApp {
         self.session()?
             .settings
             .sessions
-            .as_ref()?
+            .data()?
             .iter()
             .find(|s| s.id == id)
             .cloned()

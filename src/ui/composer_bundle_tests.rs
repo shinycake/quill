@@ -387,7 +387,7 @@ fn up_opens_the_caption_of_a_media_message_still_being_sent(cx: &mut TestAppCont
     vcx.simulate_keystrokes("up");
     let (edit, text) = app.read_with(vcx, |app, cx| {
         (
-            app.composer_ui.pending_edit.clone(),
+            app.composer_ui.pending_edit().cloned(),
             app.composer.read(cx).value().to_string(),
         )
     });
@@ -410,5 +410,5 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes("up");
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.composer_ui.is_editing()));
 }

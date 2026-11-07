@@ -606,9 +606,7 @@ impl QuillApp {
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
         self.composer_ui.set_reply(None);
-        self.composer_ui.pending_edit = None;
-        self.composer_ui.saved_edit_draft.clear();
-        self.composer_ui.saved_edit_reply = None;
+        self.composer_ui.leave_edit();
         self.message_ui.pending_delete = None;
         self.message_ui.pending_stop_poll = None;
         self.notify.ttl_picker_open = false;

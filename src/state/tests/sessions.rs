@@ -166,8 +166,7 @@ fn sessions_answer_replaces_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
-    session.settings.sessions_loading = true;
-    session.settings.sessions_error = Some("stale".into());
+    session.settings.sessions.fail("stale");
     apply_json(
         &mut session,
         &seq,
@@ -177,12 +176,12 @@ fn sessions_answer_replaces_cache_for_matching_request() {
             extra.0,
         ),
     );
-    let sessions = session.settings.sessions.as_ref().expect("cached");
+    let sessions = session.settings.sessions.data().expect("cached");
     assert_eq!(sessions.len(), 2);
     assert!(sessions.iter().any(|s| s.is_current && s.id == 11));
     assert!(sessions.iter().any(|s| s.is_password_pending && s.id == 33));
-    assert!(!session.settings.sessions_loading);
-    assert!(session.settings.sessions_error.is_none());
+    assert!(!session.settings.sessions.is_loading());
+    assert!(session.settings.sessions.error().is_none());
     assert!(!session.settings.sessions_stale);
 }
 
@@ -190,21 +189,21 @@ fn sessions_answer_replaces_cache_for_matching_request() {
 fn sessions_answer_ignored_without_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions = Some(Vec::new());
+    session.settings.sessions = crate::state::fetch::Fetch::Ready(Vec::new());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"sessions","sessions":[{"@type":"session","id":11,"is_current":true,"device_model":"X"}]}"#,
     );
-    assert_eq!(session.settings.sessions.as_ref().unwrap().len(), 0);
+    assert_eq!(session.settings.sessions.data().unwrap().len(), 0);
 }
 
 #[test]
 fn terminate_session_ok_keeps_cache_and_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions = Some(vec![ParsedSession {
+    session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![ParsedSession {
         id: 22,
         is_current: false,
         is_password_pending: false,
@@ -234,10 +233,10 @@ fn terminate_session_ok_keeps_cache_and_marks_stale() {
     );
     // The old cache stays visible until the authoritative refetch
     // replaces it — no optimistic deletion.
-    assert_eq!(session.settings.sessions.as_ref().unwrap().len(), 1);
+    assert_eq!(session.settings.sessions.data().unwrap().len(), 1);
     assert!(session.settings.sessions_stale);
     assert!(!session.settings.sessions_mutating);
-    assert!(session.settings.sessions_error.is_none());
+    assert!(session.settings.sessions.error().is_none());
 }
 
 #[test]
@@ -260,7 +259,7 @@ fn terminate_session_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_mutating);
     assert_eq!(
-        session.settings.sessions_error.as_deref(),
+        session.settings.sessions.error(),
         Some("Could not terminate the session: Telegram refused the request")
     );
 }
@@ -269,7 +268,7 @@ fn terminate_session_error_surfaces_honestly() {
 fn sessions_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions_loading = true;
+    session.settings.sessions.begin();
     // A failed stale-refetch (e.g. after a terminate-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
@@ -284,12 +283,12 @@ fn sessions_fetch_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(!session.settings.sessions_loading);
+    assert!(!session.settings.sessions.is_loading());
     // The failed stale-refetch clears staleness: no auto-retry on
     // the next ingest; the user retries via the Refresh button.
     assert!(!session.settings.sessions_stale);
     assert_eq!(
-        session.settings.sessions_error.as_deref(),
+        session.settings.sessions.error(),
         Some("Could not load the sessions list: try again in 3 seconds")
     );
 }
@@ -570,7 +569,7 @@ fn websites_fetch_error_clears_loading() {
 fn toggle_session_calls_ok_marks_sessions_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions = Some(vec![ParsedSession {
+    session.settings.sessions = crate::state::fetch::Fetch::Ready(vec![ParsedSession {
         id: 22,
         is_current: false,
         is_password_pending: false,
@@ -600,11 +599,11 @@ fn toggle_session_calls_ok_marks_sessions_stale() {
     );
     // No optimistic flip: the cached flag is untouched until the
     // authoritative refetch replaces the list.
-    let sessions = session.settings.sessions.as_ref().unwrap();
+    let sessions = session.settings.sessions.data().unwrap();
     assert!(sessions[0].can_accept_calls);
     assert!(session.settings.sessions_stale);
     assert!(!session.settings.sessions_mutating);
-    assert!(session.settings.sessions_error.is_none());
+    assert!(session.settings.sessions.error().is_none());
 }
 
 #[test]
@@ -627,7 +626,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
     );
     assert!(!session.settings.sessions_mutating);
     assert_eq!(
-        session.settings.sessions_error.as_deref(),
+        session.settings.sessions.error(),
         Some("Could not change the session setting: Telegram refused the request")
     );
 }
@@ -668,4 +667,24 @@ fn my_is_premium_follows_own_user_record() {
         },
     );
     assert!(session.my_is_premium());
+}
+
+#[test]
+fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.settings.sessions = crate::state::fetch::Fetch::Ready(Vec::new());
+    let extra = session.request(RequestPurpose::TerminateAllOtherSessions, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"FLOOD_WAIT_3"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.settings.sessions.error().is_some());
+    assert!(session.settings.sessions.data().is_some());
+    assert!(!session.settings.sessions.is_loading());
 }

@@ -27,6 +27,7 @@ pub(in crate::ui) use agent_page::AgentPageUi;
 pub(in crate::ui) use arrival::Arrival;
 pub(in crate::ui) use search::SettingsSearch;
 
+use quill::state::fetch::Fetch;
 use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
@@ -400,9 +401,8 @@ impl QuillApp {
             }
             ids.push(id);
         }
-        session.settings.blocked_senders = Some(ids);
+        session.settings.blocked_senders = Fetch::Loading { stale: Some(ids) };
         session.settings.blocked_total = 120;
-        session.settings.blocked_loading = true;
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),
             std::sync::atomic::Ordering::SeqCst,

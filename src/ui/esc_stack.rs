@@ -305,7 +305,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-edit",
-        |app| app.composer_ui.pending_edit.is_some(),
+        |app| app.composer_ui.is_editing(),
         |app, window, cx| app.request_cancel_edit(window, cx)
     ),
     layer!(

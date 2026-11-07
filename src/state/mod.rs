@@ -69,6 +69,7 @@ mod conference;
 mod conference_add_people;
 mod conference_invite;
 mod domains;
+pub mod fetch;
 mod folder_order_cache;
 mod history_calendar;
 mod history_prune;

@@ -497,9 +497,9 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.settings.blocked_senders, Some(vec![61, 62]));
+        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62]));
         assert_eq!(session.settings.blocked_total, 3);
-        assert!(!session.settings.blocked_loading);
+        assert!(!session.settings.blocked_senders.is_loading());
 
         let extra = session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders { offset: 2 }),
@@ -514,7 +514,7 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.settings.blocked_senders, Some(vec![61, 62, 63]));
+        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62, 63]));
     }
 }
 

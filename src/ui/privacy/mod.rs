@@ -19,6 +19,7 @@ use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::{PrivacyKeyState, PrivacyRuleDetail};
+use quill::state::fetch::Fetch;
 use quill::state::{ContactRow, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::requests::PrivacyWho;
@@ -287,10 +288,10 @@ impl QuillApp {
         let session = self.session();
         let total = session.map(|s| s.settings.blocked_total).unwrap_or(0);
         let list: Vec<i64> = session
-            .and_then(|s| s.settings.blocked_senders.clone())
+            .and_then(|s| s.settings.blocked_senders.data().cloned())
             .unwrap_or_default();
-        let loading = session.is_some_and(|s| s.settings.blocked_loading);
-        let error = session.is_some_and(|s| s.settings.blocked_error);
+        let loading = session.is_some_and(|s| s.settings.blocked_senders.is_loading());
+        let error = session.is_some_and(|s| s.settings.blocked_senders.error().is_some());
 
         let mut section = div().flex().flex_col().gap_1();
         section = section.child(
@@ -393,14 +394,14 @@ impl QuillApp {
         let Some(settings) = self.session().map(|s| &s.settings) else {
             return;
         };
-        let loaded = settings.blocked_senders.as_ref().map_or(0, Vec::len);
-        let has_more =
-            settings.blocked_senders.is_some() && (settings.blocked_total.max(0) as usize) > loaded;
-        if (settings.blocked_error && !scrolled)
+        let loaded = settings.blocked_senders.data().map_or(0, Vec::len);
+        let has_more = settings.blocked_senders.data().is_some()
+            && (settings.blocked_total.max(0) as usize) > loaded;
+        if (settings.blocked_senders.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.privacy.blocked_scroll),
                 has_more,
-                settings.blocked_loading,
+                settings.blocked_senders.is_loading(),
             )
             || !self.privacy.blocked_asked.allow(loaded, scrolled)
         {
@@ -533,10 +534,12 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            let list = demo.settings.blocked_senders.get_or_insert_with(Vec::new);
-            if !list.contains(&user_id) {
+            demo.settings.blocked_senders.insert_data_if_missing(Vec::new);
+            if let Some(list) = demo.settings.blocked_senders.data_mut()
+                && !list.contains(&user_id)
+            {
                 list.push(user_id);
-                demo.settings.blocked_total += 1;
+                demo.settings.blocked_total = demo.settings.blocked_total.saturating_add(1);
             }
         }
         cx.notify();
@@ -555,7 +558,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut()
-            && let Some(list) = demo.settings.blocked_senders.as_mut()
+            && let Some(list) = demo.settings.blocked_senders.data_mut()
         {
             list.retain(|id| *id != user_id);
             demo.settings.blocked_total = demo.settings.blocked_total.saturating_sub(1);
@@ -832,7 +835,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
         });
     session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
     session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
-    session.settings.blocked_senders = Some(vec![63]);
+    session.settings.blocked_senders = Fetch::Ready(vec![63]);
     session.settings.blocked_total = 1;
     session.users_state.contacts = Some(vec![61, 62, 63]);
 }

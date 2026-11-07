@@ -116,7 +116,7 @@ impl Session {
         ) {
             self.settings.sessions_stale = true;
             self.settings.sessions_mutating = false;
-            self.settings.sessions_error = None;
+            self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
         // `toggleSessionCanAcceptCalls` succeeded — same stale
@@ -131,7 +131,7 @@ impl Session {
         ) {
             self.settings.sessions_stale = true;
             self.settings.sessions_mutating = false;
-            self.settings.sessions_error = None;
+            self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)

@@ -46,7 +46,7 @@ impl QuillApp {
     }
 
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.composer_ui.is_editing() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -73,11 +73,16 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &App,
     ) -> (DraftContent, Option<SendReply>) {
-        if self.composer_ui.pending_edit.is_some() {
-            let reply = self.draft_reply(self.composer_ui.saved_edit_reply.as_ref(), chat_id);
+        if self.composer_ui.is_editing() {
+            let reply = self.draft_reply(self.composer_ui.stashed_reply(), chat_id);
             let content = match self.stored_rich_draft() {
                 Some(rich) => DraftContent::Rich(rich.clone()),
-                None => DraftContent::Text(self.composer_ui.saved_edit_draft.clone()),
+                None => DraftContent::Text(
+                    self.composer_ui
+                        .stashed_draft()
+                        .map(str::to_string)
+                        .unwrap_or_default(),
+                ),
             };
             return (content, reply);
         }
@@ -128,14 +133,10 @@ impl QuillApp {
             self.composer_ui.set_reply(None);
         }
         if self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .composer_ui.pending_edit()
             .is_some_and(|edit| edit.chat_id != chat_id)
         {
-            self.composer_ui.pending_edit = None;
-            self.composer_ui.saved_edit_draft.clear();
-            self.composer_ui.saved_edit_reply = None;
+            self.composer_ui.leave_edit();
         }
         if self
             .message_ui
@@ -200,7 +201,7 @@ impl QuillApp {
             return;
         };
         if std::mem::replace(&mut self.composer_ui.remote_draft_seen, revision) == revision
-            || self.composer_ui.pending_edit.is_some()
+            || self.composer_ui.is_editing()
         {
             return;
         }
@@ -338,7 +339,7 @@ impl QuillApp {
     }
 
     pub(super) fn restore_open_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.composer_ui.is_editing() {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
@@ -395,7 +396,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let editing = self.composer_ui.pending_edit.is_some();
+        let editing = self.composer_ui.is_editing();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)

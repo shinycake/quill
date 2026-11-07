@@ -160,7 +160,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.composer_ui.is_editing() {
             return false;
         }
         if cfg!(target_os = "macos")
@@ -224,7 +224,7 @@ impl QuillApp {
 
     /// Cmd/Ctrl+O: the attach picker (`chooseAttach`).
     pub(super) fn attach_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.shortcut_blocked(window, cx) || self.composer_ui.pending_edit.is_some() {
+        if self.shortcut_blocked(window, cx) || self.composer_ui.is_editing() {
             return false;
         }
         let can_attach = self.session().is_some_and(|session| {

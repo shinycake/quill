@@ -283,7 +283,7 @@ impl QuillApp {
             let trimmed = query.trim();
             if session.search.search.open
                 && session.search.search.query == trimmed
-                && !matches!(session.search.search.status, SearchStatus::Closed)
+                && !matches!(session.search.search.status(), SearchStatus::Closed)
             {
                 cx.notify();
                 return;

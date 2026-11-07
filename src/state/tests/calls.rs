@@ -128,7 +128,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
     assert_eq!(call.join_as_options.len(), 2);
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
-    assert!(session.settings.blocked_senders.is_none());
+    assert!(session.settings.blocked_senders.is_idle());
 }
 
 #[test]
@@ -186,7 +186,6 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
     // nothing selected instead of "Loading…".
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.calls.privacy_loading = true;
     session.calls.privacy_pending = 2;
     for setting in [
         CallPrivacySetting::AllowCalls,
@@ -206,11 +205,11 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
             ),
         );
         if setting == CallPrivacySetting::AllowCalls {
-            assert!(session.calls.privacy_loading);
+            assert!(session.calls.privacy_loading());
             assert_eq!(session.calls.privacy_p2p, None);
         }
     }
-    assert!(!session.calls.privacy_loading);
+    assert!(!session.calls.privacy_loading());
     assert_eq!(
         session.calls.privacy_allow_calls,
         Some(PrivacyWho::Everybody)

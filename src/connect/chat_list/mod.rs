@@ -3,7 +3,7 @@ use super::*;
 use crate::composer::DraftSaveClock;
 use crate::folders::spec_without_chat;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{HistoryOpen, InfoPanelTarget, RequestPurpose, RequestRollback, SearchStatus};
+use crate::state::{HistoryOpen, InfoPanelTarget, RequestPurpose, RequestRollback};
 use crate::telegram::envelope::{ChatFolderSpec, ChatKind};
 use crate::telegram::requests::{
     ArchiveChatListSettings, add_chat_to_list, add_chat_to_list_value, clear_recently_found_chats,
@@ -356,8 +356,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.search.search.chat_ids.clear();
-        self.session.search.search.status = SearchStatus::Idle;
+        self.session.search.search.clear_recents();
         Ok(Some(extra))
     }
 

@@ -15,7 +15,7 @@ impl QuillApp {
         self.chat_list.keys.begin_search_rows();
         let session = self.session();
         let status = session
-            .map(|s| s.search.search.status)
+            .map(|s| s.search.search.status())
             .unwrap_or(SearchStatus::Closed);
         let recents = session.is_some_and(|s| s.search.search.recents);
         let query = session

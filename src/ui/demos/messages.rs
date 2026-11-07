@@ -111,8 +111,15 @@ impl QuillApp {
             input.set_value("Reply from the session reducer.", window, cx);
             input.focus(window, cx);
         });
-        self.composer_ui.pending_edit = edit;
-        self.composer_ui.saved_edit_draft = "unrelated draft stays".into();
+        match edit {
+            Some(edit) => {
+                self.composer_ui
+                    .enter_edit(edit, "unrelated draft stays".into(), None);
+            }
+            None => {
+                self.composer_ui.leave_edit();
+            }
+        }
         self.message_ui.pending_delete =
             DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
     }

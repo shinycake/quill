@@ -146,7 +146,7 @@ impl QuillApp {
         let session = self.session()?;
         if self.suggest_role(chat_id) != Some(DirectMessagesRole::Member)
             || session.suggest_bar(chat_id).is_some()
-            || self.composer_ui.pending_edit.is_some()
+            || self.composer_ui.is_editing()
         {
             return None;
         }

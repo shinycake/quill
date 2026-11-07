@@ -20,7 +20,7 @@ impl QuillApp {
     /// chat becomes a [`UiSend`]; everything else the composer could send
     /// (an edit, a forward, attachments, rich blocks) is refused.
     pub(super) fn agent_route_send(&mut self, text: String, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() {
+        if self.composer_ui.is_editing() {
             guard::refuse_if_injecting("edit a message");
             return;
         }

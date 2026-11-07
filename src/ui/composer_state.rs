@@ -45,6 +45,19 @@ impl DraftClear {
     }
 }
 
+/// The composer while a message is edited: the edit, the normal draft and
+/// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
+/// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
+/// the edit.
+#[derive(Debug)]
+pub(super) struct EditMode {
+    pub(super) edit: ComposerEdit,
+    pub(super) stashed_draft: String,
+    /// Reply that belonged to the stashed draft, restored with it on leaving.
+    pub(super) stashed_reply: Option<ComposerReplyTo>,
+    pub(super) confirm_cancel: bool,
+}
+
 pub(crate) struct ComposerUi {
     /// Phase 3.3: `/` command menu state. Open while the composer text
     /// ends with a `/`-led token and the open bot chat has commands;
@@ -128,17 +141,14 @@ pub(crate) struct ComposerUi {
     /// a change to that draft replaces the field: text a link put in the
     /// composer survives drafts arriving for other chats.
     pub(super) shown_draft: Option<(ChatId, DraftTopic, Option<ChatDraft>)>,
-    /// Own-message edit (tdesktop `FieldHeader::editMessage`).
-    pub(super) pending_edit: Option<ComposerEdit>,
-    /// The "Cancel editing?" box is open (`DialogKind::CancelEditConfirm`).
-    pub(super) cancel_edit_confirm: bool,
+    /// Editing an own message (tdesktop `FieldHeader::editMessage`), with
+    /// the normal draft stashed beside it. `None` is plain composing. Read
+    /// and change it only through the methods below so every way out of
+    /// editing is one assignment.
+    edit_mode: Option<EditMode>,
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
-    /// Normal composer draft stashed while editing (`DraftType::Normal`).
-    pub(super) saved_edit_draft: String,
-    /// Reply that belonged to that normal draft. Restored with the text on cancel.
-    pub(super) saved_edit_reply: Option<ComposerReplyTo>,
     /// The composer's link dialog (Cmd/Ctrl+K on a selection).
     pub(super) link_dialog: Option<super::composer_shortcuts::ComposerLinkDialog>,
     /// The composer's date box (Formatting > Date).
@@ -197,6 +207,70 @@ impl ComposerUi {
         self.pending_reply.take()
     }
 
+    pub(super) fn is_editing(&self) -> bool {
+        self.edit_mode.is_some()
+    }
+
+    pub(super) fn pending_edit(&self) -> Option<&ComposerEdit> {
+        self.edit_mode.as_ref().map(|mode| &mode.edit)
+    }
+
+    pub(super) fn pending_edit_mut(&mut self) -> Option<&mut ComposerEdit> {
+        self.edit_mode.as_mut().map(|mode| &mut mode.edit)
+    }
+
+    /// Enter edit mode with the normal draft and reply set aside.
+    pub(super) fn enter_edit(
+        &mut self,
+        edit: ComposerEdit,
+        stashed_draft: String,
+        stashed_reply: Option<ComposerReplyTo>,
+    ) {
+        self.edit_mode = Some(EditMode {
+            edit,
+            stashed_draft,
+            stashed_reply,
+            confirm_cancel: false,
+        });
+    }
+
+    /// Leave edit mode (and with it the cancel box), handing back what was
+    /// stashed. `None` when nothing was being edited.
+    pub(super) fn leave_edit(&mut self) -> Option<EditMode> {
+        self.edit_mode.take()
+    }
+
+    pub(super) fn stashed_draft(&self) -> Option<&str> {
+        self.edit_mode
+            .as_ref()
+            .map(|mode| mode.stashed_draft.as_str())
+    }
+
+    pub(super) fn stashed_reply(&self) -> Option<&ComposerReplyTo> {
+        self.edit_mode
+            .as_ref()
+            .and_then(|mode| mode.stashed_reply.as_ref())
+    }
+
+    /// A sticker, GIF or voice send used the stashed reply.
+    pub(super) fn drop_stashed_reply(&mut self) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.stashed_reply = None;
+        }
+    }
+
+    /// Whether the "Cancel editing?" box is open. Only an edit has one.
+    pub(super) fn cancel_edit_confirm_open(&self) -> bool {
+        self.edit_mode.as_ref().is_some_and(|mode| mode.confirm_cancel)
+    }
+
+    /// Opens or closes the box; opening is ignored without an edit.
+    pub(super) fn set_cancel_edit_confirm(&mut self, open: bool) {
+        if let Some(mode) = self.edit_mode.as_mut() {
+            mode.confirm_cancel = open;
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             command_menu_open: false,
@@ -228,11 +302,8 @@ impl ComposerUi {
             draft_restore_pending: false,
             remote_draft_seen: 0,
             shown_draft: None,
-            pending_edit: None,
-            cancel_edit_confirm: false,
+            edit_mode: None,
             placeholder_shown: None,
-            saved_edit_draft: String::new(),
-            saved_edit_reply: None,
             link_dialog: None,
             date_dialog: None,
             code_language: None,
