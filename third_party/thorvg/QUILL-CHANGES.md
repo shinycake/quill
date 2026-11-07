@@ -43,3 +43,10 @@ range. Both only change how cells are found.
 
 `src/renderer/tvgPaint.cpp`, `src/common/tvgMath.h`, `src/common/tvgMath.cpp`: numeric
 limits in clipping, color conversion and curve length.
+
+`src/renderer/tvgInitializer.cpp`, `src/common/tvgCommon.h`: ThorVG's replacements of
+the global `operator new`, `new[]`, `delete` and `delete[]` are gone. They called
+`std::malloc` and `std::free`, as libc++'s do, and on macOS an executable that defines
+them makes dyld rebind every system library's uses before `main`, about 300 ms of a
+cold launch (`docs/decisions/launch-cold-floor.md`). Upstream PR thorvg/thorvg#4872
+scopes them to ThorVG's classes; once that is in a release, this change can go.

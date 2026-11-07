@@ -72,8 +72,20 @@ def make_bundle(label, binary, template):
 
 
 def running(pattern=None):
-    args = ["pgrep", "-f", pattern] if pattern else ["pgrep", "-x", "quill"]
-    return subprocess.run(args, capture_output=True).returncode == 0
+    """Whether a process matches `pattern`, or with none, whether a Quill app runs.
+
+    `quill mcp` and `quill agent` are command-line clients of the app (src/dev_cli.rs),
+    not a second app a launch would hand off to, so they do not count."""
+    if pattern:
+        return subprocess.run(["pgrep", "-f", pattern], capture_output=True).returncode == 0
+    pids = subprocess.run(["pgrep", "-x", "quill"], capture_output=True, text=True).stdout.split()
+    for pid in pids:
+        exe = subprocess.run(["ps", "-o", "comm=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        args = subprocess.run(["ps", "-o", "args=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        argv = args.removeprefix(exe).split()
+        if exe and not (argv and argv[0] in ("mcp", "agent")):
+            return True
+    return False
 
 
 def quit_quill(app):

@@ -138,25 +138,7 @@ uint16_t THORVG_VERSION_NUMBER()
 }
 
 
-void* operator new(std::size_t size)
-{
-    return tvg::malloc(size);
-}
-
-
-void operator delete(void* ptr) noexcept
-{
-    tvg::free(ptr);
-}
-
-
-void* operator new[](std::size_t size)
-{
-    return tvg::malloc(size);
-}
-
-
-void operator delete[](void* ptr) noexcept
-{
-    tvg::free(ptr);
-}
+//QUILL: no process-wide operator new and delete. ThorVG's forwarded to
+//std::malloc and std::free, as libc++'s own do, and a macOS executable that
+//defines them makes dyld rebind every system library's use of them before
+//main runs, which costs a cold launch about 300 ms.

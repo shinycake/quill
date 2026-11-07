@@ -1,3 +1,17 @@
+diff --git a/src/common/tvgCommon.h b/src/common/tvgCommon.h
+index e07c87924..ba13b0e4c 100644
+--- a/src/common/tvgCommon.h
++++ b/src/common/tvgCommon.h
+@@ -63,8 +63,7 @@ using namespace tvg;
+     #define TVG_FALLTHROUGH
+ #endif
+ 
+-void* operator new(std::size_t size);
+-void operator delete(void* ptr) noexcept;
++//QUILL: tvgInitializer.cpp no longer replaces operator new and delete.
+ 
+ namespace tvg
+ {
 diff --git a/src/common/tvgMath.cpp b/src/common/tvgMath.cpp
 index 920a5f2a5..f8bb1e10b 100644
 --- a/src/common/tvgMath.cpp
@@ -1061,6 +1075,40 @@ index f7723a889..7f59bdf05 100644
          if (bbox.min.x > t.x) bbox.min.x = t.x;
          if (bbox.max.x < t.x) bbox.max.x = t.x;
          if (bbox.min.y > t.y) bbox.min.y = t.y;
+diff --git a/src/renderer/tvgInitializer.cpp b/src/renderer/tvgInitializer.cpp
+index e52971a67..8a7825e66 100644
+--- a/src/renderer/tvgInitializer.cpp
++++ b/src/renderer/tvgInitializer.cpp
+@@ -138,25 +138,7 @@ uint16_t THORVG_VERSION_NUMBER()
+ }
+ 
+ 
+-void* operator new(std::size_t size)
+-{
+-    return tvg::malloc(size);
+-}
+-
+-
+-void operator delete(void* ptr) noexcept
+-{
+-    tvg::free(ptr);
+-}
+-
+-
+-void* operator new[](std::size_t size)
+-{
+-    return tvg::malloc(size);
+-}
+-
+-
+-void operator delete[](void* ptr) noexcept
+-{
+-    tvg::free(ptr);
+-}
++//QUILL: no process-wide operator new and delete. ThorVG's forwarded to
++//std::malloc and std::free, as libc++'s own do, and a macOS executable that
++//defines them makes dyld rebind every system library's use of them before
++//main runs, which costs a cold launch about 300 ms.
 diff --git a/src/renderer/tvgPaint.cpp b/src/renderer/tvgPaint.cpp
 index 44e8f724f..a3bf5fb4f 100644
 --- a/src/renderer/tvgPaint.cpp
