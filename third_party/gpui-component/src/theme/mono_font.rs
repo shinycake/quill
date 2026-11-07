@@ -12,7 +12,7 @@
 //! `add_fonts`, and Windows lists families under their localized names, so an
 //! English name for a CJK font would look missing when it is not.
 
-use gpui::{App, BackgroundExecutor, SharedString, TextSystem};
+use gpui::{App, BackgroundExecutor, SharedString, TextSystem, font};
 use gpui_base::TypographyTokens;
 use std::sync::{Arc, OnceLock};
 
@@ -50,7 +50,14 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
     RESOLVED
         .get_or_init(|| {
             let default = default_mono_font_family();
-            let family = first_installed(&default, MONO_FONT_ALTERNATES, installed_font_names(cx));
+            // QUILL: a default that loads under its own name is kept without
+            // the installed list, which takes tens of milliseconds to build.
+            // The web starts with no font and would panic resolving one.
+            let family = if !cfg!(target_family = "wasm") && loads_as_itself(cx, &default) {
+                default.clone()
+            } else {
+                first_installed(&default, MONO_FONT_ALTERNATES, installed_font_names(cx))
+            };
             if family != default {
                 tracing::warn!(
                     "Monospace font {default:?} is not installed, using {family:?} instead."
@@ -59,6 +66,14 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
             family
         })
         .clone()
+}
+
+/// Whether GPUI loads `family` itself rather than a fallback for it.
+fn loads_as_itself(cx: &App, family: &SharedString) -> bool {
+    let text_system = cx.text_system();
+    text_system
+        .get_font_for_id(text_system.resolve_font(&font(family.clone())))
+        .is_some_and(|resolved| resolved.family == *family)
 }
 
 static INSTALLED_FONT_NAMES: OnceLock<Vec<String>> = OnceLock::new();
@@ -72,10 +87,10 @@ pub fn installed_font_names(cx: &App) -> &'static [String] {
     INSTALLED_FONT_NAMES.get_or_init(|| cx.text_system().all_font_names())
 }
 
-/// Lists the installed families on a background thread, so the theme's
-/// `init` (the first caller of [`installed_font_names`]) finds the list
-/// ready, or waits only for the rest of it, instead of enumerating fonts on
-/// the main thread while the application starts.
+/// Lists the installed families on a background thread, so the first caller
+/// of [`installed_font_names`] (the theme's `init` when a default font is
+/// missing, else a font picker) finds the list ready, or waits only for the
+/// rest of it, instead of enumerating fonts on the main thread.
 pub fn prefetch_installed_font_names(text_system: Arc<TextSystem>, executor: &BackgroundExecutor) {
     executor
         .spawn(async move {

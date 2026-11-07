@@ -84,11 +84,31 @@ pub(super) fn live_status_for(auth: &AuthorizationState) -> String {
     }
 }
 
+/// How long the first frame waits for the launch's first chat page once
+/// TDLib is ready. The page came 9 to 15 ms after `authorizationStateReady`
+/// in cold launches.
+const LAUNCH_CHATS_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+
 impl super::app::QuillApp {
     /// Apply what TDLib answered while the window was being set up, so the
     /// first frame draws it instead of the one after the poll loop's
     /// first tick.
+    ///
+    /// On macOS, when TDLib is ready but its first chat page is not in, the
+    /// page gets a short wait first: when it misses the first frame, the run
+    /// loop's first pass loads Writing Tools (280 to 370 ms on a cold
+    /// launch) before the poll loop can draw it
+    /// (docs/decisions/launch-warm-waits.md).
     pub fn poll_before_first_frame(&mut self, cx: &mut gpui_kit::Context<Self>) {
+        if cfg!(target_os = "macos") && self.live.is_some() {
+            use quill::telegram::hub::{LAUNCH_CHATS, LaunchWait};
+            quill::startup_trace::mark("chats_wait");
+            quill::startup_trace::mark(match LAUNCH_CHATS.wait(LAUNCH_CHATS_WAIT) {
+                LaunchWait::Came => "chats_came",
+                LaunchWait::Capped => "chats_capped",
+                LaunchWait::Skipped => "chats_skipped",
+            });
+        }
         self.poll_live(cx);
     }
 
