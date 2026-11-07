@@ -594,6 +594,7 @@ impl Platform for MacPlatform {
                 .write(self_ptr);
 
             disable_autofill_heuristics();
+            crate::writing_tools::hold();
 
             // Quill: the app opens its windows here, before `run`, and
             // their first frame is committed to the window server. `run`
@@ -1206,7 +1207,7 @@ impl Platform for MacPlatform {
             let delegate: *mut AnyObject = msg_send![app, delegate];
             let menu = self.create_menu_bar(&menus, delegate, actions, keymap);
             drop(state);
-            let _: () = msg_send![app, setMainMenu: &*menu];
+            crate::writing_tools::set_main_menu(menu);
         }
         self.0.lock().menus = Some(menus.into_iter().map(|menu| menu.owned()).collect());
     }
@@ -1418,6 +1419,7 @@ extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyO
             callback();
         }
     }
+    crate::writing_tools::start_load();
 }
 
 /// `observer` must be the app delegate, whose class declares `onSystemSleep:`

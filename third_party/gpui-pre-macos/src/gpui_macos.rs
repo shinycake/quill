@@ -30,6 +30,8 @@ pub mod metal_renderer {
 mod platform;
 mod window;
 mod window_appearance;
+mod staged_load;
+mod writing_tools;
 
 use objc2::{
     Encode, Encoding, RefEncode,
@@ -48,6 +50,7 @@ pub(crate) use window::*;
 
 pub use platform::MacPlatform;
 pub use window::is_exiting_fullscreen;
+pub use writing_tools::after_writing_tools_load;
 
 /// Quill: when the next frame drawn on display `display_id` (a
 /// `DisplayId` as `u64`) is shown, as an `Instant` and in Mach host ticks,
@@ -89,8 +92,9 @@ pub(crate) fn frame_presented() {
 static LAUNCH_MARK_HOOK: std::sync::OnceLock<fn(&'static str)> = std::sync::OnceLock::new();
 
 /// Quill: `hook` gets the names of AppKit launch steps as they happen
-/// (`ns_run`, `will_finish`, `did_finish`, `window_ordered`,
-/// `first_display`), for launch timing. The first hook set stays.
+/// (`ns_run`, `will_finish`, `did_finish`, `window_ordered`, `writing_tools`,
+/// `first_display`, and `first_key` and `first_text` when the first key event
+/// and the first inserted text reach a window), for launch timing. The first hook set stays.
 pub fn on_launch_mark(hook: fn(&'static str)) {
     let _ = LAUNCH_MARK_HOOK.set(hook);
 }
