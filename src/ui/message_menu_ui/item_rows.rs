@@ -131,7 +131,7 @@ impl QuillApp {
         };
         let properties = self.option_properties(chat_id, message_id);
         let menu = option_menu(true, can_reply, properties);
-        if quill::poll::can_retract_vote(&poll.poll) && message.id.0 > 0 && !message.pending {
+        if quill::poll::can_retract_vote(&poll.poll) && message.id.0 > 0 && !message.pending() {
             rows.push(menu_row(
                 1,
                 IconName::Undo2,

@@ -416,7 +416,7 @@ impl QuillApp {
                         .icon(IconName::Video)
                         .on_click(move |_, _, cx| {
                             let _ = video_owner
-                                .update(cx, |this, cx| this.start_video_note_recording(cx));
+                                .update(cx, |this, cx| this.start_video_note_recording(false, cx));
                         }),
                 );
                 let poll_owner = owner.clone();

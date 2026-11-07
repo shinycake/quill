@@ -122,10 +122,10 @@ fn status_line(message: &HistoryMessage, context: &MessageA11yContext) -> String
     let mut parts: Vec<String> = Vec::new();
     parts.push(
         if message.is_outgoing {
-            if message.pending {
-                "Sending"
-            } else if message.failed {
+            if message.failed() {
                 "Failed"
+            } else if message.pending() {
+                "Sending"
             } else {
                 "Sent"
             }

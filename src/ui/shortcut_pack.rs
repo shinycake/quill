@@ -201,8 +201,8 @@ impl QuillApp {
             .values()
             .filter(|m| {
                 m.id.0 > 0
-                    && !m.pending
-                    && !m.failed
+                    && !m.pending()
+                    && !m.failed()
                     && !super::service_row::is_service_row(&m.content)
             })
             .map(|m| m.id.0)

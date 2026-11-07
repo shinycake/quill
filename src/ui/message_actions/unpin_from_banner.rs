@@ -321,7 +321,7 @@ impl QuillApp {
             if !quill::go_to_message::go_to_message_offered(
                 quill::go_to_message::MessageListContext::Pinned,
                 message_id,
-                message.pending,
+                message.pending(),
             ) {
                 return row.into_any_element();
             }

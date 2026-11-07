@@ -155,8 +155,15 @@ impl Session {
 /// request; TDLib also marks a message this app is still sending in
 /// `updateNewMessage` and history pages.
 pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
-    let pending =
-        pending || message.send_state == crate::telegram::envelope::MessageSendState::Pending;
+    use crate::telegram::envelope::MessageSendState;
+    let send = match message.send_state {
+        MessageSendState::Failed => SendState::Failed {
+            can_retry: message.can_retry,
+        },
+        MessageSendState::Pending => SendState::Sending,
+        MessageSendState::Sent if pending => SendState::Sending,
+        MessageSendState::Sent => SendState::Sent,
+    };
     HistoryMessage {
         sender: message.sender,
         id: message.id,
@@ -164,7 +171,7 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
         is_outgoing: message.is_outgoing,
         date: message.date,
         content: message.content,
-        pending,
+        send,
         reply_to: message.reply_to,
         forward_info: message.forward_info,
         extras: message.extras,
@@ -175,8 +182,6 @@ pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryM
         self_destruct: message.self_destruct,
         auto_delete: message.auto_delete,
         author_signature: message.author_signature,
-        failed: false,
-        can_retry: message.can_retry,
         ephemeral: message.ephemeral,
     }
 }

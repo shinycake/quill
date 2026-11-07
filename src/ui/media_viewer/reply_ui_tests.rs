@@ -43,7 +43,7 @@ fn add_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: i64, pendi
         let history = session.histories.get_mut(&CHAT.0).expect("history");
         let mut message = history.messages.get(&101).expect("a message").clone();
         message.id = MessageId(id);
-        message.pending = pending;
+        message.send = quill::state::SendState::from_flags(pending, false, false);
         message.content = MessageContent::Photo(PhotoContent {
             caption: String::new(),
             caption_entities: Vec::new(),

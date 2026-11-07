@@ -120,14 +120,15 @@ impl QuillApp {
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
                 let send_box = &self.composer_ui.send_box;
-                !send_box.sound_checking.contains(path) && !send_box.sound_checked.contains(path)
+                !send_box.sound_checking.contains_key(path)
+                    && !send_box.sound_checked.contains(path)
             })
             .collect();
         for path in paths {
-            self.composer_ui
-                .send_box
-                .sound_checking
-                .insert(path.clone());
+            let send_box = &mut self.composer_ui.send_box;
+            send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
+            let job = send_box.sound_jobs;
+            send_box.sound_checking.insert(path.clone(), job);
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
@@ -136,9 +137,10 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_ui.send_box;
                     // The batch may have been sent or cleared meanwhile.
-                    if !send_box.sound_checking.remove(&path) {
+                    if send_box.sound_checking.get(&path) != Some(&job) {
                         return;
                     }
+                    send_box.sound_checking.remove(&path);
                     send_box.sound_checked.insert(path.clone());
                     if silent {
                         for attachment in this
@@ -164,7 +166,7 @@ impl QuillApp {
         let checking = &self.composer_ui.send_box.sound_checking;
         self.pending_attachments()
             .iter()
-            .any(|attachment| checking.contains(&attachment.path))
+            .any(|attachment| checking.contains_key(&attachment.path))
     }
 
     /// The options row of the tray: High quality and the price.

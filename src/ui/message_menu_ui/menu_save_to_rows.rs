@@ -291,7 +291,7 @@ impl QuillApp {
         // a forward shows its original date (add_origin_rows), an edited
         // message its edit date, and only a plain message the sent date.
         let forwarded = message.forward_info.is_some() || message.extras.import_info.is_some();
-        if message.date > 0 && message_id.0 > 0 && !message.pending && !forwarded {
+        if message.date > 0 && message_id.0 > 0 && !message.pending() && !forwarded {
             if message.extras.edit_date > 0 {
                 let edited = quill::local_time::civil_local(i64::from(message.extras.edit_date));
                 rows.push(info_row(

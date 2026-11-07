@@ -148,3 +148,22 @@ fn a_cancelled_start_that_failed_says_nothing(cx: &mut TestAppContext) {
         assert_ne!(app.connection.status_note(), "No microphone found.");
     });
 }
+
+#[gpui_kit::test]
+fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_record_once(cx);
+        app.recording.locked = true;
+        // A story reply sends the capture without reading "Play once".
+        assert!(app.recording.take_voice().is_some());
+        assert!(
+            !app.recording.once,
+            "the next voice message is not view-once"
+        );
+        assert!(!app.recording.locked);
+    });
+}

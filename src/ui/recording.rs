@@ -94,10 +94,9 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("record a voice or video message") {
             return;
         }
-        self.recording.lock_next = false;
         match self.record_mode() {
             RecordMode::Audio => self.start_voice_recording(cx),
-            RecordMode::Video => self.start_video_note_recording(cx),
+            RecordMode::Video => self.start_video_note_recording(false, cx),
         }
     }
 
@@ -123,8 +122,9 @@ impl QuillApp {
 
     /// MED2: start a round video-note camera capture (ffmpeg V4L2, squared
     /// at finish; HQ size from media prefs). Needs a camera, honest error
-    /// otherwise.
-    pub(super) fn start_video_note_recording(&mut self, cx: &mut Context<Self>) {
+    /// otherwise. `locked`: it starts locked (the "Record Round Message"
+    /// shortcut, `startRecordingAndLock`).
+    pub(super) fn start_video_note_recording(&mut self, locked: bool, cx: &mut Context<Self>) {
         if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
             return;
         }
@@ -149,12 +149,20 @@ impl QuillApp {
         if self.deny_send(SendKind::VideoMessages, cx) {
             return;
         }
-        self.with_capture_access(true, Self::begin_video_note_capture, cx);
+        let begin = if locked {
+            Self::begin_locked_video_note_capture
+        } else {
+            Self::begin_video_note_capture
+        };
+        self.with_capture_access(true, begin, cx);
     }
 
     fn begin_video_note_capture(&mut self, cx: &mut Context<Self>) {
-        let lock = std::mem::take(&mut self.recording.lock_next);
-        self.start_video_capture(CaptureFor::Message, lock, cx);
+        self.start_video_capture(CaptureFor::Message, false, cx);
+    }
+
+    fn begin_locked_video_note_capture(&mut self, cx: &mut Context<Self>) {
+        self.start_video_capture(CaptureFor::Message, true, cx);
     }
 
     /// A capture that stopped by itself: a video message that reached the
@@ -331,14 +339,11 @@ impl QuillApp {
 
     pub(super) fn cancel_recording(&mut self, cx: &mut Context<Self>) {
         self.stop_record_preview();
-        self.recording.once = false;
         let was_video = self.recording.video().is_some() || self.recording.opening_video();
         match self.recording.take() {
             Some(media) => cx.background_spawn(async move { media.discard() }).detach(),
             None => self.recording.cancel_start(),
         }
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.sync_voice_action();
         self.connection.set_note(if was_video {
             StatusNote::silent(tr(keys::Q_MISC_VIDEO_RECORDING_CANCELLED))

@@ -471,7 +471,7 @@ mod tests {
                 .filter_map(|(ix, bounds)| match app.history.rows.get(ix)? {
                     HistoryRow::Single(inputs)
                         if inputs.message.id.0 > 0
-                            && !inputs.message.pending
+                            && !inputs.message.pending()
                             && inputs.message.can_pin() =>
                     {
                         Some(Row {

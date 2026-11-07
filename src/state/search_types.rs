@@ -81,7 +81,7 @@ impl SearchMessageHit {
             is_outgoing: self.is_outgoing,
             date: self.date,
             content: self.content,
-            pending: false,
+            send: crate::state::SendState::Sent,
             reply_to: self.reply_to,
             forward_info: self.forward_info,
             extras: self.extras,
@@ -92,8 +92,6 @@ impl SearchMessageHit {
             self_destruct: self.self_destruct,
             auto_delete: self.auto_delete,
             author_signature: self.author_signature,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         }
     }

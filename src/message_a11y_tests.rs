@@ -15,7 +15,7 @@ fn message(content: MessageContent, outgoing: bool) -> HistoryMessage {
         is_outgoing: outgoing,
         date: 0,
         content,
-        pending: false,
+        send: crate::state::SendState::Sent,
         reply_to: None,
         forward_info: None,
         extras: Default::default(),
@@ -26,8 +26,6 @@ fn message(content: MessageContent, outgoing: bool) -> HistoryMessage {
         self_destruct: None,
         auto_delete: None,
         author_signature: None,
-        failed: false,
-        can_retry: false,
         ephemeral: None,
     }
 }
@@ -98,13 +96,12 @@ fn an_outgoing_message_reads_seen_me_and_delivery() {
         "Seen\nMe\nIn reply to Me: Earlier\nHi\nSent"
     );
     context.receipt = Some(OutboxReceipt::Sent);
-    msg.pending = true;
+    msg.send = crate::state::SendState::Sending;
     assert_eq!(
         message_accessibility_name(&msg, &context, &no_files),
         "Not seen\nMe\nIn reply to Me: Earlier\nHi\nSending"
     );
-    msg.pending = false;
-    msg.failed = true;
+    msg.send = crate::state::SendState::Failed { can_retry: false };
     assert!(message_accessibility_name(&msg, &context, &no_files).ends_with("\nFailed"));
 }
 

@@ -53,7 +53,7 @@ pub fn selection_target(
         .get(&chat_id.0)?
         .messages
         .get(&message_id.0)?;
-    let sent = !message.pending && !message.failed && message.id.0 > 0;
+    let sent = !message.pending() && !message.failed() && message.id.0 > 0;
     let rich = matches!(
         effective_content(&message.content, message.ephemeral.as_ref()),
         MessageContent::RichMessage(_)

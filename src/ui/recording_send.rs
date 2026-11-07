@@ -144,16 +144,12 @@ impl QuillApp {
         let Some(target) = self.begin_recording_send(&caption, cx) else {
             return;
         };
+        let play_once = self.recording.once;
         let Some(capture) = self.recording.take_voice() else {
             return;
         };
-        // The send consumes the recording: locked state must not leak into
-        // the next one.
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.stop_record_preview();
         self.consume_composer_for_send(&target, true, window, cx);
-        let play_once = std::mem::take(&mut self.recording.once);
         let finish = capture.close_microphone();
         self.sync_voice_action();
         cx.notify();
@@ -266,9 +262,6 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return;
         };
-        self.recording.once = false;
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.consume_composer_for_send(&target, false, window, cx);
         self.sync_voice_action();
         cx.notify();

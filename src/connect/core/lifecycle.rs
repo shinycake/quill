@@ -171,9 +171,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let before = self.session.shutdown;
         self.session.begin_close();
         let extra = self.session.request(RequestPurpose::Close, None);
-        self.sender.send_json(&close_request(extra))?;
+        if let Err(err) = self.sender.send_json(&close_request(extra)) {
+            // Nothing went out: the session keeps running.
+            self.session.requests.take(extra);
+            self.session.shutdown = before;
+            return Err(err);
+        }
         Ok(extra)
     }
 
@@ -186,9 +192,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(self.session.auth, AuthorizationState::Ready) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let before = self.session.shutdown;
         self.session.begin_logout();
         let extra = self.session.request(RequestPurpose::LogOut, None);
-        self.sender.send_json(&log_out(extra))?;
+        if let Err(err) = self.sender.send_json(&log_out(extra)) {
+            // Nothing went out: the account stays signed in and usable.
+            self.session.requests.take(extra);
+            self.session.shutdown = before;
+            return Err(err);
+        }
         Ok(extra)
     }
 }

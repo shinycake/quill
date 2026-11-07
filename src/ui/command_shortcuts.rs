@@ -156,8 +156,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.recording.lock_next = true;
-        self.start_video_note_recording(cx);
+        self.start_video_note_recording(true, cx);
         true
     }
 

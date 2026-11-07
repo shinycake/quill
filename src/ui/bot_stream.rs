@@ -178,7 +178,7 @@ impl QuillApp {
             is_outgoing: false,
             date: (unix_ms_now() / 1000) as i32,
             content,
-            pending: false,
+            send: quill::state::SendState::Sent,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),
@@ -189,8 +189,6 @@ impl QuillApp {
             self_destruct: None,
             auto_delete: None,
             author_signature: None,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         })
     }

@@ -326,7 +326,7 @@ fn a_pending_photo_does_not_lift(cx: &mut TestAppContext) {
             .and_then(|s| s.histories.get_mut(&11))
             .and_then(|h| h.messages.get_mut(&901))
         {
-            message.pending = true;
+            message.send = quill::state::SendState::Sending;
         }
     });
     frames(vcx);

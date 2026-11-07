@@ -409,8 +409,6 @@ impl QuillApp {
         let Some(capture) = self.recording.take_video() else {
             return true;
         };
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         cx.notify();
         let finished = cx.background_spawn(async move { capture.finish() });
         Self::spawn_main_in(window, cx, async move |this, cx| {
@@ -469,8 +467,6 @@ impl QuillApp {
         let Some(capture) = self.recording.take_voice() else {
             return true;
         };
-        self.recording.locked = false;
-        self.recording.discard_confirm = false;
         self.stop_record_preview();
         let finish = capture.close_microphone();
         cx.notify();

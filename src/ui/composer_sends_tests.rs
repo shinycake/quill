@@ -701,7 +701,7 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
         let send_box = &mut app.composer_ui.send_box;
-        send_box.sound_checking.insert(in_a.path.clone());
+        send_box.sound_checking.insert(in_a.path.clone(), 1);
         send_box.thumbnailing.insert(in_a.path.clone(), 1);
         assert!(app.tray_videos_checking(), "A waits on its own file");
         assert!(app.tray_thumbnails_pending());

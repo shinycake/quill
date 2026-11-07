@@ -11,7 +11,7 @@ impl FooterMeta {
     ) -> Self {
         Self {
             date: message.date,
-            pending: message.pending,
+            pending: message.pending(),
             receipt,
             views,
             signature,

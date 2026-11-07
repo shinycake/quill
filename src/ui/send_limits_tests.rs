@@ -64,7 +64,9 @@ fn a_click_on_the_forbidden_record_button_names_the_user(cx: &mut TestAppContext
             "Demo chat A doesn't accept voice messages."
         );
     });
-    app.update_in(&mut vcx, |app, _, cx| app.start_video_note_recording(cx));
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.start_video_note_recording(false, cx)
+    });
     app.read_with(&vcx, |app, _| {
         assert!(!app.recording_busy());
         assert_eq!(

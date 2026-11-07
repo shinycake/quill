@@ -528,7 +528,7 @@ impl Session {
                     .flat_map(|(_, topic)| topic.messages.values()),
             );
         for message in rows {
-            if message.id.0 <= 0 || message.pending {
+            if message.id.0 <= 0 || message.pending() {
                 continue;
             }
             let Some(reply) = &message.reply_to else {
@@ -587,7 +587,7 @@ impl Session {
         let server = |messages: &HistoryMessages| {
             let mut ids = messages
                 .values()
-                .filter(|message| !message.pending && !message.failed)
+                .filter(|message| !message.pending() && !message.failed())
                 .map(|message| message.id.0);
             let oldest = ids.next()?;
             Some((oldest, ids.next_back().unwrap_or(oldest)))

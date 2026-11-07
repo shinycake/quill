@@ -183,6 +183,9 @@ impl Session {
             self.auth_state.change_number_phone = None;
             self.auth_state.change_number_timeout = None;
             self.auth_state.change_number_checking = false;
+            // The send/resend answers are dropped below, so nothing else
+            // would clear this.
+            self.auth_state.change_number_loading = false;
             self.auth_state.change_number_error = None;
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the

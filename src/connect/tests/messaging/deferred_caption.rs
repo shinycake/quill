@@ -102,7 +102,7 @@ fn up_on_a_pending_media_message_edits_its_caption_and_sends_it_with_the_real_id
     // row shows the new caption at once.
     assert_eq!(s.sent().len(), sent_before);
     let row = s.driver.session.histories[&7].messages[&PENDING].clone();
-    assert!(row.pending);
+    assert!(row.pending());
     assert_eq!(row.content.preview(), "second");
 
     // The upload finishes: the caption is sent as an edit of the real id.
@@ -147,7 +147,7 @@ fn up_leaves_a_pending_text_alone() {
         PENDING + 1
     ));
     let history = &mut s.driver.session.histories.get_mut(&7).unwrap().messages;
-    history.get_mut(&(PENDING + 1)).unwrap().pending = true;
+    history.get_mut(&(PENDING + 1)).unwrap().send = crate::state::SendState::Sending;
     assert!(s.driver.session.last_editable_message(ChatId(7)).is_none());
     assert!(
         ComposerEdit::from_pending_media(

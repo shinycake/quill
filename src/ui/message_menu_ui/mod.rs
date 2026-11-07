@@ -228,7 +228,7 @@ impl QuillApp {
         // (tdesktop `AddAddToOwnedSetAction`: lottie fits both, ≤100 px is
         // an emoji; nothing while the message is still sending).
         let joins = match content {
-            MessageContent::Sticker(sticker) if sticker.set_id == 0 && !message.pending => {
+            MessageContent::Sticker(sticker) if sticker.set_id == 0 && !message.pending() => {
                 let (to_stickers, to_emoji) = quill::sticker_set_box::joinable_kinds(
                     sticker.format == quill::telegram::envelope::StickerFormat::Tgs,
                     sticker.width,

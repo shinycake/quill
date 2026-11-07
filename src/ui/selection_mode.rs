@@ -466,7 +466,7 @@ impl QuillApp {
                 history
                     .messages
                     .get(&id.0)
-                    .is_some_and(|m| !m.is_outgoing && !m.pending && m.id.0 > 0)
+                    .is_some_and(|m| !m.is_outgoing && !m.pending() && m.id.0 > 0)
             })
     }
 

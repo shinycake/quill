@@ -162,7 +162,7 @@ fn matches_fly(fly: &Fly, message: &HistoryMessage, sticker: &StickerContent) ->
             message.chat_id.0,
             sticker.file_id.0,
             message.is_outgoing,
-            message.pending,
+            message.pending(),
             i64::from(message.date),
         ),
     )

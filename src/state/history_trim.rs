@@ -34,7 +34,7 @@ pub(super) struct LiveTrimSpan {
 }
 
 pub(super) fn is_local(message: &HistoryMessage) -> bool {
-    message.pending || message.failed
+    message.pending() || message.failed()
 }
 
 /// Up to `count` server ids from the `end` of `messages`, local sends
@@ -257,7 +257,7 @@ mod tests {
             content: MessageContent::Unsupported {
                 type_name: "test".into(),
             },
-            pending: false,
+            send: crate::state::SendState::Sent,
             reply_to: None,
             forward_info: None,
             extras: Default::default(),
@@ -268,8 +268,6 @@ mod tests {
             self_destruct: None,
             auto_delete: None,
             author_signature: None,
-            failed: false,
-            can_retry: false,
             ephemeral: None,
         }
     }
@@ -340,7 +338,7 @@ mod tests {
     fn a_trim_keeps_a_pending_send_and_drops_the_server_rows_around_it() {
         let mut state = window(1..=1600);
         let mut sending = message(1_700);
-        sending.pending = true;
+        sending.send = crate::state::SendState::Sending;
         sending.is_outgoing = true;
         state.upsert(sending);
         assert_eq!(

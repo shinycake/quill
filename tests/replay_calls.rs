@@ -63,7 +63,14 @@ fn replay_call_signaling_lifecycle() {
             .id,
         77
     );
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(
+        session.calls.second_call,
+        quill::state::SecondCall::Prompt {
+            call_id: 78,
+            user_id: 42,
+            is_video: false
+        }
+    );
     assert!(session.calls.busy_decline_queue.is_empty());
 
     // Keys exchange, then Ready; signaling data is queued honestly.
@@ -262,7 +269,14 @@ fn replay_video_call_signaling() {
             .id,
         90
     );
-    assert_eq!(session.calls.swap_pending, Some((91, 42, true)));
+    assert_eq!(
+        session.calls.second_call,
+        quill::state::SecondCall::Prompt {
+            call_id: 91,
+            user_id: 42,
+            is_video: true
+        }
+    );
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
     // sends it back in `discardCall`).

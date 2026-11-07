@@ -168,7 +168,7 @@ fn tail_excess(messages: &HistoryMessages, keep: usize) -> Vec<i64> {
     let excess = messages.len().saturating_sub(keep);
     messages
         .iter()
-        .filter(|(_, message)| !message.pending && !message.failed)
+        .filter(|(_, message)| !message.pending() && !message.failed())
         .map(|(id, _)| *id)
         .take(excess)
         .collect()
@@ -195,7 +195,7 @@ impl HistoryState {
     fn has_unsent(&self) -> bool {
         self.messages
             .values()
-            .any(|message| message.pending || message.failed)
+            .any(|message| message.pending() || message.failed())
     }
 }
 

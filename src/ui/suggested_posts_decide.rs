@@ -318,7 +318,7 @@ impl QuillApp {
             .and_then(|history| history.messages.get(&message_id.0))
             .is_some_and(|message| {
                 use quill::telegram::envelope::MessageContent as C;
-                !message.pending
+                !message.pending()
                     && message.id.0 > 0
                     && message.media_album_id == 0
                     && message.extras.suggested_post.is_none()

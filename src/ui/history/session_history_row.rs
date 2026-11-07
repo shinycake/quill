@@ -237,7 +237,7 @@ pub(in crate::ui) fn session_history_row(
         .interaction_info
         .as_ref()
         .and_then(|info| info.reply_info.as_ref())
-        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending)
+        .filter(|_| !in_thread && message.id.0 > 0 && !message.pending())
         .and_then(|info| {
             let kind = if in_channel {
                 super::super::threads::ReplyBarKind::Comments
@@ -403,7 +403,7 @@ pub(in crate::ui) fn session_history_row(
             crate::ui::premium_sticker_effect::wrap(
                 message.id.0 as u64,
                 sticker,
-                message.pending,
+                message.pending(),
                 message.chat_id.0,
                 message.id.0,
                 // The effect plays toward the side the sticker faces.
@@ -879,7 +879,7 @@ pub(in crate::ui) fn session_history_row(
             receipt,
             sender_avatar.clone(),
             message.date,
-            message.pending,
+            message.pending(),
         );
         // A spacer (no link) keeps its slot: taking it would drop the gutter.
         if let Some(link) = avatar_link.take()

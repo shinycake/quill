@@ -83,7 +83,7 @@ fn replay_ready_load_chats_select_and_send() {
     let history = session.histories.get(&7).unwrap();
     assert!(!history.messages.contains_key(&-9));
     assert!(history.messages.contains_key(&51));
-    assert!(!history.messages.get(&51).unwrap().pending);
+    assert!(!history.messages.get(&51).unwrap().pending());
     assert!(!sink.rendered().contains("CANARY_REPLAY"));
 }
 
@@ -297,7 +297,7 @@ fn replay_send_photo_then_document_succeed() {
         .messages
         .get(&60)
         .unwrap();
-    assert!(!photo.pending);
+    assert!(!photo.pending());
     assert!(photo.is_outgoing);
     assert!(matches!(
         photo.content,
@@ -328,7 +328,7 @@ fn replay_send_photo_then_document_succeed() {
         quill::telegram::envelope::MessageContent::Document(d) => {
             assert_eq!(d.file_name, "out.txt");
             assert!(doc.is_outgoing);
-            assert!(!doc.pending);
+            assert!(!doc.pending());
         }
         other => panic!("{other:?}"),
     }

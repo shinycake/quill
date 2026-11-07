@@ -248,7 +248,7 @@ impl QuillApp {
             s.histories
                 .get(&edit.chat_id.0)
                 .and_then(|history| history.messages.get(&edit.message_id.0))
-                .is_some_and(|m| m.pending)
+                .is_some_and(|m| m.pending())
         });
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;

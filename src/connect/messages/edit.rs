@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .histories
                 .get(&edit.chat_id.0)
                 .and_then(|history| history.messages.get(&edit.message_id.0))
-                .map(|m| (m.chat_id, m.id, m.is_outgoing, m.pending, &m.content))
+                .map(|m| (m.chat_id, m.id, m.is_outgoing, m.pending(), &m.content))
         };
         let Some((chat_id, message_id, is_outgoing, pending, content)) = owned else {
             return Err(ConnectSendError::InvalidRequest);
@@ -276,7 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .is_some_and(|message| message.failed && message.can_retry);
+            .is_some_and(|message| message.failed() && message.can_retry());
         if !can_retry {
             return Err(ConnectSendError::InvalidRequest);
         }

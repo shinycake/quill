@@ -285,7 +285,7 @@ pub(super) fn album_history_row(
     // without a caption, the time rides on the picture.
     let has_caption = caption.is_some();
     let avatar_link = avatar_link(&sender_avatar, first, cx);
-    let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending);
+    let mut chrome = message_chrome(sender, receipt, sender_avatar, first.date, first.pending());
     if let Some(link) = avatar_link
         && let Some(avatar) = chrome.avatar.take()
     {
@@ -389,7 +389,7 @@ fn message_corner_actions(
                 s.settings.media_prefs.corner_reaction,
             )
         }),
-        !message.pending && message.id.0 > 0,
+        !message.pending() && message.id.0 > 0,
         session.map_or(message.can_react(), |s| s.can_react_to(message)),
     );
     if !reply && !react && fast_share.is_none() {
@@ -400,7 +400,7 @@ fn message_corner_actions(
         row = row.child(fast_share::button(
             chat_id,
             message_id,
-            message.pending,
+            message.pending(),
             what,
             cx,
         ));

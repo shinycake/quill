@@ -403,7 +403,7 @@ impl QuillApp {
                 )
                 .into_iter()
                 .filter_map(|id| history.messages.get(&id))
-                .filter(|m| (model.automatic || !m.is_outgoing) && !m.pending && m.id.0 > 0)
+                .filter(|m| (model.automatic || !m.is_outgoing) && !m.pending() && m.id.0 > 0)
                 .filter(|m| {
                     translatable_content(&m.content).is_some_and(|(text, _)| {
                         detect_language(text)

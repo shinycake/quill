@@ -535,7 +535,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|h| h.messages.get(&message_id.0))
-            .is_some_and(|m| m.pending && crate::message_menu::media_target(&m.content).is_some());
+            .is_some_and(|m| {
+                m.pending() && crate::message_menu::media_target(&m.content).is_some()
+            });
         if !uploading {
             return Err(ConnectSendError::InvalidRequest);
         }
