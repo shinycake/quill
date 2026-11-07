@@ -375,11 +375,17 @@ impl QuillApp {
             multiple: false,
             prompt: Some(mode.title().into()),
         });
+        // The user id is the account's own: a picker answered after a
+        // switch opens nothing on the account switched to.
+        let asked_on = self.session().map(|session| session.account.clone());
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
                 let _ = this.update(cx, |this, cx| {
+                    if this.session().map(|session| &session.account) != asked_on.as_ref() {
+                        return;
+                    }
                     if !is_profile_photo_file(&path) {
                         this.connection
                             .set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CHOOSE_A_JPEG_PNG_OR)));

@@ -326,3 +326,28 @@ fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
     });
     assert_eq!(hits, (Some(BOB), 1), "the hits landed in Bob's window");
 }
+
+/// Text typed within the save's quiet second, then the account goes to
+/// the background (a switch): the draft goes out through this client and
+/// the slot is clean, so drafts from other devices land again.
+#[test]
+fn going_to_the_background_saves_the_draft_waiting_to_be_saved() {
+    use crate::composer::DraftTopic;
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    let outcome = h
+        .driver
+        .note_composer_draft(ALICE, "half a thought", None, 1_000, true)
+        .unwrap();
+    assert!(matches!(outcome, DraftSaveOutcome::Debounced { .. }));
+    assert!(h.driver.session.draft_is_dirty(ALICE, DraftTopic::Chat));
+
+    h.driver.leave_for_background().unwrap();
+    let drafts = h.sent("setChatDraftMessage", ALICE);
+    assert_eq!(drafts.len(), 1);
+    assert_eq!(
+        drafts[0]["draft_message"]["content"]["text"]["text"],
+        "half a thought"
+    );
+    assert!(!h.driver.session.draft_is_dirty(ALICE, DraftTopic::Chat));
+}

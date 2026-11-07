@@ -75,12 +75,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.open_chat.is_none() {
             return Ok(());
         }
+        // Text noted within the save's quiet second goes out now: nothing
+        // else would save it, and its slot would stay dirty (ignoring the
+        // drafts other devices save) until something stored it.
+        let flushed = self.flush_pending_draft();
         self.cancel_outgoing_typing()?;
         self.close_open_chat()?;
         self.draft_clock = DraftSaveClock::idle();
         self.pending_draft = None;
         self.session.leave_open_chat();
-        Ok(())
+        flushed.map(|_| ())
     }
 
     /// The account goes to the background (another one comes forward): no

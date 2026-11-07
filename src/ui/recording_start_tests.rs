@@ -149,6 +149,39 @@ fn a_cancelled_start_that_failed_says_nothing(cx: &mut TestAppContext) {
     });
 }
 
+/// Send is pressed on one account and the file is ready after a switch:
+/// the chat id is the old account's, so nothing goes out on the new one.
+#[gpui_kit::test]
+fn a_recording_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
+    use quill::ids::AccountKey;
+    use quill::lang::{keys, tr};
+    let (app, mut vcx) = open_chat(cx);
+    fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    let count = |app: &QuillApp| {
+        app.session()
+            .and_then(|session| session.histories.get(&CHAT.0))
+            .map_or(0, |history| history.messages.len())
+    };
+    let before = app.read_with(&vcx, |app, _| count(app));
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.send_voice_recording(window, cx);
+        // The account on screen changes while the encoder is joined.
+        if let Some(session) = app.demo_session.as_mut() {
+            session.account = AccountKey("other".into());
+        }
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(count(app), before, "nothing sent");
+        assert_eq!(
+            app.connection.status_note(),
+            tr(keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED)
+        );
+    });
+}
+
 #[gpui_kit::test]
 fn play_once_and_lock_end_with_the_recording_whoever_takes_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_chat(cx);

@@ -116,3 +116,59 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
         assert!(QuillShell::open_dialog_names(app).is_empty());
     });
 }
+
+/// The switch leaves the open chat as any leave does: the typed text is
+/// the old account's draft, and the composer the new account shows is
+/// empty, so it cannot send the old account's text.
+#[gpui_kit::test]
+fn a_switch_saves_the_typed_text_and_empties_the_composer(cx: &mut TestAppContext) {
+    use quill::composer::DraftTopic;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(CHAT, window, cx);
+    });
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.set_composer_markup("meet at 5", window, cx);
+        app.note_open_draft(true, cx);
+    });
+    switch(&app, &mut vcx);
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, cx| {
+        assert_eq!(app.composer_markup(cx), "", "nothing left to send");
+        assert_eq!(app.open_chat_id(), None);
+        let session = app.session().expect("session");
+        let draft = session.draft_for(CHAT, DraftTopic::Chat).expect("saved");
+        assert_eq!(draft.text, "meet at 5");
+        assert!(!session.draft_is_dirty(CHAT, DraftTopic::Chat));
+    });
+}
+
+/// Checked chats are the old account's ids.
+#[gpui_kit::test]
+fn a_switch_clears_the_chat_list_selection(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        app.chat_list.selected.insert(CHAT.0);
+    });
+    switch(&app, &mut vcx);
+    app.read_with(&vcx, |app, _| assert!(app.chat_list.selected.is_empty()));
+}
+
+/// The player's track, and the chat its next and previous read, are the
+/// old account's.
+#[gpui_kit::test]
+fn a_switch_stops_the_player(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        app.playback.playing_audio = Some(MessageId(1));
+        app.playback.player.chat = Some(CHAT);
+    });
+    switch(&app, &mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.playback.playing_audio, None);
+        assert_eq!(app.playback.player.chat, None);
+    });
+}

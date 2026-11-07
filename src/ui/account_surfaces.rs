@@ -27,6 +27,18 @@ impl QuillApp {
     /// `closeStory`) goes to the client it was opened on.
     pub(super) fn end_account_surfaces(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.end_mini_apps_for_switch(cx);
+        self.leave_chat_for_switch(window, cx);
+        // Checked ids are the old account's chats; the bulk actions would
+        // act on the new account's chats with the same ids.
+        self.chat_list.selected.clear();
+        // The bar's track and its next / previous are the old account's
+        // messages.
+        self.close_player(cx);
+        self.playback.player.chat = None;
+        self.playback.player.meta = None;
+        // An upload still running belongs to the old client; its answer
+        // never reaches the new one.
+        self.notify.tone_upload_target = None;
         // Boxes whose flag holds the old account's ids and that have no
         // close of their own.
         self.message_ui.pending_delete = None;
@@ -41,11 +53,30 @@ impl QuillApp {
         if self.viewer.state.is_open() {
             self.close_media_viewer(cx);
         }
-        self.release_story_viewer();
+        // The whole close: the reply, the privacy editor and the report
+        // belong to the old account's story too.
+        self.close_story_viewer(cx);
         self.close_video_pip(cx);
         QuillShell::close_dialogs_for_switch(self, KEPT_ON_SWITCH, window, cx);
         self.close_main_window_dialogs(window, cx);
         cx.notify();
+    }
+
+    /// The main window leaves its chat as it does for any other leave
+    /// (`leave_open_chat`): the composer's text is saved as the old
+    /// account's draft, through its own client, and the composer, its edit
+    /// and reply, and a recording still running go with it. Without this
+    /// the text stayed in the composer for the next account to send.
+    fn leave_chat_for_switch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let outer = self.windows.scope;
+        if self.set_window_scope(None) {
+            self.leave_open_chat(window, cx);
+        }
+        self.set_window_scope(outer);
+        // A recording in a chat window, or one whose camera is starting.
+        if self.recording_busy() {
+            self.cancel_recording(cx);
+        }
     }
 
     /// Close every kit dialog in the main window now, so none can take a
