@@ -18,7 +18,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::ConfirmDeviceLogin, None);
         self.session.settings.device_login_result = None;
         self.session.settings.sessions_mutating = true;
-        self.session.settings.sessions_error = None;
+        self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
             crate::telegram::requests::confirm_qr_code_authentication(id, scanned_link),
         );
@@ -38,7 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.settings.sessions.is_some() && !self.session.settings.sessions_stale)
+        if (self.session.settings.sessions.data().is_some()
+            && !self.session.settings.sessions_stale)
             || self
                 .session
                 .requests
@@ -49,13 +50,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetActiveSessions, None);
-        self.session.settings.sessions_loading = true;
-        self.session.settings.sessions_error = None;
+        self.session.settings.sessions.begin();
         match self.sender.send_json(&get_active_sessions(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions_loading = false;
+                self.session.settings.sessions.cancel();
                 Err(err)
             }
         }
@@ -87,12 +87,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .sessions
-            .as_ref()
+            .data()
             .is_some_and(|s| s.iter().any(|s| s.id == session_id))
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.sessions_error = None;
+        self.session.settings.sessions.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id }),
             None,
@@ -115,7 +115,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || self.session.settings.sessions_mutating {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.sessions_error = None;
+        self.session.settings.sessions.clear_error();
         let extra = self
             .session
             .request(RequestPurpose::TerminateAllOtherSessions, None);
@@ -297,7 +297,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .sessions
-            .as_ref()
+            .data()
             .and_then(|s| s.iter().find(|s| s.id == session_id))
             .map(|s| (s.can_accept_secret_chats, s.can_accept_calls));
         let Some((can_accept_secret_chats, can_accept_calls)) = flags else {
@@ -329,7 +329,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 )
             }
         };
-        self.session.settings.sessions_error = None;
+        self.session.settings.sessions.clear_error();
         self.session.settings.sessions_mutating = true;
         match self.sender.send_json(&json) {
             Ok(()) => Ok(extra),

@@ -1,6 +1,7 @@
 //! security.
 #![deny(clippy::indexing_slicing)]
 
+use quill::state::fetch::Fetch;
 use super::app::QuillApp;
 use super::demo::{demo_sessions, demo_storage_stats, demo_websites};
 use super::shell::{DialogKind, QuillShell};
@@ -133,14 +134,14 @@ impl QuillApp {
             let session = this.session();
             let sessions = session
                 .as_ref()
-                .and_then(|s| s.settings.sessions.clone())
+                .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
-            let loading = session.is_some_and(|s| s.settings.sessions_loading);
+            let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
             let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
             let stale = session.is_some_and(|s| s.settings.sessions_stale);
             let error = session
                 .as_ref()
-                .and_then(|s| s.settings.sessions_error.clone());
+                .and_then(|s| s.settings.sessions.error().map(str::to_string));
             let current = sessions.iter().find(|s| s.is_current);
             let mut incomplete: Vec<&ParsedSession> = sessions
                 .iter()
@@ -594,13 +595,11 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.sessions = None;
+            live.driver.session.settings.sessions = Fetch::Idle;
             live.driver.session.settings.sessions_stale = false;
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.sessions = Some(demo_sessions());
-            session.settings.sessions_loading = false;
-            session.settings.sessions_error = None;
+            session.settings.sessions = Fetch::Ready(demo_sessions());
         }
         cx.notify();
     }

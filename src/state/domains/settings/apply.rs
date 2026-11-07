@@ -122,12 +122,11 @@ impl Session {
                 {
                     self.settings.blocked_total = total_count;
                     if offset == 0 {
-                        self.settings.blocked_senders = Some(sender_ids);
-                    } else if let Some(list) = self.settings.blocked_senders.as_mut() {
+                        self.settings.blocked_senders.succeed(sender_ids);
+                    } else if let Some(mut list) = self.settings.blocked_senders.take_data() {
                         list.extend(sender_ids);
+                        self.settings.blocked_senders.succeed(list);
                     }
-                    self.settings.blocked_loading = false;
-                    self.settings.blocked_error = false;
                 }
             }
             SettingsPayload::NotificationSounds { sounds } => {
@@ -249,10 +248,11 @@ impl Session {
                     self.settings.sessions_mutating = false;
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_stale = true;
-                        self.settings.sessions_error = None;
+                        self.settings.sessions.clear_error();
                     } else {
-                        self.settings.sessions_error =
-                            Some("Telegram returned an invalid device session.".into());
+                        self.settings
+                            .sessions
+                            .fail("Telegram returned an invalid device session.");
                     }
                 }
             }
@@ -292,13 +292,11 @@ impl Session {
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
                     self.resolve_unconfirmed_entries(&sessions);
-                    self.settings.sessions = Some(sessions);
+                    self.settings.sessions.succeed(sessions);
                     if inactive_session_ttl_days.is_some() {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;
                     }
-                    self.settings.sessions_loading = false;
-                    self.settings.sessions_error = None;
                     self.settings.sessions_stale = false;
                 }
             }

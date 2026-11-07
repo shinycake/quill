@@ -18,15 +18,13 @@ impl QuillApp {
     pub(super) fn call_device_prefs_section(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let settings = self.session().map(|session| &session.settings);
         let current = settings
-            .and_then(|settings| settings.sessions.as_deref())
+            .and_then(|settings| settings.sessions.data().map(Vec::as_slice))
             .and_then(current_session_accepts_calls);
         let mutating = settings.is_some_and(|settings| settings.sessions_mutating);
         // The list arrives once; ask for it when this section first shows.
         let needs_fetch = self.live.is_some()
             && settings.is_some_and(|settings| {
-                settings.sessions.is_none()
-                    && !settings.sessions_loading
-                    && settings.sessions_error.is_none()
+                settings.sessions.is_idle()
             });
         if needs_fetch {
             // `maybe_fetch_active_sessions` is guarded, so a render that

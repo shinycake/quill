@@ -43,11 +43,9 @@ pub struct CallsState {
     /// Phase C2i: peer-to-peer calls
     /// (`userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67 :9009).
     pub privacy_p2p: Option<PrivacyWho>,
-    /// A privacy get/set round-trip is in flight (see
-    /// `call_privacy_pending` — fetch sends two gets, so this clears
-    /// only when the last response lands).
-    pub privacy_loading: bool,
-    /// Outstanding call-privacy get/set round-trips.
+    /// Outstanding call-privacy get/set round-trips. The fetch sends two
+    /// gets, so loading (see [`CallsState::privacy_loading`]) ends only when
+    /// the last response lands.
     pub privacy_pending: u8,
     /// The last privacy get/set failed.
     pub privacy_error: bool,
@@ -129,6 +127,11 @@ pub struct CallsState {
 }
 
 impl CallsState {
+    /// A privacy get/set round-trip is in flight.
+    pub fn privacy_loading(&self) -> bool {
+        self.privacy_pending > 0
+    }
+
     /// The tracked group call `id`: the current one or the story stream.
     pub fn group_call(&self, id: i32) -> Option<&ActiveGroupCall> {
         [self.active_group_call.as_ref(), self.story_stream.as_ref()]
@@ -172,7 +175,6 @@ impl CallsState {
             answered_call: None,
             privacy_allow_calls: None,
             privacy_p2p: None,
-            privacy_loading: false,
             privacy_pending: 0,
             privacy_error: false,
             prefs: CallPrefs::default(),

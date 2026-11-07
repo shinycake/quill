@@ -400,7 +400,7 @@ fn devices_page_esc_leaves_session_details_before_the_page(cx: &mut TestAppConte
     app.update(vcx, |app, cx| {
         let first = app
             .session()
-            .and_then(|s| s.settings.sessions.as_ref())
+            .and_then(|s| s.settings.sessions.data())
             .and_then(|list| list.first().map(|s| s.id));
         app.privacy.extra.session_details = first;
         cx.notify();

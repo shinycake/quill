@@ -1,6 +1,7 @@
 //! Notifications, storage, privacy, sessions, websites, the account and preferences: the `settings` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 pub struct SettingsState {
@@ -106,17 +107,16 @@ pub struct SettingsState {
     /// Slice A3: cached `getActiveSessions` answer (TGX `SessionsInfo`
     /// style); drives the Active Sessions overlay. Incomplete login
     /// attempts (`is_password_pending`) render in their own section.
-    pub sessions: Option<Vec<ParsedSession>>,
-    /// Slice A3: a `getActiveSessions` round trip is in flight.
-    pub sessions_loading: bool,
+    ///
+    /// One value for the fetch: in flight, answered, or failed with the
+    /// honest one-line error (classified from the TDLib error code, never the
+    /// native message) of the last fetch or terminate. The cache stays
+    /// visible meanwhile and the next successful fetch clears the error.
+    pub sessions: Fetch<Vec<ParsedSession>>,
     /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
     /// trip is in flight — terminate buttons stay disabled meanwhile.
     pub sessions_mutating: bool,
     pub device_login_result: Option<crate::auth::DeviceLoginResult>,
-    /// Slice A3: honest one-line failure of the last sessions fetch or
-    /// terminate (classified from the TDLib error code, never the native
-    /// message). Cleared on the next successful fetch.
-    pub sessions_error: Option<String>,
     /// Slice A3: a terminate succeeded — the old cache stays visible and
     /// is refetched from the authoritative answer on the next ingest
     /// (the `saved_sounds_stale` pattern); never an optimistic delete.
@@ -176,15 +176,13 @@ pub struct SettingsState {
     /// The last read-date get/set failed.
     pub read_date_error: bool,
     /// Slice S3: blocked user ids from `getBlockedMessageSenders`
-    /// (schema 1.8.67, :14505); `None` while never fetched.
-    pub blocked_senders: Option<Vec<i64>>,
+    /// (schema 1.8.67, :14505); idle while never fetched.
+    /// A blocked-senders page in flight or a failed get/set shows in the
+    /// same value; the loaded ids stay meanwhile.
+    pub blocked_senders: Fetch<Vec<i64>>,
     /// `total_count` from the last `messageSenders` answer; more pages
     /// exist while `blocked_senders.len() < blocked_total`.
     pub blocked_total: i32,
-    /// A blocked-senders page is in flight.
-    pub blocked_loading: bool,
-    /// The last blocked-senders get/set failed.
-    pub blocked_error: bool,
     /// MED1: local media preferences (remember-media-grouping),
     /// persisted via `settings::MediaPrefs`. Loaded at startup like
     /// `call_prefs`; the UI saves on toggle.
@@ -279,11 +277,9 @@ impl SettingsState {
             storage_limits_seed_sent: false,
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
-            sessions: None,
-            sessions_loading: false,
+            sessions: Fetch::Idle,
             sessions_mutating: false,
             device_login_result: None,
-            sessions_error: None,
             sessions_stale: false,
             account_ttl_days: None,
             account_ttl_loading: false,
@@ -302,10 +298,8 @@ impl SettingsState {
             read_date_show: None,
             read_date_loading: false,
             read_date_error: false,
-            blocked_senders: None,
+            blocked_senders: Fetch::Idle,
             blocked_total: 0,
-            blocked_loading: false,
-            blocked_error: false,
             media_prefs: MediaPrefs::default(),
             contact_prefs: ContactPrefs::default(),
             badge_prefs: BadgePrefs::default(),
