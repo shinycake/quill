@@ -548,3 +548,8 @@ pub(super) use rows_cache::{HistoryRowsKey, RowsInput};
 #[cfg(feature = "demo-capture")]
 #[path = "open_position_tests.rs"]
 mod open_position_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "thread_root_jump_tests.rs"]
+mod thread_root_jump_tests;

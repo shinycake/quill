@@ -124,6 +124,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.calls.left_group_call == Some(group_call_id) {
             self.session.calls.left_group_call = None;
         }
+        // A join starts over: a transport error left by the last time in
+        // the call is not this join's failure.
+        if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            call.transport_error = None;
+        }
         Ok(self.start_group_join(group_call_id))
     }
 

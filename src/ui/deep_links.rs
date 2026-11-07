@@ -8,6 +8,7 @@
 //! (same take-once pattern as `pending_story_open`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::links_state::PendingOpen;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -133,8 +134,11 @@ impl QuillApp {
                 live.driver.session.chats_state.deep_link = Some(preview);
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
-                self.links.pending_deep_link_open_from_agent = from_agent;
-                self.links.pending_deep_link_open = Some((chat_id, action));
+                self.links.pending_deep_link_open = Some(PendingOpen {
+                    chat_id,
+                    action,
+                    from_agent,
+                });
             }
             Some(DeepLinkState::ShowText(text)) => {
                 self.links.deep_link_dialog = Some(text);
@@ -177,15 +181,18 @@ impl QuillApp {
     /// resolved the link later, and the open is checked again now.
     pub(super) fn open_deep_link_chat(
         &mut self,
-        chat_id: ChatId,
-        action: &DeepLinkAction,
+        open: PendingOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let from_agent = std::mem::take(&mut self.links.pending_deep_link_open_from_agent);
+        let PendingOpen {
+            chat_id,
+            action,
+            from_agent,
+        } = open;
         self.agent_step(from_agent, |this| {
             if !from_agent || this.agent_may_open(chat_id) {
-                this.open_deep_link_chat_now(chat_id, action, window, cx);
+                this.open_deep_link_chat_now(chat_id, &action, window, cx);
             }
         });
     }

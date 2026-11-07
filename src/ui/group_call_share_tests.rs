@@ -156,7 +156,7 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
         let pending = app.links.pending_deep_link_open.take();
         assert_eq!(
             pending,
-            Some((
+            Some(crate::ui::links_state::PendingOpen::user(
                 chat,
                 DeepLinkAction::ShareDraft {
                     text: SPEAKER.to_string()

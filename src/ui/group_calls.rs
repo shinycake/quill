@@ -99,7 +99,9 @@ impl QuillApp {
             });
             sent
         } else if let Some(session) = self.demo_session.as_mut() {
+            // As the driver's join: it starts without the last error.
             if let Some(call) = session.calls.active_group_call.as_mut() {
+                call.transport_error = None;
                 call.is_joined = true;
             }
             self.connection.set_note(StatusNote::silent(tr(

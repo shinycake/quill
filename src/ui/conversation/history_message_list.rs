@@ -1,6 +1,7 @@
 //! Methods moved out of `conversation.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::history_state::ScrollGoal;
 use quill::lang::{keys, tr, tr_with};
 
 /// The open thread's window, read once per render: it drives the unread
@@ -12,6 +13,19 @@ struct ThreadWindow {
     unread_count: i32,
     has_newer: bool,
     window_epoch: u64,
+    /// The older replies are loaded down to the root post.
+    loaded_complete: bool,
+}
+
+/// The reader's scroll goal in this render (`HistoryUi::scroll_goal`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GoalNow {
+    /// None, or its rows are not in yet.
+    Waiting,
+    /// The rows reach it: it places the view instead of the view hold.
+    Due,
+    /// It was for a view that is gone.
+    Stale,
 }
 
 impl QuillApp {
@@ -53,6 +67,7 @@ impl QuillApp {
                 unread_count: thread.unread_count,
                 has_newer: thread.history.has_newer,
                 window_epoch: thread.history.window_epoch,
+                loaded_complete: thread.history.loaded_complete,
             });
         let history_key = (
             viewed_chat.map(|chat| chat.0).unwrap_or(-1),
@@ -122,7 +137,11 @@ impl QuillApp {
         let same_window = self.history.key == Some(history_key)
             && self.history.window_epoch == window_epoch
             && !self.history.anchor_pending;
-        let hold = (same_window && (build.is_some() || splice.is_some()))
+        // A goal the reader asked for that these rows reach: it places the
+        // view, so nothing is held.
+        let goal = self.scroll_goal_now(thread_window.as_ref());
+        let goal_due = goal == GoalNow::Due;
+        let hold = (same_window && !goal_due && (build.is_some() || splice.is_some()))
             .then(|| self.capture_view_hold(cx));
         if let Some(mut messages) = build {
             // Deleted messages dissolve in place before they go.
@@ -305,6 +324,11 @@ impl QuillApp {
             let fresh =
                 chrome_inputs.stale_rows(&self.history.rows, &chrome_due, &patches, mark.epoch);
             self.apply_row_patches(patches, fresh, mark, rows_started, cx);
+        }
+        match goal {
+            GoalNow::Due => self.reach_scroll_goal(cx),
+            GoalNow::Stale => self.history.scroll_goal = None,
+            GoalNow::Waiting => {}
         }
         // Read by the next render's view hold and by the landing.
         self.history.had_newer = has_newer;
@@ -766,6 +790,34 @@ impl QuillApp {
         // A sent message turns a freeform wallpaper.
         if following && !newer_page && outgoing {
             self.rotate_wallpaper_on_send(cx);
+        }
+    }
+
+    /// Where the reader's scroll goal stands with the rows this render
+    /// shows.
+    fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
+        match (self.history.scroll_goal, thread) {
+            (None, _) => GoalNow::Waiting,
+            (Some(ScrollGoal::ThreadRoot), Some(thread)) if thread.loaded_complete => GoalNow::Due,
+            (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalNow::Waiting,
+            // The thread closed: the goal goes with it.
+            (Some(ScrollGoal::ThreadRoot), None) => GoalNow::Stale,
+        }
+    }
+
+    /// Scroll to the goal, now that the rows are in, and let it go.
+    fn reach_scroll_goal(&mut self, cx: &mut Context<Self>) {
+        if self.history.rows.is_empty() {
+            return;
+        }
+        let Some(goal) = self.history.scroll_goal.take() else {
+            return;
+        };
+        self.end_landing();
+        match goal {
+            ScrollGoal::ThreadRoot => self.history.scroller.update(cx, |state, cx| {
+                state.scroll_to_item(0, cx);
+            }),
         }
     }
 

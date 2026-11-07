@@ -170,7 +170,10 @@ impl QuillApp {
         let Some(text) = self.group_call_share_link() else {
             return;
         };
-        self.links.pending_deep_link_open = Some((chat_id, DeepLinkAction::ShareDraft { text }));
+        self.links.pending_deep_link_open = Some(super::links_state::PendingOpen::user(
+            chat_id,
+            DeepLinkAction::ShareDraft { text },
+        ));
         self.group_call.share_open = false;
         self.raise_main_window(cx);
         cx.notify();

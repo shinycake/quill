@@ -75,6 +75,7 @@ impl QuillApp {
         // join it. Nothing else joins by itself; an unjoined window offers
         // its Join button.
         self.consume_stream_join_intent(cx);
+        self.settle_stream_join();
         let call = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())

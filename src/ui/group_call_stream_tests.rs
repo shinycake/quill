@@ -464,7 +464,7 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     });
     assert!(app.read_with(&call, |app, _| app.group_call.stream.joining.is_none()));
     assert!(error(&app, &mut call).is_some(), "the failure shows");
-    // The native connect fails without a join error: the next draw stops
+    // The native connect fails without a join error: the next sync stops
     // the spinner and says so.
     app.update(&mut call, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
@@ -473,11 +473,46 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
             active.transport_error = Some("connect failed".into());
         }
         app.group_call.stream.joining = Some(CALL);
-        cx.notify();
+        app.sync_group_call_window(cx);
     });
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| app.group_call.stream.joining.is_none()));
     assert!(error(&app, &mut call).is_some());
+}
+
+/// A screen share that failed earlier is not a failed join: the join on
+/// its way keeps waiting.
+#[gpui_kit::test]
+fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    let window = app
+        .read_with(&main, |app, _| app.group_call.window)
+        .expect("the unjoined stream's window");
+    let mut call = VisualTestContext::from_window(window, cx);
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        if let Some(active) = session.calls.active_group_call.as_mut() {
+            active.screen_share_error = Some("screen share failed".into());
+        }
+        // Join was pressed; TDLib has not answered yet.
+        app.group_call.stream.joining = Some(CALL);
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    let state = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            (
+                app.group_call.stream.joining,
+                app.session().and_then(|s| s.calls.group_call_error.clone()),
+            )
+        })
+    };
+    assert_eq!(state(&app, &mut call), (Some(CALL), None), "still joining");
 }
 
 /// The row id the stream window's live controller and overlays use.

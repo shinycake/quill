@@ -290,6 +290,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = key.id();
         if matches!(send, OfferSend::Conference) {
             self.session.calls.group_call_error = Some(format!("Could not join the call: {err}"));
+        } else if matches!(send, OfferSend::Screen)
+            && let Some(call) = self.session.calls.group_call_mut(id)
+        {
+            // The share failed; the call it was for still works.
+            call.screen_share_error = Some(err.to_string());
         } else if let Some(call) = self.session.calls.group_call_mut(id) {
             call.transport_error = Some(err.to_string());
             if matches!(send, OfferSend::Rejoin { .. }) {

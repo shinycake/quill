@@ -9,6 +9,15 @@ use quill::ids::ChatId;
 use quill::ids::MessageId;
 use std::collections::HashMap;
 
+/// A place the reader asked the history to go that may have to wait for
+/// pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScrollGoal {
+    /// The open thread's first row, its root post: due once the older
+    /// replies are all loaded ("jump to root").
+    ThreadRoot,
+}
+
 pub(crate) struct HistoryUi {
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
@@ -40,8 +49,10 @@ pub(crate) struct HistoryUi {
     /// kit Phase 3: `(open_chat_id, open_topic)` the scroller state was
     /// last synced for — a change means reset + scroll to bottom.
     pub(super) key: Option<(i64, Option<i32>, i64)>,
-    /// "Jump to root" was asked while older replies were still loading.
-    pub(super) thread_root_jump: bool,
+    /// Where the reader asked the history to go. The history list owns it:
+    /// it reaches the goal once the rows allow, and a goal due this render
+    /// wins over the view hold (`ScrollGoal`).
+    pub(super) scroll_goal: Option<ScrollGoal>,
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) ends: Option<(MessageId, MessageId)>,
@@ -183,7 +194,7 @@ impl HistoryUi {
             window_active: false,
             shared: HistoryShared::default(),
             key: None,
-            thread_root_jump: false,
+            scroll_goal: None,
             ends: None,
             window_epoch: 0,
             anchor_pending: false,
