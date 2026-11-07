@@ -170,7 +170,8 @@ impl Session {
     ///   reload via updates);
     /// - `need_rejoin` makes a rejoin due (`GroupCallRejoin::want`) so the
     ///   UI shows "Reconnecting…" and the driver re-issues the join;
-    /// - a fresh joined, non-`need_rejoin` update ends the rejoin;
+    /// - a joined, non-`need_rejoin` update that follows a not-joined one
+    ///   ends the rejoin (so does the rejoin's own join answer);
     /// - `!is_active` (ended) drops the tracked call.
     ///
     /// The watched live story's call goes to its own slot
@@ -240,7 +241,10 @@ impl Session {
             *tracked = ActiveGroupCall::fresh(group_call.id);
         }
         apply_group_call_fields(tracked, group_call);
-        if group_call.is_joined && !group_call.need_rejoin {
+        if group_call.is_joined
+            && !group_call.need_rejoin
+            && tracked.rejoin == GroupCallRejoin::Idle
+        {
             // Phase C2f: the failure is resolved — a stale
             // group-call error line would lie now.
             self.calls.group_call_error = None;
@@ -478,9 +482,18 @@ impl Session {
 
     /// Phase C3a: store the `joinVideoChat` `Text` response payload on
     /// the tracked call. Phase C2g consumes it in the driver pump to
-    /// finish the native group handshake.
-    pub fn set_group_call_join_payload(&mut self, group_call_id: i32, payload: String) {
+    /// finish the native group handshake. The answer to the rejoin in
+    /// flight (`request`) ends that rejoin.
+    pub fn set_group_call_join_payload(
+        &mut self,
+        group_call_id: i32,
+        request: Option<RequestId>,
+        payload: String,
+    ) {
         if let Some(tracked) = self.calls.group_call_mut(group_call_id) {
+            if let Some(request) = request {
+                tracked.rejoin.attempt_joined(request);
+            }
             tracked.join_payload = payload;
         }
     }
@@ -514,6 +527,7 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.is_live_story = group_call.is_live_story;
     tracked.is_rtmp_stream = group_call.is_rtmp_stream;
     tracked.scheduled_start_date = 0;
+    let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
     tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
@@ -545,10 +559,13 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
         // A rejoin already under way is not re-armed: the update predates
         // its join answer.
         tracked.rejoin.want();
-    } else if group_call.is_joined {
-        // Phase C2f: a clean joined update means the rejoin
-        // succeeded — the attempt counter starts over.
-        tracked.rejoin = GroupCallRejoin::Idle;
+    } else if group_call.is_joined && !was_joined {
+        // Phase C2f: TDLib went from not joined to joined, so a join went
+        // through. A routine joined update (a viewer count) is no evidence:
+        // a rejoin Quill armed while TDLib still said joined (a stream's
+        // part fetch) ends only on its own join answer
+        // (`GroupCallRejoin::attempt_joined`).
+        tracked.rejoin.rejoined();
     }
     tracked.sort_participants();
 }
