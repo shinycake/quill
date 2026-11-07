@@ -14,7 +14,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::demo_media_allowlist;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
-use quill::calls::engine::{MediaDevice, MediaDeviceKind, RemoteVideoState, TransportState};
+use quill::calls::engine::{MediaDevice, MediaDeviceKind, RemoteVideoState};
 use quill::calls::live_video::LiveKey;
 use quill::diagnostics::DiagnosticSink;
 use quill::state::{ActiveCall, Session};
@@ -124,8 +124,7 @@ pub(in crate::ui) fn seed_video_call(
             emojis: ["🐙", "🌵", "🎈", "🍋"].map(String::from).to_vec(),
             is_group_call_supported: true,
         }),
-        transport: Some(TransportState::Connected),
-        transport_error: None,
+        transport: quill::state::CallTransport::Connected(Default::default()),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
         muted: false,

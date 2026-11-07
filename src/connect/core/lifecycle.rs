@@ -53,8 +53,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             call_devices_listing: None,
             selected_devices: (None, None),
             group_playback_muted: Default::default(),
-            call_connect_params: None,
-            reconnect_attempts: 0,
             call_sound_watch: None,
             credentials,
             paths: prepared.paths,

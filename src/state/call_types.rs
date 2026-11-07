@@ -1,5 +1,6 @@
 //! Call state types: 1:1 and group calls.
 use super::*;
+use crate::calls::engine::ConnectParams;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -22,8 +23,9 @@ pub struct ActiveCall {
     /// here.
     pub ready_at: Option<Instant>,
     pub ready: Option<ReadyParams>,
-    pub transport: Option<TransportState>,
-    pub transport_error: Option<String>,
+    /// The media transport, its retained connect parameters and its
+    /// error, as one value (see `CallTransport`).
+    pub transport: CallTransport,
     /// Phase C2b: chunks from `updateNewCallSignalingData`; the engine now
     /// consumes them too, while this queue remains the honest diagnostic
     /// record. Capped at
@@ -97,6 +99,123 @@ pub struct CallSummary {
     pub final_transport: Option<TransportState>,
     pub reconnect_attempts: usize,
     pub muted: bool,
+}
+
+/// The 1:1 call's media transport. One value, so a phase can never sit
+/// next to a stale error and the retry budget lives with the call it
+/// belongs to. Quill connects once per Ready call, retries the retained
+/// parameters up to `MAX_CALL_RECONNECT_ATTEMPTS` times on a reported
+/// failure, and a `Connected` report starts the budget over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallTransport {
+    /// Not connected yet. `start_error`: the engine could not start the
+    /// call; the call stays signaling-only and still connects on Ready.
+    NotStarted {
+        start_error: Option<String>,
+    },
+    /// Connect issued, or the engine reports it is connecting.
+    Connecting(CallLink),
+    Connected(CallLink),
+    /// A retry of the retained parameters is in flight.
+    Reconnecting(CallLink),
+    /// The engine closed the transport.
+    Closed(CallLink),
+    /// No transport. `link` is kept when one was connected, so a later
+    /// engine failure report can still retry (or say the budget is spent).
+    Failed {
+        reason: String,
+        link: Option<CallLink>,
+    },
+}
+
+/// What a connected transport keeps for its reconnects.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CallLink {
+    pub params: ConnectParams,
+    /// Reconnects since the last `Connected` report.
+    pub reconnect_attempts: usize,
+}
+
+/// Reconnects Quill tries on its own after the engine reports a failure.
+pub const MAX_CALL_RECONNECT_ATTEMPTS: usize = 3;
+
+impl Default for CallTransport {
+    fn default() -> Self {
+        Self::NotStarted { start_error: None }
+    }
+}
+
+impl CallTransport {
+    /// The phase the engine API and the UI speak; `None` before connect.
+    pub fn state(&self) -> Option<TransportState> {
+        match self {
+            Self::NotStarted { .. } => None,
+            Self::Connecting(_) => Some(TransportState::Connecting),
+            Self::Connected(_) => Some(TransportState::Connected),
+            Self::Reconnecting(_) => Some(TransportState::Reconnecting),
+            Self::Closed(_) => Some(TransportState::Closed),
+            Self::Failed { .. } => Some(TransportState::Failed),
+        }
+    }
+
+    /// The error to show: a failed start before connect, or the failure.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::NotStarted { start_error } => start_error.as_deref(),
+            Self::Failed { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// A connect was attempted (the engine owns a transport, or failed to).
+    pub fn started(&self) -> bool {
+        !matches!(self, Self::NotStarted { .. })
+    }
+
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected(_))
+    }
+
+    pub fn link(&self) -> Option<&CallLink> {
+        match self {
+            Self::NotStarted { .. } => None,
+            Self::Connecting(link)
+            | Self::Connected(link)
+            | Self::Reconnecting(link)
+            | Self::Closed(link) => Some(link),
+            Self::Failed { link, .. } => link.as_ref(),
+        }
+    }
+
+    pub fn reconnect_attempts(&self) -> usize {
+        self.link().map_or(0, |link| link.reconnect_attempts)
+    }
+
+    /// The engine could not start the call. Before connect it is the
+    /// start error; a failed transport takes it as its reason; a live
+    /// transport has outgrown it.
+    pub fn record_start_error(&mut self, error: String) {
+        match self {
+            Self::NotStarted { start_error } => *start_error = Some(error),
+            Self::Failed { reason, .. } => *reason = error,
+            _ => {}
+        }
+    }
+
+    /// A live phase the engine reported, carrying `link`. `Failed` is not
+    /// one: a reported failure goes through the reconnect decision.
+    pub fn reported(state: TransportState, link: CallLink) -> Option<Self> {
+        match state {
+            TransportState::Connecting => Some(Self::Connecting(link)),
+            TransportState::Connected => Some(Self::Connected(CallLink {
+                reconnect_attempts: 0,
+                ..link
+            })),
+            TransportState::Reconnecting => Some(Self::Reconnecting(link)),
+            TransportState::Closed => Some(Self::Closed(link)),
+            TransportState::Failed => None,
+        }
+    }
 }
 
 impl ActiveCall {

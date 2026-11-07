@@ -8,10 +8,8 @@ use crate::calls::capture::system_audio::{SystemAudioCapture, SystemAudioMix};
 use crate::calls::capture::{
     AudioFrame, CaptureError, CaptureEvent, FrameSink, MicCapture, MicControls, VideoFrame,
 };
-use crate::calls::engine::{
-    CallEngine, CaptureTarget, ConnectParams, ExternalDevice, MockEngine, TransportState,
-};
-use crate::state::ActiveGroupCall;
+use crate::calls::engine::{CallEngine, CaptureTarget, ConnectParams, ExternalDevice, MockEngine};
+use crate::state::{ActiveGroupCall, CallTransport};
 use crate::telegram::envelope::parse_group_call_participant;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -320,7 +318,7 @@ fn a_private_call_shares_without_pause_requests() {
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
     {
         let call = driver.session.calls.active_call.as_mut().unwrap();
-        call.transport = Some(TransportState::Connected);
+        call.transport = CallTransport::Connected(Default::default());
         call.screen_sharing = true;
     }
     pump_until_screen_answers(&mut driver);

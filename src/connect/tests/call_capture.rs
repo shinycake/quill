@@ -8,9 +8,9 @@ use crate::calls::capture::{
 };
 use crate::calls::engine::{
     CallEngine, CaptureTarget, ConnectParams, ExternalDevice, MediaDevice, MediaDeviceKind,
-    MockEngine, TransportState,
+    MockEngine,
 };
-use crate::state::ActiveGroupCall;
+use crate::state::{ActiveGroupCall, CallTransport};
 use crate::telegram::envelope::parse_group_call_participant;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -289,7 +289,8 @@ fn private_call_uses_the_chosen_microphone() {
             },
         )
         .unwrap();
-    driver.session.calls.active_call.as_mut().unwrap().transport = Some(TransportState::Connected);
+    driver.session.calls.active_call.as_mut().unwrap().transport =
+        CallTransport::Connected(Default::default());
     pump_until_mic_answers(&mut driver);
     assert_eq!(
         *mics.opened.lock().unwrap(),
@@ -316,7 +317,10 @@ fn private_call_uses_the_chosen_microphone() {
     );
 
     // A failed transport stops the microphone.
-    driver.session.calls.active_call.as_mut().unwrap().transport = Some(TransportState::Failed);
+    driver.session.calls.active_call.as_mut().unwrap().transport = CallTransport::Failed {
+        reason: String::new(),
+        link: None,
+    };
     pump_until_mic_answers(&mut driver);
     until(|| mics.stopped.load(Ordering::SeqCst));
     std::fs::remove_dir_all(dir).ok();

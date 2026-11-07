@@ -148,7 +148,7 @@ impl QuillApp {
             CallState::ExchangingKeys => (tr(keys::GROUP_CALL_CONNECTING).to_string(), None),
             CallState::Ready => {
                 use quill::calls::engine::TransportState;
-                let status = match call.transport {
+                let status = match call.transport.state() {
                     Some(TransportState::Connected) if call.muted => {
                         tr(keys::Q_OPS_MUTED_MICROPHONE_OFF).to_string()
                     }
@@ -161,8 +161,8 @@ impl QuillApp {
                         &[(
                             "error",
                             (call
-                                .transport_error
-                                .as_deref()
+                                .transport
+                                .error()
                                 .unwrap_or(tr(keys::Q_OPS_UNKNOWN_ERROR))),
                         )],
                     ),
@@ -252,7 +252,7 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_OPS_VIDEO_UNAVAILABLE_NO_CAMERA_FOUND)
                 }
-            } else if call.transport == Some(quill::calls::engine::TransportState::Connected) {
+            } else if call.transport.is_connected() {
                 tr(keys::Q_OPS_AUDIO_CONNECTED)
             } else {
                 tr(keys::Q_OPS_WAITING_FOR_AUDIO_TRANSPORT)
@@ -297,12 +297,12 @@ impl QuillApp {
                     .child(error.to_string()),
             );
         }
-        if let Some(error) = &call.transport_error {
+        if let Some(error) = call.transport.error() {
             card = card.child(
                 div()
                     .text_xs()
                     .text_color(danger_soft())
-                    .child(error.clone()),
+                    .child(error.to_string()),
             );
         }
         if matches!(call.state, CallState::Ready) {

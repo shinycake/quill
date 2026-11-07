@@ -271,7 +271,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn capture_wanted(&self) -> Option<(CaptureTarget, bool)> {
         if let Some(call) = self.session.calls.active_call.as_ref()
             && matches!(
-                call.transport,
+                call.transport.state(),
                 Some(
                     TransportState::Connecting
                         | TransportState::Connected
