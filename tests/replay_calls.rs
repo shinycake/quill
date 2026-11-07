@@ -63,7 +63,7 @@ fn replay_call_signaling_lifecycle() {
             .id,
         77
     );
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert!(session.calls.busy_decline_queue.is_empty());
 
     // Keys exchange, then Ready; signaling data is queued honestly.
@@ -262,7 +262,7 @@ fn replay_video_call_signaling() {
             .id,
         90
     );
-    assert_eq!(session.calls.swap_pending, Some((91, 42, true)));
+    assert_eq!(session.calls.second_call.prompt(), Some((91, 42, true)));
 
     // Remote hangup → the summary keeps `is_video: true` (the driver
     // sends it back in `discardCall`).
@@ -354,7 +354,7 @@ fn replay_group_call_signaling() {
     assert_eq!(call.id, 555);
     assert_eq!(call.title, "Demo voice");
     assert!(!call.is_joined);
-    assert!(!call.reconnecting);
+    assert!(!call.reconnecting());
     assert!(call.can_be_managed);
     assert!(call.can_toggle_mute_new_participants);
     assert!(call.participants.is_empty());
@@ -490,7 +490,7 @@ fn replay_group_call_signaling() {
     );
     let call = session.calls.active_group_call.as_ref().expect("rejoining");
     assert!(call.need_rejoin);
-    assert!(call.reconnecting);
+    assert!(call.reconnecting());
     session.clear_group_call_reconnecting();
     assert!(
         !session
@@ -498,7 +498,7 @@ fn replay_group_call_signaling() {
             .active_group_call
             .as_ref()
             .expect("call")
-            .reconnecting
+            .reconnecting()
     );
 
     // Call ends → tracked call cleared.

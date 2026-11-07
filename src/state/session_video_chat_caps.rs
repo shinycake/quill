@@ -58,7 +58,7 @@ impl Session {
         });
         call.is_joined
             || call.need_rejoin
-            || call.reconnecting
+            || call.reconnecting()
             || joining == Some(call.id)
             || self.requests.pending.values().any(|p| p.purpose == purpose)
     }

@@ -136,14 +136,12 @@ pub struct ActiveGroupCall {
     pub is_joined: bool,
     /// `need_rejoin` arrived (kicked by network loss).
     pub need_rejoin: bool,
-    /// UI "reconnecting" banner; set on `need_rejoin`, cleared when a
-    /// rejoin is issued or a fresh joined `updateGroupCall` arrives.
-    pub reconnecting: bool,
-    /// Phase C2f: group-call rejoin attempts after `need_rejoin` —
-    /// the C2d 1:1 reconnect discipline (max 3 attempts). Reset on a
-    /// fresh joined `updateGroupCall` or when a new call takes the
-    /// slot (`fresh()`).
-    pub rejoin_attempts: usize,
+    /// Where Quill's own rejoin after a network loss stands (the
+    /// C2d 1:1 reconnect discipline, at most
+    /// `MAX_GROUP_CALL_REJOIN_ATTEMPTS`). Reset by a joined
+    /// `updateGroupCall` without `need_rejoin`, and when a new call takes
+    /// the slot (`fresh()`).
+    pub rejoin: GroupCallRejoin,
     pub can_be_managed: bool,
     pub is_owned: bool,
     pub participant_count: i32,
@@ -251,6 +249,95 @@ pub struct ActiveGroupCall {
     pub conference: Option<ConferenceCall>,
 }
 
+/// Quill's own rejoin of a group call that TDLib (or a stream feeder)
+/// says needs one. One value, so "a rejoin is due" and "the banner shows"
+/// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
+/// a repeated `need_rejoin` while one is `InFlight` changes nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GroupCallRejoin {
+    /// Joined, or never dropped.
+    #[default]
+    Idle,
+    /// A rejoin is due; `attempts` were already spent on this drop.
+    Wanted { attempts: usize },
+    /// Attempt number `attempt` is being made: its offer is being built,
+    /// or its join request (`request`) waits for TDLib.
+    InFlight { request: RequestId, attempt: usize },
+    /// Every attempt failed; only the manual Rejoin is left.
+    GaveUp,
+}
+
+impl GroupCallRejoin {
+    /// TDLib's `need_rejoin` (or a stream's own rejoin): a drop starts
+    /// one rejoin series, and a series already under way goes on.
+    pub fn want(&mut self) {
+        if *self == GroupCallRejoin::Idle {
+            *self = GroupCallRejoin::Wanted { attempts: 0 };
+        }
+    }
+
+    /// The attempt the driver may start now, if any: from `Wanted` with
+    /// attempts left.
+    pub fn next_attempt(&self) -> Option<usize> {
+        match *self {
+            GroupCallRejoin::Wanted { attempts } if attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS => {
+                Some(attempts + 1)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn in_flight(&self) -> Option<RequestId> {
+        match *self {
+            GroupCallRejoin::InFlight { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// Due or under way, with attempts left.
+    pub fn is_rejoining(&self) -> bool {
+        match *self {
+            GroupCallRejoin::Wanted { .. } => self.next_attempt().is_some(),
+            GroupCallRejoin::InFlight { .. } => true,
+            GroupCallRejoin::Idle | GroupCallRejoin::GaveUp => false,
+        }
+    }
+
+    /// The attempt behind `request` failed: the next one is due, or the
+    /// series gave up. Whether `request` was this call's rejoin.
+    pub fn attempt_failed(&mut self, request: RequestId) -> bool {
+        match *self {
+            GroupCallRejoin::InFlight {
+                request: mine,
+                attempt,
+            } if mine == request => {
+                *self = if attempt >= MAX_GROUP_CALL_REJOIN_ATTEMPTS {
+                    GroupCallRejoin::GaveUp
+                } else {
+                    GroupCallRejoin::Wanted { attempts: attempt }
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The attempt behind `request` never reached TDLib (the send
+    /// failed): it is not counted.
+    pub fn attempt_unsent(&mut self, request: RequestId) {
+        if let GroupCallRejoin::InFlight {
+            request: mine,
+            attempt,
+        } = *self
+            && mine == request
+        {
+            *self = GroupCallRejoin::Wanted {
+                attempts: attempt.saturating_sub(1),
+            };
+        }
+    }
+}
+
 /// stories-live-play: a pending "Join live" from the story viewer — the
 /// group call id plus the `getGroupCall` request behind it, so the pump
 /// can tell "still waiting" from "the fetch failed".
@@ -274,20 +361,23 @@ impl ActiveGroupCall {
     }
 
     /// Dropped by the network and still being rejoined on its own: a
-    /// rejoin is due or under way and attempts are left. A rejoin whose
-    /// answer is pending (`reconnecting` cleared) still counts, the last
-    /// one included; once the last one failed (`reconnecting` set again
-    /// with no attempts left) the call waits for the manual Rejoin.
+    /// rejoin is due or under way and attempts are left. Once the last one
+    /// failed the call waits for the manual Rejoin.
     pub fn rejoining(&self) -> bool {
-        (self.need_rejoin || self.reconnecting)
-            && (self.rejoin_attempts < MAX_GROUP_CALL_REJOIN_ATTEMPTS || !self.reconnecting)
+        self.rejoin.is_rejoining()
+    }
+
+    /// The "Connection lost" banner and the connecting self row: from
+    /// `need_rejoin` until the rejoined `updateGroupCall`, the spent
+    /// state included (the banner is the manual Rejoin).
+    pub fn reconnecting(&self) -> bool {
+        self.rejoin != GroupCallRejoin::Idle
     }
 
     /// The join or its transport failed, or the rejoins are spent: only a
     /// manual retry brings it back.
     pub fn join_failed(&self) -> bool {
-        self.transport_error.is_some()
-            || (self.reconnecting && self.rejoin_attempts >= MAX_GROUP_CALL_REJOIN_ATTEMPTS)
+        self.transport_error.is_some() || self.rejoin == GroupCallRejoin::GaveUp
     }
 
     /// Blank tracked call for a newly seen call id. Participant state
@@ -300,8 +390,7 @@ impl ActiveGroupCall {
             is_live_story: false,
             is_joined: false,
             need_rejoin: false,
-            reconnecting: false,
-            rejoin_attempts: 0,
+            rejoin: GroupCallRejoin::Idle,
             can_be_managed: false,
             is_owned: false,
             participant_count: 0,

@@ -839,7 +839,7 @@ fn driver_join_live_story_two_step_and_gates() {
     assert!(driver.session.calls.active_group_call.is_none());
     // Reconnect uses the same live-story method, not joinVideoChat.
     if let Some(call) = driver.session.calls.story_stream.as_mut() {
-        call.reconnecting = true;
+        call.rejoin.want();
     }
     driver.maybe_auto_rejoin_group_call().unwrap();
     let retry = sent_request(&recorder, "joinLiveStory");

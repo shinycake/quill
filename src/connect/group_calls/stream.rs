@@ -567,7 +567,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // tdesktop's `startRejoin`, through the existing rejoin path
             // (`join.rs`, at most 3 attempts).
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                call.reconnecting = true;
+                call.rejoin.want();
             }
             let _ = self.maybe_auto_rejoin_group_call();
         }

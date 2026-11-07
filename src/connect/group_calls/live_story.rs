@@ -394,7 +394,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 group_call_id,
             }))
             .is_some();
-        if !(stream.is_joined || stream.reconnecting || stream.need_rejoin || joining) {
+        if !(stream.is_joined || stream.reconnecting() || stream.need_rejoin || joining) {
             return Ok(());
         }
         let extra = self.session.request(
