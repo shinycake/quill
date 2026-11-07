@@ -53,7 +53,8 @@ first frame they were drawn only after it.
   falls back to one `dlopen` of the framework.
 - Until the load is done, `set_main_menu` keeps the menu bar and installs it afterwards,
   and views answer `isEditable` NO, so AppKit makes no input context for them. A key makes
-  them editable at once and waits for the rest of the load itself. It also calls
+  them editable at once, without waiting for the worker (see Results for what that key
+  costs). It also calls
   `-[NSApplication updateWindows]`, so AppKit makes and activates the key view's context
   before that key is read: `setWindowsNeedUpdate:` left it for the next pass, and an
   inactive context dropped a dead key (Option-E typed "cafe" for "café" on the first
@@ -83,6 +84,11 @@ Warm, same method:
 
 The load itself ends (`writing_tools`) about 120 ms after `did_finish` warm and 350 ms
 cold; the menu bar's menus and the tray icon appear then.
+
+A launch that starts in the tray (`--start-minimized`) still makes its tray icon before
+`[NSApp run]`, as before, and the worker starts after it. Cold, two launches each:
+`window_open` → `ns_run` 156 and 209 ms on main, 155 and 131 with this change;
+`will_finish` → `did_finish` 332 and 76 on main, 38 and 56 with it.
 
 Every launch on main reached `did_finish` 319 to 486 ms after the window showed (17 of
 18 over 400), not only those whose chats missed the first frame; with this change, 47 to

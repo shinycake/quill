@@ -18,7 +18,9 @@
 //! - `set_main_menu` keeps the menu bar and installs it afterwards;
 //! - views answer `isEditable` NO (`text_input_ready_now`), so AppKit makes no
 //!   input context for them. A key makes them editable at once
-//!   (`text_input_ready`), and that key waits for the rest of the load.
+//!   (`text_input_ready`) without waiting for the worker: its context is made
+//!   while the Siri registration is held, and a key during a cold load was
+//!   handled 10 to 15 ms later than one after it.
 //!
 //! The worker loads the framework's images one at a time (`staged_load`):
 //! one `dlopen` would hold dyld's and the Objective-C runtime's locks for
