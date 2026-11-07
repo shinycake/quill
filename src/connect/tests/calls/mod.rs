@@ -17,6 +17,7 @@ use std::sync::atomic::AtomicU64;
 mod late_engine;
 mod media;
 mod sound_watch;
+mod transport;
 
 /// Phase C3a: `join_video_chat` must accept the tracked, unjoined call
 /// (the normal flow: `getGroupCall` creates the tracker, then the
@@ -340,8 +341,8 @@ fn call_ready_connects_transport_once_with_mapped_params() {
     assert!(webrtc.peer_tag.is_empty());
 
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Connecting));
-    assert_eq!(call.transport_error, None);
+    assert_eq!(call.transport.state(), Some(TransportState::Connecting));
+    assert_eq!(call.transport.error(), None);
 
     // A second Ready update must not reconnect.
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
@@ -357,9 +358,9 @@ fn call_ready_without_key_fails_transport_honestly() {
 
     assert!(handle.connects().is_empty());
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Failed));
+    assert_eq!(call.transport.state(), Some(TransportState::Failed));
     assert_eq!(
-        call.transport_error.as_deref(),
+        call.transport.error(),
         Some("call became ready without an encryption key")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -374,8 +375,8 @@ fn call_transport_callback_updates_session() {
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
 
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Connected));
-    assert_eq!(call.transport_error, None);
+    assert_eq!(call.transport.state(), Some(TransportState::Connected));
+    assert_eq!(call.transport.error(), None);
     assert_eq!(handle.connects().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -394,7 +395,14 @@ fn call_transport_retries_same_params_three_times_then_stops() {
         assert_eq!(handle.connects().last().unwrap().1, original);
         assert_eq!(handle.mute_changes(), vec![(77, true); expected_connects]);
         assert_eq!(
-            driver.session.calls.active_call.as_ref().unwrap().transport,
+            driver
+                .session
+                .calls
+                .active_call
+                .as_ref()
+                .unwrap()
+                .transport
+                .state(),
             Some(TransportState::Reconnecting)
         );
     }
@@ -403,11 +411,8 @@ fn call_transport_retries_same_params_three_times_then_stops() {
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     assert_eq!(handle.connects().len(), 4);
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Failed));
-    assert_eq!(
-        call.transport_error.as_deref(),
-        Some("reconnect attempts exhausted")
-    );
+    assert_eq!(call.transport.state(), Some(TransportState::Failed));
+    assert_eq!(call.transport.error(), Some("reconnect attempts exhausted"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -428,7 +433,14 @@ fn call_transport_connected_resets_reconnect_attempts() {
     }
     assert_eq!(handle.connects().len(), 6);
     assert_eq!(
-        driver.session.calls.active_call.as_ref().unwrap().transport,
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .unwrap()
+            .transport
+            .state(),
         Some(TransportState::Reconnecting)
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -443,9 +455,9 @@ fn call_transport_reconnect_error_is_reported() {
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
 
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Failed));
+    assert_eq!(call.transport.state(), Some(TransportState::Failed));
     assert_eq!(
-        call.transport_error.as_deref(),
+        call.transport.error(),
         Some("call engine operation connect failed with code -1")
     );
     assert_eq!(handle.connects().len(), 2);
@@ -455,8 +467,8 @@ fn call_transport_reconnect_error_is_reported() {
     handle.emit_transport_state(77, TransportState::Connecting);
     ingest_call_json(&mut driver, &seq, &sink, READY_CALL_JSON);
     let call = driver.session.calls.active_call.as_ref().unwrap();
-    assert_eq!(call.transport, Some(TransportState::Failed));
-    assert!(call.transport_error.as_ref().unwrap().contains("set_muted"));
+    assert_eq!(call.transport.state(), Some(TransportState::Failed));
+    assert!(call.transport.error().unwrap().contains("set_muted"));
     assert_eq!(handle.hung_up_calls(), vec![77]);
     let _ = std::fs::remove_dir_all(&dir);
 }

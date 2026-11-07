@@ -106,7 +106,7 @@ pub struct RtcServer {
     pub peer_tag: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConnectParams {
     pub encryption_key: Vec<u8>,
     pub custom_parameters: String,

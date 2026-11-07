@@ -87,8 +87,7 @@ impl Session {
             started_at: Instant::now(),
             ready_at: None,
             ready: call.ready.clone(),
-            transport: None,
-            transport_error: None,
+            transport: CallTransport::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
@@ -142,12 +141,10 @@ impl Session {
             .ready_at
             .map(|t| t.elapsed().as_secs() as i64)
             .unwrap_or(0);
-        let mut summary = CallSummary::from_terminal(
-            call,
-            duration_secs,
-            active.transport == Some(TransportState::Connected),
-        );
-        summary.final_transport = active.transport;
+        let mut summary =
+            CallSummary::from_terminal(call, duration_secs, active.transport.is_connected());
+        summary.final_transport = active.transport.state();
+        summary.reconnect_attempts = active.transport.reconnect_attempts();
         summary.muted = active.muted;
         // A call taken into a conference call goes on there, with no end
         // screen (tdesktop's panel migrates).

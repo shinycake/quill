@@ -324,7 +324,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn screen_wanted(&self) -> Option<CaptureTarget> {
         if let Some(call) = self.session.calls.active_call.as_ref() {
             let up = matches!(
-                call.transport,
+                call.transport.state(),
                 Some(
                     TransportState::Connecting
                         | TransportState::Connected

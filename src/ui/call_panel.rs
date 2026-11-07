@@ -187,7 +187,7 @@ impl QuillApp {
         let (status, connecting) = call_status(
             &call.state,
             call.is_outgoing,
-            call.transport,
+            call.transport.state(),
             call.connected_secs(),
         );
         let ready = matches!(call.state, CallState::Ready);
@@ -367,7 +367,7 @@ impl QuillApp {
         let (status, _) = call_status(
             &call.state,
             call.is_outgoing,
-            call.transport,
+            call.transport.state(),
             call.connected_secs(),
         );
         let muted = call.muted;

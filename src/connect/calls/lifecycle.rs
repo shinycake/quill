@@ -275,7 +275,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(call) = self.session.calls.active_call.as_mut() else {
             return Err(EngineError::NoActiveCall);
         };
-        if call.transport.is_some()
+        if call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.is_available()
         {
@@ -298,7 +298,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), EngineError> {
         let selection = (mic, speaker);
         if let Some(call) = self.session.calls.active_call.as_ref()
-            && call.transport.is_some()
+            && call.transport.started()
             && let Some(engine) = self.call_engine.as_deref_mut()
         {
             engine.select_devices(call.id, selection.0.as_deref(), selection.1.as_deref())?;

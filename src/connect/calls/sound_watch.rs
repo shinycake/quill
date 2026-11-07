@@ -17,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_call
             .as_ref()
-            .map(|call| (call.id, call.transport == Some(TransportState::Connected)))
+            .map(|call| (call.id, call.transport.is_connected()))
         else {
             self.call_sound_watch = None;
             return;
