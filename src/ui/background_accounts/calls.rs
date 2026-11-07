@@ -13,7 +13,9 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use quill::lang::{keys, tr, tr_with};
 use quill::notify_accounts::{BackgroundCallPlan, plan_background_call, ringing_incoming_call};
-use quill::notify_call::{CallNotificationAction, CallNotifyInput, decide_call_notify};
+use quill::notify_call::{
+    CallNotificationAction, CallNotifyInput, decide_call_notify, take_call_picks,
+};
 
 /// A call ringing on a background account.
 pub(super) struct BackgroundRing {
@@ -207,23 +209,25 @@ impl QuillApp {
     }
 
     /// Picks on the ringing call's OS notification (they arrive in
-    /// `calls.notify_clicks` with the other call picks). Runs at render,
-    /// before the on-screen account's call picks.
+    /// `calls.notify_clicks` with the other call picks, each with its
+    /// account). Runs at render, before the on-screen account's call picks.
     pub(super) fn flush_background_call_picks(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(call_id) = self.background.ringing.as_ref().map(|ring| ring.call_id) else {
+        let Some((account, call_id)) = self
+            .background
+            .ringing
+            .as_ref()
+            .map(|ring| (ring.account.clone(), ring.call_id))
+        else {
             return;
         };
+        // Only the picks made on this account's call: the account on
+        // screen can ring with the same call id.
         let picks: Vec<CallNotificationAction> = match self.calls.notify_clicks.lock() {
-            Ok(mut guard) => {
-                let (mine, rest): (Vec<_>, Vec<_>) =
-                    guard.drain(..).partition(|(id, _)| *id == call_id);
-                *guard = rest;
-                mine.into_iter().map(|(_, action)| action).collect()
-            }
+            Ok(mut guard) => take_call_picks(&mut guard, &account, call_id),
             Err(_) => return,
         };
         for action in picks {

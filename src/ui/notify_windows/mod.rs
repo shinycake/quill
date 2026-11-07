@@ -38,9 +38,9 @@ use view::{Content, NotifyView, ViewEvent};
 /// One frame of an animation.
 const FRAME: Duration = Duration::from_millis(16);
 
-/// The chat a notification belongs to: the account (`None` = on screen)
-/// and the chat.
-type Key = (Option<AccountKey>, ChatId);
+/// The chat a notification belongs to: the account it was shown for and
+/// the chat.
+type Key = (AccountKey, ChatId);
 
 /// A value moving from `from` to `to` (tdesktop `anim::value`).
 #[derive(Debug, Clone, Copy)]
@@ -271,7 +271,7 @@ impl QuillApp {
     /// replaces the shown one, as the system notifications do by tag.
     pub(in crate::ui) fn show_custom_notification(
         &mut self,
-        account: Option<&AccountKey>,
+        account: &AccountKey,
         notification: OsNotification,
         icon: Option<PathBuf>,
         preview: Option<PathBuf>,
@@ -279,7 +279,7 @@ impl QuillApp {
         reply: bool,
         cx: &mut Context<Self>,
     ) {
-        let key: Key = (account.cloned(), notification.chat_id);
+        let key: Key = (account.clone(), notification.chat_id);
         let now = Instant::now();
         let windows = &mut self.notify.windows;
         windows.queue.remove_key(&key);
@@ -308,11 +308,11 @@ impl QuillApp {
     /// (tdesktop `doClearFromHistory`).
     pub(in crate::ui) fn clear_custom_notifications(
         &mut self,
-        account: Option<&AccountKey>,
+        account: &AccountKey,
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) {
-        let key: Key = (account.cloned(), chat_id);
+        let key: Key = (account.clone(), chat_id);
         let now = Instant::now();
         let windows = &mut self.notify.windows;
         windows.queue.remove_key(&key);
@@ -627,15 +627,15 @@ impl QuillApp {
             ViewEvent::Hover(false) => self.notify_start_all_hiding(now),
             ViewEvent::Activate => {
                 if let Some(key) = self.notify_key(id) {
-                    self.push_notification_click(&key, NotificationAction::Open);
-                    self.clear_custom_notifications(key.0.as_ref(), key.1, cx);
+                    self.push_notification_click(&key, NotificationAction::Open, cx);
+                    self.clear_custom_notifications(&key.0, key.1, cx);
                 }
             }
             ViewEvent::Close => self.unlink_notification(id, cx),
             ViewEvent::ReplyInApp => {
                 if let Some(key) = self.notify_key(id) {
-                    self.push_notification_click(&key, NotificationAction::Reply);
-                    self.clear_custom_notifications(key.0.as_ref(), key.1, cx);
+                    self.push_notification_click(&key, NotificationAction::Reply, cx);
+                    self.clear_custom_notifications(&key.0, key.1, cx);
                 }
             }
             ViewEvent::ReplyOpened => {
@@ -646,8 +646,13 @@ impl QuillApp {
                 }
             }
             ViewEvent::ReplySent(text) => {
-                if let Some((None, chat_id)) = self.notify_key(id) {
-                    self.send_inline_reply(chat_id, &text, cx);
+                // Sent only while the notification's account is on screen;
+                // otherwise Reply switches to it and focuses the composer.
+                if let Some(key) = self.notify_key(id)
+                    && !self.send_inline_reply(&key.0, key.1, &text, cx)
+                    && self.session().is_none_or(|s| s.account != key.0)
+                {
+                    self.push_notification_click(&key, NotificationAction::Reply, cx);
                 }
                 self.unlink_notification(id, cx);
                 self.notify_start_all_hiding(now);
@@ -680,21 +685,23 @@ impl QuillApp {
             .map(|s| s.key.clone())
     }
 
-    /// Hand a click to the path the system notifications use: the next
-    /// render opens the chat (and switches accounts if needed).
-    fn push_notification_click(&mut self, key: &Key, action: NotificationAction) {
-        match &key.0 {
-            None => {
-                if let Ok(mut clicks) = self.notify.notify_clicks.lock() {
-                    clicks.push((key.1, action));
-                }
-            }
-            Some(account) => {
-                if let Ok(mut clicks) = self.background.clicks.lock() {
-                    clicks.push((account.clone(), key.1, action));
-                }
-            }
-        }
+    /// Hand a click to the path the system notifications use: it runs on
+    /// the account the notification was shown for (switching to it if
+    /// needed), and the next render opens the chat.
+    fn push_notification_click(
+        &mut self,
+        key: &Key,
+        action: NotificationAction,
+        cx: &mut Context<Self>,
+    ) {
+        self.queue_account_click(
+            quill::notify_accounts::ChatClick {
+                account: key.0.clone(),
+                chat_id: key.1,
+                action,
+            },
+            cx,
+        );
         quill::wake::UPDATES.poke();
     }
 

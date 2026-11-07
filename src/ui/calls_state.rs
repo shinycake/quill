@@ -14,10 +14,12 @@ pub(crate) struct CallUi {
     /// its feed.
     pub(super) remote_player: Option<VideoPlayer>,
     pub(super) local_player: Option<VideoPlayer>,
-    /// Accept / Decline / body picks on incoming-call notifications.
-    pub(super) notify_clicks: Arc<Mutex<Vec<(i32, quill::notify_call::CallNotificationAction)>>>,
-    /// The incoming call last announced with a system notification.
-    pub(super) notified: Option<i32>,
+    /// Accept / Decline / body picks on incoming-call notifications, each
+    /// with the account whose call rang.
+    pub(super) notify_clicks: Arc<Mutex<Vec<quill::notify_call::CallPick>>>,
+    /// The incoming call last announced with a system notification, and
+    /// the account it rang on (call ids are per account).
+    pub(super) notified: Option<(quill::ids::AccountKey, i32)>,
     /// Phase C1: whether the call-duration 1s tick task is running
     /// (keeps the overlay's ringing/connected clock fresh). Mirrors
     /// `voice_tick`.

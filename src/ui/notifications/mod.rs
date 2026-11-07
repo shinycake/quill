@@ -10,7 +10,6 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::locks::LockExt;
 use quill::notify::{NotificationAction, NotificationSoundKind, QueuedNotification};
 use quill::state::RedrawNeed;
 use quill::telegram::envelope::{AuthorizationState, ChatNotificationSettings};
@@ -808,14 +807,8 @@ impl QuillApp {
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.
         self.drain_background_clicks(cx);
-        let clicks: Vec<(ChatId, NotificationAction)> = self
-            .notify
-            .notify_clicks
-            .lock_or_recover()
-            .drain(..)
-            .collect();
-        for (chat_id, action) in clicks {
-            self.run_notification_action(chat_id, action, window, cx);
+        for click in self.take_on_screen_clicks() {
+            self.run_notification_action(click.chat_id, click.action, window, cx);
         }
         // Other accounts: switches asked for by their notifications.
         self.flush_background_accounts(window, cx);

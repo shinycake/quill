@@ -291,6 +291,25 @@ pub enum ClickPlan {
     Ignore,
 }
 
+/// A click on a chat notification, with the account the notification was
+/// shown for. Every queue of notification clicks holds these, so a click
+/// can only act on the account whose notification it was, whichever
+/// account is on screen by the time it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatClick {
+    pub account: AccountKey,
+    pub chat_id: ChatId,
+    pub action: NotificationAction,
+}
+
+/// The account a notification tag names (`account:<key>`, see
+/// `notify::parse_notification_tag`).
+pub fn account_from_tag(tag_account: &str) -> Option<AccountKey> {
+    tag_account
+        .strip_prefix("account:")
+        .and_then(AccountKey::new)
+}
+
 /// Plan a notification click. `tag_account` is the account part of the
 /// notification tag (`account:<key>`, see `notify::parse_notification_tag`).
 pub fn plan_click(
@@ -299,22 +318,44 @@ pub fn plan_click(
     active: &AccountKey,
     known: &[AccountKey],
 ) -> ClickPlan {
-    let Some(key) = tag_account
-        .strip_prefix("account:")
-        .and_then(AccountKey::new)
-    else {
+    let Some(key) = account_from_tag(tag_account) else {
         return ClickPlan::Ignore;
     };
-    if &key == active {
+    plan_account_click(&key, action, Some(active), known)
+}
+
+/// Plan a click on a notification shown for `account`. `active` is the
+/// account on screen (`None` while none is); `known` the accounts running
+/// in the background.
+pub fn plan_account_click(
+    account: &AccountKey,
+    action: NotificationAction,
+    active: Option<&AccountKey>,
+    known: &[AccountKey],
+) -> ClickPlan {
+    if active == Some(account) {
         return ClickPlan::Active;
     }
-    if !known.contains(&key) {
+    if !known.contains(account) {
         return ClickPlan::Ignore;
     }
     match action {
-        NotificationAction::MarkRead => ClickPlan::MarkReadInBackground(key),
-        NotificationAction::Open | NotificationAction::Reply => ClickPlan::SwitchThenOpen(key),
+        NotificationAction::MarkRead => ClickPlan::MarkReadInBackground(account.clone()),
+        NotificationAction::Open | NotificationAction::Reply => {
+            ClickPlan::SwitchThenOpen(account.clone())
+        }
     }
+}
+
+/// Split queued clicks into the ones for the account on screen (`active`)
+/// and the rest, each in arrival order.
+pub fn split_by_account(
+    clicks: Vec<ChatClick>,
+    active: Option<&AccountKey>,
+) -> (Vec<ChatClick>, Vec<ChatClick>) {
+    clicks
+        .into_iter()
+        .partition(|click| active == Some(&click.account))
 }
 
 #[cfg(test)]

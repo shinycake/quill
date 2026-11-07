@@ -106,8 +106,10 @@ impl QuillApp {
             );
             return;
         }
+        // The decode may outlast an account switch: the notification stays
+        // with the account it was queued for.
         let waiting = Waiting {
-            account,
+            account: Some(self.notification_account(account.as_ref())),
             notification,
             preview,
             locked,
