@@ -380,16 +380,17 @@ fn one_press_on_a_voice_note_plays_it_once_downloaded(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
     use crate::ui::gif_clip::GifClip;
-    use crate::ui::playback_state::GifDecode;
+    use crate::ui::playback_state::{ChatMessage, GifDecode};
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     let message = MessageId(LABELLED_GIF.1);
+    let chat = ChatId(LABELLED_GIF.0);
     app.update_in(vcx, |app, _, cx| {
         let clip = GifClip::decoding_with_one_picture();
         app.playback.gif_decodes.insert(
-            message,
+            ChatMessage::new(chat, message),
             GifDecode {
                 cancel: Arc::new(AtomicBool::new(false)),
                 first: Some(clip.clone()),
@@ -401,6 +402,7 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
         assert!(app.playback.gif.is_none());
         app.playback.playing_animation = Some(message);
         app.spawn_gif_decode(
+            chat,
             message,
             FileId(LABELLED_GIF_FILE),
             "/nonexistent/played-again.gif".into(),
@@ -408,7 +410,10 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
         );
         let playing = app.playback.gif.as_ref();
         assert!(playing.is_some_and(|playing| Arc::ptr_eq(playing, &clip)));
-        let decode = app.playback.gif_decodes.get(&message);
+        let decode = app
+            .playback
+            .gif_decodes
+            .get(&ChatMessage::new(chat, message));
         assert!(
             decode.is_some_and(|decode| !decode.cancel.load(std::sync::atomic::Ordering::Relaxed))
         );

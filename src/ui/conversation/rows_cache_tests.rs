@@ -368,7 +368,10 @@ fn timer_ticks_redraw_only_the_slice_that_shows_them(cx: &mut TestAppContext) {
 
 /// Where message `id`'s row and bubble were painted: (row height, bubble width).
 fn painted(id: i64) -> (f32, f32) {
-    let Some((row, Some(bubble))) = crate::ui::vanish::painted(id) else {
+    let Some((row, Some(bubble))) = crate::ui::vanish::painted(quill::ids::ChatMessage::new(
+        ChatId(GROUP),
+        quill::ids::MessageId(id),
+    )) else {
         panic!("message {id} is painted with a bubble");
     };
     (f32::from(row.size.height), f32::from(bubble.size.width))

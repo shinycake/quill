@@ -925,6 +925,7 @@ pub(in crate::ui) fn session_history_row(
     };
     if let Some(rich_body) = rich_body {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(false),
             message.is_outgoing,
@@ -937,6 +938,7 @@ pub(in crate::ui) fn session_history_row(
     }
     if let Some(text_body) = text_body {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(
                 (text_reserved || matches!(content, MessageContent::Call { .. })) && extra_is_empty,
@@ -954,6 +956,7 @@ pub(in crate::ui) fn session_history_row(
     // through to the quoted fallback with an empty body.
     if let Some(caption_el) = caption_above_el {
         return session_bubble_rich(
+            message.chat_id,
             message.id.0 as u64,
             chrome(false),
             message.is_outgoing,
@@ -965,6 +968,7 @@ pub(in crate::ui) fn session_history_row(
         );
     }
     session_bubble_quoted(
+        message.chat_id,
         message.id.0 as u64,
         chrome(caption_reserved),
         String::new(),

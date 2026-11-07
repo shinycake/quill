@@ -330,6 +330,7 @@ pub(super) fn album_history_row(
         })
         .into_any_element();
     session_bubble_quoted(
+        first.chat_id,
         album_id as u64,
         chrome,
         String::new(),

@@ -16,7 +16,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::ids::{ChatId, MessageId};
+use quill::ids::{ChatId, ChatMessage, MessageId};
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::MessageContent;
 use std::cell::RefCell;
@@ -49,11 +49,11 @@ type Painted = (Bounds<Pixels>, Option<Bounds<Pixels>>);
 
 thread_local! {
     /// Where each history row and its bubble were last painted, by
-    /// message id: a delete starts its dust there.
-    static PAINTED: RefCell<HashMap<i64, Painted>> = RefCell::new(HashMap::new());
+    /// chat and message id: a delete starts its dust there.
+    static PAINTED: RefCell<HashMap<ChatMessage, Painted>> = RefCell::new(HashMap::new());
 }
 
-fn record(id: i64, update: impl FnOnce(&mut Painted)) {
+fn record(id: ChatMessage, update: impl FnOnce(&mut Painted)) {
     PAINTED.with(|painted| {
         // A conflict skips this frame's record; the next paint writes it.
         let Ok(mut painted) = painted.try_borrow_mut() else {
@@ -69,12 +69,12 @@ fn record(id: i64, update: impl FnOnce(&mut Painted)) {
 /// Where a message's row and bubble were last painted.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
-pub(super) fn painted(id: i64) -> Option<Painted> {
+pub(super) fn painted(id: ChatMessage) -> Option<Painted> {
     PAINTED.with(|painted| painted.borrow().get(&id).copied())
 }
 
 /// An invisible child that notes where a history row is painted.
-pub(super) fn row_tracker(id: i64) -> impl IntoElement {
+pub(super) fn row_tracker(id: ChatMessage) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, _, _| {
@@ -87,7 +87,7 @@ pub(super) fn row_tracker(id: i64) -> impl IntoElement {
 }
 
 /// An invisible child that notes where a message's bubble is painted.
-pub(super) fn bubble_tracker(id: i64) -> impl IntoElement {
+pub(super) fn bubble_tracker(id: ChatMessage) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, _, _| {
@@ -431,7 +431,13 @@ impl QuillApp {
                 continue;
             };
             let (row, bubble) = PAINTED
-                .with(|painted| painted.try_borrow().ok()?.get(&id.0).copied())
+                .with(|painted| {
+                    painted
+                        .try_borrow()
+                        .ok()?
+                        .get(&ChatMessage::new(chat_id, *id))
+                        .copied()
+                })
                 .map_or((None, None), |(row, bubble)| {
                     ((row.size.height > px(0.)).then_some(row), bubble)
                 });

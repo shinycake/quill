@@ -9,7 +9,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ai_compose::AiBoxError;
-use quill::ids::FileId;
+use quill::ids::{FileId, OfAccount};
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -92,6 +92,7 @@ impl QuillApp {
             .as_ref()
             .and_then(|preview| preview.style.as_ref())
             .map(|style| style.custom_emoji_id);
+        let account = self.current_account();
         let mut unresolved = Vec::new();
         let mut files: Vec<FileId> = Vec::new();
         for id in pills.chain(editor).chain(previewed) {
@@ -113,7 +114,14 @@ impl QuillApp {
                     );
                 }
                 Some(_) => {}
-                None if !self.ai_compose.emoji_asked.contains(&id) => unresolved.push(id),
+                None if !account.as_ref().is_some_and(|account| {
+                    self.ai_compose
+                        .emoji_asked
+                        .contains(&OfAccount::new(account.clone(), id))
+                }) =>
+                {
+                    unresolved.push(id)
+                }
                 None => {}
             }
         }
@@ -125,7 +133,11 @@ impl QuillApp {
             match live.driver.resolve_custom_emoji(id) {
                 Ok(None) => break,
                 Ok(Some(_)) | Err(_) => {
-                    self.ai_compose.emoji_asked.insert(id);
+                    if let Some(account) = account.clone() {
+                        self.ai_compose
+                            .emoji_asked
+                            .insert(OfAccount::new(account, id));
+                    }
                 }
             }
         }

@@ -59,8 +59,9 @@ const DATE_SLACK: i64 = 2;
 const TICK_FPS: u32 = 60;
 
 thread_local! {
-    /// Where each panel sticker cell was last painted (window coordinates).
-    static CELLS: RefCell<HashMap<i32, Bounds<Pixels>>> = RefCell::new(HashMap::new());
+    /// Where each panel sticker cell was last painted (window coordinates),
+    /// per window: the same sticker is in the panel of every window.
+    static CELLS: RefCell<HashMap<CellKey, Bounds<Pixels>>> = RefCell::new(HashMap::new());
     /// What the cell just chosen showed, until the send takes it.
     static SOURCE: RefCell<Option<Source>> = const { RefCell::new(None) };
     static FLY: RefCell<Option<Fly>> = const { RefCell::new(None) };
@@ -68,6 +69,14 @@ thread_local! {
     static TARGET: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
     /// The overlay's own top-left in the window, as of its last paint.
     static ORIGIN: Cell<Option<Point<Pixels>>> = const { Cell::new(None) };
+}
+
+/// A panel cell: the sticker's file in the panel of one window (`None`:
+/// the main window's, as `WindowScope`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct CellKey {
+    window: Option<ChatId>,
+    file: i32,
 }
 
 struct Source {
@@ -169,7 +178,7 @@ fn matches_fly(fly: &Fly, message: &HistoryMessage, sticker: &StickerContent) ->
 }
 
 /// Notes where a panel sticker cell is painted.
-pub(super) fn cell_probe(file: FileId) -> impl IntoElement {
+pub(super) fn cell_probe(scope: Option<ChatId>, file: FileId) -> impl IntoElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
@@ -179,10 +188,14 @@ pub(super) fn cell_probe(file: FileId) -> impl IntoElement {
             }
             CELLS.with(|cells| {
                 let mut cells = cells.borrow_mut();
-                if cells.len() >= MAX_CELLS && !cells.contains_key(&file.0) {
+                let key = CellKey {
+                    window: scope,
+                    file: file.0,
+                };
+                if cells.len() >= MAX_CELLS && !cells.contains_key(&key) {
                     cells.clear();
                 }
-                cells.insert(file.0, bounds);
+                cells.insert(key, bounds);
             });
         },
     )
@@ -258,7 +271,12 @@ impl QuillApp {
         if cx.reduce_motion() || power_saving::on(power_saving::Flag::ChatEffects) {
             return;
         }
-        let Some(cell) = CELLS.with(|cells| cells.borrow().get(&file.0).copied()) else {
+        // The sticker was chosen in the window the last input happened in.
+        let key = CellKey {
+            window: self.windows.last_input,
+            file: file.0,
+        };
+        let Some(cell) = CELLS.with(|cells| cells.borrow().get(&key).copied()) else {
             return;
         };
         let inner = {

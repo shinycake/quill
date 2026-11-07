@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::play_intent::PlayTarget;
-use super::playback_state::{SeekHover, SeekSite};
+use super::playback_state::{ChatMessage, SeekHover, SeekSite};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
@@ -118,11 +118,11 @@ impl QuillApp {
     /// remembered per-message position in `playback_positions` is kept so a
     /// stopped row still shows where it got to.
     pub(super) fn clear_playback_state(&mut self) {
-        if let (Some(message_id), Some(position)) = (
-            self.active_playback_id(),
+        if let (Some(key), Some(position)) = (
+            self.active_playback_key(),
             self.playback.active_position_secs(),
         ) {
-            self.playback.positions.insert(message_id, position);
+            self.playback.positions.insert(key, position);
         }
         self.playback.track_length = None;
         quill::wake::CHROME.poke();
@@ -136,6 +136,14 @@ impl QuillApp {
     /// Message id of the active (playing or paused) track, if any.
     pub(super) fn active_playback_id(&self) -> Option<MessageId> {
         self.playback.playing_voice.or(self.playback.playing_audio)
+    }
+
+    /// The active track with its chat, the key of its remembered position.
+    pub(super) fn active_playback_key(&self) -> Option<ChatMessage> {
+        Some(ChatMessage::new(
+            self.playback.player.chat?,
+            self.active_playback_id()?,
+        ))
     }
 
     /// Kind of the active track, for status notes.
@@ -277,11 +285,11 @@ impl QuillApp {
     /// seek bar stays interactive and Play resumes from here.
     pub(super) fn pause_active_playback(&mut self) {
         self.playback.audio.pause();
-        if let (Some(id), Some(position)) = (
-            self.active_playback_id(),
+        if let (Some(key), Some(position)) = (
+            self.active_playback_key(),
             self.playback.active_position_secs(),
         ) {
-            self.playback.positions.insert(id, position);
+            self.playback.positions.insert(key, position);
         }
         quill::wake::CHROME.poke();
     }
@@ -332,8 +340,8 @@ impl QuillApp {
         };
         let offset = secs.clamp(0.0, duration.max(0.0));
         let was_playing = self.playback.is_playing();
-        if let Some(id) = self.active_playback_id() {
-            self.playback.positions.insert(id, offset);
+        if let Some(key) = self.active_playback_key() {
+            self.playback.positions.insert(key, offset);
         }
         // A failure is kept by the engine (`audio.error()`).
         let _ = self.playback.audio.seek(offset, was_playing);
@@ -413,7 +421,7 @@ impl QuillApp {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
                             // then reset to 0.0 so replay-after-finish starts at the top.
-                            let finished_id = this.active_playback_id();
+                            let finished_id = this.active_playback_key();
                             // What the playlist continues with (voice note
                             // chain, next song, repeat) is decided while
                             // the finished track is still the active one.
@@ -567,7 +575,7 @@ impl QuillApp {
                 display_secs: self
                     .playback
                     .positions
-                    .get(&message_id)
+                    .get(&ChatMessage::new(chat_id, message_id))
                     .copied()
                     .unwrap_or(0.0),
                 duration_secs,
@@ -639,7 +647,7 @@ impl QuillApp {
         let offset = self
             .playback
             .positions
-            .get(&message_id)
+            .get(&ChatMessage::new(chat_id, message_id))
             .copied()
             .unwrap_or(0.0);
         let playing = self.begin_track_playback(
@@ -718,7 +726,7 @@ impl QuillApp {
         let offset = self
             .playback
             .positions
-            .get(&message_id)
+            .get(&ChatMessage::new(chat_id, message_id))
             .copied()
             .unwrap_or(0.0);
         let playing = self.begin_track_playback(

@@ -9,10 +9,10 @@ use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
-use super::playback_state::GifDecode;
+use super::playback_state::{ChatMessage, GifDecode};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::ids::{FileId, MessageId};
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::telegram::envelope::MessageContent;
@@ -141,6 +141,9 @@ impl QuillApp {
     }
 
     fn play_gif_file(&mut self, message_id: MessageId, file_id: FileId, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+            return;
+        };
         let path = self.session().and_then(|session| {
             session
                 .media
@@ -174,7 +177,7 @@ impl QuillApp {
         self.playback.playing_animation = Some(message_id);
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
-        self.spawn_gif_decode(message_id, file_id, safe, cx);
+        self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
         cx.notify();
     }
 
@@ -183,12 +186,14 @@ impl QuillApp {
     /// taken back instead of starting a second.
     pub(super) fn spawn_gif_decode(
         &mut self,
+        chat_id: ChatId,
         message_id: MessageId,
         file_id: FileId,
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        if let Some(decode) = self.playback.gif_decodes.get(&message_id) {
+        let key = ChatMessage::new(chat_id, message_id);
+        if let Some(decode) = self.playback.gif_decodes.get(&key) {
             decode.cancel.store(false, Ordering::Relaxed);
             // Its first picture already came: play from it again now.
             if let Some(clip) = decode.first.clone() {
@@ -198,7 +203,7 @@ impl QuillApp {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         self.playback.gif_decodes.insert(
-            message_id,
+            key,
             GifDecode {
                 cancel: cancel.clone(),
                 first: None,
@@ -215,15 +220,17 @@ impl QuillApp {
             // The first picture plays while the rest decode.
             if let Ok(clip) = first_in.await {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(decode) = this.playback.gif_decodes.get_mut(&message_id) {
+                    if let Some(decode) = this.playback.gif_decodes.get_mut(&key) {
                         decode.first = Some(clip.clone());
                     }
-                    this.gif_started(message_id, clip, cx);
+                    if this.session().and_then(|session| session.open_chat) == Some(chat_id) {
+                        this.gif_started(message_id, clip, cx);
+                    }
                 });
             }
             let decoded = decode.await;
             let _ = this.update(cx, |this, cx| {
-                this.gif_decoded(message_id, file_id, decoded, cx);
+                this.gif_decoded(key, file_id, decoded, cx);
             });
         })
         .detach();
@@ -285,13 +292,17 @@ impl QuillApp {
 
     fn gif_decoded(
         &mut self,
-        message_id: MessageId,
+        key: ChatMessage,
         file_id: FileId,
         decoded: Result<Arc<GifClip>, GifError>,
         cx: &mut Context<Self>,
     ) {
-        self.playback.gif_decodes.remove(&message_id);
-        if self.playback.playing_animation != Some(message_id) {
+        let message_id = key.message;
+        self.playback.gif_decodes.remove(&key);
+        // Playing is the open chat's: the same id in another chat is not
+        // this decode's row.
+        let in_open_chat = self.session().and_then(|session| session.open_chat) == Some(key.chat);
+        if !in_open_chat || self.playback.playing_animation != Some(message_id) {
             // Stopped or replaced meanwhile.
             return;
         }

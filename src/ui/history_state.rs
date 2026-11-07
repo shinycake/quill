@@ -5,8 +5,8 @@ use super::history::HistoryShared;
 use super::*;
 use gpui_kit::component::message_scroller::MessageScrollerState;
 use gpui_kit::*;
-use quill::ids::ChatId;
 use quill::ids::MessageId;
+use quill::ids::{AccountChat, ChatId};
 use std::collections::HashMap;
 
 /// A place the reader asked the history to go that may have to wait for
@@ -124,10 +124,10 @@ pub(crate) struct HistoryUi {
     pub(super) palette: std::cell::Cell<Option<super::chat_palette::ChatPalette>>,
     /// Pinned bar position per chat: index into the pinned list, newest
     /// first. A click on the bar jumps there and steps to the next older.
-    pub(super) pinned_cursor: HashMap<i64, usize>,
+    pub(super) pinned_cursor: HashMap<AccountChat, usize>,
     /// Chats whose pinned bar was hidden, with the newest pinned message
     /// at the time: the bar returns when a newer message is pinned.
-    pub(super) hidden_pinned: HashMap<i64, MessageId>,
+    pub(super) hidden_pinned: HashMap<AccountChat, MessageId>,
     /// The open chat's pinned-messages list (bar's list button).
     pub(super) pinned_list_open: bool,
     /// Middle-click autoscroll over the history (`autoscroll_ui`).

@@ -13,6 +13,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::playback_state::ChatMessage;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::menu_surface::MenuSurface;
@@ -334,7 +335,9 @@ impl QuillApp {
                 let (file_id, listened, duration) =
                     (voice.file_id, voice.is_listened, voice.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback.positions.insert(target_id, secs);
+                self.playback
+                    .positions
+                    .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.playing_voice == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
@@ -353,7 +356,9 @@ impl QuillApp {
             (MessageContent::Audio(audio), SeekTarget::Audio) => {
                 let (file_id, duration) = (audio.file_id, audio.duration);
                 let secs = clamp_seek(seconds, duration);
-                self.playback.positions.insert(target_id, secs);
+                self.playback
+                    .positions
+                    .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.playing_audio == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {

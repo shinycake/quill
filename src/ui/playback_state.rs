@@ -24,6 +24,8 @@ pub(crate) struct SeekHover {
     pub(crate) at: f32,
 }
 
+pub(crate) use quill::ids::ChatMessage;
+
 /// The active track as the seek bars, the player bar and the Touch Bar
 /// draw it (`PlaybackUi::track_shown`). A paused track's stays the same
 /// until its chat gains or loses a song.
@@ -70,9 +72,9 @@ pub(crate) struct PlaybackUi {
     /// track at the last tick: the tick redraws them only when it changed.
     pub(super) tick_shown: Option<TrackShown>,
     pub(super) builds_watched: bool,
-    /// Last known position per message, so rows keep their seek bar fill (and
+    /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
-    pub(super) positions: HashMap<MessageId, f64>,
+    pub(super) positions: HashMap<ChatMessage, f64>,
     /// Animated stickers, dice and custom emoji everywhere (one player,
     /// shared by every view: `sticker_player`).
     pub(super) stickers: std::rc::Rc<super::sticker_player::Player>,
@@ -86,8 +88,8 @@ pub(crate) struct PlaybackUi {
     /// with the history row (and its animation layer) that draws it.
     pub(super) gif: Option<std::sync::Arc<super::gif_clip::GifClip>>,
     pub(super) gif_started_at: Option<Instant>,
-    /// The GIF decodes running, by message (one per GIF at a time).
-    pub(super) gif_decodes: HashMap<MessageId, GifDecode>,
+    /// The GIF decodes running, by chat message (one per GIF at a time).
+    pub(super) gif_decodes: HashMap<ChatMessage, GifDecode>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, when to give up).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,

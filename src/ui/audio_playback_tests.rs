@@ -97,3 +97,22 @@ fn a_finished_build_lands_when_it_says_so_and_a_failed_one_tells_the_user(cx: &m
         );
     });
 }
+
+/// Message ids repeat between chats: a position saved for message 801 of
+/// one chat is not the seek position of the same id in another.
+#[gpui_kit::test]
+fn a_saved_position_belongs_to_its_chat(cx: &mut TestAppContext) {
+    use crate::ui::playback_state::ChatMessage;
+    let (app, mut vcx) = open_app(cx);
+    let song = MessageId(DEMO_SONG.0 + 1000);
+    let other = ChatId(DEMO_CHAT.0 + 1);
+    app.update(&mut vcx, |app, _| {
+        app.playback
+            .positions
+            .insert(ChatMessage::new(DEMO_CHAT, song), 90.0);
+        let here = app.seek_bar_view(DEMO_CHAT, song, DEMO_SONG_SECS);
+        let there = app.seek_bar_view(other, song, DEMO_SONG_SECS);
+        assert_eq!(here.display_secs, 90.0);
+        assert_eq!(there.display_secs, 0.0);
+    });
+}

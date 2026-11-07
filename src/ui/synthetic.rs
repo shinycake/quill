@@ -15,6 +15,7 @@ pub enum SyntheticKind {
 
 #[derive(Clone)]
 pub struct SyntheticRow {
+    pub chat: quill::ids::ChatId,
     pub id: u64,
     pub sender: SharedString,
     pub body: SharedString,
@@ -32,6 +33,7 @@ impl SyntheticChat {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let rows = vec![
             row(
+                quill::ids::ChatId(0),
                 1,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_SHORT_LINE),
@@ -39,6 +41,7 @@ impl SyntheticChat {
                 false,
             ),
             row(
+                quill::ids::ChatId(0),
                 2,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_A_LONGER_PARAGRAPH_USED_TO),
@@ -46,6 +49,7 @@ impl SyntheticChat {
                 false,
             ),
             row(
+                quill::ids::ChatId(0),
                 3,
                 "نورة",
                 "مرحبا — العربية مع English digits 123 ورابط https://example.com",
@@ -53,6 +57,7 @@ impl SyntheticChat {
                 false,
             ),
             row(
+                quill::ids::ChatId(0),
                 4,
                 tr(keys::FROM_YOU),
                 tr(keys::Q_MISC_HEBREW_WITH_LATIN_OK_AND),
@@ -60,6 +65,7 @@ impl SyntheticChat {
                 true,
             ),
             row(
+                quill::ids::ChatId(0),
                 5,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_PHOTO_PENDING),
@@ -89,8 +95,14 @@ impl SyntheticChat {
     pub fn send_text(&mut self, text: String, cx: &mut Context<Self>) {
         let id = self.next_id;
         self.next_id += 1;
-        self.rows
-            .push(row(id, tr(keys::FROM_YOU), text, SyntheticKind::Text, true));
+        self.rows.push(row(
+            quill::ids::ChatId(0),
+            id,
+            tr(keys::FROM_YOU),
+            text,
+            SyntheticKind::Text,
+            true,
+        ));
         self.scroller.update(cx, |state, cx| {
             state.append(1, cx);
         });
@@ -103,6 +115,7 @@ impl SyntheticChat {
         self.rows.insert(
             0,
             row(
+                quill::ids::ChatId(0),
                 id,
                 tr(keys::Q_MISC_ARCHIVE),
                 tr(keys::Q_MISC_OLDER_MESSAGE_PREPENDED_THE_VISIBLE),
@@ -215,6 +228,7 @@ fn bubble_corners(
 }
 
 fn row(
+    chat: quill::ids::ChatId,
     id: u64,
     sender: impl Into<SharedString>,
     body: impl Into<SharedString>,
@@ -222,6 +236,7 @@ fn row(
     outgoing: bool,
 ) -> SyntheticRow {
     SyntheticRow {
+        chat,
         id,
         sender: sender.into(),
         body: body.into(),
@@ -345,6 +360,7 @@ pub(crate) fn footer_reserve(outgoing: bool) -> Pixels {
 }
 
 pub(crate) fn session_bubble_quoted(
+    chat: quill::ids::ChatId,
     id: u64,
     chrome: MessageChrome,
     body: impl Into<SharedString>,
@@ -355,6 +371,7 @@ pub(crate) fn session_bubble_quoted(
 ) -> AnyElement {
     message_bubble_with_quote(
         row(
+            chat,
             id,
             chrome.sender.clone().unwrap_or_default(),
             body,
@@ -370,6 +387,7 @@ pub(crate) fn session_bubble_quoted(
 }
 
 pub(crate) fn session_bubble_rich(
+    chat: quill::ids::ChatId,
     id: u64,
     chrome: MessageChrome,
     outgoing: bool,
@@ -380,6 +398,7 @@ pub(crate) fn session_bubble_rich(
 ) -> AnyElement {
     message_bubble_with_quote(
         row(
+            chat,
             id,
             chrome.sender.clone().unwrap_or_default(),
             "",
@@ -465,7 +484,10 @@ fn message_bubble_with_quote(
         .relative()
         .children(gradient)
         // Where a delete's dust starts.
-        .child(super::vanish::bubble_tracker(row.id as i64))
+        .child(super::vanish::bubble_tracker(quill::ids::ChatMessage::new(
+            row.chat,
+            quill::ids::MessageId(row.id as i64),
+        )))
         .when(!look.plain && !bubbleless, |this| {
             this.bg(if row.outgoing {
                 look.outgoing_fill()

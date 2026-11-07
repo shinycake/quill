@@ -241,7 +241,7 @@ impl QuillApp {
                     .into_any_element(),
             })
             .children(premium_mark)
-            .child(crate::ui::send_fly::cell_probe(file_id))
+            .child(crate::ui::send_fly::cell_probe(self.windows.scope, file_id))
             .into_any_element()
     }
 

@@ -249,7 +249,7 @@ pub(super) struct MiniApps {
     render_action: Option<RenderAction>,
     /// Bots whose "Emoji Status" switch has been on screen this run, so it
     /// stays when the person turns it off (`bot_permissions`).
-    pub(super) emoji_access_shown: std::collections::HashSet<i64>,
+    pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
     /// The poll task, alive while a window is.
     poll: Option<Task<()>>,
     generation: u64,

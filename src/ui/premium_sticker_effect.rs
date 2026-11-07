@@ -22,7 +22,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::emoji_interaction::EmojiEffect;
-use quill::ids::{ChatId, FileId, MessageId};
+use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::power_saving;
 use quill::telegram::envelope::{StickerContent, StickerFormat, StickerItem};
@@ -70,6 +70,9 @@ thread_local! {
 /// own `_animatedStickersPlayed`).
 #[derive(Default)]
 struct Played {
+    /// The account the sets belong to: chat ids are the same ones in
+    /// another account's view of a shared group.
+    account: Option<AccountKey>,
     chats: HashMap<i64, HashSet<i64>>,
 }
 
@@ -89,8 +92,13 @@ impl Played {
         played.insert(key.1);
     }
 
-    /// Forget the chats no window shows.
-    fn keep_shown(&mut self, shown: &[i64]) {
+    /// Forget the chats no window shows, and everything of another
+    /// account.
+    fn keep_shown(&mut self, account: Option<&AccountKey>, shown: &[i64]) {
+        if self.account.as_ref() != account {
+            self.chats.clear();
+            self.account = account.cloned();
+        }
         self.chats.retain(|chat, _| shown.contains(chat));
     }
 }
@@ -310,7 +318,8 @@ impl QuillApp {
         };
         let shown = self.chats_on_screen();
         SEEN.with(|seen| seen.borrow_mut().retain(|key, _| shown.contains(&key.0)));
-        PLAYED.with(|played| played.borrow_mut().keep_shown(&shown));
+        let account = self.current_account();
+        PLAYED.with(|played| played.borrow_mut().keep_shown(account.as_ref(), &shown));
         let due: Vec<(Key, Seen)> = SEEN.with(|seen| {
             seen.borrow()
                 .iter()
@@ -346,11 +355,13 @@ impl QuillApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{Click, Played, SIZE_FACTOR, click_action, effect_rect};
+    use super::{AccountKey, Click, Played, SIZE_FACTOR, click_action, effect_rect};
 
     #[test]
     fn each_message_autoplays_once_per_chat_visit() {
         let mut played = Played::default();
+        let account = AccountKey::primary();
+        played.keep_shown(Some(&account), &[1, 2]);
         assert!(played.pending((1, 10)));
         played.mark((1, 10));
         assert!(!played.pending((1, 10)));
@@ -358,9 +369,21 @@ mod tests {
         assert!(played.pending((2, 10)));
         played.mark((2, 10));
         assert!(!played.pending((1, 10)));
-        played.keep_shown(&[2]);
+        played.keep_shown(Some(&account), &[2]);
         assert!(played.pending((1, 10)));
         assert!(!played.pending((2, 10)));
+    }
+
+    #[test]
+    fn another_account_starts_over_in_the_same_chat() {
+        let (first, second) = (AccountKey::primary(), AccountKey("second".to_string()));
+        let mut played = Played::default();
+        played.keep_shown(Some(&first), &[7]);
+        played.mark((7, 10));
+        played.keep_shown(Some(&first), &[7]);
+        assert!(!played.pending((7, 10)));
+        played.keep_shown(Some(&second), &[7]);
+        assert!(played.pending((7, 10)));
     }
 
     #[test]
