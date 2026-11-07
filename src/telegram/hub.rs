@@ -93,7 +93,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub const LAUNCH_CHATS_EXTRA: &str = "quill-launch-chats";
 
 /// Where the launch's first chat page is. The first frame waits a little
-/// for it once TDLib is ready: the page then comes 10 to 15 ms later, and on
+/// for it once TDLib is ready: the page then comes 9 to 15 ms later, and on
 /// a cold launch AppKit keeps the main thread for a few hundred ms after the
 /// first frame before the chats could draw. A TDLib still opening its
 /// database is further off, and the window does not wait for it.
