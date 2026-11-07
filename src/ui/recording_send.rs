@@ -8,6 +8,7 @@
 //! open when the file is ready.
 #![deny(clippy::indexing_slicing)]
 
+use super::account_job::StartedOn;
 use super::app::QuillApp;
 use super::composer_state::DraftClear;
 use super::recording_state::{CaptureFor, CaptureMedia, StartId};
@@ -19,14 +20,13 @@ use quill::lang::{keys, tr};
 use quill::telegram::SendReply;
 use quill::video::{VideoNoteCapture, VideoNoteDraft};
 use quill::voice::{VoiceCapture, VoiceDraft};
-use std::path::Path;
 
 /// Where a recording goes, fixed when Send is tapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SendTarget {
     /// Chat ids are the account's own: the recording goes out only while
     /// this account is on screen, never through the one switched to.
-    account: AccountKey,
+    account: StartedOn,
     chat_id: ChatId,
     reply: Option<ComposerReplyTo>,
     caption: String,
@@ -40,16 +40,11 @@ impl SendTarget {
         caption: &str,
     ) -> Self {
         Self {
-            account,
+            account: StartedOn::new(account),
             chat_id,
             reply,
             caption: caption.trim().to_owned(),
         }
-    }
-
-    /// The account the recording was sent from is still the one on screen.
-    fn account_on_screen(&self, on_screen: Option<&AccountKey>) -> bool {
-        on_screen == Some(&self.account)
     }
 
     /// The reply of the request: the pending reply when it belongs to the
@@ -105,21 +100,6 @@ impl QuillApp {
         }
         let reply = self.reply_for_send(cx);
         Some(SendTarget::new(account, chat_id, reply, caption))
-    }
-
-    /// The account was switched while the file was finished: the file is
-    /// removed and a note says why, and nothing is sent. Returns whether
-    /// it was dropped.
-    fn drop_send_of_other_account(&mut self, target: &SendTarget, path: &Path) -> bool {
-        let on_screen = self.session().map(|session| &session.account);
-        if target.account_on_screen(on_screen) {
-            return false;
-        }
-        let _ = std::fs::remove_file(path);
-        self.connection.set_note(StatusNote::silent(tr(
-            keys::Q_NOTES_RECORDING_NOT_SENT_ACCOUNT_CHANGED,
-        )));
-        true
     }
 
     /// The recording consumes the composer when Send is tapped, not when
@@ -224,7 +204,7 @@ impl QuillApp {
                 return;
             }
         };
-        if self.drop_send_of_other_account(target, &draft.path) {
+        if self.drop_recording_of_other_account(&target.account, &draft.path) {
             cx.notify();
             return;
         }
@@ -341,7 +321,7 @@ impl QuillApp {
                 return;
             }
         };
-        if self.drop_send_of_other_account(target, &draft.path) {
+        if self.drop_recording_of_other_account(&target.account, &draft.path) {
             cx.notify();
             return;
         }

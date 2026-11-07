@@ -246,3 +246,107 @@ fn only_app_wide_dialogs_stay_open_across_a_switch() {
         ["BackgroundCall", "EmojiSetStyle", "Passcode", "ThemeEditor"]
     );
 }
+
+/// The story composer holds the old account's media, caption and
+/// audience; its Post would publish them as the new account. A check still
+/// in flight must not leave the next composer stuck on "Checking…".
+#[gpui_kit::test]
+fn a_switch_closes_the_story_composer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        app.stories.composer.open = true;
+        app.stories.composer.check_sent = true;
+    });
+    switch(&app, &mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.stories.composer.open);
+        assert!(!app.stories.composer.check_sent);
+    });
+}
+
+/// "Reply in another chat" shows only while the composer has a reply, and
+/// the chat leave clears it: the box still closes, so the new account's
+/// next Reply does not open the chooser.
+#[gpui_kit::test]
+fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
+    use quill::composer::ComposerReplyTo;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(CHAT, window, cx);
+    });
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        let message = app
+            .session()
+            .and_then(|s| s.histories.get(&CHAT.0))
+            .and_then(|h| h.messages.keys().next_back().copied())
+            .expect("a message");
+        app.composer_ui
+            .set_reply(Some(ComposerReplyTo::new(CHAT, MessageId(message))));
+        app.share.reply_elsewhere_open = true;
+        cx.notify();
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(QuillShell::open_dialog_names(app).contains(&"ReplyElsewhere"));
+    });
+    switch(&app, &mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.share.reply_elsewhere_open);
+        assert!(!app.share.reply_quote_open);
+    });
+}
+
+/// A dialog whose gate is false while another shows (the giveaway form
+/// hides behind its own checkout) still closes once that one has, so it
+/// does not come back over the new account.
+#[gpui_kit::test]
+fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_giveaway_form(CHAT, None, window, cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.form_loading = true;
+        }
+        app.open_payment_dialog(window, cx);
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        let open = QuillShell::open_dialog_names(app);
+        assert!(!open.contains(&"Giveaway"), "hidden behind the checkout");
+        assert!(app.giveaway.form.is_some());
+    });
+    switch(&app, &mut vcx);
+    frames(&mut vcx);
+    assert!(!dialog_up(&mut vcx));
+    app.read_with(&vcx, |app, _| {
+        assert!(app.giveaway.form.is_none());
+        assert!(QuillShell::open_dialog_names(app).is_empty());
+    });
+}
+
+/// Folder ids are numbered per account: the folder tab menu's "Mark as
+/// read" after a switch would read the new account's folder with that id.
+/// Every context menu closes.
+#[gpui_kit::test]
+fn a_switch_closes_every_context_menu(cx: &mut TestAppContext) {
+    use crate::ui::folder_extras::FolderTabMenu;
+    use gpui_kit::point;
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update(&mut vcx, |app, _| {
+        app.folders.tab_menu = Some(FolderTabMenu {
+            folder_id: Some(2),
+            position: point(px(10.), px(10.)),
+        });
+        app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
+    });
+    switch(&app, &mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.folders.tab_menu.is_none());
+        assert!(app.chat_list.archive_menu.is_none());
+        assert!(!app.context_menu_open());
+    });
+}

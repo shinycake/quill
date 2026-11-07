@@ -203,11 +203,20 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_CHOOSE_PHOTO).into()),
         });
+        let Some(account) = self.started_on() else {
+            return;
+        };
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.set_bot_photo_from(bot_id, &path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    // The bot is the account's own: another account on
+                    // screen does not get the photo.
+                    if this.on_screen(&account) {
+                        this.set_bot_photo_from(bot_id, &path, cx);
+                    }
+                });
             }
         })
         .detach();

@@ -175,12 +175,19 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_CHOOSE_IMAGE).into()),
         });
+        let Some(account) = self.started_on() else {
+            return;
+        };
         self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
                 let _ = this.update(cx, |this, cx| {
-                    this.edit_image_for_set(set_id, kind, &path, cx);
+                    // The set is the account's own: no editor for it over
+                    // another account.
+                    if this.on_screen(&account) {
+                        this.edit_image_for_set(set_id, kind, &path, cx);
+                    }
                 });
             }
         })

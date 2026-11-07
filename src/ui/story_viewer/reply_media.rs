@@ -406,6 +406,11 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the account it was recorded on.
+        let Some(account) = self.started_on() else {
+            return true;
+        };
         let Some(capture) = self.recording.take_video() else {
             return true;
         };
@@ -417,7 +422,11 @@ impl QuillApp {
             let updated = this.update_in(cx, |this, _window, cx| {
                 let sent = match result {
                     Ok(draft) => {
-                        let sent = this.live.as_mut().map(|live| {
+                        if this.drop_recording_of_other_account(&account, &draft.path) {
+                            cx.notify();
+                            return;
+                        }
+                        let sent = this.live_for(&account).map(|live| {
                             live.driver
                                 .send_story_reply_video_note(chat_id, story_id, &draft)
                                 .is_ok()
@@ -464,6 +473,11 @@ impl QuillApp {
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
         }
+        // Story ids are the poster's, the same on every account: the reply
+        // goes out only from the account it was recorded on.
+        let Some(account) = self.started_on() else {
+            return true;
+        };
         let Some(capture) = self.recording.take_voice() else {
             return true;
         };
@@ -484,9 +498,12 @@ impl QuillApp {
                         return;
                     }
                 };
+                if this.drop_recording_of_other_account(&account, &draft.path) {
+                    cx.notify();
+                    return;
+                }
                 let sent = this
-                    .live
-                    .as_mut()
+                    .live_for(&account)
                     .map(|live| {
                         live.driver
                             .send_story_reply_voice(chat_id, story_id, &draft)

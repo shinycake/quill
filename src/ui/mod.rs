@@ -9,6 +9,7 @@
 mod a11y_replay_tests;
 mod account_export_box;
 mod account_export_progress;
+mod account_job;
 mod account_lifecycle;
 mod account_state;
 mod account_surfaces;

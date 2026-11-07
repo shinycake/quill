@@ -387,28 +387,19 @@ impl QuillShell {
 
     /// The account on screen is changing (`QuillApp::end_account_surfaces`):
     /// every open dialog that closes on a switch ([`OnSwitch::Closes`])
-    /// closes the way its own close does.
+    /// closes the way its own close does. A dialog hidden behind another
+    /// (the giveaway behind its checkout) closes once that one has.
     pub(super) fn close_dialogs_for_switch(
         app: &mut QuillApp,
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) {
-        for spec in registry() {
-            if spec.on_switch != OnSwitch::Closes {
-                continue;
-            }
-            let Some(close) = spec.close else {
-                continue;
-            };
-            // A close that steps back (a stacked page) runs again until
-            // the flag is clear.
-            for _ in 0..8 {
-                if !(spec.is_open)(app) {
-                    break;
-                }
-                close(app, window, cx);
-            }
-        }
+        let dialogs: Vec<_> = registry()
+            .iter()
+            .filter(|spec| spec.on_switch == OnSwitch::Closes)
+            .filter_map(|spec| Some((spec.is_open, spec.close?)))
+            .collect();
+        super::account_surfaces::close_open_surfaces(app, window, cx, &dialogs);
     }
 
     /// Keep the single kit dialog in sync with the app-side open flags.

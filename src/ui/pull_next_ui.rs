@@ -339,6 +339,9 @@ impl QuillApp {
         let Some((handle, scope)) = self.history.pull.window else {
             return;
         };
+        let Some(account) = self.started_on() else {
+            return;
+        };
         let started = Instant::now();
         self.history.pull.jump = Some(cx.spawn(async move |this, cx| {
             loop {
@@ -363,7 +366,8 @@ impl QuillApp {
             let _ = cx.update_window(handle, |_, window, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(scope, cx, |this, cx| {
-                        if this.history.pull.machine.jumping() {
+                        // `next` is a chat of the account the pull started on.
+                        if this.history.pull.machine.jumping() && this.on_screen(&account) {
                             SLIDE.set(Some((next, None, Instant::now())));
                             this.select_listed_chat(next, window, cx);
                         }

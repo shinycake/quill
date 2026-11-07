@@ -69,13 +69,19 @@ impl QuillApp {
     /// keeps each window on its own account instead; Quill's windows have
     /// no session of their own.
     pub(in crate::ui) fn close_chat_windows_for_switch(&mut self, cx: &mut Context<Self>) {
-        let windows: Vec<(ChatId, AnyWindowHandle)> = self.windows.open_windows().collect();
+        let windows: Vec<_> = self
+            .windows
+            .open
+            .iter()
+            .map(|open| (open.chat_id, open.handle, open.view.clone()))
+            .collect();
         if !windows.is_empty() {
             self.save_chat_windows_now(cx);
         }
-        for (chat_id, handle) in windows {
+        for (chat_id, handle, view) in windows {
             self.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             self.forget_chat_window(chat_id, cx);
+            let _ = view.update(cx, |view, _| view.mark_closed());
             let _ = handle.update(cx, |_, window, _| window.remove_window());
         }
         self.windows.restore = Restore::Pending;

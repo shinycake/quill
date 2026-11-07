@@ -7,9 +7,11 @@
 //! controller, which goes away with the session.
 //!
 //! Every switch runs [`QuillApp::end_account_surfaces`] before the client
-//! changes. A new account-bound surface ends here; a dialog says what a
-//! switch does to it when it registers (`shell::OnSwitch`), and the ones
-//! that close are closed here.
+//! changes. A dialog says what a switch does to it when it registers
+//! (`shell::OnSwitch`), and so does an Escape layer
+//! (`esc_stack::LayerSwitch`); the ones that close are closed here. Work
+//! still running when the switch lands checks its account itself
+//! (`account_job::StartedOn`).
 
 use super::app::QuillApp;
 use super::shell::QuillShell;
@@ -23,6 +25,10 @@ impl QuillApp {
     /// `closeStory`) goes to the client it was opened on.
     pub(super) fn end_account_surfaces(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.end_mini_apps_for_switch(cx);
+        // Overlays and dialogs first, while the chat is still open: some
+        // read it to tell whether they show ("Reply in another chat" needs
+        // the reply the leave clears).
+        self.close_switch_surfaces(window, cx);
         self.leave_chat_for_switch(window, cx);
         // Checked ids are the old account's chats; the bulk actions would
         // act on the new account's chats with the same ids.
@@ -45,17 +51,26 @@ impl QuillApp {
         self.share.forward_picker_open = false;
         self.share.forward_bar_dest = None;
         self.share.content_dialog = None;
-        self.close_context_menus(cx);
-        if self.viewer.state.is_open() {
-            self.close_media_viewer(cx);
-        }
-        // The whole close: the reply, the privacy editor and the report
-        // belong to the old account's story too.
-        self.close_story_viewer(cx);
+        self.share.forward_result = None;
+        // The old account's "new login prevented" notice is not the new
+        // account's.
+        self.auth_ui.login_prevented = None;
+        // The rich editor is a mode of the old chat's composer.
+        self.composer_ui.rich_editor_open = false;
         self.close_video_pip(cx);
-        QuillShell::close_dialogs_for_switch(self, window, cx);
+        // Again: what the leave ended can uncover another.
+        self.close_switch_surfaces(window, cx);
         self.close_main_window_dialogs(window, cx);
         cx.notify();
+    }
+
+    /// Close every Escape layer and every dialog that closes on a switch
+    /// (`LayerSwitch::Closes`, `OnSwitch::Closes`). The layers go first:
+    /// a dialog can hide behind one (the sticker box behind the photo
+    /// editor).
+    fn close_switch_surfaces(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_layers_for_switch(window, cx);
+        QuillShell::close_dialogs_for_switch(self, window, cx);
     }
 
     /// The main window leaves its chat as it does for any other leave
@@ -90,6 +105,39 @@ impl QuillApp {
             let _ = main.update(cx, |_, window, cx| window.close_all_dialogs(cx));
         }
         self.windows.main_dialogs_closed = true;
+    }
+}
+
+/// Whether a surface is open, and its own close.
+pub(super) type Surface = (
+    fn(&QuillApp) -> bool,
+    fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>),
+);
+
+/// Close every surface in `surfaces` that is open, then look again until
+/// none is. A gate can be false while another surface shows (the giveaway
+/// behind its checkout, the gift market behind Premium) and true once that
+/// one has closed, and a close that steps back one page leaves the next
+/// page open. Bounded, so a close that never clears its flag cannot hang
+/// the switch.
+pub(super) fn close_open_surfaces(
+    app: &mut QuillApp,
+    window: &mut Window,
+    cx: &mut Context<QuillApp>,
+    surfaces: &[Surface],
+) {
+    const PASSES: usize = 8;
+    for _ in 0..PASSES {
+        let mut closed = false;
+        for (is_open, close) in surfaces {
+            if is_open(app) {
+                close(app, window, cx);
+                closed = true;
+            }
+        }
+        if !closed {
+            return;
+        }
     }
 }
 

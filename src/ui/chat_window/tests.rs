@@ -565,6 +565,31 @@ fn switching_accounts_closes_the_chat_windows(cx: &mut TestAppContext) {
     assert_eq!(h.open_chat(cx), Some(OPEN));
 }
 
+/// The platform reports a window the switch closed only after the switch.
+/// Its bookkeeping already ran: the late report must not run it again on
+/// the account switched to, where it would save that account's window
+/// list while its windows are not open yet, as an empty list.
+#[gpui_kit::test]
+fn a_window_a_switch_closed_reports_nothing_afterwards(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.open_in_new_window(OTHER, cx);
+    let view = h
+        .app
+        .read_with(cx, |app, _| {
+            app.windows
+                .open
+                .first()
+                .and_then(|open| open.view.upgrade())
+        })
+        .expect("the window's view");
+    let closed_by_switch = h.app.update(cx, |app, cx| {
+        app.close_chat_windows_for_switch(cx);
+        // Before the deferred close report runs.
+        view.read(cx).is_closed()
+    });
+    assert!(closed_by_switch, "the late report has nothing left to do");
+}
+
 #[gpui_kit::test]
 fn reopen_closed_window_brings_back_the_window_closed_last(cx: &mut TestAppContext) {
     let h = new_app(cx);
