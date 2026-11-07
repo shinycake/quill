@@ -21,9 +21,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let edit_gone = self
-            .composer_ui
-            .pending_edit
-            .as_ref()
+            .composer_ui.pending_edit()
             .zip(self.session())
             .is_some_and(|(edit, session)| session.edit_target_gone(edit));
         if edit_gone {

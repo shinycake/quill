@@ -383,7 +383,7 @@ impl QuillApp {
             return;
         }
         let open_chat = self.open_chat_id();
-        let composer_idle = self.composer_ui.pending_edit.is_none()
+        let composer_idle = !self.composer_ui.is_editing()
             && self.composer_ui.reply().is_none()
             && self.composer.read(cx).value().trim().is_empty();
         for (chat_id, topic) in clears {

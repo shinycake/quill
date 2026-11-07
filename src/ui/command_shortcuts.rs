@@ -29,7 +29,7 @@ impl QuillApp {
     /// its "Send" state, `computeSendButtonType() == Send`), so the send
     /// commands of the button's menu apply.
     fn composer_sendable(&self, cx: &App) -> bool {
-        self.composer_ui.pending_edit.is_none()
+        !self.composer_ui.is_editing()
             && !self.recording_here()
             && (!self.composer.read(cx).value().trim().is_empty()
                 || !self.pending_attachments().is_empty()
@@ -149,7 +149,7 @@ impl QuillApp {
     ) -> bool {
         if self.shortcut_blocked(window, cx)
             || self.writable_open_chat().is_none()
-            || self.composer_ui.pending_edit.is_some()
+            || self.composer_ui.is_editing()
             || self.recording_active()
             || !self.composer.read(cx).value().trim().is_empty()
             || !self.pending_attachments().is_empty()

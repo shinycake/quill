@@ -102,7 +102,7 @@ impl QuillApp {
     }
 
     pub(super) fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
+        if self.composer_ui.is_editing() || self.recording_busy() {
             return;
         }
         if self.gif_panel_open() {
@@ -125,7 +125,7 @@ impl QuillApp {
     /// at finish; HQ size from media prefs). Needs a camera, honest error
     /// otherwise.
     pub(super) fn start_video_note_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.pending_edit.is_some() || self.recording_busy() {
+        if self.composer_ui.is_editing() || self.recording_busy() {
             return;
         }
         // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX

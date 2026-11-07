@@ -55,7 +55,7 @@ impl QuillApp {
     /// The open slot's rich draft while it shows in place of the field:
     /// not while a message is edited or the rich editor is open.
     pub(in crate::ui) fn shown_rich_draft(&self) -> Option<&RichDraft> {
-        if self.composer_ui.pending_edit.is_some() || self.composer_ui.rich_editor_open {
+        if self.composer_ui.is_editing() || self.composer_ui.rich_editor_open {
             return None;
         }
         let chat_id = self.open_chat_id()?;

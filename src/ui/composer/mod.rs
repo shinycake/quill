@@ -94,7 +94,7 @@ impl QuillApp {
                 if self.cancel_gone_composer_targets(window, cx) {
                     return;
                 }
-                if self.composer_ui.pending_edit.is_some() {
+                if self.composer_ui.is_editing() {
                     self.submit_edit(text, window, cx);
                     return;
                 }
@@ -595,13 +595,11 @@ impl QuillApp {
     pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         // B5: while editing, a drop or paste replaces the message's media
         // (tdesktop `EditCaptionBox` accepts exactly one file).
-        if self.composer_ui.pending_edit.is_some() {
+        if self.composer_ui.is_editing() {
             match paths {
                 [only]
                     if self
-                        .composer_ui
-                        .pending_edit
-                        .as_ref()
+                        .composer_ui.pending_edit()
                         .is_some_and(|e| e.allows_replace()) =>
                 {
                     self.set_edit_replacement(only, cx);
@@ -699,7 +697,7 @@ impl QuillApp {
         };
         match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
             // B5: a pasted image replaces the edited message's media.
-            Some(att) if self.composer_ui.pending_edit.is_some() => {
+            Some(att) if self.composer_ui.is_editing() => {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }

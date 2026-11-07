@@ -32,7 +32,7 @@ impl QuillApp {
             .map(|reply| reply.message_id)
             .or_else(|| self.keyboard_reply_target());
         PlaceholderFacts {
-            editing: self.composer_ui.pending_edit.is_some(),
+            editing: self.composer_ui.is_editing(),
             keyboard: self.keyboard_placeholder(),
             stars_per_message: session.paid_send_price(chat),
             topic: session.composer_topic(chat, reply),
@@ -116,7 +116,7 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         inline_bot_hint(
             &text,
-            self.composer_ui.pending_edit.is_some(),
+            self.composer_ui.is_editing(),
             username,
             &user.inline_query_placeholder,
         )

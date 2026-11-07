@@ -34,7 +34,7 @@ impl QuillApp {
         // tdesktop turns command autocomplete off while a message is edited.
         let triggered = self.command_trigger(cx).is_some()
             && !inline_active
-            && self.composer_ui.pending_edit.is_none();
+            && !self.composer_ui.is_editing();
         let open_chat = self.session().and_then(|session| session.open_chat);
         if triggered {
             self.load_quick_replies_for_menu();

@@ -102,11 +102,11 @@ fn deleting_the_replied_message_cancels_the_reply(cx: &mut TestAppContext) {
 fn deleting_the_edited_message_cancels_the_edit(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-edit-delete");
     let vcx = &mut vcx;
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.is_editing()));
     app.update(vcx, |app, _| app.demo_delete_message(CHAT, MessageId(102)));
     frames(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()),
+        app.read_with(vcx, |app, _| !app.composer_ui.is_editing()),
         "the edit bar goes with the message"
     );
 }
@@ -324,7 +324,7 @@ fn sending_drops_a_reply_to_a_message_deleted_since_the_last_frame(cx: &mut Test
 fn submitting_an_edit_of_a_deleted_message_sends_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-edit-delete");
     let vcx = &mut vcx;
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.composer_ui.is_editing()));
     app.update(vcx, |app, _| app.demo_delete_message(CHAT, MessageId(102)));
     let before = history_len(&app, vcx);
     vcx.update(|window, cx| {
@@ -332,7 +332,7 @@ fn submitting_an_edit_of_a_deleted_message_sends_nothing(cx: &mut TestAppContext
             app.submit_composer("new words".into(), window, cx)
         })
     });
-    assert!(app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.composer_ui.is_editing()));
     assert_eq!(history_len(&app, vcx), before, "no edit and no new message");
 }
 
@@ -350,7 +350,7 @@ fn an_edit_of_a_message_that_is_not_loaded_does_not_begin(cx: &mut TestAppContex
     .expect("text is editable");
     vcx.update(|window, cx| app.update(cx, |app, cx| app.begin_edit(unloaded, window, cx)));
     assert!(
-        app.read_with(vcx, |app, _| app.composer_ui.pending_edit.is_none()),
+        app.read_with(vcx, |app, _| !app.composer_ui.is_editing()),
         "no edit starts on an empty field"
     );
     assert_eq!(
