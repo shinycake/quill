@@ -275,8 +275,7 @@ fn spent_rejoins_show_on_the_story() {
     let mut h = watching();
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
     if let Some(call) = h.driver.session.calls.story_stream.as_mut() {
-        call.reconnecting = true;
-        call.rejoin_attempts = crate::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+        call.rejoin = crate::state::GroupCallRejoin::GaveUp;
     }
     assert!(story_failed(&h));
 }

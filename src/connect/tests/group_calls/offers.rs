@@ -150,7 +150,7 @@ fn a_rejoin_waits_without_touching_the_missing_instance() {
         .active_group_call
         .as_mut()
         .expect("tracked call")
-        .reconnecting = true;
+        .rejoin = crate::state::GroupCallRejoin::Wanted { attempts: 0 };
     handle.hold_group_offers();
 
     driver.rejoin_group_call(true).expect("rejoin starts");
@@ -164,11 +164,25 @@ fn a_rejoin_waits_without_touching_the_missing_instance() {
     );
     assert_eq!(handle.group_video_syncs().len(), syncs);
     assert_eq!(tracked(&driver).transport_error, None);
-    assert_eq!(tracked(&driver).rejoin_attempts, 0);
+    assert!(matches!(
+        tracked(&driver).rejoin,
+        crate::state::GroupCallRejoin::InFlight { attempt: 1, .. }
+    ));
+    assert!(
+        tracked(&driver).reconnecting(),
+        "the banner stays while the offer is built"
+    );
 
     land(&mut driver, &handle);
     assert_eq!(sent_count(&recorder, "joinVideoChat"), 2);
-    assert_eq!(tracked(&driver).rejoin_attempts, 1);
+    assert!(matches!(
+        tracked(&driver).rejoin,
+        crate::state::GroupCallRejoin::InFlight { attempt: 1, .. }
+    ));
+    assert!(
+        tracked(&driver).reconnecting(),
+        "and while the join is sent"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -181,13 +195,16 @@ fn a_failed_rejoin_counts_and_is_tried_again() {
         .active_group_call
         .as_mut()
         .expect("tracked call")
-        .reconnecting = true;
+        .rejoin = crate::state::GroupCallRejoin::Wanted { attempts: 0 };
     handle.fail_group_offer();
     driver.rejoin_group_call(true).expect("the press is taken");
     assert_eq!(sent_count(&recorder, "joinVideoChat"), 0);
     let call = tracked(&driver);
-    assert!(call.reconnecting);
-    assert_eq!(call.rejoin_attempts, 1);
+    assert!(call.reconnecting());
+    assert_eq!(
+        call.rejoin,
+        crate::state::GroupCallRejoin::Wanted { attempts: 1 }
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

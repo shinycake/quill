@@ -168,9 +168,9 @@ impl Session {
     /// one group call at a time (like the single 1:1 call):
     /// - a different call id replaces the tracked call (participants
     ///   reload via updates);
-    /// - `need_rejoin` sets the `reconnecting` flag so the UI shows
-    ///   "Reconnecting…" and the driver re-issues the join;
-    /// - a fresh joined, non-`need_rejoin` update clears `reconnecting`;
+    /// - `need_rejoin` makes a rejoin due (`GroupCallRejoin::want`) so the
+    ///   UI shows "Reconnecting…" and the driver re-issues the join;
+    /// - a fresh joined, non-`need_rejoin` update ends the rejoin;
     /// - `!is_active` (ended) drops the tracked call.
     ///
     /// The watched live story's call goes to its own slot
@@ -469,11 +469,10 @@ impl Session {
         }
     }
 
-    /// Phase C3a: clear the `reconnecting` flag once a rejoin has been
-    /// issued by the driver.
+    /// Screenshot demo: the Rejoin press reconnects at once.
     pub fn clear_group_call_reconnecting(&mut self) {
         if let Some(tracked) = self.calls.active_group_call.as_mut() {
-            tracked.reconnecting = false;
+            tracked.rejoin = GroupCallRejoin::Idle;
         }
     }
 
@@ -543,12 +542,13 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
         .map(|(sender, _)| *sender)
         .collect();
     if group_call.need_rejoin {
-        tracked.reconnecting = true;
+        // A rejoin already under way is not re-armed: the update predates
+        // its join answer.
+        tracked.rejoin.want();
     } else if group_call.is_joined {
-        tracked.reconnecting = false;
         // Phase C2f: a clean joined update means the rejoin
         // succeeded — the attempt counter starts over.
-        tracked.rejoin_attempts = 0;
+        tracked.rejoin = GroupCallRejoin::Idle;
     }
     tracked.sort_participants();
 }

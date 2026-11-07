@@ -19,7 +19,7 @@ use gpui_kit::{Entity, TestAppContext, VisualTestContext, WindowId};
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::convert::gradient_frame;
 use quill::calls::live_video::{LiveEnd, LiveFrame, LiveRotation, LiveSink};
-use quill::state::MAX_GROUP_CALL_REJOIN_ATTEMPTS;
+use quill::state::{GroupCallRejoin, MAX_GROUP_CALL_REJOIN_ATTEMPTS};
 use std::time::{Duration, Instant};
 
 /// A hand-fed feed with one picture.
@@ -314,12 +314,7 @@ fn a_story_pip_follows_a_feed_swap_and_enlarges_with_it(cx: &mut TestAppContext)
 
 /// Set the tracked call's rejoin state as TDLib's update, the driver's
 /// rejoin (`rejoin_group_call`) and its failure (`calls/error.rs`) do.
-fn set_rejoin_state(
-    app: &Entity<QuillApp>,
-    main: &mut VisualTestContext,
-    reconnecting: bool,
-    attempts: usize,
-) {
+fn set_rejoin_state(app: &Entity<QuillApp>, main: &mut VisualTestContext, rejoin: GroupCallRejoin) {
     app.update_in(main, |app, _, cx| {
         if let Some(call) = app
             .demo_session
@@ -328,8 +323,7 @@ fn set_rejoin_state(
         {
             call.is_joined = false;
             call.need_rejoin = true;
-            call.reconnecting = reconnecting;
-            call.rejoin_attempts = attempts;
+            call.rejoin = rejoin;
         }
         cx.notify();
     });
@@ -344,17 +338,24 @@ fn the_pip_waits_while_rejoins_are_left_and_closes_once_they_are_spent(cx: &mut 
     let pip = &mut pip;
     let _old = leave_stream_feed(&app, main);
     // The network dropped the call: a rejoin is due.
-    set_rejoin_state(&app, main, true, 0);
+    set_rejoin_state(&app, main, GroupCallRejoin::Wanted { attempts: 0 });
     settle(pip);
     settle(main);
     assert!(live_pip_open(&app, main), "a rejoin is due: it waits");
     // The last attempt is out and its answer pending.
-    set_rejoin_state(&app, main, false, MAX_GROUP_CALL_REJOIN_ATTEMPTS);
+    set_rejoin_state(
+        &app,
+        main,
+        GroupCallRejoin::InFlight {
+            request: quill::ids::RequestId(1),
+            attempt: MAX_GROUP_CALL_REJOIN_ATTEMPTS,
+        },
+    );
     settle(pip);
     settle(main);
     assert!(live_pip_open(&app, main), "the last rejoin is under way");
     // It failed: no attempts are left, only the manual Rejoin.
-    set_rejoin_state(&app, main, true, MAX_GROUP_CALL_REJOIN_ATTEMPTS);
+    set_rejoin_state(&app, main, GroupCallRejoin::GaveUp);
     pip.run_until_parked();
     settle(main);
     assert!(!live_pip_open(&app, main), "rejoins are spent: closed");
