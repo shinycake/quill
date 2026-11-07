@@ -202,5 +202,6 @@ crate::ui::shell::register_dialogs! {
         5400,
         |app| app.message_ui.fact_check_dialog.is_some(),
         QuillApp::build_fact_check_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_fact_check(cx)),
 }

@@ -925,7 +925,8 @@ crate::ui::shell::register_dialogs! {
         5300,
         |app| app.dialogs.saved_tag_dialog.is_some(),
         QuillApp::build_saved_tag_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_saved_tag_dialog(cx)),
 }
 
 #[cfg(test)]

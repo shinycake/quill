@@ -263,5 +263,6 @@ crate::ui::shell::register_dialogs! {
         7100,
         |app| app.session().is_some_and(|s| s.search.history_calendar.is_some()),
         QuillApp::build_jump_date_dialog,
-    ),
+    )
+    .follows_account(),
 }

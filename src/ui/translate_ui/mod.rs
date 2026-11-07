@@ -889,7 +889,8 @@ crate::ui::shell::register_dialogs! {
         6500,
         |app| app.settings.translate.dialog.is_some(),
         QuillApp::build_translate_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_translate_dialog(cx)),
 }
 
 mod demo;

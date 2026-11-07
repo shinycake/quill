@@ -485,7 +485,8 @@ crate::ui::shell::register_dialogs! {
         7650,
         |app| app.group_type_box_dialog_open(),
         QuillApp::build_group_type_box_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_group_type_box(cx)),
 }
 
 mod demo;

@@ -876,5 +876,9 @@ crate::ui::shell::register_dialogs! {
         300,
         |app| app.composer_ui.scheduled_dialog_open,
         QuillApp::build_scheduled_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.composer_ui.scheduled_dialog_open = false;
+            cx.notify();
+        }),
 }

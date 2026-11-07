@@ -418,7 +418,8 @@ crate::ui::shell::register_dialogs! {
         5100,
         |app| app.session().is_some_and(|s| s.stickers.emoji.open),
         QuillApp::build_emoji_sets_dialog,
-    ),
+    )
+    .follows_account(),
 }
 
 #[cfg(test)]

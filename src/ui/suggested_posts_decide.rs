@@ -595,11 +595,13 @@ crate::ui::shell::register_dialogs! {
         3964,
         |app| app.suggested_posts.accept.is_some(),
         QuillApp::build_suggest_accept_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_suggest_accept(cx)),
     /// "Decline" of a suggested post, with the reason.
     SuggestDecline => DialogSpec::new(
         3966,
         |app| app.suggested_posts.decline.is_some(),
         QuillApp::build_suggest_decline_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_suggest_decline(cx)),
 }

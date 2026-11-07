@@ -573,7 +573,8 @@ crate::ui::shell::register_dialogs! {
         7250,
         |app| app.settings.emoji_style.open,
         QuillApp::build_emoji_set_style_dialog,
-    ),
+    )
+    .app_wide(),
 }
 
 #[cfg(test)]

@@ -766,7 +766,8 @@ crate::ui::shell::register_dialogs! {
         5200,
         |app| app.admin.forum_manage_dialog.is_some(),
         QuillApp::build_forum_manage_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_forum_manage_dialog(cx)),
 }
 
 mod forum_topics_pane;

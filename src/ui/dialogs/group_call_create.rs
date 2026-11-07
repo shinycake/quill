@@ -763,7 +763,8 @@ crate::ui::shell::register_dialogs! {
             .as_ref()
             .is_some_and(|flow| !matches!(flow.step, CreateStep::Waiting(_))),
         QuillApp::build_group_call_create_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_group_call_create(cx)),
 }
 
 #[cfg(feature = "demo-capture")]

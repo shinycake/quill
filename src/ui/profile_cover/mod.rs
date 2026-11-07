@@ -240,5 +240,6 @@ crate::ui::shell::register_dialogs! {
         3792,
         |app| app.profile_cover.show_or_premium.is_some(),
         QuillApp::build_show_or_premium_box,
-    ),
+    )
+    .closes(|app, _, cx| app.close_show_or_premium(cx)),
 }

@@ -852,7 +852,8 @@ crate::ui::shell::register_dialogs! {
         1100,
         |app| app.calls.confirm.is_some(),
         QuillApp::build_call_confirm_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_pending_call(cx)),
 
     /// Swap prompt: incoming call while another call is active.
     CallSwap => DialogSpec::new(
@@ -860,7 +861,8 @@ crate::ui::shell::register_dialogs! {
         1200,
         |app| app.session().is_some_and(|s| s.calls.second_call.prompt().is_some()),
         QuillApp::build_call_swap_dialog,
-    ),
+    )
+    .follows_account(),
 }
 
 #[cfg(feature = "demo-capture")]

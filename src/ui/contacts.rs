@@ -533,13 +533,15 @@ crate::ui::shell::register_dialogs! {
         5900,
         |app| app.dialogs.import_contacts_dialog.is_some(),
         QuillApp::build_import_contacts_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_import_contacts_dialog(cx)),
 
     AddContact => DialogSpec::new(
         6200,
         |app| app.dialogs.add_contact_dialog.is_some(),
         QuillApp::build_add_contact_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_add_contact_dialog(cx)),
 }
 
 /// tdesktop's `contactsPhotoSize`.

@@ -281,5 +281,6 @@ crate::ui::shell::register_dialogs! {
         2947,
         |app| app.share.content_dialog.is_some(),
         QuillApp::build_share_contact_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_share_content_dialog(cx)),
 }

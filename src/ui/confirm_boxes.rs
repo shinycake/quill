@@ -155,5 +155,6 @@ crate::ui::shell::register_dialogs! {
         2945,
         |app| app.chat_list.pending_close_secret_chat.is_some(),
         QuillApp::build_close_secret_chat_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_close_secret_chat(cx)),
 }

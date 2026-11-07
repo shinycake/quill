@@ -121,5 +121,9 @@ crate::ui::shell::register_dialogs! {
         1600,
         |app| app.chat_list.global.clear_calls_open,
         QuillApp::build_clear_calls_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.chat_list.global.clear_calls_open = false;
+            cx.notify();
+        }),
 }

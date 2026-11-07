@@ -305,7 +305,11 @@ crate::ui::shell::register_dialogs! {
         2961,
         |app| app.calls.conference_link.is_some(),
         QuillApp::build_conference_link_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.calls.conference_link = None;
+            cx.notify();
+        }),
 }
 
 /// A conference call's encryption under its title (tdesktop

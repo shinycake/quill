@@ -646,7 +646,11 @@ crate::ui::shell::register_dialogs! {
         620,
         |app| app.privacy.passkeys.about_open,
         QuillApp::build_passkeys_about_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.privacy.passkeys.about_open = false;
+            cx.notify();
+        }),
 
     /// The Passkeys list.
     Passkeys => DialogSpec::new(

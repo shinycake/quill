@@ -784,5 +784,6 @@ crate::ui::shell::register_dialogs! {
         4300,
         |app| app.admin.member_dialog.is_some(),
         QuillApp::build_member_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_member_dialog(cx)),
 }

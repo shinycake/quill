@@ -139,40 +139,99 @@ pub(crate) struct DialogSpec {
     /// not here.
     is_open: fn(&QuillApp) -> bool,
     build: DialogBuilder,
-    /// How the shell closes the dialog without the kit: set for every
-    /// dialog agents never use (`agent_driver_surface::HARD_DIALOGS`), so
-    /// one an agent's step opened is closed before it shows.
+    /// How the shell closes the dialog without the kit: on an account
+    /// switch ([`OnSwitch::Closes`]), and, for a dialog agents never use
+    /// (`agent_driver_surface::HARD_DIALOGS`), when an agent's step opened
+    /// it, before it shows.
     close: Option<DialogClose>,
+    on_switch: OnSwitch,
+}
+
+/// What switching the account on screen does to a dialog
+/// (`QuillApp::end_account_surfaces`). Every dialog states one, because a
+/// box that keeps the old account's ids in app-side state but sends
+/// through `self.live` would act on the account switched to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum OnSwitch {
+    /// App-side state names the account's objects: the dialog closes with
+    /// its own close ([`DialogUnscoped::closes`]).
+    Closes,
+    /// The open state is read from the account on screen (its `Session`,
+    /// or state keyed by that account), so after a switch it is the new
+    /// account's own ([`DialogUnscoped::follows_account`]).
+    FollowsAccount,
+    /// Belongs to no one account (the passcode, another account's ringing
+    /// call): it stays ([`DialogUnscoped::app_wide`]).
+    AppWide,
+}
+
+/// A dialog that has not said yet what an account switch does to it
+/// ([`OnSwitch`]). `register_dialogs!` takes only a [`DialogSpec`], so an
+/// entry that stops here does not compile ("no method named `kind` found
+/// for struct `DialogUnscoped`"): end it with `.closes(..)`,
+/// `.follows_account()` or `.app_wide()`.
+pub(crate) struct DialogUnscoped {
+    priority: u32,
+    is_open: fn(&QuillApp) -> bool,
+    build: DialogBuilder,
 }
 
 impl DialogSpec {
+    // Typestate: a spec is whole only once it says what a switch does.
+    #[allow(clippy::new_ret_no_self)]
     pub(crate) const fn new(
         priority: u32,
         is_open: fn(&QuillApp) -> bool,
         build: DialogBuilder,
-    ) -> Self {
-        Self {
-            // Filled in by `register_dialogs!` from the entry's name.
-            kind: DialogKind::named(""),
+    ) -> DialogUnscoped {
+        DialogUnscoped {
             priority,
             is_open,
             build,
-            close: None,
-        }
-    }
-
-    /// The dialog's own close, for the shell to run when the dialog may not
-    /// show ([`DialogClose`]).
-    pub(crate) const fn closes(self, close: DialogClose) -> Self {
-        Self {
-            close: Some(close),
-            ..self
         }
     }
 
     /// Only [`register_dialogs!`] should call this.
     pub(crate) const fn kind(self, kind: DialogKind) -> Self {
         Self { kind, ..self }
+    }
+}
+
+impl DialogUnscoped {
+    const fn scoped(self, close: Option<DialogClose>, on_switch: OnSwitch) -> DialogSpec {
+        DialogSpec {
+            // Filled in by `register_dialogs!` from the entry's name.
+            kind: DialogKind::named(""),
+            priority: self.priority,
+            is_open: self.is_open,
+            build: self.build,
+            close,
+            on_switch,
+        }
+    }
+
+    /// The dialog's own close ([`DialogClose`]), which an account switch
+    /// runs ([`OnSwitch::Closes`]).
+    pub(crate) const fn closes(self, close: DialogClose) -> DialogSpec {
+        self.scoped(Some(close), OnSwitch::Closes)
+    }
+
+    /// The open state is read from the account on screen
+    /// ([`OnSwitch::FollowsAccount`]).
+    pub(crate) const fn follows_account(self) -> DialogSpec {
+        self.scoped(None, OnSwitch::FollowsAccount)
+    }
+
+    /// Belongs to no one account and stays open across a switch
+    /// ([`OnSwitch::AppWide`]).
+    pub(crate) const fn app_wide(self) -> DialogSpec {
+        self.scoped(None, OnSwitch::AppWide)
+    }
+
+    /// [`Self::app_wide`] with a close the agent block runs; a switch
+    /// never does.
+    pub(crate) const fn app_wide_closes(self, close: DialogClose) -> DialogSpec {
+        self.scoped(Some(close), OnSwitch::AppWide)
     }
 }
 
@@ -188,10 +247,12 @@ inventory::collect!(DialogSpec);
 ///         4150,
 ///         |app| app.example_dialog.is_some(),
 ///         QuillApp::build_example_dialog,
-///     ),
+///     )
+///     .closes(|app, _, cx| app.close_example_dialog(cx)),
 /// }
 /// ```
 ///
+/// Each entry must say what an account switch does to it ([`OnSwitch`]).
 /// `DialogSpec` is in scope inside the macro, so callers need no import.
 /// See docs/decisions/codex-refactor-2.md for picking a priority.
 macro_rules! register_dialogs {
@@ -273,13 +334,22 @@ impl QuillShell {
         registry().iter().map(|spec| spec.kind.0).collect()
     }
 
-    /// The registered dialogs with a close of their own ([`DialogSpec::closes`]).
+    /// The registered dialogs with a close of their own ([`DialogUnscoped::closes`]).
     #[cfg(test)]
     pub(super) fn closable_dialog_names() -> Vec<&'static str> {
         registry()
             .iter()
             .filter(|spec| spec.close.is_some())
             .map(|spec| spec.kind.0)
+            .collect()
+    }
+
+    /// Every registered dialog's name and what a switch does to it.
+    #[cfg(test)]
+    pub(super) fn dialog_switch_scopes() -> Vec<(&'static str, OnSwitch)> {
+        registry()
+            .iter()
+            .map(|spec| (spec.kind.0, spec.on_switch))
             .collect()
     }
 
@@ -316,17 +386,15 @@ impl QuillShell {
     }
 
     /// The account on screen is changing (`QuillApp::end_account_surfaces`):
-    /// every open dialog with a close of its own, except those named in
-    /// `keep`, closes the way that close does. A dialog without one keeps
-    /// its flag and is drawn again from the state of the account switched to.
+    /// every open dialog that closes on a switch ([`OnSwitch::Closes`])
+    /// closes the way its own close does.
     pub(super) fn close_dialogs_for_switch(
         app: &mut QuillApp,
-        keep: &[&str],
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) {
         for spec in registry() {
-            if keep.contains(&spec.kind.0) {
+            if spec.on_switch != OnSwitch::Closes {
                 continue;
             }
             let Some(close) = spec.close else {

@@ -554,7 +554,11 @@ crate::ui::shell::register_dialogs! {
         5461,
         |app| app.playback.playlist_remove.is_some(),
         QuillApp::build_remove_playlist_track_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.playback.playlist_remove = None;
+            cx.notify();
+        }),
 }
 
 #[cfg(test)]

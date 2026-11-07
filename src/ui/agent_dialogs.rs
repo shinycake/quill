@@ -428,14 +428,16 @@ crate::ui::shell::register_dialogs! {
         1055,
         |app| app.agent_request_open(),
         QuillApp::build_agent_request_dialog,
-    ),
+    )
+    .follows_account(),
 
     /// Settings: the user is about to give agents all chats.
     AgentConsent => DialogSpec::new(
         1056,
         |app| app.agent_consent_open(),
         QuillApp::build_agent_consent_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_all_chats(cx)),
 
     /// Settings: "Reset token" asks first.
     AgentResetToken => DialogSpec::new(

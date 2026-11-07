@@ -666,7 +666,8 @@ crate::ui::shell::register_dialogs! {
         5442,
         |app| app.composer_ui.send_box.video_editor.is_some(),
         QuillApp::build_video_editor_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_video_editor(cx)),
 }
 
 #[cfg(test)]

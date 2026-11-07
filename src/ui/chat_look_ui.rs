@@ -840,7 +840,8 @@ crate::ui::shell::register_dialogs! {
         2100,
         |app| app.dialogs.chat_look_dialog.is_some(),
         QuillApp::build_chat_look_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_chat_look_dialog(cx)),
 }
 
 #[cfg(test)]

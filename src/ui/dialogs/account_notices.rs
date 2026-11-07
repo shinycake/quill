@@ -535,5 +535,6 @@ crate::ui::shell::register_dialogs! {
         100,
         |app| app.account_notice().is_some(),
         QuillApp::build_account_notice_dialog,
-    ),
+    )
+    .follows_account(),
 }

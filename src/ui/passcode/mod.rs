@@ -944,7 +944,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.account.passcode.open,
         QuillApp::build_passcode_dialog,
     )
-    .closes(|app, window, cx| app.close_passcode(window, cx)),
+    .app_wide_closes(|app, window, cx| app.close_passcode(window, cx)),
 }
 
 mod build_passcode_dialog;
