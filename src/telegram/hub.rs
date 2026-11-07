@@ -24,7 +24,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
 use crate::telegram::ffi::{MAX_NATIVE_LOG_VERBOSITY, TdJson, TdJsonError};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -85,6 +85,122 @@ pub struct Routes {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     crate::locks::lock_or_recover(mutex)
+}
+
+/// `@extra` of the chat page the receive thread asks for on
+/// `authorizationStateReady` (`requests::load_chats_untracked`). Its answer
+/// ends the first frame's wait in [`LAUNCH_CHATS`].
+pub const LAUNCH_CHATS_EXTRA: &str = "quill-launch-chats";
+
+/// Where the launch's first chat page is. The first frame waits a little
+/// for it once TDLib is ready: the page then comes 9 to 15 ms later, and on
+/// a cold launch AppKit keeps the main thread for a few hundred ms after the
+/// first frame before the chats could draw. A TDLib still opening its
+/// database is further off, and the window does not wait for it.
+pub struct LaunchChats {
+    stage: AtomicU8,
+    lock: Mutex<()>,
+    came: Condvar,
+}
+
+/// TDLib is opening its database.
+const STARTING: u8 = 0;
+/// `authorizationStateReady` came, and the receive thread asked for the page.
+const ASKED: u8 = 1;
+/// The page is in, no chats are coming (the account is not signed in), or
+/// the first frame stopped waiting. Stages only move forward.
+const IN: u8 = 2;
+
+/// What [`LaunchChats::wait`] found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LaunchWait {
+    /// The page was in, or came within the cap.
+    Came,
+    /// TDLib was ready, but the page did not come within the cap.
+    Capped,
+    /// TDLib was not ready, so nothing was waited for.
+    Skipped,
+}
+
+pub static LAUNCH_CHATS: LaunchChats = LaunchChats::new();
+
+impl LaunchChats {
+    pub const fn new() -> Self {
+        Self {
+            stage: AtomicU8::new(STARTING),
+            lock: Mutex::new(()),
+            came: Condvar::new(),
+        }
+    }
+
+    fn stage(&self) -> u8 {
+        self.stage.load(Ordering::SeqCst)
+    }
+
+    fn set_in(&self) {
+        let _guard = lock(&self.lock);
+        self.stage.store(IN, Ordering::SeqCst);
+        self.came.notify_all();
+    }
+
+    fn is_in(&self) -> bool {
+        self.stage() == IN
+    }
+
+    /// Block while the page is asked for, for at most `cap`. The page then
+    /// counts as in, so later calls return at once.
+    pub fn wait(&self, cap: Duration) -> LaunchWait {
+        let guard = lock(&self.lock);
+        let found = match self.stage() {
+            IN => LaunchWait::Came,
+            STARTING => LaunchWait::Skipped,
+            _ => {
+                let (_guard, waited) = self
+                    .came
+                    .wait_timeout_while(guard, cap, |_| !self.is_in())
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if waited.timed_out() {
+                    LaunchWait::Capped
+                } else {
+                    LaunchWait::Came
+                }
+            }
+        };
+        self.stage.store(IN, Ordering::SeqCst);
+        found
+    }
+
+    /// Move on at `authorizationStateReady`, at the page's answer, and at an
+    /// authorization state that means no chats are coming.
+    fn observe(&self, json: &str, owned: &OwnedEnvelope) {
+        use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
+        if self.is_in() {
+            return;
+        }
+        let no_chats = match &owned.envelope.payload {
+            EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(
+                AuthorizationState::Ready,
+            )) => {
+                self.stage.fetch_max(ASKED, Ordering::SeqCst);
+                false
+            }
+            EnvelopePayload::Auth(AuthPayload::UpdateAuthorizationState(state)) => {
+                !matches!(state, AuthorizationState::WaitTdlibParameters)
+            }
+            _ => false,
+        };
+        let answered = matches!(owned.envelope.type_name.as_str(), "ok" | "error")
+            && json.contains(LAUNCH_CHATS_EXTRA);
+        if no_chats || answered {
+            self.set_in();
+        }
+    }
+}
+
+impl Default for LaunchChats {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Routes {
@@ -435,6 +551,7 @@ fn receive_one(
     let Some(owned) = copy_and_parse(&json, seq, sink) else {
         return;
     };
+    LAUNCH_CHATS.observe(&json, &owned);
     exit::note_received(&owned);
     if crate::startup_trace::enabled() {
         use crate::telegram::envelope::{ChatListPayload, EnvelopePayload};

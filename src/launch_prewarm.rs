@@ -1,7 +1,9 @@
 //! macOS launch: the WindowServer connection and the GPU list are set up on
 //! a worker while the main thread reads settings and builds the platform.
 //! Both are XPC round trips the main thread otherwise waits on in
-//! `App::new` (displays) and the first window (`MTLCopyAllDevices`).
+//! `App::new` (displays) and the first window (`MTLCopyAllDevices`), as is
+//! the screen zoom setting AppKit reads (once per process) when the window
+//! first sets its first responder.
 //! Then it reads back the glyph bitmaps the last launch drew, so the first
 //! frame does not rasterize the chat list's text and emoji again
 //! ([`chat_list_drawn`] writes this launch's).
@@ -23,16 +25,25 @@ pub fn start() {
             unsafe extern "C" {
                 fn CFRelease(object: *const std::ffi::c_void);
             }
+            #[link(name = "ApplicationServices", kind = "framework")]
+            unsafe extern "C" {
+                fn UAZoomEnabled() -> u8;
+            }
             let mut count = 0u32;
-            #[allow(unsafe_code, reason = "plain CoreGraphics and Metal calls")]
+            #[allow(
+                unsafe_code,
+                reason = "plain CoreGraphics, Metal and Universal Access calls"
+            )]
             // SAFETY: a zero-length query writes only `count`; the device
-            // array is a +1 CFArray (or null) released here.
+            // array is a +1 CFArray (or null) released here; UAZoomEnabled
+            // takes nothing and returns a Boolean.
             unsafe {
                 CGGetActiveDisplayList(0, std::ptr::null_mut(), &mut count);
                 let devices = MTLCopyAllDevices();
                 if !devices.is_null() {
                     CFRelease(devices);
                 }
+                UAZoomEnabled();
             }
             #[cfg(feature = "ui")]
             if let Some(path) = glyph_cache_path() {

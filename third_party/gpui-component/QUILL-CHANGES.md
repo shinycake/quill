@@ -43,6 +43,15 @@ init finds the list ready and the font picker reads the same list instead of
 listing the fonts a second time on the main thread (commit `cfdb6d7e`,
 `docs/decisions/launch-time-fonts.md`).
 
+`src/theme/{system_font,mono_font}.rs`: theme init no longer reads the
+installed list when the default fonts load under their own names. The list
+takes about 130 ms to build on macOS, and theme init waited about 28 ms for
+the prefetch on a warm launch. `resolve_default_font` lists the families only
+when `.SystemUIFont` resolved to another family (`substitute` takes the list
+as a closure), and the monospace default is kept when GPUI loads it as
+itself. Only the web reads the list first, because it starts with no font
+and resolving one would panic there (`docs/decisions/launch-warm-waits.md`).
+
 `src/highlighter/{mod,syntect_backend}.rs`: `highlighter::capture_names` is
 public with the `syntect` feature (without `tree-sitter`). It returns the
 highlight names of a text for a language, so Quill colors message code blocks

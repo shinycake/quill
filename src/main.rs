@@ -406,14 +406,20 @@ fn single_instance(args: &[String]) -> quill::single_instance::Launch {
 
 /// The macOS menu bar, once the main window has drawn its first frame. The
 /// first menu with an Edit menu makes AppKit add its text input items, which
-/// loads the Writing Tools framework: ~100 ms on a cold launch. A window that
-/// starts in the tray draws nothing, so its menus go in now.
+/// loads the Writing Tools framework: ~100 ms on a cold launch. Next-frame
+/// callbacks run before that frame draws, so the menus go in on the main
+/// queue's next turn, after the frame is shown: building them took about
+/// 7 ms of the first frame on a warm launch. A window that starts in the
+/// tray draws nothing, so its menus go in now.
 #[cfg(all(feature = "ui", target_os = "macos"))]
 fn install_app_menus(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, start_in_tray: bool) {
     if start_in_tray {
         ui::setup_app_menus(cx);
     } else {
-        window.on_next_frame(|_, cx| ui::setup_app_menus(cx));
+        window.on_next_frame(|_, cx| {
+            cx.spawn(async move |cx| cx.update(ui::setup_app_menus))
+                .detach();
+        });
     }
 }
 

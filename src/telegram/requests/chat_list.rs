@@ -5,14 +5,16 @@ pub fn load_chats(extra: RequestId, limit: i32) -> String {
     load_chats_list(extra, json!({ "@type": "chatListMain" }), limit)
 }
 
-/// `loadChats(chatListMain)` with no `@extra`: its answer matches no
-/// request, for a page asked for outside the session's bookkeeping
-/// (`LiveConnect::load_chats_when_ready`).
+/// `loadChats(chatListMain)` whose answer matches no request, for a page
+/// asked for outside the session's bookkeeping
+/// (`LiveConnect::load_chats_when_ready`). Its `@extra` names the launch
+/// page, whose answer the first frame may wait for (`hub::LAUNCH_CHATS`).
 pub fn load_chats_untracked(limit: i32) -> String {
     json!({
         "@type": "loadChats",
         "chat_list": { "@type": "chatListMain" },
         "limit": limit,
+        "@extra": crate::telegram::hub::LAUNCH_CHATS_EXTRA,
     })
     .to_string()
 }

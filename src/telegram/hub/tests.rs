@@ -397,3 +397,51 @@ fn each_route_wakes_only_its_own_poll_loop_and_a_switch_swaps_them() {
     routes.deliver(parse(option_update(Some(1), 2)));
     assert_eq!(epochs(), (before.0 + 3, before.1 + 2));
 }
+
+fn auth_state(state: &str) -> String {
+    format!(
+        r#"{{"@type":"updateAuthorizationState","authorization_state":{{"@type":"{state}"}},"@client_id":1}}"#
+    )
+}
+
+#[test]
+fn the_launch_chat_page_answer_ends_the_launch_wait() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let gate = LaunchChats::new();
+    let see = |json: String| gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    see(auth_state("authorizationStateWaitTdlibParameters"));
+    see(auth_state("authorizationStateReady"));
+    see(option_update(Some(1), 1));
+    see(r#"{"@type":"ok","@extra":7,"@client_id":1}"#.to_owned());
+    assert!(!gate.is_in());
+    see(format!(
+        r#"{{"@type":"ok","@extra":"{LAUNCH_CHATS_EXTRA}","@client_id":1}}"#
+    ));
+    assert!(gate.is_in());
+    assert_eq!(gate.wait(Duration::ZERO), LaunchWait::Came);
+}
+
+#[test]
+fn a_signed_out_account_ends_the_launch_wait() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let gate = LaunchChats::new();
+    let json = auth_state("authorizationStateWaitPhoneNumber");
+    gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    assert!(gate.is_in());
+}
+
+#[test]
+fn the_launch_waits_only_for_a_page_tdlib_was_asked_for() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let starting = LaunchChats::new();
+    assert_eq!(starting.wait(Duration::ZERO), LaunchWait::Skipped);
+    assert!(starting.is_in());
+    let asked = LaunchChats::new();
+    let json = auth_state("authorizationStateReady");
+    asked.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    assert_eq!(asked.wait(Duration::ZERO), LaunchWait::Capped);
+    assert_eq!(asked.wait(Duration::ZERO), LaunchWait::Came);
+}

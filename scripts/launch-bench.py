@@ -32,6 +32,7 @@ Bundles and trace files stay on the internal disk: an app that LaunchServices
 starts from a removable volume waits on a consent prompt.
 """
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -217,6 +218,7 @@ def main():
                         help="the milestone that ends a launch (first_render for a signed-out data root)")
     parser.add_argument("--onscreen", action="store_true",
                         help="also time when the window is first on screen, from outside (scripts/winwatch.swift)")
+    parser.add_argument("--json", metavar="PATH", help="also write every run's marks to PATH")
     parser.add_argument("sides", nargs="+", metavar="LABEL=BINARY")
     opts = parser.parse_args()
     if running() and not opts.data_root:
@@ -246,6 +248,8 @@ def main():
             print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",
                   flush=True)
             time.sleep(2)
+    if opts.json:
+        pathlib.Path(opts.json).write_text(json.dumps(results, indent=1))
     for label, runs in results.items():
         reached = sum(opts.until in m for m in runs)
         print(f"\n{label}: {reached}/{len(runs)} runs reached {opts.until}")
