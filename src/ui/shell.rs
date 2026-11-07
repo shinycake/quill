@@ -315,6 +315,34 @@ impl QuillShell {
         }
     }
 
+    /// The account on screen is changing (`QuillApp::end_account_surfaces`):
+    /// every open dialog with a close of its own, except those named in
+    /// `keep`, closes the way that close does. A dialog without one keeps
+    /// its flag and is drawn again from the state of the account switched to.
+    pub(super) fn close_dialogs_for_switch(
+        app: &mut QuillApp,
+        keep: &[&str],
+        window: &mut Window,
+        cx: &mut Context<QuillApp>,
+    ) {
+        for spec in registry() {
+            if keep.contains(&spec.kind.0) {
+                continue;
+            }
+            let Some(close) = spec.close else {
+                continue;
+            };
+            // A close that steps back (a stacked page) runs again until
+            // the flag is clear.
+            for _ in 0..8 {
+                if !(spec.is_open)(app) {
+                    break;
+                }
+                close(app, window, cx);
+            }
+        }
+    }
+
     /// Keep the single kit dialog in sync with the app-side open flags.
     /// The kit dialog is modal, so at most one flag wins, by registry
     /// priority. A flag cleared without a kit close (e.g. an action
@@ -350,6 +378,14 @@ impl QuillShell {
         // Snapshot the flags once; the app is not leased here.
         let winner = Self::first_open(app.read(cx));
         let first_open = winner.map(|r| r.kind);
+        // An account switch already closed the kit dialog this shell showed.
+        if host.is_none()
+            && app.update(cx, |app, _| {
+                std::mem::take(&mut app.windows.main_dialogs_closed)
+            })
+        {
+            self.open_dialog = None;
+        }
         if self.open_dialog.is_none() {
             // Closed by the kit (Esc, backdrop, ✕): the host is free again.
             app.update(cx, |app, _| app.windows.dialog_closed_in(host));

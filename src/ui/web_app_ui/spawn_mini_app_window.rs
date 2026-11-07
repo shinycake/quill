@@ -136,6 +136,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The account on screen is about to change: the window, its open box
+    /// and every launch still waiting for an answer belong to it. The close
+    /// goes to its own client (still `self.live` here), and nothing is left
+    /// to keep the 30 ms poll running for answers that land in the
+    /// background.
+    pub(in crate::ui) fn end_mini_apps_for_switch(&mut self, cx: &mut Context<Self>) {
+        self.close_mini_app_window(cx);
+        let apps = &mut self.mini_apps;
+        apps.confirm = None;
+        apps.awaiting_attach_bot = None;
+        apps.awaiting_search = None;
+        apps.awaiting_toggle = None;
+        apps.render_action = None;
+        // Dropping the task cancels it; a new launch starts a fresh poll.
+        apps.poll = None;
+        apps.generation += 1;
+    }
+
     /// Poll the helper and the session's mini-app answers while something
     /// is going on; stops by itself when nothing is left.
     pub(super) fn ensure_mini_app_poll(&mut self, cx: &mut Context<Self>) {

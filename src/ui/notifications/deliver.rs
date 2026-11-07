@@ -94,25 +94,30 @@ impl QuillApp {
             .and_then(quill::notify_accounts::ringing_incoming_call)
     }
 
-    /// Picks on the incoming-call notification. A stale pick (the call
-    /// already ended or was answered) or one made on another account's
-    /// notification is ignored: accepting must never act on a different
-    /// call, and TDLib call ids repeat across accounts.
-    pub(super) fn answer_call_picks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut picks: Vec<quill::notify_call::CallPick> = self
-            .calls
-            .notify_clicks
-            .lock_or_recover()
-            .drain(..)
-            .collect();
+    /// Picks on the incoming-call notification. Accepting must never act
+    /// on a different call, and TDLib call ids repeat across accounts, so
+    /// only the picks for the call ringing on screen are answered here. A
+    /// pick for a call still ringing on a background account stays queued
+    /// for `flush_background_call_picks`; any other (the call already ended
+    /// or was answered) is dropped.
+    pub(in crate::ui) fn answer_call_picks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ringing = self
             .session()
             .map(|session| session.account.clone())
             .zip(self.ringing_call().map(|(call_id, ..)| call_id));
-        let Some((account, call_id)) = ringing else {
-            return;
+        let queue = self.calls.notify_clicks.clone();
+        let mine = {
+            let mut picks = queue.lock_or_recover();
+            let mine = match &ringing {
+                Some((account, call_id)) => {
+                    quill::notify_call::take_call_picks(&mut picks, account, *call_id)
+                }
+                None => Vec::new(),
+            };
+            picks.retain(|pick| self.background_call_rings(pick));
+            mine
         };
-        for action in quill::notify_call::take_call_picks(&mut picks, &account, call_id) {
+        for action in mine {
             match action {
                 quill::notify_call::CallNotificationAction::Accept => self.accept_incoming_call(cx),
                 quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),

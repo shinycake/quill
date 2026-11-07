@@ -64,6 +64,9 @@ pub(crate) struct ChatWindows {
     pub(super) last_input: Option<ChatId>,
     /// The window showing the kit dialog (`Some(None)`: the main window).
     dialog_host: Option<Option<ChatId>>,
+    /// An account switch closed every kit dialog in the main window: its
+    /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
+    pub(super) main_dialogs_closed: bool,
     /// The main window, as last rendered.
     pub(super) main: Option<AnyWindowHandle>,
     /// Where the main window stood at its last render (`cover`).
@@ -106,6 +109,7 @@ impl ChatWindows {
             scope: None,
             last_input: None,
             dialog_host: None,
+            main_dialogs_closed: false,
             main: None,
             main_place: None,
             cascade: 0,
