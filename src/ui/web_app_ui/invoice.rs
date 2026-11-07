@@ -58,7 +58,7 @@ impl InvoiceWatch {
             // still go through: that is pending, never cancelled.
             return Some(if self.failed {
                 "failed"
-            } else if self.pending || self.sending {
+            } else if self.pending || self.sending || view.sending {
                 "pending"
             } else {
                 "cancelled"
@@ -215,6 +215,19 @@ mod tests {
         assert_eq!(watch.observe(sending), None);
         // Closed (Esc, or the 3-D Secure page) before the next look.
         assert_eq!(watch.observe(CheckoutView::default()), Some("pending"));
+    }
+
+    #[test]
+    fn a_checkout_closed_before_any_look_saw_the_send_is_pending() {
+        let mut watch = InvoiceWatch::new("s");
+        assert_eq!(watch.observe(open()), None);
+        // Pay, then Esc within one poll: the first look already finds the
+        // dialog closed with the payment still being sent.
+        let closed_sending = CheckoutView {
+            sending: true,
+            ..CheckoutView::default()
+        };
+        assert_eq!(watch.observe(closed_sending), Some("pending"));
     }
 
     #[test]
