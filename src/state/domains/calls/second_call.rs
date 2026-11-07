@@ -16,7 +16,11 @@ pub enum SecondCall {
     /// "End current & answer" was chosen and the current call's
     /// `discardCall` went out. The driver sends `acceptCall` once the
     /// active call's terminal update lands (TDLib allows one active call).
-    AcceptAfterHangup { call_id: i32, is_video: bool },
+    AcceptAfterHangup {
+        call_id: i32,
+        user_id: i64,
+        is_video: bool,
+    },
 }
 
 impl SecondCall {
@@ -47,12 +51,34 @@ impl SecondCall {
         Some(prompt)
     }
 
-    /// The queued accept's `call_id`, taking it.
-    pub fn take_queued_accept(&mut self) -> Option<i32> {
-        let Self::AcceptAfterHangup { call_id, .. } = *self else {
+    /// The queued accept's `(call_id, user_id, is_video)`, taking it.
+    pub fn take_queued_accept(&mut self) -> Option<(i32, i64, bool)> {
+        let Self::AcceptAfterHangup {
+            call_id,
+            user_id,
+            is_video,
+        } = *self
+        else {
             return None;
         };
         *self = Self::None;
-        Some(call_id)
+        Some((call_id, user_id, is_video))
+    }
+
+    /// The hang-up the queued accept waited for failed: the current call
+    /// goes on, so the swap prompt comes back.
+    pub fn back_to_prompt(&mut self) {
+        if let Self::AcceptAfterHangup {
+            call_id,
+            user_id,
+            is_video,
+        } = *self
+        {
+            *self = Self::Prompt {
+                call_id,
+                user_id,
+                is_video,
+            };
+        }
     }
 }

@@ -33,6 +33,9 @@ pub struct CallsState {
     /// active: its swap prompt, or the accept queued behind the current
     /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
     pub second_call: SecondCall,
+    /// The active call's `discardCall` in flight, which owns its
+    /// `HangingUp` phase.
+    pub hang_up: Option<HangUp>,
     /// The incoming call `acceptCall` went out for. Its state stays
     /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
     /// close hangs it up.
@@ -172,6 +175,7 @@ impl CallsState {
             busy_decline_queue: Vec::new(),
             busy_declined: Vec::new(),
             second_call: SecondCall::None,
+            hang_up: None,
             answered_call: None,
             privacy_allow_calls: None,
             privacy_p2p: None,
