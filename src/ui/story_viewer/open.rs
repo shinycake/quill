@@ -247,8 +247,7 @@ impl QuillApp {
         // path, which funnels through here.
         self.stories.playback.start(Instant::now());
         self.stories.pause.reset();
-        self.stories.native_failed = None;
-        self.stories.video_wait_since = Some(Instant::now());
+        self.stories.video.retry();
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);
         self.ensure_story_download(cx);

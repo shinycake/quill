@@ -188,11 +188,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let prompt = self.session.calls.second_call;
         let (call_id, _user_id, is_video) = self
             .session
             .calls
-            .swap_pending
-            .take()
+            .second_call
+            .take_prompt()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let extra = self.session.request(RequestPurpose::DiscardCall, None);
         if let Err(err) = self
@@ -200,6 +201,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
         {
             self.session.requests.take(extra);
+            // Nothing went out: the prompt stays up.
+            self.session.calls.second_call = prompt;
             return Err(err);
         }
         Ok(())
@@ -214,18 +217,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (pending_id, _user_id, is_video) = self
+        let prompt = self.session.calls.second_call;
+        let (call_id, _user_id, is_video) = self
             .session
             .calls
-            .swap_pending
-            .take()
+            .second_call
+            .take_prompt()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        self.session.calls.swap_accept_queued = Some((pending_id, is_video));
-        if self.session.calls.active_call.is_some() {
-            self.discard_call().map(|_| ())
-        } else {
-            self.maybe_accept_queued_swap()
+        if self.session.calls.active_call.is_some()
+            && let Err(err) = self.discard_call()
+        {
+            // The current call goes on: answering later would take a
+            // call the person no longer sees, so the prompt stays up.
+            self.session.calls.second_call = prompt;
+            return Err(err);
         }
+        self.session.calls.second_call =
+            crate::state::SecondCall::AcceptAfterHangup { call_id, is_video };
+        self.maybe_accept_queued_swap()
     }
 
     /// Driver pump: fire the queued post-swap `acceptCall` once no
@@ -236,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || self.session.calls.active_call.is_some() {
             return Ok(());
         }
-        let Some((call_id, _is_video)) = self.session.calls.swap_accept_queued.take() else {
+        let Some(call_id) = self.session.calls.second_call.take_queued_accept() else {
             return Ok(());
         };
         let extra = self

@@ -648,7 +648,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_ANSWER_THE_CALL)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some((call_id, user_id, is_video)) = session.calls.swap_pending.take() {
+            if let Some((call_id, user_id, is_video)) = session.calls.second_call.take_prompt() {
                 session.calls.active_call = None;
                 session.calls.summary = None;
                 session.calls.active_call = Some(ActiveCall {
@@ -693,7 +693,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_DECLINE_THE_CALL)),
             });
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.calls.swap_pending = None;
+            session.calls.second_call.take_prompt();
             self.connection.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SWAP_DECLINED_NO_LIVE,
             )));
@@ -717,7 +717,7 @@ impl QuillApp {
             });
         app.update(cx, |this, cx| {
             let Some((_call_id, user_id, is_video)) =
-                this.session().and_then(|s| s.calls.swap_pending)
+                this.session().and_then(|s| s.calls.second_call.prompt())
             else {
                 return dialog
                     .overlay(true)
@@ -859,7 +859,7 @@ crate::ui::shell::register_dialogs! {
     CallSwap => DialogSpec::new(
         // Swap prompt is call-urgent: same priority band as CallConfirm.
         1200,
-        |app| app.session().is_some_and(|s| s.calls.swap_pending.is_some()),
+        |app| app.session().is_some_and(|s| s.calls.second_call.prompt().is_some()),
         QuillApp::build_call_swap_dialog,
     ),
 }

@@ -29,21 +29,14 @@ pub struct CallsState {
     /// `(user_id, is_video)` so the UI can say so honestly instead of
     /// declining silently. Drained by the UI banner.
     pub busy_declined: Vec<(i64, bool)>,
-    /// Swap prompt: the first incoming call that arrived while another
-    /// call was active, awaiting the user's decision — `(call_id,
-    /// user_id, is_video)`. Further incoming calls while the prompt is
-    /// open go to `call_busy_decline_queue` (auto-declined busy).
-    pub swap_pending: Option<(i32, i64, bool)>,
+    /// The first incoming call that arrived while another call was
+    /// active: its swap prompt, or the accept queued behind the current
+    /// call's hang-up. Further incoming calls go to `busy_decline_queue`.
+    pub second_call: SecondCall,
     /// The incoming call `acceptCall` went out for. Its state stays
     /// `Pending` until TDLib's `updateCall`, but it no longer rings: a
     /// close hangs it up.
     pub answered_call: Option<i32>,
-    /// Swap prompt: the user chose "end current & answer" — the
-    /// pending incoming call's `(call_id, is_video)`, accepted by the
-    /// driver once the active call's terminal update lands (TDLib
-    /// allows a single active call, so `acceptCall` waits for the
-    /// discard to complete).
-    pub swap_accept_queued: Option<(i32, bool)>,
     /// Phase C2i: "who can call me"
     /// (`userPrivacySettingAllowCalls`, schema 1.8.67 :9006).
     pub privacy_allow_calls: Option<PrivacyWho>,
@@ -175,9 +168,8 @@ impl CallsState {
             group_call_error: None,
             busy_decline_queue: Vec::new(),
             busy_declined: Vec::new(),
-            swap_pending: None,
+            second_call: SecondCall::None,
             answered_call: None,
-            swap_accept_queued: None,
             privacy_allow_calls: None,
             privacy_p2p: None,
             privacy_loading: false,

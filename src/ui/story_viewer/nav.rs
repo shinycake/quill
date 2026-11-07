@@ -125,7 +125,7 @@ impl QuillApp {
         self.stories.pause.reset();
         self.stories.share_open = false;
         self.stories.notice = None;
-        self.stories.native_failed = None;
+        self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);

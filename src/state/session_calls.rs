@@ -37,15 +37,9 @@ impl Session {
             // update for the swap-pending/queued incoming call (the
             // caller hung up) clears it; the first pending incoming
             // raises the swap prompt; further ones auto-decline busy.
-            let swap_id = self
-                .calls
-                .swap_pending
-                .map(|(id, _, _)| id)
-                .or_else(|| self.calls.swap_accept_queued.map(|(id, _)| id));
-            if Some(call.id) == swap_id {
+            if Some(call.id) == self.calls.second_call.call_id() {
                 if call.state.is_terminal() {
-                    self.calls.swap_pending = None;
-                    self.calls.swap_accept_queued = None;
+                    self.calls.second_call = SecondCall::None;
                 }
                 return;
             }
@@ -57,10 +51,12 @@ impl Session {
                     .iter()
                     .any(|(id, _, _)| *id == call.id)
             {
-                let note = if self.calls.swap_pending.is_none()
-                    && self.calls.swap_accept_queued.is_none()
-                {
-                    self.calls.swap_pending = Some((call.id, call.user_id, call.is_video));
+                let note = if self.calls.second_call == SecondCall::None {
+                    self.calls.second_call = SecondCall::Prompt {
+                        call_id: call.id,
+                        user_id: call.user_id,
+                        is_video: call.is_video,
+                    };
                     "incoming-while-active-swap-prompt"
                 } else {
                     self.calls
@@ -162,7 +158,10 @@ impl Session {
         // is moot (the incoming call now flows through the normal
         // incoming path). A queued post-swap accept survives: the
         // driver issues acceptCall once this terminal update lands.
-        self.calls.swap_pending = None;
+        self.calls.second_call.take_prompt();
+        if self.calls.answered_call == Some(call.id) {
+            self.calls.answered_call = None;
+        }
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);

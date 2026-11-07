@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::message_media::file_is_downloading;
+use super::story_video_state::{StoryKey, StoryVideo};
 use super::video_player::{PlayState, Purpose, VideoPlayer, video_frame};
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -29,10 +30,6 @@ use std::time::{Duration, Instant};
 use super::chat_theme::danger;
 use super::story_viewer::chrome;
 use quill::lang::{keys, tr, tr_with};
-
-/// How long a video story waits for its clip to start downloading before
-/// the viewer falls back to the thumbnail and the duration clock.
-const VIDEO_WAIT: Duration = Duration::from_secs(6);
 
 impl QuillApp {
     /// A text field of the viewer owns the keyboard: Space and the arrows
@@ -78,40 +75,35 @@ impl QuillApp {
         item.kind == StoryViewerKind::Video
             && item.video_file_id.is_some()
             && super::video_player::supported()
-            && self.stories.native_failed != self.story_key()
+            && !self.stories.video.failed_for(self.story_key())
     }
 
     /// The clip is not local yet: the clock stays frozen, so the story does
     /// not run away while it downloads.
     fn story_video_waiting(&self) -> bool {
-        self.story_video_driven() && self.stories.player.is_none()
+        self.story_video_driven() && self.stories.video.player().is_none()
     }
 
     /// Open, replace or drop the player to match the current story.
     pub(super) fn sync_story_video(&mut self, cx: &mut App) {
+        let now = Instant::now();
         let key = self.story_key();
-        if self.stories.native_key != key {
-            self.stories.player = None;
-            self.stories.native_key = None;
-            self.stories.video_wait_since = Some(Instant::now());
-            self.stories.native_paused_by_us = false;
-        }
         if !self.story_video_driven() {
-            self.stories.player = None;
-            self.stories.native_key = None;
+            // A failed story keeps its fallback; anything else has no clip.
+            if !self.stories.video.failed_for(key) {
+                self.stories.video = StoryVideo::Idle;
+            }
             return;
         }
-        let failed_now = self.stories.player.as_ref().is_some_and(|player| {
-            player.take_error().is_some() || player.state() == PlayState::Failed
-        });
-        if failed_now {
-            self.stories.player = None;
-            self.stories.native_key = None;
-            self.stories.native_failed = key;
-            self.stories.playback.start(Instant::now());
+        let Some(key) = key else {
+            self.stories.video = StoryVideo::Idle;
             return;
-        }
-        if self.stories.player.is_some() {
+        };
+        self.stories.video.follow(key, now);
+        if let Some(player) = self.stories.video.player() {
+            if player.take_error().is_some() || player.state() == PlayState::Failed {
+                self.fall_back_to_clock(key, now);
+            }
             return;
         }
         if let Some(path) = self.story_video_path() {
@@ -124,43 +116,43 @@ impl QuillApp {
             match VideoPlayer::open(&path, Purpose::Story, duration, cx) {
                 Ok(player) => {
                     player.set_volume(self.story_volume());
-                    if !self.story_playback_paused() {
+                    let paused = self.story_playback_paused();
+                    if !paused {
                         if self.story_volume() > 0.0 {
                             self.sound_starts(cx);
                         }
                         player.play();
-                        self.stories.native_play_at = Instant::now();
-                    } else {
-                        self.stories.native_paused_by_us = true;
                     }
-                    self.stories.player = Some(player);
-                    self.stories.native_key = key;
+                    self.stories.video = StoryVideo::Playing {
+                        key,
+                        player,
+                        paused_by_us: paused,
+                        play_at: now,
+                    };
                 }
-                Err(_) => {
-                    self.stories.native_failed = key;
-                    self.stories.playback.start(Instant::now());
-                }
+                Err(_) => self.fall_back_to_clock(key, now),
             }
-        } else {
-            // Not local: wait while it downloads, then give up.
-            let downloading = self.session().is_some_and(|session| {
-                self.stories
-                    .viewer
-                    .current()
-                    .and_then(|item| item.video_file_id)
-                    .is_some_and(|id| {
-                        file_is_downloading(id, &session.media.files, &session.media.downloads)
-                    })
-            });
-            let waited = self
-                .stories
-                .video_wait_since
-                .is_some_and(|since| since.elapsed() > VIDEO_WAIT);
-            if waited && !downloading {
-                self.stories.native_failed = key;
-                self.stories.playback.start(Instant::now());
-            }
+            return;
         }
+        // Not local: wait while it downloads, then give up.
+        let downloading = self.session().is_some_and(|session| {
+            self.stories
+                .viewer
+                .current()
+                .and_then(|item| item.video_file_id)
+                .is_some_and(|id| {
+                    file_is_downloading(id, &session.media.files, &session.media.downloads)
+                })
+        });
+        if self.stories.video.give_up_if_stalled(downloading, now) {
+            self.stories.playback.start(now);
+        }
+    }
+
+    /// The clip of `key` cannot play: the duration clock drives the story.
+    fn fall_back_to_clock(&mut self, key: StoryKey, now: Instant) {
+        self.stories.video = StoryVideo::Fallback { key };
+        self.stories.playback.start(now);
     }
 
     /// The story's sound level: silent while muted.
@@ -174,7 +166,7 @@ impl QuillApp {
 
     /// Pause or resume the player to match `paused`.
     pub(super) fn apply_story_native_pause(&mut self, paused: bool) {
-        let Some(player) = self.stories.player.as_ref() else {
+        let Some(player) = self.stories.video.player() else {
             return;
         };
         if paused {
@@ -184,18 +176,17 @@ impl QuillApp {
             if player.wants_play() {
                 player.pause();
             }
-            self.stories.native_paused_by_us = true;
-        } else if self.stories.native_paused_by_us {
+            self.stories.video.set_paused_by_us(true);
+        } else if self.stories.video.paused_by_us() {
             player.play();
-            self.stories.native_play_at = Instant::now();
-            self.stories.native_paused_by_us = false;
+            self.stories.video.note_play(Instant::now());
         }
     }
 
     /// Progress of the current segment: the player's position for video
     /// stories it drives, the duration clock otherwise.
     pub(super) fn story_segment_progress(&self, now: Instant) -> f32 {
-        if let Some(player) = self.stories.player.as_ref() {
+        if let Some(player) = self.stories.video.player() {
             let transport = player.transport();
             let duration = transport
                 .duration
@@ -221,7 +212,7 @@ impl QuillApp {
 
     /// Whether the current story reached its end (player or clock).
     pub(super) fn story_segment_finished(&self, now: Instant) -> bool {
-        if let Some(player) = self.stories.player.as_ref() {
+        if let Some(player) = self.stories.video.player() {
             let transport = player.transport();
             let duration = transport
                 .duration
@@ -234,7 +225,10 @@ impl QuillApp {
                 })
                 .unwrap_or(0.0);
             // A just-requested play() has not started yet.
-            let playing = self.stories.native_play_at.elapsed() < Duration::from_secs(1)
+            let playing = self
+                .stories
+                .video
+                .play_requested_within(Duration::from_secs(1), Instant::now())
                 || transport.is_playing()
                 || transport.state == PlayState::Opening;
             return video_finished(
@@ -256,10 +250,10 @@ impl QuillApp {
     /// Mute / unmute the video story's sound.
     pub(super) fn toggle_story_mute(&mut self, cx: &mut Context<Self>) {
         self.stories.muted = !self.stories.muted;
-        if self.stories.player.is_some() && self.story_volume() > 0.0 {
+        if self.stories.video.player().is_some() && self.story_volume() > 0.0 {
             self.sound_starts(cx);
         }
-        if let Some(player) = self.stories.player.as_ref() {
+        if let Some(player) = self.stories.video.player() {
             player.set_volume(self.story_volume());
         }
         cx.notify();
@@ -736,7 +730,7 @@ impl QuillApp {
     /// `None` when there is no player. `video_frame` asks the frame clock
     /// for its own frames while the clip plays, so no tick is needed.
     pub(super) fn story_video_element(&self, still: Option<PathBuf>) -> Option<AnyElement> {
-        let player = self.stories.player.as_ref()?;
+        let player = self.stories.video.player()?;
         let (w, h) = (px(360.), px(640.));
         Some(
             div()
@@ -757,17 +751,5 @@ impl QuillApp {
                 .child(video_frame(player).object_fit(ObjectFit::Contain))
                 .into_any_element(),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    #[test]
-    fn video_wait_is_bounded() {
-        // The fallback to the thumbnail clock must not wait forever on a
-        // clip that never downloads.
-        assert!(super::VIDEO_WAIT < Duration::from_secs(30));
     }
 }

@@ -665,9 +665,7 @@ impl QuillApp {
         // viewer is no longer open.
         self.stories.playback.stop();
         // B14: drop the player and the viewer's extra state with it.
-        self.stories.player = None;
-        self.stories.native_key = None;
-        self.stories.native_failed = None;
+        self.stories.video = Default::default();
         self.stories.pause.reset();
         self.stories.share_open = false;
         self.stories.close_friends_edit = None;

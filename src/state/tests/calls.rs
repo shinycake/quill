@@ -243,7 +243,7 @@ fn incoming_while_active_raises_swap_prompt() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     assert!(session.calls.active_call.is_some());
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert!(
         session.calls.busy_decline_queue.is_empty(),
         "first incoming raises the prompt, not the busy queue"
@@ -257,7 +257,7 @@ fn second_incoming_while_prompt_open_busy_declines() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(79, 43, true));
-    assert_eq!(session.calls.swap_pending, Some((78, 42, false)));
+    assert_eq!(session.calls.second_call.prompt(), Some((78, 42, false)));
     assert_eq!(session.calls.busy_decline_queue, vec![(79, 43, true)]);
 }
 
@@ -268,7 +268,7 @@ fn caller_hangup_clears_swap_prompt() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(78, 42));
-    assert_eq!(session.calls.swap_pending, None);
+    assert_eq!(session.calls.second_call.prompt(), None);
     assert!(session.calls.active_call.is_some(), "active call untouched");
 }
 
@@ -281,7 +281,8 @@ fn active_call_end_clears_open_swap_prompt() {
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
     assert!(session.calls.active_call.is_none());
     assert_eq!(
-        session.calls.swap_pending, None,
+        session.calls.second_call.prompt(),
+        None,
         "moot prompt clears when the active call ends on its own"
     );
 }
@@ -293,8 +294,16 @@ fn swap_accept_queued_survives_active_call_end() {
     apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
     apply_json(&mut session, &seq, &sink, &swap_pending_json(78, 42, false));
     // User chose "End & answer": prompt moves to the accept queue.
-    session.calls.swap_pending = None;
-    session.calls.swap_accept_queued = Some((78, false));
+    session.calls.second_call = crate::state::SecondCall::AcceptAfterHangup {
+        call_id: 78,
+        is_video: false,
+    };
     apply_json(&mut session, &seq, &sink, &swap_discarded_json(77, 41));
-    assert_eq!(session.calls.swap_accept_queued, Some((78, false)));
+    assert_eq!(
+        session.calls.second_call,
+        crate::state::SecondCall::AcceptAfterHangup {
+            call_id: 78,
+            is_video: false
+        }
+    );
 }

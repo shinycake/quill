@@ -8,7 +8,6 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::story_composer::StoryComposer;
 use quill::story_viewer::{StoryPlayback, StoryViewer};
-use std::time::Instant;
 
 /// The facts the custom-emoji warm-up of the story viewer depends on.
 pub(super) type EmojiWarm = (Option<(quill::ids::ChatId, i32)>, Vec<i64>, usize, u32);
@@ -78,15 +77,10 @@ pub(crate) struct StoryUi {
     pub(super) privacy_edit: Option<StoryPrivacyEdit>,
     pub(super) privacy_user_search: Entity<TextareaState>,
     pub(super) privacy_sent: bool,
-    /// B14: the player of the current video story (`Purpose::Story`, drawn
-    /// by `video_frame` in the story frame), the story it belongs to, and
-    /// the story whose clip could not play.
-    pub(super) player: Option<super::video_player::VideoPlayer>,
-    pub(super) native_key: Option<(i64, i32)>,
-    pub(super) native_failed: Option<(i64, i32)>,
-    pub(super) native_play_at: Instant,
-    pub(super) native_paused_by_us: bool,
-    pub(super) video_wait_since: Option<Instant>,
+    /// B14: the current video story's clip: waiting for it, its player
+    /// (`Purpose::Story`, drawn by `video_frame` in the story frame), or
+    /// the fallback to the duration clock (`story_video_state`).
+    pub(super) video: super::story_video_state::StoryVideo,
     /// B14: story sound muted, the press-and-hold / Space pause, and the
     /// viewer's extra panels (close friends, share) with their shared
     /// search field and last result line.
@@ -183,12 +177,7 @@ impl StoryUi {
             cover_sent: false,
             privacy_edit: None,
             privacy_user_search: story_privacy_user_search,
-            player: None,
-            native_key: None,
-            native_failed: None,
-            native_play_at: std::time::Instant::now(),
-            native_paused_by_us: false,
-            video_wait_since: None,
+            video: Default::default(),
             muted: false,
             pause: Default::default(),
             close_friends_edit: None,

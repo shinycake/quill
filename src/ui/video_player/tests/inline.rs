@@ -347,7 +347,12 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     assert_eq!(player.state(), PlayState::Opening);
     let story_player = player.clone();
     app.update_in(vcx, |app, _, _| {
-        app.stories.player = Some(story_player);
+        app.stories.video = crate::ui::story_video_state::StoryVideo::Playing {
+            key: (1, 1),
+            player: story_player,
+            paused_by_us: false,
+            play_at: Instant::now(),
+        };
         // Press-and-hold (or Space) right after the story opened.
         app.apply_story_native_pause(true);
     });
@@ -357,7 +362,7 @@ fn a_story_paused_while_its_clip_opens_does_not_start_once_open(cx: &mut TestApp
     assert_eq!(player.state(), PlayState::Ready);
     let calls = calls(&script);
     assert!(!calls.iter().any(|c| c.starts_with("play")), "{calls:?}");
-    app.update_in(vcx, |app, _, _| app.stories.player = None);
+    app.update_in(vcx, |app, _, _| app.stories.video = Default::default());
 }
 
 /// Scrolled up a little, the jump button stays hidden and nothing covers
