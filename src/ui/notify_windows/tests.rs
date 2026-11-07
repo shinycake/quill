@@ -53,10 +53,11 @@ fn message(chat: i64) -> OsNotification {
 fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
         app.notify.windows.platform = NotifyPlatform::Windows;
         for chat in 1..=4 {
-            app.show_custom_notification(None, message(chat), None, None, false, false, cx);
+            app.show_custom_notification(&me, message(chat), None, None, false, false, cx);
         }
     });
     vcx.run_until_parked();
@@ -74,7 +75,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
 
     // Reading a shown chat makes room for the queued one.
     app.update(vcx, |app, cx| {
-        app.clear_custom_notifications(None, ChatId(1), cx)
+        app.clear_custom_notifications(&me, ChatId(1), cx)
     });
     app.read_with(vcx, |app, _| {
         let windows = &app.notify.windows;
@@ -84,13 +85,13 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             windows
                 .shown
                 .iter()
-                .any(|s| s.key == (None, ChatId(4)) && !s.unlinked)
+                .any(|s| s.key == (me.clone(), ChatId(4)) && !s.unlinked)
         );
     });
 
     // A newer message of a shown chat replaces its window.
     app.update(vcx, |app, cx| {
-        app.show_custom_notification(None, message(2), None, None, false, false, cx)
+        app.show_custom_notification(&me, message(2), None, None, false, false, cx)
     });
     app.read_with(vcx, |app, _| {
         let live: Vec<_> = app
@@ -98,7 +99,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             .windows
             .shown
             .iter()
-            .filter(|s| !s.unlinked && s.key == (None, ChatId(2)))
+            .filter(|s| !s.unlinked && s.key == (me.clone(), ChatId(2)))
             .collect();
         assert_eq!(live.len(), 1);
     });
@@ -108,17 +109,25 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
 fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
         app.notify.windows.platform = NotifyPlatform::Windows;
-        app.show_custom_notification(None, message(7), None, None, false, true, cx);
-        app.show_custom_notification(None, message(8), None, None, false, true, cx);
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+        app.show_custom_notification(&me, message(8), None, None, false, true, cx);
     });
     app.update(vcx, |app, cx| {
         let id = app.notify.windows.shown.first().map(|s| s.id).unwrap_or(0);
         app.notify_window_event(id, ViewEvent::Activate, cx);
         // Read before the next frame hands the click on.
         let clicks = quill::locks::lock_or_recover(&app.notify.notify_clicks).clone();
-        assert_eq!(clicks, vec![(ChatId(7), NotificationAction::Open)]);
+        assert_eq!(
+            clicks,
+            vec![quill::notify_accounts::ChatClick {
+                account: me.clone(),
+                chat_id: ChatId(7),
+                action: NotificationAction::Open,
+            }]
+        );
         assert_eq!(app.notify.windows.live(), 1);
     });
     app.update(vcx, |app, cx| {
@@ -141,6 +150,7 @@ fn a_click_opens_the_chat_and_hide_all_clears(cx: &mut TestAppContext) {
 fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
     app.update(vcx, |app, cx| {
         app.notify.windows.platform = NotifyPlatform::Windows;
         let drain = quill::notify_accounts::NotifyDrain {
@@ -164,7 +174,7 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
                 .windows
                 .shown
                 .iter()
-                .any(|s| s.key == (None, ChatId(5)))
+                .any(|s| s.key == (me.clone(), ChatId(5)))
         );
     });
 }

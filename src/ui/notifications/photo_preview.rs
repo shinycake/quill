@@ -31,7 +31,10 @@ impl QuillApp {
         locked: bool,
         cx: &mut Context<Self>,
     ) {
-        let key = (account.clone(), notification.chat_id);
+        let key = (
+            self.notification_account(account.as_ref()),
+            notification.chat_id,
+        );
         // This notification replaces any older one still waiting.
         self.notify.preview_waits.remove(&key);
         let preview_path = preview.and_then(|file| self.preview_path(account.as_ref(), file));
@@ -61,7 +64,7 @@ impl QuillApp {
                 cx.background_executor().timer(PHOTO_CHECK).await;
                 let done = this
                     .update(cx, |app, cx| {
-                        let path = app.preview_path(key.0.as_ref(), file);
+                        let path = app.preview_path(account.as_ref(), file);
                         if path.is_none() && Instant::now() < deadline {
                             return false;
                         }
@@ -69,7 +72,7 @@ impl QuillApp {
                         if app.notify.preview_waits.get(&key) != Some(&id) {
                             return true;
                         }
-                        if key.0.is_none()
+                        if account.is_none()
                             && app.session().map(|session| session.account.clone()) != on_screen
                         {
                             app.notify.preview_waits.remove(&key);
@@ -89,7 +92,7 @@ impl QuillApp {
                             photo = None;
                         }
                         app.show_notification_with_photo(
-                            key.0.clone(),
+                            account.clone(),
                             notification,
                             photo,
                             path,

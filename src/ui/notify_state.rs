@@ -10,22 +10,24 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 
 pub(crate) struct NotifyUi {
-    /// Phase 8.1: chat ids whose OS notification was clicked (set by the
-    /// notification worker threads); the next render focuses the chat.
-    pub(super) notify_clicks: Arc<Mutex<Vec<(ChatId, quill::notify::NotificationAction)>>>,
+    /// Phase 8.1: clicks on notifications of the account on screen, waiting
+    /// for the next render to open the chat. Each names the account it was
+    /// shown for; one whose account is no longer on screen goes back to
+    /// `background.clicks` instead of running here.
+    pub(super) notify_clicks: Arc<Mutex<Vec<quill::notify_accounts::ChatClick>>>,
     /// Phase 8.1: in-flight OS notification workers; capped so a message
     /// burst cannot stack threads.
     pub(super) notify_inflight: Arc<AtomicUsize>,
-    /// The message each chat's shown notification announces: an inline
-    /// reply typed into it answers that message
-    /// (`quill::notify::plan_inline_reply`).
-    pub(super) reply_targets: std::collections::HashMap<ChatId, quill::ids::MessageId>,
+    /// The message each shown notification announces, by the account it
+    /// was shown for and the chat: an inline reply typed into it answers
+    /// that message (`quill::notify::plan_inline_reply`).
+    pub(super) reply_targets:
+        std::collections::HashMap<(quill::ids::AccountKey, ChatId), quill::ids::MessageId>,
     /// Notifications waiting for their photo (`notifications::photo_preview`),
-    /// by account (`None` = on screen) and chat. A newer notification for
+    /// by the account they are for and the chat. A newer notification for
     /// the chat, or its dismissal, removes the entry and the wait ends
     /// without showing.
-    pub(super) preview_waits:
-        std::collections::HashMap<(Option<quill::ids::AccountKey>, ChatId), u64>,
+    pub(super) preview_waits: std::collections::HashMap<(quill::ids::AccountKey, ChatId), u64>,
     pub(super) next_preview_wait: u64,
     pub(super) notification_sounds: super::audio::NotificationSounds,
     /// Redraws the TDLib poll asked for, batched by urgency

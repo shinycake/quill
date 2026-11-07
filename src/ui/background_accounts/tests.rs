@@ -14,6 +14,8 @@ use gpui_kit::component::Root;
 use gpui_kit::{Entity, TestAppContext, VisualTestContext, px, size};
 use quill::ids::{AccountKey, ChatId};
 use quill::notify::NotificationAction;
+use quill::notify_accounts::ChatClick;
+use quill::notify_call::{CallNotificationAction, CallPick};
 use std::time::{Duration, Instant};
 
 pub(super) fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
@@ -240,11 +242,11 @@ fn mark_as_read_on_another_account_never_switches(cx: &mut TestAppContext) {
         app.background
             .clients
             .push(client(BackgroundStatus::Ready, 1));
-        app.background.clicks.lock().unwrap().push((
-            other_account(),
-            ChatId(7),
-            NotificationAction::MarkRead,
-        ));
+        app.background.clicks.lock().unwrap().push(ChatClick {
+            account: other_account(),
+            chat_id: ChatId(7),
+            action: NotificationAction::MarkRead,
+        });
         app.drain_account_clicks(cx);
         assert!(app.background.clicks.lock().unwrap().is_empty());
         assert!(app.background.pending_open.is_none());
@@ -263,11 +265,11 @@ fn a_click_on_the_account_on_screen_takes_the_usual_path(cx: &mut TestAppContext
         (session.account.clone(), closed_chat(session))
     });
     app.update_in(&mut vcx, |app, _, cx| {
-        app.background
-            .clicks
-            .lock()
-            .unwrap()
-            .push((account, chat_id, NotificationAction::Open));
+        app.background.clicks.lock().unwrap().push(ChatClick {
+            account,
+            chat_id,
+            action: NotificationAction::Open,
+        });
         app.drain_account_clicks(cx);
         assert!(app.background.clicks.lock().unwrap().is_empty());
         cx.notify();
@@ -275,5 +277,94 @@ fn a_click_on_the_account_on_screen_takes_the_usual_path(cx: &mut TestAppContext
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert_eq!(app.session().and_then(|s| s.open_chat), Some(chat_id));
+    });
+}
+
+/// A toast shown for one account, clicked after switching to another: the
+/// chat never opens on the account now on screen; the click goes back to
+/// the account it was shown for (which switches to it, or, for an account
+/// no longer running, does nothing).
+#[gpui_kit::test]
+fn a_click_after_an_account_switch_runs_on_the_account_it_was_shown_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let (shown_for, chat_id) = app.read_with(&vcx, |app, _| {
+        let session = app.session().unwrap();
+        (session.account.clone(), closed_chat(session))
+    });
+    app.update_in(&mut vcx, |app, _, cx| {
+        // The click arrived while `shown_for` was on screen (a Linux
+        // listener thread or a Quill notification window queued it).
+        app.notify.notify_clicks.lock().unwrap().push(ChatClick {
+            account: shown_for.clone(),
+            chat_id,
+            action: NotificationAction::Reply,
+        });
+        // Then another account came on screen.
+        app.session_mut().unwrap().account = other_account();
+        app.drain_background_clicks(cx);
+        assert!(app.notify.notify_clicks.lock().unwrap().is_empty());
+        assert_eq!(
+            app.background.clicks.lock().unwrap().clone(),
+            vec![ChatClick {
+                account: shown_for.clone(),
+                chat_id,
+                action: NotificationAction::Reply,
+            }],
+            "back to its own account"
+        );
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        let session = app.session().unwrap();
+        assert_eq!(session.account, other_account());
+        assert_ne!(
+            session.open_chat,
+            Some(chat_id),
+            "never opened on the account switched to"
+        );
+        assert!(app.notify.notify_clicks.lock().unwrap().is_empty());
+    });
+}
+
+/// TDLib numbers calls per client, so the account on screen and a
+/// background account can ring with the same id: a pick on the screen
+/// account's toast never answers the background call.
+#[gpui_kit::test]
+fn a_pick_on_one_accounts_call_leaves_the_same_id_on_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let on_screen = app.read_with(&vcx, |app, _| app.session().unwrap().account.clone());
+    app.update_in(&mut vcx, |app, window, cx| {
+        let ringing = ring();
+        let call_id = ringing.call_id;
+        app.background.ringing = Some(ringing);
+        app.calls.notify_clicks.lock().unwrap().push(CallPick {
+            account: on_screen.clone(),
+            call_id,
+            action: CallNotificationAction::Decline,
+        });
+        app.flush_background_call_picks(window, cx);
+        assert!(
+            app.background_ring_account() == Some(&other_account()),
+            "the background call still rings"
+        );
+        assert_eq!(
+            app.calls.notify_clicks.lock().unwrap().clone(),
+            vec![CallPick {
+                account: on_screen.clone(),
+                call_id,
+                action: CallNotificationAction::Decline,
+            }],
+            "left for the account on screen"
+        );
+        // The background account's own pick does reach it.
+        app.calls.notify_clicks.lock().unwrap().push(CallPick {
+            account: other_account(),
+            call_id,
+            action: CallNotificationAction::Decline,
+        });
+        app.flush_background_call_picks(window, cx);
+        assert!(app.background_ring_account().is_none());
+        assert_eq!(app.calls.notify_clicks.lock().unwrap().len(), 1);
     });
 }

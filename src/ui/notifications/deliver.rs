@@ -95,20 +95,24 @@ impl QuillApp {
     }
 
     /// Picks on the incoming-call notification. A stale pick (the call
-    /// already ended or was answered) is ignored: accepting must never act
-    /// on a different call.
+    /// already ended or was answered) or one made on another account's
+    /// notification is ignored: accepting must never act on a different
+    /// call, and TDLib call ids repeat across accounts.
     pub(super) fn answer_call_picks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let picks: Vec<(i32, quill::notify_call::CallNotificationAction)> = self
+        let mut picks: Vec<quill::notify_call::CallPick> = self
             .calls
             .notify_clicks
             .lock_or_recover()
             .drain(..)
             .collect();
-        let ringing = self.ringing_call().map(|(call_id, ..)| call_id);
-        for (call_id, action) in picks {
-            if ringing != Some(call_id) {
-                continue;
-            }
+        let ringing = self
+            .session()
+            .map(|session| session.account.clone())
+            .zip(self.ringing_call().map(|(call_id, ..)| call_id));
+        let Some((account, call_id)) = ringing else {
+            return;
+        };
+        for action in quill::notify_call::take_call_picks(&mut picks, &account, call_id) {
             match action {
                 quill::notify_call::CallNotificationAction::Accept => self.accept_incoming_call(cx),
                 quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),
@@ -130,19 +134,16 @@ impl QuillApp {
         let Some((call_id, user_id, is_video)) = self.ringing_call() else {
             // Not ringing any more: take the toast down (macOS and Windows;
             // a Linux `notify-send` toast expires on its own).
-            if let Some(call_id) = self.calls.notified.take()
+            if let Some((account, call_id)) = self.calls.notified.take()
                 && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
             {
-                let account = self
-                    .session()
-                    .map(|s| s.account.0.clone())
-                    .unwrap_or_else(|| "primary".to_string());
                 cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
-                    &account, call_id,
+                    &account.0, call_id,
                 ));
             }
             return;
         };
+        let account = self.notification_account(None);
         let caller = self.call_peer_name(user_id);
         let Some(notification) =
             quill::notify_call::decide_call_notify(&quill::notify_call::CallNotifyInput {
@@ -150,13 +151,20 @@ impl QuillApp {
                 caller: &caller,
                 is_video,
                 app_active: cx.active_window().is_some(),
-                last_notified: self.calls.notified,
+                // Call ids are per account: another account's call with
+                // the same id was a different call.
+                last_notified: self
+                    .calls
+                    .notified
+                    .as_ref()
+                    .filter(|(notified_on, _)| *notified_on == account)
+                    .map(|(_, call_id)| *call_id),
                 locked: self.account.passcode.locked,
             })
         else {
             return;
         };
-        self.calls.notified = Some(call_id);
-        self.spawn_call_notification(notification, cx);
+        self.calls.notified = Some((account.clone(), call_id));
+        self.spawn_call_notification_as(&account, notification, cx);
     }
 }

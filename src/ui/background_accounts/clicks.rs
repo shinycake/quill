@@ -6,7 +6,7 @@
 
 use super::*;
 use quill::locks::LockExt;
-use quill::notify_accounts::{ClickPlan, plan_click};
+use quill::notify_accounts::{ChatClick, ClickPlan, plan_account_click};
 use quill::notify_focus::{AlertInput, dnd_active, plan_alert};
 use quill::telegram::envelope::AuthorizationState;
 
@@ -44,35 +44,35 @@ impl QuillApp {
     }
 
     /// The account on screen, or the one about to be (no session yet).
-    fn current_account(&self) -> Option<AccountKey> {
+    pub(in crate::ui) fn current_account(&self) -> Option<AccountKey> {
         self.session()
             .map(|session| session.account.clone())
             .or_else(|| safe_app_root().map(|root| active_account(&root)))
     }
 
-    /// A click on a notification whose tag names another account than the
-    /// one on screen (macOS and Windows callback).
-    pub(in crate::ui) fn queue_account_click(
-        &mut self,
-        tag_account: &str,
-        chat_id: ChatId,
-        action: NotificationAction,
-        cx: &mut Context<Self>,
-    ) {
+    /// A click on a notification, from the macOS and Windows callback or
+    /// Quill's own notification windows: the account on screen runs it,
+    /// another account reads in place or switches first.
+    pub(in crate::ui) fn queue_account_click(&mut self, click: ChatClick, cx: &mut Context<Self>) {
         let Some(active) = self.current_account() else {
             return;
         };
-        match plan_click(tag_account, action, &active, &self.background.keys()) {
+        match plan_account_click(
+            &click.account,
+            click.action,
+            Some(&active),
+            &self.background.keys(),
+        ) {
             ClickPlan::Ignore => return,
             ClickPlan::Active => {
                 if let Ok(mut clicks) = self.notify.notify_clicks.lock() {
-                    clicks.push((chat_id, action));
+                    clicks.push(click);
                 }
                 self.drain_background_clicks(cx);
             }
-            ClickPlan::MarkReadInBackground(key) | ClickPlan::SwitchThenOpen(key) => {
+            ClickPlan::MarkReadInBackground(_) | ClickPlan::SwitchThenOpen(_) => {
                 if let Ok(mut clicks) = self.background.clicks.lock() {
-                    clicks.push((key, chat_id, action));
+                    clicks.push(click);
                 }
                 self.drain_account_clicks(cx);
             }
@@ -83,38 +83,38 @@ impl QuillApp {
     /// Run the account clicks that need no window ("Mark as read" on the
     /// background account) and bring the app forward for the ones that
     /// switch accounts, which the next render runs
-    /// ([`Self::flush_background_accounts`]). Called from the OS callback
+    /// ([`Self::flush_background_accounts`]). The account on screen's
+    /// clicks move to `notify.notify_clicks`. Called from the OS callback
     /// and from both polls (Linux clicks arrive on worker threads).
     pub(in crate::ui) fn drain_account_clicks(&mut self, cx: &mut Context<Self>) {
-        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> =
-            self.background.clicks.lock_or_recover().drain(..).collect();
+        let clicks: Vec<ChatClick> = self.background.clicks.lock_or_recover().drain(..).collect();
         if clicks.is_empty() {
             return;
         }
         let active = self.current_account();
+        let known = self.background.keys();
         let mut switches = Vec::new();
-        for (account, chat_id, action) in clicks {
-            if active.as_ref() == Some(&account) {
-                // Switched to that account since the notification showed.
-                if let Ok(mut guard) = self.notify.notify_clicks.lock() {
-                    guard.push((chat_id, action));
+        for click in clicks {
+            match plan_account_click(&click.account, click.action, active.as_ref(), &known) {
+                // Shown for the account on screen, or switched to it since.
+                ClickPlan::Active => {
+                    if let Ok(mut guard) = self.notify.notify_clicks.lock() {
+                        guard.push(click);
+                    }
                 }
-                continue;
-            }
-            match action {
-                NotificationAction::MarkRead => {
+                ClickPlan::MarkReadInBackground(account) => {
                     if let Some(live) = self
                         .background
                         .client_mut(&account)
                         .and_then(|client| client.live.as_mut())
                     {
-                        let _ = live.driver.mark_chat_as_read(chat_id);
+                        let _ = live.driver.mark_chat_as_read(click.chat_id);
                     }
-                    self.dismiss_notification_as(Some(&account), chat_id, cx);
+                    self.dismiss_notification_as(Some(&account), click.chat_id, cx);
                 }
-                NotificationAction::Open | NotificationAction::Reply => {
-                    switches.push((account, chat_id, action));
-                }
+                ClickPlan::SwitchThenOpen(_) => switches.push(click),
+                // An account Quill no longer runs: never the one on screen.
+                ClickPlan::Ignore => {}
             }
         }
         self.drain_background_clicks(cx);
@@ -150,21 +150,38 @@ impl QuillApp {
         {
             window.request_attention();
         }
-        let clicks: Vec<(AccountKey, ChatId, NotificationAction)> =
-            self.background.clicks.lock_or_recover().drain(..).collect();
+        let clicks: Vec<ChatClick> = self.background.clicks.lock_or_recover().drain(..).collect();
         let mut later = Vec::new();
-        for (account, chat_id, action) in clicks {
-            if action == NotificationAction::MarkRead {
-                later.push((account, chat_id, action));
-                continue;
+        let mut on_screen = false;
+        for click in clicks {
+            let plan = plan_account_click(
+                &click.account,
+                click.action,
+                self.current_account().as_ref(),
+                &self.background.keys(),
+            );
+            match plan {
+                ClickPlan::Active => {
+                    // The Linux threads queue every click here; the account
+                    // on screen runs its own the usual way.
+                    if let Ok(mut guard) = self.notify.notify_clicks.lock() {
+                        guard.push(click);
+                    }
+                    on_screen = true;
+                    continue;
+                }
+                ClickPlan::MarkReadInBackground(_) => {
+                    later.push(click);
+                    continue;
+                }
+                ClickPlan::Ignore => continue,
+                ClickPlan::SwitchThenOpen(_) => {}
             }
-            if self.current_account().as_ref() != Some(&account) {
-                self.switch_account(&account, "", window, cx);
-            }
+            self.switch_account(&click.account, "", window, cx);
             self.background.pending_open = Some(PendingOpen {
-                account,
-                chat_id,
-                action,
+                account: click.account,
+                chat_id: click.chat_id,
+                action: click.action,
                 until: Instant::now() + PENDING_OPEN_FOR,
             });
         }
@@ -172,6 +189,9 @@ impl QuillApp {
             && let Ok(mut guard) = self.background.clicks.lock()
         {
             guard.extend(later);
+        }
+        if on_screen {
+            self.drain_background_clicks(cx);
         }
         self.open_pending_account_chat(window, cx);
         self.flush_background_call_picks(window, cx);
