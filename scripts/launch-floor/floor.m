@@ -5,7 +5,8 @@
 // build AppKit's default one.
 //
 // Environment (scripts/launch-floor/floorbench.py sets these):
-//   FLOOR_TRACE=path     append "<mark> <unix µs>" lines: main, ordered,
+//   FLOOR_TRACE=path     append "<mark> <unix µs>" lines: exec (the process
+//                        start, as Quill's own trace has it), main, ordered,
 //                        flushed, will_finish, did_finish
 //   FLOOR_BORDERLESS=1   a borderless window (no title bar buttons)
 //   FLOOR_NO_FLUSH=1     skip the flush, as a plain AppKit app does
@@ -16,6 +17,7 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/QuartzCore.h>
 #include <dlfcn.h>
+#include <libproc.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,13 @@ static void mark(const char *name) {
   struct timeval now;
   gettimeofday(&now, NULL);
   fprintf(trace, "%s %lld\n", name, (long long)now.tv_sec * 1000000 + now.tv_usec);
+  fflush(trace);
+}
+
+static void mark_exec(void) {
+  struct proc_bsdinfo info;
+  if (!trace || proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info, sizeof info) != sizeof info) return;
+  fprintf(trace, "exec %lld\n", (long long)info.pbi_start_tvsec * 1000000 + info.pbi_start_tvusec);
   fflush(trace);
 }
 
@@ -92,6 +101,7 @@ int main(void) {
     const char *path = getenv("FLOOR_TRACE");
     if (path) trace = fopen(path, "a");
     mark("main");
+    mark_exec();
     const char *preload_path = getenv("FLOOR_PRELOAD");
     if (preload_path) {
       pthread_t thread;

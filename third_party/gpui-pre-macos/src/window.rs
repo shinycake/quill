@@ -2174,7 +2174,6 @@ impl PlatformWindow for MacWindow {
         let mut this = self.0.lock();
         this.renderer.draw(scene);
         drop(this);
-        FRAME_DRAWN.store(true, Ordering::Release);
         crate::frame_presented();
         crate::platform::read_keyboard_layout_after_first_frame();
     }
@@ -2217,6 +2216,11 @@ impl PlatformWindow for MacWindow {
     }
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {
+        // Quill: before then no context exists, and asking the class would
+        // load Writing Tools on the main thread (see `is_editable`).
+        if !TEXT_INPUT_READY.load(Ordering::Acquire) {
+            return;
+        }
         let executor = self.0.lock().foreground_executor.clone();
         executor
             .spawn(async move {
@@ -2762,6 +2766,7 @@ extern "C" fn handle_key_event(
     native_event: *mut AnyObject,
     key_equivalent: bool,
 ) -> Bool {
+    text_input_ready();
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.as_ref().lock();
 
@@ -3451,17 +3456,67 @@ extern "C" fn set_frame_size(this: &AnyObject, _: Sel, size: NSSize) {
     };
 }
 
-/// Quill: set once any window has drawn a frame (see `is_editable`).
-static FRAME_DRAWN: AtomicBool = AtomicBool::new(false);
+/// Quill: set on the main thread once text input may make its context (see
+/// `is_editable`).
+static TEXT_INPUT_READY: AtomicBool = AtomicBool::new(false);
 
 /// Quill: `-[NSView _inputContext]` makes a view's `NSTextInputContext`
 /// unless the view answers `isEditable` with NO, and the first use of that
-/// class loads the Writing Tools framework (about 280 ms on a cold launch).
-/// Ordering the first window front asks for the context, so until a window
-/// has drawn a frame the view is not editable; AppKit makes the context on
-/// its next update, with the window already on screen.
+/// class loads the Writing Tools framework and about 420 libraries behind it:
+/// 300 ms of the main thread on a cold launch, starting just after the window
+/// shows. So the view is not editable until a worker has loaded the framework
+/// (`load_writing_tools`), and AppKit then makes the context on its next
+/// update, finding the libraries loaded. A key that comes sooner makes the
+/// view editable at once, and that key waits for the worker instead.
 extern "C" fn is_editable(_: &AnyObject, _: Sel) -> Bool {
-    FRAME_DRAWN.load(Ordering::Acquire).to_objc()
+    TEXT_INPUT_READY.load(Ordering::Acquire).to_objc()
+}
+
+/// Starts the worker of `is_editable`. dyld loads one image at a time, so the
+/// main thread waits for the whole load whenever it loads an image itself, as
+/// `finishLaunching` does (XCTTargetBootstrap). Hence this runs from
+/// `applicationDidFinishLaunching:`.
+pub(crate) fn load_writing_tools() {
+    static STARTED: Once = Once::new();
+    STARTED.call_once(start_writing_tools_load);
+}
+
+fn start_writing_tools_load() {
+    const WRITING_TOOLS: &CStr =
+        c"/System/Library/PrivateFrameworks/WritingToolsUI.framework/WritingToolsUI";
+    const RTLD_LAZY: std::ffi::c_int = 1;
+    unsafe extern "C" {
+        fn dlopen(path: *const std::ffi::c_char, mode: std::ffi::c_int) -> *mut c_void;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("writing-tools".into())
+        .spawn(|| {
+            // SAFETY: a constant path; the handle is never closed. A missing
+            // framework returns null, and AppKit's own load then fails the same way.
+            let _ = unsafe { dlopen(WRITING_TOOLS.as_ptr(), RTLD_LAZY) };
+            crate::launch_mark("writing_tools");
+            DispatchQueue::main().exec_async(text_input_ready);
+        });
+    if spawned.is_err() {
+        text_input_ready();
+    }
+}
+
+pub(crate) fn text_input_ready_now() -> bool {
+    TEXT_INPUT_READY.load(Ordering::Acquire)
+}
+
+/// Main thread only.
+fn text_input_ready() {
+    if TEXT_INPUT_READY.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // SAFETY: on the main thread, from a key event or after
+    // `applicationDidFinishLaunching:`.
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, setWindowsNeedUpdate: Bool::YES];
+    }
 }
 
 extern "C" fn display_layer(this: &AnyObject, _: Sel, _: *mut AnyObject) {

@@ -68,6 +68,10 @@ unsafe fn build_classes() {
             let mut decl = ClassBuilder::new(c"GPUIApplication", class!(NSApplication))
                 .expect("failed to register GPUIApplication");
             decl.add_ivar::<*mut c_void>(MAC_PLATFORM_IVAR);
+            decl.add_method(
+                sel!(updateWindows),
+                update_windows as extern "C-unwind" fn(_, Sel),
+            );
             decl.register()
         }
     };
@@ -1380,6 +1384,21 @@ fn disable_autofill_heuristics() {
     }
 }
 
+/// Quill: AppKit's first `updateWindows` asks `NSTextInputContext` for the
+/// current context, and that class's first use loads the Writing Tools
+/// framework on the main thread (see `is_editable` in `window.rs`). Until a
+/// worker has loaded it, or a key needs text input, the windows wait for their
+/// update; `text_input_ready` asks for one then.
+extern "C-unwind" fn update_windows(this: &AnyObject, _: Sel) {
+    if !crate::window::text_input_ready_now() {
+        return;
+    }
+    // SAFETY: `this` is the shared GPUIApplication, an NSApplication.
+    unsafe {
+        let _: () = msg_send![super(this, class!(NSApplication)), updateWindows];
+    }
+}
+
 extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyObject) {
     crate::launch_mark("did_finish");
     unsafe {
@@ -1418,6 +1437,7 @@ extern "C-unwind" fn did_finish_launching(this: &AnyObject, _: Sel, _: *mut AnyO
             callback();
         }
     }
+    crate::window::load_writing_tools();
 }
 
 /// `observer` must be the app delegate, whose class declares `onSystemSleep:`

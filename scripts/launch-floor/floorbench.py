@@ -48,6 +48,7 @@ VARIANTS = {
     "borderless": ("FloorApp", ["FLOOR_BORDERLESS=1"]),
     "noflush": ("FloorApp", ["FLOOR_NO_FLUSH=1"]),
     "linked": ("FloorLinked", []),
+    "linked-borderless": ("FloorLinked", ["FLOOR_BORDERLESS=1"]),
     "trimmed": ("FloorTrimmed", []),
     "binds": ("FloorBinds", []),
     "opnew": ("FloorOpNew", []),
