@@ -6,7 +6,8 @@
 //! first sets its first responder.
 //! Then it reads back the glyph bitmaps the last launch drew, so the first
 //! frame does not rasterize the chat list's text and emoji again
-//! ([`chat_list_drawn`] writes this launch's).
+//! ([`chat_list_drawn`] writes this launch's, and the line layouts
+//! `crate::launch_lines` keeps).
 
 #[cfg(target_os = "macos")]
 pub fn start() {
@@ -47,7 +48,7 @@ pub fn start() {
             }
             #[cfg(feature = "ui")]
             if let Some(path) = glyph_cache_path() {
-                gpui_macos::glyph_cache::load(&path, &glyph_cache_stamp());
+                gpui_macos::glyph_cache::load(&path, &cache_stamp());
             }
         });
 }
@@ -59,9 +60,9 @@ fn glyph_cache_path() -> Option<std::path::PathBuf> {
 }
 
 /// The OS build and this executable's modification time: either changing
-/// may change the fonts or how glyphs are drawn.
+/// may change the fonts or how lines are shaped and glyphs drawn.
 #[cfg(all(target_os = "macos", feature = "ui"))]
-fn glyph_cache_stamp() -> String {
+pub(crate) fn cache_stamp() -> String {
     let os = sysctl_string(c"kern.osversion").unwrap_or_default();
     let built = std::env::current_exe()
         .and_then(std::fs::metadata)
@@ -104,9 +105,9 @@ pub fn glyphs_pending() -> bool {
         && !GLYPHS_SAVED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// The chat list has been drawn once: the glyph bitmaps drawn so far are
-/// written for the next launch, on a worker. Only the first call does
-/// anything.
+/// The chat list has been drawn once: the line layouts and glyph bitmaps
+/// made so far are written for the next launch, on a worker. Only the first
+/// call does anything.
 #[cfg(all(target_os = "macos", feature = "ui"))]
 pub fn chat_list_drawn() {
     if GLYPHS_SAVED.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -115,8 +116,9 @@ pub fn chat_list_drawn() {
     let _ = std::thread::Builder::new()
         .name("quill-glyph-cache".into())
         .spawn(|| {
+            crate::launch_lines::save();
             if let Some(path) = glyph_cache_path() {
-                let _ = gpui_macos::glyph_cache::save(&path, &glyph_cache_stamp());
+                let _ = gpui_macos::glyph_cache::save(&path, &cache_stamp());
             }
         });
 }

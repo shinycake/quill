@@ -186,3 +186,16 @@ before the first window draws and `save` once its first full frame is up.
 `AppleTextSystemState::rasterize_glyph` takes a bitmap from there when its
 size matches the glyph's raster bounds, and records every bitmap it draws
 until `save`. Without a `load` call nothing changes.
+
+It also keeps the glyphs' raster bounds there, so `raster_bounds` does not
+ask Core Text for a glyph the last launch measured, and `src/line_cache.rs`
+keeps the line layouts the first frame shaped
+(`docs/decisions/launch-first-frame-text.md`). `layout_line` takes a layout
+from there when the line has the same text, font size and font runs, and every
+font it draws with opens under its PostScript name (`line_cache_font`: a
+fallback font not loaded yet is opened by name, a system one from the
+fallback list of a font the line asks for). A run's font is named by its
+PostScript name, OpenType features and fallbacks
+(`line_cache_names_by_font_id`, filled by `load_family`). Layouts are
+recorded from the start until `save`, which hands them to the app as bytes:
+they hold the lines' text, so the app decides where they may be kept.

@@ -5,20 +5,21 @@
 //! bitmaps the last launch drew ([`load`]) before its first frame, and
 //! `rasterize_glyph` takes a bitmap from here instead of drawing it again.
 //! Everything rasterized or taken until [`save`] is written back for the
-//! next launch.
+//! next launch. The glyphs' raster bounds are kept the same way, so the
+//! first frame does not measure them again either.
 //!
 //! A glyph is named by its font's PostScript name and the render
 //! parameters. The app passes a `stamp` (its version and the OS build), so
 //! a new OS with new font files starts over; a bitmap whose size differs
 //! from the glyph's raster bounds is never used.
 
-use gpui::{DevicePixels, RenderGlyphParams, Size};
+use gpui::{Bounds, DevicePixels, RenderGlyphParams, Size, point, size};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
-const MAGIC: &[u8; 8] = b"QGLYPHS1";
+const MAGIC: &[u8; 8] = b"QGLYPHS2";
 /// A cache file larger than this is not read.
 const MAX_FILE: u64 = 16 << 20;
 /// Recording stops at this many bytes of bitmaps, in case `save` never comes
@@ -56,6 +57,9 @@ struct Bitmap {
     bytes: Vec<u8>,
 }
 
+/// A glyph's raster bounds: origin x, origin y, width, height.
+type RasterBounds = [i32; 4];
+
 #[derive(Default)]
 struct Cache {
     /// Bitmaps from the last launch not asked for yet.
@@ -63,6 +67,10 @@ struct Cache {
     /// Bitmaps this launch drew or took, until `save`.
     used: Vec<(Key, Bitmap)>,
     used_bytes: usize,
+    /// Raster bounds from the last launch not asked for yet, and those this
+    /// launch measured or took.
+    loaded_bounds: HashMap<Key, RasterBounds>,
+    used_bounds: Vec<(Key, RasterBounds)>,
     saved: bool,
 }
 
@@ -71,20 +79,27 @@ static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 /// Reads the bitmaps `path` holds if it was written with `stamp`. Call it
 /// before the first window draws; a later call does nothing.
 pub fn load(path: &Path, stamp: &str) {
-    let loaded = read(path, stamp).unwrap_or_default();
+    let (loaded, loaded_bounds) = read(path, stamp).unwrap_or_default();
     let mut cache = CACHE.lock();
     if cache.is_none() {
         *cache = Some(Cache {
             loaded,
+            loaded_bounds,
             ..Cache::default()
         });
     }
 }
 
+/// Whether the text system should look here and record what it draws:
+/// between [`load`] and [`save`].
+pub(crate) fn recording() -> bool {
+    CACHE.lock().as_ref().is_some_and(|cache| !cache.saved)
+}
+
 /// Writes the bitmaps this launch used to `path`, then stops recording and
 /// drops what was not used. Only the first call writes.
 pub fn save(path: &Path, stamp: &str) -> std::io::Result<()> {
-    let used = {
+    let (used, used_bounds) = {
         let mut cache = CACHE.lock();
         let Some(cache) = cache.as_mut() else {
             return Ok(());
@@ -94,21 +109,28 @@ pub fn save(path: &Path, stamp: &str) -> std::io::Result<()> {
         }
         cache.saved = true;
         cache.loaded = HashMap::new();
-        std::mem::take(&mut cache.used)
+        cache.loaded_bounds = HashMap::new();
+        (
+            std::mem::take(&mut cache.used),
+            std::mem::take(&mut cache.used_bounds),
+        )
     };
     let mut out = Vec::with_capacity(used.iter().map(|(_, b)| b.bytes.len() + 32).sum());
     out.extend_from_slice(MAGIC);
     put_bytes(&mut out, stamp.as_bytes());
     out.extend_from_slice(&(used.len() as u32).to_le_bytes());
     for (key, bitmap) in &used {
-        put_bytes(&mut out, key.font.as_bytes());
-        for word in [key.glyph, key.size, key.scale] {
-            out.extend_from_slice(&word.to_le_bytes());
-        }
-        out.extend_from_slice(&[key.subpixel.0, key.subpixel.1, key.flags, key.dilation]);
+        put_key(&mut out, key);
         out.extend_from_slice(&bitmap.width.to_le_bytes());
         out.extend_from_slice(&bitmap.height.to_le_bytes());
         put_bytes(&mut out, &bitmap.bytes);
+    }
+    out.extend_from_slice(&(used_bounds.len() as u32).to_le_bytes());
+    for (key, bounds) in &used_bounds {
+        put_key(&mut out, key);
+        for value in bounds {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -147,6 +169,32 @@ pub(crate) fn record(key: Key, size: Size<DevicePixels>, bytes: &[u8]) {
     }
 }
 
+/// The last launch's raster bounds for `key`.
+pub(crate) fn take_bounds(key: &Key) -> Option<Bounds<DevicePixels>> {
+    let mut cache = CACHE.lock();
+    let cache = cache.as_mut()?;
+    let found = cache.loaded_bounds.remove(key)?;
+    cache.keep_bounds(key.clone(), found);
+    let [x, y, width, height] = found;
+    Some(Bounds {
+        origin: point(DevicePixels(x), DevicePixels(y)),
+        size: size(DevicePixels(width), DevicePixels(height)),
+    })
+}
+
+/// Keeps raster bounds this launch measured for the next launch.
+pub(crate) fn record_bounds(key: Key, bounds: Bounds<DevicePixels>) {
+    if let Some(cache) = CACHE.lock().as_mut() {
+        let found = [
+            bounds.origin.x.0,
+            bounds.origin.y.0,
+            bounds.size.width.0,
+            bounds.size.height.0,
+        ];
+        cache.keep_bounds(key, found);
+    }
+}
+
 impl Cache {
     fn keep(&mut self, key: Key, bitmap: Bitmap) {
         if self.saved || self.used_bytes + bitmap.bytes.len() > MAX_USED {
@@ -155,14 +203,52 @@ impl Cache {
         self.used_bytes += bitmap.bytes.len();
         self.used.push((key, bitmap));
     }
+
+    fn keep_bounds(&mut self, key: Key, bounds: RasterBounds) {
+        // A key and its bounds take about 64 bytes on disk.
+        if self.saved || self.used_bytes + 64 > MAX_USED {
+            return;
+        }
+        self.used_bytes += 64;
+        self.used_bounds.push((key, bounds));
+    }
 }
 
-fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+pub(crate) fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
     out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
     out.extend_from_slice(bytes);
 }
 
-fn read(path: &Path, stamp: &str) -> Option<HashMap<Key, Bitmap>> {
+fn put_key(out: &mut Vec<u8>, key: &Key) {
+    put_bytes(out, key.font.as_bytes());
+    for word in [key.glyph, key.size, key.scale] {
+        out.extend_from_slice(&word.to_le_bytes());
+    }
+    out.extend_from_slice(&[key.subpixel.0, key.subpixel.1, key.flags, key.dilation]);
+}
+
+fn read_key(reader: &mut Reader) -> Option<Key> {
+    let font = String::from_utf8(reader.bytes()?.to_vec()).ok()?;
+    let (glyph, size, scale) = (reader.u32()?, reader.u32()?, reader.u32()?);
+    let tail = reader.take(4)?;
+    let (subpixel, flags, dilation) = match *tail {
+        [x, y, flags, dilation] => ((x, y), flags, dilation),
+        _ => return None,
+    };
+    Some(Key {
+        font,
+        glyph,
+        size,
+        scale,
+        subpixel,
+        flags,
+        dilation,
+    })
+}
+
+type Loaded = (HashMap<Key, Bitmap>, HashMap<Key, RasterBounds>);
+
+fn read(path: &Path, stamp: &str) -> Option<Loaded> {
     if std::fs::metadata(path).ok()?.len() > MAX_FILE {
         return None;
     }
@@ -174,30 +260,15 @@ fn read(path: &Path, stamp: &str) -> Option<HashMap<Key, Bitmap>> {
     let count = reader.u32()?;
     let mut map = HashMap::new();
     for _ in 0..count {
-        let font = String::from_utf8(reader.bytes()?.to_vec()).ok()?;
-        let (glyph, size, scale) = (reader.u32()?, reader.u32()?, reader.u32()?);
-        let tail = reader.take(4)?;
-        let (subpixel, flags, dilation) = match *tail {
-            [x, y, flags, dilation] => ((x, y), flags, dilation),
-            _ => return None,
-        };
+        let key = read_key(&mut reader)?;
         let width = i32::from_le_bytes(reader.word()?);
         let height = i32::from_le_bytes(reader.word()?);
         let bytes = reader.bytes()?.to_vec();
-        let pixel = if flags & 1 == 1 { 4 } else { 1 };
+        let pixel = if key.flags & 1 == 1 { 4 } else { 1 };
         let expected = usize::try_from(width).ok()? * usize::try_from(height).ok()? * pixel;
         if bytes.len() != expected {
             return None;
         }
-        let key = Key {
-            font,
-            glyph,
-            size,
-            scale,
-            subpixel,
-            flags,
-            dilation,
-        };
         map.insert(
             key,
             Bitmap {
@@ -207,13 +278,26 @@ fn read(path: &Path, stamp: &str) -> Option<HashMap<Key, Bitmap>> {
             },
         );
     }
-    Some(map)
+    let mut bounds = HashMap::new();
+    for _ in 0..reader.u32()? {
+        let key = read_key(&mut reader)?;
+        let mut found = [0i32; 4];
+        for value in &mut found {
+            *value = i32::from_le_bytes(reader.word()?);
+        }
+        let [_, _, width, height] = found;
+        if width < 0 || height < 0 {
+            return None;
+        }
+        bounds.insert(key, found);
+    }
+    Some((map, bounds))
 }
 
-struct Reader<'a>(&'a [u8]);
+pub(crate) struct Reader<'a>(pub(crate) &'a [u8]);
 
 impl<'a> Reader<'a> {
-    fn take(&mut self, len: usize) -> Option<&'a [u8]> {
+    pub(crate) fn take(&mut self, len: usize) -> Option<&'a [u8]> {
         if len > self.0.len() {
             return None;
         }
@@ -226,11 +310,11 @@ impl<'a> Reader<'a> {
         self.take(4)?.try_into().ok()
     }
 
-    fn u32(&mut self) -> Option<u32> {
+    pub(crate) fn u32(&mut self) -> Option<u32> {
         self.word().map(u32::from_le_bytes)
     }
 
-    fn bytes(&mut self) -> Option<&'a [u8]> {
+    pub(crate) fn bytes(&mut self) -> Option<&'a [u8]> {
         let len = usize::try_from(self.u32()?).ok()?;
         self.take(len)
     }
@@ -239,7 +323,7 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{FontId, GlyphId, point};
+    use gpui::{FontId, GlyphId};
 
     fn params(glyph: u32) -> RenderGlyphParams {
         RenderGlyphParams {
@@ -272,22 +356,34 @@ mod tests {
                 bytes: vec![9; 6],
             },
         ));
+        let bounds = [-1, 2, 2, 3];
+        cache.used_bounds.push((key.clone(), bounds));
         *CACHE.lock() = Some(cache);
         save(&path, "a").expect("written");
 
         assert!(read(&path, "b").is_none(), "another stamp is ignored");
-        let map = read(&path, "a").expect("read back");
+        let (map, loaded_bounds) = read(&path, "a").expect("read back");
+        assert_eq!(loaded_bounds.get(&key), Some(&bounds));
         *CACHE.lock() = Some(Cache {
             loaded: map,
+            loaded_bounds,
             ..Cache::default()
         });
+        assert_eq!(
+            take_bounds(&key),
+            Some(Bounds {
+                origin: point(DevicePixels(-1), DevicePixels(2)),
+                size,
+            })
+        );
+        assert!(take_bounds(&key).is_none(), "taken once");
         let wrong = Size {
             width: DevicePixels(3),
             height: DevicePixels(3),
         };
         assert!(take(&key, wrong).is_none(), "a different size is not used");
         *CACHE.lock() = Some(Cache {
-            loaded: read(&path, "a").expect("read back"),
+            loaded: read(&path, "a").expect("read back").0,
             ..Cache::default()
         });
         assert_eq!(take(&key, size).map(|(_, bytes)| bytes), Some(vec![9; 6]));

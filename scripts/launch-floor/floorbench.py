@@ -2,7 +2,8 @@
 """The cold launch floor: how long macOS takes to put a plain AppKit window on screen.
 
     python3 -I scripts/launch-floor/floorbench.py [--runs N] [--cold]
-        [--quill LABEL=BUNDLE ...] [titled] [borderless] [noflush] [linked] [binds] [opnew] [preload] [preload2]
+        [--quill LABEL=BUNDLE ...] [titled] [borderless] [noflush] [linked] [trimmed] [binds] [opnew]
+        [preload] [preload2]
 
 Builds FloorApp.app from floor.m under ~/Library/Caches/quill-launch-bench
 (signed with QUILL_CODESIGN_IDENTITY when set) and launches each variant in
@@ -11,6 +12,8 @@ turn: `titled` (a standard window), `borderless` (no title bar buttons),
 `[NSApp run]`, as a plain AppKit app), `linked` (the titled window in a
 binary that also links every system framework the first `--quill` bundle's
 executable links, to tell the frameworks' load cost from Quill's own),
+`trimmed` (`linked` without the frameworks in `DEFERRABLE`, which Quill does
+not need before its first frame),
 `binds` (`linked`, plus a pointer to every symbol that executable binds, so
 dyld resolves the same imports at launch), `opnew` (`titled`, plus replacements
 of C++ operator new and delete, as ThorVG defines them), `preload` (`titled`,
@@ -45,12 +48,17 @@ VARIANTS = {
     "borderless": ("FloorApp", ["FLOOR_BORDERLESS=1"]),
     "noflush": ("FloorApp", ["FLOOR_NO_FLUSH=1"]),
     "linked": ("FloorLinked", []),
+    "trimmed": ("FloorTrimmed", []),
     "binds": ("FloorBinds", []),
     "opnew": ("FloorOpNew", []),
     "preload": ("FloorApp", ["FLOOR_PRELOAD=" + WRITING_TOOLS_UI]),
     "preload2": ("FloorApp", [f"FLOOR_PRELOAD={SWIFT_UI}:{WRITING_TOOLS_UI}"]),
 }
 BASE_FRAMEWORKS = ["AppKit", "Metal", "QuartzCore"]
+# Media, calls, passkeys, location and notifications: nothing before the first frame.
+DEFERRABLE = {"AVFoundation", "AudioToolbox", "CloudKit", "CoreAudio", "CoreBluetooth", "CoreData",
+              "CoreImage", "CoreLocation", "CoreMedia", "LocalAuthentication", "MediaPlayer",
+              "ScreenCaptureKit", "UserNotifications"}
 PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -146,12 +154,13 @@ def main():
     apps = {"FloorApp": build("FloorApp", BASE_FRAMEWORKS)}
     if "opnew" in opts.variants:
         apps["FloorOpNew"] = build("FloorOpNew", BASE_FRAMEWORKS, [HERE / "opnew.cpp"])
-    if {"linked", "binds"} & set(opts.variants):
+    if {"linked", "trimmed", "binds"} & set(opts.variants):
         if not opts.quill:
             parser.error("linked and binds need a --quill bundle to copy the frameworks from")
         executable = pathlib.Path(opts.quill[0].partition("=")[2]) / "Contents/MacOS/quill"
         frameworks = sorted(set(BASE_FRAMEWORKS + linked_frameworks(executable)))
         apps["FloorLinked"] = build("FloorLinked", frameworks)
+        apps["FloorTrimmed"] = build("FloorTrimmed", [f for f in frameworks if f not in DEFERRABLE])
         table = bind_table(executable, bench.WORK / "floor-binds.c")
         apps["FloorBinds"] = build("FloorBinds", frameworks, [table])
     creds = bench.credentials()
