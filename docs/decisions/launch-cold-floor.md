@@ -86,7 +86,10 @@ adds the text input items to the Edit menu.
 
 A hold that ran the main run loop before `[NSApp run]` until the chats were drawn (capped
 at 150 ms) did not help: the observer runs on that first pass too, before the poll loop
-gets to draw. The hold was dropped. The window still comes sooner in those launches, and
+gets to draw. The hold was dropped. Loading WritingToolsUI on a worker from `main`
+(`floorbench.py preload`) did not help either: dyld loads one image at a time, so the
+floor app's main thread waited for the worker, and its window came about 360 ms later
+(982 against 619 ms, medians of 10 after `purge`) with `finishLaunching` done no sooner. The window still comes sooner in those launches, and
 only the chats wait.
 
 ## Results
