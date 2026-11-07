@@ -112,7 +112,7 @@ fn driver_search_happy_empty_error_and_select() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Ready);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Ready);
     assert_eq!(driver.session.search.search.chat_ids, vec![ChatId(7)]);
     driver
         .select_search_message(
@@ -123,7 +123,7 @@ fn driver_search_happy_empty_error_and_select() {
             0,
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Closed);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Closed);
     assert_eq!(driver.session.open_chat, Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
@@ -171,7 +171,7 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Ready);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Ready);
     assert!(driver.session.search.search.recents);
 
     let empty = commit_typed_search(&mut driver, "zzz");
@@ -205,7 +205,7 @@ fn driver_search_happy_empty_error_and_select() {
             )
             .unwrap();
     // Phase 7.2: `Empty` only once the public search settles too.
-    assert_eq!(driver.session.search.search.status, SearchStatus::Searching);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Searching);
     driver
         .ingest(
             copy_and_parse(
@@ -219,7 +219,7 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Empty);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Empty);
 
     let fail = commit_typed_search(&mut driver, "nope");
     let SearchFlight::Query(fail_chats, fail_messages, fail_public) = fail else {
@@ -252,7 +252,7 @@ fn driver_search_happy_empty_error_and_select() {
         )
         .unwrap();
     // Phase 7.2: the public request still in flight keeps `Searching`.
-    assert_eq!(driver.session.search.search.status, SearchStatus::Searching);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Searching);
     driver
         .ingest(
             copy_and_parse(
@@ -266,9 +266,9 @@ fn driver_search_happy_empty_error_and_select() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Failed);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Failed);
     driver.close_search();
-    assert_eq!(driver.session.search.search.status, SearchStatus::Closed);
+    assert_eq!(driver.session.search.search.status(), SearchStatus::Closed);
     assert!(!sink.rendered().contains("CANARY_DRV"));
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -122,19 +122,19 @@ impl Session {
         self.search.search.generation = self.search.search.generation.saturating_add(1);
         self.search.search.clear_results();
         self.search.search.recents = query.trim().is_empty();
-        self.search.search.chat_ids = self
-            .local_search_chats(query)
-            .into_iter()
-            .map(|chat| chat.id)
-            .collect();
-        self.search.search.chats_done = true;
-        self.search.search.messages_done = true;
-        if query.trim().is_empty() {
-            self.search.search.chat_ids.clear();
-            self.search.search.status = SearchStatus::Idle;
+        let chat_ids: Vec<ChatId> = if query.trim().is_empty() {
+            Vec::new()
         } else {
-            self.search.search.finish_if_complete();
-        }
+            self.local_search_chats(query)
+                .into_iter()
+                .map(|chat| chat.id)
+                .collect()
+        };
+        // Nothing is asked of TDLib: all three requests count as answered,
+        // so the derived status settles at once.
+        self.search.search.accept_chats(chat_ids, false);
+        self.search.search.accept_messages(Vec::new(), false);
+        self.search.search.accept_public_chats(Vec::new(), false);
     }
 
     pub fn begin_close(&mut self) {

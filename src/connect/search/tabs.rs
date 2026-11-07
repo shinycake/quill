@@ -44,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && search.query.is_empty()
             && !search.recents
             && matches!(
-                search.status,
+                search.status(),
                 SearchStatus::Searching
                     | SearchStatus::Ready
                     | SearchStatus::Empty

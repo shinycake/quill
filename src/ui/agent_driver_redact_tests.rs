@@ -15,7 +15,7 @@ use quill::ids::{AccountKey, ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::search_filters::GlobalSearchFilters;
 use quill::search_tabs::SearchTab;
-use quill::state::{PublicPostLimits, SearchMessageHit, SearchStatus};
+use quill::state::{PublicPostLimits, SearchMessageHit};
 use quill::telegram::envelope::MessageContent;
 
 const GRANTED: &str = "Demo chat A";
@@ -78,7 +78,7 @@ fn show_search_tab(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: Sea
         } else {
             "demo".to_string()
         };
-        search.status = SearchStatus::Ready;
+        search.open = true;
         search.recents = false;
         search.filters = tab.apply(GlobalSearchFilters::default());
         search.messages = vec![hit(12, 1, "top secret post"), hit(11, 2, "granted hit")];

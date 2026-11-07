@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.search.search.open
             && self.session.search.search.recents
             && matches!(
-                self.session.search.search.status,
+                self.session.search.search.status(),
                 SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
             )
         {
@@ -80,7 +80,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && self.session.search.search.query.is_empty()
                 && self.session.search.search.recents
                 && matches!(
-                    self.session.search.search.status,
+                    self.session.search.search.status(),
                     SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
                 )
             {
@@ -103,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             && self.session.search.search.query == trimmed
             && !self.session.search.search.recents
             && matches!(
-                self.session.search.search.status,
+                self.session.search.search.status(),
                 SearchStatus::Searching
                     | SearchStatus::Ready
                     | SearchStatus::Empty

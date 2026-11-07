@@ -368,8 +368,7 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.search.chat_ids.clear();
-            session.search.search.status = SearchStatus::Idle;
+            session.search.search.clear_recents();
         }
         cx.notify();
     }
