@@ -220,7 +220,8 @@ crate::ui::shell::register_dialogs! {
         7455,
         |app| app.message_ui.sponsored_about.is_some(),
         QuillApp::build_sponsored_about_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_sponsored_about(cx)),
 }
 
 #[cfg(test)]

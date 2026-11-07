@@ -536,5 +536,6 @@ crate::ui::shell::register_dialogs! {
         615,
         |app| app.privacy.sessions_confirm.is_some(),
         QuillApp::build_sessions_confirm_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_sessions_confirm(cx)),
 }

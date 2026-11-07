@@ -189,5 +189,9 @@ crate::ui::shell::register_dialogs! {
         1410,
         |app| app.chat_list.my_chats_open.is_some(),
         QuillApp::build_my_chats_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.chat_list.my_chats_open = None;
+            cx.notify();
+        }),
 }

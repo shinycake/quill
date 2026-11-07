@@ -381,5 +381,9 @@ crate::ui::shell::register_dialogs! {
         3853,
         |app| app.stories.live.delete.is_some(),
         QuillApp::build_live_delete_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.stories.live.delete = None;
+            cx.notify();
+        }),
 }

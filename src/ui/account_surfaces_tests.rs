@@ -172,3 +172,77 @@ fn a_switch_stops_the_player(cx: &mut TestAppContext) {
         assert_eq!(app.playback.player.chat, None);
     });
 }
+
+/// Boxes that keep the old account's ids in app-side state and act through
+/// `self.live` all close on a switch: none reopens over the new account to
+/// delete, leave, terminate or call there.
+#[gpui_kit::test]
+fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::confirm::SessionsConfirm;
+    use crate::ui::dialogs::folder::FolderDeleteConfirm;
+    use crate::ui::dialogs::group_confirm::GroupConfirmAction;
+
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_confirm(CHAT, GroupConfirmAction::DeleteChat, cx);
+        app.folders.delete_confirm = Some(FolderDeleteConfirm {
+            folder_id: 2,
+            name: "Work".into(),
+            has_links: false,
+            shared: false,
+            keep: Default::default(),
+        });
+        app.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        app.chat_list.global.clear_calls_open = true;
+        app.calls.confirm = Some((7, false));
+        cx.notify();
+    });
+    frames(&mut vcx);
+    assert!(dialog_up(&mut vcx));
+    let opened = [
+        "GroupConfirm",
+        "FolderDelete",
+        "SessionsConfirm",
+        "ClearCalls",
+        "CallConfirm",
+    ];
+    app.read_with(&vcx, |app, _| {
+        let open = QuillShell::open_dialog_names(app);
+        for name in opened {
+            assert!(open.contains(&name), "{name} open before the switch");
+        }
+    });
+
+    switch(&app, &mut vcx);
+    frames(&mut vcx);
+    assert!(!dialog_up(&mut vcx));
+    app.read_with(&vcx, |app, _| {
+        let open = QuillShell::open_dialog_names(app);
+        assert!(open.is_empty(), "still open: {open:?}");
+        assert!(app.admin.group_confirm_dialog.is_none());
+        assert!(app.folders.delete_confirm.is_none());
+        assert!(app.privacy.sessions_confirm.is_none());
+        assert!(!app.chat_list.global.clear_calls_open);
+        assert!(app.calls.confirm.is_none());
+    });
+}
+
+/// Every dialog says what a switch does to it (the registry will not take
+/// one that does not), and only these few stay open across one. A new
+/// app-wide dialog joins this list on purpose.
+#[test]
+fn only_app_wide_dialogs_stay_open_across_a_switch() {
+    use crate::ui::shell::OnSwitch;
+
+    let mut kept: Vec<_> = QuillShell::dialog_switch_scopes()
+        .into_iter()
+        .filter(|(_, on_switch)| *on_switch == OnSwitch::AppWide)
+        .map(|(name, _)| name)
+        .collect();
+    kept.sort_unstable();
+    assert_eq!(
+        kept,
+        ["BackgroundCall", "EmojiSetStyle", "Passcode", "ThemeEditor"]
+    );
+}

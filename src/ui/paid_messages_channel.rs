@@ -360,5 +360,6 @@ crate::ui::shell::register_dialogs! {
         4895,
         |app| app.paid_messages.direct.is_some(),
         QuillApp::build_direct_messages_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_direct_messages(cx)),
 }

@@ -101,17 +101,23 @@ crate::ui::shell::register_dialogs! {
         2932,
         |app| app.notify.mute_menu_open,
         QuillApp::build_mute_menu_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_mute_menu(cx)),
     /// The auto-delete timer (tdesktop `TTLBox`).
     TtlPicker => DialogSpec::new(
         2933,
         |app| app.notify.ttl_picker_open,
         QuillApp::build_ttl_picker_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.notify.ttl_picker_open = false;
+            cx.notify();
+        }),
     /// The chat's folders.
     FolderMenu => DialogSpec::new(
         2934,
         |app| app.folders.menu_open,
         QuillApp::build_folder_menu_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_folder_menu(cx)),
 }

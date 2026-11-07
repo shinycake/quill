@@ -691,13 +691,15 @@ crate::ui::shell::register_dialogs! {
         4500,
         |app| app.admin.username_dialog.is_some(),
         QuillApp::build_username_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_username_dialog(cx)),
 
     GroupConfirm => DialogSpec::new(
         4800,
         |app| app.admin.group_confirm_dialog.is_some(),
         QuillApp::build_group_confirm_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_group_confirm(cx)),
 }
 
 mod build_group_confirm_dialog;

@@ -385,7 +385,8 @@ crate::ui::shell::register_dialogs! {
         5444,
         |app| app.viewer.photo_editor.as_ref().is_some_and(PhotoEditor::is_profile),
         QuillApp::build_profile_photo_crop_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_photo_editor(cx)),
 }
 
 #[cfg(test)]

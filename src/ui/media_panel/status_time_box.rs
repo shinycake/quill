@@ -231,5 +231,6 @@ crate::ui::shell::register_dialogs! {
         5150,
         |app| app.pickers.media_panel.until.is_some(),
         QuillApp::build_status_time_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_status_time_box(cx)),
 }

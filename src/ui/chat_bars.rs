@@ -679,12 +679,14 @@ crate::ui::shell::register_dialogs! {
         6300,
         |app| app.dialogs.block_bar_dialog.is_some(),
         QuillApp::build_block_bar_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_block_bar_dialog(cx)),
 
     /// Batch 8: the chat's pending join requests.
     JoinRequests => DialogSpec::new(
         6400,
         |app| app.admin.join_requests_dialog.is_some(),
         QuillApp::build_join_requests_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_join_requests_dialog(cx)),
 }

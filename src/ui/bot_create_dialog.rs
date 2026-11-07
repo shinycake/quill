@@ -528,5 +528,6 @@ crate::ui::shell::register_dialogs! {
         5430,
         |app| app.dialogs.bot_create_dialog.is_some(),
         QuillApp::build_bot_create_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_bot_create(cx)),
 }

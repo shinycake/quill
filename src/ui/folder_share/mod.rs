@@ -922,13 +922,15 @@ crate::ui::shell::register_dialogs! {
         1900,
         |app| app.folders.share.is_some(),
         QuillApp::build_folder_share_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_folder_share(cx)),
 
     FolderInvite => DialogSpec::new(
         2000,
         |app| app.folders.invite.is_some(),
         QuillApp::build_folder_invite_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_folder_invite(cx)),
 }
 
 mod build_folder_invite_dialog;

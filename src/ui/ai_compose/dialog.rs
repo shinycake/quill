@@ -244,5 +244,6 @@ crate::ui::shell::register_dialogs! {
         7720,
         |app| app.ai_compose.open.is_some(),
         QuillApp::build_ai_compose_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_ai_compose(cx)),
 }

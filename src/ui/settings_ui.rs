@@ -938,5 +938,6 @@ crate::ui::shell::register_dialogs! {
         500,
         |app| app.session().is_some_and(|s| s.chat_list.archive_settings_open),
         QuillApp::build_archive_settings_dialog,
-    ),
+    )
+    .follows_account(),
 }

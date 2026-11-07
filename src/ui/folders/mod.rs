@@ -873,13 +873,21 @@ crate::ui::shell::register_dialogs! {
         1700,
         |app| app.folders.editor.is_some(),
         QuillApp::build_folder_editor_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.folders.editor = None;
+            cx.notify();
+        }),
 
     FolderDelete => DialogSpec::new(
         1800,
         |app| app.folders.delete_confirm.is_some(),
         QuillApp::build_folder_delete_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.folders.delete_confirm = None;
+            cx.notify();
+        }),
 }
 
 mod save_folder_editor;

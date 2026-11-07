@@ -147,10 +147,18 @@ crate::ui::shell::register_dialogs! {
         2935,
         |app| app.composer_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard),
         QuillApp::build_poll_discard_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.composer_ui.poll_dialog = None;
+            cx.notify();
+        }),
     PollCreate => DialogSpec::new(
         2936,
         |app| app.composer_ui.poll_dialog.is_some(),
         QuillApp::build_poll_create_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.composer_ui.poll_dialog = None;
+            cx.notify();
+        }),
 }

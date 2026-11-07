@@ -389,7 +389,8 @@ impl QuillApp {
 
 crate::ui::shell::register_dialogs! {
     /// The Monetization page's "Learn more" box.
-    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog),
+    EarnLearn => DialogSpec::new(7610, |app| app.earn.learn, QuillApp::build_earn_learn_dialog)
+    .closes(|app, _, cx| app.close_earn_learn(cx)),
     /// A TON transaction's details.
     EarnTonTx => DialogSpec::new(
         7611,
@@ -409,7 +410,8 @@ crate::ui::shell::register_dialogs! {
         7614,
         |app| app.earn.ask_boost.is_some(),
         QuillApp::build_earn_ask_boost_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_earn_ask_boost(cx)),
 }
 
 #[cfg(test)]

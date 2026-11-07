@@ -413,7 +413,8 @@ crate::ui::shell::register_dialogs! {
         6100,
         |app| app.dialogs.profile_dialog.is_some(),
         QuillApp::build_profile_panel_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_profile_dialog(cx)),
 }
 
 mod about_text;

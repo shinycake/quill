@@ -335,7 +335,8 @@ crate::ui::shell::register_dialogs! {
         2900,
         |app| app.share.link_text.is_some(),
         QuillApp::build_deep_link_share_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_share_link(cx)),
 }
 
 #[cfg(test)]

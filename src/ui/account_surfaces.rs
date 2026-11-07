@@ -7,18 +7,14 @@
 //! controller, which goes away with the session.
 //!
 //! Every switch runs [`QuillApp::end_account_surfaces`] before the client
-//! changes. A new account-bound surface ends here, or gives its dialog a
-//! close of its own (`DialogSpec::closes`), which this runs.
+//! changes. A new account-bound surface ends here; a dialog says what a
+//! switch does to it when it registers (`shell::OnSwitch`), and the ones
+//! that close are closed here.
 
 use super::app::QuillApp;
 use super::shell::QuillShell;
 use gpui_kit::component::WindowExt;
 use gpui_kit::{Context, Window};
-
-/// Dialogs with a close of their own that do not belong to the account on
-/// screen: another account's ringing call (the switch may be its own
-/// Answer) and the app-wide passcode.
-const KEPT_ON_SWITCH: &[&str] = &["BackgroundCall", "Passcode"];
 
 impl QuillApp {
     /// End every surface bound to the account on screen. Runs while
@@ -57,7 +53,7 @@ impl QuillApp {
         // belong to the old account's story too.
         self.close_story_viewer(cx);
         self.close_video_pip(cx);
-        QuillShell::close_dialogs_for_switch(self, KEPT_ON_SWITCH, window, cx);
+        QuillShell::close_dialogs_for_switch(self, window, cx);
         self.close_main_window_dialogs(window, cx);
         cx.notify();
     }

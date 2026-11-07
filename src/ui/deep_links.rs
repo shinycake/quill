@@ -462,13 +462,18 @@ crate::ui::shell::register_dialogs! {
         2700,
         |app| app.links.deep_link_dialog.is_some(),
         QuillApp::build_deep_link_dialog,
-    ),
+    )
+    .closes(|app, _, cx| {
+            app.links.deep_link_dialog = None;
+            cx.notify();
+        }),
 
     DeepLinkInvite => DialogSpec::new(
         2800,
         |app| app.links.deep_link_invite.is_some(),
         QuillApp::build_deep_link_invite_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.cancel_deep_link_invite(cx)),
 }
 
 #[cfg(test)]

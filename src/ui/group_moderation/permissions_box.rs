@@ -543,5 +543,6 @@ crate::ui::shell::register_dialogs! {
         4400,
         |app| app.admin.permissions_dialog.is_some(),
         QuillApp::build_permissions_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_permissions_dialog(cx)),
 }

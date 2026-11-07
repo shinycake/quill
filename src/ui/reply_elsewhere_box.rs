@@ -188,5 +188,6 @@ crate::ui::shell::register_dialogs! {
         2931,
         |app| app.share.reply_elsewhere_open && app.composer_ui.has_reply(),
         QuillApp::build_reply_elsewhere_dialog,
-    ),
+    )
+    .closes(|app, window, cx| app.close_reply_panels(window, cx)),
 }

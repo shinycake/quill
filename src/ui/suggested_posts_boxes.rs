@@ -575,7 +575,8 @@ crate::ui::shell::register_dialogs! {
         3960,
         |app| app.suggested_posts.time.is_some(),
         QuillApp::build_suggest_time_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_suggest_time(cx)),
     /// "Suggest a Message" / "Suggest Changes".
     SuggestPrice => DialogSpec::new(
         3968,

@@ -579,7 +579,8 @@ crate::ui::shell::register_dialogs! {
         3050,
         |app| app.peer_qr.open.is_some(),
         QuillApp::build_peer_qr_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_qr_box(cx)),
 }
 
 #[cfg(test)]

@@ -630,7 +630,8 @@ crate::ui::shell::register_dialogs! {
         5600,
         |app| app.message_ui.menu_ui.report_open,
         QuillApp::build_message_report_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_message_report(cx)),
 }
 
 mod delete_member_reaction;

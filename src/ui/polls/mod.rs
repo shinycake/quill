@@ -868,7 +868,8 @@ crate::ui::shell::register_dialogs! {
         5500,
         |app| app.message_ui.poll_voters_dialog.is_some(),
         QuillApp::build_poll_voters_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_poll_voters_dialog(cx)),
 }
 
 mod demo;

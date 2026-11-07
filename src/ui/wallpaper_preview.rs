@@ -441,7 +441,8 @@ crate::ui::shell::register_dialogs! {
         2110,
         |app| app.dialogs.wallpaper_preview.is_some(),
         QuillApp::build_wallpaper_preview_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_wallpaper_preview(cx)),
 }
 
 #[cfg(test)]

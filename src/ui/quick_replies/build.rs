@@ -462,5 +462,6 @@ crate::ui::shell::register_dialogs! {
         5437,
         |app| app.dialogs.quick_replies_dialog.is_some(),
         QuillApp::build_quick_replies_dialog,
-    ),
+    )
+    .closes(|app, _, cx| app.close_quick_replies(cx)),
 }
