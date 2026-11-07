@@ -640,6 +640,11 @@ impl QuillApp {
         }
         self.stories.viewer.close();
         self.chat_list.pending_story_open = None;
+        // The player and the clock belong to the open viewer: a close that
+        // skips the rest of `close_story_viewer` (a deleted story, the
+        // passcode lock) must not leave the clip playing.
+        self.stories.playback.stop();
+        self.stories.video = Default::default();
     }
 
     /// Phase 9.1: close the story viewer; `closeStory` marks the current
@@ -661,11 +666,8 @@ impl QuillApp {
         self.stories.cover_sent = false;
         self.stories.privacy_edit = None;
         self.stories.privacy_sent = false;
-        // Phase 9.6: the tick task self-exits on the next wake when the
-        // viewer is no longer open.
-        self.stories.playback.stop();
-        // B14: drop the player and the viewer's extra state with it.
-        self.stories.video = Default::default();
+        // B14: the player and the clock went with the viewer; the rest of
+        // its extra state goes too.
         self.stories.pause.reset();
         self.stories.share_open = false;
         self.stories.close_friends_edit = None;

@@ -3,7 +3,7 @@
 
 use super::early_connect::First;
 use crate::ui::status_note::StatusNote;
-use quill::auth::view_for;
+use quill::auth::{StartupFailure, view_for};
 use quill::connect::{
     ConnectBlocker, ConnectGate, LiveConnect, evaluate_gate, start_prepared_live_connect,
 };
@@ -188,10 +188,12 @@ impl super::app::QuillApp {
                         }
                         if !safe {
                             // Its old client's close can't be confirmed in
-                            // this run: never open the database again.
-                            this.connection.set_note(StatusNote::silent(tr(
-                                keys::Q_REST_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
-                            )));
+                            // this run: never open the database again, and
+                            // say so instead of staying on Connecting.
+                            this.auth_ui.demo_state =
+                                AuthorizationState::StartupFailed(StartupFailure::CloseUnconfirmed);
+                            this.connection.status = ConnectUiStatus::Blocked;
+                            this.connection.clear_note();
                             cx.notify();
                             return false;
                         }
