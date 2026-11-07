@@ -58,6 +58,16 @@ impl Session {
                 }
             }
             Some(RequestPurpose::DiscardCall) => {
+                // The active call's hang-up failed: the call goes on in
+                // the phase it had, and a swap waiting on it asks again.
+                if let Some(hang_up) = self.calls.hang_up.take_if(|h| Some(h.request) == extra) {
+                    if let Some(call) = self.calls.active_call.as_mut()
+                        && call.id == hang_up.call_id
+                    {
+                        call.state = hang_up.resume;
+                    }
+                    self.calls.second_call.back_to_prompt();
+                }
                 self.calls.error = Some(call_request_error_line(err, "Could not hang up the call"));
             }
             Some(RequestPurpose::SendCallRating) => {

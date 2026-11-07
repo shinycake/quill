@@ -27,8 +27,15 @@ impl Session {
                 if matches!(call.state, CallState::Ready) {
                     active.ready = call.ready.clone();
                 }
-                active.state = call.state.clone();
                 active.is_video = call.is_video;
+                // A hang-up in flight keeps showing: the update is where
+                // the call goes back to if the discardCall fails.
+                match self.calls.hang_up.as_mut() {
+                    Some(hang_up) if hang_up.call_id == call.id => {
+                        hang_up.resume = call.state.clone();
+                    }
+                    _ => active.state = call.state.clone(),
+                }
             }
             return;
         }
@@ -78,27 +85,14 @@ impl Session {
             self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             return;
         }
-        self.calls.active_call = Some(ActiveCall {
-            id: call.id,
-            user_id: call.user_id,
-            is_outgoing: call.is_outgoing,
-            is_video: call.is_video,
-            state: call.state.clone(),
-            started_at: Instant::now(),
-            ready_at: None,
-            ready: call.ready.clone(),
-            transport: CallTransport::default(),
-            signaling_queue: Vec::new(),
-            signaling_dropped: 0,
-            muted: false,
-            camera_on: call.is_video,
-            screen_sharing: false,
-            remote_video: RemoteVideoState::Inactive,
-            remote_screen: RemoteVideoState::Inactive,
-            remote_audio_muted: false,
-            remote_battery_low: false,
-            signal_bars: None,
-        });
+        self.calls.active_call = Some(ActiveCall::fresh(
+            call.id,
+            call.user_id,
+            call.is_outgoing,
+            call.is_video,
+            call.state.clone(),
+            call.ready.clone(),
+        ));
         self.calls.summary = None;
         self.calls.error = None;
     }
@@ -151,17 +145,45 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        // The active call ended on its own — a still-open swap prompt
-        // is moot (the incoming call now flows through the normal
-        // incoming path). A queued post-swap accept survives: the
-        // driver issues acceptCall once this terminal update lands.
-        self.calls.second_call.take_prompt();
+        if self
+            .calls
+            .hang_up
+            .as_ref()
+            .is_some_and(|hang_up| hang_up.call_id == call.id)
+        {
+            self.calls.hang_up = None;
+        }
         if self.calls.answered_call == Some(call.id) {
             self.calls.answered_call = None;
         }
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
+        // The active call ended with the swap prompt still up: the
+        // second call keeps ringing and becomes the incoming call, as if
+        // its pending update had just arrived (TDLib does not send it
+        // again). A queued post-swap accept survives: the driver issues
+        // acceptCall once this terminal update lands.
+        if let Some((call_id, user_id, is_video)) = self.calls.second_call.take_prompt() {
+            self.ring_second_call(call_id, user_id, is_video);
+        }
+    }
+
+    /// Track the second call as the ringing incoming call.
+    pub(crate) fn ring_second_call(&mut self, call_id: i32, user_id: i64, is_video: bool) {
+        self.calls.active_call = Some(ActiveCall::fresh(
+            call_id,
+            user_id,
+            false,
+            is_video,
+            CallState::Pending {
+                is_created: true,
+                is_received: false,
+            },
+            None,
+        ));
+        self.calls.summary = None;
+        self.calls.error = None;
     }
 
     /// Phase C3a: `updateGroupCall` state machine. The current call holds

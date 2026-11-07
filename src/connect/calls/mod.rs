@@ -447,6 +447,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .map(|(call_id, _, _, _)| *call_id);
 
+        // The call before went: gone, or replaced by the second call that
+        // rang while it was on.
+        if let Some(call_id) = active_call_before
+            && tracked_call_id != Some(call_id)
+        {
+            self.log_call_sound_summary(call_id);
+            if let Some(engine) = self.call_engine.as_deref_mut() {
+                let _ = engine.hangup(call_id);
+            }
+        }
         if let Some((call_id, user_id, is_outgoing, _)) = &active_call_after
             && Some(*call_id) != active_call_before
             && let Some(engine) = self.call_engine.as_deref_mut()
@@ -457,14 +467,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && let Some(call) = self.session.calls.active_call.as_mut()
             {
                 call.transport.record_start_error(err.to_string());
-            }
-        }
-        if tracked_call_id.is_none()
-            && let Some(call_id) = active_call_before
-        {
-            self.log_call_sound_summary(call_id);
-            if let Some(engine) = self.call_engine.as_deref_mut() {
-                let _ = engine.hangup(call_id);
             }
         }
         if let Some((call_id, data)) = bridge_signaling

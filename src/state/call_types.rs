@@ -219,6 +219,39 @@ impl CallTransport {
 }
 
 impl ActiveCall {
+    /// A call first seen now, in `state`: nothing exchanged yet, camera on
+    /// for a video call.
+    pub fn fresh(
+        id: i32,
+        user_id: i64,
+        is_outgoing: bool,
+        is_video: bool,
+        state: CallState,
+        ready: Option<ReadyParams>,
+    ) -> Self {
+        Self {
+            id,
+            user_id,
+            is_outgoing,
+            is_video,
+            state,
+            started_at: Instant::now(),
+            ready_at: None,
+            ready,
+            transport: CallTransport::default(),
+            signaling_queue: Vec::new(),
+            signaling_dropped: 0,
+            muted: false,
+            camera_on: is_video,
+            screen_sharing: false,
+            remote_video: RemoteVideoState::Inactive,
+            remote_screen: RemoteVideoState::Inactive,
+            remote_audio_muted: false,
+            remote_battery_low: false,
+            signal_bars: None,
+        }
+    }
+
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
         self.ready_at
