@@ -112,8 +112,8 @@ impl QuillApp {
         self.resolve_pending_story_open(window, cx);
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
-        if let Some((chat_id, action)) = self.links.pending_deep_link_open.take() {
-            self.open_deep_link_chat(chat_id, &action, window, cx);
+        if let Some(open) = self.links.pending_deep_link_open.take() {
+            self.open_deep_link_chat(open, window, cx);
             self.drop_shared_card(cx);
         }
         if let Some(ui) = self.links.pending_deep_link_ui.take() {

@@ -757,8 +757,11 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
                     param: &str,
                     from_agent: bool| {
         app.update_in(vcx, |app, _, cx| {
-            app.links.pending_deep_link_open_from_agent = from_agent;
-            app.links.pending_deep_link_open = Some((ChatId(chat), start(param)));
+            app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
+                chat_id: ChatId(chat),
+                action: start(param),
+                from_agent,
+            });
             cx.notify();
         });
         settle(vcx);
@@ -784,6 +787,49 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
     assert!(guard::take_refusals().is_empty());
     // The user's own link to chat 12 is not an agent's.
     assert_eq!(resolved(&app, vcx, 12, "theirs", false), "/start theirs");
+    assert!(guard::take_refusals().is_empty());
+    app.update_in(vcx, |app, window, cx| {
+        app.composer
+            .update(cx, |input, cx| input.set_value("", window, cx));
+    });
+}
+
+/// The user picks a chat to share a link to while an agent's resolved link
+/// still waits: the user's open replaces it whole, so it is not gated as
+/// the agent's.
+#[gpui_kit::test]
+fn a_share_the_user_picks_replaces_an_agents_waiting_open(cx: &mut TestAppContext) {
+    use quill::agent::ui_driver::guard;
+    use quill::ids::ChatId;
+    use quill::state::DeepLinkAction;
+
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let _ = guard::take_refusals();
+    app.update_in(vcx, |app, _, cx| {
+        // The agent's link led to chat 12, which is not granted.
+        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
+            chat_id: ChatId(12),
+            action: DeepLinkAction::OpenUsername {
+                domain: "demo".into(),
+                start_param: Some("secret".into()),
+                post: None,
+                story_id: None,
+            },
+            from_agent: true,
+        });
+        // Before the next frame the user shares a link to chat 12.
+        app.share.link_text = Some("https://example.com/shared".into());
+        app.choose_share_chat(ChatId(12), cx);
+    });
+    settle(vcx);
+    let text = vcx.update(|_, cx| app.read(cx).composer.read(cx).value().to_string());
+    assert_eq!(text, "https://example.com/shared");
     assert!(guard::take_refusals().is_empty());
     app.update_in(vcx, |app, window, cx| {
         app.composer

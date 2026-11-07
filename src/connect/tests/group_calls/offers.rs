@@ -240,8 +240,30 @@ fn a_failed_share_payload_clears_the_pending_share() {
     assert_eq!(sent_count(&recorder, "startGroupCallScreenSharing"), 0);
     let call = tracked(&driver);
     assert!(!call.screen_share_pending);
-    assert!(call.transport_error.is_some());
+    assert!(call.screen_share_error.is_some());
+    assert_eq!(call.transport_error, None, "the call itself still works");
     assert!(!handle.presentation_active(555));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Joining again starts clean: an error left from the last time in the
+/// call (a failed mute, say) is not this join's failure.
+#[test]
+fn a_new_join_drops_the_last_transport_error() {
+    let (dir, mut driver, _recorder, handle, _sink, _seq) = ready_group_call_driver();
+    sharable(&handle, &mut driver);
+    handle.fail_group_offer();
+    driver
+        .toggle_group_call_screen_share()
+        .expect("the press is taken");
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.is_joined = false;
+        call.transport_error = Some("set_muted failed".into());
+    }
+    driver.join_video_chat(555).expect("join again");
+    let call = tracked(&driver);
+    assert_eq!(call.transport_error, None);
+    assert!(call.screen_share_error.is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

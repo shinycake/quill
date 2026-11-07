@@ -578,7 +578,7 @@ fn a_card_whose_chat_did_not_open_is_not_attached_later(cx: &mut TestAppContext)
     // opens is another one.
     app.update(vcx, |app, cx| {
         app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
-        app.links.pending_deep_link_open = Some((
+        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
             quill::ids::ChatId(GROUP_CHAT),
             quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
         ));

@@ -59,7 +59,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 && let Err(err) = engine.stop_screen_share(group_call_id)
                 && let Some(call) = self.session.calls.active_group_call.as_mut()
             {
-                call.transport_error = Some(err.to_string());
+                call.screen_share_error = Some(err.to_string());
             }
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
                 call.screen_sharing = false;
@@ -81,7 +81,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if let Err(err) = engine.start_screen_share(group_call_id) {
             if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                call.transport_error = Some(err.to_string());
+                call.screen_share_error = Some(err.to_string());
             }
             return Err(ConnectSendError::InvalidRequest);
         }

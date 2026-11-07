@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
@@ -192,7 +193,9 @@ impl QuillApp {
         if live.driver.thread_needs_reload() && live.driver.fetch_thread_history().is_ok() {
             cx.notify();
         }
-        if self.history.thread_root_jump {
+        // "Jump to root" pages older replies until the root is in; the
+        // history list scrolls there (`ScrollGoal::ThreadRoot`).
+        if self.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
             let complete = live
                 .driver
                 .session
@@ -200,12 +203,7 @@ impl QuillApp {
                 .thread
                 .as_ref()
                 .is_none_or(|thread| thread.history.loaded_complete);
-            if complete {
-                self.history.thread_root_jump = false;
-                self.history.scroller.update(cx, |state, cx| {
-                    state.scroll_to_item(0, cx);
-                });
-            } else if live.driver.fetch_thread_history().is_ok() {
+            if !complete && live.driver.fetch_thread_history().is_ok() {
                 cx.notify();
             }
         }
@@ -233,7 +231,7 @@ impl QuillApp {
             return;
         };
         let back = live.driver.close_thread();
-        self.history.thread_root_jump = false;
+        self.history.scroll_goal = None;
         match back {
             Some(chat) => self.select_listed_chat(chat, window, cx),
             // Same chat: the chat's (or topic's) own draft comes back.
@@ -265,7 +263,7 @@ impl QuillApp {
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
         self.request_draft_restore();
-        self.history.thread_root_jump = false;
+        self.history.scroll_goal = None;
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);
         }
@@ -275,17 +273,7 @@ impl QuillApp {
     /// Scroll to the thread's root post, loading older replies first when
     /// they are not all loaded yet.
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
-        let complete = self
-            .session()
-            .and_then(|s| s.threads.thread.as_ref())
-            .is_none_or(|thread| thread.history.loaded_complete);
-        if complete {
-            self.history.scroller.update(cx, |state, cx| {
-                state.scroll_to_item(0, cx);
-            });
-        } else {
-            self.history.thread_root_jump = true;
-        }
+        self.history.scroll_goal = Some(ScrollGoal::ThreadRoot);
         cx.notify();
     }
 

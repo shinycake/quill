@@ -173,8 +173,10 @@ pub(crate) struct StreamFacts {
     pub(crate) server_known: bool,
     pub(crate) recording: bool,
     pub(crate) share_link: bool,
-    /// The native connect reported an error.
-    pub(crate) transport_error: bool,
+    /// The call's transport failed. A join clears it, so while a join
+    /// waits it is that join's failure; a failed screen share is kept
+    /// apart (`screen_share_error`).
+    pub(crate) transport_failed: bool,
 }
 
 /// Whether `call` shows in the live stream layout: a running RTMP stream
@@ -254,7 +256,7 @@ impl QuillApp {
             server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
-            transport_error: call.transport_error.is_some(),
+            transport_failed: call.transport_error.is_some(),
         })
     }
 
@@ -295,6 +297,32 @@ impl QuillApp {
             live.driver.session.calls.group_call_error = Some(reason);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.calls.group_call_error = Some(reason);
+        }
+    }
+
+    /// The join on its way landed or failed: stop waiting, and say so when
+    /// it failed. Run with the window sync, outside the draw.
+    pub(super) fn settle_stream_join(&mut self) {
+        let Some(joining) = self.group_call.stream.joining else {
+            return;
+        };
+        let Some(facts) = self.group_call_stream_facts() else {
+            return;
+        };
+        if joining != facts.id {
+            self.stream_join_failed();
+        } else if facts.joined {
+            self.group_call.stream.joining = None;
+            self.group_call.stream.join_timeout = None;
+        } else if facts.transport_failed {
+            // The connect failed without a join error.
+            self.stream_join_failed();
+        } else if self
+            .session()
+            .is_some_and(|s| s.calls.group_call_error.is_some())
+        {
+            self.group_call.stream.joining = None;
+            self.group_call.stream.join_timeout = None;
         }
     }
 
@@ -379,24 +407,6 @@ impl QuillApp {
         self.arm_stream_hide_timer(cx);
         let shown = self.group_call.stream.controls.value(now);
         let animating = self.group_call.stream.controls.sliding(now);
-        match self.group_call.stream.joining {
-            Some(id) if id != facts.id => self.stream_join_failed(),
-            Some(_) if facts.joined => {
-                self.group_call.stream.joining = None;
-                self.group_call.stream.join_timeout = None;
-            }
-            // The connect failed without a join error: stop waiting.
-            Some(_) if facts.transport_error => self.stream_join_failed(),
-            Some(_)
-                if self
-                    .session()
-                    .is_some_and(|s| s.calls.group_call_error.is_some()) =>
-            {
-                self.group_call.stream.joining = None;
-                self.group_call.stream.join_timeout = None;
-            }
-            _ => {}
-        }
 
         let chat_id = facts.chat.as_ref().map(|(id, _)| *id);
         let chat_name = facts

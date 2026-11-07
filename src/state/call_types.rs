@@ -305,6 +305,10 @@ pub struct ActiveGroupCall {
     /// sent `toggleGroupCallScreenSharingIsPaused`). Your own tile shows
     /// the paused state at once, before the participant update.
     pub screen_share_paused: bool,
+    /// The last screen share's failure (its offer, start, connect or
+    /// stop). Kept apart from `transport_error`: a failed share leaves
+    /// the call itself working.
+    pub screen_share_error: Option<String>,
     /// The `Text` presentation answer from
     /// `startGroupCallScreenSharing`; consumed by the driver pump to
     /// finish the presentation handshake.
@@ -529,6 +533,7 @@ impl ActiveGroupCall {
             screen_share_pending: false,
             screen_sharing: false,
             screen_share_paused: false,
+            screen_share_error: None,
             screen_share_answer: String::new(),
             share_links: Default::default(),
             is_rtmp_stream: false,
