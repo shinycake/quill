@@ -59,7 +59,9 @@ impl QuillApp {
         // post this one under the other account.
         let on_screen = self.session().map(|session| session.account.clone());
         let mut waiting = Some((notification, photo));
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the wait names the notification's account and checks it
+        // against the account on screen itself before showing anything.
+        Self::spawn_app(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(PHOTO_CHECK).await;
                 let done = this

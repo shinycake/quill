@@ -311,6 +311,8 @@ impl QuillApp {
         }
         self.frame.frame_clock_running.set(true);
         let fps = self.frame.animation_demand.get();
+        // screen-scope: the frame clock is the app's; each tick draws
+        // whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let mut run = ClockRun::new(fps);
             loop {

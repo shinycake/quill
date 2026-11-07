@@ -823,14 +823,11 @@ impl QuillApp {
             }
         };
         if !need_sets.is_empty() || !need_files.is_empty() {
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.ensure_library_sets(&need_sets);
-                        let _ = live.driver.ensure_media_files(&need_files);
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.ensure_library_sets(&need_sets);
+                    let _ = live.driver.ensure_media_files(&need_files);
+                }
             });
         }
         element

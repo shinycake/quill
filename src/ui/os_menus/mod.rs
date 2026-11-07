@@ -351,6 +351,8 @@ pub(crate) fn register_actions(handle: AnyWindowHandle, app: WeakEntity<QuillApp
             return;
         }
         let app = app.clone();
+        // screen-scope: a quit with no window key ends the whole app, held only by
+        // exports of any account, so it does not depend on the account on screen.
         cx.defer(move |cx| {
             let held = handle.update(cx, |_, window, cx| {
                 app.update(cx, |this, cx| {
@@ -381,6 +383,8 @@ fn spawn_menu_sync(window: &mut Window, cx: &mut Context<QuillApp>) {
         quill::wake::CHROME.poke();
     })
     .detach();
+    // screen-scope: the menu sync follows whichever account is on screen; each pass
+    // reads the current state and rebuilds the Dock and Window menus from it.
     cx.spawn(async move |this, cx| {
         let mut sync = sync::MenuSync::default();
         loop {

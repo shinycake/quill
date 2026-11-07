@@ -61,6 +61,11 @@ impl QuillApp {
         // Again: what the leave ended can uncover another.
         self.close_switch_surfaces(window, cx);
         self.close_main_window_dialogs(window, cx);
+        // The goodbyes are said: work the old screen started (a closer's
+        // continuation included) does not run on the next one. Also with no
+        // client (the demo session), and also when the switch fails below:
+        // the surfaces are gone either way.
+        self.screen_leaves();
         cx.notify();
     }
 

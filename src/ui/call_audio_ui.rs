@@ -178,7 +178,7 @@ impl QuillApp {
         self.calls.mic_test = MicTestRun::Opening(start);
         let open = self.calls.open_mic_test.clone();
         let opening = cx.background_spawn(async move { open() });
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let opened = opening.await;
             let _ = this.update(cx, |this, cx| {
                 if !matches!(this.calls.mic_test, MicTestRun::Opening(s) if s == start) {

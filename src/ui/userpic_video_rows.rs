@@ -63,17 +63,14 @@ impl QuillApp {
     }
 
     fn defer_userpic_fetch(&self, fetch: UserpicFetch, cx: &mut Context<Self>) {
-        let app = cx.weak_entity();
-        cx.defer(move |cx| {
-            let _ = app.update(cx, |this, _| {
-                let Some(live) = this.live.as_mut() else {
-                    return;
-                };
-                let _ = match fetch {
-                    UserpicFetch::FullInfo(user_id) => live.driver.fetch_userpic_full_info(user_id),
-                    UserpicFetch::Clip(file_id) => live.driver.download_file(file_id, 1),
-                };
-            });
+        self.defer_screen(cx, move |this, _| {
+            let Some(live) = this.live.as_mut() else {
+                return;
+            };
+            let _ = match fetch {
+                UserpicFetch::FullInfo(user_id) => live.driver.fetch_userpic_full_info(user_id),
+                UserpicFetch::Clip(file_id) => live.driver.download_file(file_id, 1),
+            };
         });
     }
 

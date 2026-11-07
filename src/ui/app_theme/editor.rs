@@ -152,6 +152,7 @@ impl QuillApp {
                     })
                 });
                 let editing = name.clone();
+                // screen-scope: the theme editor is an app-wide setting; it opens for whichever account is on screen.
                 let task = cx.spawn_in(window, async move |this, cx| {
                     let read = read.await;
                     let _ = this.update_in(cx, |this, window, cx| {

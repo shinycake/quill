@@ -207,13 +207,10 @@ impl QuillApp {
             && session.should_download(file)
         {
             // Asked for after this frame: rendering borrows the app.
-            let weak = cx.entity().downgrade();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.download_file(file, 1);
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.download_file(file, 1);
+                }
             });
         }
         path
@@ -332,6 +329,8 @@ impl QuillApp {
             return;
         }
         player.closer.set(true);
+        // screen-scope: the sticker player is the app's; the closer
+        // drops clips no window draws, whatever is on screen.
         cx.spawn(async move |this, cx| {
             loop {
                 let wait = this.update(cx, |this, cx| {
@@ -387,6 +386,8 @@ impl QuillApp {
         }));
         // window-scope: the player is shared by every window; a wake
         // redraws the app, which redraws them all.
+        // screen-scope: same: a frame wake redraws the app for the
+        // account on screen at that time.
         cx.spawn(async move |this, cx| {
             loop {
                 let (tx, rx) = oneshot::channel::<()>();

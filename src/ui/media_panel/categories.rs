@@ -81,13 +81,10 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.stickers.emoji.sticker_categories_asked);
         if !asked && self.live.is_some() {
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_sticker_categories();
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.fetch_sticker_categories();
+                }
             });
         }
         let session = self.session()?;
@@ -153,13 +150,10 @@ impl QuillApp {
             })
             .collect();
         if !icon_files.is_empty() {
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, _| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.ensure_media_files(&icon_files);
-                    }
-                });
+            self.defer_screen(cx, move |this, _| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.ensure_media_files(&icon_files);
+                }
             });
         }
         // A chosen category replaces the search icon with a way back

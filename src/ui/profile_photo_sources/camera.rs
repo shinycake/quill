@@ -50,7 +50,7 @@ impl QuillApp {
         let log = work_dir().join("camera.log");
         let choice = self.capture_choice();
         let worker = cx.background_spawn(async move { CameraStream::start(&log, &choice) });
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 if this.sources().map(|s| s.serial) != Some(serial) {
@@ -135,7 +135,7 @@ impl QuillApp {
                 .save_with_format(&target, image::ImageFormat::Jpeg)
                 .map_err(|e| e.to_string())
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
                 if this.sources().map(|s| s.serial) != Some(serial) {

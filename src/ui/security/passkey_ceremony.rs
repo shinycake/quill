@@ -222,7 +222,7 @@ impl QuillApp {
             return;
         }
         self.privacy.passkeys.ticking = true;
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let keep = this

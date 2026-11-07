@@ -115,7 +115,7 @@ state is in place then, so it has to say which window it belongs to:
   `spawn_scoped` / `spawn_scoped_in`. It finishes in that window, or not
   at all once the window has closed.
 - Work that belongs to no chat window (the poll loop, background accounts,
-  the passcode): `QuillApp::spawn_main` / `spawn_main_in`.
+  the passcode): `QuillApp::spawn_app` / `spawn_app_in`.
 - A subscription or observer made with a window (`subscribe_in`,
   `on_focus_out`, `observe_window_activation`, `window.defer`): run its body
   in `in_window_of(window, cx, ...)`. GPUI calls it with the window it was
@@ -130,8 +130,21 @@ state is in place then, so it has to say which window it belongs to:
   takes the window with it, and goes through `in_window_scope` with it. A
   separate "which window" field next to it goes stale.
 
+The account on screen is the outer owner of the same kind
+(docs/decisions/account-scoped-ui-state.md): a continuation (`cx.spawn`,
+`spawn_in`, `cx.defer`, `defer_in`, `window.spawn`, `window.defer`,
+`on_next_frame`) acts for the account that was on screen when it started.
+One that touches that account's state (`live`, `session()`, the screen's
+feature structs, or a method that does) starts with `spawn_scoped*`,
+`spawn_screen*` or `defer_screen*`, or does that work inside
+`in_screen_scope(epoch, ...)`; after a switch its update comes back `Gone`
+and nothing runs. `spawn_app*` is for the app's own work and must not touch
+the screen's state. Work that acts for whichever account is on screen says
+why with `// screen-scope: <why>` on one of the three lines above the call.
+
 `scripts/check-window-scope.py` (CI step "window scope") flags async calls
-in `src/ui` whose closure touches window state without one of these. Work
+in `src/ui` whose closure touches window or screen state without one of
+these. Work
 that really needs no window says why in a comment on one of the three lines
 above the call:
 

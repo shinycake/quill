@@ -242,7 +242,8 @@ impl QuillApp {
         }
         self.playback.audio.set_on_built(|| AUDIO_BUILT.poke());
         let mut seen = AUDIO_BUILT.epoch();
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the player is the app's; its builds land for whichever account is on screen.
+        Self::spawn_app(cx, async move |this, cx| {
             loop {
                 AUDIO_BUILT.wait_since(seen).await;
                 seen = AUDIO_BUILT.epoch();
@@ -364,7 +365,7 @@ impl QuillApp {
         }
         self.playback.tick = true;
         self.playback.tick_shown = None;
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
             let mut seen = quill::wake::CHROME.epoch();
             loop {

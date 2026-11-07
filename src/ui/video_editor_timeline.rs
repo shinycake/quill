@@ -412,6 +412,7 @@ impl QuillApp {
         let app = cx.entity().downgrade();
         // A reload asked for by the paint below is for this window's editor.
         let scope = self.windows.scope;
+        let screen = self.screen_epoch();
         let bounds_cell = editor.motion.timeline_bounds.clone();
         let timeline = editor.timeline;
         let frames: Vec<Option<Arc<RenderImage>>> = editor
@@ -442,8 +443,10 @@ impl QuillApp {
                     let app = app.clone();
                     cx.defer(move |cx| {
                         let _ = app.update(cx, |this, cx| {
-                            this.in_window_scope(scope, cx, |this, cx| {
-                                this.video_editor_reload_frames(cx)
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                this.in_window_scope(scope, cx, |this, cx| {
+                                    this.video_editor_reload_frames(cx)
+                                })
                             })
                         });
                     });

@@ -782,6 +782,8 @@ impl Element for LayerPainter {
         let (layer, inline) = self.layer.demand();
         if layer > 0 || inline > 0 {
             let (app, painter, scope) = (self.app.clone(), self.painter, self.window);
+            // screen-scope: the layer animates whatever is on screen now; the
+            // tick redraws, it owns nothing of an account.
             cx.defer(move |cx| {
                 let _ = app.update(cx, |app, cx| {
                     app.in_window_scope(scope, cx, |app, cx| {

@@ -462,15 +462,12 @@ impl QuillApp {
                 }
             }
             if !icon_sets.is_empty() || !icon_files.is_empty() {
-                let weak = cx.weak_entity();
-                cx.defer(move |cx| {
-                    cx.defer(move |cx| {
-                        let _ = weak.update(cx, |this, _| {
-                            if let Some(live) = this.live.as_mut() {
-                                let _ = live.driver.ensure_library_sets(&icon_sets);
-                                let _ = live.driver.ensure_media_files(&icon_files);
-                            }
-                        });
+                self.defer_screen(cx, move |this, cx| {
+                    this.defer_screen(cx, move |this, _| {
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.ensure_library_sets(&icon_sets);
+                            let _ = live.driver.ensure_media_files(&icon_files);
+                        }
                     });
                 });
             }

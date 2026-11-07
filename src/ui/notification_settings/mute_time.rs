@@ -61,6 +61,8 @@ impl QuillApp {
             return;
         };
         let app = cx.entity().downgrade();
+        // screen-scope: the fields are reset in the same frame they were
+        // asked for, for the box on screen.
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, cx| {
                 let _ = app.update(cx, |this, cx| this.reset_mute_time_inputs(window, cx));

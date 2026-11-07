@@ -169,7 +169,7 @@ impl QuillApp {
         let stage = std::env::var("QUILL_DEMO_EFFECTS").unwrap_or_default();
         if stage == "window" {
             self.open_chat_in_new_window(ChatId(CHAT), window, cx);
-            QuillApp::spawn_main(cx, async move |app, cx| {
+            self.spawn_screen(cx, async move |app, cx| {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(1800))
                     .await;

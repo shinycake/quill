@@ -404,41 +404,52 @@ impl QuillApp {
             self.windows.next_bounds(main)
         });
         let owner = cx.entity();
+        let screen = self.screen_epoch();
         // window-scope: window bookkeeping by chat id; the draft goes in with
         // the new window's state in place (`in_window_scope` below).
         cx.defer(move |cx| {
+            // Another account came on screen meanwhile: the chat is not its.
+            if owner.read(cx).screen_epoch() != screen {
+                return;
+            }
             let opened = view::open_chat_window(owner.clone(), chat_id, bounds, cx);
             let (handle, view, slot) = match opened {
                 Ok(opened) => opened,
                 Err(_) => {
                     owner.update(cx, |app, cx| {
-                        app.connection.set_note(StatusNote::error(tr(
-                            keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
-                        )));
-                        app.chat_window_closed(chat_id, None, cx);
+                        app.in_screen_scope(screen, cx, |app, cx| {
+                            app.connection.set_note(StatusNote::error(tr(
+                                keys::Q_MISC_COULDNT_OPEN_THE_CHAT_WINDOW,
+                            )));
+                            app.chat_window_closed(chat_id, None, cx);
+                        });
                     });
                     return;
                 }
             };
             owner.update(cx, |app, cx| {
-                let views = slot.borrow().slices.view_ids().collect();
-                app.windows.open.push(OpenChatWindow {
-                    chat_id,
-                    handle,
-                    view,
-                    slot,
-                    views,
+                app.in_screen_scope(screen, cx, |app, cx| {
+                    let views = slot.borrow().slices.view_ids().collect();
+                    app.windows.open.push(OpenChatWindow {
+                        chat_id,
+                        handle,
+                        view,
+                        slot,
+                        views,
+                    });
+                    app.schedule_chat_windows_save(cx);
+                    cx.notify();
                 });
-                app.schedule_chat_windows_save(cx);
-                cx.notify();
             });
             // The chat's draft goes into the window's compose field, which
             // takes the keyboard.
             let _ = handle.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.in_window_scope(Some(chat_id), cx, |app, cx| {
-                        app.restore_open_draft(window, cx);
-                        app.composer.update(cx, |input, cx| input.focus(window, cx));
+                    app.in_screen_scope(screen, cx, |app, cx| {
+                        app.in_window_scope(Some(chat_id), cx, |app, cx| {
+                            app.restore_open_draft(window, cx);
+                            app.composer.update(cx, |input, cx| input.focus(window, cx));
+                        });
                     });
                 });
             });
@@ -475,10 +486,12 @@ impl QuillApp {
             return false;
         };
         let owner = cx.entity();
+        let screen = self.screen_epoch();
+        // window-scope: `in_screen_scope` puts the main window's state in place.
         cx.defer(move |cx| {
             let _ = main.update(cx, |_, window, cx| {
                 owner.update(cx, |app, cx| {
-                    app.in_window_scope(None, cx, |app, cx| {
+                    app.in_screen_scope(screen, cx, |app, cx| {
                         app.select_chat_with(chat_id, thread_switch, window, cx);
                     });
                 });

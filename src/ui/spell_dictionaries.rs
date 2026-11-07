@@ -151,7 +151,9 @@ impl QuillApp {
             worker_progress.finish();
             result
         });
-        self.spell.dict_manager.task = Some(Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: the spell checker and its dictionaries belong to the
+        // app, not to an account; the download finishes on whichever screen
+        self.spell.dict_manager.task = Some(Self::spawn_app(cx, async move |this, cx| {
             while !progress.is_finished() {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))

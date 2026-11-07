@@ -163,7 +163,7 @@ impl QuillApp {
     /// Poll for the id and the messages of a shortcut the server is about to
     /// report (the updates arrive on the poll, not as an answer).
     pub(super) fn quick_replies_watch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             for _ in 0..40 {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))

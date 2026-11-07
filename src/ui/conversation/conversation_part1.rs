@@ -679,10 +679,13 @@ impl QuillApp {
                     if open.is_some() && !history_loading && !history_failed {
                         let weak = cx.weak_entity();
                         let window_chat = self.windows.scope;
+                        let screen = self.screen_epoch();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.in_window_scope(window_chat, cx, |this, cx| {
-                                    this.maybe_auto_load_older(cx)
+                                this.in_screen_scope(screen, cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.maybe_auto_load_older(cx)
+                                    })
                                 })
                             });
                         });

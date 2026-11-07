@@ -176,9 +176,8 @@ impl QuillApp {
             // page that left the list short of the viewport asks for more.
             let tabs = &search.tabs;
             if tabs.has_more() && !tabs.loading_more && !tabs.more_failed {
-                let entity = cx.entity();
-                cx.defer(move |cx| {
-                    entity.update(cx, |this, cx| this.maybe_load_more_search(cx));
+                self.defer_screen(cx, move |this, cx| {
+                    this.maybe_load_more_search(cx);
                 });
             }
         }

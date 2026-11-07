@@ -404,6 +404,8 @@ impl QuillApp {
         // autoplay, the jump button) runs with that window's state in
         // place (`in_window_scope`).
         let window_chat = self.windows.scope;
+        // The deferred work also belongs to the account on screen now.
+        let screen = self.screen_epoch();
         super::selectable_text::selection_viewport(
             super::wallpaper::paint_wallpaper(
                 div()
@@ -460,8 +462,10 @@ impl QuillApp {
                     let gif_view = weak.clone();
                     cx.defer(move |cx| {
                         let _ = gif_view.update(cx, |this, cx| {
-                            this.in_window_scope(window_chat, cx, |this, cx| {
-                                this.maybe_autoplay_gif(ix, cx)
+                            this.in_screen_scope(screen, cx, |this, cx| {
+                                this.in_window_scope(window_chat, cx, |this, cx| {
+                                    this.maybe_autoplay_gif(ix, cx)
+                                })
                             })
                         });
                     });
@@ -469,8 +473,10 @@ impl QuillApp {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.in_window_scope(window_chat, cx, |this, cx| {
-                                    this.maybe_auto_load_older(cx)
+                                this.in_screen_scope(screen, cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.maybe_auto_load_older(cx)
+                                    })
                                 })
                             });
                         });
@@ -481,8 +487,10 @@ impl QuillApp {
                         let weak = weak.clone();
                         cx.defer(move |cx| {
                             let _ = weak.update(cx, |this, cx| {
-                                this.in_window_scope(window_chat, cx, |this, cx| {
-                                    this.maybe_auto_load_newer(cx)
+                                this.in_screen_scope(screen, cx, |this, cx| {
+                                    this.in_window_scope(window_chat, cx, |this, cx| {
+                                        this.maybe_auto_load_newer(cx)
+                                    })
                                 })
                             });
                         });
@@ -612,6 +620,8 @@ impl QuillApp {
                                 // Redraw so `report_visible_history` reads the
                                 // newly seen rows (scrolling alone doesn't
                                 // re-render the app view).
+                                // screen-scope: a redraw of the window; the view reads the
+                                // account on screen at that time.
                                 cx.defer(move |cx| {
                                     let _ = seen_app.update(cx, |this, cx| {
                                         this.in_window_scope(window_chat, cx, |this, cx| {
@@ -629,8 +639,10 @@ impl QuillApp {
                             let error = super::landing::landing_error(probe, bar, &rows, bounds);
                             cx.defer(move |cx| {
                                 let _ = landing_app.update(cx, |this, cx| {
-                                    this.in_window_scope(window_chat, cx, |this, cx| {
-                                        this.advance_landing(error, cx)
+                                    this.in_screen_scope(screen, cx, |this, cx| {
+                                        this.in_window_scope(window_chat, cx, |this, cx| {
+                                            this.advance_landing(error, cx)
+                                        })
                                     })
                                 });
                             });

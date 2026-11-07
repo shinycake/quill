@@ -83,6 +83,7 @@ impl QuillApp {
             let wanted = name.to_string();
             let read = cx.background_spawn(async move { read_custom_palette(&dir, &wanted) });
             let wanted = name.to_string();
+            // screen-scope: the palette read is an app-wide setting; it applies to whichever account is on screen.
             let task = cx.spawn(async move |this, cx| {
                 let palette = read.await;
                 let _ = this.update(cx, |this, cx| {

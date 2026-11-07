@@ -209,7 +209,7 @@ impl QuillApp {
         if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(CHECK_DELAY_MS))
                 .await;

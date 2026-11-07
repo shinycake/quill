@@ -198,6 +198,8 @@ impl PolledRedraw {
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
         let generation = self.connection.generation;
+        // screen-scope: the poll loop drains whichever client is on screen; its
+        // generation guard ends it when the client is replaced.
         // window-scope: `poll_live` puts the main window's state in place itself.
         cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();

@@ -205,7 +205,7 @@ impl QuillApp {
             },
         );
         let max_edge = self.gif_decode_edge(message_id, cx);
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let (first, first_in) = futures_channel::oneshot::channel();
             let decode = cx.background_executor().spawn(async move {
                 GifClip::decode(&path, max_edge, &cancel, |clip| {
@@ -337,7 +337,7 @@ impl QuillApp {
         }
         self.recording.voice_tick = true;
         // The tick is the app's; each step runs as the recording's window.
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))

@@ -99,7 +99,8 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MISC_CHOOSE_WALLPAPER).into()),
         });
-        cx.spawn(async move |this, cx| {
+        // The preview opens for the account on screen now.
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {

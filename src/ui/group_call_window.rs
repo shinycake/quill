@@ -136,6 +136,8 @@ impl QuillApp {
             (size(px(420.), px(640.)), size(px(380.), px(520.)))
         };
         let owner = cx.entity();
+        // screen-scope: the window and its handle belong to the app, so the open must
+        // finish after a switch; its handlers read the account on screen when they fire.
         cx.defer(move |cx| {
             let weak = owner.downgrade();
             let render_owner = owner.clone();

@@ -51,7 +51,8 @@ impl AgentUi {
     /// Starts the task that wakes the UI when agent state changes and
     /// raises the window for a new request.
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
-        QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+        // screen-scope: the task wakes the UI for agent requests, and agents drive whichever account is on screen.
+        QuillApp::spawn_app_in(window, cx, async move |app, cx| {
             let mut announced = 0u64;
             let mut seen = quill::wake::AGENT.epoch();
             // Shorter while the UI driver forces the element tree, so it

@@ -408,6 +408,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::THEME_EDITOR_MENU_IMPORT).into()),
         });
+        // screen-scope: the theme import is an app-wide setting; it applies to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picker.await else {
                 return;

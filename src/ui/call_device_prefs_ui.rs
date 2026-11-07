@@ -27,7 +27,7 @@ impl QuillApp {
         if needs_fetch {
             // `maybe_fetch_active_sessions` is guarded, so a render that
             // queues this twice sends one request.
-            cx.spawn(async move |this, cx| {
+            self.spawn_screen(cx, async move |this, cx| {
                 let _ = this.update(cx, |this, cx| {
                     if let Some(live) = this.live.as_mut() {
                         let _ = live.driver.maybe_fetch_active_sessions();

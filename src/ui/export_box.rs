@@ -137,7 +137,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_OPS_EXPORT_HERE).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             let result = picker.await;
             let _ = this.update(cx, |this, cx| {
                 if let Ok(Ok(Some(paths))) = result

@@ -346,13 +346,10 @@ impl QuillApp {
                 && size <= AUTOPLAY_PREFETCH_MAX
                 && session.should_download(file_id)
             {
-                let app = cx.weak_entity();
-                cx.defer(move |cx| {
-                    let _ = app.update(cx, |this, _| {
-                        if let Some(live) = this.live.as_mut() {
-                            let _ = live.driver.download_file(file_id, 1);
-                        }
-                    });
+                self.defer_screen(cx, move |this, _| {
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.download_file(file_id, 1);
+                    }
                 });
             }
             return None;
@@ -373,20 +370,17 @@ impl QuillApp {
                 // Clicked: once from the start with sound, as a click on a
                 // muted loop does.
                 if videos.toggle_sound(key.0, key.1) {
-                    let app = cx.weak_entity();
                     let viewed = viewed.unwrap_or(true);
                     // The history drawing it is the window's.
                     let scope = self.windows.scope;
-                    cx.defer(move |cx| {
-                        let _ = app.update(cx, |this, cx| {
-                            this.in_window_scope(scope, cx, |this, cx| {
-                                this.round_sound_started(key, cx);
-                            });
-                            if !viewed {
-                                this.mark_voice_opened(chat_id, message_id);
-                            }
-                            cx.notify();
+                    self.defer_screen(cx, move |this, cx| {
+                        this.in_window_scope(scope, cx, |this, cx| {
+                            this.round_sound_started(key, cx);
                         });
+                        if !viewed {
+                            this.mark_voice_opened(chat_id, message_id);
+                        }
+                        cx.notify();
                     });
                 }
                 frame = videos.current(key);

@@ -125,7 +125,8 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     // The demo window lives until the process ends.
     std::mem::forget(activity::connect("Claude Code"));
     let out = std::env::var_os("QUILL_DEMO_SHOT_OUT").map(std::path::PathBuf::from);
-    QuillApp::spawn_main_in(window, cx, async move |app, cx| {
+    // screen-scope: the screenshot demo drives its one demo session, which never switches accounts.
+    QuillApp::spawn_app_in(window, cx, async move |app, cx| {
         cx.background_executor()
             .timer(Duration::from_millis(800))
             .await;

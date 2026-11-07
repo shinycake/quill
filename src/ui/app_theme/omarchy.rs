@@ -69,6 +69,7 @@ impl QuillApp {
             return;
         };
         self.settings.app_theme.omarchy_watched = true;
+        // screen-scope: the Omarchy watcher re-applies the app's appearance for whichever account is on screen.
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;

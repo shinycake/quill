@@ -15,7 +15,7 @@ impl QuillApp {
     ) {
         let started = Instant::now();
         self.chat_list.preview_press = Some((chat_id, started));
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;

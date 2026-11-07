@@ -509,6 +509,7 @@ impl QuillApp {
             return;
         }
         self.calls.tick_active = true;
+        // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
         cx.spawn(async move |this, cx| {
             loop {
                 // Frames wake their own pictures (`call_video`).

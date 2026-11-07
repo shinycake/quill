@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Async work in src/ui must say which window's state it belongs to.
+"""Async work in src/ui must say which screen and which window it belongs to.
 
 While a chat window is drawn or handles input, its state (composer,
 history, viewer, pickers, message menu, share box, the session's view) is
@@ -27,19 +27,37 @@ whose closure touches per-window state:
 
 Fix one by starting the work with `spawn_scoped` / `spawn_scoped_in`
 (it finishes in the window it started in, and not at all once that window
-closed), `QuillApp::spawn_main` / `spawn_main_in` (it
-belongs to no chat window), or by doing the window work inside
-`in_window_scope(window, ...)` in the closure (only what is outside that
-call is checked). Work that is really the app's, with no window state
+closed), `QuillApp::spawn_screen` / `spawn_screen_in` / `spawn_app` /
+`spawn_app_in` (it belongs to no chat window), or by doing the window work
+inside `in_window_scope(window, ...)` in the closure (only what is outside
+that call is checked). Work that is really the app's, with no window state
 involved, says why in a comment on one of the three lines above the call:
 
     // window-scope: <why this needs no window>
 
+The screen rule (docs/decisions/account-scoped-ui-state.md): a
+continuation (`cx.spawn`, `spawn_in`, `cx.defer`, `defer_in`,
+`window.spawn`, `window.defer`, `on_next_frame`) acts for the account that
+was on screen when it started. One that reads or writes the account on
+screen (`live`, `demo_session`, `session()`, `session_mut()`, a field of
+`OnScreen`, or a `QuillApp` method that does) must start with
+`spawn_scoped*` / `spawn_screen*` / `defer_screen*`, or do that work inside
+`in_screen_scope(epoch, ...)` in the closure. A `spawn_app*` body (the
+app's own work, which runs whichever account is on screen) must not touch
+them at all. The exception marker is
+
+    // screen-scope: <why this acts for whichever account is on screen>
+
+Subscriptions and observers are not continuations: they react to events
+and act for the account on screen at event time, and one made on a
+screen-owned entity dies with it. The `OnScreen` field list is read from
+src/ui/on_screen.rs when it exists, else from SCREEN_FIELDS below.
+
 Known limits: a method is matched by name, not type; a field reached
 through a local binding (`let h = &mut this.history;` in an outer
 function, captured by the closure) or a helper on another type is not
-seen; the bodies of `spawn_scoped*` / `spawn_main*` are not checked
-(they name their window by construction).
+seen; the bodies of `spawn_scoped*` / `spawn_screen*` / `defer_screen*` are
+not checked (they name their screen and window by construction).
 
 Usage: python3 scripts/check-window-scope.py [src/ui directory]
 """
@@ -57,6 +75,28 @@ START = re.compile(
 )
 # The fields `swap_slot` exchanges, on the app.
 SLOT_FIELDS = r"(?:history|composer|composer_ui|message_ui|pickers|viewer|share)\b(?!_)"
+# Continuations: a closure that runs later and acts for the account that
+# was on screen when it was made.
+CONTINUATION = re.compile(
+    r"\b(cx\.spawn|\.spawn_in|cx\.defer|\.defer_in|window\.spawn|window\.defer"
+    r"|on_next_frame)\s*\("
+)
+# The app's own work, whose body must not touch the screen's state.
+APP_WORK = re.compile(r"\bspawn_app(?:_in)?\s*\(")
+# The `OnScreen` fields until src/ui/on_screen.rs declares them (phase 1 of
+# the design): the Screen bucket of its section 2.2.
+SCREEN_FIELDS = """
+chat_list shared_media_grid stories premium_preview history composer
+composer_ui pickers sticker_box payments earn common_groups auth_ui
+search_ui location_ui media_search share ai_compose message_ui dialogs
+privacy twofa screen_share recording admin inline_members links giveaway
+paid_messages direct_messages suggested_posts gift_market paid_reaction
+mini_apps viewer folders peer_qr video_avatar profile_cover
+""".split()
+ON_SCREEN_FIELD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][a-z0-9_]*)\s*:", re.M)
+SCREEN_ACCESS = r"(?:live|demo_session)\b|session(?:_mut)?\s*\("
+SCREEN_MARKER = re.compile(r"//\s*screen-scope:\s*\S")
+SCREEN_SCOPE_CALL = re.compile(r"\bin_screen_scope\s*\(")
 # The session's view (`Session::swap_view`) and the accessors that read it.
 SESSION_VIEW = re.compile(
     r"search_ui\.chat_input|\bopen_chat\b|\bopen_topic\b|threads\.thread\b"
@@ -129,14 +169,46 @@ def call_args(text: str, at: int) -> str:
     return text[at:i]
 
 
-def without_scoped_calls(body: str) -> str:
-    """The body with the arguments of every `in_window_scope(...)` blanked:
-    what runs there has its window's state in place."""
+def without_calls(body: str, call: re.Pattern) -> str:
+    """The body with the arguments of every `call` blanked."""
     out = body
-    for m in reversed(list(SCOPE_CALL.finditer(body))):
+    for m in reversed(list(call.finditer(body))):
         args = call_args(body, m.end())
         out = out[: m.end()] + " " * len(args) + out[m.end() + len(args) :]
     return out
+
+
+def without_scoped_calls(body: str) -> str:
+    """The body with the arguments of every `in_window_scope(...)` blanked:
+    what runs there has its window's state in place."""
+    return without_calls(body, SCOPE_CALL)
+
+
+def without_screen_calls(body: str) -> str:
+    """The body with the arguments of every `in_screen_scope(...)` blanked:
+    what runs there runs only on its screen."""
+    return without_calls(body, SCREEN_SCOPE_CALL)
+
+
+def screen_fields(root: pathlib.Path) -> list[str]:
+    """The `OnScreen` fields: declared in on_screen.rs once it exists."""
+    on_screen = root / "on_screen.rs"
+    if not on_screen.exists():
+        return SCREEN_FIELDS
+    text = on_screen.read_text()
+    start = text.find("on_screen_fields!")
+    if start < 0:
+        return SCREEN_FIELDS
+    body = block_after(text, start)
+    return [f for f in ON_SCREEN_FIELD.findall(body) if f != "epoch"]
+
+
+def screen_field_hits(body: str, recv: set[str], fields: list[str]) -> list[str]:
+    names = "|".join(re.escape(f) for f in fields)
+    pattern = re.compile(
+        rf"\b(?:{alternation(recv)})\.(?:(?:{names})\b(?!_)|{SCREEN_ACCESS})"
+    )
+    return [m.group(0) for m in pattern.finditer(body)]
 
 
 def closure_part(args: str) -> str:
@@ -261,7 +333,18 @@ def main() -> int:
         ),
         lambda b: calls_on(b, receivers(b)),
     )
+    fields = screen_fields(root)
+    screen_bodies: dict[str, list[str]] = {}
+    for text in texts.values():
+        for name, body in methods(text, APP_IMPL):
+            screen_bodies.setdefault(name, []).append(without_screen_calls(body))
+    touching_screen = closure_of(
+        screen_bodies,
+        lambda b: bool(screen_field_hits(b, receivers(b), fields)),
+        lambda b: calls_on(b, receivers(b)),
+    )
     failures = []
+    screen_failures = []
     for path, text in texts.items():
         lines = text.split("\n")
         for m in START.finditer(text):
@@ -282,19 +365,48 @@ def main() -> int:
             rel = path.relative_to(root.parent.parent)
             what = ", ".join((direct + [f"{c}()" for c in via])[:4])
             failures.append(f"{rel}:{line}: async work touches window state ({what})")
+        for kind, starts in (("continuation", CONTINUATION), ("app work", APP_WORK)):
+            for m in starts.finditer(text):
+                body = flat(without_screen_calls(closure_part(call_args(text, m.end()))))
+                recv = receivers(body)
+                direct = sorted(set(screen_field_hits(body, recv, fields)))
+                via = sorted({c for c in calls_on(body, recv) if c in touching_screen})
+                if not direct and not via:
+                    continue
+                line = text.count("\n", 0, m.start()) + 1
+                above = lines[max(0, line - 4) : line]
+                if any(SCREEN_MARKER.search(l) for l in above):
+                    continue
+                rel = path.relative_to(root.parent.parent)
+                what = ", ".join((direct + [f"{c}()" for c in via])[:4])
+                screen_failures.append(f"{rel}:{line}: {kind} touches the screen's state ({what})")
+    if screen_failures:
+        print("\n".join(screen_failures))
+        print(
+            f"\n{len(screen_failures)} async call(s) in src/ui touch the account on screen without a scope.\n"
+            "Start them with spawn_scoped / spawn_screen / defer_screen (and their _in forms:\n"
+            "the screen that started the work), do the screen work inside\n"
+            "in_screen_scope(epoch, ...) in the closure, keep it out of spawn_app bodies,\n"
+            "or, when the work acts for whichever account is on screen, add\n"
+            "`// screen-scope: <why>` on one of the three lines above the call. See\n"
+            "src/ui/chat_window/scoped.rs and docs/decisions/account-scoped-ui-state.md."
+        )
     if failures:
         print("\n".join(failures))
         print(
             f"\n{len(failures)} async call(s) in src/ui touch per-window state without a scope.\n"
             "Start them with spawn_scoped / spawn_scoped_in (the window that started the\n"
-            "work), QuillApp::spawn_main / spawn_main_in (no chat window), do the\n"
+            "work), QuillApp::spawn_screen / spawn_app (and _in; no chat window), do the\n"
             "window work inside in_window_scope(window, ...) in the closure, or, when no\n"
             "window state is involved, add `// window-scope: <why>` on one of the three\n"
             "lines above the call. See src/ui/chat_window/scoped.rs and\n"
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
+    if screen_failures:
+        return 1
     print("window scope: OK")
+    print("screen scope: OK")
     return 0
 
 

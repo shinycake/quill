@@ -300,8 +300,9 @@ impl QuillApp {
         {
             return;
         }
-        // window-scope: the pending draft names its own chat and topic (and
-        // its token), so the commit needs no window's state.
+        // window-scope: the pending draft names its own chat and topic, so no window.
+        // screen-scope: the driver on screen holds the draft and ignores a token it
+        // did not issue; a task bound to one screen would strand the shared timer.
         cx.spawn(async move |this, cx| {
             loop {
                 let step = this

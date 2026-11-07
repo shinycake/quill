@@ -278,10 +278,11 @@ impl QuillApp {
         self.dismiss_group_call_error(cx);
         if self.send_group_call_join() {
             self.group_call.stream.joining = Some(id);
-            self.group_call.stream.join_timeout = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(JOIN_TIMEOUT).await;
-                let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
-            }));
+            self.group_call.stream.join_timeout =
+                Some(self.spawn_screen(cx, async move |this, cx| {
+                    cx.background_executor().timer(JOIN_TIMEOUT).await;
+                    let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
+                }));
         } else {
             self.stream_join_failed();
         }

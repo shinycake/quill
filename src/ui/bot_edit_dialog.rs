@@ -104,7 +104,7 @@ impl QuillApp {
             local_error: None,
         });
         // The texts arrive from the session on the poll; fill the fields once.
-        cx.spawn_in(window, async move |this, cx| {
+        self.spawn_screen_in(window, cx, async move |this, cx| {
             for _ in 0..100 {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
@@ -203,20 +203,13 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_MEDIA_CHOOSE_PHOTO).into()),
         });
-        let Some(account) = self.started_on() else {
-            return;
-        };
-        cx.spawn(async move |this, cx| {
+        // The bot is the account's own: another account on screen does
+        // not get the photo (`spawn_screen`).
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| {
-                    // The bot is the account's own: another account on
-                    // screen does not get the photo.
-                    if this.on_screen(&account) {
-                        this.set_bot_photo_from(bot_id, &path, cx);
-                    }
-                });
+                let _ = this.update(cx, |this, cx| this.set_bot_photo_from(bot_id, &path, cx));
             }
         })
         .detach();

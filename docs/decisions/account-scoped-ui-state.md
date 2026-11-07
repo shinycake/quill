@@ -582,3 +582,57 @@ Each of these is its own PR after phase 4; none blocks the account work.
 - The non-account instances in 6 are findings, not fixes; the two with a
   user-visible wrong result today (6.5 `positions`, 6.3 story editors) are
   small and can go in any sweep.
+
+## 8. What the build changed
+
+The phases above were written before the code was opened. Where the code
+showed the plan wrong, the code won; this section is the record, one
+entry per phase, so the sections above can be read as the intent and
+this one as what shipped.
+
+### Phase 1 (the epoch and the helpers)
+
+- **No deprecated `spawn_main` alias.** All 44 `spawn_main(_in)` sites
+  were reclassified in the same commit (16 became `spawn_screen(_in)`,
+  the rest `spawn_app(_in)`), so the alias had no callers to keep.
+- **`defer_screen(_in)` added** next to `spawn_screen(_in)`. The 4.3 table
+  had `in_screen_scope` for `cx.defer` bodies; most defer sites wanted
+  the epoch captured at the call, not threaded by hand, and
+  `Context::defer` gives the body only an `App`, so the helper re-enters
+  the entity and the screen scope for them.
+- **`StartedOn` stays, as an epoch.** The plan dropped it with the
+  account key. A recording's `SendTarget` is held across the encoder
+  join and read back on the main window, outside any scoped update; it
+  keeps `StartedOn(ScreenEpoch)` so the continuation can tell "my window
+  closed" from "the account changed" and post the right note.
+  `live_for` and `drop_recording_of_other_account` are gone.
+- **A dropped continuation still owes its cleanup.** When a screen-scoped
+  send comes back `Gone`, the file is removed and the note is posted
+  through `ScopedApp::app()` (`recording_dropped`,
+  `recording_dropped_with_screen`). Phase 1 tests for the recording
+  sites switch by calling `end_account_surfaces` instead of rewriting
+  `session.account`, which means nothing once the epoch exists.
+- **Where the epoch moves.** At the end of `end_account_surfaces`, after
+  the goodbyes and the dialog closes, so a closer's own spawned
+  continuation is dropped too. It also moves in demo mode (no client)
+  and when the switch then fails at the credentials check: the surfaces
+  are gone either way, and the existing switch tests rely on that
+  order. `close_screen_client` (logout, disk full) moves it without
+  goodbyes. A client filling an *empty* screen does not move it:
+  nothing on the screen was any account's while there was no client.
+- **Lint scope.** The screen rule covers continuations only
+  (`cx.spawn`, `spawn_in`, `cx.defer`, `defer_in`, `window.spawn`,
+  `window.defer`, `on_next_frame`); subscriptions and observers are
+  exempt, because an event handler acts for whatever is on screen when
+  the event fires. Only `in_screen_scope` satisfies the rule, not
+  `in_window_scope`, since the window scope says nothing about the
+  account. 118 sites were converted or marked; 45 carry
+  `// screen-scope:` markers, nearly all app clocks (frame clock, sticker
+  closer, notification windows, animation layer) and flags that must
+  survive a switch (`global_ptt_polling`, the drafts flush, the calls
+  tick).
+- **Two judgment calls worth knowing.** `chat_window/mod.rs` and
+  `screen_chooser.rs` return early if the epoch changed before their OS
+  window opened (the window would show the next account's chat with the
+  old id). `similar_strip.rs` has no app handle at render time and keeps
+  the account key with a marker.

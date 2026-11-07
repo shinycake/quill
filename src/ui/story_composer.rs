@@ -329,7 +329,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::ATTACH_PHOTO_OR_VIDEO).into()),
         });
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {

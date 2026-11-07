@@ -267,8 +267,13 @@ impl QuillApp {
             // The flag lives in this window's history: reset it in the
             // window that set it, not whichever one is in place later.
             let scope = self.windows.scope;
+            let screen = self.screen_epoch();
             cx.defer(move |cx| {
-                let _ = app.update(cx, |this, cx| this.finish_chrome_notify(scope, cx));
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.finish_chrome_notify(scope, cx)
+                    })
+                });
             });
         }
     }

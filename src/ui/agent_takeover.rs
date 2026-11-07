@@ -166,7 +166,7 @@ impl QuillApp {
         }
         self.takeover.wake_at.set(at);
         let delay = Duration::from_millis(at.saturating_sub(now).saturating_add(5));
-        QuillApp::spawn_main(cx, async move |app, cx| {
+        QuillApp::spawn_app(cx, async move |app, cx| {
             cx.background_executor().timer(delay).await;
             let _ = app.update(cx, |app, cx| {
                 if app.takeover.wake_at.get() == at {

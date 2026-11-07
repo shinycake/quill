@@ -355,8 +355,8 @@ impl QuillApp {
         // its Change in this same effect cycle. A defer queued from a defer
         // runs after that Change, so a press that changed nothing (at the
         // start or end of the text) leaves no snapshot for later typing.
-        cx.defer_in(window, move |_, window, cx| {
-            cx.defer_in(window, move |this, _, _| {
+        self.defer_screen_in(window, cx, move |this, window, cx| {
+            this.defer_screen_in(window, cx, move |this, _, _| {
                 if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
                     input.before_delete = None;
                 }
@@ -513,7 +513,7 @@ impl QuillApp {
         let tokenizing = cx
             .background_executor()
             .spawn(async move { tokenize(&provider, &card, transport.as_ref()) });
-        let task = Self::spawn_main_in(window, cx, async move |this, cx| {
+        let task = self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = tokenizing.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.finish_card_tokenize(result, window, cx);

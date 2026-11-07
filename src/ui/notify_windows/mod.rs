@@ -743,6 +743,8 @@ impl QuillApp {
             return;
         }
         self.notify.windows.ticking = true;
+        // screen-scope: the notification windows are the app's; the tick
+        // shows whichever account's notices are queued.
         cx.spawn(async move |this, cx| {
             loop {
                 let next = this

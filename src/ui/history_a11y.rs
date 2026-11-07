@@ -407,7 +407,7 @@ pub(crate) fn install(handle: &FocusHandle, window: &mut Window, cx: &mut Contex
         // schedule the next frame: pick the child once the draw is done,
         // as the window the history is in.
         let scope = this.window_scope_of(window);
-        cx.defer_in(window, move |this, window, cx| {
+        this.defer_screen_in(window, cx, move |this, window, cx| {
             this.in_window_scope(scope, cx, |this, cx| this.history_a11y_focus_in(window, cx));
         });
     })

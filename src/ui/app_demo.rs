@@ -632,6 +632,7 @@ impl QuillApp {
         if demo.is_none() {
             app.start_update_checks(cx);
         }
+        // screen-scope: the minute timer re-applies the appearance for whichever account is on screen.
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()

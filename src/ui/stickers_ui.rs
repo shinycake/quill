@@ -367,14 +367,11 @@ impl QuillApp {
         }
         let session = self.session()?;
         if !session.stickers.stickers.greeting_loaded {
-            let weak = cx.weak_entity();
-            cx.defer(move |cx| {
-                let _ = weak.update(cx, |this, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.fetch_greeting_stickers();
-                        cx.notify();
-                    }
-                });
+            self.defer_screen(cx, move |this, cx| {
+                if let Some(live) = this.live.as_mut() {
+                    let _ = live.driver.fetch_greeting_stickers();
+                    cx.notify();
+                }
             });
         }
         let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();

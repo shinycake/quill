@@ -161,7 +161,8 @@ impl super::app::QuillApp {
             let prepared = prepare_startup(credentials, root, secrets().as_ref(), done);
             (swept, prepared)
         });
-        Self::spawn_main(cx, async move |this, cx| {
+        // screen-scope: connecting puts the prepared client on the screen, replacing what is there; its connection generation guard ends it on a restart.
+        Self::spawn_app(cx, async move |this, cx| {
             let (swept, prepared) = connect.await;
             quill::startup_trace::mark("prepare_done");
             let _ = this.update(cx, |this, _| {

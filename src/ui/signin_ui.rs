@@ -204,7 +204,7 @@ impl QuillApp {
             {
                 let text = format!("+{code}");
                 self.auth_ui.signin.phone_text = text.clone();
-                cx.defer_in(window, move |this, window, cx| {
+                self.defer_screen_in(window, cx, move |this, window, cx| {
                     this.auth_ui
                         .phone_input
                         .update(cx, |input, cx| input.set_value(text, window, cx));
@@ -237,7 +237,7 @@ impl QuillApp {
         let complete = code_length
             .and_then(|len| usize::try_from(len).ok())
             .is_some_and(|len| len == code.len());
-        cx.defer_in(window, move |this, window, cx| {
+        self.defer_screen_in(window, cx, move |this, window, cx| {
             this.auth_ui
                 .code_input
                 .update(cx, |input, cx| input.set_value(code, window, cx));
@@ -363,6 +363,9 @@ impl QuillApp {
             return;
         }
         self.auth_ui.signin.tick_armed = true;
+        // screen-scope: a one-second redraw tick that only clears its own
+        // armed flag on whichever sign-in state is on screen; dropping it on
+        // a switch would leave the flag set and stop later ticks
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             let _ = this.update(cx, |this, cx| {

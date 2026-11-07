@@ -76,6 +76,7 @@ impl QuillApp {
         let hooks = pip_hooks(weak.clone());
         // The link belongs to the viewer of the window that opened it.
         let scope = self.windows.scope;
+        let screen = self.screen_epoch();
         // Window creation draws at once: let this update finish first.
         cx.defer(move |cx| {
             let return_to = cx.active_window();
@@ -97,25 +98,27 @@ impl QuillApp {
                 cx,
             );
             let _ = weak.update(cx, |app, cx| {
-                let orphan = match opened {
-                    Some(window) => {
-                        let link = PipLink {
-                            window,
-                            account,
-                            clip,
-                            item,
-                            return_to,
-                        };
-                        let mut link = Some(link);
-                        app.in_window_scope(scope, cx, |app, _| app.viewer.pip = link.take());
-                        link
-                    }
-                    None => {
+                let mut link = opened.map(|window| PipLink {
+                    window,
+                    account,
+                    clip,
+                    item,
+                    return_to,
+                });
+                let failed = link.is_none();
+                // Another account on screen by now: the window that opened is
+                // closed below, as when its own window has closed.
+                let placed = app.in_screen_scope(screen, cx, |app, cx| {
+                    if failed {
                         app.connection
                             .set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
-                        None
+                        return None;
                     }
-                };
+                    let mut link = link.take();
+                    app.in_window_scope(scope, cx, |app, _| app.viewer.pip = link.take());
+                    link
+                });
+                let orphan = placed.unwrap_or(link);
                 // The window that opened it closed meanwhile: so does the
                 // Picture-in-Picture window.
                 if let Some(link) = orphan {

@@ -81,6 +81,7 @@ impl QuillApp {
         self.settings.system_accent = quill::system_accent::read();
         self.settings.system_accent_probed = true;
         if quill::system_accent::pending() {
+            // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
             cx.spawn(async move |this, cx| {
                 while quill::system_accent::pending() {
                     cx.background_executor()

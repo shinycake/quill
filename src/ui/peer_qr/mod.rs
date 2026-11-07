@@ -395,7 +395,7 @@ impl QuillApp {
         };
         let shown = Instant::now();
         open.toast = Some((toast, shown));
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST).await;
             let _ = this.update(cx, |this, cx| {
                 if let Some(open) = this.peer_qr.open.as_mut()
@@ -436,7 +436,7 @@ impl QuillApp {
         }
         open.clock_running = true;
         let id = open.state.id;
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(CLOCK).await;
                 let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {

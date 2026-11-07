@@ -79,7 +79,7 @@ impl QuillApp {
                 self.set_composer_markup(PASTED, window, cx);
                 // window-scope: a demo has one window; its notification
                 // layer exists once the window is open.
-                cx.defer_in(window, move |this, window, cx| {
+                self.defer_screen_in(window, cx, move |this, window, cx| {
                     this.show_rich_paste_notice("", !premium, window, cx);
                 });
             }

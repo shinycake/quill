@@ -153,7 +153,6 @@ fn a_cancelled_start_that_failed_says_nothing(cx: &mut TestAppContext) {
 /// the chat id is the old account's, so nothing goes out on the new one.
 #[gpui_kit::test]
 fn a_recording_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
-    use quill::ids::AccountKey;
     use quill::lang::{keys, tr};
     let (app, mut vcx) = open_chat(cx);
     fake_microphone(&app, &mut vcx);
@@ -167,10 +166,9 @@ fn a_recording_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
     let before = app.read_with(&vcx, |app, _| count(app));
     app.update_in(&mut vcx, |app, window, cx| {
         app.send_voice_recording(window, cx);
-        // The account on screen changes while the encoder is joined.
-        if let Some(session) = app.demo_session.as_mut() {
-            session.account = AccountKey("other".into());
-        }
+        // The account on screen leaves while the encoder is joined (what
+        // `switch_account` does first).
+        app.end_account_surfaces(window, cx);
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
@@ -187,7 +185,6 @@ fn a_recording_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
 /// from its own chat with the poster.
 #[gpui_kit::test]
 fn a_story_reply_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
-    use quill::ids::AccountKey;
     use quill::lang::{keys, tr};
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -207,16 +204,15 @@ fn a_story_reply_finished_after_a_switch_is_not_sent(cx: &mut TestAppContext) {
     fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::StoryReply, &mut vcx);
     vcx.run_until_parked();
-    app.update(&mut vcx, |app, cx| {
+    app.update_in(&mut vcx, |app, window, cx| {
         assert!(app.story_reply_target().is_some(), "a story is on screen");
         assert!(
             app.send_story_reply_voice_recording(cx),
             "the reply took it"
         );
-        // The account on screen changes while the encoder is joined.
-        if let Some(session) = app.demo_session.as_mut() {
-            session.account = AccountKey("other".into());
-        }
+        // The account on screen leaves while the encoder is joined (what
+        // `switch_account` does first).
+        app.end_account_surfaces(window, cx);
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {

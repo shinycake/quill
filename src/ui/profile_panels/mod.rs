@@ -378,7 +378,7 @@ impl QuillApp {
         // The user id is the account's own: a picker answered after a
         // switch opens nothing on the account switched to.
         let asked_on = self.session().map(|session| session.account.clone());
-        cx.spawn(async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {

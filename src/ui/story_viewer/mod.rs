@@ -709,7 +709,7 @@ impl QuillApp {
             return;
         }
         self.stories.tick_active = true;
-        Self::spawn_main(cx, async move |this, cx| {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
