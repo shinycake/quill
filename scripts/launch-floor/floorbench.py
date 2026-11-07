@@ -28,8 +28,11 @@ when WindowServer first lists the window (scripts/winwatch.swift).
 """
 import argparse
 import importlib.util
+import json
 import os
 import pathlib
+import random
+import shutil
 import statistics
 import subprocess
 import sys
@@ -42,12 +45,23 @@ bench = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bench)
 WRITING_TOOLS_UI = "/System/Library/PrivateFrameworks/WritingToolsUI.framework/WritingToolsUI"
 SWIFT_UI = "/System/Library/Frameworks/SwiftUI.framework/SwiftUI"
+# The shared cache knows images by install name.
+SWIFT_UI_INSTALL = "/System/Library/Frameworks/SwiftUI.framework/Versions/A/SwiftUI"
 # name: (app name, environment)
 VARIANTS = {
     "titled": ("FloorApp", []),
     "borderless": ("FloorApp", ["FLOOR_BORDERLESS=1"]),
     "noflush": ("FloorApp", ["FLOOR_NO_FLUSH=1"]),
     "linked": ("FloorLinked", []),
+    "linked-borderless": ("FloorLinked", ["FLOOR_BORDERLESS=1"]),
+    "linked-deferwt": ("FloorLinked", ["FLOOR_DEFER_WT=1"]),
+    "linked-borderless-deferwt": ("FloorLinked", ["FLOOR_BORDERLESS=1", "FLOOR_DEFER_WT=1"]),
+    "deferwt": ("FloorApp", ["FLOOR_DEFER_WT=1"]),
+    "qbundle": ("FloorInQuill", ["FLOOR_DEFER_WT=1"]),
+    "qplist": ("FloorQuillPlist", ["FLOOR_DEFER_WT=1"]),
+    "linked-staged-swiftui": ("FloorLinked", ["FLOOR_STAGED=" + SWIFT_UI_INSTALL]),
+    "linked-then-titled": ("FloorLinked", ["FLOOR_THEN_TITLED=1"]),
+    "linked-big": ("FloorBig", []),
     "trimmed": ("FloorTrimmed", []),
     "binds": ("FloorBinds", []),
     "opnew": ("FloorOpNew", []),
@@ -115,6 +129,23 @@ def build(name, frameworks, sources=()):
     return app
 
 
+def in_quill_bundle(name, floor_app, quill_bundle, whole):
+    """`floor_app`'s executable as the executable of a copy of `quill_bundle`:
+    with its frameworks and resources (`whole`), or with its Info.plist alone."""
+    app = bench.WORK / name / "Quill.app"
+    shutil.rmtree(app.parent, ignore_errors=True)
+    app.parent.mkdir(parents=True)
+    if whole:
+        subprocess.run(["ditto", quill_bundle, app], check=True)
+    else:
+        (app / "Contents/MacOS").mkdir(parents=True)
+        shutil.copy2(pathlib.Path(quill_bundle) / "Contents/Info.plist", app / "Contents/Info.plist")
+    shutil.copy2(floor_app / "Contents/MacOS" / floor_app.stem, app / "Contents/MacOS/quill")
+    identity = os.environ.get("QUILL_CODESIGN_IDENTITY", "-")
+    subprocess.run(["codesign", "--force", "--deep", "-s", identity, app], check=True, capture_output=True)
+    return app
+
+
 def launch_floor(app, env, cold):
     if cold:
         subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
@@ -132,7 +163,7 @@ def launch_floor(app, env, cold):
     subprocess.run(args, check=True)
     watcher.wait(timeout=25)
     time.sleep(1.5)
-    subprocess.run(["pkill", "-x", app.stem])
+    subprocess.run(["pkill", "-f", str(app / "Contents/MacOS/")])
     time.sleep(1.5)
     marks = {}
     for path in (trace, seen):
@@ -149,20 +180,34 @@ def main():
     parser.add_argument("--runs", type=int, default=8)
     parser.add_argument("--cold", action="store_true", help="empty the file cache before every launch")
     parser.add_argument("--quill", action="append", default=[], metavar="LABEL=BUNDLE")
+    parser.add_argument("--shuffle", action="store_true", help="a new order of the sides every round")
+    parser.add_argument("--json", metavar="PATH", help="also write every run's marks to PATH")
     parser.add_argument("variants", nargs="*", default=["titled"], choices=sorted(VARIANTS))
     opts = parser.parse_args()
     apps = {"FloorApp": build("FloorApp", BASE_FRAMEWORKS)}
     if "opnew" in opts.variants:
         apps["FloorOpNew"] = build("FloorOpNew", BASE_FRAMEWORKS, [HERE / "opnew.cpp"])
-    if {"linked", "trimmed", "binds"} & set(opts.variants):
+    if {"linked", "trimmed", "binds", "qbundle", "qplist"} & set(opts.variants) or any(
+            v.startswith("linked") for v in opts.variants):
         if not opts.quill:
             parser.error("linked and binds need a --quill bundle to copy the frameworks from")
         executable = pathlib.Path(opts.quill[0].partition("=")[2]) / "Contents/MacOS/quill"
         frameworks = sorted(set(BASE_FRAMEWORKS + linked_frameworks(executable)))
         apps["FloorLinked"] = build("FloorLinked", frameworks)
         apps["FloorTrimmed"] = build("FloorTrimmed", [f for f in frameworks if f not in DEFERRABLE])
+        if "linked-big" in opts.variants:
+            # FloorLinked padded to the size of Quill's executable, so its
+            # code signature covers as many pages.
+            pad = bench.WORK / "floor-pad.bin"
+            with open(pad, "wb") as out:
+                for _ in range(executable.stat().st_size >> 20):
+                    out.write(os.urandom(1 << 20))
+            apps["FloorBig"] = build("FloorBig", frameworks, [f"-Wl,-sectcreate,__TEXT,__pad,{pad}"])
         table = bind_table(executable, bench.WORK / "floor-binds.c")
         apps["FloorBinds"] = build("FloorBinds", frameworks, [table])
+        quill_bundle = opts.quill[0].partition("=")[2]
+        apps["FloorInQuill"] = in_quill_bundle("floor-in-quill", apps["FloorLinked"], quill_bundle, True)
+        apps["FloorQuillPlist"] = in_quill_bundle("floor-quill-plist", apps["FloorLinked"], quill_bundle, False)
     creds = bench.credentials()
     sides = []
     for name in opts.variants:
@@ -176,13 +221,18 @@ def main():
     for _, run in sides:
         run(False)
     results = {label: [] for label, _ in sides}
+    order = random.Random(7)
     for index in range(opts.runs):
+        if opts.shuffle:
+            order.shuffle(sides)
         for label, run in sides:
             marks = run(opts.cold)
             results[label].append(marks)
             shown = f"{marks['onscreen']:.0f} ms" if "onscreen" in marks else "NOT SEEN"
             print(f"{label} run {index}: onscreen {shown}, load {os.getloadavg()[0]:.1f}", flush=True)
             time.sleep(2)
+    if opts.json:
+        pathlib.Path(opts.json).write_text(json.dumps(results))
     for label, runs in results.items():
         print(f"\n{label}:")
         names = {name for marks in runs for name in marks}

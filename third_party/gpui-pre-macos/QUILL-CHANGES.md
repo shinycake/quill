@@ -201,12 +201,29 @@ frame sooner (`docs/decisions/launch-time-macos-appkit.md`):
   The `NSAutoFillHeuristicControllerEnabled` default is written at the
   start of that block (`disable_autofill_heuristics`) instead of in
   `applicationWillFinishLaunching:`, so it is set before any window exists.
-- `src/window.rs`: the view answers `isEditable` with NO until a window has
-  drawn its first frame. `-[NSView _inputContext]` makes no
-  `NSTextInputContext` for a view that says it is not editable, and the
-  class's first use loads the Writing Tools framework; ordering the first
-  window front asked for one. AppKit makes and activates the context on
-  its next window update.
+- `src/writing_tools.rs` (new): keeps the Writing Tools framework (WritingToolsUI
+  and about 460 libraries, ~280 ms after `purge`) off the main thread at launch
+  (`docs/decisions/launch-writing-tools-hold.md`). `run` calls `hold`, which
+  replaces `+[NSWritingToolsCoordinator
+  addObserverForEnhancedSiriAvailabilityDidChangeUsingBlock:]` (called from
+  `+[NSTextInputContext initialize]`, which AppKit's first-responder observer
+  runs once the window is key) with one that keeps the block.
+  `applicationDidFinishLaunching:` calls `start_load`: a worker loads the
+  framework one image per `dlopen` (`src/staged_load.rs`, new: the
+  dependency graph comes from the images' load commands in the shared
+  cache, so no `dlopen` holds dyld's and the Objective-C runtime's locks
+  for long), then the main thread puts the method back, registers the kept
+  blocks with it, lets views make input contexts and installs the menu bar
+  that `set_menus` kept (`set_main_menu`; an Edit menu loads the framework
+  too). `after_writing_tools_load` (public) runs app callbacks then.
+- `src/window.rs`: the view answers `isEditable` with NO until that load is
+  done, or until a key arrives. `-[NSView _inputContext]` makes no
+  `NSTextInputContext` for a view that says it is not editable; ordering the
+  first window front asked for one. `text_input_ready` then runs
+  `updateWindows`, which makes and activates the context at once, so the
+  key is read by an active context (an inactive one drops dead keys).
+  `update_ime_position` does nothing before then.
 - `src/gpui_macos.rs`: `on_launch_mark` sets a hook that hears AppKit's
   launch steps (`ns_run`, `will_finish`, `did_finish`, `window_ordered`,
-  `first_display`) for Quill's startup trace.
+  `first_display`, `writing_tools`, and `first_key` and `first_text` from
+  `window.rs`) for Quill's startup trace.

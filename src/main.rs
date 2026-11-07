@@ -432,14 +432,29 @@ fn install_main_window_tray(
 ) {
     ui::link_inbox::attach_main_window(window, cx, view);
     quill::notify_focus::warm();
-    // Creating the status item takes ~30 ms on a cold launch: on a shown
-    // window it waits for the first frame. A window that starts in the tray
-    // draws nothing, and the tray is its only way back.
+    // Creating the status item takes ~30 ms of the main thread on a cold
+    // launch, and ~100 ms in all, so a shown window's tray waits for the first
+    // frame. On macOS it also waits for the launch's Writing Tools load
+    // (`gpui_macos::after_writing_tools_load`): made before, it held up
+    // `applicationDidFinishLaunching:`, and with it the first input events. A
+    // window that starts in the tray draws nothing, and the tray is its only
+    // way back.
     let first_frame = after_first_frame.then(|| {
         let (drawn, first_frame) = futures_channel::oneshot::channel::<()>();
         window.on_next_frame(move |_, _| {
             let _ = drawn.send(());
         });
+        #[cfg(target_os = "macos")]
+        let first_frame = {
+            let (loaded, writing_tools) = futures_channel::oneshot::channel::<()>();
+            gpui_macos::after_writing_tools_load(move || {
+                let _ = loaded.send(());
+            });
+            async move {
+                let _ = first_frame.await;
+                let _ = writing_tools.await;
+            }
+        };
         first_frame
     });
     // parity:platform-tray-icon — system tray icon with

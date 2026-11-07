@@ -184,12 +184,16 @@ def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="c
     start = time.time()
     subprocess.run(args, env=env, check=True)
     marks = {}
-    while time.time() < start + timeout and until not in marks:
+
+    def read_marks():
         if trace.exists():
             for line in trace.read_text().splitlines():
                 name, _, micros = line.partition(" ")
                 if micros.strip().isdigit():
                     marks[name] = (int(micros) / 1e6 - start) * 1000.0
+
+    while time.time() < start + timeout and until not in marks:
+        read_marks()
         time.sleep(0.02)
     if watcher:
         try:
@@ -200,8 +204,10 @@ def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="c
             name, _, micros = seen.read_text().strip().partition(" ")
             if micros.isdigit():
                 marks[name] = (int(micros) / 1e6 - start) * 1000.0
-    # Let the launch's tail (first syncs, avatars) finish before quitting.
+    # Let the launch's tail (first syncs, avatars) finish before quitting,
+    # and keep the marks it wrote (did_finish comes after chat_list).
     time.sleep(3)
+    read_marks()
     quit_quill(app)
     return marks
 

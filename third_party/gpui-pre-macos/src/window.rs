@@ -2174,7 +2174,6 @@ impl PlatformWindow for MacWindow {
         let mut this = self.0.lock();
         this.renderer.draw(scene);
         drop(this);
-        FRAME_DRAWN.store(true, Ordering::Release);
         crate::frame_presented();
         crate::platform::read_keyboard_layout_after_first_frame();
     }
@@ -2217,6 +2216,10 @@ impl PlatformWindow for MacWindow {
     }
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {
+        // Quill: until then the view has no input context (see `is_editable`).
+        if !crate::writing_tools::text_input_ready_now() {
+            return;
+        }
         let executor = self.0.lock().foreground_executor.clone();
         executor
             .spawn(async move {
@@ -2762,6 +2765,11 @@ extern "C" fn handle_key_event(
     native_event: *mut AnyObject,
     key_equivalent: bool,
 ) -> Bool {
+    static FIRST: AtomicBool = AtomicBool::new(false);
+    if !FIRST.swap(true, Ordering::Relaxed) {
+        crate::launch_mark("first_key");
+    }
+    crate::writing_tools::text_input_ready();
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.as_ref().lock();
 
@@ -3451,17 +3459,13 @@ extern "C" fn set_frame_size(this: &AnyObject, _: Sel, size: NSSize) {
     };
 }
 
-/// Quill: set once any window has drawn a frame (see `is_editable`).
-static FRAME_DRAWN: AtomicBool = AtomicBool::new(false);
-
 /// Quill: `-[NSView _inputContext]` makes a view's `NSTextInputContext`
-/// unless the view answers `isEditable` with NO, and the first use of that
-/// class loads the Writing Tools framework (about 280 ms on a cold launch).
-/// Ordering the first window front asks for the context, so until a window
-/// has drawn a frame the view is not editable; AppKit makes the context on
-/// its next update, with the window already on screen.
+/// unless the view answers `isEditable` with NO, and a context made before
+/// the Writing Tools framework is loaded loads it on the main thread (see
+/// `writing_tools`). AppKit makes the context on its next update once the
+/// view is editable.
 extern "C" fn is_editable(_: &AnyObject, _: Sel) -> Bool {
-    FRAME_DRAWN.load(Ordering::Acquire).to_objc()
+    crate::writing_tools::text_input_ready_now().to_objc()
 }
 
 extern "C" fn display_layer(this: &AnyObject, _: Sel, _: *mut AnyObject) {
@@ -3664,6 +3668,10 @@ extern "C" fn insert_text(
     text: *mut AnyObject,
     replacement_range: NSRange,
 ) {
+    static FIRST: AtomicBool = AtomicBool::new(false);
+    if !FIRST.swap(true, Ordering::Relaxed) {
+        crate::launch_mark("first_text");
+    }
     unsafe {
         let is_attributed_string: Bool = msg_send![text, isKindOfClass: class!(NSAttributedString)];
         let text: *mut AnyObject = if is_attributed_string == Bool::YES {
