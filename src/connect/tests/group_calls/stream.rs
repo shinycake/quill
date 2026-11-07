@@ -355,6 +355,85 @@ fn join_missing_answers_not_ready_and_rejoins() {
     assert_eq!(handle.group_leaves(), vec![555]);
 }
 
+fn join_requests(recorder: &RecordingSender) -> usize {
+    recorder
+        .snapshot()
+        .iter()
+        .filter(|json| json.contains(r#""@type":"joinVideoChat""#))
+        .count()
+}
+
+fn tracked_call(driver: &ConnectDriver<Arc<RecordingSender>>) -> &crate::state::ActiveGroupCall {
+    driver
+        .session
+        .calls
+        .active_group_call
+        .as_ref()
+        .expect("tracked call")
+}
+
+#[test]
+fn a_routine_joined_update_does_not_end_a_stream_rejoin() {
+    let (dir, mut driver, recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);
+    ingest_call_json(&mut driver, &seq, &sink, &group_call_json(10, false));
+    // A part fetch says the join is gone while TDLib still says joined.
+    request_part(&mut driver, &handle, 1);
+    let segment = sent_request(&recorder, "getGroupCallStreamSegment");
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"GROUPCALL_JOIN_MISSING","@extra":"{}"}}"#,
+            extra_of(&segment)
+        ),
+    );
+    assert_eq!(join_requests(&recorder), 2, "the rejoin went out");
+    let request = tracked_call(&driver)
+        .rejoin
+        .in_flight()
+        .expect("rejoin in flight");
+
+    // The viewer count changes; TDLib has not seen the drop.
+    ingest_call_json(&mut driver, &seq, &sink, &group_call_json(11, false));
+    assert_eq!(tracked_call(&driver).rejoin.in_flight(), Some(request));
+    assert!(tracked_call(&driver).reconnecting(), "the banner stays");
+
+    // The rejoin fails: the next attempt is still due and goes out.
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":500,"message":"BOOM","@extra":{}}}"#,
+            request.0
+        ),
+    );
+    assert_eq!(join_requests(&recorder), 3, "the failure is retried");
+    let retry = tracked_call(&driver)
+        .rejoin
+        .in_flight()
+        .expect("second attempt");
+    assert_ne!(retry, request);
+
+    // Its join answer is the rejoin's success.
+    ingest_call_json(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"text","text":"{{\"rtmp\":true}}","@extra":{}}}"#,
+            retry.0
+        ),
+    );
+    assert_eq!(
+        tracked_call(&driver).rejoin,
+        crate::state::GroupCallRejoin::Idle
+    );
+    assert!(!tracked_call(&driver).reconnecting());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn rejoin_drains_and_stops_the_old_native_call_first() {
     let (dir, mut driver, _recorder, handle, sink, seq) = joined_stream_call(GroupCallMode::Rtmp);

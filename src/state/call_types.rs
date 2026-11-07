@@ -445,6 +445,23 @@ impl GroupCallRejoin {
         }
     }
 
+    /// TDLib answered the join behind `request`: the rejoin succeeded and
+    /// the attempts start over. Any other answer (a first join, a stale
+    /// rejoin) leaves the state alone.
+    pub fn attempt_joined(&mut self, request: RequestId) {
+        if self.in_flight() == Some(request) {
+            *self = GroupCallRejoin::Idle;
+        }
+    }
+
+    /// TDLib reports the call joined again after it was not: a join went
+    /// through, so whatever was due or spent is over. A joined update that
+    /// follows a joined one says nothing about a rejoin Quill started on
+    /// its own (a stream's part fetch) and is not this.
+    pub fn rejoined(&mut self) {
+        *self = GroupCallRejoin::Idle;
+    }
+
     /// The attempt behind `request` never reached TDLib (the send
     /// failed): it is not counted.
     pub fn attempt_unsent(&mut self, request: RequestId) {

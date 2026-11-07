@@ -172,7 +172,7 @@ impl Session {
         if !self.calls.group_call_fetch_queue.contains(&group_call_id) {
             self.calls.group_call_fetch_queue.push(group_call_id);
         }
-        self.set_group_call_join_payload(group_call_id, join_payload);
+        self.set_group_call_join_payload(group_call_id, extra, join_payload);
         self.calls.group_call_error = None;
     }
 

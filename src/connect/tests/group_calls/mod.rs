@@ -419,14 +419,13 @@ fn driver_auto_rejoin_group_call_discipline() {
     assert!(driver.maybe_auto_rejoin_group_call().is_ok());
     assert_eq!(join_sends(), 0);
 
-    driver.session.calls.active_group_call = Some(tracked_group_call(true, false, false));
-    driver
-        .session
-        .calls
-        .active_group_call
-        .as_mut()
-        .unwrap()
-        .rejoin = crate::state::GroupCallRejoin::Wanted { attempts: 0 };
+    // TDLib reports a call it was kicked from (`need_rejoin`) as not
+    // joined; the joined update below is the rejoin going through.
+    driver.session.calls.active_group_call = Some(crate::state::ActiveGroupCall {
+        is_joined: false,
+        rejoin: crate::state::GroupCallRejoin::Wanted { attempts: 0 },
+        ..tracked_group_call(true, false, false)
+    });
 
     // Three attempts, each followed by a TDLib join failure that
     // re-arms the reconnecting banner (the C2d discipline).

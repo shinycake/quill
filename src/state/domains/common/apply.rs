@@ -255,7 +255,7 @@ impl Session {
                     self.apply_owned_bot_text(purpose, text);
                 }
                 Some(RequestPurpose::Calls(CallsPurpose::JoinVideoChat { group_call_id })) => {
-                    self.set_group_call_join_payload(group_call_id, text);
+                    self.set_group_call_join_payload(group_call_id, pending.map(|p| p.id), text);
                 }
                 Some(RequestPurpose::Calls(CallsPurpose::StartGroupCallScreenSharing {
                     group_call_id,
