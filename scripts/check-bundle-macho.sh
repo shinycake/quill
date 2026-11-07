@@ -6,7 +6,11 @@
 # @executable_path names that resolve to a file inside the bundle. Install ids
 # and LC_RPATH entries are held to the same rule. With MACOSX_DEPLOYMENT_TARGET
 # set, as in CI, every file must also load on that macOS: a library built for a
-# newer one refuses to load there.
+# newer one refuses to load there. No executable may define a symbol that a
+# system library also exports, such as C++ operator new: dyld then rebinds every
+# system library's uses of it before main runs, about 300 ms of a cold launch
+# (docs/decisions/launch-cold-floor.md). ld marks such an executable
+# MH_WEAK_DEFINES.
 #
 # Usage: scripts/check-bundle-macho.sh [path/to/Quill.app]
 set -euo pipefail
@@ -42,6 +46,10 @@ while IFS= read -r -d '' f; do
   checked=$((checked + 1))
   dir="$(dirname "$f")"
   id="$(otool -D "$f" 2>/dev/null | sed -n '2p')"
+  header=" $(otool -hv "$f" | tail -n 1) "
+  if [[ "$header" == *" EXECUTE "* && "$header" == *" WEAK_DEFINES "* ]]; then
+    fail "${f#"$APP"/}" "overrides a system library symbol (MH_WEAK_DEFINES): $(nm -gUj "$f" | grep -E '^__Zn[wa]|^__Zd[la]' | tr '\n' ' ')"
+  fi
   if [[ -n "$id" ]] && ! is_system "$id" && [[ "$id" != @rpath/* ]]; then
     fail "${f#"$APP"/}" "install id $id (must be @rpath/...)"
   fi
