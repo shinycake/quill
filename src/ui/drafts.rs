@@ -133,7 +133,8 @@ impl QuillApp {
             self.composer_ui.set_reply(None);
         }
         if self
-            .composer_ui.pending_edit()
+            .composer_ui
+            .pending_edit()
             .is_some_and(|edit| edit.chat_id != chat_id)
         {
             self.composer_ui.leave_edit();

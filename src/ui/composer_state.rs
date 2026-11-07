@@ -261,7 +261,9 @@ impl ComposerUi {
 
     /// Whether the "Cancel editing?" box is open. Only an edit has one.
     pub(super) fn cancel_edit_confirm_open(&self) -> bool {
-        self.edit_mode.as_ref().is_some_and(|mode| mode.confirm_cancel)
+        self.edit_mode
+            .as_ref()
+            .is_some_and(|mode| mode.confirm_cancel)
     }
 
     /// Opens or closes the box; opening is ignored without an edit.

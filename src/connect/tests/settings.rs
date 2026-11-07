@@ -382,12 +382,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
                 .unwrap(),
             )
             .unwrap();
-    let sessions = driver
-        .session
-        .settings
-        .sessions
-        .data()
-        .expect("refetched");
+    let sessions = driver.session.settings.sessions.data().expect("refetched");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, 11);
     assert!(!driver.session.settings.sessions_stale);

@@ -1,7 +1,6 @@
 //! Screenshot demos: security.
 #![deny(clippy::indexing_slicing)]
 
-use quill::state::fetch::Fetch;
 use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_sessions, demo_storage_stats};
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
@@ -10,6 +9,7 @@ use crate::ui::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::settings::ThemeChoice;
+use quill::state::fetch::Fetch;
 use std::sync::atomic::Ordering;
 
 register_demos![

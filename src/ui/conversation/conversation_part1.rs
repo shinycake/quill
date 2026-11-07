@@ -143,8 +143,7 @@ impl QuillApp {
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach =
-                    matches!(mode, PaneMode::Ready) && !self.composer_ui.is_editing();
+                let show_attach = matches!(mode, PaneMode::Ready) && !self.composer_ui.is_editing();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 // A rich draft shown in place of the field sends too.

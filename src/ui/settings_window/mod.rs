@@ -27,7 +27,6 @@ pub(in crate::ui) use agent_page::AgentPageUi;
 pub(in crate::ui) use arrival::Arrival;
 pub(in crate::ui) use search::SettingsSearch;
 
-use quill::state::fetch::Fetch;
 use super::actions::{CancelSearch, OpenChatSearch, OpenSearch};
 use super::app::QuillApp;
 use gpui_kit::assets::IconName;
@@ -36,6 +35,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::settings_catalog::Page;
+use quill::state::fetch::Fetch;
 
 /// Below this window width the page list and a page take turns.
 const NARROW: f32 = 720.;

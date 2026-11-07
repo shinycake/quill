@@ -534,7 +534,9 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.blocked_senders.insert_data_if_missing(Vec::new);
+            demo.settings
+                .blocked_senders
+                .insert_data_if_missing(Vec::new);
             if let Some(list) = demo.settings.blocked_senders.data_mut()
                 && !list.contains(&user_id)
             {

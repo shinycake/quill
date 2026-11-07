@@ -90,7 +90,8 @@ impl QuillApp {
     pub(in crate::ui) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
         self.composer_ui.edit_replace_as_file = !self.composer_ui.edit_replace_as_file;
         let path = self
-            .composer_ui.pending_edit()
+            .composer_ui
+            .pending_edit()
             .and_then(|e| e.media_edit.replacement.as_ref())
             .map(|r| r.path.clone());
         if let Some(path) = path {
@@ -100,7 +101,8 @@ impl QuillApp {
 
     pub(in crate::ui) fn toggle_edit_replace_spoiler(&mut self, cx: &mut Context<Self>) {
         if let Some(replacement) = self
-            .composer_ui.pending_edit_mut()
+            .composer_ui
+            .pending_edit_mut()
             .and_then(|e| e.media_edit.replacement.as_mut())
         {
             replacement.spoiler = !replacement.spoiler;

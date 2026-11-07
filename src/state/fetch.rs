@@ -7,9 +7,10 @@
 //! fails, so a list does not blank out under a spinner or an error line.
 
 /// The state of a fetched `T`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Fetch<T> {
     /// Never asked.
+    #[default]
     Idle,
     /// A request is in flight; `stale` is the last answer, if any.
     Loading { stale: Option<T> },
@@ -17,12 +18,6 @@ pub enum Fetch<T> {
     Ready(T),
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
-}
-
-impl<T> Default for Fetch<T> {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 impl<T> Fetch<T> {

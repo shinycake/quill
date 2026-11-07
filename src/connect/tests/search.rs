@@ -205,7 +205,10 @@ fn driver_search_happy_empty_error_and_select() {
             )
             .unwrap();
     // Phase 7.2: `Empty` only once the public search settles too.
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Searching);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStatus::Searching
+    );
     driver
         .ingest(
             copy_and_parse(
@@ -252,7 +255,10 @@ fn driver_search_happy_empty_error_and_select() {
         )
         .unwrap();
     // Phase 7.2: the public request still in flight keeps `Searching`.
-    assert_eq!(driver.session.search.search.status(), SearchStatus::Searching);
+    assert_eq!(
+        driver.session.search.search.status(),
+        SearchStatus::Searching
+    );
     driver
         .ingest(
             copy_and_parse(

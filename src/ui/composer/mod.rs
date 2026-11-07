@@ -599,7 +599,8 @@ impl QuillApp {
             match paths {
                 [only]
                     if self
-                        .composer_ui.pending_edit()
+                        .composer_ui
+                        .pending_edit()
                         .is_some_and(|e| e.allows_replace()) =>
                 {
                     self.set_edit_replacement(only, cx);

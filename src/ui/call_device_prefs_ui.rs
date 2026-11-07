@@ -22,10 +22,8 @@ impl QuillApp {
             .and_then(current_session_accepts_calls);
         let mutating = settings.is_some_and(|settings| settings.sessions_mutating);
         // The list arrives once; ask for it when this section first shows.
-        let needs_fetch = self.live.is_some()
-            && settings.is_some_and(|settings| {
-                settings.sessions.is_idle()
-            });
+        let needs_fetch =
+            self.live.is_some() && settings.is_some_and(|settings| settings.sessions.is_idle());
         if needs_fetch {
             // `maybe_fetch_active_sessions` is guarded, so a render that
             // queues this twice sends one request.

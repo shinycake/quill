@@ -1,7 +1,6 @@
 //! security.
 #![deny(clippy::indexing_slicing)]
 
-use quill::state::fetch::Fetch;
 use super::app::QuillApp;
 use super::demo::{demo_sessions, demo_storage_stats, demo_websites};
 use super::shell::{DialogKind, QuillShell};
@@ -19,6 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::key_fingerprint;
 use quill::lang::{keys, tr, tr_with};
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{ParsedSecretChat, ParsedSession, ParsedWebsite, PasswordState};
 use std::cell::RefCell;
 use std::rc::Rc;

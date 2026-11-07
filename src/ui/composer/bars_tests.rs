@@ -322,8 +322,7 @@ fn clicking_the_edit_bar_jumps_to_the_edited_message(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     begin_edit(&app, vcx);
     let edited = app.read_with(vcx, |app, _| {
-        app.composer_ui.pending_edit()
-            .map(|edit| edit.message_id)
+        app.composer_ui.pending_edit().map(|edit| edit.message_id)
     });
     assert_eq!(edited, Some(MessageId(11)));
     clear_jump(&app, vcx);

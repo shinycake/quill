@@ -369,7 +369,8 @@ impl QuillApp {
     /// `inputMessageText.link_preview_options`.
     pub(in crate::ui) fn preview_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let editing_text = self
-            .composer_ui.pending_edit()
+            .composer_ui
+            .pending_edit()
             .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Text));
         if !self.pending_attachments().is_empty()
             || (self.composer_ui.is_editing() && !editing_text)
@@ -504,7 +505,8 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.composer_ui.pending_edit()?
+        self.composer_ui
+            .pending_edit()?
             .media_edit
             .replacement
             .as_ref()?;
@@ -592,17 +594,18 @@ impl QuillApp {
     /// `message_caption_length_max` option. Shown while attachments are
     /// pending or a caption is being edited.
     pub(in crate::ui) fn caption_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let editing_caption =
-            self.composer_ui.pending_edit().is_some_and(|edit| {
-                matches!(edit.kind, quill::composer::ComposerEditKind::Caption)
-            });
+        let editing_caption = self
+            .composer_ui
+            .pending_edit()
+            .is_some_and(|edit| matches!(edit.kind, quill::composer::ComposerEditKind::Caption));
         if self.pending_attachments().is_empty() && !editing_caption {
             return None;
         }
         // Documents and music have no caption position; photos, videos and
         // GIFs do (`show_caption_above_media`), also after a replacement.
         let captionable = self
-            .composer_ui.pending_edit()
+            .composer_ui
+            .pending_edit()
             .is_some_and(|edit| editing_caption && edit.caption_position_applies())
             || self.pending_attachments().iter().any(|att| {
                 matches!(
@@ -611,7 +614,8 @@ impl QuillApp {
                 )
             });
         let above = if editing_caption {
-            self.composer_ui.pending_edit()
+            self.composer_ui
+                .pending_edit()
                 .is_some_and(|edit| edit.caption_above)
         } else {
             self.pending_send().caption_above

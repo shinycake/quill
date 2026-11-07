@@ -514,7 +514,10 @@ mod tests {
                 extra.0,
             ),
         );
-        assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61, 62, 63]));
+        assert_eq!(
+            session.settings.blocked_senders.data(),
+            Some(&vec![61, 62, 63])
+        );
     }
 }
 

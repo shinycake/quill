@@ -207,7 +207,8 @@ impl QuillApp {
             });
         self.set_edit_replacement(&path, cx);
         if let Some(replacement) = self
-            .composer_ui.pending_edit_mut()
+            .composer_ui
+            .pending_edit_mut()
             .and_then(|edit| edit.media_edit.replacement.as_mut())
         {
             replacement.spoiler = spoiler;
