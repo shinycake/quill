@@ -60,6 +60,7 @@ pub(super) fn prepare_startup(
         return Err(ConnectBlocker::DataFolder);
     }
     let prepared = quill::connect::prepare_connect(&root, active, secrets, &credentials)?;
+    quill::launch_lines::open(&prepared.paths, &prepared.database_key);
     Ok((credentials, prepared))
 }
 

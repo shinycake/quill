@@ -18,7 +18,7 @@ use core_graphics::{
     geometry::CGPoint,
 };
 use core_text::{
-    font::CTFont,
+    font::{CTFont, CTFontRef},
     font_collection::CTFontCollectionRef,
     font_descriptor::{
         CTFontDescriptor, kCTFontSlantTrait, kCTFontSymbolicTrait, kCTFontWeightTrait,
@@ -50,6 +50,74 @@ use pathfinder_geometry::{
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, char, convert::TryFrom, sync::Arc};
+
+// QUILL: the fallback fonts of a kept line (`line_cache_font`). Declared
+// here because core-text's wrappers panic on a null result.
+unsafe extern "C" {
+    fn CTFontCopyDefaultCascadeListForLanguages(
+        font: CTFontRef,
+        languages: CFArrayRef,
+    ) -> CFArrayRef;
+    fn CTFontCreateWithFontDescriptor(
+        descriptor: core_text::font_descriptor::CTFontDescriptorRef,
+        size: CGFloat,
+        matrix: *const std::ffi::c_void,
+    ) -> CTFontRef;
+    fn CTFontCreateWithName(
+        name: core_foundation::string::CFStringRef,
+        size: CGFloat,
+        matrix: *const std::ffi::c_void,
+    ) -> CTFontRef;
+}
+
+/// The font named `name` in `font`'s system fallback list.
+fn system_fallback(font: &CTFont, name: &str) -> Option<CTFont> {
+    // SAFETY: `font` is a live CTFont; a null languages array asks for the
+    // user's languages; non-null results follow the create rule.
+    unsafe {
+        let list =
+            CTFontCopyDefaultCascadeListForLanguages(font.as_concrete_TypeRef(), std::ptr::null());
+        if list.is_null() {
+            return None;
+        }
+        let list = CFArray::<CTFontDescriptor>::wrap_under_create_rule(list);
+        let descriptor = list
+            .iter()
+            .find(|descriptor| descriptor_name(descriptor).as_deref() == Some(name))?;
+        let found =
+            CTFontCreateWithFontDescriptor(descriptor.as_concrete_TypeRef(), 0.0, std::ptr::null());
+        (!found.is_null()).then(|| CTFont::wrap_under_create_rule(found))
+    }
+}
+
+fn descriptor_name(descriptor: &CTFontDescriptor) -> Option<String> {
+    // SAFETY: `descriptor` is live; a non-null attribute follows the create
+    // rule.
+    unsafe {
+        let name = core_text::font_descriptor::CTFontDescriptorCopyAttribute(
+            descriptor.as_concrete_TypeRef(),
+            core_text::font_descriptor::kCTFontNameAttribute,
+        );
+        if name.is_null() {
+            return None;
+        }
+        core_foundation::base::CFType::wrap_under_create_rule(name)
+            .downcast::<CFString>()
+            .map(|name| name.to_string())
+    }
+}
+
+/// A font by its PostScript name. Core Text answers a name it does not know
+/// with another font, so the caller checks the name.
+fn font_by_name(name: &str) -> Option<CTFont> {
+    let name = CFString::new(name);
+    // SAFETY: `name` is a live CFString; a non-null result follows the create
+    // rule.
+    unsafe {
+        let found = CTFontCreateWithName(name.as_concrete_TypeRef(), 0.0, std::ptr::null());
+        (!found.is_null()).then(|| CTFont::wrap_under_create_rule(found))
+    }
+}
 
 #[cfg(target_os = "macos")]
 use {
@@ -84,6 +152,9 @@ struct AppleTextSystemState {
     font_ids_by_postscript_name: HashMap<String, FontId>,
     font_ids_by_font_key: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     postscript_names_by_font_id: HashMap<FontId, String>,
+    /// QUILL: the fonts `font_id` loaded, named across launches by their
+    /// PostScript name, features and fallbacks (`crate::line_cache`).
+    line_cache_names_by_font_id: HashMap<FontId, String>,
     /// QUILL: by font and the bits of the size.
     sized_fonts: SizedFonts<(FontId, u32), CTFont>,
 }
@@ -99,6 +170,7 @@ impl AppleTextSystem {
             font_ids_by_postscript_name: HashMap::default(),
             font_ids_by_font_key: HashMap::default(),
             postscript_names_by_font_id: HashMap::default(),
+            line_cache_names_by_font_id: HashMap::default(),
             sized_fonts: SizedFonts::new(MAX_SIZED_FONTS),
         }))
     }
@@ -391,6 +463,10 @@ impl AppleTextSystemState {
             }
             let font_id = FontId(self.fonts.len());
             font_ids.push(font_id);
+            self.line_cache_names_by_font_id.insert(
+                font_id,
+                line_cache_font_name(&postscript_name, features, fallbacks),
+            );
             self.font_ids_by_postscript_name
                 .insert(postscript_name.clone(), font_id);
             self.postscript_names_by_font_id
@@ -437,6 +513,23 @@ impl AppleTextSystemState {
     }
 
     fn raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
+        // QUILL: the bounds the last launch measured (crate::glyph_cache).
+        let cache_key = self
+            .postscript_names_by_font_id
+            .get(&params.font_id)
+            .filter(|_| crate::glyph_cache::recording())
+            .map(|font| crate::glyph_cache::Key::new(font, params));
+        if let Some(found) = cache_key.as_ref().and_then(crate::glyph_cache::take_bounds) {
+            return Ok(found);
+        }
+        let bounds = self.measure_raster_bounds(params)?;
+        if let Some(key) = cache_key {
+            crate::glyph_cache::record_bounds(key, bounds);
+        }
+        Ok(bounds)
+    }
+
+    fn measure_raster_bounds(&self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
         let font = &self.fonts[params.font_id.0];
         let scale = Transform2F::from_scale(params.scale_factor);
         let bounds: Bounds<DevicePixels> = bounds_from_rect_i(font.raster_bounds(
@@ -569,6 +662,75 @@ impl AppleTextSystemState {
     }
 
     fn layout_line(&mut self, text: &str, font_size: Pixels, font_runs: &[FontRun]) -> LineLayout {
+        // QUILL: a layout the last launch made (crate::line_cache).
+        let cache_key = if crate::line_cache::recording() {
+            self.line_cache_key(text, font_size, font_runs)
+        } else {
+            None
+        };
+        if let Some(layout) = cache_key.as_ref().and_then(|key| {
+            crate::line_cache::take(key, |name| self.line_cache_font(name, font_runs))
+        }) {
+            return layout;
+        }
+        let layout = self.shape_line(text, font_size, font_runs);
+        if let Some(key) = cache_key {
+            crate::line_cache::record(key, &layout, |font_id| {
+                self.postscript_names_by_font_id.get(&font_id).cloned()
+            });
+        }
+        layout
+    }
+
+    /// QUILL: names the line across launches, or `None` when a run's font
+    /// was not loaded through `font_id`.
+    fn line_cache_key(
+        &self,
+        text: &str,
+        font_size: Pixels,
+        font_runs: &[FontRun],
+    ) -> Option<crate::line_cache::Key> {
+        let runs = font_runs
+            .iter()
+            .map(|run| {
+                let font = self.line_cache_names_by_font_id.get(&run.font_id)?;
+                Some((u32::try_from(run.len).ok()?, font.clone()))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(crate::line_cache::Key::new(text, font_size, runs))
+    }
+
+    /// QUILL: the font a kept layout's run draws with, by its PostScript
+    /// name. A fallback font this launch has not drawn with yet is opened by
+    /// that name. Asking Core Text which font covers the run's text instead
+    /// reads the character set of every fallback before it, about 6 ms of a
+    /// warm launch's first frame.
+    fn line_cache_font(&mut self, name: &str, font_runs: &[FontRun]) -> Option<(FontId, bool)> {
+        let font_id = match self.font_ids_by_postscript_name.get(name) {
+            Some(font_id) => *font_id,
+            None => {
+                let font = self.open_fallback(name, font_runs)?;
+                self.id_for_native_font(font)
+            }
+        };
+        Some((font_id, self.is_emoji(font_id)))
+    }
+
+    fn open_fallback(&self, name: &str, font_runs: &[FontRun]) -> Option<CTFont> {
+        // `CTFontCreateWithName` refuses the system's own fonts, whose names
+        // start with a dot: those are in the fallback list of a font the line
+        // asks for.
+        let found = if name.starts_with('.') {
+            font_runs.iter().find_map(|run| {
+                system_fallback(&self.fonts.get(run.font_id.0)?.native_font(), name)
+            })?
+        } else {
+            font_by_name(name)?
+        };
+        (found.postscript_name() == name).then_some(found)
+    }
+
+    fn shape_line(&mut self, text: &str, font_size: Pixels, font_runs: &[FontRun]) -> LineLayout {
         // Construct the attributed string, converting UTF8 ranges to UTF16 ranges.
         let mut string = CFMutableAttributedString::new();
         let mut max_ascent = 0.0f32;
@@ -714,6 +876,29 @@ impl<'a> StringIndexConverter<'a> {
     }
 }
 
+/// QUILL: a loaded font's name in `crate::line_cache`: its PostScript name,
+/// OpenType features and fallbacks, which all change how a line is shaped.
+fn line_cache_font_name(
+    postscript_name: &str,
+    features: &FontFeatures,
+    fallbacks: Option<&FontFallbacks>,
+) -> String {
+    let mut name = postscript_name.to_owned();
+    name.push('|');
+    for (tag, value) in features.0.iter() {
+        name.push_str(&format!("{tag}={value},"));
+    }
+    name.push('|');
+    for family in fallbacks
+        .map(|fallbacks| fallbacks.0.as_slice())
+        .unwrap_or_default()
+    {
+        name.push_str(family);
+        name.push(',');
+    }
+    name
+}
+
 fn font_kit_metrics_to_metrics(metrics: Metrics) -> FontMetrics {
     FontMetrics {
         units_per_em: metrics.units_per_em,
@@ -822,6 +1007,7 @@ mod lenient_font_attributes {
 
 #[cfg(test)]
 mod tests {
+    use super::AppleTextSystemState;
     use crate::AppleTextSystem;
     use gpui::{
         FontFallbacks, FontFeatures, FontId, FontRun, GlyphId, LineLayout, PlatformTextSystem,
@@ -889,6 +1075,91 @@ mod tests {
             assert_eq!(shaped(&kept_layout), shaped(&new_layout), "at {size}");
             assert_eq!(kept_layout.width, new_layout.width, "at {size}");
         }
+    }
+
+    #[test]
+    fn test_a_kept_line_lays_out_like_a_shaped_one() {
+        let mut tabular = font("Helvetica");
+        tabular.features = FontFeatures(Arc::new(vec![("tnum".into(), 1)]));
+        let line = "ok \u{1F600}\u{1F44D}\u{1F3FD} 12:30 \u{0645}\u{0631}\u{062D}\u{0628}\u{0627}";
+        let runs = |fonts: &AppleTextSystem| {
+            [FontRun {
+                font_id: fonts.font_id(&tabular).unwrap(),
+                len: line.len(),
+            }]
+        };
+        let fonts = AppleTextSystem::new();
+        let fonts_runs = runs(&fonts);
+        let layout = fonts.layout_line(line, px(13.), &fonts_runs);
+        assert!(layout.runs.len() > 1, "the line needs a fallback font");
+
+        // The next launch has drawn only with Helvetica so far.
+        let next = AppleTextSystem::new();
+        let next_runs = runs(&next);
+        let key = next
+            .0
+            .read()
+            .line_cache_key(line, px(13.), &next_runs)
+            .unwrap();
+        let state = fonts.0.read();
+        let mut next_state = next.0.write();
+        let fonts_before = next_state.fonts.len();
+        let kept = crate::line_cache::through_a_file(
+            &key,
+            &layout,
+            |id| state.postscript_names_by_font_id.get(&id).cloned(),
+            |name| next_state.line_cache_font(name, &next_runs),
+        )
+        .expect("the fallback fonts are found again");
+        assert!(
+            next_state.fonts.len() > fonts_before,
+            "they were not loaded before"
+        );
+        let named = |state: &AppleTextSystemState, layout: &LineLayout| {
+            shaped(layout)
+                .into_iter()
+                .map(|(font_id, glyph, x, index, is_emoji)| {
+                    let font = state.postscript_names_by_font_id[&font_id].clone();
+                    (font, glyph, x, index, is_emoji)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(named(&next_state, &kept), named(&state, &layout));
+        assert_eq!(
+            (
+                kept.width,
+                kept.ascent,
+                kept.descent,
+                kept.font_size,
+                kept.len
+            ),
+            (
+                layout.width,
+                layout.ascent,
+                layout.descent,
+                layout.font_size,
+                layout.len
+            )
+        );
+        for unknown in ["NoSuchFont-Regular", ".NoSuchFont-Regular"] {
+            assert!(
+                next_state.line_cache_font(unknown, &next_runs).is_none(),
+                "{unknown} is not opened as another font"
+            );
+        }
+        let key = state.line_cache_key(line, px(13.), &fonts_runs).unwrap();
+        drop((state, next_state));
+
+        let plain = fonts.font_id(&font("Helvetica")).unwrap();
+        let plain_runs = [FontRun {
+            font_id: plain,
+            len: line.len(),
+        }];
+        let plain_key = fonts.0.read().line_cache_key(line, px(13.), &plain_runs);
+        assert!(
+            plain_key.is_some_and(|plain_key| plain_key != key),
+            "the same font without its features is another font"
+        );
     }
 
     #[test]

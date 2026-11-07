@@ -118,6 +118,7 @@ pub mod json_access;
 pub mod key_fingerprint;
 pub mod lang;
 pub mod large_alloc;
+pub mod launch_lines;
 pub mod launch_prewarm;
 pub mod layout;
 pub mod lifecycle;
