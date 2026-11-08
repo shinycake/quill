@@ -76,6 +76,33 @@ fn no_bot_means_nothing_found_not_a_spinner() {
     assert!(sharing.next_requests().is_empty());
 }
 
+/// Round 8, 2j: a failed lookup is not a missing bot. This picker shows
+/// no venues; the next one asks for the bot again.
+#[test]
+fn a_failed_bot_lookup_is_asked_again_by_the_next_picker() {
+    let resolve = || PickerRequest::ResolveVenueBot {
+        username: "foursquare".into(),
+    };
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()]);
+    sharing.venue_bot_failed();
+    assert!(
+        sharing.next_requests().is_empty(),
+        "not again in this picker"
+    );
+    assert!(matches!(
+        sharing.picker().map(|p| p.venues().clone()),
+        Some(VenueList::NothingFound { .. })
+    ));
+    sharing.close();
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 21.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()], "the next picker");
+}
+
 #[test]
 fn the_last_fix_seeds_the_next_picker() {
     let mut sharing = LocationSharing::default();
