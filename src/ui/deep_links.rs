@@ -60,6 +60,12 @@ impl QuillApp {
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
         self.tick_media_seek(std::time::Instant::now(), cx);
         self.pump_start_files(cx);
+        // A link that arrives while Quill is locked waits for the unlock,
+        // as tdesktop's start links do (`checkStartUrls`): nothing it
+        // opens may show over the lock.
+        if self.refused_while_locked() {
+            return;
+        }
         // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
         // locally and need no sign-in: a user who is blocked from
         // Telegram can only get in through them.
@@ -163,6 +169,22 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Render-time half of a resolved link: the chat it names, or the box
+    /// of a typed link. Held while Quill is locked, then run at the first
+    /// frame after the unlock.
+    pub(super) fn run_resolved_deep_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refused_while_locked() {
+            return;
+        }
+        if let Some(open) = self.links.pending_deep_link_open.take() {
+            self.open_deep_link_chat(open, window, cx);
+            self.drop_shared_card(cx);
+        }
+        if let Some(ui) = self.links.pending_deep_link_ui.take() {
+            self.run_deep_link_ui(ui, window, cx);
+        }
+    }
+
     /// Starts the deep-link flow for `link` at the next poll, remembering
     /// whether the handler asking is a step the UI driver injected. The
     /// origin rides with the link: a later link queued by someone else
@@ -240,6 +262,56 @@ impl QuillApp {
             }
             _ => None,
         };
+        // The inline results button's start, from whichever window
+        // pressed it.
+        let inline_return = self.take_waiting_inline_return(chat_id);
+        // A chat in a window of its own opens there, with what the link
+        // asks for.
+        if self.windows.has_window(chat_id) {
+            let premium = self.take_premium_auto_start(chat_id, action, cx);
+            let mut routed =
+                super::chat_window::ChatOpen::new(chat_id).with_inline_return(inline_return);
+            if let Some(message_id) = jump_to {
+                routed = routed.at(MessageId::from_server_id(message_id));
+            }
+            if !premium
+                && let DeepLinkAction::OpenUsername {
+                    start_param: Some(param),
+                    ..
+                } = action
+            {
+                routed = routed.compose(format!("/start {param}"));
+            }
+            // A link's draft goes into that window's composer too.
+            let draft = match action {
+                DeepLinkAction::OpenPublicChatDraft { draft, .. }
+                | DeepLinkAction::OpenUserDraft { draft, .. } => Some(draft),
+                DeepLinkAction::ShareDraft { text } => Some(text),
+                _ => None,
+            };
+            match draft {
+                Some(text) => {
+                    if !text.is_empty() {
+                        routed = routed.compose(text.clone());
+                    }
+                    let _ = self.route_chat_open(routed, cx);
+                    if matches!(action, DeepLinkAction::ShareDraft { .. }) {
+                        self.in_window_scope(Some(chat_id), cx, |app, cx| {
+                            app.attach_shared_qr_card(chat_id, cx);
+                        });
+                    }
+                }
+                None => {
+                    let _ = self.route_chat_open(routed, cx);
+                    self.finish_typed_link(chat_id, action, window, cx);
+                }
+            }
+            cx.notify();
+            return;
+        }
+        if let Some(ret) = inline_return {
+            self.composer_ui.inline_return = Some(ret);
+        }
         // A linked message wins over the chat's saved scroll position (and
         // drops it); a plain chat link opens at the saved position.
         let open = match self.chat_open_at(chat_id, jump_to.map(MessageId::from_server_id)) {

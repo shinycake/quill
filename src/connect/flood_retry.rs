@@ -140,7 +140,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             .paid
             .next_change_ms(now_ms)
             .map(Duration::from_millis);
-        [retry, bot, levels, hint, microphone, paid]
+        // A live story's Stars commit when their Undo time is over.
+        let live_stars = self
+            .session
+            .stories
+            .live
+            .as_ref()
+            .and_then(|live| live.pending_reaction.as_ref())
+            .map(|pending| Duration::from_millis(pending.commit_at_ms.saturating_sub(now_ms)));
+        [retry, bot, levels, hint, microphone, paid, live_stars]
             .into_iter()
             .flatten()
             .min()

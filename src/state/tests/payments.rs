@@ -135,7 +135,11 @@ fn payment_result_notes_and_verification_url() {
         &result_json(&extra.0.to_string(), false, "https://pay.example.com/3ds"),
     );
     assert_eq!(
-        session.payments.verification_url.as_deref(),
+        session
+            .payments
+            .verification_url
+            .as_ref()
+            .map(|step| step.url.as_str()),
         Some("https://pay.example.com/3ds")
     );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
@@ -347,4 +351,33 @@ fn poll_open_period_max_option_is_kept() {
     // A zero is no limit worth keeping: the last real value stays.
     apply_json(&mut session, &seq, &sink, &option(0));
     assert_eq!(session.payments.poll_open_period_max, Some(864_000));
+}
+
+/// A verification step asked by a payment whose checkout is no longer
+/// shown does not close the checkout on screen (another invoice's).
+#[test]
+fn a_verification_step_closes_only_its_own_checkout() {
+    use crate::payment_invoice::InputInvoice;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let a = InputInvoice::Name("a".into());
+    let b = InputInvoice::Name("b".into());
+    session.payments.request = Some(PaymentRequest { invoice: a });
+    let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
+    session.payment_sent(extra);
+    // Esc, then B's checkout opens while A processes.
+    session.payments.request = Some(PaymentRequest { invoice: b.clone() });
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"paymentResult","@extra":"{}","success":false,"verification_url":"https://pay.example.com/3ds"}}"#,
+            extra.0
+        ),
+    );
+    let step = session.payments.verification_url.clone().expect("A's step");
+    assert_eq!(step.url, "https://pay.example.com/3ds");
+    assert!(!step.closes_checkout, "B's checkout stays open");
+    assert!(session.payments.shows(&b));
 }

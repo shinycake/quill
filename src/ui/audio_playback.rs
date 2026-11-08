@@ -679,8 +679,10 @@ impl QuillApp {
         duration_secs: f64,
         cx: &mut Context<Self>,
     ) {
+        // A saved track (negative id) is the same row from any chat's
+        // profile; a message's row is active only in its own chat.
         if self.playback.playing_audio == Some(message_id)
-            && self.playback.player.chat.is_none_or(|chat| chat == chat_id)
+            && (message_id.0 < 0 || self.playback.player.chat.is_none_or(|chat| chat == chat_id))
         {
             // Active row: pause ↔ resume (see voice toggle).
             if self.is_playing() {

@@ -67,7 +67,7 @@ impl QuillApp {
             dialog,
             (DialogKind::TtlPicker, BOX_WIDTH, title),
             |this, _, cx| {
-                this.notify.ttl_picker_open = false;
+                this.notify.ttl_picker = None;
                 cx.notify();
             },
             |this, cx| this.ttl_picker_panel(cx).into_any_element(),
@@ -106,11 +106,11 @@ crate::ui::shell::register_dialogs! {
     /// The auto-delete timer (tdesktop `TTLBox`).
     TtlPicker => DialogSpec::new(
         2933,
-        |app| app.notify.ttl_picker_open,
+        |app| app.notify.ttl_picker.is_some(),
         QuillApp::build_ttl_picker_dialog,
     )
     .close(|app, _, cx| {
-            app.notify.ttl_picker_open = false;
+            app.notify.ttl_picker = None;
             cx.notify();
         }),
     /// The chat's folders.

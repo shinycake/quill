@@ -140,18 +140,24 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let sets: Vec<(i64, String)> = self
+        let (sets, loaded): (Vec<(i64, String)>, bool) = self
             .session()
             .map(|s| {
-                s.stickers
-                    .emoji
+                let emoji = &s.stickers.emoji;
+                let sets = emoji
                     .installed_sets
                     .iter()
                     .map(|set| (set.id, set.title.clone()))
-                    .collect()
+                    .collect();
+                (sets, emoji.installed_loaded)
             })
             .unwrap_or_default();
         let empty = sets.is_empty();
+        let empty_note = if loaded {
+            keys::Q_MISC_YOU_HAVE_NO_EMOJI_PACKS
+        } else {
+            keys::Q_MISC_LOADING_YOUR_EMOJI_PACKS
+        };
         let mut choices = div()
             .id("chat-appearance-packs")
             .flex()
@@ -186,12 +192,7 @@ impl QuillApp {
             ))
             .child(choices)
             .when(empty, |this| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(tr(keys::Q_MISC_LOADING_YOUR_EMOJI_PACKS)),
-                )
+                this.child(div().text_xs().text_color(muted).child(tr(empty_note)))
             })
             .child(
                 div()

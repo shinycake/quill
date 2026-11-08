@@ -148,7 +148,8 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase C2i: `searchCallMessages` (schema 1.8.67 :11903) — first
     /// page of the server-side recent-calls list. Called when the
-    /// Recent-calls tab opens.
+    /// Recent-calls tab opens. A page still in flight is forgotten: its
+    /// answer would continue a list that starts over here.
     pub fn fetch_call_history(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -156,6 +157,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
         self.session.calls.recent_calls_error = false;
+        self.session.calls.recent_calls_request = None;
         self.fetch_call_history_page()
     }
 
@@ -199,7 +201,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading {
+        if self.session.calls.recent_calls_loading() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -214,7 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.calls.recent_calls_error = true;
             return Err(err);
         }
-        self.session.calls.recent_calls_loading = true;
+        self.session.calls.recent_calls_request = Some(extra);
         Ok(extra)
     }
 

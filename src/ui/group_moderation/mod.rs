@@ -77,6 +77,13 @@ impl QuillApp {
                 self.connection.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
                 )));
+            } else if let Some(AdminDialogKind::Promote { searched, .. }) = self
+                .admin
+                .admin_dialog
+                .as_mut()
+                .map(|dialog| &mut dialog.kind)
+            {
+                query.trim().clone_into(searched);
             }
         } else {
             self.connection.set_note(StatusNote::info(tr(

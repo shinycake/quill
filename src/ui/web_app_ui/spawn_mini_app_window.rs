@@ -7,6 +7,15 @@ use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
+        // An app whose URL lands while Quill is locked (asked for just
+        // before the lock) is refused: the helper window would show it,
+        // usable, over the lock. TDLib closes the launch.
+        if self.refused_while_locked() {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.close_web_app(launch.launch_id);
+            }
+            return;
+        }
         let Some(path) = helper_path() else {
             self.set_status_note(
                 StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2)),
@@ -100,6 +109,10 @@ impl QuillApp {
             .and_then(|info| info.as_ref())
             .map(|info| info.privacy_policy_url.clone())
             .filter(|url| quill::text::openable_http_url(url));
+        // A launch that lands while another app is open replaces it: the
+        // old helper quits and TDLib hears `closeWebApp` for its launch,
+        // as the window's own close does.
+        self.close_mini_app_window(cx);
         self.mini_apps.window = Some(MiniAppWindow {
             child: Some(child),
             writer: HelperWriter::spawn(stdin),
@@ -184,7 +197,7 @@ impl QuillApp {
             || self.mini_apps.awaiting_toggle.is_some()
             || self
                 .session()
-                .is_some_and(|session| session.bots.web_apps.pending.is_some())
+                .is_some_and(|session| !session.bots.web_apps.pending.is_empty())
     }
 
     /// The session's one-shot answers.

@@ -451,6 +451,7 @@ fn call_history_pages_accumulate_and_track_offset() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -462,9 +463,10 @@ fn call_history_pages_accumulate_and_track_offset() {
     );
     assert_eq!(session.calls.recent_calls.len(), 1);
     assert_eq!(session.calls.recent_calls_offset, "page2");
-    assert!(!session.calls.recent_calls_loading);
+    assert!(!session.calls.recent_calls_loading());
     assert!(!session.calls.recent_calls_error);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls_request = Some(extra);
     apply_json(
         &mut session,
         &seq,

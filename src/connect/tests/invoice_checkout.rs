@@ -45,6 +45,20 @@ fn stars_form(extra: &Value) -> String {
     .to_string()
 }
 
+/// A receipt fetch from another window leaves the open checkout's invoice:
+/// `shows` and "Processing…" still read the checkout's own.
+#[test]
+fn a_receipt_fetch_keeps_the_open_checkouts_invoice() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    let invoice = InputInvoice::Name("shop_1".into());
+    driver.send_payment_form_request(invoice.clone()).unwrap();
+    driver
+        .fetch_payment_receipt(ChatId(5), MessageId(9))
+        .unwrap();
+    let _ = sent_request(&recorder, "getPaymentReceipt");
+    assert!(driver.session.payments.shows(&invoice));
+}
+
 #[test]
 fn an_invoice_link_asks_for_its_form_by_name() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
@@ -269,7 +283,12 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
         .ingest(copy_and_parse(&result.to_string(), &seq, &sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.payments.verification_url.as_deref(),
+        driver
+            .session
+            .payments
+            .verification_url
+            .as_ref()
+            .map(|step| step.url.as_str()),
         Some("https://hooks.stripe.com/3d_secure/x")
     );
     assert!(!driver.session.payments.form_paid);

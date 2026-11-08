@@ -154,6 +154,15 @@ impl QuillApp {
             .take_if(|intent| intent.target.kind() == kind);
     }
 
+    /// The viewer of the window in place stopped: drop its parked clip
+    /// only. Another window's viewer waits on its own download.
+    pub(super) fn drop_viewer_play_intent_here(&mut self) {
+        let here = self.windows.scope;
+        self.playback.intent.take_if(|intent| {
+            intent.target.kind() == PlayKind::Viewer && intent.target.window() == here
+        });
+    }
+
     /// Drop a target parked for `message` (its track stopped).
     pub(super) fn drop_play_intent_for_message(&mut self, message: MessageId) {
         self.playback

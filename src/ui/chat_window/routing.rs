@@ -9,12 +9,37 @@
 //! at the chat from another one, a forum topic, a resolved comment thread)
 //! rides in the [`ChatOpen`] request, so it reaches the window that shows
 //! the chat instead of staying in the state of the window that asked.
+//! So does what the open hands over ([`ChatOpenCarry`]): messages to
+//! forward, dropped files, text for the composer and the inline results
+//! button's round trip. They are applied in the window that shows the
+//! chat, never in the one that asked.
 
 use super::super::app::QuillApp;
+use super::super::inline_return::InlineReturn;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
-use quill::composer::ComposerReplyTo;
+use quill::composer::{ComposerReplyTo, ForwardDraft};
+use quill::drop_modes::DropAction;
 use quill::ids::{ChatId, MessageId};
+use quill::lang::{keys, tr};
 use quill::state::ThreadView;
+use std::path::PathBuf;
+
+/// What an open hands to the window that shows the chat.
+#[derive(Debug, Default)]
+pub(in crate::ui) struct ChatOpenCarry {
+    /// Messages to forward, waiting in the forward bar (a drag dropped on
+    /// a chat row, the Forward box's "continue in chat").
+    pub(in crate::ui) forward: Option<ForwardDraft>,
+    /// Files dropped on a chat row, attached in that chat; `true` sends a
+    /// folder as one archive.
+    pub(in crate::ui) files: Option<(Vec<PathBuf>, bool)>,
+    /// Text the composer opens with (a link's `/start` prefill, the
+    /// inline query typed back into its chat).
+    pub(in crate::ui) compose: Option<String>,
+    /// The inline results button's round trip, moved to the bot's window.
+    pub(in crate::ui) inline_return: Option<InlineReturn>,
+}
 
 /// One request to show a chat, with what the view lands on.
 #[derive(Debug)]
@@ -33,6 +58,8 @@ pub(in crate::ui) struct ChatOpen {
     pub(in crate::ui) reply: Option<ComposerReplyTo>,
     /// The forum topic to open (a chat row's topic chip).
     pub(in crate::ui) topic: Option<i32>,
+    /// What the open hands over.
+    pub(in crate::ui) carry: ChatOpenCarry,
 }
 
 impl ChatOpen {
@@ -44,7 +71,28 @@ impl ChatOpen {
             open_at: None,
             reply: None,
             topic: None,
+            carry: ChatOpenCarry::default(),
         }
+    }
+
+    pub(in crate::ui) fn forwarding(mut self, draft: ForwardDraft) -> Self {
+        self.carry.forward = Some(draft);
+        self
+    }
+
+    pub(in crate::ui) fn with_files(mut self, paths: Vec<PathBuf>, archive: bool) -> Self {
+        self.carry.files = Some((paths, archive));
+        self
+    }
+
+    pub(in crate::ui) fn compose(mut self, text: String) -> Self {
+        self.carry.compose = Some(text);
+        self
+    }
+
+    pub(in crate::ui) fn with_inline_return(mut self, ret: Option<InlineReturn>) -> Self {
+        self.carry.inline_return = ret;
+        self
     }
 
     pub(in crate::ui) fn at(mut self, message_id: MessageId) -> Self {
@@ -124,6 +172,89 @@ impl QuillApp {
         if let Some(message_id) = open.open_at {
             self.jump_to_pinned_message(message_id, cx);
         }
+        self.apply_open_carry(open.chat_id, open.carry, None, cx);
+        cx.notify();
+    }
+
+    /// The window in place shows `chat_id`: what the open handed over
+    /// lands in it. Without a window at hand the composer text waits for
+    /// the window's frame (`apply_compose_after_open`).
+    pub(in crate::ui) fn apply_open_carry(
+        &mut self,
+        chat_id: ChatId,
+        carry: ChatOpenCarry,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let ChatOpenCarry {
+            forward,
+            files,
+            compose,
+            inline_return,
+        } = carry;
+        if let Some(draft) = forward {
+            self.show_forward_bar(chat_id, draft, cx);
+        }
+        if let Some((paths, archive)) = files {
+            if archive {
+                self.drop_on_zone(DropAction::Archive, &paths, cx);
+            } else {
+                self.drop_files_plain(&paths, cx);
+            }
+        }
+        // The inline results button's start goes out right away; the
+        // prefill is only for a start the user confirms.
+        let started = match inline_return {
+            Some(ret) => {
+                self.composer_ui.inline_return = Some(ret);
+                self.take_inline_start(chat_id, cx)
+            }
+            None => false,
+        };
+        if let Some(text) = compose.filter(|_| !started) {
+            match window {
+                Some(window) => self.set_composer_plain(&text, window, cx),
+                None => self.chat_ui.compose_after_open = Some(text),
+            }
+        }
+    }
+
+    /// Once per window frame: text an open handed over without a window
+    /// at hand goes into the composer, while the chat it was for shows.
+    pub(in crate::ui) fn apply_compose_after_open(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(text) = self.chat_ui.compose_after_open.take() {
+            self.set_composer_plain(&text, window, cx);
+        }
+    }
+
+    /// Plain text into the composer, replacing what is there.
+    fn set_composer_plain(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer_ui.markdown_revert = None;
+        self.composer
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        cx.notify();
+    }
+
+    /// `draft` waits in the forward bar of `chat_id`, the window in place
+    /// showing it: the state the Forward box leaves when one chat is
+    /// chosen.
+    pub(in crate::ui) fn show_forward_bar(
+        &mut self,
+        chat_id: ChatId,
+        draft: ForwardDraft,
+        cx: &mut Context<Self>,
+    ) {
+        self.share.pending_forward = Some(draft);
+        self.share.forward_bar_dest = Some(chat_id);
+        self.share.forward_picker_open = false;
+        self.share.selection.clear();
+        self.connection.set_note(StatusNote::silent(tr(
+            keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
+        )));
         cx.notify();
     }
 }
@@ -132,3 +263,8 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 #[path = "routing_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "routing_carry_tests.rs"]
+mod carry_tests;

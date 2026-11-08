@@ -511,6 +511,14 @@ impl QuillApp {
         }
         self.twofa.open = true;
         self.goto_twofa_view(TwofaView::Status);
+        // The last change's error belongs to the box it was shown in; a
+        // cached state skips the fetch that would clear it. One still in
+        // flight keeps its answer's line.
+        if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
+            && !auth.password_state_loading
+        {
+            auth.password_op_error = None;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_password_state();
         }

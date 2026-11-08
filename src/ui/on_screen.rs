@@ -160,7 +160,7 @@ on_screen_fields! {
     /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
     folders: super::folders_state::FolderUi,
     /// Standalone boxes: profiles, contacts, chat look, export, tags and call rating (`ui/dialogs_state.rs`).
-    dialogs: super::dialogs_state::DialogUi,
+    dialogs: Box<super::dialogs_state::DialogUi>,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
     admin: super::admin_state::AdminUi,
     /// Payments and the gift marketplace (`ui/payments_state.rs`).
@@ -303,10 +303,7 @@ impl OnScreen {
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         let history = super::history_state::HistoryUi::new(cx);
         // The scroller notifies on every scroll: drives the floating date.
-        cx.observe(&history.scroller, |this, _, cx| {
-            this.note_history_scroll(cx);
-        })
-        .detach();
+        QuillApp::observe_history_scroll(&history, None, cx);
         let message_ui = super::message_state::MessageUi::new(window, cx);
         super::history_a11y::install(&message_ui.history_focus, window, cx);
         Self {
@@ -336,7 +333,7 @@ impl OnScreen {
             message_ui,
             notify: super::notify_state::NotifyUi::new(),
             folders: super::folders_state::FolderUi::new(),
-            dialogs: super::dialogs_state::DialogUi::new(window, cx),
+            dialogs: Box::new(super::dialogs_state::DialogUi::new(window, cx)),
             admin: super::admin_state::AdminUi::new(),
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),

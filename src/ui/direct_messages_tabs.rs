@@ -177,9 +177,9 @@ impl QuillApp {
         }
         let chat_id = tabs.chat_id;
         let handle = if vertical {
-            self.folders.topic_tabs_column_scroll.clone()
+            self.history.subsection_tabs.column.clone()
         } else {
-            self.folders.topic_tabs_scroll.clone()
+            self.history.subsection_tabs.strip.clone()
         };
         list.on_scroll(cx.listener(move |this, _, _, cx| {
             let max = handle.max_offset();

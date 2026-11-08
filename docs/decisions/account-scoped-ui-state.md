@@ -1420,3 +1420,401 @@ sites missed.
     hover preview, and the next move over a bar resets it.
   - A mini app's switch-inline still waits for the main window's next
     frame when that window is hidden.
+
+### Phase 11 (area A)
+
+Round 11 of the review, area A, on `claude/sm-review11-a`. Core modules
+only. All six findings held up in code. Three of them (1, 2 and 5) had
+one cause: update paths read `open_chat` or the main window's thread or
+Saved view as "what is on screen". During `ingest` the view in place is
+the main window's, so a chat window got nothing.
+
+**One notion of every view on screen** (`src/state/session_views.rs`).
+
+- `views_shown()` reads every window's view where it is kept: the one
+  in place and each one in `WindowViews`. Each `ShownView` says which
+  window it belongs to and carries its chat, topic, thread and Saved
+  views. `chat_drawn(chat)` asks whether any window's pane draws a
+  chat, counting a comment thread's chats. `chat_is_shown` and
+  `chats_shown` are now built on it, and `WindowViews::shows_chat` /
+  `shows_topic` are gone.
+- `in_every_view(f)` runs an edit once with each view in place, for the
+  rows a view keeps itself (thread, Saved sublist and tag filter, the
+  gallery, the search jump). Requests made inside are stamped with that
+  view. Inside a closed window's throwaway view it runs once, because the
+  main window's view is held outside the session then.
+- Designs considered. (a) A `&mut` projection over every view's layers:
+  no swaps, but `thread_upsert` needs the request table as well as the
+  thread, so it would need a second path anyway. (b) Keying threads and
+  Saved views by window in the session: a larger move of state that
+  `swap_view` already owns. (c) Fixing each call site with its own loop,
+  as `maybe_download_shown_thumbs` does: that is the shape that kept
+  missing sites. We picked one read projection plus `in_every_view`.
+  A swap is nine `mem::swap`s, and with no chat window open
+  `in_every_view` runs `f` once with no swap.
+
+What goes through it:
+
+- **Redraw grading (1).** `shows_chat`, `shows_user`, `group_need` and
+  `interaction_need` read `views_shown`. New messages, typing, read ticks,
+  counters, drafts and positions of a chat shown only in a chat window
+  grade `Now`, and so does its peer's status. Before, they graded
+  `ChatList`, which redraws only the sidebar.
+- **Live thread and Saved updates (2).** New replies (`thread_upsert`),
+  the own reply's server id or failure (`replace_view_copy`), edits,
+  reactions and content changes (`edit_loaded_message` now edits every
+  view's thread and Saved rows), reply counters (`sync_thread_reply_info`),
+  deletions (thread, Saved views, gallery, search jump) and a deleted
+  Saved sublist all reach every window. `prune_reply_targets` keeps the
+  targets of every window's thread.
+- **Tap effects (5).** `accept_emoji_effect` checks `chat_is_shown`.
+- **Same shape, found in the sweep.** Reaction notifications now skip a
+  chat shown in the active chat window (`shown_in_active_window`, as
+  message notifications already did). The custom emoji the screen
+  shows, and the stories that story messages point at, come from
+  `shown_messages()` (every shown chat's history and every view's
+  layered rows). Full-media auto-download runs for each chat window
+  (`maybe_download_shown_chat_media`). The history pruner's "shown"
+  checks read `views_shown`.
+- **Guard.** `scripts/view_reads.py`, run by `check-window-scope.py`,
+  reads the update, answer and redraw files of `src/state` (`redraw.rs`,
+  `session_apply*.rs`, `session_updates.rs`, `updates_sync.rs`,
+  `session_notifications.rs`, `session_forward.rs`, and each domain's
+  `apply.rs`, `error.rs` and `interaction.rs`). It fails on a read of
+  `self.open_chat` / `session.open_chat`, `.threads.thread` or the Saved
+  views, unless the line or one of the three above carries
+  `// view-in-place: <why>`. Three reads carry it: the sponsored answer
+  (applied in the asking view), and the two notification inputs (the
+  main window's chat while the app is active). On 7240cf719 it fails
+  with 14 lines, among them `interaction.rs:23` (finding 5), the four
+  redraw reads behind finding 1, and the thread and Saved reads behind
+  finding 2 in `messages/apply.rs` and `edit_loaded_message`. A read split
+  over two lines (`session`, then `.open_chat`) counts. It cannot see a
+  read inside a helper defined in another file, such as `thread_accepts`
+  in `session_thread.rs`.
+
+**Every copy of a message (3).** `loaded_message(chat, message)` finds a
+row in the chat's history, a loaded forum topic, or any window's thread
+or Saved views. The poll vote and retract look the row up there, and the
+optimistic flip, its immediate undo and the `PollVote` rollback go
+through `set_poll_marks`, which edits every copy via
+`edit_loaded_message`. `apply_update_poll` updates every copy the same
+way. Thread pages, live thread replies, Saved pages and a live topic row
+outside the main window now index their polls, so `updatePoll` finds
+them. `apply_update_poll` returns the number of rows updated in any copy.
+
+**Answers matched to the query that asked (4, 6).**
+
+- Recent actions: `GroupsState::event_log_waits` holds the page and poll
+  each chat's log waits for (`EventLogWait`). A refresh forgets both and
+  is sent at once, even while an older page is out. A page, poll or
+  error with another id changes nothing. `has_event_log_in_flight` is
+  gone. A failed poll now clears its wait, so the next tick polls again.
+- Recent calls: `recent_calls_loading` is now
+  `recent_calls_request: Option<RequestId>`, and `recent_calls_loading()`
+  is derived from it. Reopening the tab clears it and asks for the first
+  page again. "Clear all"'s `ok` forgets the page in flight. Only the
+  awaited page or error lands.
+
+**Tests.** Every fix has a deterministic test of what the user sees:
+`state/tests/redraw.rs` (a chat window's typing, message, read tick and
+status grade `Now`, also with the window's view in place, and a chat
+window's thread counts), `connect/tests/chat_window_views.rs` (a live
+reply, the own reply's server id, edit and delete in a chat window's
+thread, a vote and a refused vote there, a vote in a forum topic),
+`connect/tests/latest_query_wins.rs` (search typed during a load,
+filters saved during an older page, a poll from before a refresh, a
+Calls reopen, Clear all during a page),
+`state/tests/emoji_interaction.rs`, `notify/tests.rs`, `emoji/tests.rs`,
+`state/tests/message_story.rs` and `connect/tests/update_batch.rs`. With
+`in_every_view` and `loaded_message` reduced to the view in place, the
+five chat-window thread tests fail.
+
+**Not done.** File-progress grading still treats chat windows' automatic
+downloads as off-screen (`Later`), because only the main window reports
+the rows it shows. A Saved Messages sublist takes no live new messages,
+in any window, as before. `drop_thread_pages_past` matches pages by
+thread, so two windows showing the same thread mark each other's pages
+stale.
+
+### Phase 11 (area B: keys, actions, carried opens and per-window layers)
+
+Round 11 of the review, area B, on `claude/sm-review11-b`. Findings 1
+and 14 belong to area A. The rest come down to three shapes: input
+bound or checked for the main window only, chat opens that skipped the
+router or left what they carried behind, and layer state that every
+window shared.
+
+- **Keys per window.** The key interceptor moved to `window_keys.rs`.
+  `key_window` tells the main window, a chat window and the app's other
+  windows (Settings, notification popups, call windows) apart, and keys
+  in an "other" window are left to that window. `context_menu_open` and
+  `dismiss_context_menus` count the main window's menus (the chat-list
+  row, archive and story menus, a playlist's, a folder tab's) only while
+  the main window's state is in place. A chat window's Escape and arrow
+  keys no longer go to a menu it does not draw. The lock dismisses each
+  window's menus inside `in_every_window`.
+- **Actions on every root.** `window_actions.rs` binds the composer,
+  history, selection, in-chat search and viewer actions, plus Copy and
+  Paste in the capture phase. The main root and every chat window's root
+  bind the same list. `chat_window_app_actions` gives a chat window the
+  app's own commands. Lock (Cmd/Ctrl+L), the theme toggle and Help run as
+  the main window. Quit, Settings and Shortcuts go through
+  `hand_to_main_window`. Minimize, Zoom and Full Screen act on the chat
+  window itself. Before this, all of them did nothing while a chat window
+  had the focus. The chat list's keys (pinned chats, folders, the
+  list's arrows) and the story viewer's keys stay main-only, because
+  only the main window draws those surfaces.
+- **Opens carry their state.** `ChatOpen` gained `ChatOpenCarry`:
+  messages to forward, dropped files, composer text and the inline
+  results button's round trip. `apply_open_carry` applies them in the
+  window that shows the chat, from `land_chat_open` and from
+  `select_chat_request`. Composer text that arrives without a window at
+  hand waits in `ChatUi::compose_after_open` for that window's
+  `per_window_upkeep`. These now route with what they carry:
+  - the Forward box's "continue in chat": the source window keeps no
+    forward, selection or comment;
+  - a forward drag or a file drop on a chat row, and the drop-topic
+    chooser;
+  - the thread back button, which opens the origin chat at the post;
+  - the pull-to-next jump. If the jump went to another window,
+    `select_chat_request` returns false, and the pull machine resets
+    instead of staying in its jump;
+  - the inline query typed back into its chat;
+  - a deep link for a chat that has a window of its own. The jump, the
+    `/start` prefill, a link's draft and the inline start are applied in
+    that window;
+  - a story area's message link.
+- **The routing guard.** `check-window-scope.py` fails a `QuillApp`
+  method that opens a chat through the driver (`select_chat`,
+  `select_chat_open`, `select_search_chat_open`, `select_search_message`
+  or `switch_to_thread_chat`) without calling `route_chat_open`. An open
+  that has to stay in place says why with `// routed: <why>`. The only
+  one is a basic group replaced in place by its supergroup upgrade.
+- **Per-window layers.** The subsection tabs' strip and column scroll
+  and their revealed key moved from `FoldersUi` to `HistoryUi`
+  (`SubsectionTabsScroll`), so they are swapped per window. Every
+  window's history scroller has its own observer
+  (`observe_history_scroll`), which puts that window's state in place
+  before it records the scroll position, preloads or moves the date
+  pill. Before, a chat window's scrolls were noted only by its renders.
+  The GIF panel is read from the window's own media panel. The session's
+  one GIF gate (`gifs.open`) follows whether any window shows the GIFs
+  tab (`sync_gif_downloads`). The sticker panel, which is session-wide,
+  counts only in the main window, so Escape in a chat window no longer
+  closes it.
+- **Smaller fixes.**
+  - Jumps are deduped by `(jump_serial, message)`, so going to the same
+    message again after scrolling away lands again.
+  - Each Saved Messages sublist and tag view has its own history key: a
+    negative third part hashed from the view.
+  - A reply-keyboard button always sends a new message, even while
+    editing, with a forward bar or with a tray.
+
+Tests: `chat_window/routing_carry_tests.rs` (forward, continue-in-chat,
+composer text, `/start` link, files), `chat_window/window_input_tests.rs`
+(Lock from a chat window, main menus vs a chat window's keys, the GIF
+panel per window, the tab strip per window, Saved view keys),
+`landing_tests.rs` (the same jump twice) and `composer/bars_tests.rs`
+(a keyboard button while editing).
+
+Left open:
+- The thread back button and the pull-to-next reset have no test,
+  because the demo has no live comment thread and no pull session.
+- The per-window scroll observer has no test either. Its effect is a
+  saved position and a date pill, which the harness does not scroll.
+- A deep link's thread or media timestamp, for a chat with its own
+  window, still runs in the main window (`finish_typed_link`).
+- A link's draft replaces the routed window's composer text. In the
+  main window it is appended to the text already there.
+- "All Messages" from the drop-topic chooser, for a forum with its own
+  window, leaves that window's open topic as it is.
+
+### Phase 11 (area C, part 1)
+
+Round 11 of the review, area C, findings 1 and 3 to 20, on
+`claude/sm-review11-c1`. Finding 2 (Lock Quill bound only on the main
+root) is the action bindings' fixer's. The findings were four shapes.
+
+- **The lock has one owner.** `passcode/lock_gate.rs` holds both
+  halves. `close_for_lock` stops or closes what the lock screen does
+  not cover: a recording (cancelled, so a round video at its limit is
+  not sent), every window's media viewer, the story viewer, the mini
+  app window, context menus, notification windows, every video PiP and
+  the device-linking camera scanner. `refused_while_locked` stops new
+  ones: recordings, a mini app whose URL lands under the lock (TDLib's
+  launch is closed) and links. A launch or OS link is held until the
+  unlock, as tdesktop holds start links (`checkStartUrls`): the poll
+  does not resolve it, and a link resolved just before the lock opens
+  its chat or box at the first frame after the unlock
+  (`run_resolved_deep_link`). Call windows stay up, as tdesktop leaves
+  its call panel, so a call can still be answered.
+  Guard: `scripts/lock_surfaces.py` (run by `check-screen-state.py`).
+  Every production function in `src/ui` that opens an OS window
+  (`.open_window(`), starts a helper process (`Command::new(`) or
+  starts a recording (`.begin_capture_start(`) must call
+  `refused_while_locked()` or be listed in `scripts/lock-surfaces.txt`
+  with the closer `close_for_lock` calls, or `-` and the reason the
+  lock need not reach it. `refuses` pins the link paths, which no
+  pattern finds. The list has 14 entries.
+- **What is open over a story belongs to that story.**
+  `leave_story_item` runs on every step, every open over an open
+  viewer and every release (a deleted story, the lock): it ends the
+  reply row and its recording, closes the item's panels and replaces
+  `StoryViewerUi` with a fresh one (close friends' edit and save
+  survive, being the account's). Before, the cover and privacy
+  editors survived Prev and Next and saved the story they were opened
+  on, and an open over the viewer kept the old reply and share panel.
+  A story reply whose story went is cancelled, never sent to the chat
+  under the viewer (`story_reply_send_target`). The ⋯ menu pauses the
+  story while open (`menu_open`) and each entry carries the story it
+  was drawn for, so a pick after the story moved on does nothing.
+  Edit and Repost pause the viewer under the composer. A finished
+  story page op ("Saved", "Failed") is settled when its story or page
+  goes (`settle_story_page_op`); one in flight keeps its line. A live
+  story's pending Stars commit from the poll, for a background account
+  too, and `next_deadline` wakes for them, so Stars tapped before the
+  story went to Picture-in-Picture are sent, not dropped.
+- **An answer acts on the owner it was asked for.**
+  - The header's Mute box keeps the chat it was opened on
+    (`mute_chat`, no fallback to the open chat). The auto-delete picker
+    is now `ttl_picker: Option<ChatId>`, the chat it was opened for, so
+    one opened from a profile's menu no longer sets the open chat's
+    timer.
+  - The call rating draft carries its call (`RatingDetail::call_id`).
+    Another call's summary neither shows it nor submits it, and Skip
+    drops it.
+  - The screen chooser and the screen access box belong to their call.
+    The video chat's id is recorded at open (`ScreenShareUi::group_call`).
+    When that call ends or another takes its place they close
+    (`sync_screen_share_call`), and a pick that lands after shares into
+    nothing. Closing the video chat window closes its Settings and
+    rename boxes.
+  - The free-transcription quota last seen is per account
+    (`OwnedBy`), so a switch toasts nothing.
+  - A GIF file plays in the window that pressed it (`PlayingGif`
+    carries the window), and that window's close stops it.
+- **One copy per screen or per window, not one shared.**
+  - The Privacy page's password check has its own field
+    (`TwoStepUi::check_password`). It shared the 2FA box's field, which
+    painted in two places, showed the same text twice and redrew every
+    frame (`lock-field-per-window.md`).
+  - "Send messages with" reaches every window's composer, not only the
+    main one's.
+  - The push-to-talk release slider moved from the app-wide
+    `GroupCallUi` to the screen-scoped `SettingsUi`, so each account's
+    Settings > Calls seeds its own.
+  - A switch during video full screen gives the window back
+    (`ViewerUi`'s farewell).
+- **Nothing waits on the main window's frame.**
+  - The call windows' sync ran only in the main window's upkeep, which
+    a hidden or minimized main window never draws. It now runs from the
+    notification pass (every poll) and from a chat window's draw
+    (`sync_call_windows`), and the call screen's linger timer syncs when
+    it fires. An incoming call is shown as an OS notification unless
+    the main window or the call window is active (`call_ring_seen`),
+    so a call is not silent while you work in a chat window.
+  - View Profile, Statistics and Monetization from a chat window hand
+    off to the main window, which draws the info column. "View all
+    photos" is left out of a chat window's viewer menu: no chat window
+    draws the shared media gallery.
+- **Findings 21 to 40.** None shares a root cause with these fixes. The
+  call window id leftover in 40 was not touched.
+- **Not done, or not tested.**
+  - Joining a video chat from a chat window: the start box and the
+    RTMP toasts still wait for the main window (part of 15).
+  - No behaviour test for "Send messages with" in a chat window: the
+    kit's input has no getter for the mode, and a test would have to
+    press Enter in the window's composer.
+  - No in-app test for the per-account transcription toast, the PTT
+    slider or the full-screen farewell: each needs a second account or
+    an OS full-screen window. `OwnedBy` and the screen-state guard
+    cover the first two.
+  - The OS notification for a ringing call and the call sync from a
+    chat window were not run with a real hidden main window.
+  - The mini app refusal under the lock was not tested; the window
+    needs the helper process.
+  - The 2FA field split is covered by a test that checks the password
+    without touching the box's field. The redraw loop itself was not
+    measured.
+
+### Phase 11 (area C, part 2)
+
+Round 11 of the review, area C, findings 21 to 40, on
+`claude/sm-review11-c2`. Part 1 (`claude/sm-review11-c1`) took the
+lock, the chat-window entry points, the GIF, video chat boxes and the
+PTT slider; nothing here overlaps it.
+
+- **An answer lands where its request came from.**
+  - Off-UI work (`run_off_ui_then`) now resumes with `spawn_screen`, so
+    a result never finishes on another account's screen. The profile
+    photo crop resumes with `run_off_ui_scoped_then`, in its window.
+  - The resale gift buy goes to the recipient the Send Gift box picked
+    (`start_gift_resale_buy(name, recipient, for_craft)`), not to the
+    chat open behind it. Opening the market copies the recipient only
+    while the send box is open.
+  - A 3-D Secure step closes the checkout only when it came from the
+    checkout on screen (`PaymentVerification::closes_checkout`). A
+    receipt fetch no longer overwrites the open checkout's invoice.
+  - Mini app launches keep a list of pending contexts keyed by request
+    (`WebAppPending::request`), so two overlapping launches each open
+    with their own bot and source. A launch whose send fails drops its
+    entry, and a new mini app window closes the old one first.
+  - New Contact ignores a second Create while its import is in flight
+    and clears the request after any answer.
+  - The bot-create poll waits until it gets an answer or the box closes,
+    instead of giving up after 200 tries.
+- **A member change refetches the lists that show it.** A
+  `setChatMemberStatus` or tag success marks the chat's member list
+  stale and drops its administrator list and the user's cached rights;
+  `updateChatMember` marks it stale too (`mark_member_list_stale`). The
+  poll refetches the administrators of a stale chat with none cached.
+- **Per-window state moved to the slot; screen state moved off it.**
+  - The topic strip's scroll and reveal moved from `FolderUi` to
+    `HistoryUi`, so each window keeps its own.
+  - The sticker and masks manager moved from `PickerUi` (per window) to
+    `SettingsUi`, because the session has one manager and its close runs
+    as the main window.
+  - A set's video pick carries its window. Its editor opens there
+    (`hand_to_chat_window`), and the pick is dropped if the window
+    closed. Closing the viewed sticker set closes its box in every
+    window.
+  - The location picker remembers the window that opened it and closes
+    with that window.
+- **A box or line belongs to what it was opened for.**
+  - New Topic from a chat window reopens the manage box for that
+    window's forum instead of editing the main window's.
+  - The revoked-links disclosure is keyed by chat. The Promote picker
+    shows Recent until a search is actually sent.
+  - Closing the profile modal gives the info column back to what it
+    showed before. Opening another chat drops the modal and its saved
+    column.
+  - The Direct Messages price box takes the price when it arrives,
+    instead of keeping the 0 it was opened with.
+  - The 1:1 call window's close reads the call it shows now. Before, a
+    window reused for a second call kept the first call's id, so
+    closing it opened it again at the next sync.
+- **Playback and the viewer.** A saved track's title opens its owner's
+  playlist, and its row counts as playing from any chat. Closing the
+  viewer drops a pending seek. A main-window viewer stop drops only the
+  main window's play intent. Closing the forward picker drops its
+  timestamp.
+- **Lines that outlive their box.** Reopening 2FA clears its last error
+  (unless a request is in flight), the Account box clears its error,
+  and the emoji sets box clears "Could not update emoji packs". A
+  supergroup's Appearance box shows "Loading your emoji packs" only
+  until the list answers (`EmojiPanel::installed_loaded`), then "You
+  have no emoji packs".
+- **Animated userpics follow the account.** `UserpicVideos::own` drops
+  the failed list and the slots when the account on screen changes, so
+  one account's failures do not hide another's clips.
+- **Not done, or not tested.**
+  - The bot-create poll and the Promote picker's Recent fallback have no
+    tests; both need a live driver.
+  - A 3-D Secure page from a checkout that was replaced still opens
+    (only the checkout stays); tdesktop opens it too.
+  - Mini apps still have one `open_result` slot; a second answer before
+    the first is drawn replaces it.
+  - The `group_call.ptt_delay_slider` entry in
+    `scripts/app-wide-fields.txt` belongs to part 1, which moved the
+    slider to `SettingsUi`.

@@ -84,8 +84,9 @@ impl Session {
             // surface on the Recent-calls tab (the UI reads the
             // flags), not the call overlay.
             Some(RequestPurpose::SearchCallMessages) => {
-                self.calls.recent_calls_loading = false;
-                self.calls.recent_calls_error = true;
+                if pending.is_some_and(|p| self.calls.take_recent_calls_request(p.id)) {
+                    self.calls.recent_calls_error = true;
+                }
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls_clearing = false;

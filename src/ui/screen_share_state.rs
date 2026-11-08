@@ -42,6 +42,9 @@ pub(crate) struct ScreenShareUi {
     pub(super) generation: u64,
     /// The privacy box shown over this call's window.
     pub(super) privacy_for: Option<ScreenFor>,
+    /// The video chat a `ScreenFor::Group` chooser or box was opened for:
+    /// another video chat, or none, closes them (`sync_screen_share_call`).
+    pub(super) group_call: Option<i32>,
     /// A backend used instead of the OS one (demos, tests).
     pub(super) backend: Option<Arc<dyn ScreenBackend>>,
     /// The demo's "currently shared" source (live calls ask the driver).

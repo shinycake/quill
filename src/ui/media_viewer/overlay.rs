@@ -313,7 +313,7 @@ impl QuillApp {
                 let menu_set_main = can_set_main;
                 let menu_can_report = can_report;
                 let menu_playable = item.kind.is_playable();
-                let menu_chat_source = self.viewer.state.source() == ViewerSource::Chat;
+                let menu_chat_source = self.viewer_can_view_all();
                 let menu_rotate_video = self.viewer_video_rotatable();
                 let menu_share_at: Option<String> =
                     (self.viewer_can_share_at_time() && can_forward).then(|| {

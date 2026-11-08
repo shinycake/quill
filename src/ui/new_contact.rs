@@ -63,6 +63,11 @@ impl QuillApp {
         let Some(dialog) = self.dialogs.add_contact_dialog.as_ref() else {
             return;
         };
+        // A second press while this box's import is out waits for its
+        // answer: the box keeps the request it applies.
+        if dialog.sent_request.is_some() {
+            return;
+        }
         let first = dialog.first_name_input.read(cx).value().to_string();
         let last = dialog.last_name_input.read(cx).value().to_string();
         let phone = dialog.phone_input.read(cx).value().trim().to_string();
@@ -83,12 +88,13 @@ impl QuillApp {
         };
         match sent {
             Ok(request) => {
-                if let Some(dialog) = self.screen.dialogs.add_contact_dialog.as_mut() {
+                let demo = self.live.is_none();
+                if let Some(dialog) = self.screen.dialogs.add_contact_dialog.as_mut()
+                    && (request.is_some() || demo)
+                {
                     dialog.sent_name = Some(first);
                     dialog.sent_request = request;
-                    if self.live.is_none() {
-                        dialog.not_joined = true;
-                    }
+                    dialog.not_joined = demo;
                 }
             }
             Err(err) => self.connection.set_note(StatusNote::error(user_error_for(
@@ -114,6 +120,12 @@ impl QuillApp {
             .and_then(|live| live.driver.session.users_state.new_contact_outcome.take())
             .filter(|(request, _)| Some(*request) == sent)
             .map(|(_, outcome)| outcome);
+        // Answered: Create may send again (after "not joined" or a failure).
+        if outcome.is_some()
+            && let Some(dialog) = self.dialogs.add_contact_dialog.as_mut()
+        {
+            dialog.sent_request = None;
+        }
         match outcome {
             None => {}
             Some(NewContactOutcome::Joined(_)) => {

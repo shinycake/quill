@@ -49,7 +49,7 @@ pub(super) struct MenuEntry {
 }
 
 fn icon_button(
-    id: &'static str,
+    id: impl Into<ElementId>,
     icon: IconName,
     label: &str,
     variant: ButtonCustomVariant,
@@ -101,15 +101,21 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_story_pause(cx))),
             );
             let entries = self.story_viewer_menu_entries();
-            if !entries.is_empty() {
+            let story = self.stories.viewer.current().map(StoryViewerItem::key);
+            if let Some(story) = story.filter(|_| !entries.is_empty()) {
                 let owner = cx.entity().downgrade();
+                let opened = owner.clone();
+                // The trigger is the story's: another story gets a fresh
+                // menu, built for it, and this one goes.
+                let id = format!("story-more-{}-{}", story.0.0, story.1);
                 row = row.child(
                     icon_button(
-                        "story-more",
+                        SharedString::from(id),
                         IconName::Ellipsis,
                         tr(keys::PROFILE_ACTION_SHORT_MORE),
                         chrome::ghost(cx),
                     )
+                    .debug_selector(|| "story-more".into())
                     .dropdown_menu(move |mut menu, _, _| {
                         for entry in &entries {
                             let (owner, act) = (owner.clone(), entry.act);
@@ -122,12 +128,20 @@ impl QuillApp {
                                     .disabled(entry.disabled)
                                     .on_click(move |_, window, cx| {
                                         let _ = owner.update(cx, |this, cx| {
-                                            this.run_story_menu(act, window, cx)
+                                            this.run_story_menu(act, story, window, cx)
                                         });
                                     }),
                             );
                         }
                         menu
+                    })
+                    // The story holds still while its menu is open.
+                    .on_open_change(move |open, _, cx| {
+                        let open = *open;
+                        let _ = opened.update(cx, |this, cx| {
+                            this.stories.with_viewer_ui(|ui| ui.menu_open = open);
+                            cx.notify();
+                        });
                     }),
                 );
             }
@@ -290,8 +304,25 @@ impl QuillApp {
         out
     }
 
-    fn run_story_menu(&mut self, act: MenuAct, window: &mut Window, cx: &mut Context<Self>) {
+    /// Run a ⋯ menu entry for `story`, the story the menu was opened
+    /// for. If the viewer shows another story by now (it was stepped by
+    /// key or arrow, or opened over), the entry does nothing: Delete,
+    /// Report, Hide and the editors would act on the wrong story.
+    pub(super) fn run_story_menu(
+        &mut self,
+        act: MenuAct,
+        story: (ChatId, i32),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.menu_open = false;
+        }
         let item = self.stories.viewer.current().cloned();
+        if item.as_ref().map(StoryViewerItem::key) != Some(story) {
+            cx.notify();
+            return;
+        }
         match act {
             MenuAct::Stories => {
                 if let Some(item) = item {

@@ -302,6 +302,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_story_viewer(cx);
+        // A chat in a window of its own shows the message there.
+        let open = super::chat_window::ChatOpen::new(chat_id).at(message_id);
+        if self.route_chat_open(open, cx).is_none() {
+            cx.notify();
+            return;
+        }
         self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note(
@@ -552,8 +558,10 @@ impl QuillApp {
         if let Some(session) = session {
             session.clear_story_report();
             session.clear_story_viewers();
-            // A failed edit's line was about the story it edited.
+            // A failed edit's line was about the story it edited, and a
+            // finished page op's about the story or page it acted on.
             session.stories.manage.error = None;
+            session.settle_story_page_op();
         }
     }
 
@@ -672,8 +680,11 @@ impl QuillApp {
 
     /// Close the viewer itself: `closeStory` for the story it showed, no
     /// preloads, and no open still waiting for its story. Every close goes
-    /// through here, so TDLib's calls stay paired.
-    pub(super) fn release_story_viewer(&mut self) {
+    /// through here, so TDLib's calls stay paired. The story's own work
+    /// ends with it (`leave_story_item`): a reply being recorded is
+    /// cancelled, not left to be sent as a message to the open chat.
+    pub(super) fn release_story_viewer(&mut self, cx: &mut Context<Self>) {
+        self.leave_story_item(cx);
         if let Some(item) = self.stories.viewer.current().cloned()
             && let Some(live) = self.live.as_mut()
         {
@@ -697,10 +708,7 @@ impl QuillApp {
     /// editors, the pause, the notice) goes with it in
     /// `release_story_viewer`; this ends what other owners hold for it.
     pub(super) fn close_story_viewer(&mut self, cx: &mut Context<Self>) {
-        // The reply row's panel and recording are the media panel's and
-        // the recorder's: they read the viewer's state, so before it goes.
-        self.end_story_reply(cx);
-        self.release_story_viewer();
+        self.release_story_viewer(cx);
         // A live story playing on in Picture-in-Picture stays joined.
         if self.stories.live.watching != self.live_pip_story() {
             self.leave_live_story_view(cx);
@@ -731,7 +739,12 @@ impl QuillApp {
             || self.stories.viewer_ui().privacy_edit.is_some()
             || self.stories.viewer_ui().cover.is_some()
             || self.stories.viewer_ui().close_friends_edit.is_some()
+            || self.stories.viewer_ui().menu_open
             || self.stories.stealth_box.is_some()
+            // Edit and Repost open the composer over the viewer: the story
+            // under it must not play on, and TDLib must not mark the next
+            // stories viewed behind it.
+            || self.stories.composer.open
     }
 
     /// Phase 9.6: 100ms tick while the story viewer is open (mirrors
@@ -807,6 +820,9 @@ mod icon_chrome;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod icon_chrome_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod item_tests;
 mod live_comments;
 mod live_composer;
 #[cfg(feature = "demo-capture")]

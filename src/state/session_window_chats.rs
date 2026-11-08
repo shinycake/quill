@@ -18,27 +18,24 @@ use super::*;
 use std::collections::BTreeMap;
 
 impl Session {
-    /// Whether `chat_id` is on screen: the main window's chat or one shown
-    /// in its own window, whichever view is in place.
+    /// Whether `chat_id` is on screen: a window's chat (the main window's
+    /// or a chat window's, whichever view is in place), or a chat window's
+    /// own chat. A comment thread's chats count only for
+    /// [`Session::chat_drawn`].
     pub fn chat_is_shown(&self, chat_id: ChatId) -> bool {
-        self.open_chat == Some(chat_id)
-            || self.window_chats.contains(&chat_id)
-            || self.window_chats.shows_chat(chat_id)
+        self.window_chats.contains(&chat_id)
+            || self
+                .views_shown()
+                .any(|view| view.open_chat == Some(chat_id))
     }
 
-    /// Every chat on screen: the main window's and each chat window's,
-    /// whichever view is in place.
+    /// Every chat on screen ([`Self::chat_is_shown`]), sorted.
     pub fn chats_shown(&self) -> Vec<ChatId> {
         let mut chats: Vec<ChatId> = self
-            .open_chat
-            .into_iter()
-            .chain(self.window_chats.iter().copied())
-            .chain(
-                self.window_chats
-                    .views
-                    .values()
-                    .filter_map(|view| view.open_chat),
-            )
+            .window_chats
+            .iter()
+            .copied()
+            .chain(self.views_shown().filter_map(|view| view.open_chat))
             .collect();
         chats.sort_unstable_by_key(|chat| chat.0);
         chats.dedup();
@@ -249,19 +246,11 @@ impl WindowViews {
         self.views.is_empty()
     }
 
-    /// Whether a stored view (a window's, or the main window's while a
-    /// window's is in place) shows `chat_id`.
-    pub fn shows_chat(&self, chat_id: ChatId) -> bool {
-        self.views
-            .values()
-            .any(|view| view.open_chat == Some(chat_id))
-    }
-
-    /// Whether a stored view shows `topic` of `chat_id`.
-    pub fn shows_topic(&self, chat_id: ChatId, topic: i32) -> bool {
-        self.views
-            .values()
-            .any(|view| view.open_chat == Some(chat_id) && view.open_topic == Some(topic))
+    /// The stored views by key: each chat window's, except that while a
+    /// chat window's view is in place its entry holds the main window's
+    /// (read through [`Session::views_shown`], which says whose is whose).
+    pub(crate) fn stored(&self) -> impl Iterator<Item = (&ChatId, &SessionView)> {
+        self.views.iter()
     }
 
     pub fn len(&self) -> usize {

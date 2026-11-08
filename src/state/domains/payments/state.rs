@@ -4,6 +4,15 @@
 use crate::state::*;
 use crate::telegram::envelope::BankCardInfoData;
 
+/// A payment's verification step (`paymentResult.verification_url`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentVerification {
+    pub url: String,
+    /// The checkout on screen showed the paid invoice when the answer
+    /// came: opening the page closes that checkout, and only that one.
+    pub closes_checkout: bool,
+}
+
 pub struct PaymentsState {
     /// Slice P1: the in-flight payment request context (`getPaymentForm`,
     /// `validateOrderInfo`, `sendPaymentForm`, `getPaymentReceipt`).
@@ -50,7 +59,7 @@ pub struct PaymentsState {
     /// Slice P1: `paymentResult.verification_url` from a non-successful
     /// `sendPaymentForm` — the UI takes it on the next poll and opens it
     /// in the OS browser (3-D Secure and similar).
-    pub verification_url: Option<String>,
+    pub verification_url: Option<PaymentVerification>,
     /// The last `sendPaymentForm` answer asked for a verification step.
     /// Unlike `verification_url` nothing drains it; a mini app's checkout
     /// reads it to report `pending`.

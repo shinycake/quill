@@ -177,7 +177,9 @@ impl QuillApp {
     }
 
     /// One destination chosen: open it with the forward bar above its
-    /// composer (the typed comment moves into the composer).
+    /// composer (the typed comment moves into the composer). The forward
+    /// and the comment ride with the open to the window that shows the
+    /// chat; the box's window keeps none of it.
     pub(super) fn share_continue_in_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dest) = self.share.selection.single() else {
             return;
@@ -188,19 +190,21 @@ impl QuillApp {
             return;
         }
         let comment = self.share.comment_input.read(cx).value().trim().to_string();
-        self.share.forward_bar_dest = Some(dest);
+        let draft = self.share.pending_forward.take();
+        self.share.forward_bar_dest = None;
         self.share.forward_picker_open = false;
         self.share.selection.clear();
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.select_listed_chat(dest, window, cx);
-        if !comment.is_empty() {
-            self.set_composer_markup(&comment, window, cx);
+        let mut open = super::chat_window::ChatOpen::new(dest);
+        if let Some(draft) = draft {
+            open = open.forwarding(draft);
         }
-        self.connection.set_note(StatusNote::silent(tr(
-            keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
-        )));
+        if !comment.is_empty() {
+            open = open.compose(comment);
+        }
+        self.select_chat_request(open, window, cx);
         cx.notify();
     }
 

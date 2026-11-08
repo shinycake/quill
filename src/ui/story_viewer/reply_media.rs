@@ -60,6 +60,24 @@ impl QuillApp {
             && self.recording.purpose() == Some(CaptureFor::StoryReply)
     }
 
+    /// Where a finished story-reply recording goes: the story whose reply
+    /// row started it. A story-reply recording with no reply row left (the
+    /// viewer closed or moved on without ending it) is cancelled: it is
+    /// never sent anywhere else, the open chat least of all. `None` for a
+    /// message recording too, which the composer sends.
+    fn story_reply_send_target(&mut self, cx: &mut Context<Self>) -> Option<(ChatId, i32)> {
+        if self.recording.purpose() != Some(CaptureFor::StoryReply) {
+            return None;
+        }
+        let target = self
+            .story_reply_target()
+            .filter(|_| self.story_reply_recording_active());
+        if target.is_none() {
+            self.cancel_recording(cx);
+        }
+        target
+    }
+
     /// The reply row is done (sent, closed, or the story changed): close
     /// what it opened.
     pub(in crate::ui) fn end_story_reply(&mut self, cx: &mut Context<Self>) {
@@ -410,11 +428,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.story_reply_recording_active() {
-            return false;
-        }
-        let Some((chat_id, story_id)) = self.story_reply_target() else {
-            return false;
+        let Some((chat_id, story_id)) = self.story_reply_send_target(cx) else {
+            return self.recording.purpose() == Some(CaptureFor::StoryReply);
         };
         if self.slow_mode_blocked(chat_id, cx) {
             return true;
@@ -471,11 +486,8 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.story_reply_recording_active() {
-            return false;
-        }
-        let Some((chat_id, story_id)) = self.story_reply_target() else {
-            return false;
+        let Some((chat_id, story_id)) = self.story_reply_send_target(cx) else {
+            return self.recording.purpose() == Some(CaptureFor::StoryReply);
         };
         if self.slow_mode_blocked(chat_id, cx) {
             return true;

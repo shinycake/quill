@@ -195,3 +195,20 @@ fn sticker_set_picker_reports_an_unreadable_file(cx: &mut TestAppContext) {
         assert!(!app.connection.status_note().is_empty());
     });
 }
+
+/// Work handed off the UI thread finishes for the account it started on:
+/// a switch meanwhile drops its result (a profile photo render must not
+/// set the photo of the account switched to).
+#[gpui_kit::test]
+fn off_ui_work_does_not_finish_on_another_screen(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let landed = std::rc::Rc::new(std::cell::Cell::new(0));
+    let (a, b) = (landed.clone(), landed.clone());
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.run_off_ui_then(|| (), move |_, (), _| a.set(a.get() + 1), cx);
+        app.run_off_ui_scoped_then(|| (), move |_, (), _| b.set(b.get() + 1), cx);
+        app.end_account_surfaces(window, cx);
+    });
+    vcx.run_until_parked();
+    assert_eq!(landed.get(), 0, "both results were dropped");
+}

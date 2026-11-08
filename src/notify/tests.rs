@@ -523,6 +523,7 @@ fn reaction_input<'a>(source: ReactionNotificationSource) -> ReactionNotifyInput
         chat_muted: false,
         app_active: false,
         open_chat: None,
+        shown_in_active_window: false,
     }
 }
 
@@ -548,6 +549,11 @@ fn reaction_respects_mute_focus_and_preview() {
     open.app_active = true;
     open.open_chat = Some(ChatId(7));
     assert!(decide_reaction_notify(&open).is_none());
+    // The chat shown in the active chat window, whatever the main window has.
+    let mut in_window = reaction_input(ReactionNotificationSource::All);
+    in_window.app_active = true;
+    in_window.shown_in_active_window = true;
+    assert!(decide_reaction_notify(&in_window).is_none());
     let mut hidden = reaction_input(ReactionNotificationSource::All);
     hidden.show_preview = false;
     assert_eq!(

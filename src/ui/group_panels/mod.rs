@@ -69,6 +69,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Only the main window draws the info column (chat windows leave
+        // it out): asked from a chat window (View Profile, Statistics, a
+        // viewer's sender name), it opens there, brought forward, and its
+        // search fields are built with the main window.
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.open_info_panel_target(target, window, cx);
+        }) {
+            return;
+        }
         if let InfoPanelTarget::User(user_id) = target {
             self.reset_common_groups_search(user_id, window, cx);
         }

@@ -164,3 +164,33 @@ fn the_box_goes_with_its_call(cx: &mut TestAppContext) {
     });
     assert_eq!(fresh, (true, String::new()));
 }
+
+/// The call window is reused when another call starts while it is open:
+/// closing it then keeps it shut for the call it shows, so the next sync
+/// does not open it again.
+#[gpui_kit::test]
+fn closing_a_reused_call_window_keeps_it_shut_for_the_new_call(cx: &mut TestAppContext) {
+    let (app, mut call) = open_box(cx);
+    let call = &mut call;
+    let first = app.read_with(call, |app, _| {
+        app.session()
+            .and_then(|s| s.calls.active_call.as_ref())
+            .map(|c| c.id)
+            .expect("the demo call")
+    });
+    let second = first + 1;
+    app.update(call, |app, cx| {
+        if let Some(active) = app.session_mut().and_then(|s| s.calls.active_call.as_mut()) {
+            active.id = second;
+        }
+        app.sync_call_window(cx);
+    });
+    assert!(app.read_with(call, |app, _| app.calls.window.is_some()));
+    assert!(call.simulate_close(), "the window closes");
+    call.run_until_parked();
+    app.update(call, |app, cx| app.sync_call_window(cx));
+    app.read_with(call, |app, _| {
+        assert_eq!(app.call_screen.window_closed_by_user, Some(second));
+        assert!(app.calls.window.is_none(), "it stays shut");
+    });
+}

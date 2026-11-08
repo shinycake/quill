@@ -107,8 +107,16 @@ impl QuillApp {
                 search_input,
                 rights,
                 selected_user,
+                searched,
                 ..
-            } => self.promote_dialog_panel(*chat_id, search_input, rights, *selected_user, cx),
+            } => self.promote_dialog_panel(
+                *chat_id,
+                search_input,
+                searched,
+                rights,
+                *selected_user,
+                cx,
+            ),
             AdminDialogKind::EditRights { user_id, rights } => {
                 self.rights_editor_panel(*chat_id, *user_id, *rights, cx)
             }

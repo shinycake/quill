@@ -465,8 +465,18 @@ impl Session {
             // state so the panel shows an honest error instead of
             // spinning forever. A failed "load more" keeps the
             // already-loaded page so the button stays retryable.
+            // A failed poll changes nothing shown; the next tick asks again.
+            Some(RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)) => {
+                if let Some(pending) = pending {
+                    self.take_event_log_wait(pending);
+                }
+            }
             Some(RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                // Only the page the log waits for; one asked under an
+                // earlier query or filter changes nothing.
+                if let Some(chat_id) = pending
+                    .filter(|pending| self.take_event_log_wait(pending))
+                    .and_then(|p| p.chat_id)
                     && (from_event_id == 0
                         || !matches!(
                             self.groups.event_logs.get(&chat_id.0),

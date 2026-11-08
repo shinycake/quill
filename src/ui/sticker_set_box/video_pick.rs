@@ -81,6 +81,7 @@ impl QuillApp {
                 pick,
                 file_id,
                 emoji,
+                window: self.windows.scope,
             });
             cx.notify();
             return;

@@ -80,7 +80,10 @@ impl Session {
                         // credentials verification (e.g. 3-D Secure) — the
                         // UI opens it in the OS browser. It is this
                         // payment's own step, shown or not.
-                        self.payments.verification_url = Some(result.verification_url);
+                        self.payments.verification_url = Some(PaymentVerification {
+                            url: result.verification_url,
+                            closes_checkout: shown,
+                        });
                         if shown {
                             self.payments.verification_started = true;
                         }

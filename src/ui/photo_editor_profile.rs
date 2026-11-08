@@ -315,7 +315,10 @@ impl QuillApp {
     ) {
         let job = editor.into_render_job();
         cx.notify();
-        self.run_off_ui_then(
+        // The photo is set through the client on screen when the render
+        // ends: scoped to this screen (and window), so a switch meanwhile
+        // drops it instead of setting it on the account switched to.
+        self.run_off_ui_scoped_then(
             move || {
                 let square = finish_square(job.render());
                 let saved = super::edit_media_tools::write_edited_png(&square)?;

@@ -672,6 +672,19 @@ impl QuillApp {
             progressed = true;
         }
         self.inline_members_stale(&stale_chats, cx);
+        // The Administrators list of a stale chat asks again: it is fetched
+        // only on open, and would otherwise draw "Loading" forever.
+        if !stale_chats.is_empty()
+            && let Some(live) = self.live.as_mut()
+        {
+            for chat in &stale_chats {
+                if !live.driver.session.groups.admin_lists.contains_key(chat)
+                    && let Ok(Some(_)) = live.driver.fetch_chat_administrators(ChatId(*chat))
+                {
+                    progressed = true;
+                }
+            }
+        }
         // Phase 3.2: bot answers to inline keyboard callback presses.
         if let Some(answer) = self
             .live
@@ -696,12 +709,12 @@ impl QuillApp {
         }
         // Slice P1: a `paymentResult` verification URL — the provider's
         // page the buyer must complete (schema:4740).
-        if let Some(url) = self
+        if let Some(step) = self
             .live
             .as_mut()
             .and_then(|live| live.driver.session.payments.verification_url.take())
         {
-            self.open_payment_verification(&url, cx);
+            self.open_payment_verification(&step, cx);
             progressed = true;
         }
         // Slice P1 fix-up: a failed `getPaymentReceipt` surfaces in the

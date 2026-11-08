@@ -39,6 +39,11 @@ scripts/session-dialogs.txt with the closer a farewell calls
 (scripts/session_dialogs.py; round 10: eight such boxes came back on
 switch-back).
 
+Every surface that opens an OS window, a helper process or a recording is
+closed by the passcode lock or refused under it (scripts/lock_surfaces.py,
+scripts/lock-surfaces.txt; round 11: recordings and mini apps outlived
+the lock).
+
 Run from the repository root:
 
     python3 scripts/check-screen-state.py [--root DIR]
@@ -49,6 +54,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lock_surfaces  # noqa: E402
 import session_dialogs  # noqa: E402
 
 APP = "src/ui/app.rs"
@@ -437,12 +443,16 @@ def main():
     for problem in dialog_problems:
         print(problem)
         failed = True
+    lock_problems, lock_starts = lock_surfaces.problems()
+    for problem in lock_problems:
+        print(problem)
+        failed = True
     if failed:
         sys.exit(1)
     print(
         f"screen state: OK ({len(fields)} QuillApp fields, {len(listed)} listed, "
         f"{len(listed_fields(FIELD_LIST))} app-wide sub-fields justified, "
-        f"{session_backed} session-held dialogs closed)"
+        f"{session_backed} session-held dialogs closed, {lock_starts} lock surfaces)"
     )
 
 

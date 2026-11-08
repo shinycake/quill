@@ -267,6 +267,22 @@ impl QuillApp {
         self.active_playback_id().is_some_and(|id| id.0 < 0)
     }
 
+    /// The user whose saved music holds the active track.
+    pub(super) fn saved_track_owner(&self) -> Option<i64> {
+        let id = self.active_playback_id()?;
+        self.session()?
+            .media
+            .playlists
+            .iter()
+            .find(|(_, playlist)| {
+                playlist
+                    .tracks
+                    .iter()
+                    .any(|track| quill::state::playlist_message_id(track.file_id) == id)
+            })
+            .map(|(user, _)| *user)
+    }
+
     /// The message to play after the active one, per the playlist rules.
     fn playlist_neighbor(&mut self, step: Step, auto: bool) -> Option<(ChatId, MessageId)> {
         let chat = self.playback.player.chat?;
@@ -407,7 +423,15 @@ impl QuillApp {
     }
 
     /// Open the track's chat if needed and scroll to the message.
+    /// A profile's saved track is no message: its title opens the owner's
+    /// Playlist page instead.
     fn jump_to_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.playing_saved_track() {
+            if let Some(owner) = self.saved_track_owner() {
+                self.open_playlist_ui(owner, cx);
+            }
+            return;
+        }
         let (Some(chat), Some(id)) = (self.playback.player.chat, self.active_playback_id()) else {
             return;
         };

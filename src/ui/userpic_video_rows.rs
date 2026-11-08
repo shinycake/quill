@@ -153,6 +153,9 @@ impl QuillApp {
     /// no Quill window is in front, and the main window's while something
     /// covers its chat.
     pub(super) fn sync_userpic_videos(&self, active: bool, scale: f32, history_drawn: bool) {
+        if let Some(session) = self.session() {
+            self.players.userpic_videos.own(&session.account);
+        }
         self.players.userpic_videos.frame_start(
             !active,
             self.userpics_covered(),

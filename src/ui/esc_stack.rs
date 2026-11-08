@@ -227,9 +227,9 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Phase B4: the TTL picker.
     layer!(
         "ttl-picker",
-        |app| app.notify.ttl_picker_open,
+        |app| app.notify.ttl_picker.is_some(),
         |app, _, cx| {
-            app.notify.ttl_picker_open = false;
+            app.notify.ttl_picker = None;
             cx.notify();
         }
     ),
@@ -413,7 +413,6 @@ pub(super) static WINDOW_LAYERS: &[&str] = &[
     "record-discard-confirm",
     "recording",
     "gif-panel",
-    "sticker-panel",
     "send-as",
     "reply-panels",
     "forward-picker",

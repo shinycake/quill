@@ -12,7 +12,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
 use quill::composer::{SendKeyMode, should_send_on_enter};
-use quill::drop_modes::{DragState, DropAction};
+use quill::drop_modes::DragState;
 use quill::drop_topic::topics_for;
 use quill::forward_drag::ForwardDrag;
 use std::cell::RefCell;
@@ -242,17 +242,30 @@ impl QuillApp {
         }
         self.chat_list.drop_topic = None;
         cx.notify();
-        if !self.enter_drop_topic(chat_id, topic, window, cx) {
+        // What was dropped rides with the open, to the window that shows
+        // the chat.
+        let mut open = crate::ui::chat_window::ChatOpen::new(chat_id);
+        match payload {
+            DropPayload::Files { paths, kind } => {
+                open = open.with_files(paths, matches!(kind, DragState::Folder));
+            }
+            DropPayload::Forward(drag) => {
+                if let Some(draft) = Self::forward_draft_of(&drag, topic) {
+                    open = open.forwarding(draft);
+                }
+            }
+        }
+        // A chat in a window of its own opens the topic there.
+        if self.windows.has_window(chat_id) {
+            if let Some(topic) = topic {
+                open = open.in_topic(topic);
+            }
+            self.select_chat_request(open, window, cx);
             return;
         }
-        match &payload {
-            DropPayload::Files { paths, kind } => match kind {
-                DragState::Folder => self.drop_on_zone(DropAction::Archive, paths, cx),
-                _ => self.drop_files_plain(paths, cx),
-            },
-            DropPayload::Forward(drag) => {
-                self.set_forward_bar(chat_id, topic, drag, cx);
-            }
+        let carry = std::mem::take(&mut open.carry);
+        if self.enter_drop_topic(chat_id, topic, window, cx) {
+            self.apply_open_carry(chat_id, carry, Some(window), cx);
         }
     }
 

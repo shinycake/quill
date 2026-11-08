@@ -31,15 +31,15 @@ fn poll_adds_new_events_on_top_and_keeps_older_pages() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let first: Vec<i64> = (101..=200).rev().collect();
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page_json(extra.0, &first));
     let older: Vec<i64> = (1..=100).rev().collect();
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 101 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 101 },
     );
     apply_json(&mut session, &seq, &sink, &page_json(extra.0, &older));
     let Some((ids, has_more)) = loaded_ids(&session) else {
@@ -49,10 +49,7 @@ fn poll_adds_new_events_on_top_and_keeps_older_pages() {
     assert!(has_more);
 
     // The poll answers with the newest page: two new events and overlap.
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::PollChatEventLog),
-        Some(ChatId(13)),
-    );
+    let extra = event_log_request(&mut session, GroupsPurpose::PollChatEventLog);
     apply_json(
         &mut session,
         &seq,
@@ -78,10 +75,7 @@ fn poll_answer_without_a_loaded_page_is_dropped() {
         .groups
         .event_logs
         .insert(13, ChatEventLogFetch::Loading);
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::PollChatEventLog),
-        Some(ChatId(13)),
-    );
+    let extra = event_log_request(&mut session, GroupsPurpose::PollChatEventLog);
     apply_json(&mut session, &seq, &sink, &page_json(extra.0, &[5, 4]));
     assert_eq!(
         session.groups.event_logs.get(&13),

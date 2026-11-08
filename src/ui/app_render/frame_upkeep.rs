@@ -25,7 +25,8 @@ impl QuillApp {
         // main-only: it opens the chat windows themselves.
         self.restore_chat_windows(window, cx);
         // A video chosen for an owned set finished downloading: its editor.
-        // main-only: the sticker set boxes are the main window's dialogs.
+        // main-only: the pick carries its window and the editor opens there
+        // (`hand_to_chat_window`); the main frame only notices the file.
         self.sticker_box_frame_upkeep(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
@@ -56,9 +57,6 @@ impl QuillApp {
         // main-only: the AI compose box carries the window it was opened in.
         self.ai_compose_frame_upkeep(window, cx);
         self.premium_limit_toast_upkeep(window, cx);
-        // The call windows follow the call.
-        self.sync_call_window(cx);
-        self.sync_group_call_window(cx);
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
         // main-only: the session keeps one composer preview; every window
@@ -69,18 +67,11 @@ impl QuillApp {
         self.maybe_prefill_folder_editor(window, cx);
         // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
-        // `parity:platform-deep-links`: open the chat the deep link
+        // `parity:platform-deep-links`: open the chat or box the deep link
         // resolved to (take-once; render owns the `Window`).
         // main-only: deep links arrive in the main window; the chat they
         // name goes through the router.
-        if let Some(open) = self.links.pending_deep_link_open.take() {
-            self.open_deep_link_chat(open, window, cx);
-            self.drop_shared_card(cx);
-        }
-        // main-only: as above.
-        if let Some(ui) = self.links.pending_deep_link_ui.take() {
-            self.run_deep_link_ui(ui, window, cx);
-        }
+        self.run_resolved_deep_link(window, cx);
         self.pump_collectible_info(cx);
         self.pump_promo_request(cx);
         // main-only: mini apps open over the main window.
@@ -173,13 +164,9 @@ impl QuillApp {
             })
         });
         if current_deleted {
-            self.release_story_viewer();
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reaction_picker_open = false;
-            }
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reply_open = false;
-            }
+            // Its reply, and a reply being recorded, end with it.
+            // main-only: only the main window draws the story viewer.
+            self.release_story_viewer(cx);
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_REST_STORY_DELETED)));
         }

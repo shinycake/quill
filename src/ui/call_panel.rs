@@ -231,22 +231,7 @@ impl QuillApp {
     /// shut if you closed it, and lingers briefly on "call ended".
     pub(super) fn sync_call_window(&mut self, cx: &mut Context<Self>) {
         self.close_stale_call_add_people();
-        let (call_id, incoming, ended, busy) = match self.session() {
-            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
-                (Some(call), _) => (
-                    Some(call.id),
-                    matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
-                    false,
-                    false,
-                ),
-                (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
-                _ => match super::call_conference_ui::ringing_invite_key(session) {
-                    Some(key) => (Some(key), true, false, false),
-                    None => (None, false, false, false),
-                },
-            },
-            None => (None, false, false, false),
-        };
+        let (call_id, incoming, ended, busy) = self.call_window_target();
         // The window's call, and when it ended.
         if ended {
             if self
@@ -283,13 +268,54 @@ impl QuillApp {
         if wanted.is_none() {
             self.release_call_players(cx);
         }
-        if ended && lingering && !busy {
-            // Close once the linger is over.
+        if ended && lingering && !busy && self.call_screen.linger_wake != call_id {
+            self.call_screen.linger_wake = call_id;
+            // Close once the linger is over, whichever window draws.
+            // window-scope: the call window is the app's, no chat window's.
+            // screen-scope: the sync reads the session on screen when it runs.
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(ENDED_LINGER).await;
-                let _ = this.update(cx, |_, cx| cx.notify());
+                let _ = this.update(cx, |this, cx| {
+                    this.call_screen.linger_wake = None;
+                    this.sync_call_windows(cx);
+                    cx.notify();
+                });
             })
             .detach();
+        }
+    }
+
+    /// The 1:1 and group call windows follow their calls, and what was
+    /// opened for a call (the screen chooser, its access box, the video
+    /// chat's boxes) goes when the call or its window does. Runs from the
+    /// poll and from every window's frame: a hidden or minimized main
+    /// window does not draw, and an incoming call still needs its window
+    /// while you work in a chat window.
+    pub(in crate::ui) fn sync_call_windows(&mut self, cx: &mut Context<Self>) {
+        self.sync_call_window(cx);
+        self.sync_group_call_window(cx);
+        self.sync_screen_share_call(cx);
+    }
+
+    /// The call the 1:1 window shows: the active call, its ended summary,
+    /// or a ringing conference invite; with whether it rings in, has ended,
+    /// and the other side was busy.
+    fn call_window_target(&self) -> (Option<i32>, bool, bool, bool) {
+        match self.session() {
+            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
+                (Some(call), _) => (
+                    Some(call.id),
+                    matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,
+                    false,
+                    false,
+                ),
+                (None, Some(summary)) => (Some(summary.call_id), false, true, summary.busy),
+                _ => match super::call_conference_ui::ringing_invite_key(session) {
+                    Some(key) => (Some(key), true, false, false),
+                    None => (None, false, false, false),
+                },
+            },
+            None => (None, false, false, false),
         }
     }
 
@@ -325,7 +351,10 @@ impl QuillApp {
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |app, cx| {
                             app.calls.forget_window();
-                            app.call_screen.window_closed_by_user = Some(call_id);
+                            // The window is reused for later calls: it
+                            // closes on the one it shows now.
+                            let (shown, ..) = app.call_window_target();
+                            app.call_screen.window_closed_by_user = shown.or(Some(call_id));
                             cx.notify();
                         });
                         true
@@ -467,8 +496,13 @@ impl QuillApp {
     /// Bring the call window back (the call bar's click).
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
         self.call_screen.window_closed_by_user = None;
-        if let Some(handle) = self.calls.window {
-            let _ = handle.update(cx, |_, window, _| window.activate_window());
+        match self.calls.window {
+            Some(handle) => {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
+            // Pressed in a chat window: the window opens now, not at the
+            // main window's next frame.
+            None => self.sync_call_windows(cx),
         }
         cx.notify();
     }

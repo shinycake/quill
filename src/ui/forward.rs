@@ -77,6 +77,9 @@ impl QuillApp {
             return;
         };
         self.drop_deleted_selection();
+        // A new forward is no viewer share at a time (that one sets it
+        // again after this).
+        self.viewer.extra.share_at = None;
         if let Some(existing) = self.screen.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
             && self.screen.share.forward_picker_open
@@ -161,6 +164,8 @@ impl QuillApp {
         }
         self.share.forward_picker_open = false;
         self.share.selection.clear();
+        // "Share at 1:23" lasts as long as the picker it opened.
+        self.viewer.extra.share_at = None;
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));

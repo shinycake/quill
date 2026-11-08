@@ -300,11 +300,19 @@ pub(super) fn context_menu_item(
 }
 
 impl QuillApp {
-    /// Whether any context menu is showing. The one list the focus hand-off,
-    /// the keystroke interceptor and the Escape stack all read.
+    /// Whether a context menu shows in the window whose state is in
+    /// place. The one list the focus hand-off, the keystroke interceptor
+    /// and the Escape stack all read. The message menu is each window's
+    /// own; the others only the main window draws, so a chat window's keys
+    /// and Escape never reach them.
     pub(super) fn context_menu_open(&self) -> bool {
-        self.message_ui.menu.is_some()
-            || self.chat_list.menu.is_some()
+        self.message_ui.menu.is_some() || (!self.windows.in_window() && self.main_menu_open())
+    }
+
+    /// The menus only the main window draws: the chat list's row, archive
+    /// and story menus, a playlist's and a folder tab's.
+    fn main_menu_open(&self) -> bool {
+        self.chat_list.menu.is_some()
             || self.chat_list.archive_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
             || self.playback.playlist_menu.is_some()
@@ -323,17 +331,20 @@ impl QuillApp {
         }
     }
 
-    /// Close every context menu. Returns whether one was open.
+    /// Close every context menu of the window in place. Returns whether
+    /// one was open.
     pub(super) fn dismiss_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.context_menu_open() {
             return false;
         }
-        self.playback.playlist_menu = None;
         self.close_message_menu();
-        self.chat_list.menu = None;
-        self.chat_list.archive_menu = None;
-        self.chat_list.global.story_menu = None;
-        self.folders.tab_menu = None;
+        if !self.windows.in_window() {
+            self.playback.playlist_menu = None;
+            self.chat_list.menu = None;
+            self.chat_list.archive_menu = None;
+            self.chat_list.global.story_menu = None;
+            self.folders.tab_menu = None;
+        }
         cx.notify();
         true
     }

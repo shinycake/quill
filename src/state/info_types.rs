@@ -450,6 +450,18 @@ pub enum ChatEventLogFetch {
     Failed(String),
 }
 
+/// The `getChatEventLog` requests one chat's log waits for
+/// (`GroupsState::event_log_waits`). Only their answers fill the list: a
+/// refresh (a new search query or filter) forgets both, so a page or poll
+/// asked under the previous query is dropped when it lands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EventLogWait {
+    /// The first or older page in flight.
+    pub page: Option<crate::ids::RequestId>,
+    /// The live poll in flight.
+    pub poll: Option<crate::ids::RequestId>,
+}
+
 /// Phase D3c: one cached `getChatEventLog` result. Events arrive in
 /// reverse chronological order (decreasing event `id`, schema 1.8.67,
 /// line 15252); pages append older events, deduped by event id.

@@ -303,14 +303,8 @@ impl QuillApp {
         self.set_media_panel_tab(tab, cx);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.open_media_panel();
-            if tab == PanelTab::Gifs {
-                let _ = live.driver.open_gif_panel();
-            }
-        } else if tab == PanelTab::Gifs
-            && let Some(session) = self.demo_session.as_mut()
-        {
-            session.stickers.gifs.open = true;
         }
+        self.sync_gif_downloads();
         cx.notify();
     }
 
@@ -369,36 +363,19 @@ impl QuillApp {
             self.pickers.media_panel.key = None;
         }
         self.close_status_selector();
-        if let Some(live) = self.live.as_mut() {
-            live.driver.close_gif_panel();
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.gifs.close();
-        }
+        self.sync_gif_downloads();
         cx.notify();
         true
     }
 
     fn set_media_panel_tab(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.pickers.media_panel.tab != tab {
-            // GIFs download and play only while their tab shows.
-            if self.pickers.media_panel.tab == PanelTab::Gifs {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.close_gif_panel();
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.stickers.gifs.close();
-                }
-            }
             self.pickers.media_panel.tab = tab;
             self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
             self.pickers.media_panel.active_section = 0;
-            if tab == PanelTab::Gifs {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.open_gif_panel();
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.stickers.gifs.open = true;
-                }
-            }
+            // GIFs download and play only while their tab shows.
+            self.sync_gif_downloads();
         }
         cx.notify();
     }
@@ -963,6 +940,7 @@ fn placeholder_cell(size: f32, cx: &App) -> AnyElement {
 
 mod categories;
 mod custom_emoji_cell;
+mod gif_gate;
 mod reaction_packs_demo;
 mod reaction_rows;
 mod reveal;

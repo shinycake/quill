@@ -1,0 +1,28 @@
+# What the passcode lock does with each surface that opens an OS window,
+# starts a helper process or starts a recording. Checked by
+# scripts/lock_surfaces.py (run by scripts/check-screen-state.py).
+#
+# <fn> | <closer> | <reason>
+# closer: a method `close_for_lock` (src/ui/passcode/lock_gate.rs) calls;
+# `-` when the lock need not reach it (say why); `refuses` for a function
+# that must call `refused_while_locked()` itself.
+
+# Closed by the lock.
+open_pip_window | close_every_video_pip | a video PiP plays the account's media over the lock screen; it opens only from a viewer, which the lock closes too
+open_popup | close_all_notify_windows | Quill's notification windows show senders and text; one shown while locked hides the sender (`hide_sender`)
+start | clear_device_qr | the device-linking camera scanner is a helper window with the camera on, opened from Settings > Devices
+
+# Refused while locked (they call `refused_while_locked()`).
+pump_deep_link | refuses | a launch or OS link waits for the unlock, as tdesktop's start links (`checkStartUrls`)
+run_resolved_deep_link | refuses | the chat or box a link resolved to opens after the unlock
+spawn_mini_app_window | refuses | a mini app whose URL lands while locked would show, usable, over the lock; TDLib closes the launch
+
+# Not the lock's.
+open_chat_window | - | a chat window draws the lock screen itself (`lock_overlay`, with its own `LockField`), as tdesktop locks every window
+reopen_main_window | - | the main window, which draws the lock screen
+open_call_window | - | the call window shows the call, not the chats; tdesktop leaves its call panel up while locked (`closeAdditionalWindows` does not close it), so a call can be answered
+open_group_call_window | - | as the 1:1 call window: tdesktop leaves the group call panel up while locked
+open_screen_chooser_window | - | opened from a call window's Share Screen, which the lock leaves usable
+open_window | - | the platform wrapper every window opens through (interface zoom), and the What's New window, which shows release notes only
+show_alert | - | the startup failure alert, shown before any account or lock exists
+demo_starting_camera | - | screenshot demo only

@@ -35,3 +35,16 @@ fn a_click_in_another_chat_plays_nothing() {
     apply(&mut session, &update(5));
     assert!(session.stickers.interactions.take_pending().is_empty());
 }
+
+/// Round 11 (area A): a chat shown in its own window plays its taps too,
+/// whatever the main window shows.
+#[test]
+fn a_click_in_a_chat_window_queues_its_effect() {
+    let (mut session, _sink) = session();
+    session.open_chat = Some(ChatId(6));
+    session.open_window_chat(ChatId(5));
+    apply(&mut session, &update(5));
+    let taken = session.stickers.interactions.take_pending();
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].chat_id, ChatId(5));
+}

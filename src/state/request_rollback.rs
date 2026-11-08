@@ -121,18 +121,12 @@ impl Session {
                 previous,
                 shown,
             } => {
-                if let Some(history) = self.histories.get_mut(&chat_id)
-                    && let Some(message) = history.messages.get_mut(&message_id)
-                    && let MessageContent::Poll(content) = &mut message.content
-                {
-                    let options = &mut content.poll.options;
-                    let marks: Vec<bool> = options.iter().map(|o| o.is_chosen).collect();
-                    if marks == shown {
-                        for (option, was) in options.iter_mut().zip(previous) {
-                            option.is_chosen = was;
-                        }
-                    }
-                }
+                self.set_poll_marks(
+                    ChatId(chat_id),
+                    MessageId(message_id),
+                    &previous,
+                    Some(&shown),
+                );
             }
             _ => {}
         }

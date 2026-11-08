@@ -503,3 +503,43 @@ fn a_bot_that_makes_its_own_topics_is_off_thread_until_one_opens(cx: &mut TestAp
     open_chat(&app, vcx, KEYBOARD_BOT);
     assert_eq!(placeholder(&app, vcx), "Choose a size");
 }
+
+/// A reply-keyboard button pressed while editing sends its text as a
+/// message of its own (tdesktop `sendBotCommand`): the edit stays open and
+/// the edited message keeps its text.
+#[gpui_kit::test]
+fn a_keyboard_button_while_editing_sends_a_new_message(cx: &mut TestAppContext) {
+    let (app, mut cx) = new_app(cx);
+    let cx = &mut cx;
+    open_chat(&app, cx, GROUP);
+    begin_edit(&app, cx);
+    assert!(editing(&app, cx));
+    let state = |app: &Entity<QuillApp>, cx: &mut VisualTestContext, target: Option<MessageId>| {
+        app.read_with(cx, |app, _| {
+            let history = app.session().and_then(|s| s.histories.get(&GROUP.0));
+            let count = history.map_or(0, |h| h.ordered().len());
+            let content = history
+                .zip(target)
+                .and_then(|(h, id)| h.ordered().into_iter().find(|m| m.id == id))
+                .map(|m| format!("{:?}", m.content));
+            (count, content)
+        })
+    };
+    let target = app.read_with(cx, |app, _| {
+        app.chat_ui.pending_edit().map(|edit| edit.message_id)
+    });
+    assert!(target.is_some());
+    let (count, content) = state(&app, cx, target);
+    app.update(cx, |app, cx| {
+        app.press_custom_keyboard_text(GROUP, MessageId(1), "Yes please", false, cx)
+    });
+    frames(cx);
+    let (count_after, content_after) = state(&app, cx, target);
+    assert_eq!(
+        count_after,
+        count + 1,
+        "the button's text went out as a new message"
+    );
+    assert_eq!(content_after, content, "the edited message kept its text");
+    assert!(editing(&app, cx), "the edit stays open");
+}

@@ -105,6 +105,9 @@ pub(crate) struct ChatUi {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// Text a chat open handed over without a window at hand, for this
+    /// chat's composer (`QuillApp::apply_compose_after_open`).
+    pub(super) compose_after_open: Option<String>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.
@@ -242,12 +245,13 @@ impl QuillApp {
     /// owes TDLib and disk a cancel).
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
         // Phase B4: the TTL picker belongs to the previous chat.
-        self.notify.ttl_picker_open = false;
+        self.notify.ttl_picker = None;
         self.dismiss_forward_for_chat(chat);
         self.cancel_recording_here(cx);
         if self.chat_ui.chat == Some(chat) {
             return;
         }
+        self.profile_modal_leaves_chat(cx);
         let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
         let old = std::mem::take(&mut *self.screen.chat_ui);
         next.pending_reply = old.pending_reply.filter(|reply| reply.belongs_to(chat));

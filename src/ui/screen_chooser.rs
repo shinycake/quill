@@ -205,6 +205,9 @@ impl QuillApp {
         let Some(backend) = self.screen_backend() else {
             return false;
         };
+        if for_call == ScreenFor::Group {
+            self.screen_share.group_call = self.tracked_group_call_id();
+        }
         if backend.access() == ScreenAccess::Denied {
             self.screen_share.privacy_for = Some(for_call);
             cx.notify();
@@ -367,6 +370,46 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn tracked_group_call_id(&self) -> Option<i32> {
+        self.session()
+            .and_then(|session| session.calls.active_group_call.as_ref())
+            .map(|call| call.id)
+    }
+
+    /// Whether `for_call` is still the call on screen: the 1:1 call of
+    /// that id, or the video chat the chooser or box was opened for.
+    fn screen_call_current(&self, for_call: ScreenFor) -> bool {
+        match for_call {
+            ScreenFor::Group => self.tracked_group_call_id() == self.screen_share.group_call,
+            ScreenFor::Private(id) => self
+                .session()
+                .and_then(|session| session.calls.active_call.as_ref())
+                .is_some_and(|call| call.id == id),
+        }
+    }
+
+    /// The chooser and the screen access box belong to the call they were
+    /// opened for. When it ends, or another call takes its place, they go:
+    /// the chooser floats over everything and would share into the next
+    /// call, and the box would show over the next call's window.
+    pub(super) fn sync_screen_share_call(&mut self, cx: &mut Context<Self>) {
+        if self
+            .screen_share
+            .for_call
+            .is_some_and(|for_call| !self.screen_call_current(for_call))
+        {
+            self.close_screen_chooser(cx);
+        }
+        if self
+            .screen_share
+            .privacy_for
+            .is_some_and(|for_call| !self.screen_call_current(for_call))
+        {
+            self.screen_share.privacy_for = None;
+            cx.notify();
+        }
+    }
+
     /// Cancel, and after Share Screen or Stop Sharing.
     pub(super) fn close_screen_chooser(&mut self, cx: &mut Context<Self>) {
         let handle = self.screen_share.window.take();
@@ -394,6 +437,11 @@ impl QuillApp {
         ) else {
             return;
         };
+        // The call it was opened for ended meanwhile: share into no other.
+        if !self.screen_call_current(for_call) {
+            self.close_screen_chooser(cx);
+            return;
+        }
         let with_audio = self.screen_share.with_audio && self.offers_system_audio();
         if let Some(live) = self.live.as_mut() {
             live.driver.choose_call_screen_source(id, with_audio);

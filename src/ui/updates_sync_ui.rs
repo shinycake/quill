@@ -20,8 +20,11 @@ use quill::state::{
 use quill::telegram::envelope::SpeechTrialUpdate;
 
 /// The free-transcription quota last seen, so a change can toast once.
+/// Each account has its own quota: the value is the account's that set it
+/// (`OwnedBy`), and the first one seen after a switch is only recorded, so
+/// switching between two accounts toasts nothing.
 #[derive(Default)]
-struct SpeechTrialSeen(Option<SpeechTrialUpdate>);
+struct SpeechTrialSeen(quill::ids::OwnedBy<Option<SpeechTrialUpdate>>);
 
 impl Global for SpeechTrialSeen {}
 
@@ -38,17 +41,18 @@ impl QuillApp {
     /// Toast the free transcription quota when a transcription changed it,
     /// as tdesktop does; nothing is shown under the voice rows.
     pub(super) fn sync_speech_trial_hint(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((trial, premium)) = self
+        let Some((trial, premium, account)) = self
             .session()
-            .and_then(|s| Some((s.sync.speech_trial?, s.my_is_premium())))
+            .and_then(|s| Some((s.sync.speech_trial?, s.my_is_premium(), s.account.clone())))
         else {
             return;
         };
-        let previous = cx.try_global::<SpeechTrialSeen>().and_then(|seen| seen.0);
+        let seen = cx.default_global::<SpeechTrialSeen>().0.for_owner(&account);
+        let previous = *seen;
         if previous == Some(trial) {
             return;
         }
-        cx.set_global(SpeechTrialSeen(Some(trial)));
+        *seen = Some(trial);
         let now = quill::local_time::now_unix();
         let Some(text) = speech_trial_toast(previous, trial, premium, now) else {
             return;

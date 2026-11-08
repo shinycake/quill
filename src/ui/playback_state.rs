@@ -74,8 +74,9 @@ pub(crate) struct PlaybackUi {
     /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
-    /// History row whose `image/gif` file is looping (`inline_playback`).
-    pub(super) playing_animation: Option<MessageId>,
+    /// History row whose `image/gif` file is looping (`inline_playback`),
+    /// with the window and chat it plays in.
+    pub(super) playing_animation: Option<PlayingGif>,
     pub(super) autoplayed_gifs: std::collections::HashSet<MessageId>,
     /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
     /// with the history row (and its animation layer) that draws it.
@@ -89,6 +90,16 @@ pub(crate) struct PlaybackUi {
     /// The media viewer's playback error. The audio rows read
     /// `audio.error()` instead.
     pub(super) error: Option<String>,
+}
+
+/// The `image/gif` file looping in a history row: the row of one window,
+/// in one chat. Message ids repeat across chats, and a window that closes
+/// takes its row with it (`forget_chat_window` stops it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlayingGif {
+    /// The window whose row plays it (`None`: the main window).
+    pub(super) window: Option<ChatId>,
+    pub(super) message: ChatMessage,
 }
 
 impl PlaybackUi {

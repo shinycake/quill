@@ -600,7 +600,8 @@ impl Session {
         let topics = topics
             .filter(|((chat, _), _)| *chat == chat_id.0)
             .map(|(_, topic)| &topic.messages);
-        let thread = self.threads.thread.iter();
+        // Every window's comment thread, not only the one in place.
+        let thread = self.views_shown().filter_map(|view| view.thread);
         let thread = thread
             .filter(|thread| thread.chat_id == chat_id)
             .map(|thread| &thread.history.messages);

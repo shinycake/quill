@@ -392,7 +392,8 @@ impl QuillApp {
         lock: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.recording_busy() {
+        // Nothing records under the lock (`close_for_lock` stops it).
+        if self.recording_busy() || self.refused_while_locked() {
             return;
         }
         let hq = self
@@ -449,7 +450,8 @@ impl QuillApp {
     }
 
     pub(super) fn start_voice_capture(&mut self, purpose: CaptureFor, cx: &mut Context<Self>) {
-        if self.recording_busy() {
+        // Nothing records under the lock (`close_for_lock` stops it).
+        if self.recording_busy() || self.refused_while_locked() {
             return;
         }
         let start = self.begin_capture_start(false, purpose);

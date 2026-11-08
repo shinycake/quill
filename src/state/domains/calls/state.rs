@@ -63,8 +63,11 @@ pub struct CallsState {
     /// `next_offset` from the last `foundMessages` page; empty starts
     /// (or restarts) the list.
     pub recent_calls_offset: String,
-    /// A `searchCallMessages` page is in flight.
-    pub recent_calls_loading: bool,
+    /// The `searchCallMessages` page the list waits for. Only its answer
+    /// or error lands: a reopen asks for the first page again at once, and
+    /// "Clear all" forgets the page in flight, so an older page never
+    /// fills the list.
+    pub recent_calls_request: Option<RequestId>,
     /// The last `searchCallMessages` request failed.
     pub recent_calls_error: bool,
     /// A `deleteAllCallMessages` request is in flight.
@@ -135,6 +138,21 @@ impl CallsState {
         self.privacy_pending > 0
     }
 
+    /// A recent-calls page is in flight.
+    pub fn recent_calls_loading(&self) -> bool {
+        self.recent_calls_request.is_some()
+    }
+
+    /// Whether `request` is the recent-calls page the list waits for; if
+    /// so the list stops waiting for it.
+    pub(crate) fn take_recent_calls_request(&mut self, request: RequestId) -> bool {
+        if self.recent_calls_request != Some(request) {
+            return false;
+        }
+        self.recent_calls_request = None;
+        true
+    }
+
     /// The tracked group call `id`: the current one or the story stream.
     pub fn group_call(&self, id: i32) -> Option<&ActiveGroupCall> {
         [self.active_group_call.as_ref(), self.story_stream.as_ref()]
@@ -184,7 +202,7 @@ impl CallsState {
             prefs: CallPrefs::default(),
             recent_calls: Vec::new(),
             recent_calls_offset: String::new(),
-            recent_calls_loading: false,
+            recent_calls_request: None,
             recent_calls_error: false,
             recent_calls_clearing: false,
             active_group_call: None,

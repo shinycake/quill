@@ -460,3 +460,42 @@ fn web_proxy_relay_traffic_never_redraws() {
         RedrawNeed::Nothing
     );
 }
+
+/// Round 11 (area A): a chat shown only in its own window redraws for its
+/// own updates as the main window's chat does; the main window then
+/// shows nothing.
+#[test]
+fn a_chat_window_redraws_for_its_own_chat() {
+    let mut session = two_chats();
+    session.open_chat = None;
+    session.open_window_chat(ChatId(12));
+    let typing = r#"{"@type":"updateChatAction","chat_id":12,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":12},"action":{"@type":"chatActionTyping"}}"#;
+    let read_out =
+        r#"{"@type":"updateChatReadOutbox","chat_id":12,"last_read_outbox_message_id":7}"#;
+    assert_eq!(need(&session, typing), RedrawNeed::Now);
+    assert_eq!(need(&session, &new_message(12)), RedrawNeed::Now);
+    assert_eq!(need(&session, read_out), RedrawNeed::Now);
+    assert_eq!(need(&session, &status(12, OFFLINE)), RedrawNeed::Now);
+    // Ada is in no window: her row only.
+    assert_eq!(need(&session, &new_message(11)), RedrawNeed::ChatList);
+    // The same while the window's own view is in place: the main
+    // window's chat still counts.
+    session.open_chat = Some(ChatId(11));
+    assert!(session.enter_view(Some(ChatId(12))));
+    assert_eq!(need(&session, &new_message(11)), RedrawNeed::Now);
+    assert_eq!(need(&session, &new_message(12)), RedrawNeed::Now);
+}
+
+/// A comment thread open in a chat window counts as shown too.
+#[test]
+fn a_chat_windows_thread_counts_as_shown() {
+    let mut session = two_chats();
+    session.open_window_chat(ChatId(12));
+    assert!(session.enter_view(Some(ChatId(12))));
+    let mut thread = ThreadView::resolving(ChatId(12), MessageId(1));
+    thread.chat_id = ChatId(77);
+    session.threads.thread = Some(thread);
+    assert!(session.enter_view(None));
+    let read = r#"{"@type":"updateChatReadInbox","chat_id":77,"last_read_inbox_message_id":5,"unread_count":0}"#;
+    assert_eq!(need(&session, read), RedrawNeed::Now);
+}

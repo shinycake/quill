@@ -36,11 +36,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The row may live only in a forum topic or a comment thread.
         let poll = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 MessageContent::Poll(poll) => Some(poll.poll.clone()),
@@ -68,9 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let retractable = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
             .is_some_and(|message| match &message.content {
                 MessageContent::Poll(poll) => crate::poll::can_retract_vote(&poll.poll),
@@ -91,19 +88,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Capture the previous chosen marks: the optimistic flip below is
         // rolled back if the send fails (the server's `updatePoll` corrects
         // counts/percentages in place on success).
-        let mut previous: Vec<bool> = Vec::new();
-        let mut shown: Vec<bool> = Vec::new();
-        if let Some(history) = self.session.histories.get_mut(&chat_id.0)
-            && let Some(message) = history.messages.get_mut(&message_id.0)
-            && let MessageContent::Poll(poll_content) = &mut message.content
-        {
-            let chosen: std::collections::HashSet<i32> = option_ids.iter().copied().collect();
-            for (index, option) in poll_content.poll.options.iter_mut().enumerate() {
-                previous.push(option.is_chosen);
-                option.is_chosen = chosen.contains(&(index as i32));
-                shown.push(option.is_chosen);
-            }
-        }
+        // Every copy of the row flips (the chat's history, a forum topic,
+        // a comment thread, in any window).
+        let previous: Vec<bool> = self
+            .session
+            .loaded_message(chat_id, message_id)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => {
+                    Some(poll.poll.options.iter().map(|o| o.is_chosen).collect())
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let chosen: std::collections::HashSet<i32> = option_ids.iter().copied().collect();
+        let shown: Vec<bool> = (0..previous.len())
+            .map(|index| chosen.contains(&(index as i32)))
+            .collect();
+        self.session
+            .set_poll_marks(chat_id, message_id, &shown, None);
         let extra = self
             .session
             .request(RequestPurpose::SetPollAnswer, Some(chat_id));
@@ -125,16 +127,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 self.session.requests.take(extra);
                 // The vote never left the client: restore the previous marks.
-                if let Some(history) = self.session.histories.get_mut(&chat_id.0)
-                    && let Some(message) = history.messages.get_mut(&message_id.0)
-                    && let MessageContent::Poll(poll_content) = &mut message.content
-                {
-                    for (option, &was_chosen) in
-                        poll_content.poll.options.iter_mut().zip(previous.iter())
-                    {
-                        option.is_chosen = was_chosen;
-                    }
-                }
+                self.session
+                    .set_poll_marks(chat_id, message_id, &previous, Some(&shown));
                 Err(err)
             }
         }
@@ -193,11 +187,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !supported {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // The row may live only in a forum topic or a comment thread.
         let poll = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 MessageContent::Poll(poll) => Some(poll.poll.clone()),

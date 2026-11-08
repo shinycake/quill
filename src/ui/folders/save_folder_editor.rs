@@ -209,7 +209,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn open_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         self.close_mute_menu(cx);
-        self.notify.ttl_picker_open = false;
+        self.notify.ttl_picker = None;
         self.folders.menu_open = true;
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)

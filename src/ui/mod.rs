@@ -630,9 +630,11 @@ mod wallpaper_rotation;
 mod wallpaper_source;
 mod web_app_tab;
 mod web_app_ui;
+mod window_actions;
 mod window_chrome;
 pub(crate) mod window_control;
 pub(crate) mod window_frame;
+mod window_keys;
 
 pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;

@@ -47,14 +47,19 @@ impl Session {
                 // Phase C2i: `searchCallMessages` pages for the
                 // Recent-calls tab. `searchCallMessages` returns call and
                 // group-call messages newest-first; the rows render both.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::SearchCallMessages) {
+                // Only the page the list waits for: one asked before a
+                // reopen or a "Clear all" is dropped.
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::SearchCallMessages
+                {
                     for message in &messages {
                         self.remember_files(&message.files);
                     }
-                    self.calls.recent_calls.extend(messages);
-                    self.calls.recent_calls_offset = next_offset;
-                    self.calls.recent_calls_loading = false;
-                    self.calls.recent_calls_error = false;
+                    if self.calls.take_recent_calls_request(pending.id) {
+                        self.calls.recent_calls.extend(messages);
+                        self.calls.recent_calls_offset = next_offset;
+                        self.calls.recent_calls_error = false;
+                    }
                 }
             }
             // `searchPublicPosts` answer: posts of public channels; an

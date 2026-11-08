@@ -109,9 +109,12 @@ impl QuillApp {
         Some(grid.into_any_element())
     }
 
-    /// B1: tap a `keyboardButtonTypeText` button — sends the button's text
-    /// through the normal composer path (same as typing it and pressing
-    /// Enter). A one-time keyboard hides first, locally and via
+    /// B1: tap a `keyboardButtonTypeText` button: the button's text goes
+    /// out as a message of its own, whatever the composer holds (tdesktop
+    /// `sendBotCommand`). An edit, a forward bar, a tray or the rich
+    /// editor in the composer stay as they are; the composer's path would
+    /// have made the text the edited message's, the forward's comment or
+    /// the files' caption. A one-time keyboard hides first, locally and via
     /// `deleteChatReplyMarkup` (schema 1.8.67, line 13183).
     pub(super) fn press_custom_keyboard_text(
         &mut self,
@@ -119,13 +122,13 @@ impl QuillApp {
         message_id: MessageId,
         text: &str,
         one_time: bool,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if one_time {
             self.dismiss_custom_keyboard(chat_id, message_id, cx);
         }
-        self.submit_composer(text.to_string(), window, cx);
+        self.send_command_text(chat_id, text, cx);
+        cx.notify();
     }
 
     /// B1: hide a one-time custom keyboard locally and tell TDLib
@@ -204,10 +207,8 @@ impl QuillApp {
         match &button.kind {
             KeyboardButtonType::Text => {
                 let text = button.text.clone();
-                element.on_click(cx.listener(move |this, _, window, cx| {
-                    this.press_custom_keyboard_text(
-                        chat_id, message_id, &text, one_time, window, cx,
-                    );
+                element.on_click(cx.listener(move |this, _, _, cx| {
+                    this.press_custom_keyboard_text(chat_id, message_id, &text, one_time, cx);
                 }))
             }
             KeyboardButtonType::WebApp { url } => {

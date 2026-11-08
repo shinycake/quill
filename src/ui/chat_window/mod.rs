@@ -46,6 +46,9 @@ mod tests;
 mod upkeep_tests;
 mod view;
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod window_input_tests;
+#[cfg(test)]
 mod window_owner_tests;
 #[cfg(test)]
 mod window_state_tests;
@@ -190,6 +193,11 @@ impl ChatWindows {
     /// Every open chat window's slot.
     fn slots(&self) -> impl Iterator<Item = slot::SharedSlot> + '_ {
         self.open.iter().map(|open| open.slot.clone())
+    }
+
+    /// Whether `chat_id` shows in a window of its own.
+    pub(in crate::ui) fn has_window(&self, chat_id: ChatId) -> bool {
+        self.window_for(chat_id).is_some()
     }
 
     fn window_for(&self, chat_id: ChatId) -> Option<&OpenChatWindow> {
@@ -549,7 +557,10 @@ impl QuillApp {
             self.set_window_scope(None);
         }
         self.end_recording_of_window(chat_id, cx);
+        self.close_location_picker_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
+        // Its media panel goes: the GIF downloads follow the panels left.
+        self.sync_gif_downloads();
         // Its activation goes with it: GPUI drops the window before the
         // platform reports it inactive, so its observer never runs, and a
         // main window that draws nothing would leave the gate on. Only the
@@ -558,6 +569,7 @@ impl QuillApp {
         self.frame.main_covered.set(covered);
         self.follow_windows(cx);
         self.drop_play_intent_in_window(chat_id);
+        self.stop_gif_of_window(chat_id);
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
         }
@@ -628,7 +640,7 @@ impl QuillApp {
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
         self.leave_chat_ui();
-        self.notify.ttl_picker_open = false;
+        self.notify.ttl_picker = None;
         self.cancel_recording_here(cx);
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();

@@ -12,8 +12,8 @@ use quill::telegram::envelope::NotificationSettingsScope;
 pub(crate) struct NotifyUi {
     /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
     pub(super) mute_menu_open: bool,
-    /// The chat the Mute panel is for when it was opened from a chat row's
-    /// menu; `None` means the open chat.
+    /// The chat the Mute panel is for, set when it opens (from the header
+    /// or a chat row's menu).
     pub(super) mute_chat: Option<ChatId>,
     /// The Mute submenu's "Custom..." duration row is expanded.
     pub(super) mute_custom_open: bool,
@@ -21,8 +21,9 @@ pub(crate) struct NotifyUi {
     /// (tdesktop `ChooseTimeWidget`), made when the panel opens.
     pub(super) mute_time: Option<super::notification_settings::MuteTimeInputs>,
     /// Phase B4: self-destruct / auto-delete timer picker below the
-    /// conversation header (`setChatMessageAutoDeleteTime`).
-    pub(super) ttl_picker_open: bool,
+    /// conversation header (`setChatMessageAutoDeleteTime`), open for
+    /// this chat.
+    pub(super) ttl_picker: Option<ChatId>,
     /// Parity slice: the notifications panel's sound picker sub-view is open.
     pub(super) notif_sound_picker_open: bool,
     /// The picker an "Upload Sound" in flight was started from: the new
@@ -66,7 +67,7 @@ impl NotifyUi {
             mute_chat: None,
             mute_custom_open: false,
             mute_time: None,
-            ttl_picker_open: false,
+            ttl_picker: None,
             notif_sound_picker_open: false,
             tone_upload_target: None,
             story_sound_picker_open: false,
