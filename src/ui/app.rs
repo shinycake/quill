@@ -60,6 +60,8 @@ pub struct QuillApp {
     pub(super) location_ui: super::location_picker::state::LocationPickerUi,
     /// The gallery's search field (`ui/shared_media_search_state.rs`).
     pub(super) media_search: super::shared_media_search_state::SharedMediaSearchUi,
+    /// The main menu popover (`ui/main_menu_grid.rs`).
+    pub(super) main_menu: super::main_menu_grid::MainMenuUi,
     /// Forwarding and the share box (`ui/share_state.rs`).
     pub(super) share: super::share_state::ShareUi,
     /// Files sent to Quill from outside (`ui/start_files_state.rs`).

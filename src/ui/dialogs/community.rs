@@ -327,6 +327,20 @@ pub fn build_community_hub_dialog(
                     content.child(body)
                 }
             }))
+            // The one place a community is made (the main menu shows only
+            // the hub).
+            .footer(
+                div().flex().justify_end().child(
+                    Button::new("g10-hub-create")
+                        .label(tr(keys::COMMUNITY_CREATE_TITLE))
+                        .icon(gpui_kit::assets::IconName::Plus)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_community_hub(cx);
+                            this.close_kit_dialog_if_done(DialogKind::CommunityHub, window, cx);
+                            this.open_create_community_dialog(window, cx);
+                        })),
+                ),
+            )
             .on_close(on_close)
     })
 }
