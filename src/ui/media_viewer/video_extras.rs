@@ -150,7 +150,8 @@ impl QuillApp {
             return;
         }
         if let (Some(item), Some(elapsed)) = (self.viewer.state.current(), elapsed) {
-            self.viewer.pending_seek = Some((item.message_id, elapsed));
+            let key = quill::ids::ChatMessage::new(item.chat_id, item.message_id);
+            self.viewer.pending_seek = Some((key, elapsed));
         }
         let orientation = self.viewer.orientation;
         let fullscreen = self.viewer.extra.video_fullscreen;

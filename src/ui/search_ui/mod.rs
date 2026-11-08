@@ -532,6 +532,9 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready {
             return;
         }
+        let fresh = !self.session().is_some_and(|s| {
+            s.search.chat_search.open && s.search.chat_search.chat_id == s.open_chat
+        });
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {
                 Ok(true) => {
@@ -564,9 +567,14 @@ impl QuillApp {
             false
         };
         if opened {
-            self.search_ui
-                .chat_input
-                .update(cx, |input, cx| input.focus(window, cx));
+            // A fresh search starts empty: a chat change closed the last
+            // chat's search but left its text in the field.
+            self.search_ui.chat_input.update(cx, |input, cx| {
+                if fresh {
+                    input.set_value("", window, cx);
+                }
+                input.focus(window, cx);
+            });
         }
         cx.notify();
     }
