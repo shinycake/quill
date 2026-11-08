@@ -34,7 +34,15 @@ the feature's own text fields. The struct is a field of `QuillApp`
 (`ui/app.rs`) only when it is the process's, not the account on screen's
 (a player engine, the accounts list, a window handle), and then it is
 listed in `scripts/app-wide-state.txt` with the reason;
-`scripts/check-screen-state.py` checks both. The design:
+`scripts/check-screen-state.py` checks both.
+
+State a view holds for the chat it shows (a bar, a menu, a box opened
+over one chat's messages) is a field of `ChatUi` (`ui/chat_ui_state.rs`),
+which is replaced whole when that chat changes; each chat window has its
+own. A field of `ComposerUi`, `MessageUi`, `HistoryUi`, `PickerUi`,
+`ShareUi` or `ViewerUi` that names one chat's ids goes there, or is
+listed in `scripts/view-state-not-chat.txt` with the reason it may outlive
+its chat; the same script checks it. The design:
 `docs/decisions/account-scoped-ui-state.md`; the older layout:
 `docs/decisions/codex-refactor-3.md`, `-3b.md`, `-3c.md`.
 

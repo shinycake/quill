@@ -392,7 +392,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)));
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         self.search_ui
             .input
@@ -440,7 +440,7 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)));
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         self.search_ui
             .input

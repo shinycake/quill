@@ -88,7 +88,7 @@ impl QuillApp {
     ) -> Dialog {
         let is_quiz = app
             .read(cx)
-            .message_ui
+            .chat_ui
             .pending_stop_poll
             .is_some_and(|(_, _, is_quiz)| is_quiz);
         let ask = if is_quiz {
@@ -147,7 +147,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     StopPollConfirm => DialogSpec::new(
         2944,
-        |app| app.message_ui.pending_stop_poll.is_some(),
+        |app| app.chat_ui.pending_stop_poll.is_some(),
         QuillApp::build_stop_poll_dialog,
     )
     .close(|app, _, cx| app.cancel_stop_poll(cx)),

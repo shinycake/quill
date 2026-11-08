@@ -646,10 +646,7 @@ impl QuillApp {
     /// and message state goes, and the pane shows "Select a chat".
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
-        self.composer_ui.set_reply(None);
-        self.composer_ui.leave_edit();
-        self.message_ui.pending_delete = None;
-        self.message_ui.pending_stop_poll = None;
+        self.leave_chat_ui();
         self.notify.ttl_picker_open = false;
         self.cancel_recording_here(cx);
         self.stop_animation_playback();

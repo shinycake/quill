@@ -55,6 +55,7 @@ mod chat_appearance_extras;
 mod chat_list_state;
 mod chat_palette;
 mod chat_theme;
+mod chat_ui_state;
 mod chat_window;
 mod clipboard_files;
 mod code_highlight;

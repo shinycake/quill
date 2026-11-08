@@ -14,7 +14,7 @@ impl QuillApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.composer_ui.command_menu_open {
+        if !self.chat_ui.command_menu_open {
             return None;
         }
         self.command_menu_dropdown_body(cx)
@@ -28,7 +28,7 @@ impl QuillApp {
     fn command_menu_dropdown_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (prefix, items) = self.command_menu_state(cx)?;
         let selected = self
-            .composer_ui
+            .chat_ui
             .command_menu_selected
             .min(items.len().saturating_sub(1));
         let has_specific = items.iter().any(|item| !item.global);

@@ -55,7 +55,7 @@ impl QuillApp {
     /// The open slot's rich draft while it shows in place of the field:
     /// not while a message is edited or the rich editor is open.
     pub(in crate::ui) fn shown_rich_draft(&self) -> Option<&RichDraft> {
-        if self.composer_ui.is_editing() || self.composer_ui.rich_editor_open {
+        if self.chat_ui.is_editing() || self.chat_ui.rich_editor_open {
             return None;
         }
         let chat_id = self.open_chat_id()?;
@@ -172,7 +172,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.composer_ui.rich_editor_open = true;
+        self.chat_ui.rich_editor_open = true;
         self.set_composer_markup(&rich.markup(), window, cx);
         self.composer_ui.prev_text = self.composer.read(cx).value();
         self.composer
@@ -185,7 +185,7 @@ impl QuillApp {
     /// editor's draft when its box closes); plain text stays in the field.
     pub(in crate::ui) fn close_rich_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let markup = self.composer_markup(cx);
-        self.composer_ui.rich_editor_open = false;
+        self.chat_ui.rich_editor_open = false;
         let Some(chat_id) = self.open_chat_id() else {
             self.set_composer_markup(&markup, window, cx);
             cx.notify();
@@ -193,7 +193,7 @@ impl QuillApp {
         };
         if let Some(rich) = RichDraft::from_markup(&markup) {
             let topic = self.open_draft_topic(chat_id);
-            let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
+            let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
             self.save_chat_draft(
                 chat_id,
                 topic,
@@ -222,7 +222,7 @@ impl QuillApp {
             return;
         };
         let topic = self.open_draft_topic(chat_id);
-        let reply = self.draft_reply(self.composer_ui.reply(), chat_id);
+        let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
         self.save_chat_draft(
             chat_id,
             topic,
@@ -295,7 +295,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.rich_editor_open = false;
+        self.chat_ui.rich_editor_open = false;
         self.set_composer_markup(&plain, window, cx);
         self.submit_composer(plain.clone(), window, cx);
         // A refused send leaves the draft: the field it hides goes back

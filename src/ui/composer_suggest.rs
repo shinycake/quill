@@ -222,7 +222,7 @@ impl QuillApp {
         let range = self.composer.read(cx).selected_range();
         let mention = self.mention_trigger(cx).is_some();
         let ui = &self.composer_ui.suggest;
-        let query = (range.is_empty() && !mention && !self.composer_ui.is_editing())
+        let query = (range.is_empty() && !mention && !self.chat_ui.is_editing())
             .then(|| detect(&text, range.start, self.chat_prefs.suggest_emoji))
             .flatten()
             .filter(|q| ui.dismissed.as_ref() != Some(&(q.kind, q.range.start, q.query.clone())))

@@ -351,7 +351,7 @@ impl QuillApp {
         // Cut / Copy / Paste / Paste as Plain Text / Select All, then the
         // Formatting submenu with its shortcuts (tdesktop's field menu).
         let menu = Self::unicode_control_menu(edit_menu_items(menu, has_selection, true));
-        let in_code_block = if app.composer_ui.rich_editor_open {
+        let in_code_block = if app.chat_ui.rich_editor_open {
             quill::code_language::fence_at(&input.value(), caret).is_some()
         } else {
             app.composer_code_block_at_caret(cx).is_some()

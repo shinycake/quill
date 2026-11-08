@@ -18,7 +18,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.composer_ui.rich_editor_open {
+        if self.shortcut_blocked(window, cx) || self.chat_ui.rich_editor_open {
             return false;
         }
         let Some(chat_id) = self.writable_open_chat() else {

@@ -113,7 +113,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(reply) = self.composer_ui.reply().cloned() else {
+        let Some(reply) = self.chat_ui.reply().cloned() else {
             return;
         };
         match option {
@@ -151,7 +151,7 @@ impl QuillApp {
 
     /// Show the chat chooser for the composer's reply.
     pub(super) fn open_reply_elsewhere(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer_ui.reply().is_none() {
+        if self.chat_ui.reply().is_none() {
             return;
         }
         self.share.reply_quote_open = false;
@@ -183,7 +183,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(reply) = self.composer_ui.reply().cloned() else {
+        let Some(reply) = self.chat_ui.reply().cloned() else {
             return;
         };
         let secret = self
@@ -205,7 +205,7 @@ impl QuillApp {
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.composer_ui.set_reply(Some(reply.into_chat(dest)));
+        self.chat_ui.set_reply(Some(reply.into_chat(dest)));
         self.select_listed_chat(dest, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -230,11 +230,11 @@ impl QuillApp {
     /// The part of the message was picked (or unpicked, back to the whole
     /// message).
     fn pick_reply_quote(&mut self, quote: QuoteSelection, cx: &mut Context<Self>) {
-        let Some(reply) = self.composer_ui.take_reply() else {
+        let Some(reply) = self.chat_ui.take_reply() else {
             return;
         };
         let same = reply.quote.as_ref() == Some(&quote);
-        self.composer_ui
+        self.chat_ui
             .set_reply(Some(reply.with_new_quote((!same).then_some(quote))));
         self.note_open_draft(true, cx);
         cx.notify();
@@ -257,7 +257,7 @@ impl QuillApp {
         if !self.share.reply_quote_open {
             return None;
         }
-        let reply = self.composer_ui.reply()?;
+        let reply = self.chat_ui.reply()?;
         let text = self.reply_message_text(reply)?;
         let picked = reply.quote.clone();
         let mut list = div()

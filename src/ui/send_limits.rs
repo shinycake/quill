@@ -44,7 +44,7 @@ impl QuillApp {
         let session = self.session()?;
         let chat_id = session.open_chat?;
         let replying = self
-            .composer_ui
+            .chat_ui
             .reply()
             .filter(|reply| reply.chat_id == chat_id)
             .map(|reply| reply.message_id);

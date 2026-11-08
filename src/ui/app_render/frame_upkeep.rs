@@ -12,6 +12,8 @@ impl QuillApp {
         #[cfg(feature = "frame-profiler")]
         self.frame_profile_tick(window);
         self.flush_notifications(window, cx);
+        // What was open for a chat the view no longer shows goes.
+        self.sync_chat_ui();
         self.sync_history_holds();
         self.fetch_missing_reply_target();
         // The inline results button's round trip back to its chat.

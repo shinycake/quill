@@ -66,9 +66,9 @@ impl QuillApp {
             // The press owns the pointer: no text selection under it.
             GlobalState::suppress_text_selection(cx);
             window.focus(&self.message_ui.history_focus, cx);
-            self.message_ui.selection_focus = Some(message_id);
+            self.chat_ui.selection_focus = Some(message_id);
             if event.modifiers.shift
-                && let Some(anchor) = self.message_ui.selection_anchor
+                && let Some(anchor) = self.chat_ui.selection_anchor
             {
                 let ids = self.loaded_selectable_ids(chat);
                 let range = quill::selection_pin::range_between(&ids, anchor, message_id);
@@ -168,7 +168,7 @@ impl QuillApp {
                 // Drag-selecting gives the history the keyboard
                 // (`updateDragSelection` → `setFocus`).
                 window.focus(&self.message_ui.history_focus, cx);
-                self.message_ui.selection_focus = Some(press);
+                self.chat_ui.selection_focus = Some(press);
                 range = Some(DragRange {
                     anchor: press,
                     to,
@@ -228,13 +228,13 @@ impl QuillApp {
                 self.set_selection(drag.chat, next, cx);
                 // The release ends the drag, not a swipe to reply.
                 self.message_ui.swipe_reply_start = None;
-                self.message_ui.selection_anchor = Some(range.to);
-                self.message_ui.selection_focus = Some(range.to);
+                self.chat_ui.selection_anchor = Some(range.to);
+                self.chat_ui.selection_focus = Some(range.to);
             }
             None if drag.click_toggles => {
                 self.toggle_forward_select(drag.chat, drag.press, drag.pending, cx);
-                self.message_ui.selection_anchor = Some(drag.press);
-                self.message_ui.selection_focus = Some(drag.press);
+                self.chat_ui.selection_anchor = Some(drag.press);
+                self.chat_ui.selection_focus = Some(drag.press);
             }
             None => {}
         }
@@ -258,7 +258,7 @@ impl QuillApp {
             {
                 self.share.pending_forward = None;
                 self.share.forward_picker_open = false;
-                self.message_ui.selection_focus = None;
+                self.chat_ui.selection_focus = None;
             }
         } else {
             match self.share.pending_forward.as_mut() {
@@ -513,7 +513,7 @@ mod tests {
     }
 
     fn focus(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<MessageId> {
-        app.read_with(cx, |app, _| app.message_ui.selection_focus)
+        app.read_with(cx, |app, _| app.chat_ui.selection_focus)
     }
 
     fn drag(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>) {
@@ -619,7 +619,7 @@ mod tests {
         vcx.simulate_click(blank_point(a), Modifiers::default());
         assert_eq!(selected(&app, vcx), vec![b.id], "a click toggles a off");
         assert_eq!(
-            app.read_with(vcx, |app, _| app.message_ui.selection_anchor),
+            app.read_with(vcx, |app, _| app.chat_ui.selection_anchor),
             Some(a.id),
             "the last clicked row anchors the next Shift+click"
         );

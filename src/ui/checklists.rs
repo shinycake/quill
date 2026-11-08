@@ -164,7 +164,7 @@ impl QuillApp {
             match live.driver.send_checklist_draft(chat_id, &draft, reply_to) {
                 Ok(_) => {
                     self.composer_ui.checklist_dialog = None;
-                    self.composer_ui.set_reply(None);
+                    self.chat_ui.set_reply(None);
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_CHECKLIST)));
                 }

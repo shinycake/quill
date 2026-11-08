@@ -313,7 +313,7 @@ impl QuillApp {
                 .connection
                 .set_note(chat_search_jump_note(session));
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         // The composer shows the new chat's draft (next frame: no window here).
         self.request_draft_restore();
         cx.notify();

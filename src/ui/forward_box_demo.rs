@@ -40,7 +40,7 @@ impl QuillApp {
         use quill::composer::ComposerReplyTo;
         use quill::ids::MessageId;
         self.demo_seed_share_chats();
-        self.composer_ui
+        self.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
         self.open_reply_elsewhere(window, cx);
     }

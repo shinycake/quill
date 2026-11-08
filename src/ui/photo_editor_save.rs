@@ -150,7 +150,7 @@ impl QuillApp {
 
     /// The message whose media is being edited, if any.
     fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
-        let edit = self.composer_ui.pending_edit()?;
+        let edit = self.chat_ui.pending_edit()?;
         Some((edit.chat_id, edit.message_id))
     }
 

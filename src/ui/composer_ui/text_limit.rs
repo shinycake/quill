@@ -116,10 +116,10 @@ impl QuillApp {
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // The rich editor sends one message, and refuses text over its own limit.
-        if self.composer_ui.rich_editor_open || !self.pending_attachments().is_empty() {
+        if self.chat_ui.rich_editor_open || !self.pending_attachments().is_empty() {
             return None;
         }
-        let editing = self.composer_ui.pending_edit();
+        let editing = self.chat_ui.pending_edit();
         if editing.is_some_and(|edit| !matches!(edit.kind, quill::composer::ComposerEditKind::Text))
         {
             return None;

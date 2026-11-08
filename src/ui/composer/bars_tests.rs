@@ -85,11 +85,11 @@ fn begin_edit(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
 }
 
 fn editing(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
-    app.read_with(cx, |app, _| app.composer_ui.is_editing())
+    app.read_with(cx, |app, _| app.chat_ui.is_editing())
 }
 
 fn confirm_open(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> bool {
-    app.read_with(cx, |app, _| app.composer_ui.cancel_edit_confirm_open())
+    app.read_with(cx, |app, _| app.chat_ui.cancel_edit_confirm_open())
 }
 
 fn set_field(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
@@ -217,7 +217,7 @@ fn leaving_the_chat_with_the_box_open_leaves_no_box_and_no_edit(cx: &mut TestApp
 
 #[test]
 fn the_cancel_box_cannot_open_without_an_edit() {
-    let mut ui = crate::ui::composer_state::ComposerUi::new();
+    let mut ui = crate::ui::chat_ui_state::ChatUi::default();
     ui.set_cancel_edit_confirm(true);
     assert!(!ui.cancel_edit_confirm_open());
 }
@@ -252,7 +252,7 @@ fn the_x_button_cancels_without_asking(cx: &mut TestAppContext) {
 
 fn reply_to_ada(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, cx| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(GROUP, MessageId(10))));
         cx.notify();
     });
@@ -284,9 +284,7 @@ fn clicking_the_reply_bar_opens_the_quote_picker(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     reply_to_ada(&app, vcx);
     let kind = app.read_with(vcx, |app, _| {
-        app.composer_ui
-            .reply()
-            .map(|reply| app.reply_bar_kind(reply))
+        app.chat_ui.reply().map(|reply| app.reply_bar_kind(reply))
     });
     assert!(matches!(
         kind,
@@ -322,7 +320,7 @@ fn clicking_the_edit_bar_jumps_to_the_edited_message(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     begin_edit(&app, vcx);
     let edited = app.read_with(vcx, |app, _| {
-        app.composer_ui.pending_edit().map(|edit| edit.message_id)
+        app.chat_ui.pending_edit().map(|edit| edit.message_id)
     });
     assert_eq!(edited, Some(MessageId(11)));
     clear_jump(&app, vcx);
@@ -434,7 +432,7 @@ fn select_topic(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId
 
 fn reply_to(app: &Entity<QuillApp>, cx: &mut VisualTestContext, chat: ChatId, message: i64) {
     app.update(cx, |app, cx| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(chat, MessageId(message))));
         cx.notify();
     });
@@ -454,7 +452,7 @@ fn a_forum_field_names_the_topic_it_sends_to(cx: &mut TestAppContext) {
     assert_eq!(placeholder(&app, vcx), "Reply in Releases");
     // Cancelling the reply brings General back.
     app.update(vcx, |app, cx| {
-        app.composer_ui.set_reply(None);
+        app.chat_ui.set_reply(None);
         cx.notify();
     });
     frames(vcx);

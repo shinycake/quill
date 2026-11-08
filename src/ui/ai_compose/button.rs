@@ -52,10 +52,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        if session.open_chat.is_none()
-            || self.recording_active()
-            || self.composer_ui.rich_editor_open
-        {
+        if session.open_chat.is_none() || self.recording_active() || self.chat_ui.rich_editor_open {
             return false;
         }
         let text = self.composer.read(cx).value();

@@ -124,7 +124,7 @@ fn a_ton_address_opens_copy_and_explorer(cx: &mut TestAppContext) {
     });
     frames(vcx);
     let popup = app.read_with(vcx, |app, _| {
-        app.message_ui.link_popup.as_ref().map(|p| p.link.clone())
+        app.chat_ui.link_popup.as_ref().map(|p| p.link.clone())
     });
     assert_eq!(popup, Some(LinkTarget::TonAddress(ADDRESS.into())));
     assert!(find(vcx, "link-popup-explorer".into()), "View in Explorer");
@@ -138,7 +138,7 @@ fn a_ton_address_opens_copy_and_explorer(cx: &mut TestAppContext) {
     assert_eq!(url, format!("https://tonviewer.com/{ADDRESS}"));
     // Copy Address puts the address on the clipboard and closes the menu.
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.link_popup = None;
+        app.chat_ui.link_popup = None;
         app.copy_ton_address(ADDRESS.to_string(), cx);
     });
     let copied = vcx.read_from_clipboard().and_then(|item| item.text());

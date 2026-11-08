@@ -145,7 +145,7 @@ impl QuillApp {
             || self.kit_dialog_open()
             || self.profile_modal_active()
             || self.media_panel_open()
-            || self.composer_ui.inline_results_open
+            || self.chat_ui.inline_results_open
             || self.players.inline_videos.any_sounding()
     }
 

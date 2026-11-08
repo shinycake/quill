@@ -27,8 +27,8 @@ impl QuillApp {
     pub(super) fn file_drop_enabled(&self) -> bool {
         matches!(self.pane_mode(), PaneMode::Ready)
             && self.composer_available(PaneMode::Ready)
-            && !self.composer_ui.is_editing()
-            && !self.composer_ui.rich_editor_open
+            && !self.chat_ui.is_editing()
+            && !self.chat_ui.rich_editor_open
             && !self.recording_active()
     }
 
@@ -76,7 +76,7 @@ impl QuillApp {
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         self.composer_ui.drop_state = None;
         self.composer_ui.drop_paths.clear();
-        if self.file_drop_enabled() || self.composer_ui.is_editing() {
+        if self.file_drop_enabled() || self.chat_ui.is_editing() {
             self.attach_dropped_files(paths, cx);
         }
     }

@@ -101,7 +101,7 @@ impl QuillApp {
     }
 
     pub(super) fn start_voice_recording(&mut self, cx: &mut Context<Self>) {
-        if self.composer_ui.is_editing() || self.recording_busy() {
+        if self.chat_ui.is_editing() || self.recording_busy() {
             return;
         }
         if self.gif_panel_open() {
@@ -125,7 +125,7 @@ impl QuillApp {
     /// otherwise. `locked`: it starts locked (the "Record Round Message"
     /// shortcut, `startRecordingAndLock`).
     pub(super) fn start_video_note_recording(&mut self, locked: bool, cx: &mut Context<Self>) {
-        if self.composer_ui.is_editing() || self.recording_busy() {
+        if self.chat_ui.is_editing() || self.recording_busy() {
             return;
         }
         // Phase S1: round video notes need secret-chat layer ≥ 66 (TGX

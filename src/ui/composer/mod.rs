@@ -94,7 +94,7 @@ impl QuillApp {
                 if self.cancel_gone_composer_targets(window, cx) {
                     return;
                 }
-                if self.composer_ui.is_editing() {
+                if self.chat_ui.is_editing() {
                     self.submit_edit(text, window, cx);
                     return;
                 }
@@ -133,7 +133,7 @@ impl QuillApp {
                 self.forget_scroll_on_return_to_latest();
                 self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
-                if self.composer_ui.rich_editor_open {
+                if self.chat_ui.rich_editor_open {
                     let blocks = quill::rich::markup_to_blocks(&text);
                     self.submit_rich_composer(blocks, window, cx);
                     return;
@@ -430,7 +430,7 @@ impl QuillApp {
                     }
                     self.finish_pending_send();
                     self.composer_ui.group_media = None;
-                    self.composer_ui.set_reply(None);
+                    self.chat_ui.set_reply(None);
                     if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
                         self.forget_local_draft(chat_id);
                     }
@@ -573,8 +573,8 @@ impl QuillApp {
             Ok(_) => {
                 self.finish_pending_send();
                 self.composer_ui.schedule_popup_open = false;
-                self.composer_ui.set_reply(None);
-                self.composer_ui.rich_editor_open = false;
+                self.chat_ui.set_reply(None);
+                self.chat_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);
                 self.composer_ui.clear_draft_on_success = Some(DraftClear::whole_composer(chat_id));
                 self.composer
@@ -596,11 +596,11 @@ impl QuillApp {
     pub(super) fn attach_dropped_files(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         // B5: while editing, a drop or paste replaces the message's media
         // (tdesktop `EditCaptionBox` accepts exactly one file).
-        if self.composer_ui.is_editing() {
+        if self.chat_ui.is_editing() {
             match paths {
                 [only]
                     if self
-                        .composer_ui
+                        .chat_ui
                         .pending_edit()
                         .is_some_and(|e| e.allows_replace()) =>
                 {
@@ -699,7 +699,7 @@ impl QuillApp {
         };
         match quill::composer::clipboard_image_attachment(&image.bytes, extension) {
             // B5: a pasted image replaces the edited message's media.
-            Some(att) if self.composer_ui.is_editing() => {
+            Some(att) if self.chat_ui.is_editing() => {
                 self.attach_dropped_files(std::slice::from_ref(&att.path), cx);
                 return true;
             }

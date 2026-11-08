@@ -105,7 +105,7 @@ impl QuillApp {
                 draft.toggle(chat_id, message_id, pending);
                 if draft.is_empty() {
                     self.share.pending_forward = None;
-                    self.message_ui.selection_focus = None;
+                    self.chat_ui.selection_focus = None;
                     self.share.forward_picker_open = false;
                 }
             }
@@ -169,7 +169,7 @@ impl QuillApp {
 
     pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.pending_forward.take());
-        self.message_ui.selection_focus = None;
+        self.chat_ui.selection_focus = None;
         self.share.forward_picker_open = false;
         self.share.forward_bar_dest = None;
         self.share.selection.clear();
@@ -184,8 +184,6 @@ impl QuillApp {
     /// Chat switch: a forward draft stays only for its source chat (the
     /// selection) and for the chat the forward bar waits in.
     pub(super) fn dismiss_forward_for_chat(&mut self, chat_id: ChatId) {
-        // The send-as list belongs to the chat it was opened in.
-        self.composer_ui.send_as_open = false;
         if self
             .share
             .forward_bar_dest

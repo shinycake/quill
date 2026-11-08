@@ -113,15 +113,14 @@ impl QuillApp {
         });
         match edit {
             Some(edit) => {
-                self.composer_ui
+                self.chat_ui
                     .enter_edit(edit, "unrelated draft stays".into(), None);
             }
             None => {
-                self.composer_ui.leave_edit();
+                self.chat_ui.leave_edit();
             }
         }
-        self.message_ui.pending_delete =
-            DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
+        self.chat_ui.pending_delete = DeleteConfirm::own(ChatId(11), MessageId(102), true, false);
     }
 
     fn demo_ready_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -240,7 +239,7 @@ impl QuillApp {
                 entity(11, 19, quill::text::TextEntityKind::Italic),
                 entity(20, 24, quill::text::TextEntityKind::Strikethrough),
             ];
-            self.composer_ui.set_reply(Some(ComposerReplyTo::with_quote(
+            self.chat_ui.set_reply(Some(ComposerReplyTo::with_quote(
                 ChatId(11),
                 MessageId(101),
                 quote,

@@ -3,7 +3,7 @@
 //!
 //! `QuillApp` keeps one copy of the view state its conversation, composer
 //! and overlay code reads (`history`, `composer`, `composer_ui`,
-//! `message_ui`, `pickers`, `viewer`, and the slices that draw them,
+//! `chat_ui`, `message_ui`, `pickers`, `viewer`, and the slices that draw them,
 //! `slices.window`) and the `Session` keeps one view
 //! (`open_chat`, `open_topic`, the thread, Saved Messages and search
 //! views, the gallery). A chat window owns its own copy of the app's part
@@ -20,6 +20,7 @@
 
 use super::super::app::QuillApp;
 use super::super::app_slice::WindowSlices;
+use super::super::chat_ui_state::ChatUi;
 use super::super::composer_state::ComposerUi;
 use super::super::glyph_sweep;
 use super::super::history_state::HistoryUi;
@@ -41,6 +42,8 @@ pub(super) struct WindowSlot {
     pub(super) history: HistoryUi,
     pub(super) composer: Entity<TextareaState>,
     pub(super) composer_ui: Box<ComposerUi>,
+    /// What the window has open for its chat (`chat_ui_state`).
+    pub(super) chat_ui: Box<ChatUi>,
     pub(super) message_ui: MessageUi,
     pub(super) pickers: PickerUi,
     pub(super) viewer: ViewerUi,
@@ -96,6 +99,7 @@ impl WindowSlot {
             history: HistoryUi::new(cx),
             composer,
             composer_ui: Box::new(ComposerUi::new()),
+            chat_ui: Box::new(ChatUi::for_chat(Some(chat_id))),
             message_ui: MessageUi::new(window, cx),
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),
@@ -156,6 +160,7 @@ impl QuillApp {
         std::mem::swap(&mut self.history, &mut slot.history);
         std::mem::swap(&mut self.composer, &mut slot.composer);
         std::mem::swap(&mut self.composer_ui, &mut slot.composer_ui);
+        std::mem::swap(&mut self.screen.chat_ui, &mut slot.chat_ui);
         std::mem::swap(&mut self.message_ui, &mut slot.message_ui);
         std::mem::swap(&mut self.pickers, &mut slot.pickers);
         std::mem::swap(&mut self.viewer, &mut slot.viewer);

@@ -243,8 +243,8 @@ fn a_reply_started_in_a_chat_window_stays_in_that_window(cx: &mut TestAppContext
     h.settle(cx);
     let (window_reply, main_reply) = h.app.read_with(cx, |app, _| {
         let slot = app.windows.slot_for(OTHER).expect("slot");
-        let reply = slot.borrow().composer_ui.reply().cloned();
-        (reply, app.composer_ui.reply().cloned())
+        let reply = slot.borrow().chat_ui.reply().cloned();
+        (reply, app.chat_ui.reply().cloned())
     });
     assert_eq!(window_reply.map(|reply| reply.message_id), Some(OTHER_LAST));
     assert!(main_reply.is_none());
@@ -274,13 +274,13 @@ fn a_chat_windows_reply_to_a_deleted_option_sends_a_plain_reply(cx: &mut TestApp
     // points at an item that no longer exists.
     let (sent, draft) = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, cx| {
-            app.composer_ui.set_reply(Some(
+            app.chat_ui.set_reply(Some(
                 ComposerReplyTo::new(OTHER, OTHER_LAST)
                     .to_item(ReplyItem::PollOption("gone".into())),
             ));
             let sent = app.send_reply_for(OTHER, cx).map(|reply| reply.item);
             let draft = app
-                .draft_reply(app.composer_ui.reply(), OTHER)
+                .draft_reply(app.chat_ui.reply(), OTHER)
                 .map(|reply| reply.item);
             (sent, draft)
         })

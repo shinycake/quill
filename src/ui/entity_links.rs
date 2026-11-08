@@ -170,7 +170,7 @@ impl QuillApp {
                         let _ = live.driver.request_bank_card_info(&number);
                     }
                 }
-                self.message_ui.link_popup = Some(LinkPopup {
+                self.chat_ui.link_popup = Some(LinkPopup {
                     position: window.mouse_position(),
                     link,
                 });
@@ -462,7 +462,7 @@ impl QuillApp {
 
     /// The menu of a phone number, card number, date or TON address.
     pub(super) fn link_popup_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.message_ui.link_popup.as_ref()?;
+        self.chat_ui.link_popup.as_ref()?;
         self.link_popup_overlay_body(cx)
     }
 
@@ -472,7 +472,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn link_popup_overlay_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let popup = self.message_ui.link_popup.clone()?;
+        let popup = self.chat_ui.link_popup.clone()?;
         let (label, text) = match &popup.link {
             LinkTarget::Phone(number) => (tr(keys::Q_OPS_COPY_PHONE_NUMBER), number.clone()),
             LinkTarget::BankCard(number) => (tr(keys::Q_OPS_COPY_CARD_NUMBER), number.clone()),
@@ -511,7 +511,7 @@ impl QuillApp {
             super::ton_wallet_ui::explorer_menu_row(
                 "link-popup-explorer",
                 address,
-                |this| this.message_ui.link_popup = None,
+                |this| this.chat_ui.link_popup = None,
                 None,
                 cx,
             )
@@ -520,7 +520,7 @@ impl QuillApp {
         let send_row = (ton_address.is_some() && wallet_on).then(|| {
             super::ton_wallet_ui::send_money_menu_row(
                 "link-popup-send-money",
-                |this| this.message_ui.link_popup = None,
+                |this| this.chat_ui.link_popup = None,
                 None,
                 cx,
             )
@@ -537,7 +537,7 @@ impl QuillApp {
                         .absolute()
                         .inset_0()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_ui.link_popup = None;
+                            this.chat_ui.link_popup = None;
                             cx.notify();
                         })),
                 )
@@ -586,7 +586,7 @@ impl QuillApp {
                                         )
                                         .child(label)
                                         .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.message_ui.link_popup = None;
+                                            this.chat_ui.link_popup = None;
                                             if ton_address.is_some() {
                                                 this.copy_ton_address(text.clone(), cx);
                                             } else {
@@ -616,7 +616,7 @@ impl QuillApp {
                                             .aria_label(label.clone())
                                             .child(label)
                                             .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.message_ui.link_popup = None;
+                                                this.chat_ui.link_popup = None;
                                                 this.open_link(&url, cx);
                                             }))
                                     },

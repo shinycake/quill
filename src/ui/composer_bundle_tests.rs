@@ -387,7 +387,7 @@ fn up_opens_the_caption_of_a_media_message_still_being_sent(cx: &mut TestAppCont
     vcx.simulate_keystrokes("up");
     let (edit, text) = app.read_with(vcx, |app, cx| {
         (
-            app.composer_ui.pending_edit().cloned(),
+            app.chat_ui.pending_edit().cloned(),
             app.composer.read(cx).value().to_string(),
         )
     });
@@ -402,7 +402,7 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         pending_photo(app, "on its way");
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(quill::composer::ComposerReplyTo::new(
                 OPEN,
                 quill::ids::MessageId(1),
@@ -410,5 +410,5 @@ fn up_keeps_scrolling_while_a_reply_is_pending(cx: &mut TestAppContext) {
         app.composer.update(cx, |input, cx| input.focus(window, cx));
     });
     vcx.simulate_keystrokes("up");
-    assert!(app.read_with(vcx, |app, _| !app.composer_ui.is_editing()));
+    assert!(app.read_with(vcx, |app, _| !app.chat_ui.is_editing()));
 }

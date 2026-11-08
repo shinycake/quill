@@ -143,7 +143,7 @@ impl QuillApp {
                 |this, banner| this.child(banner),
             )
             .when(composer.is_some() && part.bottom(), |this| {
-                let show_attach = matches!(mode, PaneMode::Ready) && !self.composer_ui.is_editing();
+                let show_attach = matches!(mode, PaneMode::Ready) && !self.chat_ui.is_editing();
                 // Something to send (text, an attachment, an edit): the
                 // composer shows Send instead of the mic.
                 // A rich draft shown in place of the field sends too.
@@ -416,7 +416,7 @@ impl QuillApp {
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
-                        .when(self.composer_ui.rich_editor_open, |this| {
+                        .when(self.chat_ui.rich_editor_open, |this| {
                             this.child(self.rich_editor_bar(cx))
                         }),
                 )

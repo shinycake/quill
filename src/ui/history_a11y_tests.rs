@@ -145,7 +145,7 @@ fn focus_entering_the_history_picks_a_message_and_arrows_move_it(cx: &mut TestAp
 
     // The focused message has a spoken name ending in its delivery state.
     let name = app.read_with(vcx, |app, _| {
-        let focus = app.message_ui.selection_focus.expect("a focused message");
+        let focus = app.chat_ui.selection_focus.expect("a focused message");
         let row = app
             .history
             .rows

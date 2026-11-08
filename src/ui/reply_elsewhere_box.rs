@@ -34,7 +34,7 @@ impl QuillApp {
     /// The author of the replied-to message, when they have a chat of their
     /// own to answer in that the chooser can list.
     fn reply_author_chat(&self) -> Option<ChatId> {
-        let reply = self.composer_ui.reply()?;
+        let reply = self.chat_ui.reply()?;
         let session = self.session()?;
         let message = session
             .histories
@@ -186,7 +186,7 @@ crate::ui::shell::register_dialogs! {
     /// "Reply in Another Chat" over the window (tdesktop `ShowReplyToChatBox`).
     ReplyElsewhere => DialogSpec::new(
         2931,
-        |app| app.share.reply_elsewhere_open && app.composer_ui.has_reply(),
+        |app| app.share.reply_elsewhere_open && app.chat_ui.has_reply(),
         QuillApp::build_reply_elsewhere_dialog,
     )
     .close(|app, window, cx| app.close_reply_panels(window, cx)),

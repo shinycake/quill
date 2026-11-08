@@ -408,7 +408,7 @@ impl QuillApp {
                 self.open_scheduled_dialog(cx);
             }
             ScheduleTarget::RescheduleSelected => {
-                for id in std::mem::take(&mut self.composer_ui.scheduled_selected) {
+                for id in std::mem::take(&mut self.chat_ui.scheduled_selected) {
                     self.edit_scheduled_state(id, scheduling, cx);
                 }
                 self.open_scheduled_dialog(cx);
@@ -557,7 +557,7 @@ impl QuillApp {
                 .tooltip(title)
                 .accessibility_label(title)
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.composer_ui.scheduled_selected.clear();
+                    this.chat_ui.scheduled_selected.clear();
                     this.open_scheduled_dialog(cx);
                 }))
                 .into_any_element(),
@@ -603,7 +603,7 @@ impl QuillApp {
 
     /// The scheduled messages that are ticked and still scheduled.
     fn selected_scheduled(&self) -> Vec<MessageId> {
-        let mut selected = self.composer_ui.scheduled_selected.clone();
+        let mut selected = self.chat_ui.scheduled_selected.clone();
         let existing: Vec<MessageId> = self
             .session()
             .map(|s| s.messages.scheduled_messages.iter().map(|m| m.id).collect())
@@ -634,7 +634,7 @@ impl QuillApp {
                         for id in ids {
                             this.edit_scheduled_state(id, ComposerScheduling::None, cx);
                         }
-                        this.composer_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_selected.clear();
                         cx.notify();
                     });
                     true
@@ -664,7 +664,7 @@ impl QuillApp {
                         for id in ids {
                             this.delete_scheduled_message(id, cx);
                         }
-                        this.composer_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_selected.clear();
                         cx.notify();
                     });
                     true
@@ -727,7 +727,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.composer_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_selected.clear();
                         cx.notify();
                     })),
             )
@@ -837,7 +837,7 @@ impl QuillApp {
                                     .checked(selected.contains(&id))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         quill::selection_pin::toggle_id(
-                                            &mut this.composer_ui.scheduled_selected,
+                                            &mut this.chat_ui.scheduled_selected,
                                             id,
                                         );
                                         cx.notify();

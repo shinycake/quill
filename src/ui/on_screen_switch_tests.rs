@@ -75,7 +75,7 @@ fn a_delete_box_open_across_a_switch_closes(cx: &mut TestAppContext) {
     frames(&mut vcx);
     assert!(!dialog_up(&mut vcx));
     app.read_with(&vcx, |app, _| {
-        assert!(app.message_ui.pending_delete.is_none());
+        assert!(app.chat_ui.pending_delete.is_none());
         let kept = app
             .session()
             .and_then(|s| s.histories.get(&CHAT.0))
@@ -298,7 +298,7 @@ fn a_switch_closes_reply_in_another_chat(cx: &mut TestAppContext) {
             .and_then(|s| s.histories.get(&CHAT.0))
             .and_then(|h| h.messages.keys().next_back().copied())
             .expect("a message");
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(CHAT, MessageId(message))));
         app.share.reply_elsewhere_open = true;
         cx.notify();

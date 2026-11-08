@@ -26,13 +26,13 @@ impl QuillApp {
             .get(&chat.0)
             .is_some_and(|chat| chat.is_channel());
         let reply = self
-            .composer_ui
+            .chat_ui
             .reply()
             .filter(|reply| reply.chat_id == chat && reply.target_chat.is_none())
             .map(|reply| reply.message_id)
             .or_else(|| self.keyboard_reply_target());
         PlaceholderFacts {
-            editing: self.composer_ui.is_editing(),
+            editing: self.chat_ui.is_editing(),
             keyboard: self.keyboard_placeholder(),
             stars_per_message: session.paid_send_price(chat),
             topic: session.composer_topic(chat, reply),
@@ -116,7 +116,7 @@ impl QuillApp {
         let text = self.composer.read(cx).value().to_string();
         inline_bot_hint(
             &text,
-            self.composer_ui.is_editing(),
+            self.chat_ui.is_editing(),
             username,
             &user.inline_query_placeholder,
         )

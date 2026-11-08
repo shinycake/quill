@@ -240,7 +240,7 @@ impl QuillApp {
                 && live.driver.session.open_chat == Some(old)
             {
                 let _ = live.driver.select_chat(new);
-                self.dismiss_cross_chat_state(new, cx);
+                self.enter_chat_ui(new, cx);
             }
         }
         cx.notify();

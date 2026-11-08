@@ -1,0 +1,26 @@
+# Fields of the per-view structs (the ones a chat window's `WindowSlot`
+# swaps in) that name one chat's ids but are not the chat's UI state
+# (docs/decisions/account-scoped-ui-state.md, section 9). Checked by
+# scripts/check-screen-state.py: in `ComposerUi`, `MessageUi`, `HistoryUi`,
+# `PickerUi`, `ShareUi` and `ViewerUi`, a field whose type holds a
+# `ChatId`, `MessageId`, `DeleteConfirm`, `ComposerReplyTo` or
+# `ComposerEdit` (outside a keyed map or set) is listed here with its
+# reason, or it goes in `ChatUi` (ui/chat_ui_state.rs), which is replaced
+# whole when the chat shown changes.
+#
+#   <Struct>.<field> | <why it may outlive the chat it names>
+
+ComposerUi.shown_draft | carries its own chat and topic: a draft for another slot never matches
+ComposerUi.slow_mode_tick_chat | marks the running 1 s tick task, which exits by itself when the chat changes; resetting it would start a second task
+MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
+HistoryUi.painted_ids | rebuilt by every paint of the history list
+HistoryUi.seen | carries its chat; read once at the next render
+HistoryUi.on_screen | rebuilt by every paint of the history list
+HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never matches
+HistoryUi.ends | compared with the history synced next; a new chat's ends differ
+HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
+HistoryUi.self_destruct_tick_chat | marks a running tick task, as slow_mode_tick_chat
+HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick_chat
+ShareUi.forward_bar_dest | the chat a forward waits in; kept across chats on purpose (dismiss_forward_for_chat)
+ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
+ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video

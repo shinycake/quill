@@ -153,7 +153,7 @@ impl QuillApp {
         let generation = self
             .session()
             .map_or(0, |s| s.stickers.emoji.keyword_lookups.generation);
-        let on = self.emoji_words_on() && !self.composer_ui.is_editing();
+        let on = self.emoji_words_on() && !self.chat_ui.is_editing();
         let skip = composer.spans().iter().filter(|span| {
             matches!(
                 ComposerTag::from_tag(span.tag()),

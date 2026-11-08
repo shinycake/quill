@@ -52,7 +52,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let drawn = self.follow_bar(
             &self.frame.surfaces.edit_bar,
-            self.composer_ui.pending_edit().cloned(),
+            self.chat_ui.pending_edit().cloned(),
             cx,
         )?;
         let content = self
@@ -75,7 +75,7 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         let drawn = self.follow_bar(
             &self.frame.surfaces.reply_bar,
-            self.composer_ui.reply().cloned(),
+            self.chat_ui.reply().cloned(),
             cx,
         )?;
         let content = self

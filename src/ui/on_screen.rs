@@ -122,6 +122,8 @@ on_screen_fields! {
     composer: Entity<TextareaState>,
     /// Composer state: menus, attachments, send options, reply and edit drafts (`ui/composer_state.rs`).
     composer_ui: Box<super::composer_state::ComposerUi>,
+    /// What the main window has open for the chat it shows, replaced when that chat changes (`ui/chat_ui_state.rs`).
+    chat_ui: Box<super::chat_ui_state::ChatUi>,
     /// Emoji, sticker and GIF panel and their search fields (`ui/pickers_state.rs`).
     pickers: super::pickers_state::PickerUi,
     /// Search fields: global search and search in chat (`ui/search_state.rs`).
@@ -290,6 +292,7 @@ impl OnScreen {
             chat_list: super::chat_list_state::ChatListUi::new(window, cx),
             composer,
             composer_ui: Box::new(super::composer_state::ComposerUi::new()),
+            chat_ui: Default::default(),
             pickers: super::pickers_state::PickerUi::new(
                 window,
                 cx,

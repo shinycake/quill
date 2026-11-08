@@ -187,7 +187,7 @@ impl QuillApp {
         let order = mosaic.order();
         let selected = order
             .get(
-                self.composer_ui
+                self.chat_ui
                     .inline_results_selected
                     .min(order.len().saturating_sub(1)),
             )
@@ -445,8 +445,8 @@ impl QuillApp {
         else {
             return;
         };
-        self.composer_ui.inline_results_open = false;
-        self.composer_ui.inline_query_armed = None;
+        self.chat_ui.inline_results_open = false;
+        self.chat_ui.inline_query_armed = None;
         match action {
             ButtonAction::StartBot { parameter } => {
                 // tdesktop sends the bot's start with the parameter once
@@ -496,11 +496,8 @@ impl QuillApp {
         if order.is_empty() {
             return;
         }
-        let Some(&target) = order.get(
-            self.composer_ui
-                .inline_results_selected
-                .min(order.len() - 1),
-        ) else {
+        let Some(&target) = order.get(self.chat_ui.inline_results_selected.min(order.len() - 1))
+        else {
             return;
         };
         let Some(row) = mosaic
@@ -526,7 +523,7 @@ impl QuillApp {
     /// one viewport of the end (`Widget::onScroll`), so a short first page
     /// keeps loading until the panel fills.
     pub(super) fn load_more_inline_results_if_needed(&mut self, cx: &mut Context<Self>) {
-        if !self.composer_ui.inline_results_open {
+        if !self.chat_ui.inline_results_open {
             return;
         }
         let text = self.composer.read(cx).value().to_string();

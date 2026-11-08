@@ -112,7 +112,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
 
     // The reply chooser lists every destination, server search included.
     app.update_in(vcx, |app, _, cx| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
         app.share.reply_elsewhere_open = true;
         cx.notify();
@@ -134,7 +134,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     );
     app.update_in(vcx, |app, window, cx| {
         app.close_reply_panels(window, cx);
-        app.composer_ui.set_reply(None);
+        app.chat_ui.set_reply(None);
     });
 
     // The search tabs: channels (joined channel 13), photos (media rows

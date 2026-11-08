@@ -378,7 +378,7 @@ impl QuillApp {
             // follows the pref again.
             self.composer_ui.group_media = None;
             self.composer_ui.schedule_popup_open = false;
-            self.composer_ui.set_reply(None);
+            self.chat_ui.set_reply(None);
             self.clear_suggest_bar_after_send(chat_id);
         }
         self.composer_ui.clear_draft_on_success = plan

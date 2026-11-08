@@ -134,7 +134,7 @@ impl QuillApp {
             .and_then(|bytes| bytes.parse().ok())
             .unwrap_or(0);
         let markup = rich_editor_markup(bytes);
-        self.composer_ui.rich_editor_open = true;
+        self.chat_ui.rich_editor_open = true;
         self.set_composer_markup(&markup, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -176,7 +176,7 @@ impl QuillApp {
         }
         match mode.as_str() {
             "reply" => {
-                self.composer_ui
+                self.chat_ui
                     .set_reply(Some(quill::composer::ComposerReplyTo::new(
                         ChatId(-2002),
                         quill::ids::MessageId(10),
@@ -198,7 +198,7 @@ impl QuillApp {
             }
             "silent" => self.toggle_composer_silent(),
             "topic-reply" => {
-                self.composer_ui
+                self.chat_ui
                     .set_reply(Some(quill::composer::ComposerReplyTo::new(
                         FORUM_CHAT,
                         quill::ids::MessageId(20),

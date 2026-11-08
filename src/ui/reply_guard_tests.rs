@@ -42,17 +42,17 @@ fn app_with_a_deleted_reply(cx: &mut TestAppContext) -> (Entity<QuillApp>, Visua
         }
     });
     vcx.run_until_parked();
-    assert!(app.read_with(&vcx, |app, _| app.composer_ui.has_reply()));
+    assert!(app.read_with(&vcx, |app, _| app.chat_ui.has_reply()));
     app.update(&mut vcx, |app, _| app.demo_delete_message(CHAT, REPLIED));
     assert!(
-        app.read_with(&vcx, |app, _| app.composer_ui.has_reply()),
+        app.read_with(&vcx, |app, _| app.chat_ui.has_reply()),
         "no frame ran: the bar still holds the reply"
     );
     (app, vcx)
 }
 
 fn reply_is_gone(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> bool {
-    app.read_with(vcx, |app, _| !app.composer_ui.has_reply())
+    app.read_with(vcx, |app, _| !app.chat_ui.has_reply())
 }
 
 fn rows(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> Vec<i64> {
@@ -140,7 +140,7 @@ fn shared_content_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
     let (app, mut vcx) = app_with_a_deleted_reply(cx);
     let kept = app.update(&mut vcx, |app, cx| {
         app.roll_dice("🎲", cx);
-        app.composer_ui.has_reply()
+        app.chat_ui.has_reply()
     });
     assert!(!kept, "the share sender dropped the reply itself");
 }
@@ -161,7 +161,7 @@ fn a_poll_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
                 }
             }
             app.submit_poll_dialog(window, cx);
-            app.composer_ui.has_reply()
+            app.chat_ui.has_reply()
         })
     });
     assert!(!kept, "the poll sender dropped the reply itself");
@@ -181,7 +181,7 @@ fn a_checklist_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
             }
             app.composer_ui.checklist_dialog = Some(dialog);
             app.submit_checklist_dialog(cx);
-            app.composer_ui.has_reply()
+            app.chat_ui.has_reply()
         })
     });
     assert!(!kept, "the checklist sender dropped the reply itself");
@@ -191,7 +191,7 @@ fn a_checklist_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
 fn a_reply_to_a_message_that_is_there_passes_through(cx: &mut TestAppContext) {
     let (app, mut vcx) = app_with_a_deleted_reply(cx);
     app.update(&mut vcx, |app, cx| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(quill::composer::ComposerReplyTo::new(
                 CHAT,
                 MessageId(102),

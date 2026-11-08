@@ -22,7 +22,7 @@ impl QuillApp {
             .map(|draft| draft.from_chat_id)
             .into_iter()
             .chain(self.playback.player.chat)
-            .chain(self.composer_ui.reply().map(|reply| reply.chat_id))
+            .chain(self.chat_ui.reply().map(|reply| reply.chat_id))
             .chain(self.member_list_readers())
             .chain(self.session().into_iter().flat_map(|session| {
                 [session.info_panel_chat(), session.sponsored_report_chat()]

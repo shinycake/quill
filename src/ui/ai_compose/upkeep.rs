@@ -134,7 +134,8 @@ impl QuillApp {
                 Ok(None) => break,
                 Ok(Some(_)) | Err(_) => {
                     if let Some(account) = account.clone() {
-                        self.screen.ai_compose
+                        self.screen
+                            .ai_compose
                             .emoji_asked
                             .insert(OfAccount::new(account, id));
                     }

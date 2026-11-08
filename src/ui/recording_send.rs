@@ -116,7 +116,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if take_text {
-            self.composer_ui.set_reply(None);
+            self.chat_ui.set_reply(None);
             self.composer
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.forget_local_draft(target.chat_id);
@@ -134,9 +134,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let text = self.composer.read(cx).value().to_string();
-        let plan = target.restore_plan(self.open_chat_id(), &text, self.composer_ui.reply());
+        let plan = target.restore_plan(self.open_chat_id(), &text, self.chat_ui.reply());
         if plan.reply {
-            self.composer_ui.set_reply(target.reply.clone());
+            self.chat_ui.set_reply(target.reply.clone());
         }
         if plan.caption {
             self.set_composer_markup(&target.caption, window, cx);

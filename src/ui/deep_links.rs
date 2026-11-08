@@ -265,7 +265,7 @@ impl QuillApp {
                 )));
             }
         }
-        self.dismiss_cross_chat_state(chat_id, cx);
+        self.enter_chat_ui(chat_id, cx);
         self.restore_open_draft(window, cx);
         // The inline results button's start goes out right away (the user
         // pressed it); a link's `start=` only prefills `/start <param>`,

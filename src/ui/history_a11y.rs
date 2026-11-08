@@ -142,7 +142,7 @@ impl QuillApp {
                 .iter()
                 .position(|item| matches!(item, A11yItem::Bar(_)));
         }
-        let focus = self.message_ui.selection_focus?;
+        let focus = self.chat_ui.selection_focus?;
         items.iter().position(|item| match item {
             A11yItem::Row(ix) => self
                 .history
@@ -174,8 +174,8 @@ impl QuillApp {
                     return;
                 };
                 self.message_ui.a11y.bar_focused = false;
-                self.message_ui.selection_focus = Some(id);
-                self.message_ui.selection_anchor = Some(id);
+                self.chat_ui.selection_focus = Some(id);
+                self.chat_ui.selection_anchor = Some(id);
                 ix
             }
         };
@@ -290,7 +290,7 @@ impl QuillApp {
         if !self.screen_reader_on(window) || self.message_ui.a11y.bar_focused {
             return false;
         }
-        let Some(focus) = self.message_ui.selection_focus else {
+        let Some(focus) = self.chat_ui.selection_focus else {
             return false;
         };
         let Some(message) = self.history.rows.iter().find_map(|row| match row {
@@ -342,7 +342,7 @@ impl QuillApp {
             return (false, row.unread_divider());
         }
         let focused = self
-            .message_ui
+            .chat_ui
             .selection_focus
             .is_some_and(|focus| row.contains(focus));
         (focused, false)

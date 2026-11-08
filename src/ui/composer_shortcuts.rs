@@ -199,7 +199,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             // The selected text becomes a link, shown in the link colour.
             self.composer.update(cx, |input, cx| {
                 input.set_selected_range(range.clone(), cx);
@@ -285,7 +285,7 @@ impl QuillApp {
         let caret = self.composer.read(cx).selected_range().start;
         // A code block is formatting in the field (codex:composer-input);
         // the rich editor still writes fences.
-        let (block, current) = if self.composer_ui.rich_editor_open {
+        let (block, current) = if self.chat_ui.rich_editor_open {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
@@ -344,7 +344,7 @@ impl QuillApp {
         };
         let typed = dialog.input.read(cx).value().to_string();
         let block = dialog.block.clone();
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             let still_there = self
                 .composer_code_block_at_caret(cx)
                 .is_some_and(|(range, _)| range == block);

@@ -33,7 +33,7 @@ impl QuillApp {
         let inline_active = quill::composer::inline_query_trigger(&text).is_some();
         // tdesktop turns command autocomplete off while a message is edited.
         let triggered =
-            self.command_trigger(cx).is_some() && !inline_active && !self.composer_ui.is_editing();
+            self.command_trigger(cx).is_some() && !inline_active && !self.chat_ui.is_editing();
         let open_chat = self.session().and_then(|session| session.open_chat);
         if triggered {
             self.load_quick_replies_for_menu();
@@ -44,19 +44,18 @@ impl QuillApp {
                 .unwrap_or(false)
         });
         let open = triggered && has_items;
-        if open == self.composer_ui.command_menu_open {
+        if open == self.chat_ui.command_menu_open {
             return;
         }
-        self.composer_ui.command_menu_open = open;
+        self.chat_ui.command_menu_open = open;
         // tdesktop starts below the "Edit Quick Replies" row.
-        self.composer_ui.command_menu_selected =
-            self.command_menu_state(cx).map_or(0, |(_, items)| {
-                usize::from(
-                    items
-                        .first()
-                        .is_some_and(|i| i.quick_reply == Some(quill::quick_replies::EDIT_ROW)),
-                )
-            });
+        self.chat_ui.command_menu_selected = self.command_menu_state(cx).map_or(0, |(_, items)| {
+            usize::from(
+                items
+                    .first()
+                    .is_some_and(|i| i.quick_reply == Some(quill::quick_replies::EDIT_ROW)),
+            )
+        });
         cx.notify();
     }
 
@@ -64,11 +63,11 @@ impl QuillApp {
     /// true when the menu was open (the key interceptor swallows the
     /// keystroke only then).
     pub(in crate::ui) fn close_command_menu(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.composer_ui.command_menu_open {
+        if !self.chat_ui.command_menu_open {
             return false;
         }
-        self.composer_ui.command_menu_open = false;
-        self.composer_ui.command_menu_selected = 0;
+        self.chat_ui.command_menu_open = false;
+        self.chat_ui.command_menu_selected = 0;
         cx.notify();
         true
     }
@@ -80,12 +79,11 @@ impl QuillApp {
             .command_menu_state(cx)
             .map(|(_, items)| items.len())
             .unwrap_or(0);
-        if !self.composer_ui.command_menu_open || rows == 0 {
+        if !self.chat_ui.command_menu_open || rows == 0 {
             return false;
         }
-        self.composer_ui.command_menu_selected = (self.composer_ui.command_menu_selected as i32
-            + delta)
-            .rem_euclid(rows as i32) as usize;
+        self.chat_ui.command_menu_selected =
+            (self.chat_ui.command_menu_selected as i32 + delta).rem_euclid(rows as i32) as usize;
         cx.notify();
         true
     }
@@ -97,7 +95,7 @@ impl QuillApp {
         &self,
         cx: &Context<Self>,
     ) -> Option<(String, Vec<CommandMenuItem>)> {
-        if !self.composer_ui.command_menu_open {
+        if !self.chat_ui.command_menu_open {
             return None;
         }
         let (_, prefix) = self.command_trigger(cx)?;
@@ -129,11 +127,11 @@ impl QuillApp {
             .command_menu_state(cx)
             .map(|(_, items)| items.len())
             .unwrap_or(0);
-        if !self.composer_ui.command_menu_open || rows == 0 {
+        if !self.chat_ui.command_menu_open || rows == 0 {
             return false;
         }
         let index = self
-            .composer_ui
+            .chat_ui
             .command_menu_selected
             .min(rows.saturating_sub(1));
         self.send_command_menu_index(index, window, cx);
@@ -152,10 +150,10 @@ impl QuillApp {
             .command_menu_state(cx)
             .map(|(_, items)| items)
             .unwrap_or_default();
-        if !self.composer_ui.command_menu_open || items.is_empty() {
+        if !self.chat_ui.command_menu_open || items.is_empty() {
             return false;
         }
-        let index = self.composer_ui.command_menu_selected.min(items.len() - 1);
+        let index = self.chat_ui.command_menu_selected.min(items.len() - 1);
         let Some(item) = items.get(index) else {
             return false;
         };

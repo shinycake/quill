@@ -47,7 +47,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             let tag = super::composer_field::tag_for_action(&action);
             self.toggle_composer_tag(tag, window, cx);
             self.composer
@@ -73,7 +73,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.composer_ui.rich_editor_open {
+        if !self.chat_ui.rich_editor_open {
             self.clear_composer_tags(window, cx);
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -433,8 +433,7 @@ impl QuillApp {
     /// of opening the editor.
     #[inline(never)]
     fn rich_editor_entry(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.composer_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3
-        {
+        if self.chat_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3 {
             return None;
         }
         Some(
@@ -449,7 +448,7 @@ impl QuillApp {
                     if premium {
                         // The editor works on block markup: show it raw.
                         let markup = this.composer_markup(cx);
-                        this.composer_ui.rich_editor_open = true;
+                        this.chat_ui.rich_editor_open = true;
                         this.set_composer_markup(&markup, window, cx);
                         this.connection.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,

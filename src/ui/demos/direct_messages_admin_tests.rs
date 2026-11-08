@@ -95,7 +95,7 @@ fn all_asks_to_choose_a_message_until_a_reply_is_picked(cx: &mut TestAppContext)
     assert_eq!(status.as_deref(), Some("3 chats"));
 
     app.update(vcx, |app, _| {
-        app.composer_ui
+        app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(DIRECT), MessageId(2001))));
     });
     let (restriction, composer) = app.read_with(vcx, |app, _| {

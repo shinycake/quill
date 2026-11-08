@@ -35,8 +35,8 @@ impl QuillApp {
     /// A paste into the field, before the field takes it.
     pub(in crate::ui) fn offer_rich_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.composer.read(cx).focus_handle(cx).is_focused(window)
-            || self.composer_ui.is_editing()
-            || self.composer_ui.rich_editor_open
+            || self.chat_ui.is_editing()
+            || self.chat_ui.rich_editor_open
             || self.open_chat_id().is_none()
         {
             return;
@@ -156,7 +156,7 @@ impl QuillApp {
     /// The field's text, as block markup, in the rich editor.
     fn open_rich_editor_with_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let markup = self.composer_markup(cx);
-        self.composer_ui.rich_editor_open = true;
+        self.chat_ui.rich_editor_open = true;
         self.set_composer_markup(&markup, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));

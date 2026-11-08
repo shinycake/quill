@@ -117,7 +117,7 @@ impl QuillApp {
             MenuAction::Tool(EditMediaTool::EditVideo) => self.open_edit_video_editor(window, cx),
             MenuAction::Tool(EditMediaTool::EditCover) => self.pick_edit_cover(cx),
             MenuAction::ClearCover => {
-                if let Some(edit) = self.composer_ui.pending_edit_mut() {
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
                     edit.media_edit.cover = None;
                 }
                 self.connection
@@ -130,7 +130,7 @@ impl QuillApp {
     /// "Edit Image": open the photo editor on the staged replacement, or
     /// on the downloaded original of the message's photo.
     fn begin_edit_image(&mut self, cx: &mut Context<Self>) {
-        let Some(edit) = self.composer_ui.pending_edit() else {
+        let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
         let source = match edit.media_edit.replacement.as_ref() {
@@ -164,7 +164,7 @@ impl QuillApp {
 
     /// The photo isn't on disk yet: ask TDLib for it, then try again.
     fn request_edit_image_download(&mut self, cx: &mut Context<Self>) {
-        let file_id = self.composer_ui.pending_edit().and_then(|edit| {
+        let file_id = self.chat_ui.pending_edit().and_then(|edit| {
             let message = self
                 .session()?
                 .histories
@@ -195,7 +195,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let Some(edit) = self.composer_ui.pending_edit() else {
+        let Some(edit) = self.chat_ui.pending_edit() else {
             return;
         };
         let spoiler = edit
@@ -207,7 +207,7 @@ impl QuillApp {
             });
         self.set_edit_replacement(&path, cx);
         if let Some(replacement) = self
-            .composer_ui
+            .chat_ui
             .pending_edit_mut()
             .and_then(|edit| edit.media_edit.replacement.as_mut())
         {
@@ -236,7 +236,7 @@ impl QuillApp {
 
     /// Stage a picked cover; it goes out with the edit.
     pub(super) fn set_edit_cover(&mut self, path: &Path, cx: &mut Context<Self>) {
-        let Some(edit) = self.screen.composer_ui.pending_edit_mut() else {
+        let Some(edit) = self.screen.chat_ui.pending_edit_mut() else {
             return;
         };
         match cover_send_path(path) {

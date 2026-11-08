@@ -9,7 +9,15 @@ scripts/app-wide-state.txt with the reason it survives an account switch.
 
 This check fails when a `QuillApp` field is neither infrastructure nor
 listed, when the list names a field that is gone, or when `OnScreen` is
-declared outside the macro. Run from the repository root:
+declared outside the macro.
+
+One level down, the same for the chat shown: what a view has open for its
+chat is one value, `ChatUi` (src/ui/chat_ui_state.rs), replaced whole when
+the chat changes. A field of a per-view struct (the ones a chat window's
+`WindowSlot` swaps in) whose type names one chat's ids goes in `ChatUi`,
+or is listed in scripts/view-state-not-chat.txt with the reason it may
+outlive that chat. A `ChatUi` field declared again in a per-view struct
+fails too. Run from the repository root:
 
     python3 scripts/check-screen-state.py
 """
@@ -20,6 +28,25 @@ import sys
 APP = "src/ui/app.rs"
 SCREEN = "src/ui/on_screen.rs"
 LIST = "scripts/app-wide-state.txt"
+CHAT_UI = "src/ui/chat_ui_state.rs"
+VIEW_LIST = "scripts/view-state-not-chat.txt"
+
+# The per-view structs a chat window's `WindowSlot` swaps in, and where.
+VIEW_STRUCTS = {
+    "ComposerUi": "src/ui/composer_state.rs",
+    "MessageUi": "src/ui/message_state.rs",
+    "HistoryUi": "src/ui/history_state.rs",
+    "PickerUi": "src/ui/pickers_state.rs",
+    "ShareUi": "src/ui/share_state.rs",
+    "ViewerUi": "src/ui/viewer_state.rs",
+}
+# A type that names one chat's ids. A keyed map or set holds every chat's
+# entries and is fine where it is.
+CHAT_IDS = re.compile(r"\b(ChatId|MessageId|DeleteConfirm|ComposerReplyTo|ComposerEdit)\b")
+KEYED = re.compile(r"\b(HashSet|HashMap|BTreeSet|BTreeMap)\b")
+TYPED_FIELD = re.compile(
+    r"^\s{4}(?:pub(?:\([^)]*\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*(.+?),?\s*$", re.M
+)
 
 # The fields that make the design work, rather than hold state of their own.
 INFRASTRUCTURE = {"screen", "live", "demo_session", "credentials"}
@@ -50,9 +77,9 @@ def app_fields():
     return FIELD.findall(body)
 
 
-def listed_fields():
+def listed_fields(path=LIST):
     out = {}
-    with open(LIST, encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for n, line in enumerate(f, 1):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -60,9 +87,47 @@ def listed_fields():
             name, _, reason = line.partition("|")
             name, reason = name.strip(), reason.strip()
             if not reason:
-                sys.exit(f"{LIST}:{n}: `{name}` needs a reason after `|`")
+                sys.exit(f"{path}:{n}: `{name}` needs a reason after `|`")
             out[name] = reason
     return out
+
+
+def chat_scope_problems():
+    """The chat level: one line per problem."""
+    problems = []
+    with open(CHAT_UI, encoding="utf-8") as f:
+        chat_body = struct_body(f.read(), "ChatUi")
+    if chat_body is None:
+        return [f"{CHAT_UI}: no `struct ChatUi`"]
+    chat_fields = {name for name, _ in TYPED_FIELD.findall(chat_body)}
+    listed = listed_fields(VIEW_LIST)
+    seen = set()
+    for struct, path in VIEW_STRUCTS.items():
+        with open(path, encoding="utf-8") as f:
+            body = struct_body(f.read(), struct)
+        if body is None:
+            problems.append(f"{path}: no `struct {struct}`")
+            continue
+        for name, ty in TYPED_FIELD.findall(body):
+            key = f"{struct}.{name}"
+            seen.add(key)
+            if name in chat_fields:
+                problems.append(
+                    f"{path}: `{key}` is declared in ChatUi too; the chat's copy is the only one"
+                )
+                continue
+            if not CHAT_IDS.search(ty) or KEYED.search(ty) or key in listed:
+                continue
+            problems.append(
+                f"{path}: `{key}` names one chat's ids but is not in ChatUi "
+                f"({CHAT_UI}), which is replaced when the chat shown changes. "
+                f"Move it there, or list it in {VIEW_LIST} with the reason "
+                f"it may outlive its chat."
+            )
+    for key in listed:
+        if key not in seen:
+            problems.append(f"{VIEW_LIST}: `{key}` is listed but no such field exists")
+    return problems
 
 
 def screen_declared_by_macro():
@@ -100,6 +165,11 @@ def main():
     problem = screen_declared_by_macro()
     if problem:
         print(f"{SCREEN}: {problem}")
+        failed = True
+    chat_problems = chat_scope_problems()
+    for problem in chat_problems:
+        print(problem)
+    if chat_problems:
         failed = True
     if failed:
         sys.exit(1)

@@ -424,7 +424,7 @@ fn a_lifted_photo_released_over_the_history_does_not_reply(cx: &mut TestAppConte
     press_and_move(vcx, from, to);
     vcx.simulate_mouse_up(to, MouseButton::Left, Modifiers::default());
     frames(vcx);
-    let replying = app.read_with(vcx, |app, _| app.composer_ui.reply().is_some());
+    let replying = app.read_with(vcx, |app, _| app.chat_ui.reply().is_some());
     assert!(!replying, "the release ended a drag, not a swipe to reply");
 }
 
