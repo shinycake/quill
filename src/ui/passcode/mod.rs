@@ -281,6 +281,7 @@ impl QuillApp {
         self.account.passcode.busy = true;
         self.account.passcode.error = None;
         let task = cx.background_executor().spawn(async move { job() });
+        // screen-scope: the passcode is one lock over every account; only its window matters.
         cx.spawn_in(window, async move |this, cx| {
             let out = task.await;
             let ran = this.update_in(cx, |this, window, cx| {
