@@ -29,7 +29,7 @@ impl QuillApp {
                 }
             }
             ViewerVideoStart::PlayNow => {
-                self.playback.intent = None;
+                self.drop_play_intents_for_viewer_here();
                 // `decide_viewer_video_start` only plays a local clip.
                 let Some(path) = path else {
                     return;

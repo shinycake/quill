@@ -488,6 +488,10 @@ mod inline;
 #[cfg(feature = "demo-capture")]
 mod inline_windows;
 
+/// A chat window's viewer: its Space hold and its parked clip belong to it.
+#[cfg(feature = "demo-capture")]
+mod viewer_windows;
+
 /// With autoplay off: a clicked round video plays with sound (downloaded
 /// first), a clicked MP4 GIF loops on the inline player.
 #[cfg(feature = "demo-capture")]
