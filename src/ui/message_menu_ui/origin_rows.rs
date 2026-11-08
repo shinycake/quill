@@ -151,7 +151,7 @@ impl QuillApp {
             .as_mut()
     }
 
-    fn close_replies_block(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_replies_block(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.origin_session_mut() {
             session.users_state.replies_block = None;
         }

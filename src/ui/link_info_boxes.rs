@@ -163,7 +163,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_language_box(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_language_box(&mut self, cx: &mut Context<Self>) {
         if let Some(session) = self.link_info_session_mut() {
             session.settings.language_link = None;
         }

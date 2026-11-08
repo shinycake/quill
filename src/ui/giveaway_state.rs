@@ -35,6 +35,7 @@ pub(crate) struct GiveawayUi {
 
 /// A giveaway just launched asks the old client for the chat's boost
 /// status, and the session's launch state is reset (`close_giveaway_form`).
+/// The info box's lookup is the session's, so it closes too.
 impl crate::ui::on_screen::Farewell for GiveawayUi {
     fn farewell(
         app: &mut QuillApp,
@@ -42,6 +43,7 @@ impl crate::ui::on_screen::Farewell for GiveawayUi {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         app.close_giveaway_form(cx);
+        app.close_giveaway_info(cx);
     }
 }
 

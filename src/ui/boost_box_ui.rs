@@ -61,7 +61,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_boost_box_state(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_boost_box_state(&mut self, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => live.driver.close_boost_box(),
             None => {

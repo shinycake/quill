@@ -109,7 +109,23 @@ impl CallBoxes {
 
 /// The microphone test's device closes with the value; the boxes hold ids
 /// and flags.
-impl super::on_screen::Farewell for CallBoxes {}
+/// The call link's leave confirm is the session's
+/// (`calls.call_link_confirm`): it is cancelled here, or it would come
+/// back on switch-back.
+impl super::on_screen::Farewell for CallBoxes {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.calls.call_link_confirm.is_some())
+        {
+            app.cancel_call_link_leave(cx);
+        }
+    }
+}
 
 impl CallUi {
     /// The call window is gone (closed by the user or by the app): drop its

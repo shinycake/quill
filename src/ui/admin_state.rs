@@ -63,7 +63,23 @@ pub(crate) struct AdminUi {
     pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
 }
 
-impl crate::ui::on_screen::Farewell for AdminUi {}
+/// The boost box keeps its state in the session (`groups.boost_box`),
+/// which goes to the background with the account: it closes here so it
+/// does not come back on switch-back.
+impl crate::ui::on_screen::Farewell for AdminUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.groups.boost_box.is_some())
+        {
+            app.close_boost_box_state(cx);
+        }
+    }
+}
 
 impl AdminUi {
     pub(super) fn new() -> Self {

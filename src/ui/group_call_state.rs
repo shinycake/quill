@@ -174,8 +174,23 @@ impl GroupCallBoxes {
     }
 }
 
-/// Flags and a pending request id: nothing to say.
-impl super::on_screen::Farewell for GroupCallBoxes {}
+/// The RTMP box keeps its process in the session (`calls.rtmp_start`),
+/// which goes to the background with the account: it ends here, or it
+/// would come back on switch-back with the stream key hidden again.
+impl super::on_screen::Farewell for GroupCallBoxes {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.calls.rtmp_start.is_some())
+        {
+            app.close_rtmp_start(cx);
+        }
+    }
+}
 
 impl GroupCallUi {
     pub(super) fn new() -> Self {

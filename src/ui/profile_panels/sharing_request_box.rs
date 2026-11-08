@@ -34,7 +34,7 @@ impl QuillApp {
             .and_then(|session| session.groups.private_sharing.request_box_chat())
     }
 
-    fn close_sharing_request_box(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_sharing_request_box(&mut self, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => live.driver.close_sharing_request_box(),
             None => {

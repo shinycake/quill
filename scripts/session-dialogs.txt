@@ -1,0 +1,59 @@
+# Dialogs whose DialogSpec predicate reads the Session, checked by
+# scripts/check-screen-state.py (scripts/session_dialogs.py).
+#
+# The Session goes to the background with its account and comes back with
+# it, so a box whose open flag is the session's is open again on
+# switch-back unless a farewell closes it. Each line is
+#   Name | closer | reason
+# where `closer` is the method an `impl .. Farewell` calls to close it, or
+# `-` when the open flag is the screen's (the predicate only reads session
+# data) or the box is meant to come back with the account.
+
+AccountExport | - | the box's flag is `dialogs.account_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
+AccountNotice | - | terms, service notices and the frozen notice are the account's own and stay until answered; the screen-held ones (`login_prevented`, `freeze_info_open`) go with the screen
+ArchiveSettings | set_archive_settings_open | `chat_list.archive_settings_open`
+BlockFromReplies | close_replies_block | `users_state.replies_block`
+BoostBox | close_boost_box_state | `groups.boost_box`
+CallLinkLeave | cancel_call_link_leave | `calls.call_link_confirm`
+CallSwap | - | a second call prompts only during a call, and a switch closes a client that is in a call (retire_live_to_background)
+ChatExport | - | the box's flag is `dialogs.chat_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
+CollectibleInfo | close_collectible_info | `payments.hub.collectible`
+CreateChat | - | the box is `admin.create_chat_dialog` (screen); the session holds only the creation step
+DropTopic | - | the chooser is `chat_list.drop_topic` (screen)
+EarnJoin | close_earn_boxes | `payments.earn.join_box`
+EarnLink | close_earn_boxes | `payments.earn.link_box`
+EarnPrograms | close_earn_boxes | `payments.earn.programs_box`
+EarnRevoke | close_earn_boxes | `payments.earn.revoke`
+EarnSetupConfirm | close_earn_boxes | `payments.earn.setup.confirm`
+EarnWithdraw | close_earn_boxes | `payments.earn.withdraw`
+EmojiSets | close_emoji_sets | `stickers.emoji.open`
+ForwardBox | - | the box is `share.forward_picker_open` (screen); the session only filters deleted messages
+GiftCodeLink | close_gift_code_box | `payments.gift_code`
+GiftMarket | - | the stack is `gift_market.stack` (screen)
+GiftTransfer | close_gift_transfer | `payments.gifts_manage` transfer
+GiftValue | close_gift_value | `payments.hub.gift_value`
+Giveaway | - | the form is `giveaway.form` (screen)
+GiveawayInfo | close_giveaway_info | `payments.giveaway.info`
+Grams | close_grams | `payments.hub.grams.open`
+GramsWithdraw | cancel_grams_withdraw | `payments.hub.grams.withdraw`
+GroupEditBox | - | the box is `admin.group_edit_box` (screen)
+GroupHistoryBox | - | inside `admin.group_edit_box` (screen)
+GroupTypeBox | - | inside `admin.group_edit_box` (screen)
+LanguageLink | close_language_box | `settings.language_link`
+LocationPicker | close_location_picker | `location.picker`
+MaskSets | close_mask_sets | `stickers.masks.open`
+Money | close_money | `ton_wallet.money.open`
+PaidSendConfirm | cancel_paid_confirm | `paid_messages.confirm` (screen) or the driver's held paid send
+PaymentForm | close_payment_dialog | `payments.dialog` (screen) over the session's form
+PaymentReceipt | close_payment_receipt | `payments.receipt_open`
+PremiumFeatures | close_premium | `payments.hub.premium_open`
+PremiumLimit | dismiss_premium_limit | `payments.hub.limit_box`
+ReceivedGifts | close_gifts | `payments.hub.gifts_open`
+RtmpStart | close_rtmp_start | `calls.rtmp_start`
+SendGift | close_send_gift_dialog | `payments.gifts_manage.send.open`
+SessionDetails | - | the id is `privacy.extra.session_details` (screen)
+SharingRequest | close_sharing_request_box | `groups.private_sharing` request box
+Stars | close_stars | `payments.hub.stars_open`
+StarsGift | close_stars_gift_dialog | `payments.stars_gift.open`
+Subscriptions | close_subscriptions | `payments.subscriptions_open`
+WalletNotice | dismiss_wallet_notice | `ton_wallet.notice`

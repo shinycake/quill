@@ -46,7 +46,23 @@ pub(crate) struct LinkUi {
     pub(super) login_url_confirm: Option<LoginUrlConfirm>,
 }
 
-impl crate::ui::on_screen::Farewell for LinkUi {}
+/// The language link box keeps its pack in the session
+/// (`settings.language_link`), which goes to the background with the
+/// account: without a close it would come back on switch-back.
+impl crate::ui::on_screen::Farewell for LinkUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.settings.language_link.is_some())
+        {
+            app.close_language_box(cx);
+        }
+    }
+}
 
 impl LinkUi {
     pub(super) fn new() -> Self {
