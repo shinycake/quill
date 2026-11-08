@@ -126,7 +126,7 @@ impl QuillApp {
         self.playback.track_length = None;
         quill::wake::CHROME.poke();
         self.playback.seek_slider = None;
-        self.playback.player.slider = None;
+        self.playback.player.sliders.clear();
         self.playback.seek_scrubbing = false;
         self.playback.seek_preview_secs = None;
         self.playback.seek_hover = None;
@@ -496,13 +496,14 @@ impl QuillApp {
                     state.set_value(value, window, cx);
                 });
             }
-            // The player bar's own slider follows the same position.
-            if let Some(bar) = self.playback.player.slider.as_ref()
-                && bar.read(cx).value() != SliderValue::Single(value)
-            {
-                bar.update(cx, |state, cx| {
-                    state.set_value(value, window, cx);
-                });
+            // The player bar's own sliders, one per window, follow the
+            // same position.
+            for bar in self.playback.player.sliders.values() {
+                if bar.read(cx).value() != SliderValue::Single(value) {
+                    bar.update(cx, |state, cx| {
+                        state.set_value(value, window, cx);
+                    });
+                }
             }
         }
     }
