@@ -31,6 +31,9 @@ const RISE: f32 = 14.;
 /// The open profile modal: which panel it shows and its fade.
 pub(super) struct ProfileModal {
     pub(super) target: InfoPanelTarget,
+    /// What the info column showed before the modal took it over: the
+    /// modal's close puts it back.
+    previous: Option<InfoPanelTarget>,
     /// 0 = hidden, 1 = shown.
     glide: Glide,
     closing: bool,
@@ -62,8 +65,16 @@ impl QuillApp {
         let now = Instant::now();
         let mut glide = Glide::settled(0., now, ease_out_circ);
         glide.go(1., OPEN_FADE, self.frame.window_active.get(), now);
+        // A modal opened from inside another keeps the column it found.
+        let previous = match self.dialogs.profile_modal.take() {
+            Some(modal) => modal.previous,
+            None => self
+                .session()
+                .and_then(|session| session.users_state.open_info_panel),
+        };
         self.dialogs.profile_modal = Some(ProfileModal {
             target,
+            previous,
             glide,
             closing: false,
         });
@@ -92,28 +103,76 @@ impl QuillApp {
         modal.closing = true;
         modal.glide.go(0., CLOSE_FADE, animate, now);
         if !animate || !modal.glide.animating(now) {
+            let previous = modal.previous;
             self.dialogs.profile_modal = None;
-            self.close_info_panel(cx);
+            self.restore_info_panel(previous, cx);
             return;
         }
         let target = modal.target;
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
-                if this
+                if let Some(modal) = this
                     .dialogs
                     .profile_modal
-                    .as_ref()
-                    .is_some_and(|modal| modal.closing && modal.target == target)
+                    .take_if(|modal| modal.closing && modal.target == target)
                 {
-                    this.dialogs.profile_modal = None;
-                    this.close_info_panel(cx);
+                    this.restore_info_panel(modal.previous, cx);
                 }
             })
             .ok();
         })
         .detach();
         cx.notify();
+    }
+
+    /// The modal's close: the info column goes back to what it showed
+    /// before (closed, or the chat's own info), not closed whatever it was.
+    fn restore_info_panel(&mut self, previous: Option<InfoPanelTarget>, cx: &mut Context<Self>) {
+        let Some(previous) = previous else {
+            self.close_info_panel(cx);
+            return;
+        };
+        let Some(main) = self.main_window.handle else {
+            self.close_info_panel(cx);
+            return;
+        };
+        let screen = self.screen_epoch();
+        let app = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.in_window_scope(None, cx, |this, cx| {
+                            this.open_info_panel_target(previous, window, cx);
+                        });
+                    });
+                });
+            });
+        });
+    }
+
+    /// The main window's chat changed under the modal: the modal belonged
+    /// to the old chat's member and goes, and the info column is what it
+    /// was before the modal, so the chat open's "the column follows the
+    /// chat" sees a column only when the user had one open.
+    pub(super) fn profile_modal_leaves_chat(&mut self, cx: &mut Context<Self>) {
+        if self.windows.scope.is_some() {
+            return;
+        }
+        let Some(modal) = self.dialogs.profile_modal.take() else {
+            return;
+        };
+        match modal.previous {
+            None => self.close_info_panel(cx),
+            Some(previous) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.set_info_panel(Some(previous));
+                } else if let Some(session) = self.demo_session.as_mut() {
+                    session.users_state.open_info_panel = Some(previous);
+                }
+            }
+        }
     }
 
     /// Drop the modal without touching the info panel (a button inside it
@@ -217,3 +276,8 @@ impl QuillApp {
         )
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "profile_modal_tests.rs"]
+mod profile_modal_tests;

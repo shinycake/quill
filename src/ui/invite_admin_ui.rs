@@ -108,10 +108,9 @@ impl QuillApp {
 
     /// Show or hide the revoked-links list (fetched on first open).
     pub(super) fn toggle_revoked_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        self.admin.revoked_links_open = !self.admin.revoked_links_open;
-        if self.admin.revoked_links_open
-            && let Some(live) = self.live.as_mut()
-        {
+        let open = self.admin.revoked_links_open != Some(chat_id);
+        self.admin.revoked_links_open = open.then_some(chat_id);
+        if open && let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_revoked_chat_invite_links(chat_id);
         }
         cx.notify();
@@ -342,7 +341,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let open = self.admin.revoked_links_open;
+        let open = self.admin.revoked_links_open == Some(chat_id);
         let mut block = div().flex().flex_col().w_full().gap_1().pt_1().child(
             div().flex().items_center().w_full().gap_1().child(
                 // A disclosure row: the section title with a chevron

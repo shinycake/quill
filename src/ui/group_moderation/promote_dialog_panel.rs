@@ -11,6 +11,7 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         search_input: &Entity<TextareaState>,
+        searched: &str,
         rights: &ChatAdminRights,
         selected_user: Option<i64>,
         cx: &mut Context<Self>,
@@ -26,9 +27,9 @@ impl QuillApp {
             .unwrap_or_default();
         let members = self.session().and_then(|session| {
             // Slice G1: the promote picker browses Recent / Search
-            // pages; show whichever matches the current query.
-            let query = search_input.read(cx).value();
-            let filter = if query.trim().is_empty() {
+            // pages; show the page of the query last sent, not the text
+            // being typed (round-7's member dialog rule).
+            let filter = if searched.is_empty() {
                 MemberListFilter::Recent
             } else {
                 MemberListFilter::Search

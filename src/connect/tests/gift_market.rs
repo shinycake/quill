@@ -167,13 +167,41 @@ fn resale_search_sends_filters_and_pages() {
     );
 }
 
+/// The listing is bought for the recipient the send box chose, whatever
+/// chat is open.
+#[test]
+fn resale_buy_goes_to_the_send_boxs_recipient_not_the_open_chat() {
+    let mut f = Fixture::new();
+    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    f.answer("searchGiftsForResale", resale_page(&[1, 2]));
+    let member = crate::gift_manage::GiftRecipient {
+        sender: crate::telegram::envelope::MessageSender::User { user_id: 4242 },
+        name: "Member".into(),
+        is_self: false,
+        is_channel: false,
+    };
+    f.driver.session.open_chat(FRIEND_CHAT);
+    f.driver
+        .start_gift_resale_buy("PlushPepe-1", Some(member.clone()), false)
+        .unwrap();
+    f.driver
+        .buy_gift_resale(GiftPrice::Stars(1500), "", false)
+        .unwrap();
+    let sent = f.last("sendResoldGift");
+    assert_eq!(sent["owner_id"]["user_id"], 4242);
+}
+
 #[test]
 fn resale_buy_sends_the_confirmed_price_and_handles_a_change() {
     let mut f = Fixture::new();
     f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
     f.answer("searchGiftsForResale", resale_page(&[1, 2]));
     f.driver
-        .start_gift_resale_buy("PlushPepe-1", Some(FRIEND_CHAT), false)
+        .start_gift_resale_buy(
+            "PlushPepe-1",
+            f.driver.session.gift_recipient(FRIEND_CHAT),
+            false,
+        )
         .unwrap();
     // A stale price is refused before anything goes out.
     assert!(

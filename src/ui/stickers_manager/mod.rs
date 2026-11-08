@@ -67,7 +67,7 @@ struct ManagerView {
 
 impl QuillApp {
     fn manager_edits(&mut self, kind: Kind) -> &mut ManagerEdits {
-        let manager = &mut self.pickers.sticker_manager;
+        let manager = &mut self.settings.sticker_manager;
         match kind {
             Kind::Stickers => &mut manager.stickers,
             Kind::Masks => &mut manager.masks,
@@ -165,8 +165,8 @@ impl QuillApp {
     /// Open the box on the installed stickers.
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.settings.sticker_settings_open = true;
-        self.pickers.sticker_manager.stickers.clear();
-        self.pickers
+        self.settings.sticker_manager.stickers.clear();
+        self.settings
             .sticker_manager
             .scroll
             .set_offset(point(px(0.), px(0.)));
@@ -246,7 +246,7 @@ impl QuillApp {
     }
 
     fn manager_select_tab(&mut self, kind: Kind, tab: ManagerTab, cx: &mut Context<Self>) {
-        self.pickers
+        self.settings
             .sticker_manager
             .scroll
             .set_offset(point(px(0.), px(0.)));
@@ -338,7 +338,7 @@ impl QuillApp {
 
     /// The list was scrolled: ask for the next page near its end.
     fn manager_load_more(&mut self, kind: Kind, cx: &mut Context<Self>) {
-        let scroll = &self.pickers.sticker_manager.scroll;
+        let scroll = &self.settings.sticker_manager.scroll;
         if !crate::ui::scroll_load::scrolled_near_end(scroll) {
             return;
         }
@@ -375,8 +375,8 @@ impl QuillApp {
     fn manager_panel(&self, kind: Kind, cx: &mut Context<Self>) -> AnyElement {
         let view = self.manager_view(kind);
         let edits = match kind {
-            Kind::Stickers => &self.pickers.sticker_manager.stickers,
-            Kind::Masks => &self.pickers.sticker_manager.masks,
+            Kind::Stickers => &self.settings.sticker_manager.stickers,
+            Kind::Masks => &self.settings.sticker_manager.masks,
         };
         let sets: Vec<StickerSetInfo> = match view.tab {
             ManagerTab::Installed => {
@@ -476,7 +476,7 @@ impl QuillApp {
                     .aria_label(tr(keys::STICKERS_YOU_HAVE))
                     .h(px(420.))
                     .overflow_y_scroll()
-                    .track_scroll(&self.pickers.sticker_manager.scroll)
+                    .track_scroll(&self.settings.sticker_manager.scroll)
                     .on_scroll(cx.listener(move |this, _, _, cx| this.manager_load_more(kind, cx)))
                     .child(rows),
             )

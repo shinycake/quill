@@ -221,3 +221,42 @@ fn only_the_owner_of_a_channel_sees_direct_messages(cx: &mut TestAppContext) {
         assert_eq!(boxed.price.steps.first(), Some(&0));
     });
 }
+
+/// The box opened before the channel's price arrived shows the default;
+/// once the price lands the slider moves to it, so Save is not armed with
+/// a price nobody chose.
+#[gpui_kit::test]
+fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        let session = app.demo_session.as_mut().unwrap();
+        let supergroup = session.chat_supergroup(ChatId(13)).expect("demo channel");
+        session.groups.supergroup_full_infos.insert(
+            supergroup,
+            quill::state::SupergroupFullInfoData {
+                direct_messages_chat_id: 13,
+                admin: SupergroupFullAdmin {
+                    can_enable_paid_messages: true,
+                    ..SupergroupFullAdmin::default()
+                },
+                ..quill::state::SupergroupFullInfoData::default()
+            },
+        );
+        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        app.open_direct_messages(ChatId(13), cx);
+        let boxed = app.paid_messages.direct.as_ref().expect("opens");
+        assert!(boxed.enabled);
+        assert!(!boxed.seeded, "the price is still on its way");
+        let session = app.demo_session.as_mut().unwrap();
+        session
+            .payments
+            .paid_messages
+            .dm_price
+            .insert(supergroup, 50);
+        app.seed_direct_messages_price(cx);
+        let boxed = app.paid_messages.direct.as_ref().expect("still open");
+        assert_eq!(boxed.price.price, 50);
+        assert!(boxed.seeded && !boxed.touched);
+    });
+}

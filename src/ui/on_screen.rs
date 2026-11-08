@@ -160,7 +160,7 @@ on_screen_fields! {
     /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
     folders: super::folders_state::FolderUi,
     /// Standalone boxes: profiles, contacts, chat look, export, tags and call rating (`ui/dialogs_state.rs`).
-    dialogs: super::dialogs_state::DialogUi,
+    dialogs: Box<super::dialogs_state::DialogUi>,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
     admin: super::admin_state::AdminUi,
     /// Payments and the gift marketplace (`ui/payments_state.rs`).
@@ -333,7 +333,7 @@ impl OnScreen {
             message_ui,
             notify: super::notify_state::NotifyUi::new(),
             folders: super::folders_state::FolderUi::new(),
-            dialogs: super::dialogs_state::DialogUi::new(window, cx),
+            dialogs: Box::new(super::dialogs_state::DialogUi::new(window, cx)),
             admin: super::admin_state::AdminUi::new(),
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),

@@ -26,6 +26,9 @@ pub enum AdminDialogKind {
         selected_user: Option<i64>,
         /// Hand focus to the search field once the dialog has mounted.
         focus_on_mount: bool,
+        /// The query last sent: the list shown is its page (Recent when
+        /// empty), not whatever the field holds while typing.
+        searched: String,
     },
     EditRights {
         user_id: i64,
@@ -55,6 +58,7 @@ impl AdminDialog {
                 rights: ChatAdminRights::all(),
                 selected_user: None,
                 focus_on_mount: true,
+                searched: String::new(),
             },
         }
     }

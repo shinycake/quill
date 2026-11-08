@@ -53,6 +53,9 @@ pub struct EmojiPanel {
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
+    /// The installed list has been answered at least once, so an empty
+    /// list means none rather than not loaded yet.
+    pub installed_loaded: bool,
     /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
     pub archived_sets: Vec<StickerSetInfo>,
     /// Slice S10: trending/discover emoji sets + premium-row flag.
@@ -241,6 +244,7 @@ impl Session {
             self.stickers.emoji.failed = false;
         }
         self.stickers.emoji.installed_sets = sets;
+        self.stickers.emoji.installed_loaded = true;
     }
 
     /// Slice S10: store an archived-emoji-sets page. First page replaces,
@@ -299,6 +303,7 @@ impl Session {
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
         self.stickers.emoji.installed_sets.clear();
+        self.stickers.emoji.installed_loaded = false;
     }
 
     /// Slice S10: purpose-gated dispatch for the emoji payloads. Stray

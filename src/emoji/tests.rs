@@ -498,3 +498,15 @@ fn a_chat_windows_custom_emoji_count_as_shown() {
     assert!(session.open_chat_custom_emoji_ids().contains(&12345));
     assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
 }
+
+/// An empty installed list reads as "none" only after the list answered;
+/// a change drops the cache and the list is loading again.
+#[test]
+fn an_empty_installed_list_is_loaded_only_after_its_answer() {
+    let (mut session, _) = session();
+    assert!(!session.stickers.emoji.installed_loaded);
+    session.accept_installed_emoji_sets(Vec::new());
+    assert!(session.stickers.emoji.installed_loaded);
+    session.invalidate_installed_emoji_sets();
+    assert!(!session.stickers.emoji.installed_loaded);
+}

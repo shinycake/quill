@@ -267,8 +267,10 @@ impl QuillApp {
             return;
         }
         dialog.submitted = true;
+        // Watched until TDLib answers or the box closes: a cap would leave
+        // Create off with nothing in flight, and drop a late success.
         self.spawn_screen_in(window, cx, async move |this, cx| {
-            for _ in 0..200 {
+            loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
                     .await;

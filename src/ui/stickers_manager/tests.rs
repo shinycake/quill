@@ -180,7 +180,7 @@ fn removing_marks_the_row_and_undo_takes_the_mark_off(cx: &mut TestAppContext) {
     assert!(has(vcx, "manager-undo-102"));
     assert!(!has(vcx, "manager-remove-102"));
     assert!(app.read_with(vcx, |app, _| {
-        app.pickers.sticker_manager.stickers.is_removed(102)
+        app.settings.sticker_manager.stickers.is_removed(102)
     }));
     // Nothing is removed until the box closes.
     assert_eq!(installed_ids(&app, vcx), vec![101, 102, 103, 104]);
@@ -188,7 +188,7 @@ fn removing_marks_the_row_and_undo_takes_the_mark_off(cx: &mut TestAppContext) {
     assert!(has(vcx, "manager-remove-102"));
     assert!(!has(vcx, "manager-undo-102"));
     assert!(!app.read_with(vcx, |app, _| {
-        app.pickers.sticker_manager.stickers.is_removed(102)
+        app.settings.sticker_manager.stickers.is_removed(102)
     }));
 }
 
@@ -220,14 +220,14 @@ fn closing_applies_removals_and_the_dragged_order(cx: &mut TestAppContext) {
     let order: Vec<i64> = app.read_with(vcx, |app, _| {
         let view = app.manager_view(Kind::Stickers);
         let ids: Vec<i64> = view.installed.iter().map(|set| set.id).collect();
-        app.pickers.sticker_manager.stickers.arranged(&ids)
+        app.settings.sticker_manager.stickers.arranged(&ids)
     });
     assert_eq!(order, vec![102, 103, 101, 104]);
     close_box(&app, vcx);
     assert_eq!(installed_ids(&app, vcx), vec![103, 101, 104]);
     assert!(
         app.read_with(vcx, |app, _| !app
-            .pickers
+            .settings
             .sticker_manager
             .stickers
             .is_removed(102)),

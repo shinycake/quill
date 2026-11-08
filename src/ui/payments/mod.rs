@@ -49,10 +49,17 @@ impl QuillApp {
     }
 
     /// The provider's 3-D Secure page opens in the OS browser and the
-    /// checkout closes, as tdesktop does when it cannot show a web view.
-    pub(super) fn open_payment_verification(&mut self, url: &str, cx: &mut Context<Self>) {
-        self.open_link(url, cx);
-        self.close_payment_dialog(cx);
+    /// checkout of that payment closes, as tdesktop does when it cannot
+    /// show a web view. Another invoice's checkout stays open.
+    pub(super) fn open_payment_verification(
+        &mut self,
+        step: &quill::state::PaymentVerification,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_link(&step.url, cx);
+        if step.closes_checkout {
+            self.close_payment_dialog(cx);
+        }
     }
 
     /// Slice P1: close the receipt dialog.

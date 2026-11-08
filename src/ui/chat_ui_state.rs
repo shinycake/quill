@@ -251,6 +251,7 @@ impl QuillApp {
         if self.chat_ui.chat == Some(chat) {
             return;
         }
+        self.profile_modal_leaves_chat(cx);
         let mut next = ChatUi::for_topic(chat, self.open_draft_topic(chat));
         let old = std::mem::take(&mut *self.screen.chat_ui);
         next.pending_reply = old.pending_reply.filter(|reply| reply.belongs_to(chat));

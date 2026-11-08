@@ -221,3 +221,56 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
         (false, false)
     );
 }
+
+/// User 77's saved music holds file 5, and it is the active track,
+/// started from chat 11.
+fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, _| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        let playlist = session.media.playlists.entry(77).or_default();
+        playlist.tracks = vec![quill::telegram::envelope::ProfileAudio {
+            file_id: quill::ids::FileId(5),
+            title: "Saved".into(),
+            performer: String::new(),
+            file_name: String::new(),
+            duration: 30,
+        }];
+        playlist.total_count = 1;
+        playlist.loaded = true;
+        app.playback.playing_audio = Some(quill::state::playlist_message_id(quill::ids::FileId(5)));
+        app.playback.player.chat = Some(CHAT);
+    });
+}
+
+/// The bar's title on a saved track opens its owner's Playlist page; the
+/// open chat is not jumped to a message that does not exist.
+#[gpui_kit::test]
+fn a_saved_track_title_opens_its_playlist(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    give_saved_track(&app, vcx);
+    let before = app.read_with(vcx, |app, _| app.open_chat_id());
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.jump_to_playing(window, cx));
+    });
+    app.read_with(vcx, |app, _| {
+        let session = app.demo_session.as_ref().expect("demo session");
+        assert_eq!(session.media.shared_media.playlist_user, Some(77));
+        assert_eq!(app.open_chat_id(), before, "the chat shown stays");
+    });
+}
+
+/// The saved track's row is the active row on its owner's profile opened
+/// from any chat: a press there pauses or resumes it, and never starts it
+/// again from 0:00 (which, with the file not local, parks a play intent).
+#[gpui_kit::test]
+fn a_saved_track_row_is_active_from_another_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    give_saved_track(&app, vcx);
+    let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
+    app.update(vcx, |app, cx| {
+        app.toggle_audio_playback(ChatId(999), saved, quill::ids::FileId(5), 30.0, cx);
+        assert!(app.playback.intent.is_none(), "not started again");
+    });
+}

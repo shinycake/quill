@@ -557,6 +557,7 @@ impl QuillApp {
             self.set_window_scope(None);
         }
         self.end_recording_of_window(chat_id, cx);
+        self.close_location_picker_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.
         self.sync_gif_downloads();

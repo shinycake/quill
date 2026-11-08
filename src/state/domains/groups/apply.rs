@@ -926,9 +926,7 @@ impl Session {
                 self.groups
                     .supergroup_members
                     .retain(|(id, _), _| *id != chat_id.0);
-                if !self.groups.member_list_stale.contains(&chat_id.0) {
-                    self.groups.member_list_stale.push(chat_id.0);
-                }
+                self.groups.mark_member_list_stale(chat_id.0);
                 self.accept_own_chat_member(chat_id, member);
             }
             GroupsPayload::JoinChatResult(result) => {

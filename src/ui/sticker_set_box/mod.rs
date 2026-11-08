@@ -170,8 +170,13 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The session holds one viewed set, so its box closes in every window
+    /// that shows it: a set deleted from a chat window's box (the poll runs
+    /// as the main window) leaves no empty box behind.
     pub(in crate::ui) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.menu_ui.sticker_set_open = false;
+        self.in_every_window(cx, |app, _| {
+            app.message_ui.menu_ui.sticker_set_open = false;
+        });
         self.sticker_box.reset();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.stickers.sticker_set_view = None;

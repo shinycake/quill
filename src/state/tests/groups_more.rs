@@ -309,6 +309,9 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.groups.admin_lists.contains_key(&13));
+    // `updateChatMember` reaches bots only: the `ok` itself marks the chat
+    // for the UI's refetch, so the list never waits on nothing.
+    assert_eq!(session.groups.member_list_stale, vec![13]);
 }
 
 #[test]

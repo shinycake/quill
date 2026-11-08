@@ -3,7 +3,7 @@
 //! helpers shared with inline playback and calls.
 
 use super::*;
-use crate::ui::play_intent::{PlayKind, PlayTarget};
+use crate::ui::play_intent::PlayTarget;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -296,7 +296,7 @@ impl QuillApp {
         self.viewer.gif = None;
         self.viewer.video = None;
         self.viewer.video_path = None;
-        self.drop_play_intent(PlayKind::Viewer);
+        self.drop_viewer_play_intent_here();
         // The player is gone, so a boost has nothing to restore.
         let _ = self.viewer.controls.clear_clip();
     }
@@ -317,3 +317,8 @@ pub(super) fn viewer_error_message(
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "one_shot_tests.rs"]
+mod one_shot_tests;
