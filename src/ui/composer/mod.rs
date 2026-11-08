@@ -107,7 +107,8 @@ impl QuillApp {
                 // A photo's edit is still rendering: the Send waits for it,
                 // so the unedited file never goes out.
                 if self.tray_renders_an_edit() {
-                    self.update_pending_send(|send| send.held_send = Some(text));
+                    let once = self.send_once();
+                    self.update_pending_send(|send| send.held_send = Some((text, once)));
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                     cx.notify();

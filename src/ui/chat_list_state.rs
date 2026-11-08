@@ -63,12 +63,6 @@ pub(crate) struct ChatListUi {
     /// call settings instead of the chat list. Mutually exclusive with
     /// `contacts_tab_open`.
     pub(super) calls_tab_open: bool,
-    /// On a narrow window the forum's topic column replaces the chat list;
-    /// this brings the list back until another forum opens.
-    pub(super) forum_chats_peek: bool,
-    /// The forum topic column is on screen this frame, so the conversation
-    /// shows a hint instead of repeating the topic list.
-    pub(super) forum_column_shown: bool,
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pub(super) pending_close_secret_chat: Option<ChatId>,
@@ -107,8 +101,6 @@ impl ChatListUi {
             my_chats_open: None,
             contacts_tab_open: false,
             calls_tab_open: false,
-            forum_chats_peek: false,
-            forum_column_shown: false,
             pending_close_secret_chat: None,
             pending_story_open: None,
             drop_on_row: Default::default(),

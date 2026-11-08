@@ -120,6 +120,27 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn escape_in_a_chat_window_drops_its_reply_only(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let reply = |chat| quill::composer::ComposerReplyTo::new(chat, OTHER_LAST);
+    read(&h, None, cx, |app, _| {
+        app.chat_ui.set_reply(Some(reply(OPEN)))
+    });
+    in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
+        app.chat_ui.set_reply(Some(reply(OTHER)));
+    });
+    draw(chat_window, cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        window.dispatch_action(Box::new(crate::ui::actions::CancelSearch), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(!read(&h, Some(OTHER), cx, |app, _| app.chat_ui.has_reply()));
+    assert!(read(&h, None, cx, |app, _| app.chat_ui.has_reply()));
+}
+
+#[gpui_kit::test]
 fn each_window_lifts_its_own_corner_buttons(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
@@ -169,4 +190,65 @@ fn a_main_dialog_stays_open_while_the_pointer_is_in_a_chat_window(cx: &mut TestA
         h.shell.read_with(cx, |shell, _| shell.dialog_open()),
         "the main window's dialog read the main window's flag"
     );
+}
+
+#[gpui_kit::test]
+fn a_forward_from_a_chat_window_answers_there(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    read(&h, None, cx, |app, _| {
+        app.share.pending_forward =
+            quill::composer::ForwardDraft::from_message(OPEN, quill::ids::MessageId(101), false);
+    });
+    let result = quill::state::ForwardResult {
+        dest_chat_id: OPEN,
+        dest_title: "A".into(),
+        from_chat_id: OTHER,
+        requested: 1,
+        forwarded_ids: vec![quill::ids::MessageId(1)],
+    };
+    h.app
+        .update(cx, |app, cx| app.present_forward_answer(result, cx));
+    let main = read(&h, None, cx, |app, _| {
+        (
+            app.share.pending_forward.is_some(),
+            app.share.forward_result.is_some(),
+        )
+    });
+    let window = read(&h, Some(OTHER), cx, |app, _| {
+        app.share.forward_result.is_some()
+    });
+    assert_eq!(main, (true, false), "the main window's selection stays");
+    assert!(window, "the result shows in the window it came from");
+}
+
+#[gpui_kit::test]
+fn a_chat_windows_frame_leaves_the_main_windows_peek(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    read(&h, None, cx, |app, _| app.history.forum_chats_peek = true);
+    draw(chat_window, cx);
+    assert!(read(&h, None, cx, |app, _| app.history.forum_chats_peek));
+}
+
+#[gpui_kit::test]
+fn a_send_that_waited_keeps_its_one_time_options(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let once = crate::ui::composer_sends::SendOnce {
+        silent: true,
+        effect: 7,
+    };
+    let (inside, after) = read(&h, None, cx, |app, _| {
+        let inside = app.with_send_once(once, |app| {
+            let options = app.composer_send_options();
+            (options.disable_notification, options.effect_id)
+        });
+        (inside, app.send_once())
+    });
+    assert_eq!(
+        inside,
+        (true, 7),
+        "the held send goes silent, with its effect"
+    );
+    assert_eq!(after, crate::ui::composer_sends::SendOnce::default());
 }

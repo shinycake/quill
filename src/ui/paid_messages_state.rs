@@ -15,6 +15,9 @@ use quill::paid_messages::PaidConfirm;
 pub(crate) struct ComposerPaidConfirm {
     pub(super) ask: PaidConfirm,
     pub(super) slot: SendSlot,
+    /// The send's one-time options (silent, effect): it goes out with them
+    /// after Pay.
+    pub(super) once: super::composer_sends::SendOnce,
 }
 
 /// A price chosen on a slider: the steps it moves over and the value.

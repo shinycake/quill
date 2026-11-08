@@ -414,7 +414,7 @@ impl QuillApp {
         text: &str,
     ) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.cancel_pending_draft();
+            live.driver.cancel_pending_draft_of(chat_id);
             let draft = live
                 .driver
                 .session
@@ -433,7 +433,7 @@ impl QuillApp {
     /// Drop the stored draft of a chat that is not on screen.
     fn forget_stored_draft(&mut self, chat_id: ChatId, topic: quill::composer::DraftTopic) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.cancel_pending_draft();
+            live.driver.cancel_pending_draft_of(chat_id);
             live.driver
                 .session
                 .store_composer_draft(chat_id, topic, None);

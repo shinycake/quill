@@ -284,7 +284,7 @@ impl QuillApp {
     pub(super) fn forget_local_draft(&mut self, chat_id: ChatId) {
         let topic = self.open_draft_topic(chat_id);
         if let Some(live) = self.live.as_mut() {
-            live.driver.cancel_pending_draft();
+            live.driver.cancel_pending_draft_of(chat_id);
             live.driver
                 .session
                 .store_composer_draft(chat_id, topic, None);

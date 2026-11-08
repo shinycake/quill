@@ -401,7 +401,53 @@ impl QuillApp {
     }
 }
 
+/// The layers a chat window draws (`chat_window::body`): Escape in a chat
+/// window closes the topmost of these, and never the main window's panels,
+/// pages or the story viewer.
+pub(super) static WINDOW_LAYERS: &[&str] = &[
+    "instant-view",
+    "context-menus",
+    "link-popup",
+    "photo-editor",
+    "media-viewer",
+    "record-discard-confirm",
+    "recording",
+    "gif-panel",
+    "sticker-panel",
+    "send-as",
+    "reply-panels",
+    "forward-picker",
+    "chat-search",
+    "selection-mode",
+    "pending-reply",
+    "pending-edit",
+    "pending-forward",
+    "forward-result",
+];
+
 impl QuillApp {
+    /// Escape in a chat window, with its state in place: close the
+    /// topmost of its layers ([`WINDOW_LAYERS`]). Returns whether one was
+    /// closed. The lock screen swallows Escape here too.
+    pub(super) fn dismiss_window_layer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.account.passcode.locked {
+            return false;
+        }
+        let Some(layer) = ESC_LAYERS
+            .iter()
+            .filter(|layer| WINDOW_LAYERS.contains(&layer.name))
+            .find(|layer| (layer.is_open)(self))
+        else {
+            return false;
+        };
+        (layer.close)(self, window, cx);
+        true
+    }
+
     /// The topmost open layer, if any.
     pub(super) fn topmost_esc_layer(&self) -> Option<&'static EscLayer> {
         ESC_LAYERS.iter().find(|layer| (layer.is_open)(self))
@@ -427,6 +473,16 @@ impl QuillApp {
 
 #[cfg(test)]
 mod table_tests {
+    #[test]
+    fn every_window_layer_is_a_layer() {
+        for name in super::WINDOW_LAYERS {
+            assert!(
+                super::ESC_LAYERS.iter().any(|layer| layer.name == *name),
+                "{name} is not an Escape layer"
+            );
+        }
+    }
+
     #[test]
     fn layer_names_are_unique() {
         let mut names: Vec<_> = super::ESC_LAYERS.iter().map(|layer| layer.name).collect();

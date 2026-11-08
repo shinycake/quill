@@ -31,6 +31,13 @@ pub(crate) struct HistoryUi {
     /// list's paint (overdraw rows included); the history's own canvas
     /// turns them into `seen`.
     pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
+    /// On a narrow window the forum's topic column replaces the chat list;
+    /// this brings the list back until another forum opens. Each window
+    /// lays out its own column.
+    pub(super) forum_chats_peek: bool,
+    /// The forum topic column is on screen in this window this frame, so
+    /// the conversation shows a hint instead of repeating the topic list.
+    pub(super) forum_column_shown: bool,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -196,6 +203,8 @@ impl HistoryUi {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
             painted_ids: Default::default(),
+            forum_chats_peek: false,
+            forum_column_shown: false,
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,
