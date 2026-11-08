@@ -25,6 +25,13 @@ whose closure touches per-window state:
 - a `QuillApp` method that does any of these, directly or through other
   `QuillApp` methods (matched by name, so a false hit is possible).
 
+Two helpers that finish as the main window are checked the same way
+(round 10): `run_off_ui_then`, whose `done` closure is written at the call
+site, and `spawn_screen` / `spawn_screen_in`. Reached from a chat window's
+input, either one lands that window's work in the main window's state (a
+GIF file that never played, an Edit Image that opened over the main
+window). One that is the main window's by design says so with the marker.
+
 Fix one by starting the work with `spawn_scoped` / `spawn_scoped_in`
 (it finishes in the window it started in, and not at all once that window
 closed), `QuillApp::spawn_screen` / `spawn_screen_in` / `spawn_app` /
@@ -71,7 +78,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "src" / "ui"
 START = re.compile(
     r"\b(cx\.spawn|\.spawn_in|cx\.defer|\.defer_in|window\.spawn|window\.defer"
     r"|on_next_frame|cx\.subscribe(?:_in)?|cx\.observe\w*"
-    r"|\.on_focus_in|\.on_focus_out|\.on_focus|\.on_blur)\s*\("
+    r"|\.on_focus_in|\.on_focus_out|\.on_focus|\.on_blur"
+    r"|\.run_off_ui_then|\.spawn_screen(?:_in)?)\s*\("
 )
 # Where a chat window's state is declared and exchanged with the app's.
 SLOT_FILE = pathlib.Path("chat_window") / "slot.rs"

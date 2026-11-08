@@ -46,6 +46,11 @@ impl QuillApp {
 
     /// [`Self::open_story_viewer`] for a prepared `open`.
     pub(super) fn open_story(&mut self, open: PendingStoryOpen, cx: &mut Context<Self>) {
+        // Only the main window draws the viewer: a press in a chat window
+        // opens it there, brought forward.
+        if self.hand_to_main_window(cx, move |app, _, cx| app.open_story(open, cx)) {
+            return;
+        }
         let (chat_id, story_id, scope) = (ChatId(open.chat_id), open.story_id, open.scope);
         let mut wanted: Vec<i32> = match scope {
             StoryOpenScope::Tray => self

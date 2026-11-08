@@ -146,6 +146,38 @@ impl QuillApp {
 
     /// `cx.defer` for work that continues the account on screen now: the
     /// body runs as the main window of this screen, or not at all.
+    /// For a surface only the main window draws (the story viewer, the
+    /// profile modal), opened by input in a chat window: run `f` at the end
+    /// of this update as the main window, with its `Window`, and bring that
+    /// window forward, so the surface shows where it is drawn and what it
+    /// builds is the main window's. `false`, without running `f`, when the
+    /// main window's state is in place already (the caller goes on there).
+    pub(in crate::ui) fn hand_to_main_window(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+    ) -> bool {
+        if self.windows.scope.is_none() {
+            return false;
+        }
+        let Some(main) = self.main_window.handle else {
+            return true;
+        };
+        let screen = self.screen_epoch();
+        let app = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                crate::ui::link_inbox::raise_main_window(window, cx);
+                let _ = app.update(cx, |this, cx| {
+                    this.in_screen_scope(screen, cx, |this, cx| {
+                        this.in_window_scope(None, cx, |this, cx| f(this, window, cx));
+                    });
+                });
+            });
+        });
+        true
+    }
+
     pub(in crate::ui) fn defer_screen(
         &self,
         cx: &mut Context<Self>,

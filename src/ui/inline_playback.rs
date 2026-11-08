@@ -157,6 +157,7 @@ impl QuillApp {
                 file_id,
                 PlayTarget::Gif {
                     message: message_id,
+                    window: self.windows.scope,
                 },
                 cx,
             );
@@ -210,7 +211,9 @@ impl QuillApp {
             },
         );
         let max_edge = self.gif_decode_edge(message_id, cx);
-        self.spawn_screen(cx, async move |this, cx| {
+        // The decode lands in the window that started it: its open chat is
+        // the row's chat, in a chat window too.
+        self.spawn_scoped(cx, async move |this, cx| {
             let (first, first_in) = futures_channel::oneshot::channel();
             let decode = cx.background_executor().spawn(async move {
                 GifClip::decode(&path, max_edge, &cancel, |clip| {
@@ -229,9 +232,18 @@ impl QuillApp {
                 });
             }
             let decoded = decode.await;
-            let _ = this.update(cx, |this, cx| {
-                this.gif_decoded(key, file_id, decoded, cx);
-            });
+            let landed = this.update(cx, |this, cx| this.gif_decoded(key, file_id, decoded, cx));
+            // Its window closed meanwhile: the row it played went with it,
+            // so the decode ends and nothing stays marked as playing.
+            if landed.is_err() {
+                let _ = this.main().update(cx, |this, cx| {
+                    this.playback.gif_decodes.remove(&key);
+                    if this.playback.playing_animation == Some(message_id) {
+                        this.stop_animation_playback();
+                        cx.notify();
+                    }
+                });
+            }
         })
         .detach();
     }
@@ -348,6 +360,7 @@ impl QuillApp {
         }
         self.recording.voice_tick = true;
         // The tick is the app's; each step runs as the recording's window.
+        // window-scope: `recording_tick_in_window` enters the recording's window itself.
         self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()

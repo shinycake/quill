@@ -131,6 +131,10 @@ impl QuillApp {
         } else if !local {
             let play_id = item.play_file_id?;
             let message_id = item.message_id;
+            let chat_id = item.chat_id;
+            // The press runs later, with no window's state in place: it
+            // parks the clip for the viewer of the window drawing it.
+            let scope = self.windows.scope;
             if file_is_downloading(play_id, files, downloading) {
                 let progress = files
                     .get(&play_id.0)
@@ -148,9 +152,13 @@ impl QuillApp {
                     on_start: Rc::new(move |_, cx| {
                         let _ = view.update(cx, |this, cx| {
                             let target = PlayTarget::Viewer {
+                                chat: chat_id,
                                 message: message_id,
+                                window: scope,
                             };
-                            this.play_when_ready(play_id, target, cx);
+                            this.in_window_scope(scope, cx, |this, cx| {
+                                this.play_when_ready(play_id, target, cx);
+                            });
                         });
                     }),
                 }

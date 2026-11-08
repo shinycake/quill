@@ -144,6 +144,7 @@ impl QuillApp {
         }
         self.mini_apps.generation += 1;
         let generation = self.mini_apps.generation;
+        // window-scope: the mini app is the screen's; a step aimed at a chat names its chat.
         let task = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()

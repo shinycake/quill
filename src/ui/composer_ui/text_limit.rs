@@ -97,7 +97,8 @@ impl QuillApp {
             let markup = self.composer_markup(cx);
             let count =
                 cx.background_spawn(async move { TextLimitNote::of(&markup, key.limit, editing) });
-            let task = self.spawn_screen(cx, async move |this, cx| {
+            // The count is the composer's: a chat window's lands in its own.
+            let task = self.spawn_scoped(cx, async move |this, cx| {
                 let note = count.await;
                 this.update(cx, |this, cx| {
                     this.composer_ui.text_limit.set(key, note);

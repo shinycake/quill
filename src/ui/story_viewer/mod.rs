@@ -744,6 +744,7 @@ impl QuillApp {
             return;
         }
         self.stories.tick_active = true;
+        // window-scope: only the main window draws the story viewer (`hand_to_main_window`).
         self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()

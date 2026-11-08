@@ -371,6 +371,7 @@ impl QuillApp {
         }
         self.playback.tick = true;
         self.playback.tick_shown = None;
+        // window-scope: the track is the screen's; the bar it moves is redrawn in every window.
         self.spawn_screen(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
             let mut seen = quill::wake::CHROME.epoch();

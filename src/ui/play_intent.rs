@@ -24,8 +24,12 @@ pub(super) enum PlayTarget {
         message: MessageId,
         duration: f64,
     },
-    /// An `image/gif` file, decoded in process.
-    Gif { message: MessageId },
+    /// An `image/gif` file, decoded in process, asked for in `window`
+    /// (`None`: the main window).
+    Gif {
+        message: MessageId,
+        window: Option<ChatId>,
+    },
     /// A round video or MP4 GIF on the inline player, asked for in
     /// `window` (`None`: the main window).
     Inline {
@@ -34,8 +38,13 @@ pub(super) enum PlayTarget {
         demand: Demand,
         window: Option<ChatId>,
     },
-    /// The media viewer's current clip.
-    Viewer { message: MessageId },
+    /// The media viewer's current clip, in `window`'s viewer (`None`: the
+    /// main window's).
+    Viewer {
+        chat: ChatId,
+        message: MessageId,
+        window: Option<ChatId>,
+    },
 }
 
 impl PlayTarget {
@@ -43,9 +52,20 @@ impl PlayTarget {
         match self {
             Self::Voice { message, .. }
             | Self::Audio { message, .. }
-            | Self::Gif { message }
+            | Self::Gif { message, .. }
             | Self::Inline { message, .. }
-            | Self::Viewer { message } => *message,
+            | Self::Viewer { message, .. } => *message,
+        }
+    }
+
+    /// The chat window the target was asked for in (`None`: the main
+    /// window), for the targets that play in a window's own state.
+    pub(super) const fn window(&self) -> Option<ChatId> {
+        match self {
+            Self::Gif { window, .. }
+            | Self::Inline { window, .. }
+            | Self::Viewer { window, .. } => *window,
+            Self::Voice { .. } | Self::Audio { .. } => None,
         }
     }
 
@@ -146,9 +166,9 @@ impl QuillApp {
     /// nothing would drop it, and the clip would start with sound wherever
     /// the chat shows next.
     pub(super) fn drop_play_intent_in_window(&mut self, chat: ChatId) {
-        self.playback.intent.take_if(|intent| {
-            matches!(intent.target, PlayTarget::Inline { window, .. } if window == Some(chat))
-        });
+        self.playback
+            .intent
+            .take_if(|intent| intent.target.window() == Some(chat));
     }
 
     /// Drop the target waiting on `file` (its download failed or stopped).
@@ -178,8 +198,11 @@ impl QuillApp {
                 message,
                 duration,
             } => self.toggle_audio_playback(chat, message, file, duration, cx),
-            PlayTarget::Gif { message } => {
-                self.toggle_animation_playback(message, file, "image/gif".into(), cx);
+            // A window closed meanwhile drops its target (`in_window_scope`).
+            PlayTarget::Gif { message, window } => {
+                self.in_window_scope(window, cx, |app, cx| {
+                    app.toggle_animation_playback(message, file, "image/gif".into(), cx);
+                });
             }
             PlayTarget::Inline {
                 chat,
@@ -187,15 +210,19 @@ impl QuillApp {
                 demand,
                 window,
             } => self.play_inline_on_demand(window, chat, message, file, demand, cx),
-            PlayTarget::Viewer { message } => {
-                let current = self
-                    .viewer
-                    .state
-                    .current()
-                    .is_some_and(|item| item.message_id == message && item.plays_clip());
-                if current {
-                    self.maybe_autoplay_viewer_video(cx);
-                }
+            PlayTarget::Viewer {
+                chat,
+                message,
+                window,
+            } => {
+                self.in_window_scope(window, cx, |app, cx| {
+                    let current = app.viewer.state.current().is_some_and(|item| {
+                        item.chat_id == chat && item.message_id == message && item.plays_clip()
+                    });
+                    if current {
+                        app.maybe_autoplay_viewer_video(cx);
+                    }
+                });
             }
         }
     }
