@@ -61,46 +61,61 @@ impl<T: Farewell> Farewell for Box<T> {
 /// (`HistoryUi`'s farewell).
 impl Farewell for Entity<TextareaState> {}
 
-/// Declares [`OnScreen`] and `QuillApp::farewell_screen`, which runs every
-/// field's [`Farewell`] in field order. One list: a field cannot be
-/// declared without its goodbye, and the order of goodbyes is the order
-/// of fields (the mini app before the chat leave).
+/// Declares one owner's state struct and the `QuillApp` method that runs
+/// every field's goodbye in field order, with the arguments that method
+/// passes on (`=> (self, ...)`). One list: a field cannot be
+/// declared without its goodbye (its type implements the owner's trait),
+/// and the order of goodbyes is the order of fields. Fields before the
+/// `;` are the owner's own bookkeeping and say nothing. Two owners use it:
+/// the screen ([`OnScreen`], [`Farewell`]) and a chat window's slot
+/// (`chat_window::slot::WindowSlot`, `SlotFarewell`).
 macro_rules! on_screen_fields {
-    ($(
-        $(#[$meta:meta])*
-        $field:ident : $ty:ty
-    ),+ $(,)?) => {
-        pub struct OnScreen {
-            /// Changes with every replacement; work started under an older
-            /// epoch does not run (`chat_window::scoped::ScopedApp`).
-            pub(super) epoch: ScreenEpoch,
-            /// A client was put on this screen (`QuillApp::put_on_screen`):
-            /// it must be replaced before that client leaves.
-            client_filled: bool,
-            $(
-                $(#[$meta])*
-                pub(super) $field: $ty,
-            )+
+    (
+        $(#[$smeta:meta])*
+        $svis:vis struct $name:ident via $trait:ident;
+        $(#[$fmeta:meta])*
+        fn $farewell:ident $params:tt => $pass:tt;
+        $( $(#[$bmeta:meta])* $bvis:vis $book:ident : $bty:ty, )*
+        ;
+        $( $(#[$meta:meta])* $field:ident : $ty:ty ),+ $(,)?
+    ) => {
+        $(#[$smeta])*
+        $svis struct $name {
+            $( $(#[$bmeta])* $bvis $book: $bty, )*
+            $( $(#[$meta])* pub(super) $field: $ty, )+
         }
 
-        impl OnScreen {
+        impl $name {
             /// The declared fields, in order: a test checks a flag's struct
             /// against this list instead of naming it by hand.
             #[cfg(test)]
+            #[allow(dead_code)]
             pub(super) const FIELD_NAMES: &'static [&'static str] = &[$(stringify!($field)),+];
         }
 
         impl QuillApp {
-            /// What the account leaving the screen says, through its own
-            /// client (still `self.live` here), before its UI is dropped.
-            pub(super) fn farewell_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-                $( <$ty as Farewell>::farewell(self, window, cx); )+
+            $(#[$fmeta])*
+            pub(super) fn $farewell $params {
+                $( <$ty as $trait>::farewell $pass; )+
             }
         }
     };
 }
+pub(in crate::ui) use on_screen_fields;
 
 on_screen_fields! {
+    pub struct OnScreen via Farewell;
+    /// What the account leaving the screen says, through its own client
+    /// (still `self.live` here), before its UI is dropped.
+    fn farewell_screen(&mut self, window: &mut Window, cx: &mut Context<Self>)
+        => (self, window, cx);
+    /// Changes with every replacement; work started under an older epoch
+    /// does not run (`chat_window::scoped::ScopedApp`).
+    pub(super) epoch: ScreenEpoch,
+    /// A client was put on this screen (`QuillApp::put_on_screen`): it
+    /// must be replaced before that client leaves.
+    client_filled: bool,
+    ;
     /// Mini apps: the helper window, its launch and the open box
     /// (`ui/web_app_ui.rs`, `DialogKind::WebAppConfirm`). First: its
     /// `closeWebApp` goes before the chat leave.
@@ -194,6 +209,8 @@ on_screen_fields! {
     auth_ui: super::auth_state::AuthUi,
     /// Agent access: the account Settings edits, the consent box and the page (`ui/agent_state.rs`).
     agent_ui: super::agent_state::AgentUi,
+    /// Translation for the account on screen: the dialog, the bar's toast, the pump's scan (`ui/translate_ui`).
+    translate: super::translate_ui::TranslateScreen,
     /// Connection status, the status note and its toasts, presence sync (`ui/connection_state.rs`).
     connection: super::connection_state::ConnectionUi,
     /// Chats open in windows of their own and the frame scope that names the one being drawn (`ui/chat_window`).
@@ -330,6 +347,7 @@ impl OnScreen {
             ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
             settings: super::settings_state::SettingsUi::new(cx),
             call_boxes: super::calls_state::CallBoxes::new(),
+            translate: Default::default(),
             group_call_boxes: super::group_call_state::GroupCallBoxes::new(),
             auth_ui: super::auth_state::AuthUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(),

@@ -10,7 +10,7 @@ use super::{Script, calls};
 use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+use gpui_kit::{AppContext as _, Entity, TestAppContext, VisualContext as _, VisualTestContext};
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{AccountKey, ChatId, FileId, MessageId};
 use std::cell::RefCell;
@@ -220,4 +220,47 @@ fn opening_the_clip_from_the_chat_continues_the_pip_player(cx: &mut TestAppConte
     assert!(!script.borrow().dropped);
     let calls = calls(&script);
     assert!(!calls.iter().any(|c| c.starts_with("seek")), "{calls:?}");
+}
+
+/// Picture-in-Picture opened from a chat window's viewer has its link in
+/// that window's state: it closes with the window instead of playing on
+/// with nothing left to reach it.
+#[gpui_kit::test]
+fn pip_from_a_chat_window_closes_with_the_window(cx: &mut TestAppContext) {
+    let script = ready_script();
+    let (app, mut vcx, player) = open_pip_on(cx, &script, |_| {}, MessageId(204), 0);
+    drop(player);
+    let vcx = &mut vcx;
+    let main = vcx.window_handle();
+    let (pip_window, view) = pip_of(&app, vcx);
+    drop(view);
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_in_new_window(ChatId(11), window, cx)
+    });
+    settle(vcx);
+    let chat_window = cx
+        .windows()
+        .into_iter()
+        .find(|handle| {
+            handle.window_id() != main.window_id() && handle.window_id() != pip_window.window_id()
+        })
+        .expect("the chat window");
+    // As if the window's own viewer had opened it.
+    app.update(vcx, |app, cx| {
+        let link = app.viewer.pip.take();
+        app.in_window_scope(Some(ChatId(11)), cx, move |app, _| app.viewer.pip = link);
+    });
+    cx.update_window(chat_window, |_, window, cx| {
+        window.render_frame(cx);
+        window.dispatch_action(Box::new(crate::ui::actions::CloseWindow), cx);
+    })
+    .expect("the chat window is open");
+    settle(vcx);
+    assert!(
+        !cx.windows()
+            .iter()
+            .any(|handle| handle.window_id() == pip_window.window_id()),
+        "the PiP window closed"
+    );
+    assert!(script.borrow().dropped, "the player stopped");
 }

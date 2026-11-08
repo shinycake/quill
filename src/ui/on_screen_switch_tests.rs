@@ -195,6 +195,11 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
             field: "call_boxes",
             open: |app| app.call_boxes.confirm.is_some(),
         },
+        HeldBox {
+            dialog: "Translate",
+            field: "translate",
+            open: |app| app.translate.dialog.is_some(),
+        },
     ];
 
     let (app, mut vcx) = new_app(cx, "ready-chats");
@@ -218,6 +223,9 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
         });
         app.call_boxes.confirm = Some((7, false));
         cx.notify();
+    });
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_translate_selection(CHAT, "hola".into(), window, cx);
     });
     frames(&mut vcx);
     assert!(dialog_up(&mut vcx));

@@ -130,8 +130,8 @@ pub(crate) struct PreferencesUi {
     /// The step sliders of the network editor, the local storage limits and
     /// the auto-delete picker (`index_sliders.rs`).
     pub(super) index_sliders: super::index_sliders::IndexSliders,
-    /// Translation: prefs (`translate_prefs.json`), the translate dialog,
-    /// the bar's toast.
+    /// Translation prefs (`translate_prefs.json`); the dialog and the
+    /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
     pub(super) update_banner_dismissed: bool,

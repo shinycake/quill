@@ -132,8 +132,7 @@ impl QuillApp {
         chat_id: ChatId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.preferences
-            .translate
+        self.translate
             .toast
             .as_ref()
             .filter(|toast| toast.chat_id == chat_id)?;
@@ -151,7 +150,6 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let toast = self
-            .preferences
             .translate
             .toast
             .as_ref()
@@ -179,7 +177,7 @@ impl QuillApp {
                         .small()
                         .text_color(accent())
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.preferences.translate.toast = None;
+                            this.translate.toast = None;
                             match action {
                                 ToastAction::ShowBar => {
                                     this.set_translate_bar_hidden(chat_id, false, cx)
@@ -203,26 +201,22 @@ impl QuillApp {
         action: ToastAction,
         cx: &mut Context<Self>,
     ) {
-        self.preferences.translate.toast_seq += 1;
-        let id = self.preferences.translate.toast_seq;
-        self.preferences.translate.toast = Some(TranslateToast {
+        self.translate.toast_seq += 1;
+        let id = self.translate.toast_seq;
+        self.translate.toast = Some(TranslateToast {
             chat_id,
             text,
             label,
             action,
             id,
         });
-        cx.spawn(async move |this, cx| {
+        // The toast is the screen's: a timer from an account switched away
+        // must not clear the next account's toast with the same id.
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(TOAST_DURATION).await;
             let _ = this.update(cx, |this, cx| {
-                if this
-                    .preferences
-                    .translate
-                    .toast
-                    .as_ref()
-                    .is_some_and(|t| t.id == id)
-                {
-                    this.preferences.translate.toast = None;
+                if this.translate.toast.as_ref().is_some_and(|t| t.id == id) {
+                    this.translate.toast = None;
                     cx.notify();
                 }
             });
@@ -375,14 +369,14 @@ impl QuillApp {
         {
             return followed;
         }
-        let mut scan = std::mem::take(&mut self.preferences.translate.pump);
+        let mut scan = std::mem::take(&mut self.translate.pump);
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
-                self.preferences.translate.pump = scan;
+                self.translate.pump = scan;
                 return followed;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
-                self.preferences.translate.pump = scan;
+                self.translate.pump = scan;
                 return followed;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
@@ -417,11 +411,10 @@ impl QuillApp {
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
             found.into_iter().take(room).collect()
         };
-        self.preferences.translate.pump = scan;
+        self.translate.pump = scan;
         let Some(live) = self.live.as_mut() else {
             #[cfg(test)]
-            self.preferences
-                .translate
+            self.translate
                 .asked
                 .extend(wanted.into_iter().map(|id| (id, model.to)));
             return followed;
