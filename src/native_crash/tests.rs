@@ -117,3 +117,104 @@ fn the_next_start_offers_the_native_report_to_the_notice() {
     assert_eq!(crash_files, 1, "no extra generic report");
     let _ = fs::remove_dir_all(&root);
 }
+
+/// Set in the child run of `a_native_report_lists_the_faulting_frames`.
+#[cfg(any(
+    target_os = "macos",
+    all(target_os = "linux", target_env = "gnu"),
+    all(windows, target_arch = "x86_64")
+))]
+mod fault {
+    use super::super::ACTIVE_REPORT_FILE;
+    use super::temp_root;
+    use crate::crash_log;
+    use std::fs;
+
+    const CHILD_DIR: &str = "QUILL_TEST_NATIVE_FAULT_DIR";
+
+    #[inline(never)]
+    fn fault_here_for_the_report() -> u32 {
+        // SAFETY: none; the read faults on purpose (null page, offset 0x20,
+        // the shape of issue #1389's crash) and the process dies of it.
+        unsafe { std::ptr::read_volatile(std::hint::black_box(0x20usize) as *const u32) }
+    }
+
+    /// Only does something in the child process the test below starts.
+    #[test]
+    fn native_fault_child() {
+        let Some(dir) = std::env::var_os(CHILD_DIR) else {
+            return;
+        };
+        super::super::install(std::path::Path::new(&dir));
+        #[cfg(windows)]
+        // SAFETY: a plain call; no error dialog may wait for a click on CI.
+        unsafe {
+            windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode(
+                windows_sys::Win32::System::Diagnostics::Debug::SEM_NOGPFAULTERRORBOX,
+            );
+        }
+        // A worker thread, like most native faults; on Unix it gets the
+        // handler's own alternate stack.
+        // The fault ends the process; the parent sees a live exit as a failure.
+        let _ = std::thread::spawn(fault_here_for_the_report).join();
+    }
+
+    /// The report lists the faulting thread's frames. On macOS `backtrace`
+    /// run on the alternate signal stack can return nothing (the empty
+    /// report in issue #1389), so the report walks the interrupted registers
+    /// there; Windows walks the exception's context.
+    #[test]
+    fn a_native_report_lists_the_faulting_frames() {
+        let root = temp_root("fault");
+        let dir = crash_log::log_dir(&root);
+        fs::create_dir_all(&dir).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "native_crash::tests::fault::native_fault_child",
+                "--nocapture",
+            ])
+            .env(CHILD_DIR, &dir)
+            .status()
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(libc::SIGSEGV), "{status:?}");
+        }
+        #[cfg(windows)]
+        assert_eq!(
+            status.code().map(|code| code as u32),
+            Some(0xc000_0005),
+            "{status:?}"
+        );
+        let report = fs::read_to_string(dir.join(ACTIVE_REPORT_FILE)).unwrap();
+        let frames = report
+            .split("backtrace:\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\nend of report").next())
+            .unwrap_or("");
+        assert!(frames.lines().count() >= 3, "frames are listed:\n{report}");
+        #[cfg(unix)]
+        assert!(report.contains("fault address: 0x20"), "{report}");
+        // Linux names only exported symbols; its frames are `quill(+offset)`.
+        #[cfg(target_os = "macos")]
+        {
+            assert!(report.contains("load address: 0x"), "{report}");
+            assert!(
+                report.contains("fault_here_for_the_report"),
+                "the faulting function is in the backtrace:\n{report}"
+            );
+        }
+        // The first frame is the faulting instruction, in the test binary.
+        #[cfg(windows)]
+        assert!(
+            frames
+                .lines()
+                .next()
+                .is_some_and(|line| line.contains(".exe+0x")),
+            "{report}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}

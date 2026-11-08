@@ -215,6 +215,9 @@ impl QuillApp {
                 div()
                     .id("status-toast")
                     .test_support()
+                    // A click dismisses the toast and nothing under it (a
+                    // message, or the media viewer's backdrop).
+                    .occlude()
                     .role(role)
                     .aria_label(note.text().to_string())
                     .cursor_pointer()

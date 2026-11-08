@@ -770,7 +770,10 @@ impl MetalRenderer {
                 };
                 Some(drawable)
             }
-            DisplayLinkMode::Detached => layer.nextDrawable(),
+            DisplayLinkMode::Detached => {
+                crate::display_link::invalidate_retired();
+                layer.nextDrawable()
+            }
         };
         let Some(drawable) = drawable.and_then(|drawable| self.usable_drawable(&layer, drawable))
         else {

@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::ui::chat_theme::bg_canvas;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::motion::{Glide, ease_out_circ};
 use gpui_kit::assets::IconName;
 use quill::lang::{keys, tr};
@@ -239,27 +240,16 @@ impl QuillApp {
             .overflow_hidden()
             .role(gpui_kit::Role::Dialog)
             .aria_label(panel.title())
-            // Clicks inside the card never reach the backdrop.
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(bar)
             .children(self.earn_panel(panel, cx));
         Some(
-            div()
-                .id("earn-layer")
-                .occlude()
-                .absolute()
-                .inset_0()
-                .bg(gpui_kit::black().opacity(0.45 * shown))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.close_earn_layer(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                .child(card)
-                .into_any_element(),
+            DismissLayer::new(
+                "earn-layer",
+                cx.listener(|this, _, _, cx| this.close_earn_layer(cx)),
+            )
+            .layer(|layer| layer.bg(gpui_kit::black().opacity(0.45 * shown)))
+            .content(card)
+            .into_any_element(),
         )
     }
 }

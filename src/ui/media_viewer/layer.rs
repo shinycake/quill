@@ -270,6 +270,8 @@ impl QuillApp {
             .bottom_0()
             // Clicking anywhere outside the media and controls closes.
             .child(
+                // click-through-ok: the media and every control over it
+                // occlude (chrome.rs), with the backdrop's own scroll/pinch.
                 div()
                     .id("media-viewer-backdrop")
                     .occlude()

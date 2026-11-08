@@ -8,9 +8,11 @@
 
 use super::app::QuillApp;
 use super::dialogs::GroupConfirmAction;
+use super::dismiss_layer::DismissLayer;
 use crate::ui::scroll_load::{load_due, loading_row, scrolled_near_end, watch};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
@@ -124,66 +126,54 @@ impl QuillApp {
         title: &'static str,
         body: AnyElement,
     ) -> AnyElement {
-        div()
-            .id(format!("privacy-overlay-{id}"))
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id(format!("privacy-backdrop-{id}"))
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(rgba(0x000000e6))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_privacy_top(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id(format!("privacy-dialog-{id}"))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .px_4()
-                    .py_3()
-                    .rounded_lg()
-                    .bg(cx.theme().sidebar)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .w(px(520.))
-                    .max_w(relative(0.9))
-                    .max_h(relative(0.85))
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(div().font_semibold().child(title))
-                            .child(
-                                Button::new(format!("privacy-close-{id}"))
-                                    .icon(gpui_kit::assets::IconName::X)
-                                    .tooltip(tr(keys::CLOSE))
-                                    .accessibility_label(tr(keys::CLOSE))
-                                    .ghost()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_privacy_top(cx);
-                                    })),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
+        DismissLayer::new(
+            format!("privacy-overlay-{id}"),
+            cx.listener(|this, _, _, cx| this.close_privacy_top(cx)),
+        )
+        .layer(|layer| {
+            layer
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(rgba(0x000000e6))
+        })
+        .content(
+            div()
+                .id(format!("privacy-dialog-{id}"))
+                .test_support()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .px_4()
+                .py_3()
+                .rounded_lg()
+                .bg(cx.theme().sidebar)
+                .border_1()
+                .border_color(cx.theme().border)
+                .w(px(520.))
+                .max_w(relative(0.9))
+                .max_h(relative(0.85))
+                .overflow_y_scroll()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(div().font_semibold().child(title))
+                        .child(
+                            Button::new(format!("privacy-close-{id}"))
+                                .icon(gpui_kit::assets::IconName::X)
+                                .tooltip(tr(keys::CLOSE))
+                                .accessibility_label(tr(keys::CLOSE))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_privacy_top(cx);
+                                })),
+                        ),
+                )
+                .child(body),
+        )
+        .into_any_element()
     }
 
     /// "Clear saved payment/shipping info" (`parity:bots-payment-clear`):

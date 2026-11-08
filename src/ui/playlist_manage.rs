@@ -16,6 +16,7 @@ use super::context_menu_keys::context_menu_item;
 use super::folder_share::finish_dialog;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -440,37 +441,16 @@ impl QuillApp {
             .py_1()
             .menu_surface(cx)
             .children(rows);
-        div()
-            .id("playlist-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("playlist-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.playback.playlist_menu = None;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                anchored()
-                    .position(position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(panel),
-            )
-            .focus_trap("playlist-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        DismissLayer::new(
+            "playlist-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.playback.playlist_menu = None;
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .anchored(position, panel)
+        .focus_trap("playlist-menu-focus", &self.frame.context_menu_focus)
     }
 
     fn build_remove_playlist_track_dialog(

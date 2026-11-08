@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -97,6 +98,9 @@ impl QuillApp {
                 .child(
                     div()
                         .id("custom-emoji-card")
+                        .test_support()
+                        // Clicks, hover and scroll over the card stay on it.
+                        .occlude()
                         .role(Role::Group)
                         .aria_label(label.clone())
                         .max_w(px(460.))

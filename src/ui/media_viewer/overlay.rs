@@ -532,6 +532,8 @@ impl QuillApp {
         // closes the viewer.
         let root = if part == ViewerPart::Inline {
             div().absolute().inset_0().child(
+                // click-through-ok: the media and every control over it
+                // occlude (chrome.rs), with the backdrop's own scroll/pinch.
                 div()
                     .id("media-viewer-backdrop")
                     .occlude()

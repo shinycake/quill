@@ -11,6 +11,7 @@ use super::context_menu_keys::context_menu_item;
 use super::folder_share::{chat_title, finish_dialog};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
@@ -224,44 +225,25 @@ impl QuillApp {
             .py_1()
             .menu_surface(cx)
             .children(rows);
-        div()
-            .id("folder-tab-menu-overlay")
-            .track_focus(&self.frame.context_menu_focus)
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .child(
-                div()
-                    .id("folder-tab-menu-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.folders.tab_menu = None;
-                        cx.notify();
-                    }))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(|this, _, _, cx| {
-                            this.folders.tab_menu = None;
-                            cx.notify();
-                        }),
-                    ),
+        DismissLayer::new(
+            "folder-tab-menu-overlay",
+            cx.listener(|this, _, _, cx| {
+                this.folders.tab_menu = None;
+                cx.notify();
+            }),
+        )
+        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .backdrop(|backdrop| {
+            backdrop.on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, _, cx| {
+                    this.folders.tab_menu = None;
+                    cx.notify();
+                }),
             )
-            .child(
-                anchored()
-                    .position(menu.position)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(panel),
-            )
-            .focus_trap("folder-tab-menu-focus", &self.frame.context_menu_focus)
-            .into_any_element()
+        })
+        .anchored(menu.position, panel)
+        .focus_trap("folder-tab-menu-focus", &self.frame.context_menu_focus)
     }
 
     // ------------------------------------------------------------------

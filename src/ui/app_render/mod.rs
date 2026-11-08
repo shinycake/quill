@@ -21,6 +21,7 @@ use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
 use super::shell::title_bar;
 use super::shortcut_pack::HistoryKey;
+use crate::ui::dismiss_layer::DismissLayer;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
@@ -811,27 +812,14 @@ impl Render for QuillApp {
                     let panel = self.media_panel(cx);
                     let panel = self.selector_panel(panel);
                     this.child(
-                        div()
-                            .id("reaction-selector-layer")
-                            .occlude()
-                            .absolute()
-                            .inset_0()
-                            .child(
-                                div()
-                                    .id("reaction-selector-backdrop")
-                                    .absolute()
-                                    .inset_0()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_media_panel(cx);
-                                    })),
-                            )
-                            .child(
-                                anchored()
-                                    .position(position)
-                                    .snap_to_window_with_margin(px(8.))
-                                    .child(panel),
-                            )
-                            .children(self.panel_painter()),
+                        DismissLayer::new(
+                            "reaction-selector-layer",
+                            cx.listener(|this, _, _, cx| {
+                                this.close_media_panel(cx);
+                            }),
+                        )
+                        .anchored(position, panel)
+                        .decorations(self.panel_painter()),
                     )
                 },
             )

@@ -1,7 +1,9 @@
 //! Methods moved out of `story_albums.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::scroll_load::{loading_row, watch_scroll};
+use gpui_kit::TestSupportExt;
 use quill::lang::{keys, tr, tr_with};
 
 /// The tallest a section of the story page grows before it scrolls.
@@ -404,79 +406,66 @@ impl QuillApp {
             body = body.child(list).child(chat_page).child(archive);
         }
 
-        div()
-            .id("story-page-overlay")
-            .occlude()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .id("story-page-backdrop")
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .bg(rgba(0x000000e6))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_story_page(cx);
-                    })),
-            )
-            .child(
-                div()
-                    .id("story-page-panel")
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .p_4()
-                    .max_w(px(560.))
-                    .max_h_full()
-                    .overflow_y_scroll()
-                    .rounded_lg()
-                    .bg(cx.theme().popover)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .font_semibold()
-                                    .text_color(cx.theme().foreground)
-                                    .child(tr_with(
-                                        keys::Q_MEDIA_STORIES_2,
-                                        &[("title", &title.to_string())],
-                                    )),
-                            )
-                            .child(
-                                Button::new("story-page-close")
-                                    .icon(gpui_kit::assets::IconName::X)
-                                    .tooltip(tr(keys::CLOSE))
-                                    .accessibility_label(tr(keys::CLOSE))
-                                    .ghost()
-                                    .text_color(cx.theme().foreground)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.close_story_page(cx);
-                                    })),
-                            ),
-                    )
-                    .when_some(op_status, |this, status| {
-                        this.child(
+        DismissLayer::new(
+            "story-page-overlay",
+            cx.listener(|this, _, _, cx| this.close_story_page(cx)),
+        )
+        .layer(|layer| {
+            layer
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(rgba(0x000000e6))
+        })
+        .content(
+            div()
+                .id("story-page-panel")
+                .test_support()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .p_4()
+                .max_w(px(560.))
+                .max_h_full()
+                .overflow_y_scroll()
+                .rounded_lg()
+                .bg(cx.theme().popover)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
                             div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(status),
+                                .font_semibold()
+                                .text_color(cx.theme().foreground)
+                                .child(tr_with(
+                                    keys::Q_MEDIA_STORIES_2,
+                                    &[("title", &title.to_string())],
+                                )),
                         )
-                    })
-                    .child(body),
-            )
-            .into_any_element()
+                        .child(
+                            Button::new("story-page-close")
+                                .icon(gpui_kit::assets::IconName::X)
+                                .tooltip(tr(keys::CLOSE))
+                                .accessibility_label(tr(keys::CLOSE))
+                                .ghost()
+                                .text_color(cx.theme().foreground)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_story_page(cx);
+                                })),
+                        ),
+                )
+                .when_some(op_status, |this, status| {
+                    this.child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    )
+                })
+                .child(body),
+        )
+        .into_any_element()
     }
 }

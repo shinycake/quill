@@ -1,4 +1,5 @@
-//! An unhandled-exception filter: exception code, address and a minidump.
+//! An unhandled-exception filter: exception code, address, the faulting
+//! thread's frames and a minidump.
 //!
 //! The filter runs on the faulting thread, possibly with almost no stack
 //! left (a stack overflow), so it does nothing that allocates, opens files
@@ -163,6 +164,8 @@ fn report_text(info: *const EXCEPTION_POINTERS) -> String {
          started: {started} (unix seconds)\n\
          minidump: the .dmp file with the same name as this report\n\
          \n\
+         backtrace:\n\
+         {frames}\n\
          end of report\n",
         version = crate::version::APP,
         os = std::env::consts::OS,
@@ -170,7 +173,18 @@ fn report_text(info: *const EXCEPTION_POINTERS) -> String {
         // SAFETY: no arguments, no preconditions.
         pid = unsafe { GetCurrentProcessId() },
         started = crate::crash_log::session_start(),
+        frames = fault_frames(info),
     )
+}
+
+#[cfg(target_arch = "x86_64")]
+fn fault_frames(info: *const EXCEPTION_POINTERS) -> String {
+    super::windows_stack::frames(info, FAULT_THREAD.load(Ordering::SeqCst))
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+fn fault_frames(_info: *const EXCEPTION_POINTERS) -> String {
+    "(only in the minidump on this architecture)\n".to_owned()
 }
 
 fn write_minidump(file: &File, info: *const EXCEPTION_POINTERS) {

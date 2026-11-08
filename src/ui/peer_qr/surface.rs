@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
+use super::super::dismiss_layer::DismissLayer;
 use super::super::shell::{DialogKind, QuillShell};
 use super::card::{card, fit, hsla};
 use super::gift_view::{GiftArgs, gift_canvas};
@@ -292,27 +293,21 @@ impl QuillApp {
                 }));
         }
         if let Some(panel) = motion.shown.filter(|_| progress > 0.) {
-            root = root
-                .child(
-                    div()
-                        .id("peer-qr-panel-dismiss")
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, _, cx| this.qr_act(QrAction::ClosePanel, cx)),
-                        ),
+            let shown = self.qr_panel(
+                view,
+                panel,
+                place.panel,
+                progress,
+                motion.open_elapsed_ms(now),
+                cx,
+            );
+            root = root.child(
+                DismissLayer::new(
+                    "peer-qr-panel-dismiss",
+                    cx.listener(|this, _, _, cx| this.qr_act(QrAction::ClosePanel, cx)),
                 )
-                .child(self.qr_panel(
-                    view,
-                    panel,
-                    place.panel,
-                    progress,
-                    motion.open_elapsed_ms(now),
-                    cx,
-                ));
+                .content(shown),
+            );
         }
         root.children(self.qr_free_menu(view, place.pill_top, window, cx))
             .children(self.qr_toast_element())
