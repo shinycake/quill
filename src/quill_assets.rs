@@ -7,6 +7,9 @@ gpui_kit::assets::icon_assets!(
     [
         X,
         Languages,
+        CircleDashed,
+        RadioTower,
+        ContactRound,
         CircleQuestionMark,
         Captions,
         TextSearch,

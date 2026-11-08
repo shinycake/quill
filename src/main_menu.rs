@@ -2,11 +2,106 @@
 //!
 //! tdesktop's menu opens with My Profile, then New Group / New Channel,
 //! Contacts, Calls, Saved Messages, Settings and a Night Mode switch.
+//! Quill shows its entries as a filterable icon grid and leaves out the
+//! ones the window already shows elsewhere ([`Entry`] says where).
 //! The switch flips between the day and night theme in one step, which is
 //! what `night_mode_toggle` decides from the theme in effect.
 #![deny(clippy::indexing_slicing)]
 
 use crate::settings::{AutoNight, ThemeChoice};
+
+/// One tile of the main menu grid, in display order.
+///
+/// Left out on purpose, because the window already shows them:
+/// Contacts and Calls (the chat list's tabs), Saved Messages (pinned in
+/// the chat list, and in search), New story (the "+" of the stories
+/// strip), New supergroup (tdesktop has only New Group; TDLib upgrades a
+/// group as it grows), New secret chat (a contact's profile menu, as in
+/// tdesktop) and New Community (a button in the Communities box).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    MyProfile,
+    MyStories,
+    EmojiStatus,
+    NewGroup,
+    NewChannel,
+    Communities,
+    MyGroups,
+    MyChannels,
+    Downloads,
+    Archive,
+    ArchiveToList,
+    MarkRead,
+    Accounts,
+    Settings,
+}
+
+/// The grid's tiles; the archive pair only while the archive lives in
+/// the menu (tdesktop `archiveInMainMenu`).
+pub fn entries(archive_in_menu: bool) -> Vec<Entry> {
+    use Entry::*;
+    [
+        MyProfile,
+        MyStories,
+        EmojiStatus,
+        NewGroup,
+        NewChannel,
+        Communities,
+        MyGroups,
+        MyChannels,
+        Downloads,
+        Archive,
+        ArchiveToList,
+        MarkRead,
+        Accounts,
+        Settings,
+    ]
+    .into_iter()
+    .filter(|e| archive_in_menu || !matches!(e, Archive | ArchiveToList))
+    .collect()
+}
+
+/// Whether a tile's label matches the filter field: every word of the
+/// query starts a word of the label, ignoring case ("my ch" finds
+/// "My Channels", "read" finds "Mark all chats as read").
+pub fn matches_filter(label: &str, query: &str) -> bool {
+    let words: Vec<String> = label.split_whitespace().map(str::to_lowercase).collect();
+    query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .all(|q| words.iter().any(|w| w.starts_with(&q)))
+}
+
+/// A move of the keyboard highlight in the grid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// The highlighted tile after `step` in a grid of `len` tiles laid out
+/// `columns` wide. Left/Right wrap through the rows; Up/Down stay put at
+/// the edge. `None` (nothing highlighted yet) lands on the first tile.
+pub fn step(current: Option<usize>, step: Step, len: usize, columns: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    let Some(i) = current.filter(|i| *i < len) else {
+        return Some(0);
+    };
+    let columns = columns.max(1);
+    Some(match step {
+        Step::Left => (i + len - 1) % len,
+        Step::Right => (i + 1) % len,
+        Step::Up => i.checked_sub(columns).unwrap_or(i),
+        Step::Down => {
+            let below = i + columns;
+            if below < len { below } else { i }
+        }
+    })
+}
 
 /// What the Night Mode switch sets when it is flipped: the opposite of
 /// the theme in effect, with the schedule turned off so the choice sticks
@@ -71,6 +166,36 @@ pub fn is_my_created_chat(chat: &crate::state::ChatSummary, channels: bool) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_tiles_follow_the_setting() {
+        assert!(!entries(false).contains(&Entry::Archive));
+        let with = entries(true);
+        assert!(with.contains(&Entry::Archive) && with.contains(&Entry::ArchiveToList));
+        assert_eq!(with.len(), entries(false).len() + 2);
+    }
+
+    #[test]
+    fn filter_matches_word_starts() {
+        assert!(matches_filter("My Channels", ""));
+        assert!(matches_filter("My Channels", "my ch"));
+        assert!(matches_filter("Mark all chats as read", "READ"));
+        assert!(!matches_filter("My Channels", "annels"));
+        assert!(!matches_filter("Settings", "night"));
+    }
+
+    #[test]
+    fn step_moves_through_the_grid() {
+        assert_eq!(step(None, Step::Down, 5, 3), Some(0));
+        assert_eq!(step(Some(0), Step::Left, 5, 3), Some(4));
+        assert_eq!(step(Some(4), Step::Right, 5, 3), Some(0));
+        assert_eq!(step(Some(1), Step::Down, 5, 3), Some(4));
+        assert_eq!(step(Some(2), Step::Down, 5, 3), Some(2));
+        assert_eq!(step(Some(4), Step::Up, 5, 3), Some(1));
+        assert_eq!(step(Some(0), Step::Up, 5, 3), Some(0));
+        assert_eq!(step(Some(9), Step::Up, 5, 3), Some(0));
+        assert_eq!(step(Some(0), Step::Down, 0, 3), None);
+    }
 
     #[test]
     fn status_label_follows_the_current_status() {

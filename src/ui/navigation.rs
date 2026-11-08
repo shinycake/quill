@@ -2,8 +2,6 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use crate::ui::status_note::StatusNote;
-use gpui_kit::component::button::*;
-use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard::{self, HardSurface};
@@ -23,14 +21,10 @@ pub(super) enum NavigationAction {
     MyGroups,
     MyChannels,
     Contacts,
-    Calls,
     NightMode,
-    Secret,
     Downloads,
     Group,
-    Supergroup,
     Channel,
-    CommunityCreate,
     Communities,
     ArchivedStickers,
     Storage,
@@ -50,7 +44,6 @@ pub(super) enum NavigationAction {
     ExportChat,
     ViewAsTopics,
     NewTopic,
-    NewStory,
     Appearance,
     Privacy,
     TwoFa,
@@ -185,7 +178,6 @@ impl QuillApp {
                     self.start_chat_export(chat, cx);
                 }
             }
-            NavigationAction::NewStory => self.open_story_composer(window, cx),
             NavigationAction::Saved => {
                 self.open_saved_messages(window, cx);
             }
@@ -199,7 +191,6 @@ impl QuillApp {
             NavigationAction::MyGroups => self.open_my_chats(false, cx),
             NavigationAction::MyChannels => self.open_my_chats(true, cx),
             NavigationAction::Contacts => self.open_contacts_tab(cx),
-            NavigationAction::Calls => self.open_calls_tab(cx),
             NavigationAction::NightMode => {
                 let dark = self.night_mode_on();
                 let (theme, auto_night) = quill::main_menu::night_mode_toggle(dark);
@@ -207,10 +198,6 @@ impl QuillApp {
                     a.theme = theme;
                     a.auto_night = auto_night;
                 });
-            }
-            NavigationAction::Secret => {
-                self.share.new_secret_picker_open = !self.share.new_secret_picker_open;
-                cx.notify();
             }
             NavigationAction::Downloads => {
                 if let Some(live) = self.live.as_mut() {
@@ -224,14 +211,8 @@ impl QuillApp {
             NavigationAction::Group => {
                 self.open_new_chat(NewChatKind::Group, window, cx);
             }
-            NavigationAction::Supergroup => {
-                self.open_new_chat(NewChatKind::Megagroup, window, cx);
-            }
             NavigationAction::Channel => {
                 self.open_new_chat(NewChatKind::Channel, window, cx);
-            }
-            NavigationAction::CommunityCreate => {
-                self.open_create_community_dialog(window, cx);
             }
             NavigationAction::Communities => {
                 self.open_community_hub(cx);
@@ -345,99 +326,6 @@ impl QuillApp {
                 .map(|(mode, ..)| *mode == gpui_kit::component::theme::ThemeMode::Dark),
             self.appearance.theme,
         )
-    }
-
-    pub(super) fn main_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
-        let owner = cx.entity().downgrade();
-        let night = self.night_mode_on();
-        let status_label = self.emoji_status_menu_label();
-        // tdesktop `archiveInMainMenu`: the archive lives here instead of
-        // on top of the chat list while there is something archived.
-        let archive_in_menu = quill::chatlist_archive::show_in_main_menu(
-            self.session().is_some_and(|s| s.has_archived_chats()),
-            self.appearance.archive_in_main_menu,
-        );
-        let accounts_unread = self.other_accounts_unread();
-        let button = Button::new("main-menu")
-            .icon(gpui_kit::assets::IconName::Menu)
-            .ghost()
-            .tooltip(tr(keys::MAIN_MENU))
-            .accessibility_label(tr(keys::MAIN_MENU))
-            .on_click(|event, window, cx| {
-                if matches!(event, ClickEvent::Keyboard(_)) {
-                    window.dispatch_action(
-                        Box::new(gpui_kit::base::actions::Confirm { secondary: false }),
-                        cx,
-                    );
-                }
-            })
-            .dropdown_menu(move |mut menu, _, _| {
-                for (label, action) in [
-                    (tr(keys::MENU_MY_PROFILE), NavigationAction::MyProfile),
-                    (tr(keys::MENU_MY_STORIES), NavigationAction::MyStories),
-                    (status_label, NavigationAction::EmojiStatus),
-                    (tr(keys::MENU_MY_GROUPS), NavigationAction::MyGroups),
-                    (tr(keys::MENU_MY_CHANNELS), NavigationAction::MyChannels),
-                    (tr(keys::MENU_CONTACTS), NavigationAction::Contacts),
-                    (tr(keys::MENU_CALLS), NavigationAction::Calls),
-                    (tr(keys::SAVED_MESSAGES), NavigationAction::Saved),
-                    (tr(keys::ARCHIVED_NAME), NavigationAction::Archive),
-                    (
-                        tr(keys::CONTEXT_ARCHIVE_TO_LIST),
-                        NavigationAction::ArchiveToList,
-                    ),
-                    (tr(keys::Q_NAVIGATION_NEW_STORY), NavigationAction::NewStory),
-                    (tr(keys::CREATE_GROUP_TITLE), NavigationAction::Group),
-                    (
-                        tr(keys::Q_NAVIGATION_NEW_SUPERGROUP),
-                        NavigationAction::Supergroup,
-                    ),
-                    (tr(keys::CREATE_CHANNEL_TITLE), NavigationAction::Channel),
-                    (
-                        tr(keys::Q_NAVIGATION_NEW_SECRET_CHAT),
-                        NavigationAction::Secret,
-                    ),
-                    (
-                        tr(keys::Q_NAVIGATION_COMMUNITIES),
-                        NavigationAction::Communities,
-                    ),
-                    (
-                        tr(keys::COMMUNITY_CREATE_TITLE),
-                        NavigationAction::CommunityCreate,
-                    ),
-                    (tr(keys::DOWNLOADS_SECTION), NavigationAction::Downloads),
-                    (tr(keys::CONTEXT_MARK_READ_ALL), NavigationAction::MarkRead),
-                    (tr(keys::Q_NAVIGATION_ACCOUNTS), NavigationAction::Accounts),
-                    (tr(keys::MENU_SETTINGS), NavigationAction::Settings),
-                    (tr(keys::MENU_NIGHT_MODE), NavigationAction::NightMode),
-                ] {
-                    if matches!(
-                        action,
-                        NavigationAction::Archive | NavigationAction::ArchiveToList
-                    ) && !archive_in_menu
-                    {
-                        continue;
-                    }
-                    let owner = owner.clone();
-                    let mut item = PopupMenuItem::new(label);
-                    if matches!(action, NavigationAction::NightMode) {
-                        item = item.checked(night);
-                    }
-                    // The other accounts' unread counter (tdesktop's
-                    // accounts toggle badge).
-                    if let (NavigationAction::Accounts, Some(unread)) = (action, accounts_unread) {
-                        item = PopupMenuItem::element(move |_, cx| {
-                            super::background_accounts::chrome::accounts_menu_row(unread, cx)
-                        });
-                    }
-                    menu = menu.item(item.on_click(move |_, window, cx| {
-                        let _ = owner.update(cx, |this, cx| this.navigate(action, window, cx));
-                    }));
-                }
-                menu
-            })
-            .into_any_element();
-        self.with_other_accounts_dot(button)
     }
 }
 

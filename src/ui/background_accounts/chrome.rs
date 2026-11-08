@@ -5,7 +5,6 @@
 use super::*;
 use crate::ui::{accent_strong, bg_badge_muted};
 use gpui_kit::component::badge::Badge;
-use quill::lang::{keys, tr};
 use quill::notify_accounts::account_name_in_title;
 use quill::telegram::envelope::AuthorizationState;
 
@@ -60,19 +59,7 @@ impl QuillApp {
     }
 }
 
-/// The "Accounts" menu row with the other accounts' counter.
-pub(in crate::ui) fn accounts_menu_row(unread: AccountUnread, cx: &App) -> AnyElement {
-    div()
-        .flex()
-        .flex_1()
-        .items_center()
-        .justify_between()
-        .gap_2()
-        .child(tr(keys::Q_OPS_ACCOUNTS))
-        .child(super::account_row::counter_pill(
-            "accounts-menu",
-            unread,
-            cx,
-        ))
-        .into_any_element()
+/// The other accounts' counter on the main menu's "Accounts" tile.
+pub(in crate::ui) fn accounts_unread_pill(unread: AccountUnread, cx: &App) -> AnyElement {
+    super::account_row::counter_pill("accounts-menu", unread, cx)
 }
