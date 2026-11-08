@@ -74,6 +74,10 @@ pub struct GroupTypeState {
     pub check_pending: Option<(ChatId, String)>,
     /// The newest answer.
     pub check: Option<UsernameVerdict>,
+    /// The chat and text whose newest check failed (FLOOD_WAIT, a server
+    /// error): the box says so instead of "Checking..." with nothing in
+    /// flight, and Save asks again.
+    pub check_failed: Option<(ChatId, String)>,
     /// `checkCreatedPublicChatsLimit`: `Some(true)` at the limit.
     pub public_limit_reached: Option<bool>,
     /// Chats `checkChatUsername` said can't be public
@@ -96,6 +100,15 @@ fn group_type_purpose(pending: Option<&PendingRequest>) -> Option<GroupTypePurpo
 }
 
 impl Session {
+    /// The newest check of exactly `username` in `chat_id` failed.
+    pub fn group_username_check_failed(&self, chat_id: ChatId, username: &str) -> bool {
+        self.groups
+            .group_type
+            .check_failed
+            .as_ref()
+            .is_some_and(|(chat, text)| *chat == chat_id && text == username)
+    }
+
     /// The verdict for exactly `username` in `chat_id`, if one came.
     pub fn group_username_verdict(
         &self,
@@ -237,7 +250,8 @@ impl Session {
             Some(GroupTypePurpose::CheckChatUsername { generation })
                 if generation == self.groups.group_type.check_generation =>
             {
-                self.groups.group_type.check_pending = None;
+                let state = &mut self.groups.group_type;
+                state.check_failed = state.check_pending.take();
             }
             Some(GroupTypePurpose::CheckPublicChatsLimit) => {
                 self.groups.group_type.public_limit_reached =

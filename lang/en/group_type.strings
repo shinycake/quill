@@ -24,6 +24,7 @@
 "lng_create_channel_link_bad_symbols" = "Only 0-9, a-z, and underscores allowed.";
 "lng_create_channel_link_available" = "This link is available";
 "lng_create_channel_link_pending" = "Checking name...";
+"qll_group_type_link_check_failed" = "Could not check this link. Press Save to try again.";
 "lng_create_channel_link_copied" = "Link copied to clipboard.";
 "lng_username_purchase_available" = "Sorry, this link is taken. But it's available for purchase. {link}";
 "lng_username_purchase_available_link" = "Learn more...";
