@@ -11,26 +11,21 @@ impl QuillApp {
     pub(super) fn frame_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(feature = "frame-profiler")]
         self.frame_profile_tick(window);
+        // main-only: notification clicks, other accounts and delivery are the
+        // app's; a chat they open goes through the router (`route_chat_open`).
         self.flush_notifications(window, cx);
-        // What was open for a chat the view no longer shows goes.
-        self.sync_chat_ui();
-        self.sync_history_holds();
+        // What every window's frame runs, here with the main window's
+        // state in place (`window_upkeep`).
+        self.per_window_upkeep(window, cx);
+        // main-only: the main window's reply bar; a chat window's reply
+        // target fetch belongs to the session side (`connect`).
         self.fetch_missing_reply_target();
-        // The inline results button's round trip back to its chat.
-        self.flush_inline_return(window, cx);
-        // A topic or thread switch without a window at hand asked for the
-        // new slot's draft to be restored into the composer.
-        self.restore_draft_if_pending(window, cx);
-        self.adopt_remote_draft(window, cx);
-        self.sync_composer_placeholder(window, cx);
-        // Emoji keywords for the `:` popup arrived.
-        self.refresh_suggest_menu(cx);
-        // Words with emoji: picked again when the text, caret or answers move.
-        self.sync_emoji_words(cx);
         // The chat windows open at the last run come back once the
         // account is ready (`chat_window::saved`).
+        // main-only: it opens the chat windows themselves.
         self.restore_chat_windows(window, cx);
         // A video chosen for an owned set finished downloading: its editor.
+        // main-only: the sticker set boxes are the main window's dialogs.
         self.sticker_box_frame_upkeep(window, cx);
         // Revenue and affiliate pages: the amount field, the setup
         // sliders, program photos and pages, profile balances.
@@ -43,8 +38,10 @@ impl QuillApp {
         // Starting a video chat: the "join as" list, a refused create.
         self.group_call_create_frame_upkeep(window, cx);
         // Gift transfer: Fragment's export page, the transferred toast.
+        // main-only: a box of the main window.
         self.gift_transfer_frame_upkeep(window, cx);
         // Grams: Fragment's withdrawal page, the password field.
+        // main-only: a box of the main window.
         self.grams_withdraw_frame_upkeep(window, cx);
         // Slice P1 fix-up: the checkout dialog opens on Buy press before
         // the form arrives — prefill the saved order info once, on the
@@ -56,75 +53,37 @@ impl QuillApp {
                 dialog.prefill_from_form(&form, window, cx);
             }
         }
-        // Slice msg-richtext-ai-tools: an AI answer for the open chat's
-        // composer replaces the draft (this needs `&mut Window` for the
-        // input, so it can't live in `poll_live`). A late answer for a
-        // chat the user has since left is dropped, never applied blindly.
-        // Rich answers are written back as editor markup, inline formatting
-        // included, so the rich send path rebuilds the whole message.
-        let ai_text = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.messages.ai_composer_text.take());
-        let ai_blocks = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.messages.ai_composer_blocks.take());
-        let open_chat = self
-            .live
-            .as_ref()
-            .and_then(|live| live.driver.session.open_chat);
-        if let Some((chat_id, text)) = ai_text
-            && open_chat == Some(chat_id)
-        {
-            self.set_composer_markup(&text, window, cx);
-            self.connection
-                .set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
-        }
-        if let Some((chat_id, rich, note)) = ai_blocks
-            && open_chat == Some(chat_id)
-        {
-            let text = quill::rich::RichDraft::from_message(&rich.blocks)
-                .map(|draft| draft.markup())
-                .unwrap_or_default();
-            self.set_composer_markup(&text, window, cx);
-            self.connection.set_note(StatusNote::info(note));
-        }
+        // main-only: the AI compose box carries the window it was opened in.
         self.ai_compose_frame_upkeep(window, cx);
         self.premium_limit_toast_upkeep(window, cx);
-        // Phase A1: keep the slow-mode countdown ticking while the open
-        // chat is gated (spawns at most one 1s task per open chat).
-        self.ensure_slow_mode_tick(cx);
-        // Phase B3: keep self-destruct countdown badges fresh while the
-        // open chat has a live `self_destruct_in` timer (same 1s task
-        // pattern as slow mode).
-        self.ensure_self_destruct_tick(cx);
-        // Live-location countdowns: refreshed at the pace their labels
-        // change, only while the open chat shows a running one.
-        self.ensure_live_location_tick(cx);
         // The call windows follow the call.
         self.sync_call_window(cx);
         self.sync_group_call_window(cx);
         // MED4b: debounced `getLinkPreview` prefetch for the
         // detected-URL chip (spawns at most one timer per new URL).
+        // main-only: the session keeps one composer preview; every window
+        // asking would refetch it for each window in turn.
         self.maybe_prefetch_link_preview(cx);
         // Parity slice: prefill the folder editor once its `getChatFolder`
         // spec arrives.
         self.maybe_prefill_folder_editor(window, cx);
+        // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
         // `parity:platform-deep-links`: open the chat the deep link
         // resolved to (take-once; render owns the `Window`).
+        // main-only: deep links arrive in the main window; the chat they
+        // name goes through the router.
         if let Some(open) = self.links.pending_deep_link_open.take() {
             self.open_deep_link_chat(open, window, cx);
             self.drop_shared_card(cx);
         }
+        // main-only: as above.
         if let Some(ui) = self.links.pending_deep_link_ui.take() {
             self.run_deep_link_ui(ui, window, cx);
         }
-        // A clicked mention, hashtag, command or link (`entity_links`).
-        self.run_pending_link(window, cx);
         self.pump_collectible_info(cx);
         self.pump_promo_request(cx);
+        // main-only: mini apps open over the main window.
         self.run_pending_mini_app_action(window, cx);
         // Phase 9.2: the `updateStoryPostSucceeded` reducer queued poster
         // chats whose active stories should be refreshed (an own story

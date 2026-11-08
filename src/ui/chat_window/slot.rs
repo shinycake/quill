@@ -108,6 +108,23 @@ super::super::on_screen::on_screen_fields! {
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
 
+impl super::ChatWindows {
+    /// The chats whose histories the slots not in place still read: the
+    /// source of their pending forward and the chat their reply bar points
+    /// at (`QuillApp::sync_history_holds`).
+    pub(in crate::ui) fn slot_history_holds(&self) -> Vec<ChatId> {
+        self.slots()
+            .filter_map(|slot| {
+                let slot = slot.try_borrow().ok()?;
+                let forward = slot.share.pending_forward.as_ref().map(|d| d.from_chat_id);
+                let reply = slot.chat_ui.reply().map(|reply| reply.chat_id);
+                Some(forward.into_iter().chain(reply).collect::<Vec<_>>())
+            })
+            .flatten()
+            .collect()
+    }
+}
+
 impl WindowSlot {
     /// A fresh slot, with a compose field wired like the main window's and
     /// its own picker search fields.

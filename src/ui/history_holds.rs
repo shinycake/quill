@@ -14,6 +14,8 @@ use super::*;
 use quill::ids::ChatId;
 
 impl QuillApp {
+    /// Every window's claims, whichever window's state is in place: the
+    /// one in place and each chat window slot's.
     pub(super) fn sync_history_holds(&mut self) {
         let holds: Vec<ChatId> = self
             .share
@@ -21,8 +23,9 @@ impl QuillApp {
             .as_ref()
             .map(|draft| draft.from_chat_id)
             .into_iter()
-            .chain(self.playback.player.chat)
             .chain(self.chat_ui.reply().map(|reply| reply.chat_id))
+            .chain(self.windows.slot_history_holds())
+            .chain(self.playback.player.chat)
             .chain(self.member_list_readers())
             .chain(self.session().into_iter().flat_map(|session| {
                 [session.info_panel_chat(), session.sponsored_report_chat()]

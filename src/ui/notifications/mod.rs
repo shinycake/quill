@@ -534,8 +534,9 @@ impl QuillApp {
                 )));
             progressed = true;
         }
-        // Batch 7: keep a translated chat's translations coming.
-        if self.pump_translation() {
+        // Batch 7: keep a translated chat's translations coming, and
+        // Saved Messages' sublists and tags loaded, in every window.
+        if self.poll_every_window(cx) {
             progressed = true;
         }
         // `parity:platform-deep-links`: drive the launch-link flow —
@@ -554,8 +555,6 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(err));
             progressed = true;
         }
-        // Saved Messages: load the sublists and tags while it is open.
-        self.pump_saved_messages();
         // B7: a basic group became a supergroup: leave the old chat.
         if self.pump_chat_upgrades(cx) {
             progressed = true;
@@ -812,9 +811,6 @@ impl QuillApp {
     /// things in the window, then hand out what is still queued. Runs
     /// from `render`, which is the only UI path with a `&mut Window`.
     pub(super) fn flush_notifications(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // A resolved comment thread moves the view into its discussion group.
-        self.advance_thread(window, cx);
-        self.cancel_gone_composer_targets(window, cx);
         // Where Quill's own notification windows would go. The main
         // window's display is noted when it changes (`display_events`):
         // looking it up enumerates every display.
@@ -822,11 +818,14 @@ impl QuillApp {
         self.post_debug_notification_once(cx);
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.
+        // main-only: clicks are the app's; a chat they open is routed.
         self.drain_background_clicks(cx);
+        // main-only: as above.
         for click in self.take_on_screen_clicks() {
             self.run_notification_action(click.chat_id, click.action, window, cx);
         }
         // Other accounts: switches asked for by their notifications.
+        // main-only: an account switch is the app's.
         self.flush_background_accounts(window, cx);
         self.answer_call_picks(window, cx);
         // B1: force-reply — an incoming message demanded a reply; drain
@@ -840,9 +839,12 @@ impl QuillApp {
                     .as_mut()
                     .and_then(|session| session.bots.pending_force_reply.take())
             });
+        // main-only: a forced reply arms the main window's composer; one for
+        // a chat window's chat is not routed there yet.
         if let Some(target) = force_target {
             self.drain_force_reply(target, window, cx);
         }
+        // main-only: notifications are the app's.
         self.deliver_notifications(Some(window), cx);
     }
 }

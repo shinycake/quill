@@ -42,6 +42,8 @@ mod scoped;
 mod slot;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod upkeep_tests;
 mod view;
 #[cfg(test)]
 mod window_state_tests;

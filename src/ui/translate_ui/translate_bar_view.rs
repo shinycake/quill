@@ -369,14 +369,14 @@ impl QuillApp {
         {
             return followed;
         }
-        let mut scan = std::mem::take(&mut self.translate.pump);
+        let mut scan = self.translate.pump.remove(&chat_id.0).unwrap_or_default();
         let wanted: Vec<MessageId> = {
             let Some(session) = self.session() else {
-                self.translate.pump = scan;
+                self.translate.pump.insert(chat_id.0, scan);
                 return followed;
             };
             let Some(history) = session.histories.get(&chat_id.0) else {
-                self.translate.pump = scan;
+                self.translate.pump.insert(chat_id.0, scan);
                 return followed;
             };
             let room = MAX_IN_FLIGHT.saturating_sub(session.messages.translate.jobs.len());
@@ -411,7 +411,22 @@ impl QuillApp {
             scan.record(key, revision, found.iter().map(|id| id.0).collect());
             found.into_iter().take(room).collect()
         };
-        self.translate.pump = scan;
+        // Only the chats some window shows keep their scan.
+        let gone: Vec<i64> = self
+            .translate
+            .pump
+            .keys()
+            .copied()
+            .filter(|chat| {
+                !self
+                    .session()
+                    .is_some_and(|session| session.chat_is_shown(ChatId(*chat)))
+            })
+            .collect();
+        for chat in gone {
+            self.translate.pump.remove(&chat);
+        }
+        self.translate.pump.insert(chat_id.0, scan);
         let Some(live) = self.live.as_mut() else {
             #[cfg(test)]
             self.translate
