@@ -288,7 +288,7 @@ fn a_popup_replaced_by_another_is_answered(cx: &mut TestAppContext) {
             .as_ref()
             .map(|window| window.popups.keys().cloned().collect())
             .unwrap_or_default();
-        assert_eq!(open, [confirm.id.clone()]);
+        assert_eq!(open, std::slice::from_ref(&confirm.id));
         answer(app, &confirm.id, "cancel", cx);
         app.handle_web_app_event(WebAppEvent::RequestPhone, cx);
         prompt(&received);

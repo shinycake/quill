@@ -176,11 +176,11 @@ impl Session {
                 state.options.stars_loading = false;
                 state.options.stars_error = Some(reason);
             }
-            Some(RequestPurpose::LaunchPrepaidGiveaway) => {
-                if state.launching(pending.map_or(0, |p| p.id.0)) {
-                    state.launch =
-                        GiveawayLaunch::Failed(format!("Couldn't start the giveaway: {reason}"));
-                }
+            Some(RequestPurpose::LaunchPrepaidGiveaway)
+                if state.launching(pending.map_or(0, |p| p.id.0)) =>
+            {
+                state.launch =
+                    GiveawayLaunch::Failed(format!("Couldn't start the giveaway: {reason}"));
             }
             _ => {}
         }
