@@ -318,7 +318,7 @@ impl QuillApp {
     ) {
         self.close_send_menu(cx);
         self.open_schedule_picker(super::scheduled::ScheduleTarget::Composer, window, cx);
-        if let Some(picker) = self.composer_ui.schedule_picker.as_mut() {
+        if let Some(picker) = self.chat_ui.schedule_picker.as_mut() {
             picker.send_after = true;
             picker.send_effect = effect_id;
         }

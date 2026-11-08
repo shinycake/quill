@@ -51,7 +51,9 @@ impl Session {
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
-            })) => self.finish_scheduling_edit(message_id, scheduling),
+            })) => {
+                self.finish_scheduling_edit(pending.and_then(|p| p.chat_id), message_id, scheduling)
+            }
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls.clear();
                 self.calls.recent_calls_offset.clear();

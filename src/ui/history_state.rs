@@ -152,10 +152,6 @@ pub(crate) struct HistoryUi {
     /// The open chat whose live-location countdowns are being refreshed
     /// (`Some` exactly while that task runs; see `live_location_tick`).
     pub(super) live_location_tick_chat: Option<ChatId>,
-    /// The info card under the open forum topic's strip.
-    pub(super) topic_info_open: bool,
-    /// The info card under the open reply thread's root bar.
-    pub(super) thread_info_open: bool,
     /// The history's width class at the last paint (tdesktop
     /// `Adaptive::ChatLayout`, `chat_wide_ui`).
     pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,
@@ -246,8 +242,6 @@ impl HistoryUi {
             vanish_clock: Default::default(),
             self_destruct_tick_chat: None,
             live_location_tick_chat: None,
-            topic_info_open: false,
-            thread_info_open: false,
             chat_layout: Default::default(),
             width: Default::default(),
             width_probed: Default::default(),

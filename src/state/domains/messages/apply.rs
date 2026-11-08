@@ -499,7 +499,7 @@ impl Session {
                         .messages
                         .scheduled_messages
                         .iter_mut()
-                        .find(|m| m.id == message.id)
+                        .find(|m| m.chat_id == message.chat_id && m.id == message.id)
                     {
                         *slot = message;
                     } else {

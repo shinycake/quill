@@ -72,7 +72,7 @@ fn schedule_with_repeat(
     app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
     // 01:20, which went by once already as CDT.
     let value = picker_value(WallClock::of(cx).now() + 900, cx).expect("a picker value");
-    let picker = app.composer_ui.schedule_picker.as_mut().expect("picker");
+    let picker = app.chat_ui.schedule_picker.as_mut().expect("picker");
     picker.repeat = repeat;
     let date = picker.date.state.clone();
     date.update(cx, |state, cx| state.set_date_time(value, window, cx));
@@ -144,11 +144,7 @@ fn the_schedule_shortcut_asks_for_a_time_and_then_sends(cx: &mut TestAppContext)
         app.composer
             .update(cx, |input, cx| input.set_value("later", window, cx));
         assert!(app.schedule_send_by_key(window, cx));
-        let picker = app
-            .composer_ui
-            .schedule_picker
-            .as_ref()
-            .expect("the picker");
+        let picker = app.chat_ui.schedule_picker.as_ref().expect("the picker");
         assert!(picker.send_after);
         // Confirming the time sends, as tdesktop's schedule box does.
         let date = picker.date.state.clone();
@@ -190,8 +186,8 @@ fn the_scheduled_list_and_the_link_preview_toggle_follow_the_chat(cx: &mut TestA
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         assert!(app.show_scheduled_by_key(window, cx));
-        assert!(app.composer_ui.scheduled_dialog_open);
-        app.composer_ui.scheduled_dialog_open = false;
+        assert!(app.chat_ui.scheduled_dialog_open);
+        app.chat_ui.scheduled_dialog_open = false;
 
         // No link in the text: nothing to toggle.
         assert!(!app.toggle_link_preview_by_key(window, cx));

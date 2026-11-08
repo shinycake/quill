@@ -61,6 +61,59 @@ fn edit_scheduled_message_refreshes_scheduled_list_not_history() {
     );
 }
 
+/// Round 7, 2b: the scheduled list is kept by chat. An answer fills only
+/// the chat it was asked for, and a finished edit touches only its chat's
+/// row, though scheduled message ids repeat across chats.
+#[test]
+fn scheduled_list_answers_and_edits_keep_to_their_chat() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let answer = |session: &mut Session, chat: i64, ids: &[i64]| {
+        let extra = session.request(RequestPurpose::GetChatScheduledMessages, Some(ChatId(chat)));
+        let rows: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"@type":"message","id":{id},"chat_id":{chat},"is_outgoing":true,"scheduling_state":{{"@type":"messageSchedulingStateSendAtDate","send_date":999}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"s","entities":[]}}}}}}"#
+                )
+            })
+            .collect();
+        apply_json(
+            session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"messages","@extra":"{}","total_count":{},"messages":[{}]}}"#,
+                extra.0,
+                ids.len(),
+                rows.join(",")
+            ),
+        );
+    };
+    answer(&mut session, 7, &[70]);
+    answer(&mut session, 8, &[70, 80]);
+    assert_eq!(session.scheduled_in(ChatId(7)).count(), 1);
+    assert_eq!(session.scheduled_in(ChatId(8)).count(), 2);
+    // Chat 7's next answer replaces chat 7's rows only.
+    answer(&mut session, 7, &[]);
+    assert_eq!(session.scheduled_in(ChatId(7)).count(), 0);
+    assert_eq!(session.scheduled_in(ChatId(8)).count(), 2);
+    // "Send now" of chat 8's message 70 leaves chat 7's 70 and chat 8's 80.
+    answer(&mut session, 7, &[70]);
+    session.finish_scheduling_edit(
+        Some(ChatId(8)),
+        MessageId(70),
+        crate::composer::ComposerScheduling::None,
+    );
+    assert_eq!(
+        session.scheduled_in(ChatId(7)).count(),
+        1,
+        "chat 7's 70 stays"
+    );
+    let left: Vec<i64> = session.scheduled_in(ChatId(8)).map(|m| m.id.0).collect();
+    assert_eq!(left, vec![80]);
+}
+
 #[test]
 fn edit_regular_message_still_upserts_history() {
     let (mut session, sink) = session();

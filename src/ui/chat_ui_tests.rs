@@ -224,3 +224,51 @@ fn another_forum_topic_drops_the_edit(cx: &mut TestAppContext) {
         assert_eq!(app.chat_ui.chat(), Some(FORUM_CHAT));
     });
 }
+
+/// Round 7, 2a and 2b: a Reschedule picker names a message id of its
+/// chat, and the scheduled list's buttons act on the chat shown. Both go
+/// when another chat opens, as from a chat-list click or a notification.
+#[gpui_kit::test]
+fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut TestAppContext) {
+    use crate::ui::scheduled::ScheduleTarget;
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.chat_ui.scheduled_dialog_open = true;
+        app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(app.chat_ui.schedule_picker.is_some() && app.chat_ui.schedule_popup_open);
+    });
+    open(&app, &mut vcx, other);
+    app.read_with(&vcx, |app, _| {
+        assert!(
+            app.chat_ui.schedule_picker.is_none(),
+            "the picker was the last chat's"
+        );
+        assert!(!app.chat_ui.schedule_popup_open);
+        assert!(
+            !app.chat_ui.scheduled_dialog_open,
+            "the list was the last chat's"
+        );
+    });
+}
+
+/// Round 7, 2g: the topic and thread info cards are the chat's.
+#[gpui_kit::test]
+fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.chat_ui.topic_info_open = true;
+        app.chat_ui.thread_info_open = true;
+        cx.notify();
+    });
+    open(&app, &mut vcx, other);
+    app.read_with(&vcx, |app, _| {
+        assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
+    });
+}

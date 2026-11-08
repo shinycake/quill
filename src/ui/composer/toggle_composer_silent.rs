@@ -92,7 +92,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.schedule_popup_open = false;
+        self.chat_ui.schedule_popup_open = false;
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -105,7 +105,7 @@ impl QuillApp {
                 ))),
             }
         }
-        self.composer_ui.scheduled_dialog_open = true;
+        self.chat_ui.scheduled_dialog_open = true;
         cx.notify();
     }
 
@@ -129,7 +129,7 @@ impl QuillApp {
                     .session
                     .messages
                     .scheduled_messages
-                    .retain(|m| m.id != message_id);
+                    .retain(|m| m.chat_id != chat_id || m.id != message_id);
                 self.connection.set_note(StatusNote::silent(tr(
                     keys::Q_CHAT_SCHEDULED_MESSAGE_DELETED,
                 )));
@@ -377,8 +377,8 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.composer_ui.schedule_popup_open {
-                        this.composer_ui.schedule_popup_open = false;
+                    if this.chat_ui.schedule_popup_open {
+                        this.chat_ui.schedule_popup_open = false;
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);

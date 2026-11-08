@@ -415,7 +415,7 @@ fn the_cards_schedule_sends_with_the_effect_after_the_time_is_picked(cx: &mut Te
     let (fire, _, _) = REACTION_EFFECTS[0];
     app.update_in(vcx, |app, window, cx| {
         app.schedule_with_effect(fire, window, cx);
-        let picker = app.composer_ui.schedule_picker.as_ref().expect("picker");
+        let picker = app.chat_ui.schedule_picker.as_ref().expect("picker");
         assert!(picker.send_after);
         assert_eq!(picker.send_effect, fire);
         assert!(app.composer_ui.send_menu.open.is_none());

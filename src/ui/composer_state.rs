@@ -76,13 +76,6 @@ pub(crate) struct ComposerUi {
     /// The send button's options menu and its effect picker
     /// (`send_effects`).
     pub(super) send_menu: super::send_effects::SendMenuUi,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`).
-    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
-    /// M1: the scheduled-messages dialog (view/delete).
-    pub(super) scheduled_dialog_open: bool,
     /// A rich draft's discard and Premium boxes and the rich paste notice
     /// (`rich_draft`).
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
@@ -155,9 +148,6 @@ impl ComposerUi {
             send_silent_once: false,
             send_effect_once: 0,
             send_menu: Default::default(),
-            schedule_popup_open: false,
-            schedule_picker: None,
-            scheduled_dialog_open: false,
             rich_draft: Default::default(),
             clear_draft_on_success: None,
             draft_restore_pending: false,

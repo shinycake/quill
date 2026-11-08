@@ -259,7 +259,7 @@ impl QuillApp {
     /// field once a chat is chosen.
     fn forward_box_body(&self, viewport: Pixels, cx: &mut Context<Self>) -> AnyElement {
         if self
-            .composer_ui
+            .chat_ui
             .schedule_picker
             .as_ref()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share)
@@ -486,7 +486,7 @@ impl QuillApp {
         let owner = app.downgrade();
         let scheduling = app
             .read(cx)
-            .composer_ui
+            .chat_ui
             .schedule_picker
             .as_ref()
             .is_some_and(|picker| picker.target == ScheduleTarget::Share);
