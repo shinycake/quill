@@ -139,6 +139,8 @@ impl Session {
 
     pub fn begin_close(&mut self) {
         self.shutdown = ShutdownPhase::CloseRequested;
+        // A close asked for now is not undone by a refused `logOut`.
+        self.auth_state.logout_request = None;
     }
 
     /// `logOut` went out as `request`: the account's other requests settle
@@ -147,6 +149,7 @@ impl Session {
     pub fn logout_sent(&mut self, request: RequestId) {
         let sent = self.requests.take(request);
         self.begin_logout();
+        self.auth_state.logout_request = Some(request);
         if let Some(mut sent) = sent {
             sent.account_generation = self.account_generation;
             self.requests.readmit(sent);

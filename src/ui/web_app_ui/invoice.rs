@@ -116,14 +116,25 @@ impl QuillApp {
 
     /// Reports the checkout's end to the app; called by the mini app poll.
     pub(super) fn poll_invoice(&mut self, cx: &mut Context<Self>) {
+        // The watched invoice's own payment: a checkout opened for another
+        // invoice, or a payment of one closed before, says nothing here.
+        let Some(invoice) = self
+            .mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.invoice.as_ref())
+            .and_then(|watch| invoice_link_invoice(&watch.slug))
+        else {
+            return;
+        };
+        let payments = self.session().map(|s| &s.payments);
+        let shown = payments.is_some_and(|p| p.shows(&invoice));
         let view = CheckoutView {
             dialog_open: self.payments.dialog.is_some(),
-            paid: self.session().is_some_and(|s| s.payments.form_paid),
-            sending: self.session().is_some_and(|s| s.payments.sending),
-            note: self.session().is_some_and(|s| s.payments.note.is_some()),
-            verification: self
-                .session()
-                .is_some_and(|s| s.payments.verification_started),
+            paid: shown && payments.is_some_and(|p| p.form_paid),
+            sending: payments.is_some_and(|p| p.is_paying(&invoice)),
+            note: shown && payments.is_some_and(|p| p.note.is_some()),
+            verification: shown && payments.is_some_and(|p| p.verification_started),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;

@@ -36,11 +36,10 @@ impl QuillApp {
         self.payments.dialog = Some(dialog);
     }
 
-    /// Slice P1: close the checkout dialog, discarding the form answers.
-    /// The payment request context goes here, or, while a payment is in
-    /// flight, once it answers (`Session::close_checkout`): the answer
-    /// reducers keep it so `validateOrderInfo` and `sendPaymentForm` still
-    /// correlate after the form answer is applied.
+    /// Slice P1: close the checkout dialog, discarding the form answers
+    /// and the checkout (`Session::close_checkout`). A payment in flight
+    /// keeps its own invoice and form (`PaymentsState::paying`), so its
+    /// answer still lands on the payment that was made.
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
         self.payments.dialog = None;
         if let Some(live) = self.live.as_mut() {
@@ -344,7 +343,7 @@ impl QuillApp {
                 )],
             ))
             .primary();
-        body = body.child(if session.payments.sending {
+        body = body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
         } else if session.payments.form_paid {
             pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
@@ -478,18 +477,14 @@ impl QuillApp {
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");
         let sent = self.live.as_mut().map(|live| {
             live.driver.session.payments.note = None;
-            let sent = live.driver.submit_payment_form(
+            live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,
                 order_info_id,
                 shipping_option_id,
                 credentials,
                 0,
-            );
-            if sent.is_ok() {
-                live.driver.session.payments.sending = true;
-            }
-            sent
+            )
         });
         if !matches!(sent, Some(Ok(_))) {
             self.connection.set_note(StatusNote::error(tr(

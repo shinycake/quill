@@ -1,37 +1,36 @@
-//! Closing the checkout: what goes at once and what waits for a payment
-//! still in flight.
-use crate::state::Session;
+//! The checkout's lifetime: closing it, and the payments it sent.
+use crate::ids::RequestId;
+use crate::state::{PaymentInFlight, Session};
 
 impl Session {
-    /// The checkout closed: its form answers go. A `sendPaymentForm` still
-    /// in flight keeps the invoice and form it pays until TDLib answers,
-    /// so a paid-media purchase still unlocks
-    /// (`note_paid_media_unlocked`); `settle_closed_checkout` drops them
-    /// then.
+    /// The checkout closed: its form and answers go. A `sendPaymentForm`
+    /// still in flight keeps its own invoice and form
+    /// (`PaymentsState::paying`) until TDLib answers, so a paid-media
+    /// purchase still unlocks and a checkout opened meanwhile does not take
+    /// its answer.
     pub fn close_checkout(&mut self) {
         let payments = &mut self.payments;
         payments.form_loading = false;
+        payments.form_request = None;
         payments.note = None;
         payments.validated = None;
         payments.shipping_id = None;
-        if payments.sending {
-            payments.checkout_closed = true;
-        } else {
-            payments.form = None;
-            payments.request = None;
-            payments.form_paid = false;
-        }
+        payments.form = None;
+        payments.request = None;
+        payments.form_paid = false;
     }
 
-    /// The payment a closed checkout left in flight answered: what it kept
-    /// for the answer goes.
-    pub(crate) fn settle_closed_checkout(&mut self) {
+    /// `sendPaymentForm` went out as `request_id` for the checkout on
+    /// screen: remember what it pays, so its answer goes to it.
+    pub(crate) fn payment_sent(&mut self, request_id: RequestId) {
         let payments = &mut self.payments;
-        if std::mem::take(&mut payments.checkout_closed) {
-            payments.form = None;
-            payments.request = None;
-            payments.form_paid = false;
-            payments.note = None;
-        }
+        let Some(request) = payments.request.as_ref() else {
+            return;
+        };
+        payments.paying.push(PaymentInFlight {
+            request_id,
+            invoice: request.invoice.clone(),
+            form: payments.form.clone(),
+        });
     }
 }

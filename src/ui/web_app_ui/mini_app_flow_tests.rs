@@ -219,7 +219,13 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         let received = open_window(app, cx);
         app.open_payment_dialog(window, cx);
         app.mini_apps.window.as_mut().unwrap().invoice = Some(InvoiceWatch::new("abc"));
-        app.demo_session.as_mut().unwrap().payments.form_paid = true;
+        // The checkout shows the watched invoice: a payment of another
+        // invoice would not be reported here.
+        let payments = &mut app.demo_session.as_mut().unwrap().payments;
+        payments.request = Some(quill::state::PaymentRequest {
+            invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
+        });
+        payments.form_paid = true;
         app.poll_invoice(cx);
         let (event, data) = reply(&received);
         assert_eq!(event, "invoice_closed");

@@ -9,7 +9,7 @@ impl Session {
         &mut self,
         payload: PaymentsPayload,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match payload {
@@ -32,8 +32,13 @@ impl Session {
             }
             PaymentsPayload::PaymentForm(form) => {
                 // Slice P1: `getPaymentForm` answer to our own Buy press
-                // (matched by `@extra`). Opens the checkout dialog.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm) {
+                // (matched by `@extra`). Opens the checkout dialog. An
+                // answer to an earlier checkout's fetch is not this one's.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
+                    && extra.is_some()
+                    && self.payments.form_request == extra
+                {
+                    self.payments.form_request = None;
                     self.payments.form = Some(form);
                     self.payments.form_loading = false;
                     self.payments.form_paid = false;
@@ -54,24 +59,34 @@ impl Session {
                 }
             }
             PaymentsPayload::PaymentResult(result) => {
-                // Slice P1: `sendPaymentForm` answer (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
-                    self.payments.sending = false;
-                    self.payments.verification_started = false;
+                // Slice P1: `sendPaymentForm` answer (matched by `@extra`),
+                // for the payment that sent it. The checkout on screen
+                // takes the outcome only while it shows that invoice.
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm)
+                    && let Some(paid) = self.payments.take_paying(extra)
+                {
+                    let shown = self.payments.shows(&paid.invoice);
+                    if shown {
+                        self.payments.verification_started = false;
+                    }
                     if result.success {
-                        self.payments.form_paid = true;
-                        self.note_paid_media_unlocked();
-                        self.payments.note = Some("✅ Payment successful".to_string());
+                        self.note_paid_media_unlocked(&paid);
+                        if shown {
+                            self.payments.form_paid = true;
+                            self.payments.note = Some("✅ Payment successful".to_string());
+                        }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
                         // credentials verification (e.g. 3-D Secure) — the
-                        // UI opens it in the OS browser.
-                        self.payments.verification_started = true;
+                        // UI opens it in the OS browser. It is this
+                        // payment's own step, shown or not.
                         self.payments.verification_url = Some(result.verification_url);
-                    } else {
+                        if shown {
+                            self.payments.verification_started = true;
+                        }
+                    } else if shown {
                         self.payments.note = Some("Payment failed".to_string());
                     }
-                    self.settle_closed_checkout();
                 }
             }
             PaymentsPayload::MarketplaceGift(quote) => {

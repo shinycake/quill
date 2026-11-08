@@ -40,6 +40,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
         self.session.payments.request = Some(PaymentRequest { invoice });
+        self.session.payments.form_request = Some(extra);
         self.send_json_request(extra, &json)
     }
 
@@ -85,7 +86,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             credentials,
             tip_amount,
         );
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.payment_sent(extra);
+        Ok(sent)
     }
 
     /// Slice P1: `getPaymentReceipt` (schema 1.8.67, line 15280) — fetch

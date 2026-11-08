@@ -10,10 +10,26 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            // TDLib refused the `logOut`: the account is still signed in,
+            // so the close the send began is undone and the chat list
+            // loads again. Without this the session stayed in
+            // `CloseRequested` with nothing to move it on. A quit asked
+            // for meanwhile (`begin_close` forgets the request) stays.
+            Some(RequestPurpose::LogOut)
+                if extra.is_some() && self.auth_state.logout_request == extra =>
+            {
+                self.auth_state.logout_request = None;
+                if self.shutdown == ShutdownPhase::CloseRequested
+                    && matches!(self.auth, AuthorizationState::Ready)
+                {
+                    self.shutdown = ShutdownPhase::Running;
+                    self.auth_state.logout_refused = Some(err.clone());
+                }
+            }
             // Slice A2: a failed 2FA management request clears the
             // in-flight flag and parks the honest, classified
             // error line on the overlay — never a fake success,

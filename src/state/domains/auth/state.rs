@@ -41,6 +41,11 @@ pub struct AuthState {
     /// request (TDLib's actual error, classified — never a fake
     /// success). Cleared on the next attempt and on success.
     pub password_op_error: Option<String>,
+    /// The `logOut` sent and not answered yet (`Session::logout_sent`).
+    pub logout_request: Option<RequestId>,
+    /// TDLib refused the `logOut`: the account stays signed in, and the UI
+    /// says so once (drained by the poll).
+    pub logout_refused: Option<TdError>,
 }
 
 impl AuthState {
@@ -58,6 +63,8 @@ impl AuthState {
             password_state: None,
             password_state_loading: false,
             password_op_error: None,
+            logout_request: None,
+            logout_refused: None,
         }
     }
 }

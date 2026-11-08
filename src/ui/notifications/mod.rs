@@ -740,6 +740,19 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(notice));
             progressed = true;
         }
+        // TDLib refused the `logOut`: the account stays signed in.
+        if let Some(err) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.auth_state.logout_refused.take())
+        {
+            self.connection
+                .set_note(StatusNote::error(crate::ui::user_error::user_error_for(
+                    quill::lang::keys::Q_NOTES_FAILED_LOG_OUT,
+                    &err,
+                )));
+            progressed = true;
+        }
         self.poll_folder_new_chats();
         self.prune_drop_topic();
         if self.drain_folder_share(cx)
