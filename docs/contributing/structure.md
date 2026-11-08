@@ -25,10 +25,18 @@ State that belongs to one feature lives in that feature's struct in
 touches only that file: the declaration and its initial value in `new`.
 
 A feature with no struct yet adds `ui/<feature>_state.rs` with a
-`pub(crate) struct <Feature>Ui` and a `new`, plus one `mod` line in
-`ui/mod.rs`, one field in `QuillApp` (`ui/app.rs`) and one line in
-`new_with_demo` (`ui/app_demo.rs`). `new` creates the feature's own text
-fields. Details: `docs/decisions/codex-refactor-3.md`, `-3b.md`, `-3c.md`.
+`pub(crate) struct <Feature>Ui`, a `new` and an
+`impl crate::ui::on_screen::Farewell for <Feature>Ui` (empty unless the
+struct must tell the old client something before it goes), plus one `mod`
+line in `ui/mod.rs` and one field in `OnScreen` (`ui/on_screen.rs`: the
+`on_screen_fields!` list and its line in `OnScreen::new`). `new` creates
+the feature's own text fields. The struct is a field of `QuillApp`
+(`ui/app.rs`) only when it is the process's, not the account on screen's
+(a player engine, the accounts list, a window handle), and then it is
+listed in `scripts/app-wide-state.txt` with the reason;
+`scripts/check-screen-state.py` checks both. The design:
+`docs/decisions/account-scoped-ui-state.md`; the older layout:
+`docs/decisions/codex-refactor-3.md`, `-3b.md`, `-3c.md`.
 
 ### A screenshot demo
 

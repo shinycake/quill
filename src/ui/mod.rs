@@ -12,7 +12,6 @@ mod account_export_progress;
 mod account_job;
 mod account_lifecycle;
 mod account_state;
-mod account_surfaces;
 mod accounts;
 mod admin_state;
 mod advanced_state;

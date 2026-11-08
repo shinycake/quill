@@ -752,3 +752,21 @@ this one as what shipped.
 - **Three auth placeholders** got lang keys (`qll_misc_phone_country_code`,
   `qll_misc_recovery_code_from_email`, `qll_misc_verification_code`) when
   they left the check-lang-exempt `app_demo.rs`.
+
+### Phase 4 (the guards)
+
+- `scripts/check-screen-state.py` and `scripts/app-wide-state.txt` as in
+  4.6, run in CI next to the window-scope lint. 33 `QuillApp` fields: 4
+  infrastructure (`screen`, `live`, `demo_session`, `credentials`), 29
+  listed with their reasons. The macro check is textual: `OnScreen` must
+  be declared inside `on_screen_fields!`.
+- Hotspots: `src/ui/app.rs` and `src/ui/app_demo.rs` are `none`;
+  `src/ui/on_screen.rs` allows `max:3` (one field, its doc line and its
+  line in `new`).
+- `account_surfaces.rs` is gone: `end_account_surfaces`,
+  `leave_chat_for_switch` and `close_main_window_dialogs` live in
+  `on_screen.rs`; its remaining behavioural tests (delete box, media
+  viewer, checkout, draft save, boxes holding ids, reply-elsewhere, hidden
+  dialog, the app-wide flag) are `on_screen_switch_tests.rs`.
+- Not done here (phase 5, optional): merging `connect.generation` into
+  the epoch, and declaring `WindowSlot` through the macro.
