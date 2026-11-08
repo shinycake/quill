@@ -72,8 +72,10 @@ impl SettingsUi {
 }
 
 /// The stickers manager commits its reordering and removals through the
-/// old client when it closes (`close_stickers_manager`); the pages and
-/// the other boxes are flags.
+/// old client when it closes (`close_stickers_manager`). The page shown
+/// is left as on a page change, so what it holds in app-wide state (the
+/// language box, the storage sliders, an armed push-to-talk capture)
+/// does not carry over to the next account.
 impl super::on_screen::Farewell for SettingsUi {
     fn farewell(
         app: &mut QuillApp,
@@ -82,6 +84,9 @@ impl super::on_screen::Farewell for SettingsUi {
     ) {
         if app.settings.sticker_settings_open {
             app.close_stickers_manager(cx);
+        }
+        if let Some(page) = app.settings.page {
+            app.leave_settings_page(page);
         }
     }
 }

@@ -174,3 +174,41 @@ fn storage_limit_sliders_apply_when_let_go(cx: &mut TestAppContext) {
     move_slider(&app, vcx, StepSlider::StorageKeep, 15, true);
     assert_eq!(app.read_with(vcx, |app, _| limits(app)), (None, None));
 }
+
+/// Round 8, 2c: the limit sliders show one account's TDLib limits. The
+/// next arrival on the page (here after an account switch, which leaves
+/// no page and brings a fresh Settings state) starts them from the
+/// account shown, so a drag cannot write the last account's other limit.
+#[gpui_kit::test]
+fn storage_limit_sliders_restart_from_the_account_shown(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    move_slider(&app, vcx, StepSlider::StorageSize, 9, true);
+    let index = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            app.preferences
+                .index_sliders
+                .index(StepSlider::StorageSize, cx)
+        })
+    };
+    assert_eq!(index(&app, vcx), Some(9));
+    // Another account, with no limits set, is shown now.
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.storage_limits = Default::default();
+        }
+        app.settings.page = None;
+        app.open_settings(Some(quill::settings_catalog::Page::DataStorage));
+        cx.notify();
+    });
+    frames(vcx);
+    assert_eq!(
+        index(&app, vcx),
+        Some(quill::limit_steps::SIZE_STEPS - 1),
+        "the slider reads the account shown: no limit"
+    );
+}

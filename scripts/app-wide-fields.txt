@@ -34,7 +34,7 @@ preferences.system_accent | the OS accent color
 preferences.system_accent_probed | whether the OS accent was read
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
-preferences.index_sliders * | slider entities of the app settings, keyed by setting
+preferences.index_sliders * | slider entities, keyed by setting; most are app settings, but the two storage-limit sliders show one account's TDLib limits, so every arrival on Data and Storage (and every leave) drops them and they are rebuilt from the account shown (`forget_storage_sliders`)
 preferences.translate * | the translation preferences file
 preferences.update_state | the updater's state, for the install
 preferences.update_banner_dismissed | the update banner was dismissed, for the run

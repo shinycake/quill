@@ -120,12 +120,7 @@ impl QuillApp {
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
         self.settings.data_storage_editor = None;
-        self.preferences
-            .index_sliders
-            .remove(StepSlider::StorageSize);
-        self.preferences
-            .index_sliders
-            .remove(StepSlider::StorageKeep);
+        self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.storage_freed = None;
@@ -223,6 +218,17 @@ impl QuillApp {
     pub(crate) fn leave_data_storage(&mut self) {
         self.settings.data_storage_editor = None;
         self.settings.storage_confirm = None;
+        self.forget_storage_sliders();
+    }
+
+    /// The two limit sliders hold the account's TDLib limits: each visit
+    /// of the page starts them again from the account shown
+    /// (`ensure_storage_sliders`). An account switch leaves no page, so
+    /// the page's arrival drops them too.
+    pub(crate) fn forget_storage_sliders(&mut self) {
+        let sliders = &mut self.preferences.index_sliders;
+        sliders.remove(StepSlider::StorageSize);
+        sliders.remove(StepSlider::StorageKeep);
     }
 
     /// Slice S4: the overview — error line, the three auto-download

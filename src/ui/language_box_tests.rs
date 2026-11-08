@@ -65,3 +65,33 @@ fn settings_row_opens_the_box_and_a_pick_translates(cx: &mut TestAppContext) {
     assert_eq!(tr(keys::MENU_SETTINGS), "Settings");
     assert_eq!(quill::lang::current_pack_id(), "en");
 }
+
+/// Round 8, 2g: an account switch leaves no page, and the language box
+/// is app-wide. The next arrival on the page makes a fresh box, which is
+/// what asks the account shown for its packs, and drops the old search.
+#[gpui_kit::test]
+fn arriving_on_the_page_again_makes_a_fresh_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.navigate(NavigationAction::Language, window, cx);
+    });
+    vcx.run_until_parked();
+    let first = app.update_in(vcx, |app, window, cx| {
+        let open = app.language.open.as_ref().expect("the box");
+        open.search
+            .update(cx, |input, cx| input.set_value("port", window, cx));
+        open.search.entity_id()
+    });
+    // A fresh Settings state for the next account: no page.
+    app.update_in(vcx, |app, window, cx| {
+        app.settings.page = None;
+        app.open_language_box(window, cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, cx| {
+        let open = app.language.open.as_ref().expect("a box");
+        assert_ne!(open.search.entity_id(), first, "a fresh box");
+        assert_eq!(open.search.read(cx).value(), "");
+    });
+}
