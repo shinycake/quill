@@ -564,9 +564,9 @@ impl QuillApp {
             .window_closed(chat_id, std::time::Instant::now());
         self.windows.dialog_closed_in(Some(chat_id));
         self.set_window_chat_active(chat_id, false);
-        self.playback.userpic_videos.forget_window(chat_id);
-        self.playback.inline_videos.forget_window(chat_id, cx);
-        self.playback.stickers.window_closed(chat_id);
+        self.players.userpic_videos.forget_window(chat_id);
+        self.players.inline_videos.forget_window(chat_id, cx);
+        self.players.stickers.window_closed(chat_id);
         self.leave_sticker_chat(
             Some(chat_id),
             Some(chat_id),

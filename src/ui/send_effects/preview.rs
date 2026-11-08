@@ -138,7 +138,7 @@ impl QuillApp {
             if preview.playing.get().is_none() {
                 // Shown again: from its first frame.
                 preview.playing.set(Some(Instant::now()));
-                self.playback.stickers.restart(head, file.0);
+                self.players.stickers.restart(head, file.0);
             }
             view
         });

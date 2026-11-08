@@ -134,7 +134,7 @@ impl QuillApp {
         let player = self.active_playback_id().map(|_| {
             let (can_previous, can_next) = self.playlist_can_move();
             DockPlayer {
-                paused: !self.playback.is_playing(),
+                paused: !self.is_playing(),
                 can_previous,
                 can_next,
             }

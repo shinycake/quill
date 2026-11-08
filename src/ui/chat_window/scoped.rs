@@ -26,7 +26,7 @@
 //! window or screen state without one of these.
 
 use super::super::app::QuillApp;
-pub(in crate::ui) use super::super::connection_state::ScreenEpoch;
+pub(in crate::ui) use super::super::on_screen::ScreenEpoch;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
@@ -111,21 +111,6 @@ impl ScopedApp {
 }
 
 impl QuillApp {
-    /// The screen the account on screen draws on now.
-    pub(in crate::ui) fn screen_epoch(&self) -> ScreenEpoch {
-        self.connection.epoch
-    }
-
-    /// The account on screen is leaving it: work started under the current
-    /// epoch does not run any more. Called by the two places a client
-    /// leaves the screen (`retire_live_to_background`,
-    /// `close_screen_client`); a client filling an empty screen keeps the
-    /// epoch, because nothing of the account's was open while there was
-    /// no client.
-    pub(in crate::ui) fn screen_leaves(&mut self) {
-        self.connection.epoch = self.connection.epoch.next();
-    }
-
     /// Run `f` with the state of the window `window` is in place: a chat
     /// window's, else the main window's (also for the app's other
     /// windows). GPUI calls a subscription or an observer made with

@@ -200,7 +200,10 @@ impl super::app::QuillApp {
                         }
                         // A client still on screen closes first; when it is
                         // this account's, wait for that close too.
-                        if let Some(old) = this.live.take() {
+                        if this.live.is_some() {
+                            this.screen_leaves_later(cx);
+                        }
+                        if let Some(old) = this.take_live() {
                             let same = Some(&old.driver.session.account) == account.as_ref();
                             this.close_live_later(old, false, cx);
                             if same {
@@ -248,9 +251,9 @@ impl super::app::QuillApp {
         match result {
             Ok(mut live) => {
                 quill::startup_trace::mark("client_open");
-                live.driver.set_stream_volume(self.playback.volume);
+                live.driver.set_stream_volume(self.players.volume);
                 self.disk.seed(&mut live.driver);
-                self.live = Some(live);
+                self.put_on_screen(live);
             }
             Err(ConnectBlocker::DiskFull) => {
                 self.refuse_screen_open(cx);

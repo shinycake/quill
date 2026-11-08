@@ -81,7 +81,7 @@ impl QuillApp {
         }
         // Parity slice: custom sounds whose downloads just completed.
         for path in drain.sound_plays {
-            self.notify
+            self.delivery
                 .notification_sounds
                 .play(NotificationSound::File(path));
         }

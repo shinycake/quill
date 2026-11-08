@@ -115,11 +115,11 @@ fn a_paused_track_draws_nothing(cx: &mut TestAppContext) {
     activate(vcx);
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
     let paused = app.read_with(vcx, |app, _| {
-        app.active_playback_id().is_some() && !app.playback.is_playing()
+        app.active_playback_id().is_some() && !app.is_playing()
     });
     assert!(paused, "the voice note is paused, its bar still up");
     let at = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.playback.active_position_secs())
+        app.read_with(vcx, |app, _| app.active_position_secs())
     };
     // The demo starts the 12 s note at 4.8 s.
     assert_eq!(at(&app, vcx), Some(4.8));
@@ -134,7 +134,7 @@ fn a_paused_track_draws_nothing(cx: &mut TestAppContext) {
 
     activate(vcx);
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
-    assert!(app.read_with(vcx, |app, _| app.playback.is_playing()));
+    assert!(app.read_with(vcx, |app, _| app.is_playing()));
     let drawn = frames(vcx, 1);
     let moves = drawn.get("conversation").copied().unwrap_or(0);
     assert!(moves >= 4, "the seek bar moves every 250 ms: {drawn:?}");

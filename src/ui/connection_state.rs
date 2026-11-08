@@ -9,11 +9,6 @@ use std::time::Instant;
 pub(crate) struct ConnectionUi {
     pub(super) status: ConnectUiStatus,
     pub(super) generation: u64,
-    /// The screen the account on screen draws on
-    /// (docs/decisions/account-scoped-ui-state.md). Changes when that
-    /// account leaves the screen; work started under an older epoch does
-    /// not run (`chat_window::scoped::ScopedApp`).
-    pub(super) epoch: ScreenEpoch,
     /// The connection generation whose lost bridge already posted the
     /// "connection closed" note. A new connection bumps `generation`, which
     /// re-arms it; other notes cannot, so they are never overwritten again.
@@ -39,7 +34,6 @@ impl ConnectionUi {
         Self {
             status: connect_status,
             generation: 0,
-            epoch: ScreenEpoch::default(),
             closed_noted_generation: None,
             note: StatusNote::new(NoteKind::Silent, status_note),
             toasts: ToastQueue::default(),
@@ -48,19 +42,6 @@ impl ConnectionUi {
             status_traced: String::new(),
             presence: Default::default(),
         }
-    }
-}
-
-/// One account's turn on screen. Monotonic per process: A → B → A gives A a
-/// new epoch, so a continuation from its first turn (a box that is gone)
-/// does not run in its second. A key would match again.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Hash)]
-pub(crate) struct ScreenEpoch(u64);
-
-impl ScreenEpoch {
-    /// The epoch after this one.
-    pub(super) fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
     }
 }
 

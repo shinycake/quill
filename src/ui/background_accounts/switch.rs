@@ -12,8 +12,7 @@ impl QuillApp {
     /// inactive accounts are. A client in the sign-in flow, or in a call
     /// (which would go on with no window to hang it up), is closed instead.
     pub(in crate::ui) fn retire_live_to_background(&mut self, cx: &mut Context<Self>) {
-        self.leave_live_story_for_switch(cx);
-        let Some(mut live) = self.live.take() else {
+        let Some(mut live) = self.take_live() else {
             return;
         };
         let key = live.driver.session.account.clone();
@@ -92,9 +91,9 @@ impl QuillApp {
         live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();
-        live.driver.set_stream_volume(self.playback.volume);
+        live.driver.set_stream_volume(self.players.volume);
         live.bridge.wake_with(&quill::wake::UPDATES);
-        self.live = Some(live);
+        self.put_on_screen(live);
         self.reload_account_keybindings(cx);
         self.spawn_poll_loop(cx);
         self.ensure_background_accounts(cx);

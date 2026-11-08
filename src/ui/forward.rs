@@ -77,9 +77,9 @@ impl QuillApp {
             return;
         };
         self.drop_deleted_selection();
-        if let Some(existing) = self.share.pending_forward.as_mut()
+        if let Some(existing) = self.screen.share.pending_forward.as_mut()
             && existing.from_chat_id == chat_id
-            && self.share.forward_picker_open
+            && self.screen.share.forward_picker_open
         {
             existing.toggle(chat_id, message_id, pending);
             if existing.is_empty() {

@@ -88,12 +88,13 @@ impl QuillApp {
         self.close_later(key, live, restart, cx);
     }
 
-    /// Close the client on screen, if any, without waiting for it.
+    /// Close the client on screen, if any, without waiting for it. The
+    /// screen's UI goes with it at the end of this update
+    /// (`screen_leaves_later`): the callers have no window, and the
+    /// client (logging out, or on a full disk) has nothing to say.
     pub(in crate::ui) fn close_screen_client(&mut self, cx: &mut Context<Self>) {
-        // No goodbyes: the client is logging out or the disk is full, and
-        // the callers closed what they could first.
-        self.screen_leaves();
-        if let Some(live) = self.live.take() {
+        self.screen_leaves_later(cx);
+        if let Some(live) = self.take_live() {
             self.close_live_later(live, false, cx);
         }
     }

@@ -66,10 +66,10 @@ impl QuillApp {
         // One sound at a time: a live PiP goes too.
         self.close_live_pip(cx);
         self.close_media_viewer(cx);
-        let last_volume = if self.playback.volume > 0.0 {
-            self.playback.volume
+        let last_volume = if self.players.volume > 0.0 {
+            self.players.volume
         } else {
-            self.playback.unmuted_volume
+            self.players.unmuted_volume
         };
         let account = self.session().map(|session| session.account.clone());
         let weak = cx.entity().downgrade();
@@ -164,7 +164,7 @@ impl QuillApp {
     /// A round video was clicked: when it now plays with sound, that is
     /// a sound starting.
     pub(in crate::ui) fn round_sound_started(&mut self, key: (i64, i64), cx: &mut App) {
-        if self.playback.inline_videos.is_sounding(key) {
+        if self.players.inline_videos.is_sounding(key) {
             self.sound_starts(cx);
         }
     }
@@ -329,10 +329,10 @@ impl QuillApp {
     /// the player bar's speaker shows it.
     fn pip_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
         if volume > 0.0 {
-            self.playback.unmuted_volume = volume;
+            self.players.unmuted_volume = volume;
         }
-        self.playback.volume = volume;
-        self.playback.audio.set_volume(volume);
+        self.players.volume = volume;
+        self.players.audio.set_volume(volume);
         cx.notify();
     }
 }

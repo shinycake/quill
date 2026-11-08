@@ -176,7 +176,7 @@ fn next_turns_on_for_a_song_arriving_off_screen_while_paused(cx: &mut TestAppCon
         window.set_a11y_forced(true);
     });
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
-    assert!(app.read_with(vcx, |app, _| !app.playback.is_playing()));
+    assert!(app.read_with(vcx, |app, _| !app.is_playing()));
     // One song left, and another chat open.
     apply(
         &app,

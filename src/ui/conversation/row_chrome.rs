@@ -317,10 +317,10 @@ impl QuillApp {
         let patched_messages = !patches.is_empty();
         let mut changed = Vec::with_capacity(checked);
         for patch in patches {
-            let Some(row) = self.history.rows.get_mut(patch.ix) else {
+            let Some(row) = self.screen.history.rows.get_mut(patch.ix) else {
                 continue;
             };
-            self.history.row_stats.messages_cloned += patch.messages.len() as u64;
+            self.screen.history.row_stats.messages_cloned += patch.messages.len() as u64;
             for message in patch.messages {
                 if let Some(slot) = row.message_mut(message.id) {
                     *slot = message;

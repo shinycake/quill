@@ -173,6 +173,18 @@ pub(crate) struct HistoryUi {
     pub(super) pull: super::pull_next_ui::PullUi,
 }
 
+/// The open chat is left as any leave: the draft is saved through the old
+/// client (`leave_chat_for_switch`).
+impl super::on_screen::Farewell for HistoryUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        app.leave_chat_for_switch(window, cx);
+    }
+}
+
 impl HistoryUi {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]

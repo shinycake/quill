@@ -398,7 +398,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let editing = self.composer_ui.is_editing();
+        let editing = self.screen.composer_ui.is_editing();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)

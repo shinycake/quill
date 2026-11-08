@@ -50,7 +50,7 @@ impl QuillApp {
             return None;
         };
         let roots = self.media_display_roots();
-        let videos = &self.playback.userpic_videos;
+        let videos = &self.players.userpic_videos;
         let key = (surface, user_id);
         let player = videos.frame(
             key,
@@ -146,14 +146,14 @@ impl QuillApp {
             || self.profile_modal_active()
             || self.media_panel_open()
             || self.composer_ui.inline_results_open
-            || self.playback.inline_videos.any_sounding()
+            || self.players.inline_videos.any_sounding()
     }
 
     /// At the start of every main-window frame: the clips hold still while
     /// no Quill window is in front, and the main window's while something
     /// covers its chat.
     pub(super) fn sync_userpic_videos(&self, active: bool, scale: f32, history_drawn: bool) {
-        self.playback.userpic_videos.frame_start(
+        self.players.userpic_videos.frame_start(
             !active,
             self.userpics_covered(),
             scale,
@@ -164,7 +164,7 @@ impl QuillApp {
     /// At each render of `chat`'s window, its state in place: its clips
     /// hold still while something covers its chat.
     pub(super) fn sync_window_userpic_videos(&self, chat: ChatId) {
-        self.playback
+        self.players
             .userpic_videos
             .cover_window(chat, self.userpics_covered());
     }

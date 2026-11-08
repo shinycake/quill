@@ -644,7 +644,7 @@ impl QuillApp {
                             this.set_media_pref(|prefs| prefs.autoplay_gifs = on, cx);
                             if !on {
                                 this.stop_animation_playback();
-                                this.playback.inline_videos.clear();
+                                this.players.inline_videos.clear();
                             }
                             cx.notify();
                         }),
@@ -665,7 +665,7 @@ impl QuillApp {
                         cx.listener(|this, &on, _, cx| {
                             this.set_media_pref(|prefs| prefs.autoplay_videos = on, cx);
                             if !on {
-                                this.playback.inline_videos.clear();
+                                this.players.inline_videos.clear();
                             }
                             cx.notify();
                         }),

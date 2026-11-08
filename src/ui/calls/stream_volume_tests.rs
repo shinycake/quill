@@ -40,7 +40,7 @@ fn slider(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Entity<SliderS
 }
 
 fn volume(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> f32 {
-    app.read_with(vcx, |app, _| app.playback.volume)
+    app.read_with(vcx, |app, _| app.players.volume)
 }
 
 #[gpui_kit::test]

@@ -78,7 +78,9 @@ impl QuillApp {
                 .driver
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
             // A poll option has its own menu facts.
-            if let quill::composer::ReplyItem::PollOption(option_id) = &self.message_ui.menu_item {
+            if let quill::composer::ReplyItem::PollOption(option_id) =
+                &self.screen.message_ui.menu_item
+            {
                 let _ = live.driver.fetch_poll_option_properties(
                     menu.chat_id,
                     menu.message_id,

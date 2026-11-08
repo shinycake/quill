@@ -200,7 +200,10 @@ def screen_fields(root: pathlib.Path) -> list[str]:
     if start < 0:
         return SCREEN_FIELDS
     body = block_after(text, start)
-    return [f for f in ON_SCREEN_FIELD.findall(body) if f != "epoch"]
+    declared = [f for f in ON_SCREEN_FIELD.findall(body) if f not in ("epoch", "client_filled")]
+    # Until the dialogs phase of the design moves the rest, the planned
+    # fields still count.
+    return sorted(set(declared) | set(SCREEN_FIELDS))
 
 
 def screen_field_hits(body: str, recv: set[str], fields: list[str]) -> list[str]:

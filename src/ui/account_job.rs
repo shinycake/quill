@@ -16,7 +16,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::connection_state::ScreenEpoch;
+use super::on_screen::ScreenEpoch;
 use super::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
@@ -67,7 +67,7 @@ impl QuillApp {
 #[cfg(test)]
 mod tests {
     use super::StartedOn;
-    use crate::ui::connection_state::ScreenEpoch;
+    use crate::ui::on_screen::ScreenEpoch;
 
     #[test]
     fn work_names_the_screen_it_started_on() {

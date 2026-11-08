@@ -34,8 +34,8 @@ impl QuillApp {
                 position: 0.0,
                 duration: item.duration_secs.map(|secs| f64::from(secs.max(0))),
                 buffered: Vec::new(),
-                rate: self.playback.speed,
-                volume: self.playback.volume,
+                rate: self.players.speed,
+                volume: self.players.volume,
                 has_sound: true,
                 live: false,
             });
@@ -45,7 +45,7 @@ impl QuillApp {
         let boosted = self.viewer.controls.boost.is_active();
         let trigger = speed_trigger(
             ("media-viewer-speed", row_id),
-            self.playback.speed,
+            self.players.speed,
             boosted,
             cx,
         );
@@ -79,7 +79,7 @@ impl QuillApp {
         };
         Some(
             VideoController::new(row_id, &transport, &self.viewer.controls, actions)
-                .level(self.playback.volume)
+                .level(self.players.volume)
                 .fullscreen(self.viewer.extra.video_fullscreen.is_on())
                 .shown(!self.viewer.controls_hidden)
                 .speed_dial(speed_dial)
@@ -328,7 +328,7 @@ impl QuillApp {
     /// Back to the chosen speed after a boost.
     fn restore_viewer_rate(&mut self, cx: &mut Context<Self>) {
         if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
-            player.set_rate(self.playback.speed);
+            player.set_rate(self.players.speed);
         }
         cx.notify();
     }

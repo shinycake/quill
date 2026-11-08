@@ -636,3 +636,58 @@ this one as what shipped.
   window opened (the window would show the next account's chat with the
   old id). `similar_strip.rs` has no app handle at render time and keeps
   the account key with a marker.
+
+### Phase 2 (`OnScreen`, the first sixteen fields)
+
+- **The ramp stays.** `Deref<Target = OnScreen>` for `QuillApp` left 47
+  borrow-split errors in 21 files (the 4.2 threshold was 500); each was
+  fixed by spelling `self.screen.<field>` on the side of the split that
+  names a screen field. No mechanical rename.
+- **`OnScreen::new` needs a window.** Its text fields are
+  `TextareaState::new(window, cx)`, so the screen is replaced where the
+  switch has one (`end_account_surfaces`, now `close_switch_surfaces` +
+  `farewell_screen` + `close_switch_surfaces` + the kit close +
+  `replace_screen`). The three paths that empty the screen without a
+  window (the poll loop's logout, a full disk, a connection that finds a
+  client still on screen) call `screen_leaves_later`: the epoch moves at
+  once, so no old work runs, and the goodbyes and the replacement run on
+  the main window at the end of the same update, with the client already
+  gone, which is what those paths always did. Without a main window the
+  old UI stays under the new epoch.
+- **`put_on_screen` and `take_live`, not `take_off_screen`.** The plan
+  had one function that said goodbye, took the client and replaced the
+  UI. Since the goodbyes need the client and the replacement needs a
+  window, they are three steps: `end_account_surfaces` (goodbyes and
+  replacement), `take_live` (the only reader-out of `live`; a debug
+  assertion checks the screen was replaced since the client was put on
+  it) and `put_on_screen` (the only writer). Quit still takes `live`
+  directly. A client filling an empty screen keeps the screen.
+- **`Farewell::farewell` takes the app.** A field's goodbye goes through
+  the app's methods (`close_player`, `leave_chat_for_switch`,
+  `close_video_pip`, `close_mini_app_window`,
+  `leave_live_story_for_switch`, `cancel_recording`), so the trait method
+  is `fn farewell(app: &mut QuillApp, window: &mut Window, cx)` with the
+  field's type naming which goodbye; a value method would need the
+  app anyway. `end_mini_apps_for_switch` is gone: its field resets were
+  the drop.
+- **`ScreenEpoch` moved to `on_screen.rs` here**, not in phase 3: the
+  epoch is `OnScreen::epoch` and `screen_leaves` is gone; `ConnectionUi`
+  keeps only `generation`.
+- **Split names.** `PlaybackUi`'s app half is `players: PlayersUi`
+  (engine, sticker and emoji players, inline and userpic videos, speed,
+  volume); `NotifyUi`'s app half is `delivery: NotifyDelivery` (OS
+  clicks, reply targets, preview waits, sounds, Quill's notification
+  windows). The track reads (`is_playing`, `held_paused`, `track_shown`,
+  `active_position_secs`) take the engine as a parameter on `PlaybackUi`
+  and are forwarded by `QuillApp`, so their unit tests still run without
+  an app.
+- **Dialogs that are not flags.** The delete box is the kit's alert and
+  sets `message_ui.pending_delete` only on OK; the `on_screen_tests`
+  read it through `window.has_active_dialog`. The search's `open` is the
+  session's, not the screen's, and is not in the test's surface list.
+- **The lint's field list** now comes from `on_screen.rs` and is joined
+  with the planned names that phase 3 still has to move.
+- **Tests that faked a switch** by calling `retire_live_to_background`
+  alone (the live story's leave and PiP tests) now call
+  `end_account_surfaces` first, as `switch_account` does: the story's
+  leave is `StoryUi`'s farewell, not the retire's business.

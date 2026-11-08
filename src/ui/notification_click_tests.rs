@@ -57,7 +57,7 @@ fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
 fn click(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
     app.update(vcx, |app, cx| {
         let account = app.notification_account(None);
-        app.notify
+        app.delivery
             .notify_clicks
             .lock_or_recover()
             .push(quill::notify_accounts::ChatClick {

@@ -212,7 +212,7 @@ impl QuillApp {
                     let work_left = this.poll_live(cx);
                     let now = std::time::Instant::now();
                     let active = this.frame.window_active.get();
-                    let redraw = this.notify.polled_redraw.next_due(active, now);
+                    let redraw = this.delivery.polled_redraw.next_due(active, now);
                     this.live.as_ref().map(|live| {
                         let timed = live.driver.next_deadline(now, quill::state::unix_ms_now());
                         PassEnd {
@@ -266,9 +266,9 @@ impl QuillApp {
         let active = self.frame.window_active.get();
         let now = std::time::Instant::now();
         let action = if deliver {
-            self.notify.polled_redraw.drawn(now)
+            self.delivery.polled_redraw.drawn(now)
         } else {
-            self.notify.polled_redraw.decide(need, active, now)
+            self.delivery.polled_redraw.decide(need, active, now)
         };
         match action {
             PolledAction::Wait => {}
@@ -299,8 +299,10 @@ impl QuillApp {
     }
 
     fn sync_rows_on_screen(&mut self) {
-        let rows = self.history.on_screen.try_borrow().ok();
-        let rows = rows.as_ref().filter(|_| !self.viewer.state.is_open());
+        let rows = self.screen.history.on_screen.try_borrow().ok();
+        let rows = rows
+            .as_ref()
+            .filter(|_| !self.screen.viewer.state.is_open());
         if let Some(live) = self.live.as_mut() {
             live.driver
                 .session
@@ -380,7 +382,7 @@ impl QuillApp {
                     .unwrap_or_default();
                 super::frame_clock::trace_ingested(name);
             }
-            self.notify.polled_redraw.record(
+            self.delivery.polled_redraw.record(
                 quill::state::redraw_need(&live.driver.session, &owned.envelope),
                 self.frame.window_active.get(),
             );
@@ -434,7 +436,7 @@ impl QuillApp {
         let deliver = live.driver.session.bots.pending_force_reply.is_some();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.folders.tab
+        if let Some(folder_id) = self.screen.folders.tab
             && !live
                 .driver
                 .session
@@ -444,8 +446,8 @@ impl QuillApp {
                 .any(|f| f.id == folder_id)
         {
             // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
-            self.chat_list.selected.clear();
-            self.folders.tab = None;
+            self.screen.chat_list.selected.clear();
+            self.screen.folders.tab = None;
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
@@ -804,7 +806,7 @@ impl QuillApp {
         // Where Quill's own notification windows would go. The main
         // window's display is noted when it changes (`display_events`):
         // looking it up enumerates every display.
-        self.notify.windows.platform = super::notify_windows::platform_of(window);
+        self.delivery.windows.platform = super::notify_windows::platform_of(window);
         self.post_debug_notification_once(cx);
         // Inline replies and "Mark as read" need no window; what is left
         // opens a chat.

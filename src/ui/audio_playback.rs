@@ -88,7 +88,7 @@ pub(super) fn apply_ready_voice(session: &mut Session, sink: &Arc<MemorySink>, s
 
 impl QuillApp {
     pub(super) fn kill_shared_player(&mut self) {
-        self.playback.audio.stop();
+        self.players.audio.stop();
     }
 
     pub(super) fn stop_voice_playback(&mut self) {
@@ -118,10 +118,9 @@ impl QuillApp {
     /// remembered per-message position in `playback_positions` is kept so a
     /// stopped row still shows where it got to.
     pub(super) fn clear_playback_state(&mut self) {
-        if let (Some(message_id), Some(position)) = (
-            self.active_playback_id(),
-            self.playback.active_position_secs(),
-        ) {
+        if let (Some(message_id), Some(position)) =
+            (self.active_playback_id(), self.active_position_secs())
+        {
             self.playback.positions.insert(message_id, position);
         }
         self.playback.track_length = None;
@@ -220,14 +219,14 @@ impl QuillApp {
         if simulation.is_none() {
             self.watch_audio_builds(cx);
         }
-        self.playback.audio.set_simulation(simulation);
+        self.players.audio.set_simulation(simulation);
         let executor = cx.background_executor().clone();
-        self.playback.audio.set_sim_time(move || executor.now());
-        match self.playback.audio.start(
+        self.players.audio.set_sim_time(move || executor.now());
+        match self.players.audio.start(
             path,
             offset_secs,
-            self.playback.volume,
-            self.playback.speed,
+            self.players.volume,
+            self.players.speed,
             duration_secs,
         ) {
             Ok(()) => true,
@@ -237,10 +236,10 @@ impl QuillApp {
     }
 
     fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.playback.builds_watched, true) {
+        if std::mem::replace(&mut self.players.builds_watched, true) {
             return;
         }
-        self.playback.audio.set_on_built(|| AUDIO_BUILT.poke());
+        self.players.audio.set_on_built(|| AUDIO_BUILT.poke());
         let mut seen = AUDIO_BUILT.epoch();
         // screen-scope: the player is the app's; its builds land for whichever account is on screen.
         Self::spawn_app(cx, async move |this, cx| {
@@ -257,8 +256,8 @@ impl QuillApp {
     }
 
     fn land_audio_build(&mut self, cx: &mut Context<Self>) {
-        self.playback.audio.settle();
-        if !self.playback.audio.take_start_failed() {
+        self.players.audio.settle();
+        if !self.players.audio.take_start_failed() {
             self.notify_playback_position(cx);
             return;
         }
@@ -277,11 +276,9 @@ impl QuillApp {
     /// Pause the active track: hold the sound, keep the row active so the
     /// seek bar stays interactive and Play resumes from here.
     pub(super) fn pause_active_playback(&mut self) {
-        self.playback.audio.pause();
-        if let (Some(id), Some(position)) = (
-            self.active_playback_id(),
-            self.playback.active_position_secs(),
-        ) {
+        self.players.audio.pause();
+        if let (Some(id), Some(position)) = (self.active_playback_id(), self.active_position_secs())
+        {
             self.playback.positions.insert(id, position);
         }
         quill::wake::CHROME.poke();
@@ -291,14 +288,14 @@ impl QuillApp {
     /// engine in the state it reports (still paused, or failed), with the
     /// reason in `audio.error()`.
     pub(super) fn resume_active_playback(&mut self, cx: &mut Context<Self>) {
-        let Some(position) = self.playback.active_position_secs() else {
+        let Some(position) = self.active_position_secs() else {
             self.stop_voice_playback();
             self.stop_audio_playback();
             return;
         };
         self.sound_starts(cx);
         // A failure is kept by the engine (`audio.error()`).
-        let _ = self.playback.audio.resume(position);
+        let _ = self.players.audio.resume(position);
         // The progress tick sleeps while the track is paused.
         quill::wake::CHROME.poke();
     }
@@ -332,12 +329,12 @@ impl QuillApp {
             return;
         };
         let offset = secs.clamp(0.0, duration.max(0.0));
-        let was_playing = self.playback.is_playing();
+        let was_playing = self.is_playing();
         if let Some(id) = self.active_playback_id() {
             self.playback.positions.insert(id, offset);
         }
         // A failure is kept by the engine (`audio.error()`).
-        let _ = self.playback.audio.seek(offset, was_playing);
+        let _ = self.players.audio.seek(offset, was_playing);
         quill::wake::CHROME.poke();
         if was_playing {
             self.connection.set_note(StatusNote::silent(format!(
@@ -408,8 +405,8 @@ impl QuillApp {
                         // The sound is the authority on where the track
                         // ends (its real length can differ from TDLib's
                         // rounded duration).
-                        this.playback.audio.settle();
-                        let finished = this.playback.audio.is_ended();
+                        this.players.audio.settle();
+                        let finished = this.players.audio.is_ended();
                         if finished && !this.playback.seek_scrubbing {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
@@ -436,14 +433,14 @@ impl QuillApp {
                         // Unless its chat gains or loses a song: a message
                         // in a chat not on screen redraws only the chat
                         // list, so the tick watches Previous / Next too.
-                        let shown = this.playback.track_shown(this.playlist_can_move());
+                        let shown = this.track_shown(this.playlist_can_move());
                         let moved = this.playback.tick_shown.replace(shown) != Some(shown);
                         if finished {
                             cx.notify();
                         } else if moved {
                             this.notify_playback_position(cx);
                         }
-                        Some((!this.playback.held_paused()).then_some(PLAYBACK_TICK))
+                        Some((!this.held_paused()).then_some(PLAYBACK_TICK))
                     })
                     .ok()
                     .flatten();
@@ -477,7 +474,7 @@ impl QuillApp {
         }
         if let (Some(slider), Some(position)) = (
             self.playback.seek_slider.as_ref(),
-            self.playback.active_position_secs(),
+            self.active_position_secs(),
         ) {
             let value = position as f32;
             // `set_value` calls `cx.notify()` unconditionally — only push when
@@ -545,16 +542,16 @@ impl QuillApp {
             let display = self
                 .playback
                 .seek_preview_secs
-                .or_else(|| self.playback.active_position_secs());
+                .or_else(|| self.active_position_secs());
             SeekBarView {
                 slider: self.playback.seek_slider.clone(),
                 display_secs: display.unwrap_or(0.0),
                 duration_secs,
-                is_playing: self.playback.is_playing(),
+                is_playing: self.is_playing(),
                 // Speed, mute and the engine's error show on the active row.
-                speed: self.playback.speed,
-                muted: self.playback.volume < 0.01,
-                error: self.playback.audio.error().map(audio_error_text),
+                speed: self.players.speed,
+                muted: self.players.volume < 0.01,
+                error: self.players.audio.error().map(audio_error_text),
                 hover: self
                     .playback
                     .seek_hover
@@ -573,7 +570,7 @@ impl QuillApp {
                     .unwrap_or(0.0),
                 duration_secs,
                 is_playing: false,
-                speed: self.playback.speed,
+                speed: self.players.speed,
                 muted: false,
                 error: None,
                 hover: None,
@@ -596,13 +593,13 @@ impl QuillApp {
         {
             // Active row: pause ↔ resume (the row stays active so the seek
             // bar keeps working and Play resumes from the frozen position).
-            if self.playback.is_playing() {
+            if self.is_playing() {
                 self.pause_active_playback();
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_NOTE_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.set_note(if self.playback.is_playing() {
+                self.connection.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
@@ -675,13 +672,13 @@ impl QuillApp {
             && self.playback.player.chat.is_none_or(|chat| chat == chat_id)
         {
             // Active row: pause ↔ resume (see voice toggle).
-            if self.playback.is_playing() {
+            if self.is_playing() {
                 self.pause_active_playback();
                 self.connection
                     .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.set_note(if self.playback.is_playing() {
+                self.connection.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))

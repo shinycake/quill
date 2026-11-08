@@ -210,16 +210,16 @@ impl QuillApp {
         apply_ready_channels(session, &self.demo_ui.sink, &self.demo_ui.seq);
         let sink: Arc<dyn DiagnosticSink> = self.demo_ui.sink.clone();
         seed_live_story(session, &sink, &self.demo_ui.seq);
-        self.stories.live.demo_feed = demo_stream_feed(false, cx);
+        self.screen.stories.live.demo_feed = demo_stream_feed(false, cx);
         let items = quill::story_viewer::collect_found_story_items(
             &[(CHANNEL, STORY)],
             &session.stories.stories,
         );
-        self.stories.live.chosen_stars = 0;
+        self.screen.stories.live.chosen_stars = 0;
         self.begin_story_viewer(items, 0, cx);
         // The viewer joins by itself; the demo has no driver, so the
         // watched story is marked here.
-        self.stories.live.watching = Some((ChatId(CHANNEL), STORY));
+        self.screen.stories.live.watching = Some((ChatId(CHANNEL), STORY));
         cx.notify();
     }
 }

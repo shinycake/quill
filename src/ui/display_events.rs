@@ -40,9 +40,9 @@ pub(super) fn reaction(event: DisplayEvent) -> DisplayReaction {
 /// Note the main window's display and follow display changes. Called once
 /// while the main window's `QuillApp` is built.
 pub(super) fn install(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>) {
-    app.notify.windows.main_display = window.display(cx).map(|display| display.id());
+    app.delivery.windows.main_display = window.display(cx).map(|display| display.id());
     cx.observe_window_display(window, |this, window, cx| {
-        this.notify.windows.main_display = window.display(cx).map(|display| display.id());
+        this.delivery.windows.main_display = window.display(cx).map(|display| display.id());
     })
     .detach();
     let app = cx.weak_entity();
@@ -124,7 +124,7 @@ mod tests {
         });
         let app = slot.borrow().clone().unwrap();
         cx.run_until_parked();
-        let noted = app.read_with(cx, |app, _| app.notify.windows.main_display);
+        let noted = app.read_with(cx, |app, _| app.delivery.windows.main_display);
         assert!(noted.is_some(), "the test window is on a display");
 
         let redraws = Rc::new(Cell::new(0));
@@ -135,7 +135,7 @@ mod tests {
         cx.simulate_display_added(DisplayId::new(7), None);
         assert!(redraws.get() > 0, "a new display redraws the app");
         // Its own display did not change.
-        let still = app.read_with(cx, |app, _| app.notify.windows.main_display);
+        let still = app.read_with(cx, |app, _| app.delivery.windows.main_display);
         assert_eq!(still, noted);
     }
 }

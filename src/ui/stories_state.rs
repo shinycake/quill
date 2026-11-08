@@ -96,6 +96,18 @@ pub(crate) struct StoryUi {
     pub(super) stealth_toast: Option<super::story_stealth_ui::ShownStealthToast>,
 }
 
+/// The story viewer's `closeStory` and a live story's leave go to the old
+/// client (`leave_live_story_for_switch`).
+impl super::on_screen::Farewell for StoryUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.leave_live_story_for_switch(cx);
+    }
+}
+
 impl StoryUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         let story_reply_input = cx.new(|cx| {

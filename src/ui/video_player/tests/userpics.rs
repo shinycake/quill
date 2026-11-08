@@ -73,7 +73,7 @@ fn scripts() -> Vec<Rc<RefCell<Script>>> {
 fn keys(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, surface: Surface) -> Vec<i64> {
     app.read_with(vcx, |app, _| {
         let mut users: Vec<i64> = app
-            .playback
+            .players
             .userpic_videos
             .keys()
             .into_iter()
@@ -90,7 +90,7 @@ fn playing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, surface: Surface
     app.read_with(vcx, |app, _| {
         users
             .into_iter()
-            .filter(|user| app.playback.userpic_videos.is_playing((surface, *user)))
+            .filter(|user| app.players.userpic_videos.is_playing((surface, *user)))
             .collect()
     })
 }
@@ -220,7 +220,7 @@ fn a_userpic_no_longer_drawn_sleeps_and_comes_back(cx: &mut TestAppContext) {
         vcx.run_until_parked();
     }
     let asleep = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.playback.userpic_videos.asleep(row))
+        app.read_with(vcx, |app, _| app.players.userpic_videos.asleep(row))
     };
     assert_eq!(asleep(&app, vcx), Some(true), "asleep while not drawn");
     assert!(playing(&app, vcx, Surface::ChatList).is_empty());

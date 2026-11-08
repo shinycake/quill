@@ -35,7 +35,7 @@ fn frames(vcx: &mut VisualTestContext) {
 fn settle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     for _ in 0..4 {
         frames(vcx);
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
         app.update(vcx, |_, cx| cx.notify());
     }
     frames(vcx);
@@ -55,11 +55,11 @@ fn open_demo_at(cx: &mut TestAppContext, fps: f64) -> (Entity<QuillApp>, VisualT
     let handle = cx.open_window(size(px(1000.), px(900.)), move |window, cx| {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         view.read(cx)
-            .playback
+            .players
             .stickers
             .follow(cx.background_executor().clone());
         for file in [HAND_FILE, EFFECT_FILE] {
-            view.read(cx).playback.stickers.set_fixture(
+            view.read(cx).players.stickers.set_fixture(
                 file,
                 Arc::new(move |edge| DecodedFrames {
                     frames: (0..30u8)

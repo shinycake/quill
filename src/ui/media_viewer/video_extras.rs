@@ -42,11 +42,11 @@ impl QuillApp {
             return;
         }
         self.viewer.orientation.rotate_cw();
-        if let Some(item) = self.viewer.state.current() {
+        if let Some(item) = self.screen.viewer.state.current() {
             store_turns(
-                &mut self.viewer.extra.rotations,
+                &mut self.screen.viewer.extra.rotations,
                 (item.chat_id.0, item.message_id.0),
-                self.viewer.orientation.turns,
+                self.screen.viewer.orientation.turns,
             );
         }
         cx.notify();

@@ -119,7 +119,7 @@ impl QuillApp {
         if super::video_player::decodes_in_process() && !tile.within_inline_area() {
             return None;
         }
-        let frame = self.playback.inline_videos.frame(
+        let frame = self.players.inline_videos.frame(
             self.windows.scope,
             (panel.chat(), i64::from(clip.0)),
             tile,
@@ -139,7 +139,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // Clips whose cells do not render in this pass stop.
-        self.playback
+        self.players
             .inline_videos
             .begin_panel_render(self.windows.scope, Panel::InlineResults);
         let mut panel = div()

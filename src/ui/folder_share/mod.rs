@@ -856,7 +856,7 @@ impl QuillApp {
                 changed = true;
             }
         }
-        if let Some(dialog) = self.folders.invite.as_mut()
+        if let Some(dialog) = self.screen.folders.invite.as_mut()
             && dialog.adding
             && self
                 .live

@@ -237,7 +237,7 @@ impl QuillApp {
         cx: &mut App,
     ) {
         let window = self.windows.scope;
-        let videos = &self.playback.inline_videos;
+        let videos = &self.players.inline_videos;
         videos.frame_start(window, history_drawn, host, cx);
         if self.viewer.state.is_open() || self.stories.viewer.is_open() {
             videos.leave_window(window);
@@ -273,7 +273,7 @@ impl QuillApp {
         let session = self.session()?;
         let prefs = &session.settings.media_prefs;
         let key = (message.chat_id.0, message.id.0);
-        let demand = self.playback.inline_videos.demand(key);
+        let demand = self.players.inline_videos.demand(key);
         let autoplay_videos = prefs.autoplay_videos && !prefs.data_saver;
         let autoplay_gifs = prefs.autoplay_gifs && !prefs.data_saver;
         let caption_width = self.inline_caption_width(message, cx);
@@ -356,7 +356,7 @@ impl QuillApp {
         }
         let (chat_id, message_id) = (message.chat_id, message.id);
         let duration = (duration > 0).then_some(f64::from(duration));
-        let videos = &self.playback.inline_videos;
+        let videos = &self.players.inline_videos;
         let mut frame = videos.frame(
             self.windows.scope,
             key,
@@ -410,13 +410,13 @@ impl QuillApp {
             );
         }
         // Seek rings spring in and out while the clip holds still.
-        if self.playback.inline_videos.seek_animating() {
+        if self.players.inline_videos.seek_animating() {
             self.request_animation_tick(60, cx);
         }
         // Masks over the video blend into the history behind it.
         let backdrop = self.wallpaper_backdrop(cx);
         let live = layered.then(|| LiveSource {
-            videos: self.playback.inline_videos.clone(),
+            videos: self.players.inline_videos.clone(),
             key,
             backdrop,
         });
@@ -458,7 +458,7 @@ impl QuillApp {
             return;
         }
         self.playback.intent = None;
-        self.playback
+        self.players
             .inline_videos
             .request(window, (chat_id.0, message_id.0), demand);
         self.notify_conversation(cx);
@@ -479,7 +479,7 @@ impl QuillApp {
             return;
         }
         let key = (chat_id.0, message_id.0);
-        if self.playback.inline_videos.toggle_sound(key.0, key.1) {
+        if self.players.inline_videos.toggle_sound(key.0, key.1) {
             self.round_sound_started(key, cx);
             if !note.is_viewed {
                 self.mark_voice_opened(chat_id, message_id);

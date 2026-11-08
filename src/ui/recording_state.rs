@@ -88,6 +88,20 @@ pub(crate) struct RecordingUi {
     pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
 }
 
+/// A recording still running, or a camera starting, is cancelled: its
+/// file would be the old account's message.
+impl super::on_screen::Farewell for RecordingUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app.recording_busy() {
+            app.cancel_recording(cx);
+        }
+    }
+}
+
 impl RecordingUi {
     pub(super) fn new() -> Self {
         Self {

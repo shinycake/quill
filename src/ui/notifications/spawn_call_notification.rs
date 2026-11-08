@@ -33,7 +33,7 @@ impl QuillApp {
             return;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
-            &self.notify.notify_inflight,
+            &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
             return;
@@ -123,9 +123,9 @@ impl QuillApp {
     ) {
         let account = self.notification_account(account);
         let key = (account, chat_id);
-        self.notify.reply_targets.remove(&key);
+        self.delivery.reply_targets.remove(&key);
         // One still waiting for its photo never shows.
-        self.notify.preview_waits.remove(&key);
+        self.delivery.preview_waits.remove(&key);
         let (account, chat_id) = key;
         // Quill's own windows, whichever backend showed the rest.
         self.clear_custom_notifications(&account, chat_id, cx);
@@ -181,7 +181,7 @@ impl QuillApp {
             None => Some(NotificationSound::DefaultTone),
         };
         if let Some(sound) = sound {
-            self.notify.notification_sounds.play_at(sound, volume);
+            self.delivery.notification_sounds.play_at(sound, volume);
         }
     }
 
@@ -261,8 +261,8 @@ impl QuillApp {
         if on_screen {
             let key = (account.clone(), chat_id);
             match notification.message_id {
-                Some(message_id) => self.notify.reply_targets.insert(key, message_id),
-                None => self.notify.reply_targets.remove(&key),
+                Some(message_id) => self.delivery.reply_targets.insert(key, message_id),
+                None => self.delivery.reply_targets.remove(&key),
             };
         }
         if self.custom_notifications_active() {
@@ -320,7 +320,7 @@ impl QuillApp {
             return;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
-            &self.notify.notify_inflight,
+            &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
             return;

@@ -223,13 +223,13 @@ pub(super) fn native_service(platform: NotifyPlatform) -> NativeService {
 impl QuillApp {
     /// tdesktop's native-notification rules for this platform.
     pub(in crate::ui) fn native_notify_support(&self) -> custom::NativeSupport {
-        let platform = self.notify.windows.platform;
+        let platform = self.delivery.windows.platform;
         custom::native_support(platform, native_service(platform), force_custom())
     }
 
     /// Whether notifications go to Quill's own windows right now.
     pub(in crate::ui) fn custom_notifications_active(&self) -> bool {
-        let platform = self.notify.windows.platform;
+        let platform = self.delivery.windows.platform;
         custom::use_custom(
             quill::notify_prefs::current().native,
             self.native_notify_support(),
@@ -247,7 +247,7 @@ impl QuillApp {
             .iter()
             .find(|d| wanted != 0 && display_checksum(d.as_ref()) == wanted)
             .or_else(|| {
-                self.notify
+                self.delivery
                     .windows
                     .main_display
                     .and_then(|id| displays.iter().find(|d| d.id() == id))
@@ -281,7 +281,7 @@ impl QuillApp {
     ) {
         let key: Key = (account.clone(), notification.chat_id);
         let now = Instant::now();
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows.queue.remove_key(&key);
         for shown in windows
             .shown
@@ -314,7 +314,7 @@ impl QuillApp {
     ) {
         let key: Key = (account.clone(), chat_id);
         let now = Instant::now();
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows.queue.remove_key(&key);
         let mut changed = false;
         for shown in windows
@@ -334,7 +334,7 @@ impl QuillApp {
     /// Hide everything ("Hide all", tdesktop `doClearAll`).
     fn clear_all_custom_notifications(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows.queue.clear();
         for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
             shown.unlinked = true;
@@ -347,12 +347,12 @@ impl QuillApp {
     /// restack (tdesktop `showNextFromQueue` + `moveWidgets`).
     fn notify_show_next(&mut self, cx: &mut Context<Self>) {
         let limit = custom::clamp_count(quill::notify_prefs::current().count);
-        let free = limit.saturating_sub(self.notify.windows.live());
+        let free = limit.saturating_sub(self.delivery.windows.live());
         // With no display to show them on, they wait for one to be
         // connected (`custom_notify_displays_changed`; tdesktop keeps its
         // queue for `screenAdded`).
         if let Some((display_id, area)) = self.notify_display(cx) {
-            for (key, pending) in self.notify.windows.queue.take(free) {
+            for (key, pending) in self.delivery.windows.queue.take(free) {
                 self.open_notification(key, pending, display_id, area, cx);
             }
         }
@@ -364,7 +364,7 @@ impl QuillApp {
     /// back in place on the notification display (the next clock step
     /// moves them) and show what waited for a display.
     pub(in crate::ui) fn custom_notify_displays_changed(&mut self, cx: &mut Context<Self>) {
-        let windows = &self.notify.windows;
+        let windows = &self.delivery.windows;
         if windows.shown.is_empty()
             && windows.hide_all.is_none()
             && windows.samples.is_empty()
@@ -386,7 +386,7 @@ impl QuillApp {
         area: Rect,
         cx: &mut Context<Self>,
     ) {
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows.next_id += 1;
         let id = windows.next_id;
         let content = Content::Message {
@@ -396,7 +396,7 @@ impl QuillApp {
             media: pending.preview,
             hide_sender: pending.locked,
             can_reply: pending.reply && pending.notification.message_id.is_some(),
-            reply_inline: self.notify.windows.platform != NotifyPlatform::X11,
+            reply_inline: self.delivery.windows.platform != NotifyPlatform::X11,
         };
         let corner = quill::notify_prefs::current().corner;
         let Some(popup) =
@@ -406,7 +406,7 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        self.notify.windows.shown.push(Shown {
+        self.delivery.windows.shown.push(Shown {
             id,
             key,
             popup,
@@ -476,7 +476,7 @@ impl QuillApp {
     /// all" button below it (tdesktop `moveWidgets`).
     fn notify_restack(&mut self, cx: &mut Context<Self>) {
         let now = Instant::now();
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         let heights: Vec<f32> = windows
             .shown
             .iter()
@@ -496,9 +496,9 @@ impl QuillApp {
             if windows.hide_all.is_none() {
                 let corner = quill::notify_prefs::current().corner;
                 if let Some((display_id, area)) = self.notify_display(cx) {
-                    self.notify.windows.next_id += 1;
-                    let id = self.notify.windows.next_id;
-                    self.notify.windows.hide_all = self.open_popup(
+                    self.delivery.windows.next_id += 1;
+                    let id = self.delivery.windows.next_id;
+                    self.delivery.windows.hide_all = self.open_popup(
                         id,
                         Content::HideAll,
                         HIDE_ALL_HEIGHT,
@@ -510,11 +510,11 @@ impl QuillApp {
                     );
                 }
             }
-            if let Some(hide_all) = self.notify.windows.hide_all.as_mut() {
+            if let Some(hide_all) = self.delivery.windows.hide_all.as_mut() {
                 hide_all.shift.retarget(below, FAST_ANIM_MS, false, now);
                 hide_all.unhide(now);
             }
-        } else if let Some(hide_all) = self.notify.windows.hide_all.as_mut()
+        } else if let Some(hide_all) = self.delivery.windows.hide_all.as_mut()
             && !hide_all.hiding
         {
             hide_all.hide(false, now);
@@ -527,7 +527,7 @@ impl QuillApp {
         let limit = custom::clamp_count(quill::notify_prefs::current().count);
         let now = Instant::now();
         let mut allow = limit;
-        for shown in self.notify.windows.shown.iter_mut().rev() {
+        for shown in self.delivery.windows.shown.iter_mut().rev() {
             if shown.unlinked {
                 continue;
             }
@@ -545,7 +545,7 @@ impl QuillApp {
     }
 
     fn all_popups_mut(&mut self) -> impl Iterator<Item = &mut Popup> {
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows
             .shown
             .iter_mut()
@@ -563,7 +563,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let now = Instant::now();
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         let dim = if corner.is_some() { 0.0 } else { 1.0 };
         if (windows.demo.to - dim).abs() > f32::EPSILON {
             windows.demo.retarget(dim, FAST_ANIM_MS, false, now);
@@ -589,8 +589,8 @@ impl QuillApp {
             if let Some((display_id, area)) = self.notify_display(cx) {
                 for index in present..count {
                     let shift = DELTA_Y + index as f32 * (MIN_HEIGHT + DELTA_Y);
-                    self.notify.windows.next_id += 1;
-                    let id = self.notify.windows.next_id;
+                    self.delivery.windows.next_id += 1;
+                    let id = self.delivery.windows.next_id;
                     if let Some(popup) = self.open_popup(
                         id,
                         Content::Sample,
@@ -601,7 +601,7 @@ impl QuillApp {
                         area,
                         cx,
                     ) {
-                        self.notify.windows.samples.push((corner, popup));
+                        self.delivery.windows.samples.push((corner, popup));
                     }
                 }
             }
@@ -615,7 +615,7 @@ impl QuillApp {
         match event {
             ViewEvent::Hover(true) => {
                 // tdesktop `stopAllHiding`.
-                let windows = &mut self.notify.windows;
+                let windows = &mut self.delivery.windows;
                 for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
                     shown.hide_at = None;
                     shown.popup.unhide(now);
@@ -639,7 +639,7 @@ impl QuillApp {
                 }
             }
             ViewEvent::ReplyOpened => {
-                if let Some(shown) = self.notify.windows.shown.iter_mut().find(|s| s.id == id) {
+                if let Some(shown) = self.delivery.windows.shown.iter_mut().find(|s| s.id == id) {
                     shown.replying = true;
                     shown.hide_at = None;
                     shown.popup.unhide(now);
@@ -659,7 +659,7 @@ impl QuillApp {
             }
             ViewEvent::ReplyHeight(field) => {
                 let height = MIN_HEIGHT + field;
-                if let Some(shown) = self.notify.windows.shown.iter_mut().find(|s| s.id == id)
+                if let Some(shown) = self.delivery.windows.shown.iter_mut().find(|s| s.id == id)
                     && (shown.popup.height - height).abs() > 0.5
                 {
                     shown.popup.height = height;
@@ -677,7 +677,7 @@ impl QuillApp {
     }
 
     fn notify_key(&self, id: u64) -> Option<Key> {
-        self.notify
+        self.delivery
             .windows
             .shown
             .iter()
@@ -708,7 +708,7 @@ impl QuillApp {
     fn unlink_notification(&mut self, id: u64, cx: &mut Context<Self>) {
         let now = Instant::now();
         if let Some(shown) = self
-            .notify
+            .delivery
             .windows
             .shown
             .iter_mut()
@@ -724,7 +724,7 @@ impl QuillApp {
     /// tdesktop `startAllHiding`: the pointer left, so everything fades
     /// slowly, unless someone is typing a reply.
     fn notify_start_all_hiding(&mut self, now: Instant) {
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         if windows.any_replying() {
             return;
         }
@@ -739,10 +739,10 @@ impl QuillApp {
     }
 
     fn ensure_notify_clock(&mut self, cx: &mut Context<Self>) {
-        if self.notify.windows.ticking {
+        if self.delivery.windows.ticking {
             return;
         }
-        self.notify.windows.ticking = true;
+        self.delivery.windows.ticking = true;
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
         cx.spawn(async move |this, cx| {
@@ -765,7 +765,7 @@ impl QuillApp {
     fn notify_windows_tick(&mut self, cx: &mut Context<Self>) -> Option<Duration> {
         let now = Instant::now();
         self.notify_check_input(now);
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         let replying = windows.any_replying();
         for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
             if shown.hide_at.is_some_and(|at| at <= now) && !replying {
@@ -778,7 +778,7 @@ impl QuillApp {
         let display = self.notify_display(cx);
         let corner = quill::notify_prefs::current().corner;
         let mut closed = false;
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         let popups = windows
             .shown
             .iter_mut()
@@ -812,7 +812,7 @@ impl QuillApp {
             }
         }
         if closed {
-            let windows = &mut self.notify.windows;
+            let windows = &mut self.delivery.windows;
             windows
                 .shown
                 .retain(|s| !(s.popup.hiding && s.popup.opacity.done(now)));
@@ -828,7 +828,7 @@ impl QuillApp {
                 .retain(|(_, p)| !(p.hiding && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         if animating {
             return Some(FRAME);
         }
@@ -866,7 +866,7 @@ impl QuillApp {
     /// starts the timer at once.
     fn notify_check_input(&mut self, now: Instant) {
         let idle = quill::passcode::os_idle_ms().map(Duration::from_millis);
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         let replying = windows.any_replying();
         for shown in windows.shown.iter_mut().filter(|s| s.waiting_for_input) {
             let back = match idle {
@@ -886,7 +886,7 @@ impl QuillApp {
 
     /// Close every window at once (sign out, quit).
     pub(in crate::ui) fn close_all_notify_windows(&mut self, cx: &mut Context<Self>) {
-        let windows = &mut self.notify.windows;
+        let windows = &mut self.delivery.windows;
         windows.queue.clear();
         let shown = std::mem::take(&mut windows.shown);
         let hide_all = windows.hide_all.take();

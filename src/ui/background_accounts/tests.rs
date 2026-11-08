@@ -294,7 +294,7 @@ fn a_click_after_an_account_switch_runs_on_the_account_it_was_shown_for(cx: &mut
     app.update_in(&mut vcx, |app, _, cx| {
         // The click arrived while `shown_for` was on screen (a Linux
         // listener thread or a Quill notification window queued it).
-        app.notify.notify_clicks.lock().unwrap().push(ChatClick {
+        app.delivery.notify_clicks.lock().unwrap().push(ChatClick {
             account: shown_for.clone(),
             chat_id,
             action: NotificationAction::Reply,
@@ -302,7 +302,7 @@ fn a_click_after_an_account_switch_runs_on_the_account_it_was_shown_for(cx: &mut
         // Then another account came on screen.
         app.session_mut().unwrap().account = other_account();
         app.drain_background_clicks(cx);
-        assert!(app.notify.notify_clicks.lock().unwrap().is_empty());
+        assert!(app.delivery.notify_clicks.lock().unwrap().is_empty());
         assert_eq!(
             app.background.clicks.lock().unwrap().clone(),
             vec![ChatClick {
@@ -323,7 +323,7 @@ fn a_click_after_an_account_switch_runs_on_the_account_it_was_shown_for(cx: &mut
             Some(chat_id),
             "never opened on the account switched to"
         );
-        assert!(app.notify.notify_clicks.lock().unwrap().is_empty());
+        assert!(app.delivery.notify_clicks.lock().unwrap().is_empty());
     });
 }
 

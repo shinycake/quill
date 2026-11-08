@@ -181,7 +181,7 @@ impl QuillApp {
     /// animations hold still for a chat window over it: only while it is
     /// not active itself (it is in front then).
     pub(in crate::ui) fn note_main_place(&mut self, window: &Window, main_active: bool) {
-        self.windows.main_place = WindowPlace::of(window, self.notify.windows.main_display);
+        self.windows.main_place = WindowPlace::of(window, self.delivery.windows.main_display);
         self.frame
             .main_covered
             .set(!main_active && self.windows.main_covered());
@@ -232,7 +232,7 @@ impl QuillApp {
     pub(in crate::ui) fn follow_windows(&self, cx: &mut App) -> bool {
         let active = self.frame.main_active.get() || self.windows.any_active();
         let covered = self.frame.main_covered.get();
-        let videos = &self.playback.inline_videos;
+        let videos = &self.players.inline_videos;
         if self.frame.window_active.replace(active) != active {
             videos.set_window_active(active);
         }

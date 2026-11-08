@@ -3,7 +3,6 @@
 use super::connect_ui::ConnectUiStatus;
 use super::demo::demo_media_allowlist;
 use super::synthetic::SyntheticChat;
-use gpui_kit::component::input::TextareaState;
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -14,36 +13,33 @@ use quill::state::Session;
 use quill::telegram::envelope::AuthorizationState;
 use std::path::PathBuf;
 pub struct QuillApp {
+    /// The UI of the account on screen, replaced whole on a switch
+    /// (`ui/on_screen.rs`). Its fields read through the app
+    /// (`self.chat_list`, `self.history`, ...).
+    pub(super) screen: super::on_screen::OnScreen,
+    /// The app's players: audio engine, sticker and emoji players, inline
+    /// and userpic videos, speed and volume (`ui/players_state.rs`).
+    pub(super) players: super::players_state::PlayersUi,
+    /// Notification delivery: OS clicks, reply targets, sounds and Quill's
+    /// notification windows (`ui/notify_delivery_state.rs`).
+    pub(super) delivery: super::notify_delivery_state::NotifyDelivery,
     /// Settings boxes: appearance, shortcuts, storage, proxy, translation and app updates (`ui/settings_state.rs`).
     pub(super) settings: super::settings_state::SettingsUi,
     pub(super) chat: Entity<SyntheticChat>,
-    pub(super) composer: Entity<TextareaState>,
     /// kit Phase 7: the in-window menu bar (Linux/Windows; macOS uses the
     /// native menu bar via `cx.set_menus`). Entity-owned so it survives
     /// re-renders.
     pub(super) menu_bar: Entity<AppMenuBar>,
-    /// Chat list: rows, filter, menus, pinning, preview and side tabs (`ui/chat_list_state.rs`).
-    pub(super) chat_list: super::chat_list_state::ChatListUi,
     /// Scroll positions of the shared-media grid tabs (`ui/shared_media_grid_state.rs`).
     pub(super) shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi,
-    /// Stories UI state: the strip, viewer, composer, story page and their boxes.
-    pub(super) stories: super::stories_state::StoryUi,
     /// The Premium feature preview's clip player (`ui/premium_preview_state.rs`).
     pub(super) premium_preview: super::premium_preview_state::PremiumPreviewUi,
     /// The first-run onboarding before sign-in (`ui/first_run_state.rs`).
     pub(super) first_run: super::first_run_state::FirstRun,
-    /// Message history: rows, window, scroll probes, highlights and pinned bar (`ui/history_state.rs`).
-    pub(super) history: super::history_state::HistoryUi,
     /// Window and per-frame bookkeeping: animation demand, focus restore, quit guard (`ui/frame_state.rs`).
     pub(super) frame: super::frame_state::FrameUi,
-    /// Composer state: menus, attachments, send options, reply and edit drafts (`ui/composer_state.rs`).
-    pub(super) composer_ui: Box<super::composer_state::ComposerUi>,
     /// The next send's attachments and options, per account, chat and topic (`ui/composer_sends.rs`).
     pub(super) composer_sends: super::composer_sends::ComposerSends,
-    /// Emoji, sticker and GIF panel and their search fields (`ui/pickers_state.rs`).
-    pub(super) pickers: super::pickers_state::PickerUi,
-    /// The sticker set box's editing flows (`ui/sticker_set_box/state.rs`).
-    pub(super) sticker_box: super::sticker_set_box::state::StickerSetBoxUi,
     /// Payments and the gift marketplace (`ui/payments_state.rs`).
     pub(super) payments: super::payments_state::PaymentUi,
     /// Revenue pages, withdrawals and affiliate programs (`ui/earn_state.rs`).
@@ -54,14 +50,10 @@ pub struct QuillApp {
     pub(super) common_groups: super::profile_panels::common_groups::CommonGroupsUi,
     /// Sign-in: inputs, registration, terms, recovery and the QR code (`ui/auth_state.rs`).
     pub(super) auth_ui: super::auth_state::AuthUi,
-    /// Search fields: global search and search in chat (`ui/search_state.rs`).
-    pub(super) search_ui: super::search_state::SearchUi,
     /// Send Location's map gesture, search field and timers (`ui/location_picker/state.rs`).
     pub(super) location_ui: super::location_picker::state::LocationPickerUi,
     /// The gallery's search field (`ui/shared_media_search_state.rs`).
     pub(super) media_search: super::shared_media_search_state::SharedMediaSearchUi,
-    /// Forwarding and the share box (`ui/share_state.rs`).
-    pub(super) share: super::share_state::ShareUi,
     /// Files sent to Quill from outside (`ui/start_files_state.rs`).
     pub(super) start_files: super::start_files_state::StartFilesUi,
     pub(super) ai_compose: super::ai_compose_state::AiComposeUi,
@@ -88,20 +80,14 @@ pub struct QuillApp {
     pub(super) demo_ui: super::demo_state::DemoUi,
     /// One-to-one call UI: the call window, tick, sounds, images and notifications.
     pub(super) calls: super::calls_state::CallUi,
-    /// Notifications: OS clicks, sounds, mute and auto-delete menus, defaults (`ui/notify_state.rs`).
-    pub(super) notify: super::notify_state::NotifyUi,
     /// Accounts that are not on screen, still connected (`ui/background_accounts`).
     pub(super) background: super::background_accounts::BackgroundAccounts,
     /// Accounts, account lifecycle, local passcode, freeze and age checks (`ui/account_state.rs`).
     pub(super) account: super::account_state::AccountUi,
     /// Spell checking: the engine, results and the dictionaries box (`ui/spell_state.rs`).
     pub(super) spell: super::spell_state::SpellUi,
-    /// Message menu, selection, links and per-message toggles in the history (`ui/message_state.rs`).
-    pub(super) message_ui: super::message_state::MessageUi,
     /// Standalone boxes: profiles, contacts, chat look, export, tags and call rating (`ui/dialogs_state.rs`).
     pub(super) dialogs: super::dialogs_state::DialogUi,
-    /// Voice, music, GIF, sticker and inline video playback (`ui/playback_state.rs`).
-    pub(super) playback: super::playback_state::PlaybackUi,
     /// Cached child views (chat list, conversation) the frame clock can
     /// redraw on their own, and the chat list's animation layer; see
     /// `app_slice`.
@@ -121,8 +107,6 @@ pub struct QuillApp {
     pub(super) group_call: super::group_call_state::GroupCallUi,
     /// Screen sharing: the source chooser, privacy box and paused tiles.
     pub(super) screen_share: super::screen_share_state::ScreenShareUi,
-    /// Voice and round video recording (`ui/recording_state.rs`).
-    pub(super) recording: super::recording_state::RecordingUi,
     /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
     pub(super) admin: super::admin_state::AdminUi,
     /// The members block of the group info panel (`ui/inline_members_state.rs`).
@@ -144,13 +128,6 @@ pub struct QuillApp {
     /// `tg:`), set by `main.rs`. Fired once auth reaches Ready, then
     /// cleared (`pub(crate)` so the binary can set it).
     pub(crate) pending_deep_link: Option<String>,
-    /// Mini apps: the helper window, its launch and the open box
-    /// (`ui/web_app_ui.rs`, `DialogKind::WebAppConfirm`).
-    pub(super) mini_apps: super::web_app_ui::MiniApps,
-    /// Media viewer: zoom, video, controls and the photo editor (`ui/viewer_state.rs`).
-    pub(super) viewer: super::viewer_state::ViewerUi,
-    /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
-    pub(super) folders: super::folders_state::FolderUi,
     /// Chats open in windows of their own and the frame scope that names the one being drawn (`ui/chat_window`).
     pub(super) windows: super::chat_window::ChatWindows,
     /// The QR code box (`ui/peer_qr`).

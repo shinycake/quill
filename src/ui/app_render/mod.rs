@@ -93,7 +93,7 @@ impl Render for QuillApp {
         );
         self.report_visible_sponsored(window.is_window_active() && !self.account.passcode.locked);
         let history_drawn = self.slices.window.history_drawn();
-        self.playback.inline_videos.set_scale(window.scale_factor());
+        self.players.inline_videos.set_scale(window.scale_factor());
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
         self.check_video_pip(cx);

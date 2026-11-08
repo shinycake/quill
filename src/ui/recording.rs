@@ -261,21 +261,19 @@ impl QuillApp {
         };
         let seconds = f64::from(capture.elapsed_secs());
         let mut resumed_preview = false;
-        if let Some(clock) = self.recording.preview.as_mut() {
+        if let Some(clock) = self.screen.recording.preview.as_mut() {
             if clock.is_playing() {
                 clock.pause();
-                self.playback.audio.pause();
+                self.players.audio.pause();
                 cx.notify();
                 return;
             }
-            if !clock.finished()
-                && self.playback.audio.is_loaded()
-                && !self.playback.audio.is_ended()
+            if !clock.finished() && self.players.audio.is_loaded() && !self.players.audio.is_ended()
             {
                 let at = clock.elapsed_secs();
                 // The progress tick sleeps while the track is paused.
                 quill::wake::CHROME.poke();
-                if self.playback.audio.resume(at).is_ok() {
+                if self.players.audio.resume(at).is_ok() {
                     clock.resume();
                     resumed_preview = true;
                 }
@@ -306,7 +304,7 @@ impl QuillApp {
     /// The preview ran to its end: show it stopped, ready to play again.
     pub(super) fn check_record_preview(&mut self) {
         let ended = self.recording.preview.as_ref().is_some_and(|clock| {
-            clock.is_playing() && (clock.finished() || self.playback.audio.is_ended())
+            clock.is_playing() && (clock.finished() || self.players.audio.is_ended())
         });
         if ended {
             self.recording.preview = None;

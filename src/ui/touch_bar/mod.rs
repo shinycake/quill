@@ -97,10 +97,10 @@ impl QuillApp {
         self.playback.playing_audio?;
         let (can_previous, can_next) = self.playlist_can_move();
         Some(Track {
-            playing: self.playback.is_playing(),
+            playing: self.is_playing(),
             can_previous,
             can_next,
-            position: self.playback.active_position_secs().unwrap_or(0.),
+            position: self.active_position_secs().unwrap_or(0.),
             duration: self.playback.track_duration().unwrap_or(0.),
         })
     }

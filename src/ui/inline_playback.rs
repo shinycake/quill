@@ -242,7 +242,7 @@ impl QuillApp {
     /// The longer side to decode the GIF at: its tile in device pixels
     /// (`InlineTile::decode_edge`, capped at `INLINE_MAX_EDGE`).
     fn gif_decode_edge(&self, message_id: MessageId, cx: &mut Context<Self>) -> u32 {
-        let scale = self.playback.inline_videos.scale();
+        let scale = self.players.inline_videos.scale();
         let message = self.session().and_then(|session| {
             let chat = session.open_chat?;
             session.histories.get(&chat.0)?.messages.get(&message_id.0)

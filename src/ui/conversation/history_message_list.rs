@@ -360,14 +360,14 @@ impl QuillApp {
         // window. Those not painted in view this pass pause once it has
         // painted.
         let target = self.history_redraw_target();
-        self.playback.inline_videos.begin_render(
+        self.players.inline_videos.begin_render(
             self.windows.scope,
             target,
             self.history.pane_width.get(),
             cx,
         );
         let surface = self.history_userpic_surface();
-        self.playback
+        self.players
             .userpic_videos
             .begin_render(surface, target, cx);
         let weak = cx.weak_entity();

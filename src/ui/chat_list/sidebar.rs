@@ -400,7 +400,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let pull_gap = self.story_pull_gap(cx);
-        self.playback.userpic_videos.begin_render(
+        self.players.userpic_videos.begin_render(
             super::userpic_videos::Surface::ChatList,
             self.slices.current(),
             cx,

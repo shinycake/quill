@@ -257,14 +257,14 @@ impl QuillApp {
                 };
                 cx.background_executor().timer(wait).await;
                 let keep = this.update_in(cx, |app, window, cx| {
-                    let hdr = &mut app.viewer.hdr;
-                    if !hdr.has_frame() || app.viewer.state.current().is_none() {
+                    let hdr = &mut app.screen.viewer.hdr;
+                    if !hdr.has_frame() || app.screen.viewer.state.current().is_none() {
                         hdr.polling = false;
                         return false;
                     }
                     let left_edr = hdr.edr_on && !hdr.edr_lost && super::renderer_left_edr(window);
                     if left_edr
-                        || app.viewer.orientation.is_identity()
+                        || app.screen.viewer.orientation.is_identity()
                             && super::headroom(window).effective() != hdr.headroom
                     {
                         cx.notify();

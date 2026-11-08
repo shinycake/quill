@@ -50,7 +50,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let as_file = self.composer_ui.edit_replace_as_file;
-        let Some(edit) = self.composer_ui.pending_edit_mut() else {
+        let Some(edit) = self.screen.composer_ui.pending_edit_mut() else {
             return;
         };
         match edit.replacement_for(path, as_file) {

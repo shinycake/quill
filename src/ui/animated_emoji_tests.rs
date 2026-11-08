@@ -47,7 +47,7 @@ fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
         let view = cx.new(|cx| QuillApp::new_with_demo(window, cx, None, Some(demo)));
         // A one-second clip: long enough to tap during a replay.
         for file in [HAND_FILE, CUSTOM_FILE] {
-            view.read(cx).playback.stickers.set_fixture(
+            view.read(cx).players.stickers.set_fixture(
                 file,
                 Arc::new(|edge| DecodedFrames {
                     frames: (0..30u8)
@@ -71,7 +71,7 @@ fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn settle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     for _ in 0..3 {
         frames(vcx);
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
         app.update(vcx, |_, cx| cx.notify());
     }
     frames(vcx);
@@ -116,17 +116,17 @@ fn a_lone_emoji_plays_once_and_a_tap_plays_it_again(cx: &mut TestAppContext) {
     let _ = app.update(&mut vcx, |app, cx| app.lone_emoji_view(&message, cx));
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.playback
+            app.players
                 .stickers
                 .head_known(play_head(key, 0), HAND_FILE),
             Some(true),
             "the play head started when the row painted"
         );
-        assert!(app.playback.emoji_plays.borrow().has_played(key));
+        assert!(app.players.emoji_plays.borrow().has_played(key));
     });
     // Drawn for a second (30 frames at 30 fps), it played through.
     let done = |app: &QuillApp| {
-        app.playback
+        app.players
             .stickers
             .head_progress(play_head(key, 0), HAND_FILE)
             .is_some_and(|(pos, total)| pos >= total)
@@ -145,12 +145,12 @@ fn a_lone_emoji_plays_once_and_a_tap_plays_it_again(cx: &mut TestAppContext) {
         app.tap_animated_emoji(ChatId(CHAT), MessageId(FIRST_MESSAGE));
     });
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.emoji_plays.borrow().generation(key), 1);
+        assert_eq!(app.players.emoji_plays.borrow().generation(key), 1);
     });
     settle(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
         assert_eq!(
-            app.playback
+            app.players
                 .stickers
                 .head_known(play_head(key, 1), HAND_FILE),
             Some(true),
@@ -160,7 +160,7 @@ fn a_lone_emoji_plays_once_and_a_tap_plays_it_again(cx: &mut TestAppContext) {
     // A second tap while it plays does not start it over; once it played
     // through (a slow machine can get there during `settle`), it does.
     let replaying = app.read_with(&vcx, |app, _| {
-        app.playback
+        app.players
             .stickers
             .head_progress(play_head(key, 1), HAND_FILE)
             .is_some_and(|(pos, total)| pos < total)
@@ -170,13 +170,13 @@ fn a_lone_emoji_plays_once_and_a_tap_plays_it_again(cx: &mut TestAppContext) {
     });
     app.read_with(&vcx, |app, _| {
         let expected = if replaying { 1 } else { 2 };
-        assert_eq!(app.playback.emoji_plays.borrow().generation(key), expected);
+        assert_eq!(app.players.emoji_plays.borrow().generation(key), expected);
     });
     // Leaving the chat forgets it: it plays again next time.
     let other = other_chat(&app, &vcx);
     open_in_main(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
-        let plays = app.playback.emoji_plays.borrow();
+        let plays = app.players.emoji_plays.borrow();
         assert!(!plays.has_played(key));
         assert_eq!(plays.generation(key), 0);
     });
@@ -203,7 +203,7 @@ fn custom_emoji_messages_take_their_sizes(cx: &mut TestAppContext) {
 fn idle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, seconds: u64) {
     for _ in 0..seconds {
         app.read_with(vcx, |app, _| {
-            app.playback.stickers.skip(Duration::from_secs(1));
+            app.players.stickers.skip(Duration::from_secs(1));
         });
         vcx.executor().advance_clock(Duration::from_secs(1));
         vcx.run_until_parked();
@@ -211,11 +211,11 @@ fn idle(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, seconds: u64) {
 }
 
 fn open_clips(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> usize {
-    app.read_with(vcx, |app, _| app.playback.stickers.engine().stats().clips)
+    app.read_with(vcx, |app, _| app.players.stickers.engine().stats().clips)
 }
 
 fn hand_clips(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> usize {
-    app.read_with(vcx, |app, _| app.playback.stickers.clips_of(HAND_FILE))
+    app.read_with(vcx, |app, _| app.players.stickers.clips_of(HAND_FILE))
 }
 
 /// Every clip open at `first` (`Player::first_frames`) still is, with the
@@ -225,7 +225,7 @@ fn assert_still_open(
     vcx: &VisualTestContext,
     first: &[Option<std::time::Instant>],
 ) {
-    let now = app.read_with(vcx, |app, _| app.playback.stickers.first_frames());
+    let now = app.read_with(vcx, |app, _| app.players.stickers.first_frames());
     let gone: Vec<_> = first.iter().filter(|at| !now.contains(at)).collect();
     assert!(gone.is_empty(), "closed and opened again: {gone:?}");
 }
@@ -255,21 +255,21 @@ fn emoji_at_rest_on_the_layer_stay_open_while_nothing_draws(cx: &mut TestAppCont
     let (app, mut vcx) = open_demo(cx);
     // Played through: the lone emoji rest.
     app.read_with(&vcx, |app, _| {
-        app.playback.stickers.skip(Duration::from_secs(2));
+        app.players.stickers.skip(Duration::from_secs(2));
     });
     settle(&app, &mut vcx);
     let open = open_clips(&app, &vcx);
     assert!(open >= 3, "the emoji play: {open} clips");
-    let first = app.read_with(&vcx, |app, _| app.playback.stickers.first_frames());
+    let first = app.read_with(&vcx, |app, _| app.players.stickers.first_frames());
     idle(&app, &mut vcx, 10);
     assert_eq!(open_clips(&app, &vcx), open, "on screen: open");
-    let looks = app.read_with(&vcx, |app, _| app.playback.stickers.looks());
+    let looks = app.read_with(&vcx, |app, _| app.players.stickers.looks());
     for _ in 0..5 {
         main_frame(&app, &mut vcx);
         vcx.run_until_parked();
     }
     assert_still_open(&app, &vcx, &first);
-    let looked = app.read_with(&vcx, |app, _| app.playback.stickers.looks()) - looks;
+    let looked = app.read_with(&vcx, |app, _| app.players.stickers.looks()) - looks;
     assert!(looked <= 1, "the closer looked {looked} times in 5 frames");
 }
 
@@ -283,7 +283,7 @@ fn emoji_no_window_shows_close_and_free_their_frames_with_nothing_drawn(cx: &mut
     // The lone emoji show only in the messages (the chat list may show the
     // custom ones too).
     let frame = app
-        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .read_with(&vcx, |app, _| app.players.stickers.any_frame(HAND_FILE))
         .expect("a lone emoji's frame");
     let probe = atlas_probe(&frame);
     let freed = Arc::downgrade(&frame);
@@ -359,9 +359,9 @@ fn chat_in_window(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> AnyWin
         draw(vcx);
         app.read_with(vcx, |app, _| {
             if step == 1 {
-                app.playback.stickers.skip(Duration::from_secs(2));
+                app.players.stickers.skip(Duration::from_secs(2));
             }
-            app.playback.stickers.settle();
+            app.players.stickers.settle();
         });
     }
     draw(vcx);
@@ -379,13 +379,13 @@ fn a_chat_windows_emoji_at_rest_stay_open_while_the_main_window_draws(cx: &mut T
         let session = app.demo_session.as_ref().expect("the demo");
         let history = session.histories.get(&CHAT).map(|h| h.messages.len());
         let anchor = session.chats.get(&CHAT).and_then(|c| c.unread_anchor());
-        (history, anchor, app.playback.stickers.screen_stats())
+        (history, anchor, app.players.stickers.screen_stats())
     });
     assert!(
         open >= 3,
         "the emoji play in the chat window: {open} clips ({shown:?})"
     );
-    let first = app.read_with(&vcx, |app, _| app.playback.stickers.first_frames());
+    let first = app.read_with(&vcx, |app, _| app.players.stickers.first_frames());
     for _ in 0..3 {
         main_frame(&app, &mut vcx);
     }
@@ -402,7 +402,7 @@ fn a_chat_windows_emoji_close_with_it(cx: &mut TestAppContext) {
     let chat_window = chat_in_window(&app, &mut vcx);
     assert!(hand_clips(&app, &vcx) > 0);
     let frame = app
-        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .read_with(&vcx, |app, _| app.players.stickers.any_frame(HAND_FILE))
         .expect("a lone emoji's frame");
     let freed = Arc::downgrade(&frame);
     drop(frame);
@@ -416,11 +416,11 @@ fn a_chat_windows_emoji_close_with_it(cx: &mut TestAppContext) {
     let key = (CHAT, FIRST_MESSAGE);
     app.read_with(&vcx, |app, _| {
         let head = app
-            .playback
+            .players
             .stickers
             .head_known(play_head(key, 0), HAND_FILE);
         assert_eq!(head, None, "its lone emoji's head");
-        assert!(!app.playback.emoji_plays.borrow().has_played(key));
+        assert!(!app.players.emoji_plays.borrow().has_played(key));
     });
     // Its clips close with it, not 5 s later, and their frames go.
     assert_eq!(hand_clips(&app, &vcx), 0, "closed with the window");
@@ -459,8 +459,8 @@ fn lone_emoji_play(
     app.read_with(vcx, |app, _| {
         let head = play_head(key, 0);
         (
-            app.playback.stickers.head_progress(head, HAND_FILE),
-            app.playback.emoji_plays.borrow().has_played(key),
+            app.players.stickers.head_progress(head, HAND_FILE),
+            app.players.emoji_plays.borrow().has_played(key),
         )
     })
 }
@@ -491,7 +491,7 @@ fn the_main_window_opening_a_chat_leaves_a_chat_windows_emoji_playing(cx: &mut T
     // may show the custom ones too).
     let hand_first = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
         app.read_with(vcx, |app, _| {
-            app.playback.stickers.first_frames_of(Some(HAND_FILE))
+            app.players.stickers.first_frames_of(Some(HAND_FILE))
         })
     };
     let first = hand_first(&app, &vcx);
@@ -505,7 +505,7 @@ fn the_main_window_opening_a_chat_leaves_a_chat_windows_emoji_playing(cx: &mut T
         vcx.run_until_parked();
         vcx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
             .expect("the chat window draws");
-        app.read_with(&vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(&vcx, |app, _| app.players.stickers.settle());
     }
     assert_eq!(hand_first(&app, &vcx), first, "none opened again");
     went_on(&app, &vcx, "not started over");
@@ -520,11 +520,11 @@ fn the_chat_the_main_window_leaves_plays_again_and_closes_its_clips(cx: &mut Tes
     let other = other_chat(&app, &vcx);
     // The player's clock moves only as the test moves it: the lone emoji
     // plays 500 ms, a paint every 100 ms.
-    app.read_with(&vcx, |app, _| app.playback.stickers.freeze());
+    app.read_with(&vcx, |app, _| app.players.stickers.freeze());
     main_frame(&app, &mut vcx);
     for _ in 0..5 {
         app.read_with(&vcx, |app, _| {
-            app.playback.stickers.skip(Duration::from_millis(100));
+            app.players.stickers.skip(Duration::from_millis(100));
         });
         main_frame(&app, &mut vcx);
     }
@@ -546,7 +546,7 @@ fn the_chat_the_main_window_leaves_plays_again_and_closes_its_clips(cx: &mut Tes
     assert_eq!(head.map(|(pos, _)| pos), Some(Duration::ZERO), "{head:?}");
     assert!(played);
     let frame = app
-        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .read_with(&vcx, |app, _| app.players.stickers.any_frame(HAND_FILE))
         .expect("a lone emoji's frame");
     assert_eq!(frame.as_bytes(0).and_then(|b| b.first().copied()), Some(0));
 }
@@ -595,12 +595,12 @@ fn closing_a_chat_window_keeps_the_clips_the_main_window_shares(cx: &mut TestApp
     let (app, mut vcx) = open_demo(cx);
     let chat_window = chat_in_both_windows(&app, &mut vcx);
     let first = app.read_with(&vcx, |app, _| {
-        app.playback.stickers.first_frames_of(Some(HAND_FILE))
+        app.players.stickers.first_frames_of(Some(HAND_FILE))
     });
     assert!(!first.is_empty() && first.iter().all(Option::is_some));
     main_frame(&app, &mut vcx);
     let frame = app
-        .read_with(&vcx, |app, _| app.playback.stickers.any_frame(HAND_FILE))
+        .read_with(&vcx, |app, _| app.players.stickers.any_frame(HAND_FILE))
         .expect("a lone emoji's frame");
     let probe = atlas_probe(&frame);
     drop(frame);
@@ -615,7 +615,7 @@ fn closing_a_chat_window_keeps_the_clips_the_main_window_shares(cx: &mut TestApp
         vcx.run_until_parked();
     }
     let now = app.read_with(&vcx, |app, _| {
-        app.playback.stickers.first_frames_of(Some(HAND_FILE))
+        app.players.stickers.first_frames_of(Some(HAND_FILE))
     });
     assert_eq!(now, first, "none closed and opened again");
 }
@@ -674,7 +674,7 @@ fn third_chat(app: &Entity<QuillApp>, vcx: &VisualTestContext, other: ChatId) ->
 fn give_status(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
     use quill::telegram::envelope::ChatKind;
     app.update(vcx, |app, _| {
-        app.playback
+        app.players
             .stickers
             .set_fixture(STATUS_FILE, Arc::new(one_second));
         let session = app.demo_session.as_mut().expect("the demo session");
@@ -705,7 +705,7 @@ fn once_on_a_stopped_clock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) 
         let session = app.demo_session.as_mut().expect("the demo session");
         session.settings.media_prefs.loop_animated_stickers = false;
         app.stop_sticker_playback();
-        app.playback.stickers.freeze();
+        app.players.stickers.freeze();
     });
     settle(app, vcx);
 }
@@ -714,10 +714,10 @@ fn once_on_a_stopped_clock(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) 
 fn play_on(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     for _ in 0..25 {
         app.read_with(vcx, |app, _| {
-            app.playback.stickers.skip(Duration::from_millis(100));
+            app.players.stickers.skip(Duration::from_millis(100));
         });
         main_frame(app, vcx);
-        app.read_with(vcx, |app, _| app.playback.stickers.settle());
+        app.read_with(vcx, |app, _| app.players.stickers.settle());
     }
 }
 
@@ -769,7 +769,7 @@ fn the_chat_lists_emoji_stay_at_rest_when_the_main_window_opens_a_chat(cx: &mut 
         app.read_with(vcx, |app, _| {
             heads
                 .iter()
-                .map(|(head, file)| app.playback.stickers.head_progress(*head, *file))
+                .map(|(head, file)| app.players.stickers.head_progress(*head, *file))
                 .collect::<Vec<_>>()
         })
     };
@@ -782,7 +782,7 @@ fn the_chat_lists_emoji_stay_at_rest_when_the_main_window_opens_a_chat(cx: &mut 
     );
     let clips = |app: &Entity<QuillApp>, vcx: &VisualTestContext, file| {
         app.read_with(vcx, |app, _| {
-            app.playback.stickers.first_frames_of(Some(file))
+            app.players.stickers.first_frames_of(Some(file))
         })
     };
     let status_clips = clips(&app, &vcx, STATUS_FILE);
@@ -811,7 +811,7 @@ fn the_chat_lists_emoji_stay_at_rest_when_the_main_window_opens_a_chat(cx: &mut 
     };
     stayed(&app, &vcx, "opened");
     // The rows have their frames at once: no fallback while a clip opens.
-    let status_frame = app.read_with(&vcx, |app, _| app.playback.stickers.any_frame(STATUS_FILE));
+    let status_frame = app.read_with(&vcx, |app, _| app.players.stickers.any_frame(STATUS_FILE));
     assert!(status_frame.is_some(), "the status has a frame to show");
     main_frame(&app, &mut vcx);
     stayed(&app, &vcx, "the next frame");
@@ -833,7 +833,7 @@ fn an_empty_chats_greeting_closes_with_the_chat_and_plays_again(cx: &mut TestApp
     let (app, mut vcx) = open_demo(cx);
     let empty = other_chat(&app, &vcx);
     app.update(&mut vcx, |app, _| {
-        app.playback
+        app.players
             .stickers
             .set_fixture(GREETING_FILE, Arc::new(one_second));
         let session = app.demo_session.as_mut().expect("the demo session");
@@ -853,7 +853,7 @@ fn an_empty_chats_greeting_closes_with_the_chat_and_plays_again(cx: &mut TestApp
     let head = greeting_head(empty, quill::ids::FileId(GREETING_FILE));
     let greeting = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
         app.read_with(vcx, |app, _| {
-            let player = &app.playback.stickers;
+            let player = &app.players.stickers;
             (
                 player.clips_of(GREETING_FILE),
                 player.head_known(head, GREETING_FILE),
@@ -894,7 +894,7 @@ fn the_headers_status_plays_again_on_return_and_the_rows_stays_at_rest(cx: &mut 
     let row = status_head(StatusSurface::ListRow, CHAT, STATUS_ID);
     let progress = |app: &Entity<QuillApp>, vcx: &VisualTestContext| {
         app.read_with(vcx, |app, _| {
-            let player = &app.playback.stickers;
+            let player = &app.players.stickers;
             [header, row].map(|head| player.head_progress(head, STATUS_FILE))
         })
     };

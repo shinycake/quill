@@ -85,10 +85,7 @@ fn a_paused_track_ticks_only_when_something_could_change(cx: &mut TestAppContext
     }
 
     app.update(vcx, |app, cx| app.toggle_active_playback(cx));
-    assert!(
-        app.read_with(vcx, |app, _| app.playback.is_playing()),
-        "resumed"
-    );
+    assert!(app.read_with(vcx, |app, _| app.is_playing()), "resumed");
     passes_over(vcx, 2).assert_passes(7, 10, "in 2 s resumed");
 }
 

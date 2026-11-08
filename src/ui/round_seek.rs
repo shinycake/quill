@@ -175,7 +175,7 @@ pub(super) fn round_seek_overlay(
                     let seeking = app
                         .update(cx, |this, cx| {
                             let took = this
-                                .playback
+                                .players
                                 .inline_videos
                                 .seek_to(chat_id, message_id, fraction);
                             cx.notify();
@@ -197,7 +197,7 @@ pub(super) fn round_seek_overlay(
                     }
                     let fraction = ring_fraction(center, event.position);
                     let _ = app.update(cx, |this, cx| {
-                        let videos = &this.playback.inline_videos;
+                        let videos = &this.players.inline_videos;
                         if videos.is_seeking(chat_id, message_id) {
                             videos.seek_to(chat_id, message_id, fraction);
                             cx.notify();
@@ -210,7 +210,7 @@ pub(super) fn round_seek_overlay(
                     return;
                 }
                 let _ = app.update(cx, |this, cx| {
-                    let videos = &this.playback.inline_videos;
+                    let videos = &this.players.inline_videos;
                     if videos.is_seeking(chat_id, message_id) {
                         videos.end_seek(chat_id, message_id);
                         cx.notify();

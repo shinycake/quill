@@ -43,10 +43,10 @@ fn a_long_start_shows_pause_alone_on_the_row(cx: &mut TestAppContext) {
     let song = track("ui-long-start.wav", 4);
     let (open, clock) = app.update(&mut vcx, |app, _| {
         let clock;
-        (app.playback.audio, clock) = AudioEngine::new(output).with_manual_clock();
-        app.playback.audio.set_simulation(None);
-        let open = app.playback.audio.gate_builds();
-        app.playback
+        (app.players.audio, clock) = AudioEngine::new(output).with_manual_clock();
+        app.players.audio.set_simulation(None);
+        let open = app.players.audio.gate_builds();
+        app.players
             .audio
             .start(&song, 2.0, 1.0, 1.0, 214.0)
             .unwrap();
@@ -56,13 +56,13 @@ fn a_long_start_shows_pause_alone_on_the_row(cx: &mut TestAppContext) {
         let row = app.seek_bar_view(DEMO_CHAT, DEMO_SONG, DEMO_SONG_SECS);
         assert!(row.is_playing, "tdesktop: Pause from the press on");
         assert_eq!(row.display_secs, 2.0);
-        app.playback.track_shown((false, false))
+        app.track_shown((false, false))
     };
     let pressed = app.read_with(&vcx, |app, _| shown(app));
     clock.store(5000, std::sync::atomic::Ordering::Relaxed);
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.audio.state(), EngineState::Loading);
+        assert_eq!(app.players.audio.state(), EngineState::Loading);
         assert_eq!(shown(app), pressed);
     });
     drop(open);
@@ -76,21 +76,21 @@ fn a_finished_build_lands_when_it_says_so_and_a_failed_one_tells_the_user(cx: &m
     let (output, _device) = device();
     let missing = track("ui-landing.wav", 1).with_file_name("ui-landing-missing.wav");
     app.update(&mut vcx, |app, cx| {
-        app.playback.audio = AudioEngine::new(output);
-        app.playback.audio.set_simulation(None);
+        app.players.audio = AudioEngine::new(output);
+        app.players.audio.set_simulation(None);
         app.watch_audio_builds(cx);
-        app.playback.audio.set_on_built(|| {});
-        app.playback
+        app.players.audio.set_on_built(|| {});
+        app.players
             .audio
             .start(&missing, 1.0, 1.0, 1.0, 214.0)
             .unwrap();
-        app.playback.audio.await_build_done();
-        assert_eq!(app.playback.audio.state(), EngineState::Loading);
+        app.players.audio.await_build_done();
+        assert_eq!(app.players.audio.state(), EngineState::Loading);
     });
     AUDIO_BUILT.poke();
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.audio.state(), EngineState::Failed);
+        assert_eq!(app.players.audio.state(), EngineState::Failed);
         assert_eq!(
             app.connection.status_note(),
             tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED)
