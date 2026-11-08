@@ -412,6 +412,38 @@ def main_only_failures(
     return failures
 
 
+# A driver call that makes a chat the session's open one (round 11).
+DRIVER_OPEN = re.compile(
+    r"\bdriver\s*\.\s*(select_search_chat_open|select_chat_open|select_search_message"
+    r"|select_chat|switch_to_thread_chat)\s*\("
+)
+ROUTE_CALL = re.compile(r"\broute_chat_open\s*\(")
+ROUTED_MARKER = re.compile(r"//\s*routed:\s*\S")
+
+
+def unrouted_opens(root: pathlib.Path, texts: dict) -> list[str]:
+    """A `QuillApp` method that opens a chat through the driver asks
+    `route_chat_open` first: a chat with a window of its own shows there,
+    and what the open carries reaches that window. `// routed: <why>` in
+    the method says why it needs no routing."""
+    failures = []
+    for path, text in texts.items():
+        for impl in APP_IMPL.finditer(text):
+            block = block_after(text, impl.end() - 1)
+            base = impl.end() - 1
+            for m in METHOD.finditer(block):
+                body = block_after(block, m.end())
+                opens = DRIVER_OPEN.search(body)
+                if not opens or ROUTE_CALL.search(body) or ROUTED_MARKER.search(body):
+                    continue
+                line = text.count("\n", 0, base + m.start()) + 1
+                rel = path.relative_to(root.parent.parent)
+                failures.append(
+                    f"{rel}:{line}: {m.group(1)}() opens a chat ({opens.group(1)}) without route_chat_open"
+                )
+    return failures
+
+
 def main() -> int:
     root = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT
     global SLOT_FIELDS
@@ -480,6 +512,16 @@ def main() -> int:
                 rel = path.relative_to(root.parent.parent)
                 what = ", ".join((direct + [f"{c}()" for c in via])[:4])
                 screen_failures.append(f"{rel}:{line}: {kind} touches the screen's state ({what})")
+    unrouted = unrouted_opens(root, texts)
+    if unrouted:
+        print("\n".join(unrouted))
+        print(
+            f"\n{len(unrouted)} chat open(s) in src/ui skip the router.\n"
+            "Open the chat with select_chat_request(ChatOpen, ...), or call\n"
+            "route_chat_open first and go on only when it gives the request back\n"
+            "(src/ui/chat_window/routing.rs). A switch that must stay in place (a\n"
+            "chat replaced by its upgrade) says why with `// routed: <why>`.\n"
+        )
     if main_only:
         print("\n".join(main_only))
         print(
@@ -511,7 +553,7 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures or main_only:
+    if screen_failures or main_only or unrouted:
         return 1
     print("window scope: OK")
     print("screen scope: OK")

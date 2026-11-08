@@ -194,6 +194,29 @@ impl QuillApp {
         }
     }
 
+    /// The history key's last part for the Saved Messages view shown: a
+    /// sublist and each tag filter (of all of Saved Messages or of one
+    /// sublist) is a history of its own, with its own saved place and its
+    /// own landing. `None` for the plain Saved history and every other
+    /// chat. Negative, so it never names a reply thread.
+    pub(super) fn saved_view_scope(&self) -> Option<i64> {
+        use std::hash::{Hash, Hasher};
+        let saved = &self.session()?.threads.saved;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        match self.saved_mode()? {
+            SavedMode::Sublists => return None,
+            SavedMode::Sublist => {
+                ("sublist", saved.sublist.as_ref()?.topic_id).hash(&mut hasher);
+            }
+            SavedMode::Tag => {
+                let search = saved.tag_search.as_ref()?;
+                ("tag", search.topic_id, format!("{:?}", search.tag)).hash(&mut hasher);
+            }
+        }
+        let positive = i64::try_from(hasher.finish() >> 2).unwrap_or(i64::MAX);
+        Some(-positive.saturating_add(1))
+    }
+
     /// Sublist and tag views are read-only: the composer goes away.
     pub(super) fn saved_readonly(&self) -> bool {
         self.saved_mode().is_some()

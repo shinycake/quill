@@ -273,7 +273,7 @@ impl QuillApp {
             scope,
             messages: Some(&history.messages),
             extra: 0,
-            window_epoch: 0,
+            window_epoch: history.window_epoch,
             unread_anchor: None,
             translated: None,
             tail: Some(0),

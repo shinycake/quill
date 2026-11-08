@@ -7,7 +7,6 @@ use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::menu::AppMenuBar;
-use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
@@ -140,94 +139,7 @@ impl QuillApp {
             app.seed_demo_attachments(pending_attachments);
         }
 
-        let menu_app = cx.weak_entity();
-        cx.intercept_keystrokes(move |event, window, cx| {
-            // Shortcut capture owns the key. This interceptor is registered
-            // first so it observes `keybinding_capture` before the capture
-            // handler clears it.
-            let capturing = menu_app
-                .update(cx, |this, _| this.keybinding_capture_active())
-                .unwrap_or(false);
-            if !capturing {
-                let menu_handled = menu_app
-                    .update(cx, |this, cx| {
-                        this.context_menu_key(&event.keystroke, window, cx)
-                    })
-                    .unwrap_or(false);
-                if menu_handled {
-                    cx.stop_propagation();
-                    return;
-                }
-            }
-            // Viewer playback keys (Space/K/J/L/Enter, tdesktop
-            // `handleKeyPress`). A dialog over the viewer (delete
-            // confirmation) keeps its own Enter and Space.
-            if !capturing && !window.has_active_dialog(cx) {
-                let viewer_handled = menu_app
-                    .update(cx, |this, cx| {
-                        this.handle_viewer_key(&event.keystroke, window, cx)
-                    })
-                    .unwrap_or(false);
-                if viewer_handled {
-                    cx.stop_propagation();
-                    return;
-                }
-            }
-            if capturing || event.keystroke.modifiers.modified() {
-                return;
-            }
-            let handled = match event.keystroke.key.as_str() {
-                "escape" => menu_app
-                    .update(cx, |this, cx| {
-                        this.close_context_menus(cx)
-                            || this.close_media_viewer_on_escape(cx)
-                            || this.close_media_panel(cx)
-                            || this.close_inline_results(cx)
-                            || this.close_mention_menu(cx)
-                            || this.close_suggest_menu(true, cx)
-                            || this.close_command_menu(cx)
-                            || this.dismiss_sticker_suggestions(window, cx)
-                    })
-                    .unwrap_or(false),
-                "up" => menu_app
-                    .update(cx, |this, cx| {
-                        this.step_inline_results(-1, cx)
-                            || this.step_mention_menu(-1, cx)
-                            || this.step_suggest_menu(-1, false, cx)
-                            || this.step_command_menu(-1, cx)
-                    })
-                    .unwrap_or(false),
-                "down" => menu_app
-                    .update(cx, |this, cx| {
-                        this.step_inline_results(1, cx)
-                            || this.step_mention_menu(1, cx)
-                            || this.step_suggest_menu(1, false, cx)
-                            || this.step_command_menu(1, cx)
-                    })
-                    .unwrap_or(false),
-                // Tab completes the highlighted `@` / `#` / `:` suggestion.
-                "tab" => menu_app
-                    .update(cx, |this, cx| {
-                        this.pick_mention_selection(window, cx)
-                            || this.pick_suggest_selection(true, window, cx)
-                            || this.insert_command_menu_selection(window, cx)
-                    })
-                    .unwrap_or(false),
-                // The emoji strip is horizontal (tdesktop steps with
-                // Left/Right too); the key keeps moving the caret otherwise.
-                "left" => menu_app
-                    .update(cx, |this, cx| this.step_suggest_menu(-1, true, cx))
-                    .unwrap_or(false),
-                "right" => menu_app
-                    .update(cx, |this, cx| this.step_suggest_menu(1, true, cx))
-                    .unwrap_or(false),
-                _ => false,
-            };
-            if handled {
-                cx.stop_propagation();
-            }
-        })
-        .detach();
+        super::window_keys::intercept_window_keys(cx);
         // GPUI matches keybindings before `on_key_down`. While a shortcut
         // row is capturing, consume the key here so Escape cannot dismiss
         // Appearance and quit/close/other chords cannot fire underneath.

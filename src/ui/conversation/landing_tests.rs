@@ -178,6 +178,33 @@ fn a_chat_left_at_its_bar_reopens_at_the_bottom_once_read(cx: &mut TestAppContex
     );
 }
 
+/// Going to the same message twice lands on it again, with the view
+/// scrolled away in between: jumps are told apart by their serial, not by
+/// the message.
+#[gpui_kit::test]
+fn the_same_jump_twice_lands_both_times(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx, 1_080, 1_079);
+    let vcx = &mut vcx;
+    let jump = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, cx| {
+            app.jump_to_pinned_message(quill::ids::MessageId(1_010), cx)
+        });
+        frames(vcx);
+        frames(vcx);
+    };
+    assert!(following(&app, vcx), "opened at the bottom");
+    jump(&app, vcx);
+    assert!(!following(&app, vcx), "landed on the message");
+    app.update_in(vcx, |app, window, cx| {
+        app.scroll_history_by_key(crate::ui::shortcut_pack::HistoryKey::Bottom, window, cx);
+    });
+    frames(vcx);
+    frames(vcx);
+    assert!(following(&app, vcx), "back at the bottom");
+    jump(&app, vcx);
+    assert!(!following(&app, vcx), "the second jump lands too");
+}
+
 /// New messages after a chat was left at its old bar: it reopens with the
 /// new bar at the top.
 #[gpui_kit::test]

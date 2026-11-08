@@ -134,6 +134,37 @@ impl super::ChatWindows {
     }
 }
 
+impl super::ChatWindows {
+    /// The inline results button's round trip a chat window not in place
+    /// began, waiting to send `bot_id`'s start: it moves to the window
+    /// that opens the bot's chat (`QuillApp::take_waiting_inline_return`).
+    pub(in crate::ui) fn take_slot_inline_return(
+        &self,
+        bot_id: i64,
+    ) -> Option<super::super::inline_return::InlineReturn> {
+        self.slots().find_map(|slot| {
+            let mut slot = slot.try_borrow_mut().ok()?;
+            let waits = slot
+                .composer_ui
+                .inline_return
+                .as_ref()
+                .is_some_and(|ret| ret.waits_for_start(bot_id));
+            waits
+                .then(|| slot.composer_ui.inline_return.take())
+                .flatten()
+        })
+    }
+
+    /// Whether the media panel of a chat window whose state is not in
+    /// place shows its GIFs tab (`QuillApp::sync_gif_downloads`).
+    pub(in crate::ui) fn slot_shows_gifs(&self) -> bool {
+        self.slots().any(|slot| {
+            slot.try_borrow()
+                .is_ok_and(|slot| slot.pickers.media_panel.shows_gifs())
+        })
+    }
+}
+
 impl WindowSlot {
     /// A fresh slot, with a compose field wired like the main window's and
     /// its own picker search fields.
@@ -163,8 +194,10 @@ impl WindowSlot {
             .detach();
         }
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
+        let history = HistoryUi::new(cx);
+        QuillApp::observe_history_scroll(&history, Some(chat_id), cx);
         Self {
-            history: HistoryUi::new(cx),
+            history,
             composer,
             composer_ui: Box::new(ComposerUi::new()),
             chat_ui: Box::new(ChatUi::for_chat(Some(chat_id))),

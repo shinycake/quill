@@ -94,9 +94,10 @@ pub(crate) struct HistoryUi {
     /// (ready files, downloading files) at the last history render; a
     /// change remeasures the virtualized rows (media grew in place).
     pub(super) media_signature: (u64, usize),
-    /// kit Phase 3: last chat-search highlight the scroller jumped to —
-    /// avoids re-scrolling every frame while the highlight is set.
-    pub(super) last_highlight: Option<MessageId>,
+    /// The last jump the scroller landed on, as `(jump serial, message)`:
+    /// it lands once per jump, so a second jump to the same message lands
+    /// again, and a highlight that stays set is not scrolled to each frame.
+    pub(super) last_highlight: Option<(u64, MessageId)>,
     /// `(jump serial, start)` of the running jump-highlight fade.
     pub(super) highlight_fade: Option<(u64, std::time::Instant)>,
     /// B11: the reaction that just flew from the message (message, glyph, start).
@@ -174,6 +175,21 @@ pub(crate) struct HistoryUi {
     pub(super) pane_width: std::rc::Rc<std::cell::Cell<Pixels>>,
     /// The pull to the next unread channel (`pull_next_ui`).
     pub(super) pull: super::pull_next_ui::PullUi,
+    /// The subsection tab strip over this window's conversation (forum
+    /// topics, bot topics, channel direct messages): each window scrolls
+    /// its own.
+    pub(super) subsection_tabs: SubsectionTabsScroll,
+}
+
+/// Where a window's subsection tabs are scrolled (`subsection_tabs`).
+#[derive(Default)]
+pub(super) struct SubsectionTabsScroll {
+    /// The horizontal strip (top or bottom layout).
+    pub(super) strip: gpui_kit::ScrollHandle,
+    /// The Left layout's column.
+    pub(super) column: gpui_kit::ScrollHandle,
+    /// What the selected tab was last scrolled into view for.
+    pub(super) revealed: std::cell::Cell<Option<super::folder_tabs_fit::RevealKey>>,
 }
 
 /// The open chat is left as any leave: the draft is saved through the old
@@ -256,6 +272,7 @@ impl HistoryUi {
             width_probed: Default::default(),
             pane_width: Default::default(),
             pull: Default::default(),
+            subsection_tabs: Default::default(),
         }
     }
 }

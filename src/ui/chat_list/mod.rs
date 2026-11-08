@@ -171,6 +171,7 @@ impl QuillApp {
             open_at,
             reply,
             topic,
+            carry,
         } = open;
         self.flush_leaving_draft(cx);
         // A reply aimed at this chat from another one survives the draft
@@ -204,11 +205,7 @@ impl QuillApp {
             cx,
         );
         if self.gif_panel_open() {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.close_gif_panel();
-            } else if let Some(session) = self.demo_session.as_mut() {
-                session.stickers.gifs.close();
-            }
+            self.close_gif_panel(cx);
         }
         if self.sticker_panel_open() {
             if let Some(live) = self.live.as_mut() {
@@ -268,6 +265,7 @@ impl QuillApp {
         if let Some(topic) = topic {
             self.select_topic_ui(topic, cx);
         }
+        self.apply_open_carry(chat_id, carry, Some(window), cx);
         cx.notify();
         true
     }

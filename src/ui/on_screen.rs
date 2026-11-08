@@ -303,10 +303,7 @@ impl OnScreen {
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         let history = super::history_state::HistoryUi::new(cx);
         // The scroller notifies on every scroll: drives the floating date.
-        cx.observe(&history.scroller, |this, _, cx| {
-            this.note_history_scroll(cx);
-        })
-        .detach();
+        QuillApp::observe_history_scroll(&history, None, cx);
         let message_ui = super::message_state::MessageUi::new(window, cx);
         super::history_a11y::install(&message_ui.history_focus, window, cx);
         Self {

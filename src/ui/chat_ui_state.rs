@@ -105,6 +105,9 @@ pub(crate) struct ChatUi {
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.
     pub(super) thread_info_open: bool,
+    /// Text a chat open handed over without a window at hand, for this
+    /// chat's composer (`QuillApp::apply_compose_after_open`).
+    pub(super) compose_after_open: Option<String>,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.

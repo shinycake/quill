@@ -130,12 +130,13 @@ impl QuillApp {
     pub(super) fn anchor_opened_history(
         &mut self,
         key: ScrollKey,
-        highlight_id: Option<MessageId>,
+        jump: Option<(u64, MessageId)>,
         cx: &mut Context<Self>,
     ) {
+        let highlight_id = jump.map(|(_, id)| id);
         let rows = &self.screen.history.rows;
         let row_of = |id: MessageId| rows.iter().position(|row| row.contains(id));
-        let highlighted = highlight_id.filter(|id| row_of(*id).is_some());
+        let highlighted = jump.filter(|(_, id)| row_of(*id).is_some());
         if highlighted.is_some() {
             self.screen.history.last_highlight = highlighted;
         }
@@ -154,7 +155,7 @@ impl QuillApp {
             });
             return;
         }
-        if let Some(target) = highlighted {
+        if let Some((_, target)) = highlighted {
             self.start_landing(LandingGoal::Message(target), cx);
         } else if !self.start_landing(LandingGoal::Bar, cx) {
             self.history

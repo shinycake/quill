@@ -13,7 +13,7 @@
 use super::drop_topic::DropPayload;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use quill::drop_modes::{DragEntry, DragState, DropAction, classify};
+use quill::drop_modes::{DragEntry, DragState, classify};
 use quill::forward_drag::{Destination, Drop, ForwardDrag, list_accepts};
 use quill::suggested_posts::DirectMessagesRole;
 use std::collections::HashMap;
@@ -288,40 +288,26 @@ impl QuillApp {
             self.connection.set_note(StatusNote::error(note));
             return;
         }
-        if self.set_forward_bar(chat_id, None, drag, cx) {
-            self.select_listed_chat(chat_id, window, cx);
+        // The forward rides with the open, to the window that shows the
+        // chat (its own, when it has one).
+        if let Some(draft) = Self::forward_draft_of(drag, None) {
+            let open = crate::ui::chat_window::ChatOpen::new(chat_id).forwarding(draft);
+            self.select_chat_request(open, window, cx);
         }
     }
 
-    /// The messages of `drag` wait in the forward bar of `chat_id`, the same
-    /// state the Forward box leaves when one chat is chosen. False when
-    /// nothing could be carried.
-    pub(in crate::ui) fn set_forward_bar(
-        &mut self,
-        chat_id: ChatId,
-        topic: Option<i32>,
+    /// The forward of `drag`'s messages, for `topic` when there is one.
+    /// None when nothing could be carried.
+    pub(in crate::ui) fn forward_draft_of(
         drag: &ForwardDrag,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(first) = drag.ids().first().copied() else {
-            return false;
-        };
-        let Some(mut draft) =
-            quill::composer::ForwardDraft::from_message(drag.from_chat(), first, false)
-        else {
-            return false;
-        };
+        topic: Option<i32>,
+    ) -> Option<quill::composer::ForwardDraft> {
+        let first = drag.ids().first().copied()?;
+        let mut draft =
+            quill::composer::ForwardDraft::from_message(drag.from_chat(), first, false)?;
         draft.message_ids = drag.ids().to_vec();
         draft.topic_id = topic;
-        self.share.pending_forward = Some(draft);
-        self.share.forward_bar_dest = Some(chat_id);
-        self.share.forward_picker_open = false;
-        self.share.selection.clear();
-        self.connection.set_note(StatusNote::silent(tr(
-            keys::Q_OPS_FORWARD_BAR_READY_PRESS_SEND,
-        )));
-        cx.notify();
-        true
+        Some(draft)
     }
 
     /// Freezes the list order at what is shown now, for two more seconds.
@@ -402,17 +388,13 @@ impl QuillApp {
             }
             return;
         }
-        self.select_listed_chat(chat_id, window, cx);
-        // A chat that shows in a window of its own does not become this
-        // window's open chat.
-        if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
-            return;
-        }
-        match drag {
-            // One folder goes as one archive (`history_widget.cpp:7960`).
-            DragState::Folder => self.drop_on_zone(DropAction::Archive, paths, cx),
-            _ => self.drop_files_plain(paths, cx),
-        }
+        // The files ride with the open, to the window that shows the chat
+        // (its own, when it has one). One folder goes as one archive
+        // (`history_widget.cpp:7960`).
+        let archive = matches!(drag, DragState::Folder);
+        let open =
+            crate::ui::chat_window::ChatOpen::new(chat_id).with_files(paths.to_vec(), archive);
+        self.select_chat_request(open, window, cx);
     }
 
     /// The row wrapped so a file drag can light it up and drop on it.
