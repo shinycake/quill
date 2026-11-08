@@ -39,7 +39,7 @@ impl QuillApp {
                 "menu-save-to-profile",
                 tr(keys::CONTEXT_SAVE_MUSIC_PROFILE),
                 false,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
                 {
                     let target = target.clone();
@@ -78,7 +78,7 @@ impl QuillApp {
                 "menu-save-to-saved",
                 tr(keys::CONTEXT_SAVE_MUSIC_SAVED),
                 false,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
                 move |this, _, cx| {
                     let me = this.session().and_then(|s| s.my_user_id);
@@ -109,7 +109,7 @@ impl QuillApp {
             "menu-save-to-downloads",
             tr(keys::CONTEXT_SAVE_MUSIC_FOLDER),
             false,
-            &self.frame.context_menu_items,
+            &self.frame.menu.items,
             cx,
             move |this, _, cx| {
                 this.save_message_media_as(chat_id, message_id, cx);
@@ -255,11 +255,7 @@ impl QuillApp {
                         .text_sm()
                         .text_color(text_menu())
                         .hover(|style| style.bg(row_hover))
-                        .menu_key_target(
-                            row_key(audience_order),
-                            &self.frame.context_menu_items,
-                            cx,
-                        )
+                        .menu_key_target(row_key(audience_order), &self.frame.menu.items, cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label(label.clone())
                         .child(Icon::new(IconName::Eye).size(px(16.)))
@@ -386,7 +382,7 @@ impl QuillApp {
             .messages
             .message_menu_actions
             .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
-        let items = &self.frame.context_menu_items;
+        let items = &self.frame.menu.items;
         let person = |ix: u64,
                       sender: MessageSender,
                       detail: Option<String>,

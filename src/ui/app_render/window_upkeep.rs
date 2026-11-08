@@ -12,6 +12,9 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The window's menus and layers take and give back its focus, and
+        // the menu's items claim their handles afresh for this frame.
+        self.menu_focus_upkeep(window, cx);
         // A resolved comment thread moves the view into its discussion group.
         self.advance_thread(window, cx);
         // A deleted message's reply or edit bar goes.

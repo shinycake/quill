@@ -22,6 +22,7 @@ use super::super::app::QuillApp;
 use super::super::app_slice::WindowSlices;
 use super::super::chat_ui_state::ChatUi;
 use super::super::composer_state::ComposerUi;
+use super::super::context_menu_keys::MenuFocus;
 use super::super::glyph_sweep;
 use super::super::history_state::HistoryUi;
 use super::super::image_budget::{BoundedImageCache, WindowDraw};
@@ -66,6 +67,7 @@ impl SlotFarewell for ShareUi {}
 impl SlotFarewell for LockField {}
 impl SlotFarewell for Surfaces {}
 impl SlotFarewell for MotionState {}
+impl SlotFarewell for MenuFocus {}
 
 /// The Picture-in-Picture window opened from this window's viewer plays
 /// the window's clip, with its link in this slot: it closes with it.
@@ -113,6 +115,8 @@ super::super::on_screen::on_screen_fields! {
     surfaces: Surfaces,
     /// The window's history reveal and selection fades (`FrameUi::motion`).
     motion: MotionState,
+    /// The window's own menu items and focus hand-off (`FrameUi::menu`).
+    menu: MenuFocus,
 }
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
@@ -209,6 +213,7 @@ impl WindowSlot {
             lock_field: LockField::new(window, cx, app.account.passcode.locked),
             surfaces: Surfaces::new(std::time::Instant::now()),
             motion: MotionState::default(),
+            menu: MenuFocus::new(cx),
             slices: WindowSlices::new(Some(chat_id), cx)
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
@@ -274,6 +279,7 @@ impl QuillApp {
         std::mem::swap(&mut self.slices.window, &mut slot.slices);
         std::mem::swap(&mut self.frame.surfaces, &mut slot.surfaces);
         std::mem::swap(&mut self.frame.motion, &mut slot.motion);
+        std::mem::swap(&mut self.frame.menu, &mut slot.menu);
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for

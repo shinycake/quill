@@ -12,9 +12,11 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
-    /// The emoji panel is open for the Edit box's name field.
+    /// The emoji panel is open for the Edit box's name field. Only the
+    /// main window draws the box, so a chat window's panel is never its.
     pub(in crate::ui) fn group_title_emoji_active(&self) -> bool {
-        self.group_edit_box().is_some_and(|edit| edit.title_emoji)
+        !self.windows.in_window()
+            && self.group_edit_box().is_some_and(|edit| edit.title_emoji)
             && self.pickers.media_panel.open
             && self.pickers.media_panel.reaction.is_none()
             && self.pickers.media_panel.status.is_none()

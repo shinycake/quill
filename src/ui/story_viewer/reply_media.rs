@@ -44,12 +44,16 @@ impl QuillApp {
         )
     }
 
-    /// The emoji / sticker / GIF panel is open for the story reply.
+    /// The emoji / sticker / GIF panel is open for the story reply. Only
+    /// the main window draws the story viewer, so a chat window's panel
+    /// is never the story reply's.
     pub(in crate::ui) fn story_reply_panel_active(&self) -> bool {
-        picks_go_to_story(
-            self.stories.viewer_ui().reply_open,
-            self.stories.viewer_ui().reply_panel,
-        ) && self.pickers.media_panel.open
+        !self.windows.in_window()
+            && picks_go_to_story(
+                self.stories.viewer_ui().reply_open,
+                self.stories.viewer_ui().reply_panel,
+            )
+            && self.pickers.media_panel.open
             && self.pickers.media_panel.reaction.is_none()
             && self.pickers.media_panel.status.is_none()
     }

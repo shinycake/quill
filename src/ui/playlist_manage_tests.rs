@@ -134,7 +134,7 @@ fn tab_reaches_the_track_menu_items(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     vcx.simulate_keystrokes("tab");
     let (inside, on_frame) = vcx.update(|window, cx| {
-        let menu = app.read(cx).frame.context_menu_focus.clone();
+        let menu = app.read(cx).frame.menu.focus.clone();
         (menu.contains_focused(window, cx), menu.is_focused(window))
     });
     assert!(inside && !on_frame, "Tab lands on an item inside the menu");
@@ -170,7 +170,7 @@ fn down_and_up_wrap_through_the_track_menu_items(cx: &mut TestAppContext) {
         app.open_playlist_menu(FileId(2), point(px(300.), px(200.)), cx);
     });
     vcx.run_until_parked();
-    let items = app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count());
+    let items = app.read_with(vcx, |app, _| app.frame.menu.items.enabled_count());
     assert!(items >= 2, "the track menu has items, saw {items}");
     let focus = |vcx: &mut VisualTestContext| vcx.update(|window, cx| window.focused(cx));
     vcx.simulate_keystrokes("down");

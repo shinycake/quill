@@ -369,11 +369,16 @@ pub(super) struct LayerFocus {
 }
 
 impl QuillApp {
+    /// Whether a tracked layer is open in the window in place. A chat
+    /// window counts only the layers it draws (`WINDOW_LAYERS`).
     fn focus_return_layer_open(&self) -> bool {
+        let in_window = self.windows.in_window();
         self.pickers.media_panel.open
-            || ESC_LAYERS
-                .iter()
-                .any(|layer| FOCUS_RETURN_LAYERS.contains(&layer.name) && (layer.is_open)(self))
+            || ESC_LAYERS.iter().any(|layer| {
+                FOCUS_RETURN_LAYERS.contains(&layer.name)
+                    && (!in_window || WINDOW_LAYERS.contains(&layer.name))
+                    && (layer.is_open)(self)
+            })
     }
 
     /// One shared focus return for the hand-drawn layers. Runs every frame:
@@ -383,7 +388,7 @@ impl QuillApp {
     pub(super) fn track_layer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.focus_return_layer_open();
         let focused = window.focused(cx);
-        let state = &mut self.frame.layer_focus;
+        let state = &mut self.frame.menu.layers;
         if open {
             state.open_focus = focused.map(|handle| handle.downgrade());
         } else if state.was_open {
@@ -397,7 +402,7 @@ impl QuillApp {
         } else {
             state.base = focused.map(|handle| handle.downgrade());
         }
-        self.frame.layer_focus.was_open = open;
+        self.frame.menu.layers.was_open = open;
     }
 }
 

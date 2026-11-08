@@ -83,13 +83,9 @@ pub(crate) struct FrameUi {
     pub(super) capture_blocked: bool,
     /// The "screenshots can't be blocked here" note was dismissed (Linux).
     pub(super) capture_notice_dismissed: bool,
-    pub(super) context_menu_focus: FocusHandle,
-    /// Focus handles of the open context menu's items.
-    pub(super) context_menu_items: super::context_menu_keys::ContextMenuItems,
-    pub(super) context_menu_was_open: bool,
-    pub(super) context_menu_previous_focus: Option<FocusHandle>,
-    /// Focus return for hand-drawn layers (see `esc_stack::track_layer_focus`).
-    pub(super) layer_focus: super::esc_stack::LayerFocus,
+    /// The focus hand-off of the window in place's context menus and
+    /// layers: a chat window swaps in its own (`slot`).
+    pub(super) menu: super::context_menu_keys::MenuFocus,
     /// The one timer behind the debounced draft save (`draft_timer.rs`).
     /// App-wide like the driver's pending draft it commits: a chat
     /// window's state swapped in when it fires must not hide it.
@@ -136,11 +132,7 @@ impl FrameUi {
             window_state_save_pending: false,
             capture_blocked: false,
             capture_notice_dismissed: false,
-            context_menu_focus: cx.focus_handle(),
-            context_menu_items: Default::default(),
-            context_menu_was_open: false,
-            context_menu_previous_focus: None,
-            layer_focus: Default::default(),
+            menu: super::context_menu_keys::MenuFocus::new(cx),
             draft_timer: Default::default(),
         }
     }

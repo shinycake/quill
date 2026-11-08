@@ -1818,3 +1818,79 @@ PTT slider; nothing here overlaps it.
   - The `group_call.ptt_delay_slider` entry in
     `scripts/app-wide-fields.txt` belongs to part 1, which moved the
     slider to `SettingsUi`.
+
+### Phase 12 (area B)
+
+Round 12 of the review, area B, on `claude/sm-review12-b`. The findings
+share one shape: state that every window shares, written by whichever
+window drew or acted last.
+
+- **Copy protection checks its own window's selection.** The selected
+  message and the selected emoji moved from two thread-locals into one
+  map keyed by `WindowId` (`selectable_text.rs`). Paint writes the
+  painting window's entry and `selected_message_text` reads the asking
+  window's. Before, the main window repainting after a chat window's
+  drag replaced the selection, so Copy in the chat window checked the
+  main window's chat and could copy a protected chat's text.
+- **Each window's message menu has its own focus.** The menu's focus
+  handle, item registry, open flag, previous focus and layer focus
+  moved into `MenuFocus` (`context_menu_keys.rs`). `FrameState` and
+  `WindowSlot` each hold one, and `swap_slot` exchanges them. The
+  hand-off (focus into the menu on open, back on close) is the first
+  step of `per_window_upkeep`, so a chat window's menu takes the keys
+  and gives the focus back to its own composer. `focus_return_layer_open`
+  counts only the window's own layers in a chat window.
+- **A link from a chat window brings the main window forward.** A
+  queued link remembers the window it was clicked in (`flow_window`,
+  carried through `pump_deep_link` the way the agent origin is). When
+  it opens a chat that has no window of its own, the main window is
+  raised after the open. A chat with its own window opens there.
+- **The media panel reads only its window.** `story_reply_panel_active`
+  and `group_title_emoji_active` are false in a chat window, so the
+  main window's story reply or group title emoji no longer hides a chat
+  window's panel or takes its picks. A Business Start Page sticker step
+  takes only a pick made in the main window
+  (`route_business_start_page_sticker`).
+- **A failed members page can be asked for again.** The members-more
+  error marks `(chat, filter)` in `GroupsState::member_more_failed`.
+  The inline members list takes the mark and, at the next user scroll,
+  clears `failed_offset` so the page is asked for again. A frame alone
+  does not retry, so a failing server is not asked in a loop. An empty
+  page still stops the list.
+- **Recent hashtags are the account's.** The list moved from the
+  composer's `SuggestUi` (one per window, loaded from the app root) to
+  `OnScreen::recent_hashtags`, an `OwnedBy` list loaded lazily from the
+  account's own `AccountPaths`. Every window offers the tags sent from
+  any of them, and another account keeps its own.
+- **Same shape, found in the sweep.**
+  - The sticker send flight names its window. Only that window draws
+    it, so the main window no longer draws a copy in the chat window's
+    coordinates (`send_fly.rs`).
+  - The spoiler specks' "painted this frame" flag is a set of
+    `WindowId`s. Each window's frame takes its own and asks for its
+    tick, so a chat window's spoilers keep moving while the main window
+    is not drawn.
+- **The guard.** `scripts/ui_statics.py`, run by
+  `check-window-scope.py`, lists every production `thread_local!`
+  static and static atomic or lock in src/ui. Each one has a type that
+  names `WindowId` or an entry in `scripts/ui-statics.txt` with the
+  reason it may be shared (scoped and restored around one draw, keyed
+  by something that is in one window at a time, a cache, or the app's
+  own). An entry whose static is gone fails too.
+
+Tests: `selectable_text_window_tests.rs` (two windows, two selections),
+`chat_window/window_menu_tests.rs` (a chat window's menu takes Down and
+gives the focus back), `chat_window/window_pick_tests.rs` (title emoji,
+Business sticker step, send flight, hashtags across windows and
+accounts), `spoiler_fx_window_tests.rs`, `inline_members_retry_tests.rs`,
+`state/tests/inline_members.rs` (the failed mark) and the deep link
+pump test (a queued link keeps its window).
+
+Not done, or not tested:
+- The main window raise has only a pump test; the open itself needs a
+  live client.
+- The members retry test drives the state and `maybe_load_more_inline`,
+  not a real scroll.
+- A typed link box (`DeepLinkState::Ui`) opened from a chat window does
+  not raise the main window.
+- The review's items marked not material are untouched.

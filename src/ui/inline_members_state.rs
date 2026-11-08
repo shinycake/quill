@@ -23,6 +23,10 @@ pub(crate) struct InlineMembersUi {
     pub(super) chat: Option<ChatId>,
     /// A next-page request at this offset failed; do not repeat it.
     pub(super) failed_offset: Option<i32>,
+    /// The request for the page at `failed_offset` failed (the session's
+    /// `member_more_failed`): the next scroll asks for it again. A page
+    /// that came back empty stays at `failed_offset`.
+    pub(super) retry_at_scroll: bool,
     pub(super) snapshot: RefCell<Option<MembersSnapshot>>,
 }
 
@@ -35,6 +39,7 @@ impl InlineMembersUi {
             scroll: ScrollHandle::new(),
             chat: None,
             failed_offset: None,
+            retry_at_scroll: false,
             snapshot: RefCell::new(None),
         }
     }
@@ -44,6 +49,7 @@ impl InlineMembersUi {
         self.shown = quill::inline_members::ROWS_STEP;
         self.chat = chat;
         self.failed_offset = None;
+        self.retry_at_scroll = false;
         self.snapshot.replace(None);
     }
 }

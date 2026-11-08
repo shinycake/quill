@@ -330,7 +330,7 @@ fn a_drawn_submenu_without_live_rows_keeps_the_focus_on_its_parent(cx: &mut Test
     let vcx = &mut vcx;
     hover_open_with_focus_on_mute(&app, vcx);
     app.update_in(vcx, |app, _, _| {
-        let items = &app.frame.context_menu_items;
+        let items = &app.frame.menu.items;
         let rows = items
             .keys
             .borrow()

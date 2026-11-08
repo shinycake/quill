@@ -189,6 +189,12 @@ impl Render for ChatWindowView {
             let outer = app.windows.scope;
             app.set_window_scope(Some(chat_id));
             let outer_tick = app.frame.tick_view.replace(Some(view_id));
+            // Spoiler specks this window painted last frame keep drifting.
+            if super::super::spoiler_fx::take_text_painted(window)
+                || super::super::spoiler_fx::revealing()
+            {
+                app.request_animation_tick(30, cx);
+            }
             let history_drawn = app.slices.window.history_drawn();
             app.inline_videos_frame_start(history_drawn, window, cx);
             (outer, outer_tick)
@@ -208,6 +214,8 @@ impl Render for ChatWindowView {
                 app.per_window_upkeep(window, cx);
             }
             let body = app.chat_window_body(chat_id, window, cx);
+            // A submenu opened by key focuses its first row once drawn.
+            app.frame.menu.items.apply_pending_focus(window, cx);
             let capture_blocked = app.capture_block_wanted();
             (body, app.autoscroll_layer(cx), capture_blocked)
         });

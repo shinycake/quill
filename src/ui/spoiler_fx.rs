@@ -292,13 +292,17 @@ pub(super) fn paint_media_specks(bounds: Bounds<Pixels>, window: &mut Window) {
 }
 
 thread_local! {
-    static TEXT_PAINTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The windows that painted moving text specks since they last asked.
+    static TEXT_PAINTED: std::cell::RefCell<std::collections::HashSet<WindowId>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
-/// Whether text specks were painted since the last call: the app keeps
-/// its frame clock running for them.
-pub(super) fn take_text_painted() -> bool {
-    TEXT_PAINTED.with(|painted| painted.replace(false))
+/// Whether `window` painted moving text specks since its last call: its
+/// frame keeps the clock running for them. Each window asks for its own,
+/// so a chat window's specks move while the main window is not drawn.
+pub(super) fn take_text_painted(window: &Window) -> bool {
+    let id = window.window_handle().window_id();
+    TEXT_PAINTED.with(|painted| painted.borrow_mut().remove(&id))
 }
 
 /// Paint text-spoiler specks of `color` inside `rect` (window points).
@@ -310,7 +314,17 @@ pub(super) fn paint_text_specks(
     color: Hsla,
     window: &mut Window,
 ) {
-    TEXT_PAINTED.with(|painted| painted.set(!still()));
+    if !still() {
+        let id = window.window_handle().window_id();
+        TEXT_PAINTED.with(|painted| {
+            let mut painted = painted.borrow_mut();
+            // Closed windows never ask again; a handful at most stay.
+            if painted.len() > 16 {
+                painted.clear();
+            }
+            painted.insert(id);
+        });
+    }
     draw_text_specks(rect, origin, color, window);
 }
 
@@ -635,3 +649,8 @@ mod tests {
         assert_eq!(speck_coverage(14., 10., 10., 10., 4., 4.), 0.);
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "spoiler_fx_window_tests.rs"]
+mod window_tests;

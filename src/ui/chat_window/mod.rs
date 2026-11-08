@@ -49,7 +49,13 @@ mod view;
 #[cfg(feature = "demo-capture")]
 mod window_input_tests;
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod window_menu_tests;
+#[cfg(test)]
 mod window_owner_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod window_pick_tests;
 #[cfg(test)]
 mod window_state_tests;
 
