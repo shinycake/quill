@@ -46,6 +46,9 @@ mod tests;
 mod upkeep_tests;
 mod view;
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod window_input_tests;
+#[cfg(test)]
 mod window_owner_tests;
 #[cfg(test)]
 mod window_state_tests;
@@ -190,6 +193,11 @@ impl ChatWindows {
     /// Every open chat window's slot.
     fn slots(&self) -> impl Iterator<Item = slot::SharedSlot> + '_ {
         self.open.iter().map(|open| open.slot.clone())
+    }
+
+    /// Whether `chat_id` shows in a window of its own.
+    pub(in crate::ui) fn has_window(&self, chat_id: ChatId) -> bool {
+        self.window_for(chat_id).is_some()
     }
 
     fn window_for(&self, chat_id: ChatId) -> Option<&OpenChatWindow> {
@@ -550,6 +558,8 @@ impl QuillApp {
         }
         self.end_recording_of_window(chat_id, cx);
         self.windows.open.retain(|open| open.chat_id != chat_id);
+        // Its media panel goes: the GIF downloads follow the panels left.
+        self.sync_gif_downloads();
         // Its activation goes with it: GPUI drops the window before the
         // platform reports it inactive, so its observer never runs, and a
         // main window that draws nothing would leave the gate on. Only the

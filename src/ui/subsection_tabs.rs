@@ -119,7 +119,7 @@ impl QuillApp {
         // into view once per change; the user's own scrolling stays put.
         // A vertical wheel already scrolls this horizontal strip: GPUI maps
         // it to x on a div that only scrolls along x.
-        let scroll = self.folders.topic_tabs_scroll.clone();
+        let scroll = self.history.subsection_tabs.strip.clone();
         let topic_ids: Vec<i32> = tabs.topics.iter().map(|t| t.forum_topic_id).collect();
         let selected = match &tabs.direct {
             Some(direct) => direct.selected_child(),
@@ -135,8 +135,8 @@ impl QuillApp {
                 tab_count,
                 strip_width: f32::from(scroll.bounds().size.width) as i32,
             };
-            if needs_reveal(self.folders.topic_tabs_revealed.get(), key) {
-                self.folders.topic_tabs_revealed.set(Some(key));
+            if needs_reveal(self.history.subsection_tabs.revealed.get(), key) {
+                self.history.subsection_tabs.revealed.set(Some(key));
                 scroll.scroll_to_item(selected);
             }
         }
@@ -196,7 +196,7 @@ impl QuillApp {
             .min_h_0()
             .w_full()
             .overflow_y_scroll()
-            .track_scroll(&self.folders.topic_tabs_column_scroll)
+            .track_scroll(&self.history.subsection_tabs.column)
             .child(self.vertical_tab(&tabs, Tab::All, cx));
         for tab in tab_list(&tabs) {
             list = list.child(self.vertical_tab(&tabs, tab, cx));

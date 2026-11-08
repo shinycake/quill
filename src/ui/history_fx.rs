@@ -277,11 +277,26 @@ impl QuillApp {
         Some(reveal)
     }
 
-    /// The main window's history list scrolled (or its rows moved): refresh
-    /// the pill. Observed on that list's scroller, so it runs as the main
-    /// window whatever state is in place.
-    pub(super) fn note_history_scroll(&mut self, cx: &mut Context<Self>) {
-        self.in_window_scope(None, cx, |this, cx| {
+    /// Observe `history`'s scroller for the window `window` (`None`: the
+    /// main window): each window's list drives its own pill, saved place
+    /// and scroll preload.
+    pub(super) fn observe_history_scroll(
+        history: &super::history_state::HistoryUi,
+        window: Option<quill::ids::ChatId>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.observe(&history.scroller, move |this, _, cx| {
+            this.note_history_scroll(window, cx);
+        })
+        .detach();
+    }
+
+    /// The history list of the window `window` (`None`: the main window)
+    /// scrolled (or its rows moved): refresh its pill. Observed on that
+    /// list's scroller, so it puts that window's state in place whatever
+    /// state is there; a closed window's list runs nothing.
+    fn note_history_scroll(&mut self, window: Option<quill::ids::ChatId>, cx: &mut Context<Self>) {
+        self.in_window_scope(window, cx, |this, cx| {
             // Record where the reader is now: the saved position follows
             // every scroll, not only the next full render.
             if let Some(key) = this.history.key {

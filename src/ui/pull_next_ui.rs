@@ -366,7 +366,17 @@ impl QuillApp {
                     this.in_window_scope(scope, cx, |this, cx| {
                         if this.history.pull.machine.jumping() {
                             SLIDE.set(Some((next, None, Instant::now())));
-                            this.select_listed_chat(next, window, cx);
+                            let open = super::chat_window::ChatOpen::new(next);
+                            if !this.select_chat_request(open, window, cx) {
+                                // The next channel showed in a window of
+                                // its own: this history stays, and its
+                                // pull starts over instead of staying in
+                                // the jump.
+                                SLIDE.set(None);
+                                let now = this.history.pull.now();
+                                this.history.pull.machine.reset_all(now);
+                                cx.notify();
+                            }
                         }
                     })
                 });

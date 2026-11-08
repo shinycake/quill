@@ -302,6 +302,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_story_viewer(cx);
+        // A chat in a window of its own shows the message there.
+        let open = super::chat_window::ChatOpen::new(chat_id).at(message_id);
+        if self.route_chat_open(open, cx).is_none() {
+            cx.notify();
+            return;
+        }
         self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note(

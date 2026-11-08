@@ -236,6 +236,8 @@ impl QuillApp {
             {
                 self.admin.group_settings_dialog = None;
             }
+            // routed: the window that shows the old group shows its
+            // upgrade in place.
             if let Some(live) = self.live.as_mut()
                 && live.driver.session.open_chat == Some(old)
             {

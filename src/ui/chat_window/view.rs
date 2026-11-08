@@ -7,6 +7,7 @@ use super::super::frame_clock::follow_app_unless_held;
 use super::super::glyph_sweep;
 use super::super::image_budget::{CacheScope, WindowDraw};
 use super::super::shell::QuillShell;
+use super::super::window_actions::WindowActions;
 use super::cover::WindowPlace;
 use super::slot::{SharedSlot, WindowSlot, scope_probe};
 use gpui_kit::component::{Root, StyledExt, TitleBar};
@@ -245,6 +246,12 @@ impl Render for ChatWindowView {
                 }
             })
             .chat_window_command_actions(self.owner.clone(), chat_id)
+            // The composer, history, selection, in-chat search and viewer
+            // actions, as on the main root.
+            .window_actions(self.owner.clone(), Some(chat_id))
+            // The app's own commands (lock, quit, theme, Settings) and the
+            // window's chrome, as from the main window.
+            .chat_window_app_actions(self.owner.clone(), Some(chat_id))
             // The viewer's Space release (a tap or the end of a hold), as on
             // the main root; key-downs reach it through the interceptor.
             .capture_key_up({

@@ -1536,3 +1536,96 @@ the rows it shows. A Saved Messages sublist takes no live new messages,
 in any window, as before. `drop_thread_pages_past` matches pages by
 thread, so two windows showing the same thread mark each other's pages
 stale.
+
+### Phase 11 (area B: keys, actions, carried opens and per-window layers)
+
+Round 11 of the review, area B, on `claude/sm-review11-b`. Findings 1
+and 14 belong to area A. The rest come down to three shapes: input
+bound or checked for the main window only, chat opens that skipped the
+router or left what they carried behind, and layer state that every
+window shared.
+
+- **Keys per window.** The key interceptor moved to `window_keys.rs`.
+  `key_window` tells the main window, a chat window and the app's other
+  windows (Settings, notification popups, call windows) apart, and keys
+  in an "other" window are left to that window. `context_menu_open` and
+  `dismiss_context_menus` count the main window's menus (the chat-list
+  row, archive and story menus, a playlist's, a folder tab's) only while
+  the main window's state is in place. A chat window's Escape and arrow
+  keys no longer go to a menu it does not draw. The lock dismisses each
+  window's menus inside `in_every_window`.
+- **Actions on every root.** `window_actions.rs` binds the composer,
+  history, selection, in-chat search and viewer actions, plus Copy and
+  Paste in the capture phase. The main root and every chat window's root
+  bind the same list. `chat_window_app_actions` gives a chat window the
+  app's own commands. Lock (Cmd/Ctrl+L), the theme toggle and Help run as
+  the main window. Quit, Settings and Shortcuts go through
+  `hand_to_main_window`. Minimize, Zoom and Full Screen act on the chat
+  window itself. Before this, all of them did nothing while a chat window
+  had the focus. The chat list's keys (pinned chats, folders, the
+  list's arrows) and the story viewer's keys stay main-only, because
+  only the main window draws those surfaces.
+- **Opens carry their state.** `ChatOpen` gained `ChatOpenCarry`:
+  messages to forward, dropped files, composer text and the inline
+  results button's round trip. `apply_open_carry` applies them in the
+  window that shows the chat, from `land_chat_open` and from
+  `select_chat_request`. Composer text that arrives without a window at
+  hand waits in `ChatUi::compose_after_open` for that window's
+  `per_window_upkeep`. These now route with what they carry:
+  - the Forward box's "continue in chat": the source window keeps no
+    forward, selection or comment;
+  - a forward drag or a file drop on a chat row, and the drop-topic
+    chooser;
+  - the thread back button, which opens the origin chat at the post;
+  - the pull-to-next jump. If the jump went to another window,
+    `select_chat_request` returns false, and the pull machine resets
+    instead of staying in its jump;
+  - the inline query typed back into its chat;
+  - a deep link for a chat that has a window of its own. The jump, the
+    `/start` prefill, a link's draft and the inline start are applied in
+    that window;
+  - a story area's message link.
+- **The routing guard.** `check-window-scope.py` fails a `QuillApp`
+  method that opens a chat through the driver (`select_chat`,
+  `select_chat_open`, `select_search_chat_open`, `select_search_message`
+  or `switch_to_thread_chat`) without calling `route_chat_open`. An open
+  that has to stay in place says why with `// routed: <why>`. The only
+  one is a basic group replaced in place by its supergroup upgrade.
+- **Per-window layers.** The subsection tabs' strip and column scroll
+  and their revealed key moved from `FoldersUi` to `HistoryUi`
+  (`SubsectionTabsScroll`), so they are swapped per window. Every
+  window's history scroller has its own observer
+  (`observe_history_scroll`), which puts that window's state in place
+  before it records the scroll position, preloads or moves the date
+  pill. Before, a chat window's scrolls were noted only by its renders.
+  The GIF panel is read from the window's own media panel. The session's
+  one GIF gate (`gifs.open`) follows whether any window shows the GIFs
+  tab (`sync_gif_downloads`). The sticker panel, which is session-wide,
+  counts only in the main window, so Escape in a chat window no longer
+  closes it.
+- **Smaller fixes.**
+  - Jumps are deduped by `(jump_serial, message)`, so going to the same
+    message again after scrolling away lands again.
+  - Each Saved Messages sublist and tag view has its own history key: a
+    negative third part hashed from the view.
+  - A reply-keyboard button always sends a new message, even while
+    editing, with a forward bar or with a tray.
+
+Tests: `chat_window/routing_carry_tests.rs` (forward, continue-in-chat,
+composer text, `/start` link, files), `chat_window/window_input_tests.rs`
+(Lock from a chat window, main menus vs a chat window's keys, the GIF
+panel per window, the tab strip per window, Saved view keys),
+`landing_tests.rs` (the same jump twice) and `composer/bars_tests.rs`
+(a keyboard button while editing).
+
+Left open:
+- The thread back button and the pull-to-next reset have no test,
+  because the demo has no live comment thread and no pull session.
+- The per-window scroll observer has no test either. Its effect is a
+  saved position and a date pill, which the harness does not scroll.
+- A deep link's thread or media timestamp, for a chat with its own
+  window, still runs in the main window (`finish_typed_link`).
+- A link's draft replaces the routed window's composer text. In the
+  main window it is appended to the text already there.
+- "All Messages" from the drop-topic chooser, for a forum with its own
+  window, leaves that window's open topic as it is.

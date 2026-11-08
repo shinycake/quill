@@ -144,24 +144,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The media panel of the window in place shows its GIFs tab. The
+    /// session's `gifs.open` is the download gate for every window's panel
+    /// (`sync_gif_downloads`), not this window's.
     pub(super) fn gif_panel_open(&self) -> bool {
-        self.session()
-            .is_some_and(|session| session.stickers.gifs.open)
+        self.pickers.media_panel.shows_gifs()
     }
 
+    /// The GIFs are a tab of this window's media panel: closing them
+    /// closes it.
     pub(super) fn close_gif_panel(&mut self, cx: &mut Context<Self>) {
-        // The GIFs are a tab of the media panel: closing them closes it.
         if self.close_media_panel(cx) {
-            return;
+            self.connection
+                .set_note(StatusNote::silent(tr(keys::Q_CHAT_GIFS_CLOSED)));
         }
-        if let Some(live) = self.live.as_mut() {
-            live.driver.close_gif_panel();
-        } else if let Some(session) = self.demo_session.as_mut() {
-            session.stickers.gifs.close();
-        }
-        self.connection
-            .set_note(StatusNote::silent(tr(keys::Q_CHAT_GIFS_CLOSED)));
-        cx.notify();
     }
 
     pub(super) fn send_gif_pick(
@@ -223,9 +219,15 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The sticker sets Settings shows (the stickers manager, the business
+    /// start page) are open. Only the main window draws them, so a chat
+    /// window never sees them open (its Escape and its recording leave
+    /// them alone).
     pub(super) fn sticker_panel_open(&self) -> bool {
-        self.session()
-            .is_some_and(|session| session.stickers.stickers.open)
+        !self.windows.in_window()
+            && self
+                .session()
+                .is_some_and(|session| session.stickers.stickers.open)
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {

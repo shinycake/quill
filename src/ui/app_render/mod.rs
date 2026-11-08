@@ -2,37 +2,25 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::actions::{
-    AttachFile, CancelSearch, ChatSearchNewer, ChatSearchOlder, CloseWindow,
-    ComposerEditCodeLanguage, ComposerEditLink, ComposerPastePlain, DeleteSelection,
-    EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff, FirstChat, FocusComposer, FocusSidebar,
-    FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
-    FormatStrikethrough, FormatUnderline, HistoryPageDown, HistoryPageUp, HistoryToBottom,
-    HistoryToTop, LastChat, LoadOlder, LockApp, MarkChatRead, MinimizeWindow, NextChat, NextFolder,
-    OpenArchive, OpenChatSearch, OpenContacts, OpenHelp, OpenPinnedChat, OpenSavedMessages,
-    OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp, ReplyToNext,
-    ReplyToPrevious, SelectionExtendNewer, SelectionExtendOlder, SelectionFocusNewer,
-    SelectionFocusOlder, ShowChatMenu, ShowChatPreview, SpellingIgnore, SpellingLearn,
-    SpellingReplace, SpellingUnlearn, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleMessageSelection, ToggleSidebar, ToggleTheme, ViewerCopy,
-    ViewerFlipHorizontal, ViewerFlipVertical, ViewerNext, ViewerPrev, ViewerSave, ViewerZoomIn,
-    ViewerZoomOut, ViewerZoomReset, ZoomWindow,
+    CancelSearch, CloseWindow, FirstChat, FocusSidebar, LastChat, LockApp, MarkChatRead,
+    MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenContacts, OpenHelp, OpenPinnedChat,
+    OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp,
+    ShowChatMenu, ShowChatPreview, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone,
+    ToggleFullscreen, ToggleSidebar, ToggleTheme, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
 use super::shell::title_bar;
-use super::shortcut_pack::HistoryKey;
+use super::window_actions::WindowActions;
 use crate::ui::dismiss_layer::DismissLayer;
 use gpui_kit::component::alert::Alert;
-use gpui_kit::component::input::{Copy as CopyAction, Paste as PasteAction};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::agent::ui_driver::guard::{self, HardSurface};
 use quill::auth::{AuthAction, view_for};
-use quill::composer::ComposerShortcut;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::settings::ThemeChoice;
 use quill::state::{ConnectionIndicator, connection_indicator};
 impl QuillApp {
     /// What each frame of the main window starts with, whether it renders
@@ -172,24 +160,9 @@ impl Render for QuillApp {
                     cx.stop_propagation();
                 }
             }))
-            // Capture phase: with message text selected, ⌘C copies it even
-            // while the composer has focus.
-            .capture_action(cx.listener(|_this, _: &CopyAction, window, cx| {
-                if let Some(((chat_id, _), text)) =
-                    super::selectable_text::selected_message_text(window, cx)
-                {
-                    if !_this.refuse_protected_copy(ChatId(chat_id), cx) {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    }
-                    cx.stop_propagation();
-                } else if let Some((chat_id, text)) = _this.selected_messages_text() {
-                    // Selection mode: copy the selected messages.
-                    if !_this.refuse_protected_copy(chat_id, cx) {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                    }
-                    cx.stop_propagation();
-                }
-            }))
+            // The composer, history, selection, in-chat search and viewer
+            // actions, the same list every chat window binds.
+            .window_actions(cx.weak_entity(), None)
             .on_action(cx.listener(|this, _: &LockApp, _, cx| this.lock_by_passcode(cx)))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.navigate(super::navigation::NavigationAction::Settings, window, cx);
@@ -242,22 +215,7 @@ impl Render for QuillApp {
                 this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleTheme, _, cx| {
-                // A settings change, written to disk.
-                if guard::refuse_if_injecting("change the theme") {
-                    return;
-                }
-                // Write through the appearance funnel (persist + re-apply)
-                // so the 60s auto-night tick can't silently revert the
-                // flip. Auto-night, when enabled, still overrides the
-                // manual choice while active — same as the dialog.
-                // stories-high-contrast: the toggle cycles all three
-                // modes (Light → Dark → High contrast).
-                let next = match this.appearance.theme {
-                    ThemeChoice::Light => ThemeChoice::Dark,
-                    ThemeChoice::Dark => ThemeChoice::HighContrast,
-                    ThemeChoice::HighContrast => ThemeChoice::Light,
-                };
-                this.set_appearance(cx, |a| a.theme = next);
+                this.cycle_theme_by_key(cx);
             }))
             .on_action(cx.listener(|this, _: &OpenHelp, _, cx| {
                 this.open_link("https://github.com/shinycake/quill", cx);
@@ -272,92 +230,12 @@ impl Render for QuillApp {
             .on_action(cx.listener(|this, _: &PrevChat, window, cx| {
                 this.step_open_chat(-1, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &FocusComposer, window, cx| {
-                this.composer
-                    .update(cx, |input, cx| input.focus(window, cx));
-            }))
-            // Parity slice (platform-paste-image): the kit Textarea's paste is
-            // text-only, and GPUI stops an action at the first handler, so a
-            // bubbling handler never ran. This one captures (runs before the
-            // focused textarea): clipboard images and copied files become
-            // attachments; anything else falls through to the text paste.
-            .capture_action(cx.listener(|this, _: &PasteAction, window, cx| {
-                if this.paste_image_from_clipboard(window, cx) {
-                    cx.stop_propagation();
-                } else {
-                    this.offer_rich_paste(window, cx);
-                }
-            }))
             .on_action(cx.listener(|this, _: &FocusSidebar, window, cx| {
                 window.focus(&this.focus_sidebar, cx);
             }))
             // Shortcut pack (see `shortcut_pack.rs`): a handler that has no
-            // use for the key propagates it to the focused input.
-            .on_action(cx.listener(|this, _: &ReplyToPrevious, window, cx| {
-                if !this.reply_by_key(false, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ReplyToNext, window, cx| {
-                if !this.reply_by_key(true, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &AttachFile, window, cx| {
-                if !this.attach_by_key(window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &HistoryPageUp, window, cx| {
-                if !this.scroll_history_by_key(HistoryKey::PageUp, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &HistoryPageDown, window, cx| {
-                if !this.scroll_history_by_key(HistoryKey::PageDown, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &HistoryToTop, window, cx| {
-                if !this.scroll_history_by_key(HistoryKey::Top, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &HistoryToBottom, window, cx| {
-                if !this.scroll_history_by_key(HistoryKey::Bottom, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &DeleteSelection, window, cx| {
-                if !this.delete_selection_by_key(window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ToggleMessageSelection, window, cx| {
-                if !this.toggle_focused_selection_by_key(window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &SelectionFocusOlder, window, cx| {
-                if !this.move_selection_focus_by_key(true, false, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &SelectionFocusNewer, window, cx| {
-                if !this.move_selection_focus_by_key(false, false, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &SelectionExtendOlder, window, cx| {
-                if !this.move_selection_focus_by_key(true, true, window, cx) {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &SelectionExtendNewer, window, cx| {
-                if !this.move_selection_focus_by_key(false, true, window, cx) {
-                    cx.propagate();
-                }
-            }))
+            // use for the key propagates it to the focused input. The chat
+            // list's keys are the main window's.
             .on_action(cx.listener(|this, action: &OpenPinnedChat, window, cx| {
                 if !this.open_pinned_by_key(action.index, window, cx) {
                     cx.propagate();
@@ -414,99 +292,17 @@ impl Render for QuillApp {
                 }
             }))
             .command_actions(cx)
-            .on_action(cx.listener(|this, _: &LoadOlder, _, cx| {
-                this.load_older_action(cx);
-            }))
             .on_action(cx.listener(|this, _: &OpenSearch, window, cx| {
                 this.open_search_ui(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &OpenChatSearch, window, cx| {
-                this.open_chat_search_ui(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ChatSearchNewer, _, cx| {
-                this.chat_search_newer(cx);
-            }))
-            .on_action(cx.listener(|this, _: &ChatSearchOlder, _, cx| {
-                this.chat_search_older(cx);
             }))
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
                 this.cancel_search(window, cx);
             }))
-            // Parity slice 5: left/right step the media viewer; `0` resets
-            // zoom. Only while the viewer is open: otherwise the handler
-            // propagates, so the keystroke reaches the focused input (an
-            // action handler stops propagation unless told to propagate,
-            // which used to eat the composer's arrow keys and "0").
+            // The story viewer is the main window's. Only while it is open:
+            // otherwise the key reaches the focused input.
             .on_action(cx.listener(|this, _: &StoryTogglePause, window, cx| {
                 if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
                     this.toggle_story_pause(cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerPrev, window, cx| {
-                if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
-                    this.step_story_viewer(-1, cx);
-                } else if this.viewer.state.is_open() {
-                    this.step_media_viewer(-1, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerNext, window, cx| {
-                if this.stories.viewer.is_open() && !this.story_text_input_open(window, cx) {
-                    this.step_story_viewer(1, cx);
-                } else if this.viewer.state.is_open() {
-                    this.step_media_viewer(1, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerZoomReset, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.viewer_toggle_natural_zoom(cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerZoomIn, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.viewer_zoom_step(true, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerZoomOut, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.viewer_zoom_step(false, cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerFlipHorizontal, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.flip_viewer_horizontal(cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerFlipVertical, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.flip_viewer_vertical(cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerCopy, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.copy_viewer_photo(cx);
-                } else {
-                    cx.propagate();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &ViewerSave, _, cx| {
-                if this.viewer.state.is_open() {
-                    this.save_viewer_media(cx);
                 } else {
                     cx.propagate();
                 }
@@ -519,76 +315,6 @@ impl Render for QuillApp {
             }))
             .on_action(cx.listener(|this, _: &SubmitPassword, window, cx| {
                 this.submit_password(window, cx);
-            }))
-            // M1: formatting shortcuts only apply when the composer has
-            // focus (otherwise the keystroke belongs to whatever is
-            // focused).
-            // codex:spellcheck-native: composer context-menu spelling items.
-            .on_action(cx.listener(|this, action: &SpellingReplace, window, cx| {
-                this.on_spelling_replace(action, window, cx);
-            }))
-            .on_action(cx.listener(|this, action: &SpellingLearn, _, cx| {
-                this.on_spelling_learn(action, cx);
-            }))
-            .on_action(cx.listener(|this, action: &SpellingUnlearn, _, cx| {
-                this.on_spelling_unlearn(action, cx);
-            }))
-            .on_action(cx.listener(|this, action: &SpellingIgnore, _, cx| {
-                this.on_spelling_ignore(action, cx);
-            }))
-            .on_action(cx.listener(|this, action: &EmojiWordSuggest, _, cx| {
-                this.on_emoji_word_suggest(action, cx);
-            }))
-            .on_action(cx.listener(|this, action: &EmojiWordBlock, _, cx| {
-                this.on_emoji_word_block(action, cx);
-            }))
-            .on_action(cx.listener(|this, _: &EmojiWordsOff, _, cx| {
-                this.on_emoji_words_off(cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatBold, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Bold, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatItalic, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Italic, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatUnderline, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Underline, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatStrikethrough, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Strikethrough, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatMonospace, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Monospace, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatBlockQuote, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::BlockQuote, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatSpoiler, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::Spoiler, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FormatClear, window, cx| {
-                this.run_composer_shortcut(ComposerShortcut::ClearFormatting, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ComposerEditLink, window, cx| {
-                this.composer_link_chord(window, cx);
-            }))
-            .on_action(
-                cx.listener(|this, _: &super::actions::ComposerEditDate, window, cx| {
-                    this.composer_date_chord(window, cx);
-                }),
-            )
-            .on_action(cx.listener(
-                |this, action: &super::actions::ComposerInsertControlChar, window, cx| {
-                    this.insert_composer_control_char(action.character, window, cx);
-                },
-            ))
-            .on_action(
-                cx.listener(|this, _: &ComposerEditCodeLanguage, window, cx| {
-                    this.open_code_language_dialog(window, cx);
-                }),
-            )
-            .on_action(cx.listener(|this, _: &ComposerPastePlain, window, cx| {
-                this.paste_plain_text(window, cx);
             }))
             .child(title_bar(
                 self.pane_mode(),

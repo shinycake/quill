@@ -413,7 +413,6 @@ pub(super) static WINDOW_LAYERS: &[&str] = &[
     "record-discard-confirm",
     "recording",
     "gif-panel",
-    "sticker-panel",
     "send-as",
     "reply-panels",
     "forward-picker",

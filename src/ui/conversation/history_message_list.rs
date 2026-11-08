@@ -51,6 +51,9 @@ impl QuillApp {
         self.begin_effect_notes_pass();
         let session = self.session();
         let jump_serial = session.map_or(0, |s| s.search.chat_search.jump_serial);
+        // The jump the rows highlight, by serial: the same message asked
+        // for again is a new jump.
+        let jump = highlight_id.map(|id| (jump_serial, id));
         // Phase B4: secret chats word the timer-change service row as
         // "Self-destruct".
         let is_secret = chat.is_some_and(|c| matches!(c.kind, ChatKind::Secret { .. }));
@@ -69,17 +72,27 @@ impl QuillApp {
                 window_epoch: thread.history.window_epoch,
                 loaded_complete: thread.history.loaded_complete,
             });
+        // A Saved Messages sublist or tag filter is its own history.
+        let saved_scope = self.saved_view_scope();
         let history_key = (
             viewed_chat.map(|chat| chat.0).unwrap_or(-1),
             viewed_topic,
-            thread_window.as_ref().map_or(0, |thread| thread.thread_id),
+            thread_window
+                .as_ref()
+                .map(|thread| thread.thread_id)
+                .or(saved_scope)
+                .unwrap_or(0),
         );
+        let saved_window = saved_scope
+            .and_then(|_| self.saved_history())
+            .map(|(_, history)| (None, history.has_newer, history.window_epoch));
         // The loaded window: the thread's own (it opens around its read
         // position and pages forward like the main history), the topic's
         // (no unread divider) or the main history's.
-        let (unread_anchor, has_newer, window_epoch) = match &thread_window {
-            Some(thread) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
-            None => session
+        let (unread_anchor, has_newer, window_epoch) = match (&thread_window, saved_window) {
+            (Some(thread), _) => (thread.unread_anchor, thread.has_newer, thread.window_epoch),
+            (None, Some(saved)) => saved,
+            (None, None) => session
                 .and_then(|s| {
                     let chat = viewed_chat?;
                     match viewed_topic {
@@ -307,7 +320,7 @@ impl QuillApp {
             if let Some(hold) = hold {
                 self.apply_view_hold(hold, cx);
             }
-            self.rows_replaced(history_key, highlight_id, cx);
+            self.rows_replaced(history_key, jump, cx);
         } else if let Some(splice) = splice {
             // Messages came or went: build the rows around them again and
             // keep the rest.
@@ -316,7 +329,7 @@ impl QuillApp {
             if let Some(hold) = hold {
                 self.apply_view_hold(hold, cx);
             }
-            self.rows_replaced(history_key, highlight_id, cx);
+            self.rows_replaced(history_key, jump, cx);
         } else {
             // Kept rows: patch the messages changed in place and bring the
             // chrome around the viewport up to date.
@@ -325,6 +338,8 @@ impl QuillApp {
                 chrome_inputs.stale_rows(&self.history.rows, &chrome_due, &patches, mark.epoch);
             self.apply_row_patches(patches, fresh, mark, rows_started, cx);
         }
+        // A jump to a message the kept rows already hold lands too.
+        self.land_new_jump(jump, cx);
         match goal {
             GoalNow::Due => self.reach_scroll_goal(cx),
             GoalNow::Stale => self.history.scroll_goal = None,
@@ -838,7 +853,7 @@ impl QuillApp {
     fn rows_replaced(
         &mut self,
         history_key: quill::state::ScrollKey,
-        highlight_id: Option<MessageId>,
+        jump: Option<(u64, MessageId)>,
         cx: &mut Context<Self>,
     ) {
         let rows = &self.history.rows;
@@ -851,15 +866,21 @@ impl QuillApp {
         // jump target, else the "Unread messages" divider, else the bottom.
         if self.history.anchor_pending && !self.history.rows.is_empty() {
             self.history.anchor_pending = false;
-            self.anchor_opened_history(history_key, highlight_id, cx);
+            self.anchor_opened_history(history_key, jump, cx);
         }
-        // A jump (search hit, reply, pinned message): bring the message
-        // to the middle of the view once per new `highlight_id`.
-        if highlight_id != self.history.last_highlight {
-            self.history.last_highlight = highlight_id;
-            if let Some(target) = highlight_id {
-                self.start_landing(super::landing::LandingGoal::Message(target), cx);
-            }
+        self.land_new_jump(jump, cx);
+    }
+
+    /// A jump (search hit, reply, pinned message): bring the message to
+    /// the middle of the view once per jump. Jumps are told apart by their
+    /// serial, so the same message asked for again lands again.
+    fn land_new_jump(&mut self, jump: Option<(u64, MessageId)>, cx: &mut Context<Self>) {
+        if jump == self.history.last_highlight {
+            return;
+        }
+        self.history.last_highlight = jump;
+        if let Some((_, target)) = jump {
+            self.start_landing(super::landing::LandingGoal::Message(target), cx);
         }
     }
 }

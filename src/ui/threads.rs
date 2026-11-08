@@ -243,13 +243,24 @@ impl QuillApp {
         let back = live.driver.close_thread();
         self.history.scroll_goal = None;
         match back {
-            Some(chat) => self.select_listed_chat(chat, window, cx),
-            // Same chat: the chat's (or topic's) own draft comes back.
-            None => self.restore_open_draft(window, cx),
-        }
-        // Land on the post the thread was opened from.
-        if let Some(message_id) = origin {
-            self.jump_to_replied_message(message_id, cx);
+            // Another chat: the post the thread was opened from rides with
+            // the open, to the window that shows that chat.
+            Some(chat) => {
+                let open = super::chat_window::ChatOpen::new(chat);
+                let open = match origin {
+                    Some(message_id) => open.at(message_id),
+                    None => open,
+                };
+                self.select_chat_request(open, window, cx);
+            }
+            // Same chat: the chat's (or topic's) own draft comes back, and
+            // the view lands on the post the thread was opened from.
+            None => {
+                self.restore_open_draft(window, cx);
+                if let Some(message_id) = origin {
+                    self.jump_to_replied_message(message_id, cx);
+                }
+            }
         }
         cx.notify();
     }

@@ -25,6 +25,8 @@ impl QuillApp {
         // A topic or thread switch without a window at hand asked for the
         // new slot's draft to be restored into the composer.
         self.restore_draft_if_pending(window, cx);
+        // Text an open handed over goes in after the draft it lands on.
+        self.apply_compose_after_open(window, cx);
         self.adopt_remote_draft(window, cx);
         self.sync_composer_placeholder(window, cx);
         // Emoji keywords for the `:` popup arrived.
