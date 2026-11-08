@@ -36,6 +36,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::settings_catalog::Page;
 use quill::state::fetch::Fetch;
+use quill::telegram::requests_privacy::PrivacySettingKey;
 
 /// Below this window width the page list and a page take turns.
 const NARROW: f32 = 720.;
@@ -123,7 +124,20 @@ impl QuillApp {
             // this account's TDLib for its packs.
             Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
+            Page::Calls => self.fetch_call_settings(),
             _ => {}
+        }
+    }
+
+    /// The Calls page's own data: who can call and peer-to-peer (the rules
+    /// Privacy shows too) and the auto-download settings "Use less data for
+    /// calls" changes. It was drawn as loading until another screen asked.
+    fn fetch_call_settings(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            for key in [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer] {
+                let _ = live.driver.fetch_privacy_rules(key);
+            }
+            let _ = live.driver.fetch_auto_download_presets();
         }
     }
 
