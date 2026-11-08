@@ -538,6 +538,22 @@ impl QuillApp {
         }
     }
 
+    /// Close the panels that belong to one story (Report, viewers) and drop
+    /// their session state, whatever stage the report flow reached.
+    pub(super) fn close_story_item_panels(&mut self) {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.report_open = false;
+            open.viewers_open = false;
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.clear_story_report();
+            live.driver.session.clear_story_viewers();
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.clear_story_report();
+            session.clear_story_viewers();
+        }
+    }
+
     pub(super) fn send_story_report_step(
         &mut self,
         item: &StoryViewerItem,
@@ -552,7 +568,7 @@ impl QuillApp {
                 .stories
                 .report
                 .as_ref()
-                .is_none_or(|flow| flow.story_id != item.story_id)
+                .is_none_or(|flow| !flow.is_for(item.chat_id.0, item.story_id))
             {
                 live.driver
                     .session
@@ -706,6 +722,11 @@ impl QuillApp {
                 .pending_story_open
                 .is_some_and(|open| open.if_gone.is_some())
             || self.stories.viewer_ui().share_open
+            || self.stories.viewer_ui().report_open
+            || self.stories.viewer_ui().viewers_open
+            || self.stories.viewer_ui().stats_open
+            || self.stories.viewer_ui().privacy_edit.is_some()
+            || self.stories.viewer_ui().cover.is_some()
             || self.stories.viewer_ui().close_friends_edit.is_some()
             || self.stories.stealth_box.is_some()
     }
@@ -802,6 +823,9 @@ mod open;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod open_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod panel_tests;
 mod reply_media;
 mod repost;
 mod siblings;

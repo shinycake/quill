@@ -74,6 +74,13 @@ pub struct StoryReportFlow {
     pub stage: StoryReportStage,
 }
 
+impl StoryReportFlow {
+    /// Story ids are per poster, so a flow is the story's only when both match.
+    pub fn is_for(&self, chat_id: i64, story_id: i32) -> bool {
+        self.chat_id == chat_id && self.story_id == story_id
+    }
+}
+
 /// Phase 9.5: story stealth-mode state (`updateStoryStealthMode`,
 /// TDLib 1.8.67, `schema/td_api.tl:10919`). Unix timestamps; 0 = the
 /// corresponding state is off.
