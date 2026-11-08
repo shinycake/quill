@@ -130,6 +130,7 @@ impl QuillApp {
         let send = ai.start();
         self.ai_compose.open = Some(AiComposeOpen {
             chat_id,
+            window: self.windows.scope,
             ai,
             view: AiComposeView::Card,
             style_names: self.ai_compose_style_names(),
