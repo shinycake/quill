@@ -32,7 +32,7 @@ impl Session {
                     self.threads.saved.topics_exhausted = true;
                 } else {
                     // Not sent as far as the pump goes: it asks again when
-                    // the connection is back.
+                    // the connection is back or Saved Messages opens again.
                     self.threads.saved.topics_requested = false;
                     self.threads.saved.retry_when_online = true;
                     self.chats_state.chat_action_error =
