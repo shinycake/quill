@@ -778,7 +778,10 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
                                 })),
                                 ..Default::default()
                             },
-                            |_, cx| cx.new(|_| EmptyView),
+                            |window, cx| {
+                                let blank = cx.new(|_| EmptyView);
+                                cx.new(|cx| gpui_kit::component::Root::new(blank, window, cx))
+                            },
                         ) {
                             let _ = other.update(cx, |_, window, _| window.activate_window());
                         }

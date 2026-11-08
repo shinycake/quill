@@ -97,7 +97,7 @@ impl Anim {
 
 /// One open window and its motion.
 struct Popup {
-    handle: WindowHandle<NotifyView>,
+    handle: WindowHandle<gpui_kit::component::Root>,
     view: Entity<NotifyView>,
     height: f32,
     shift: Anim,
@@ -189,6 +189,18 @@ impl NotifyWindows {
             platform: NotifyPlatform::Other,
             main_display: None,
         }
+    }
+
+    /// Every notification window up now. They never take activation: a
+    /// click brings the main window forward, not them.
+    pub(in crate::ui) fn window_ids(&self) -> Vec<WindowId> {
+        let shown = self.shown.iter().map(|s| &s.popup);
+        let samples = self.samples.iter().map(|(_, popup)| popup);
+        shown
+            .chain(self.hide_all.iter())
+            .chain(samples)
+            .map(|popup| popup.handle.window_id())
+            .collect()
     }
 
     fn live(&self) -> usize {
@@ -473,7 +485,15 @@ impl QuillApp {
                     window_background: WindowBackgroundAppearance::Transparent,
                     ..Default::default()
                 },
-                move |_, _| root,
+                // Every window gets the kit's Root, as the main window does:
+                // app-wide handlers (keystroke interceptors, kit dialogs and
+                // toasts) look up its per-window state in whichever window
+                // they run for. Transparent, so the content's fade shows.
+                move |window, cx| {
+                    cx.new(|cx| {
+                        gpui_kit::component::Root::new(root, window, cx).bg(transparent_black())
+                    })
+                },
             )
             .ok()?;
         let now = Instant::now();

@@ -87,6 +87,7 @@ pub(crate) fn reopen_main_window(
     let (root, app) = cx
         .update(|cx| kept_app(&kept, cx))
         .ok_or_else(|| std::io::Error::other("the closed main window kept no app"))?;
+    // window-root-ok: `root` is the closed main window's Root, kept.
     cx.open_window(options, move |window, cx| {
         window.take_over(kept, cx);
         crate::ui::link_inbox::attach_main_window(window, cx, &app);

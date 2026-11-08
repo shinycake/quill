@@ -267,3 +267,46 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
         );
     });
 }
+
+/// A real click on a notification window (issue #1401). It brings the
+/// main window forward, never the notification window itself; and a key
+/// that still lands in one (on Windows, GPUI's activation sends Alt to the
+/// window it activates) finds the kit's window state there, as app-wide
+/// key handlers ask every window about its dialogs.
+#[gpui_kit::test]
+fn clicking_a_notification_window_opens_the_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+    });
+    vcx.run_until_parked();
+    let handle = app.read_with(vcx, |app, _| {
+        app.delivery.windows.shown.first().map(|s| s.popup.handle)
+    });
+    let Some(handle) = handle else {
+        panic!("no notification window opened");
+    };
+    let mut popup = VisualTestContext::from_window(handle.into(), cx);
+    popup.run_until_parked();
+    popup.simulate_click(
+        gpui_kit::point(px(120.), px(40.)),
+        gpui_kit::Modifiers::none(),
+    );
+    popup.run_until_parked();
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.delivery.windows.live(), 0, "the clicked window closes");
+    });
+    assert!(
+        !popup.update(|window, _| window.is_window_active()),
+        "the click never activates the notification window"
+    );
+
+    popup.simulate_modifiers_change(gpui_kit::Modifiers::alt());
+    popup.simulate_modifiers_change(gpui_kit::Modifiers::none());
+    popup.simulate_keystrokes("a escape up");
+    popup.run_until_parked();
+}

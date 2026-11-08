@@ -125,10 +125,7 @@ impl QuillApp {
             guard.extend(switches);
         }
         // A hidden or minimized window may never render on its own.
-        cx.activate(true);
-        for window in cx.windows() {
-            let _ = window.update(cx, |_, window, _| window.activate_window());
-        }
+        crate::ui::notifications::activate_everything(&self.delivery.windows.window_ids(), cx);
         cx.notify();
     }
 
