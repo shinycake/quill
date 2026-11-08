@@ -32,7 +32,7 @@ use quill::lang::{keys, tr, tr_with};
 
 /// How long a video story waits for its clip to start downloading before
 /// the viewer falls back to the thumbnail and the duration clock.
-const VIDEO_WAIT: Duration = Duration::from_secs(6);
+pub(in crate::ui) const VIDEO_WAIT: Duration = Duration::from_secs(6);
 
 impl QuillApp {
     /// A text field of the viewer owns the keyboard: Space and the arrows
@@ -90,15 +90,18 @@ impl QuillApp {
     /// Open, replace or drop the player to match the current story.
     pub(super) fn sync_story_video(&mut self, cx: &mut App) {
         let key = self.story_key();
+        // `native_key` is the story this video state belongs to, set on
+        // the switch itself: keyed on the player instead, a clip still
+        // downloading looked like a new story on every tick and the wait
+        // below restarted forever.
         if self.stories.native_key != key {
             self.stories.player = None;
-            self.stories.native_key = None;
+            self.stories.native_key = key;
             self.stories.video_wait_since = Some(Instant::now());
             self.stories.native_paused_by_us = false;
         }
         if !self.story_video_driven() {
             self.stories.player = None;
-            self.stories.native_key = None;
             return;
         }
         let failed_now = self.stories.player.as_ref().is_some_and(|player| {
@@ -106,7 +109,6 @@ impl QuillApp {
         });
         if failed_now {
             self.stories.player = None;
-            self.stories.native_key = None;
             self.stories.native_failed = key;
             self.stories.playback.start(Instant::now());
             return;
@@ -134,7 +136,6 @@ impl QuillApp {
                         self.stories.native_paused_by_us = true;
                     }
                     self.stories.player = Some(player);
-                    self.stories.native_key = key;
                 }
                 Err(_) => {
                     self.stories.native_failed = key;

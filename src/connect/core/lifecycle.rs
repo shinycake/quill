@@ -1,11 +1,25 @@
 //! Connect driver: construction, TDLib paths, kickoff, chat-list loading, close and logout.
 use super::*;
 
-/// TDLib's media cache folders inside the database directory (TDLib
-/// `FileType` directories for stickers, thumbnails, profile photos and
-/// wallpapers).
-const TDLIB_DATABASE_MEDIA_DIRS: [&str; 4] =
-    ["stickers", "thumbnails", "profile_photos", "wallpapers"];
+/// TDLib's media folders inside the database directory: the displayable
+/// file types `get_file_dir_type` puts in `FileDirType::Secure`, named by
+/// `get_file_type_name` (td/telegram/files/FileType.cpp). Stories (photo
+/// and video) live in `stories`; self-destructing media reuse the common
+/// names (`photos`, `videos`, `voice`, `video_notes`) but under this
+/// directory. `temp`, `passport` and `notification_sounds` stay out.
+const TDLIB_DATABASE_MEDIA_DIRS: [&str; 11] = [
+    "stickers",
+    "thumbnails",
+    "profile_photos",
+    "wallpapers",
+    "stories",
+    "secret",
+    "secret_thumbnails",
+    "photos",
+    "videos",
+    "voice",
+    "video_notes",
+];
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub fn new(

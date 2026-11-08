@@ -757,6 +757,9 @@ impl QuillApp {
 }
 
 pub(in crate::ui) mod chrome;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod click_through_tests;
 #[cfg(feature = "demo-capture")]
 mod demo;
 mod ensure_story_download;
@@ -797,6 +800,9 @@ mod story_viewer_overlay;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tick_notify_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod video_wait_tests;
 
 pub(in crate::ui) use live_state::LiveStoryUi;
 pub(in crate::ui) use open::PendingStoryOpen;
