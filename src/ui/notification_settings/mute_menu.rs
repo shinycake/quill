@@ -30,14 +30,18 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The header's Mute: the box is for the chat the header shows, kept
+    /// with the box. A chat opened under it (a notification click, another
+    /// window) does not retarget it.
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
+        let chat = self.session().and_then(|session| session.open_chat);
         self.notify.mute_menu_open = true;
-        self.notify.mute_chat = None;
-        self.notify.ttl_picker_open = false;
+        self.notify.mute_chat = chat;
+        self.notify.ttl_picker = None;
         self.folders.menu_open = false;
         self.notify.mute_custom_open = false;
         self.queue_mute_time_inputs(cx);
-        if let Some(chat_id) = self.session().and_then(|session| session.open_chat) {
+        if let Some(chat_id) = chat {
             self.ensure_chat_volume_slider(chat_id, cx);
         }
         cx.notify();
@@ -100,10 +104,7 @@ impl QuillApp {
     /// `NotificationChannelSecretChat` label with the peer's name.
     pub(in crate::ui) fn mute_menu_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
-        let open_chat = self
-            .notify
-            .mute_chat
-            .or_else(|| session.as_ref().and_then(|s| s.open_chat));
+        let open_chat = self.notify.mute_chat;
         let open_chat_summary: Option<&ChatSummary> =
             open_chat.and_then(|id| session.as_ref()?.chats.get(&id.0));
         let chat_settings: ChatNotificationSettings = open_chat_summary

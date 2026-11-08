@@ -118,26 +118,7 @@ impl QuillApp {
         }
         // The user moved on: a press still waiting for its story is dropped.
         self.chat_list.pending_story_open = None;
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reaction_picker_open = false;
-        }
-        self.end_story_reply(cx);
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.stats_open = false;
-        }
-        // B14: a new story starts playing (a Space pause is per story).
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.pause.reset();
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.share_open = false;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.notice = None;
-        }
-        // The Report and viewers panels are about the story they opened on:
-        // a reason picked after a move would report the next story.
-        self.close_story_item_panels();
+        self.leave_story_item(cx);
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);
@@ -147,5 +128,26 @@ impl QuillApp {
         self.ensure_story_custom_emoji_downloads();
         self.sync_live_story(cx);
         cx.notify();
+    }
+
+    /// The story the viewer showed is left: the viewer moved to another
+    /// one, opened another over it, or closed. Everything opened over it
+    /// goes with it (`StoryUi::leave_item`): its reply and the recording
+    /// or panel the reply opened, the reaction picker, the Report and
+    /// viewers flows, the statistics, share, cover and privacy editors,
+    /// the pause and the result lines. A reply typed or recorded for one
+    /// story is never sent to the next, and an editor never saves the
+    /// story it was opened on while another is shown.
+    pub(in crate::ui) fn leave_story_item(&mut self, cx: &mut Context<Self>) {
+        if !self.stories.viewer.is_open() {
+            return;
+        }
+        // The reply row's panel and recording are the media panel's and
+        // the recorder's: they read the viewer's state, so before it goes.
+        self.end_story_reply(cx);
+        // The Report and viewers panels are about the story they opened on:
+        // a reason picked after a move would report the next story.
+        self.close_story_item_panels();
+        self.stories.leave_item();
     }
 }

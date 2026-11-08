@@ -98,14 +98,18 @@ pub(crate) struct ViewerUi {
     pub(super) controls: super::video_player::controls::VideoControlsState,
 }
 
-/// The PiP window plays the old account's video: it closes.
+/// The PiP window plays the old account's video: it closes. A window
+/// the viewer made full screen for a video goes back: the next screen's
+/// viewer starts `Off` and would never give it back.
 impl super::on_screen::Farewell for ViewerUi {
     fn farewell(
         app: &mut super::app::QuillApp,
-        _: &mut gpui_kit::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<super::app::QuillApp>,
     ) {
         app.close_video_pip(cx);
+        app.viewer_leave_video_fullscreen();
+        app.viewer_follow_window_fullscreen(window);
     }
 }
 

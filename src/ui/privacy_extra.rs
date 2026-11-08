@@ -823,7 +823,7 @@ impl QuillApp {
                     .child(tr(keys::Q_PREFS_YOUR_ACCOUNT_IS_PROTECTED_BY)),
             )
             .child(
-                Input::new(&self.twofa.current_password)
+                Input::new(&self.twofa.check_password)
                     .aria_label(tr(keys::Q_PREFS_YOUR_TWO_STEP_VERIFICATION_PASSWORD))
                     .content_type(InputContentType::Password)
                     .h(px(40.)),
@@ -876,9 +876,9 @@ impl QuillApp {
     /// Send the typed password to be verified; the field is cleared and
     /// the string zeroized right away.
     fn submit_password_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut password = self.twofa.current_password.read(cx).value().to_string();
+        let mut password = self.twofa.check_password.read(cx).value().to_string();
         self.twofa
-            .current_password
+            .check_password
             .update(cx, |input, cx| input.set_value("", window, cx));
         if password.is_empty() {
             return;
@@ -1168,5 +1168,34 @@ mod dispatch_tests {
             );
         });
         file_prefs::store(FilePrefs::default());
+    }
+
+    /// The Privacy page's password check has its own field: checking the
+    /// password clears that field only, not what the 2FA box over the
+    /// page holds.
+    #[gpui_kit::test]
+    fn the_password_check_card_and_the_2fa_box_keep_their_own_text(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let set = |input: &Entity<gpui_kit::component::input::InputState>,
+                       text: &str,
+                       window: &mut gpui_kit::Window,
+                       cx: &mut gpui_kit::Context<QuillApp>| {
+                input.update(cx, |input, cx| input.set_value(text, window, cx));
+            };
+            set(
+                &app.twofa.current_password.clone(),
+                "in the box",
+                window,
+                cx,
+            );
+            set(&app.twofa.check_password.clone(), "checked", window, cx);
+            app.submit_password_check(window, cx);
+            let read = |input: &Entity<gpui_kit::component::input::InputState>| {
+                input.read(cx).value().to_string()
+            };
+            assert_eq!(read(&app.twofa.check_password), "", "the check cleared");
+            assert_eq!(read(&app.twofa.current_password), "in the box");
+        });
     }
 }

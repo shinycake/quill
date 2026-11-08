@@ -682,3 +682,25 @@ fn a_failed_burst_request_is_asked_again_on_the_next_join() {
     rejoin(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
 }
+
+/// Stars tapped on a live story commit from the poll, for an account in
+/// the background too: the story may play on in Picture-in-Picture with
+/// no viewer tick, and the poll wakes for their commit time.
+#[test]
+fn live_story_stars_commit_from_the_poll_with_no_viewer() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    h.driver.add_live_story_reaction(1, 0).unwrap();
+    let wait = h.driver.next_deadline(std::time::Instant::now(), 0);
+    assert!(
+        wait.is_some_and(|wait| wait <= std::time::Duration::from_millis(ACCUMULATE_MS)),
+        "the poll wakes for the commit: {wait:?}"
+    );
+    let network = crate::net_watch::NetworkState {
+        epoch: 0,
+        available: true,
+    };
+    h.driver
+        .poll_ticks(TickScope::Background, std::time::Instant::now(), network);
+    assert_eq!(h.sent("commitPendingLiveStoryReactions"), 1);
+}

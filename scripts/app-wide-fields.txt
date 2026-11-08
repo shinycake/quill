@@ -162,7 +162,6 @@ group_call.chat_shown | the window's chat column is open, a layout preference
 group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.ptt_capture | the push-to-talk key is being recorded
-group_call.ptt_delay_slider | the push-to-talk delay slider
 group_call.global_ptt | the OS-wide push-to-talk listener
 group_call.global_ptt_polling | it is polled
 group_call.global_ptt_listener_stop | its stop flag
@@ -192,6 +191,7 @@ screen_share.with_audio | share sound with it
 screen_share.generation | which listing may land
 screen_share.privacy_for | the screen recording permission box's call; cleared by the screen's goodbye
 screen_share.privacy_for.Private.0 | the call id of privacy_for, cleared with it
+screen_share.group_call | the video chat id a Group chooser or box was opened for; another call or none closes them, and the screen's goodbye closes both
 screen_share.backend | the capture backend
 screen_share.demo_active | the screenshot demos' shared source
 screen_share.demo_active_audio | the screenshot demos' shared sound

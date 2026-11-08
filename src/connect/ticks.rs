@@ -67,7 +67,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // background too (tdesktop's other sessions keep their send timer),
         // so a switch inside the window neither holds them nor sends them
         // late with no Undo on return.
-        let committed = self.paid_reaction_tick(crate::state::unix_ms_now());
+        let now_ms = crate::state::unix_ms_now();
+        let committed = self.paid_reaction_tick(now_ms);
+        // A live story's Stars too: the story may play on in
+        // Picture-in-Picture, or in another account, with no viewer tick
+        // to commit them; held, they would be dropped when it is left.
+        let committed = self.live_story_reaction_tick(now_ms) || committed;
         let TickScope::OnScreen { settings_open } = scope else {
             outcome.progress(committed);
             return outcome;

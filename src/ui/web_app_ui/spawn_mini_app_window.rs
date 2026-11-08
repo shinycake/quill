@@ -7,6 +7,15 @@ use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
     pub(super) fn spawn_mini_app_window(&mut self, launch: WebAppLaunch, cx: &mut Context<Self>) {
+        // An app whose URL lands while Quill is locked (asked for just
+        // before the lock) is refused: the helper window would show it,
+        // usable, over the lock. TDLib closes the launch.
+        if self.refused_while_locked() {
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.close_web_app(launch.launch_id);
+            }
+            return;
+        }
         let Some(path) = helper_path() else {
             self.set_status_note(
                 StatusNote::silent(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_QUILL_2)),

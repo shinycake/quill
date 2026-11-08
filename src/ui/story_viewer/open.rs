@@ -241,25 +241,17 @@ impl QuillApp {
     fn start_story_viewer(&mut self, viewer: StoryViewer, cx: &mut Context<Self>) {
         let previous = self.stories.viewer.current().map(StoryViewerItem::key);
         let current = viewer.current().map(StoryViewerItem::key);
+        // Opened over an open viewer (a "Reposted from" label, a story
+        // card in a chat window, the live PiP's return): the story shown
+        // until now is left, its reply and editors with it, as a step to
+        // another story would.
+        self.leave_story_item(cx);
         self.stories.viewer = viewer;
-        // Phase 9.5: viewers list and report flow are per-story.
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.viewers_open = false;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.report_open = false;
-        }
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.stats_open = false;
-        }
         self.switch_open_story(previous, current);
         // Phase 9.6: (re)start the playback clock + tick whenever the
         // viewer (re)opens — also covers the deferred `pending_story_open`
         // path, which funnels through here.
         self.stories.playback.start(Instant::now());
-        if let Some(open) = self.stories.viewer_ui_mut() {
-            open.pause.reset();
-        }
         self.stories.video.retry();
         self.sync_story_video(cx);
         self.ensure_story_tick(cx);

@@ -51,6 +51,9 @@ pub(crate) struct StoryViewerUi {
     pub(super) close_friends_saving: bool,
     pub(super) share_open: bool,
     pub(super) notice: Option<String>,
+    /// The ⋯ menu is open: the story holds still under it, and its entries
+    /// act on the story it was opened for (`MenuAct` carries it).
+    pub(super) menu_open: bool,
 }
 
 pub(crate) struct StoryUi {
@@ -152,6 +155,23 @@ impl StoryUi {
     /// The viewer closed: what it had open goes, as one value.
     pub(super) fn drop_viewer_ui(&mut self) {
         self.open = None;
+    }
+
+    /// The viewer moved on from the story it showed: what was open over
+    /// that story goes, as one value. The close friends editor stays: it
+    /// edits the user's list, not the story. The caller ends what other
+    /// owners hold for the story first (`QuillApp::leave_story_item`).
+    pub(super) fn leave_item(&mut self) {
+        let Some(open) = self.open.take() else {
+            return;
+        };
+        if self.viewer.is_open() {
+            self.open = Some(StoryViewerUi {
+                close_friends_edit: open.close_friends_edit,
+                close_friends_saving: open.close_friends_saving,
+                ..StoryViewerUi::default()
+            });
+        }
     }
 
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {

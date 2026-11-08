@@ -251,10 +251,14 @@ impl QuillApp {
         f(&mut self.chat_prefs);
         save_chat_prefs(&Self::appearance_paths(), &self.chat_prefs);
         // Keep kit's newline-vs-submit behavior in sync with the mode on
-        // the two chat composers (other inputs always submit on Enter).
+        // the chat composers, every window's (other inputs always submit
+        // on Enter). A chat window built its composer with the mode then
+        // in force.
         let submit = self.chat_prefs.send_key_mode == quill::composer::SendKeyMode::Enter;
-        self.composer.update(cx, |input, cx| {
-            input.set_submit_on_enter(submit, cx);
+        self.in_every_window(cx, |app, cx| {
+            app.composer.update(cx, |input, cx| {
+                input.set_submit_on_enter(submit, cx);
+            });
         });
         self.group_call_screen.composer.update(cx, |input, cx| {
             input.set_submit_on_enter(submit, cx);

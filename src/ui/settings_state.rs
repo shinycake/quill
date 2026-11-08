@@ -46,6 +46,10 @@ pub(crate) struct SettingsUi {
     pub(super) proxy: super::proxy::ProxyUi,
     /// The "No" answer of the phone-number prompt was chosen: show the note.
     pub(super) phone_change_note: bool,
+    /// Release-delay slider in Settings > Calls (`ui/ptt_delay.rs`). The
+    /// screen's: it is seeded from, and saves into, the call prefs of the
+    /// account it was made for, which are per account.
+    pub(super) ptt_delay_slider: Option<Entity<gpui_kit::component::slider::SliderState>>,
 }
 
 impl SettingsUi {
@@ -67,6 +71,7 @@ impl SettingsUi {
             storage_selected: Default::default(),
             proxy: Default::default(),
             phone_change_note: false,
+            ptt_delay_slider: None,
         }
     }
 }

@@ -71,6 +71,21 @@ impl Session {
         }
     }
 
+    /// The story or page a finished op acted on was left: its "Done" or
+    /// "Failed" line goes, so it never shows under another story or
+    /// another chat's page. An op still in flight keeps its line until its
+    /// answer.
+    pub fn settle_story_page_op(&mut self) {
+        if self.stories.page_op.as_ref().is_some_and(|op| {
+            matches!(
+                op.state,
+                StoryPageOpState::Succeeded | StoryPageOpState::Failed(_)
+            )
+        }) {
+            self.stories.page_op = None;
+        }
+    }
+
     /// Phase 9.7: clear the story-page op once its load answer landed (the
     /// loaded list itself is the honest state — no status line needed).
     pub(crate) fn clear_story_page_op(&mut self, purpose: RequestPurpose) {

@@ -14,7 +14,7 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// Create the slider on first use, seeded from the saved delay.
     pub(super) fn ensure_ptt_delay_slider(&mut self, cx: &mut Context<Self>) {
-        if self.group_call.ptt_delay_slider.is_some() {
+        if self.settings.ptt_delay_slider.is_some() {
             return;
         }
         let saved = self
@@ -37,13 +37,13 @@ impl QuillApp {
             }
         })
         .detach();
-        self.group_call.ptt_delay_slider = Some(slider);
+        self.settings.ptt_delay_slider = Some(slider);
     }
 
     /// Label and slider for the release delay.
     pub(super) fn ptt_delay_row(&self, saved_ms: u32, cx: &mut Context<Self>) -> AnyElement {
         let shown = self
-            .group_call
+            .settings
             .ptt_delay_slider
             .as_ref()
             .map(|slider| delay_by_index(slider.read(cx).value().end().round().max(0.0) as u32))
@@ -61,7 +61,7 @@ impl QuillApp {
                     .font_weight(FontWeight::MEDIUM)
                     .child(delay_label(shown)),
             );
-        if let Some(slider) = self.group_call.ptt_delay_slider.as_ref() {
+        if let Some(slider) = self.settings.ptt_delay_slider.as_ref() {
             row = row.child(
                 div()
                     .id("call-pref-ptt-delay-slider")

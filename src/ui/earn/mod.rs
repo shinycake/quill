@@ -244,6 +244,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The earn pages are the main window's info column: from a chat
+        // window (Monetization) they open there.
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.open_earn(panel, window, cx);
+        }) {
+            return;
+        }
         let current = self.session().and_then(|s| s.users_state.open_info_panel);
         match current {
             Some(InfoPanelTarget::Earn(open)) if open != panel => {

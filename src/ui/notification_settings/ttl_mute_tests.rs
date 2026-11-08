@@ -205,3 +205,54 @@ fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
         assert!(chat.is_muted(), "muted for the default 8 hours");
     });
 }
+
+/// The header's Mute box is for the chat it was opened on: a chat opened
+/// under it (a notification click, another window) does not retarget it.
+#[gpui_kit::test]
+fn the_mute_box_keeps_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let first = open_chat(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| app.open_mute_menu(cx));
+    let other = app.read_with(&vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.chats.keys().copied().find(|id| *id != first.0))
+            .map(ChatId)
+    });
+    let Some(other) = other else {
+        panic!("demo has a second chat");
+    };
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(other, window, cx)
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
+        assert_eq!(app.notify.mute_chat, Some(first), "the box's own chat");
+    });
+}
+
+/// The auto-delete picker sets the timer of the chat it was opened for
+/// (a profile's menu opens it for a chat that is not the open one).
+#[gpui_kit::test]
+fn the_auto_delete_picker_saves_for_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let open = open_chat(&app, vcx);
+    let other = app.read_with(vcx, |app, _| {
+        app.session()
+            .and_then(|s| s.chats.keys().copied().find(|id| *id != open.0))
+            .map(ChatId)
+    });
+    let Some(other) = other else {
+        panic!("demo has a second chat");
+    };
+    app.update(vcx, |app, cx| app.open_ttl_picker(other, cx));
+    frames(vcx);
+    move_ttl_slider(&app, vcx, 3);
+    vcx.update(|window, cx| window.click("ttl-save", cx));
+    frames(vcx);
+    assert_eq!(ttl_of(&app, vcx, other), 3 * DAY, "the picker's chat");
+    assert_eq!(ttl_of(&app, vcx, open), 0, "not the open chat");
+}

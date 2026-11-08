@@ -22,8 +22,6 @@ pub(crate) struct GroupCallUi {
     pub(super) ptt: quill::calls::ptt::PushToTalk,
     pub(super) ptt_clock: Instant,
     pub(super) ptt_capture: bool,
-    /// Release-delay slider in Settings > Calls (`ui/ptt_delay.rs`).
-    pub(super) ptt_delay_slider: Option<Entity<gpui_kit::component::slider::SliderState>>,
     /// System-wide push-to-talk hook, live only while joined with PTT on.
     pub(super) global_ptt: quill::calls::ptt_global::PlatformController,
     pub(super) global_ptt_polling: bool,
@@ -196,6 +194,13 @@ impl QuillApp {
             self.group_call_boxes.share_open = false;
             self.group_call_boxes.share_copied = false;
         }
+        // The rename and Settings boxes are drawn in the call window: with
+        // that window closed they would show nowhere, yet their Esc layers
+        // would still sit in the main window.
+        if id.is_some() && self.group_call_screen.window_closed_by_user == id {
+            self.group_call_screen.title_dialog = None;
+            self.group_call_screen.settings_open = false;
+        }
         if self.group_call_boxes.share_open
             && call.is_some_and(|(_, generating, ready)| !generating && !ready)
         {
@@ -245,7 +250,6 @@ impl GroupCallUi {
             ptt: quill::calls::ptt::PushToTalk::new(),
             ptt_clock: std::time::Instant::now(),
             ptt_capture: false,
-            ptt_delay_slider: None,
             global_ptt: Default::default(),
             global_ptt_polling: false,
             global_ptt_listener_stop: None,

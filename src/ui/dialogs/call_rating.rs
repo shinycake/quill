@@ -1,7 +1,11 @@
 use quill::lang::{Key, keys};
 /// Phase C2i: rating-detail draft for the call-end card. `problems` is
-/// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`).
+/// indexed by `CALL_PROBLEMS` (schema 1.8.67, `:7253`-`:7277`). It is
+/// the draft of one call's rating: the summary of another call never shows
+/// it or submits it.
 pub struct RatingDetail {
+    /// The call whose summary the stars were tapped on.
+    pub(crate) call_id: i32,
     pub(crate) stars: i32,
     pub(crate) problems: [bool; CALL_PROBLEMS.len()],
 }

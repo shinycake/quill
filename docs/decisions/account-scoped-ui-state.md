@@ -1420,3 +1420,111 @@ sites missed.
     hover preview, and the next move over a bar resets it.
   - A mini app's switch-inline still waits for the main window's next
     frame when that window is hidden.
+
+### Phase 11 (area C, part 1)
+
+Round 11 of the review, area C, findings 1 and 3 to 20, on
+`claude/sm-review11-c1`. Finding 2 (Lock Quill bound only on the main
+root) is the action bindings' fixer's. The findings were four shapes.
+
+- **The lock has one owner.** `passcode/lock_gate.rs` holds both
+  halves. `close_for_lock` stops or closes what the lock screen does
+  not cover: a recording (cancelled, so a round video at its limit is
+  not sent), every window's media viewer, the story viewer, the mini
+  app window, context menus, notification windows, every video PiP and
+  the device-linking camera scanner. `refused_while_locked` stops new
+  ones: recordings, a mini app whose URL lands under the lock (TDLib's
+  launch is closed) and links. A launch or OS link is held until the
+  unlock, as tdesktop holds start links (`checkStartUrls`): the poll
+  does not resolve it, and a link resolved just before the lock opens
+  its chat or box at the first frame after the unlock
+  (`run_resolved_deep_link`). Call windows stay up, as tdesktop leaves
+  its call panel, so a call can still be answered.
+  Guard: `scripts/lock_surfaces.py` (run by `check-screen-state.py`).
+  Every production function in `src/ui` that opens an OS window
+  (`.open_window(`), starts a helper process (`Command::new(`) or
+  starts a recording (`.begin_capture_start(`) must call
+  `refused_while_locked()` or be listed in `scripts/lock-surfaces.txt`
+  with the closer `close_for_lock` calls, or `-` and the reason the
+  lock need not reach it. `refuses` pins the link paths, which no
+  pattern finds. The list has 14 entries.
+- **What is open over a story belongs to that story.**
+  `leave_story_item` runs on every step, every open over an open
+  viewer and every release (a deleted story, the lock): it ends the
+  reply row and its recording, closes the item's panels and replaces
+  `StoryViewerUi` with a fresh one (close friends' edit and save
+  survive, being the account's). Before, the cover and privacy
+  editors survived Prev and Next and saved the story they were opened
+  on, and an open over the viewer kept the old reply and share panel.
+  A story reply whose story went is cancelled, never sent to the chat
+  under the viewer (`story_reply_send_target`). The ⋯ menu pauses the
+  story while open (`menu_open`) and each entry carries the story it
+  was drawn for, so a pick after the story moved on does nothing.
+  Edit and Repost pause the viewer under the composer. A finished
+  story page op ("Saved", "Failed") is settled when its story or page
+  goes (`settle_story_page_op`); one in flight keeps its line. A live
+  story's pending Stars commit from the poll, for a background account
+  too, and `next_deadline` wakes for them, so Stars tapped before the
+  story went to Picture-in-Picture are sent, not dropped.
+- **An answer acts on the owner it was asked for.**
+  - The header's Mute box keeps the chat it was opened on
+    (`mute_chat`, no fallback to the open chat). The auto-delete picker
+    is now `ttl_picker: Option<ChatId>`, the chat it was opened for, so
+    one opened from a profile's menu no longer sets the open chat's
+    timer.
+  - The call rating draft carries its call (`RatingDetail::call_id`).
+    Another call's summary neither shows it nor submits it, and Skip
+    drops it.
+  - The screen chooser and the screen access box belong to their call.
+    The video chat's id is recorded at open (`ScreenShareUi::group_call`).
+    When that call ends or another takes its place they close
+    (`sync_screen_share_call`), and a pick that lands after shares into
+    nothing. Closing the video chat window closes its Settings and
+    rename boxes.
+  - The free-transcription quota last seen is per account
+    (`OwnedBy`), so a switch toasts nothing.
+  - A GIF file plays in the window that pressed it (`PlayingGif`
+    carries the window), and that window's close stops it.
+- **One copy per screen or per window, not one shared.**
+  - The Privacy page's password check has its own field
+    (`TwoStepUi::check_password`). It shared the 2FA box's field, which
+    painted in two places, showed the same text twice and redrew every
+    frame (`lock-field-per-window.md`).
+  - "Send messages with" reaches every window's composer, not only the
+    main one's.
+  - The push-to-talk release slider moved from the app-wide
+    `GroupCallUi` to the screen-scoped `SettingsUi`, so each account's
+    Settings > Calls seeds its own.
+  - A switch during video full screen gives the window back
+    (`ViewerUi`'s farewell).
+- **Nothing waits on the main window's frame.**
+  - The call windows' sync ran only in the main window's upkeep, which
+    a hidden or minimized main window never draws. It now runs from the
+    notification pass (every poll) and from a chat window's draw
+    (`sync_call_windows`), and the call screen's linger timer syncs when
+    it fires. An incoming call is shown as an OS notification unless
+    the main window or the call window is active (`call_ring_seen`),
+    so a call is not silent while you work in a chat window.
+  - View Profile, Statistics and Monetization from a chat window hand
+    off to the main window, which draws the info column. "View all
+    photos" is left out of a chat window's viewer menu: no chat window
+    draws the shared media gallery.
+- **Findings 21 to 40.** None shares a root cause with these fixes. The
+  call window id leftover in 40 was not touched.
+- **Not done, or not tested.**
+  - Joining a video chat from a chat window: the start box and the
+    RTMP toasts still wait for the main window (part of 15).
+  - No behaviour test for "Send messages with" in a chat window: the
+    kit's input has no getter for the mode, and a test would have to
+    press Enter in the window's composer.
+  - No in-app test for the per-account transcription toast, the PTT
+    slider or the full-screen farewell: each needs a second account or
+    an OS full-screen window. `OwnedBy` and the screen-state guard
+    cover the first two.
+  - The OS notification for a ringing call and the call sync from a
+    chat window were not run with a real hidden main window.
+  - The mini app refusal under the lock was not tested; the window
+    needs the helper process.
+  - The 2FA field split is covered by a test that checks the password
+    without touching the box's field. The redraw loop itself was not
+    measured.

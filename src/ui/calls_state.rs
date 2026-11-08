@@ -47,6 +47,9 @@ pub(crate) struct CallUi {
 pub(crate) struct CallScreen {
     pub(super) window_closed_by_user: Option<i32>,
     pub(super) ended_at: Option<(i32, std::time::Instant)>,
+    /// The ended call whose linger timer is running, so the syncs from the
+    /// poll and every window's frame start one, not one each.
+    pub(super) linger_wake: Option<i32>,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
 }
 
