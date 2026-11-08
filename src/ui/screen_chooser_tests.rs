@@ -344,3 +344,39 @@ fn the_privacy_text_bolds_its_marked_words() {
     assert_eq!(bold, vec![std::ops::Range { start: 13, end: 29 }]);
     assert_eq!(split_bold("plain"), ("plain".to_string(), Vec::new()));
 }
+
+/// The chooser belongs to the video chat it was opened for: once another
+/// call is the one on screen, a pick shares nothing and the next sync
+/// closes it. (The test leaves the call itself in place, so that the call
+/// window is not opened or closed under it, and says the chooser was
+/// opened for call 6.)
+#[gpui_kit::test]
+fn the_chooser_goes_with_its_video_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.screen_share.window.is_some(), "the chooser opened");
+        assert_eq!(app.screen_share.group_call, Some(7), "for call 7");
+        app.screen_share.group_call = Some(6);
+        app.accept_screen_source(cx);
+    });
+    vcx.run_until_parked();
+    assert!(!group_sharing(&app, vcx), "call 7 shares nothing");
+    app.read_with(vcx, |app, _| assert!(app.screen_share.window.is_none()));
+
+    app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        assert!(app.screen_share.window.is_some(), "open again");
+        app.sync_screen_share_call(cx);
+        assert!(app.screen_share.window.is_some(), "its call is on screen");
+        app.screen_share.group_call = Some(6);
+        app.sync_screen_share_call(cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(app.screen_share.window.is_none(), "its call went")
+    });
+}

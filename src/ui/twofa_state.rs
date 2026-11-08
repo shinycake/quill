@@ -14,6 +14,11 @@ pub(crate) struct TwoStepUi {
     pub(super) open: bool,
     pub(super) view: TwofaView,
     pub(super) current_password: Entity<InputState>,
+    /// The Privacy page's "Your password" check card. Its own field: the
+    /// 2FA box stays over that page, so the box's forms and the card are
+    /// drawn in the same frame, and one field painted in two places
+    /// notifies at every paint (`lock-field-per-window.md`).
+    pub(super) check_password: Entity<InputState>,
     pub(super) new_password: Entity<InputState>,
     pub(super) hint: Entity<TextareaState>,
     pub(super) email: Entity<TextareaState>,
@@ -35,6 +40,12 @@ impl TwoStepUi {
         // here only and are cleared on submit/close — never on the
         // session.
         let twofa_current_password = cx.new(|cx| {
+            InputState::new(window, cx)
+                .masked(true)
+                .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
+                .submit_on_enter(false)
+        });
+        let check_password = cx.new(|cx| {
             InputState::new(window, cx)
                 .masked(true)
                 .placeholder(tr(keys::Q_PREFS_CURRENT_PASSWORD))
@@ -67,6 +78,7 @@ impl TwoStepUi {
             open: false,
             view: TwofaView::Status,
             current_password: twofa_current_password,
+            check_password,
             new_password: twofa_new_password,
             hint: twofa_hint,
             email: twofa_email,

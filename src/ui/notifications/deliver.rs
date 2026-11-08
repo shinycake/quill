@@ -26,6 +26,9 @@ impl QuillApp {
         {
             self.hand_out_notifications(drain, window, cx);
         }
+        // The call windows follow the call from here too, not from the
+        // main window's frame alone, which a hidden main window never draws.
+        self.sync_call_windows(cx);
         self.announce_ringing_call(cx);
         // The ringtone follows the call's state, as tdesktop's
         // `Calls::Instance` does, not a paint; the call tick keeps it looping.
@@ -133,6 +136,14 @@ impl QuillApp {
         }
     }
 
+    /// Whether the window in front shows an incoming call: the main
+    /// window (its call bar) or the call window itself.
+    fn call_ring_seen(&self, cx: &App) -> bool {
+        cx.active_window().is_some_and(|active| {
+            Some(active) == self.main_window.handle || Some(active) == self.calls.window
+        })
+    }
+
     /// Announce a new ringing call when no Quill window is in front, and
     /// withdraw the notification once the call stops ringing.
     fn announce_ringing_call(&mut self, cx: &mut Context<Self>) {
@@ -155,7 +166,9 @@ impl QuillApp {
                 call_id,
                 caller: &caller,
                 is_video,
-                app_active: cx.active_window().is_some(),
+                // Seen in the main or the call window only: a chat window
+                // in front shows no call, so the OS notification goes out.
+                app_active: self.call_ring_seen(cx),
                 // Call ids are per account: another account's call with
                 // the same id was a different call.
                 last_notified: self

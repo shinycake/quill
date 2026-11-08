@@ -102,7 +102,7 @@ impl QuillApp {
                 let message = &inputs.message;
                 let chrome = &inputs.chrome;
                 let inline = self.inline_frame(message, cx);
-                let animation_playing = self.playback.playing_animation == Some(message.id);
+                let animation_playing = self.gif_playing(message.chat_id, message.id);
                 let animation = animation_playing
                     .then(|| self.playback.gif_play())
                     .flatten();

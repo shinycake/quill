@@ -450,10 +450,21 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// "View all" is offered for a chat's media in the main window's
+    /// viewer only: the gallery is that window's (`SessionView`), and a
+    /// chat window draws no Shared Media, so from there it would open
+    /// nowhere.
+    pub(in crate::ui) fn viewer_can_view_all(&self) -> bool {
+        self.viewer.state.source() == ViewerSource::Chat && self.windows.scope.is_none()
+    }
+
     /// "View all media": close the viewer and open the chat's Shared
     /// Media gallery on its photos and videos (tdesktop opens the same
     /// list as the viewer's paging source).
     pub(in crate::ui) fn view_all_viewer_media(&mut self, cx: &mut Context<Self>) {
+        if !self.viewer_can_view_all() {
+            return;
+        }
         self.close_media_viewer(cx);
         self.open_shared_media_ui(cx);
         self.select_shared_media_tab_ui(quill::state::SharedMediaTab::Media, cx);

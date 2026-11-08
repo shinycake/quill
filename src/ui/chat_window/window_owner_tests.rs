@@ -161,3 +161,28 @@ fn a_secret_chats_window_blocks_capture_of_itself(cx: &mut TestAppContext) {
     assert!(window_blocked, "the secret chat window");
     assert!(!main_blocked, "the main window shows another chat");
 }
+
+/// A GIF plays in the row of the window that pressed it: the main window
+/// showing the same message does not play it too, and closing the window
+/// stops it.
+#[gpui_kit::test]
+fn a_gif_plays_in_its_window_and_stops_when_the_window_closes(cx: &mut TestAppContext) {
+    use crate::ui::playback_state::{ChatMessage, PlayingGif};
+    use quill::ids::MessageId;
+    let (app, main) = new_app(cx, "ready-chats");
+    open_chat_window(&app, main, cx);
+    let message = MessageId(40);
+    let (here, in_main) = app.update(cx, |app, cx| {
+        app.playback.playing_animation = Some(PlayingGif {
+            window: Some(OTHER),
+            message: ChatMessage::new(OTHER, message),
+        });
+        let here = app.in_window_scope(Some(OTHER), cx, |app, _| app.gif_playing(OTHER, message));
+        (here, app.gif_playing(OTHER, message))
+    });
+    assert_eq!(here, Some(true), "the chat window's row plays it");
+    assert!(!in_main, "the main window's row does not");
+    app.update(cx, |app, cx| app.forget_chat_window(OTHER, cx));
+    let playing = app.read_with(cx, |app, _| app.playback.playing_animation.is_some());
+    assert!(!playing, "the window's GIF stopped with it");
+}

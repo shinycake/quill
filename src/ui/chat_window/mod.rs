@@ -568,6 +568,7 @@ impl QuillApp {
         self.frame.main_covered.set(covered);
         self.follow_windows(cx);
         self.drop_play_intent_in_window(chat_id);
+        self.stop_gif_of_window(chat_id);
         if self.windows.last_input == Some(chat_id) {
             self.windows.last_input = None;
         }
@@ -638,7 +639,7 @@ impl QuillApp {
     pub(super) fn leave_open_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_leaving_draft(cx);
         self.leave_chat_ui();
-        self.notify.ttl_picker_open = false;
+        self.notify.ttl_picker = None;
         self.cancel_recording_here(cx);
         self.stop_animation_playback();
         self.playback.autoplayed_gifs.clear();

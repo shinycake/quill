@@ -9,7 +9,7 @@ use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
-use super::playback_state::{ChatMessage, GifDecode};
+use super::playback_state::{ChatMessage, GifDecode, PlayingGif};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -89,6 +89,28 @@ impl QuillApp {
         self.toggle_animation_playback(id, file_id, mime, cx);
     }
 
+    /// The GIF file of `chat`'s row `message_id` loops in the window whose
+    /// state is in place.
+    pub(super) fn gif_playing(&self, chat: ChatId, message_id: MessageId) -> bool {
+        self.playback.playing_animation
+            == Some(PlayingGif {
+                window: self.windows.scope,
+                message: ChatMessage::new(chat, message_id),
+            })
+    }
+
+    /// The window `chat` closed: a GIF its row played stops, and its clip
+    /// goes. Left marked, it would block autoplay in the other windows.
+    pub(in crate::ui) fn stop_gif_of_window(&mut self, chat: ChatId) {
+        if self
+            .playback
+            .playing_animation
+            .is_some_and(|playing| playing.window == Some(chat))
+        {
+            self.stop_animation_playback();
+        }
+    }
+
     pub(super) fn stop_animation_playback(&mut self) {
         // A decode still running stops before its next frame.
         for decode in self.playback.gif_decodes.values() {
@@ -111,7 +133,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.playback.autoplayed_gifs.insert(message_id);
-        if self.playback.playing_animation == Some(message_id) {
+        let open_chat = self.session().and_then(|session| session.open_chat);
+        if open_chat.is_some_and(|chat| self.gif_playing(chat, message_id)) {
             self.stop_animation_playback();
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_AV_GIF_PAUSED)));
@@ -175,7 +198,10 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
-        self.playback.playing_animation = Some(message_id);
+        self.playback.playing_animation = Some(PlayingGif {
+            window: self.windows.scope,
+            message: ChatMessage::new(chat_id, message_id),
+        });
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_AV_LOADING_GIF_PLAYBACK)));
         self.spawn_gif_decode(chat_id, message_id, file_id, safe, cx);
@@ -198,7 +224,7 @@ impl QuillApp {
             decode.cancel.store(false, Ordering::Relaxed);
             // Its first picture already came: play from it again now.
             if let Some(clip) = decode.first.clone() {
-                self.gif_started(message_id, clip, cx);
+                self.gif_started(chat_id, message_id, clip, cx);
             }
             return;
         }
@@ -227,7 +253,7 @@ impl QuillApp {
                         decode.first = Some(clip.clone());
                     }
                     if this.session().and_then(|session| session.open_chat) == Some(chat_id) {
-                        this.gif_started(message_id, clip, cx);
+                        this.gif_started(chat_id, message_id, clip, cx);
                     }
                 });
             }
@@ -238,7 +264,11 @@ impl QuillApp {
             if landed.is_err() {
                 let _ = this.main().update(cx, |this, cx| {
                     this.playback.gif_decodes.remove(&key);
-                    if this.playback.playing_animation == Some(message_id) {
+                    if this
+                        .playback
+                        .playing_animation
+                        .is_some_and(|playing| playing.message == key)
+                    {
                         this.stop_animation_playback();
                         cx.notify();
                     }
@@ -290,8 +320,14 @@ impl QuillApp {
     }
 
     /// The GIF's first picture is in: it plays from here.
-    fn gif_started(&mut self, message_id: MessageId, clip: Arc<GifClip>, cx: &mut Context<Self>) {
-        if self.playback.playing_animation != Some(message_id) || self.playback.gif.is_some() {
+    fn gif_started(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        clip: Arc<GifClip>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.gif_playing(chat_id, message_id) || self.playback.gif.is_some() {
             return;
         }
         self.playback.gif = Some(clip);
@@ -314,7 +350,7 @@ impl QuillApp {
         // Playing is the open chat's: the same id in another chat is not
         // this decode's row.
         let in_open_chat = self.session().and_then(|session| session.open_chat) == Some(key.chat);
-        if !in_open_chat || self.playback.playing_animation != Some(message_id) {
+        if !in_open_chat || !self.gif_playing(key.chat, message_id) {
             // Stopped or replaced meanwhile.
             return;
         }
@@ -328,7 +364,7 @@ impl QuillApp {
                     .is_some_and(|playing| Arc::ptr_eq(playing, &clip)) => {}
             // Another clip of the same GIF is playing.
             _ if self.playback.gif.is_some() => return,
-            Ok(clip) => self.gif_started(message_id, clip, cx),
+            Ok(clip) => self.gif_started(key.chat, message_id, clip, cx),
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
                 self.playback.playing_animation = None;

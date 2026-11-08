@@ -511,26 +511,7 @@ impl QuillApp {
             self.account.passcode.system_unlock_key.is_some();
         self.account.passcode.lock_error = None;
         self.account.passcode.logout_confirm = false;
-        // tdesktop closes the media viewer and call panels when it locks:
-        // every window's viewer, so its video stops and leaves full screen.
-        // Every window's context menus go too.
-        self.in_every_window(cx, |app, cx| {
-            if app.viewer.state.is_open() {
-                app.close_media_viewer(cx);
-            }
-            app.dismiss_context_menus(cx);
-        });
-        self.release_story_viewer();
-        // The mini app is a helper window the lock screen does not cover;
-        // tdesktop closes such windows on lock (`closeAdditionalWindows`).
-        self.close_mini_app_window(cx);
-        // Notification windows on screen show senders and text (tdesktop
-        // redraws them hidden on lock).
-        self.close_all_notify_windows(cx);
-        // tdesktop drops Picture-in-Picture on lock (`passcodeLockChanges`
-        // in `switchToPip`); this runs with the main window minimized or
-        // hidden too. A chat window's viewer keeps its own link.
-        self.close_every_video_pip(cx);
+        self.close_for_lock(cx);
         cx.notify();
     }
 
@@ -937,5 +918,9 @@ crate::ui::shell::register_dialogs! {
 
 mod build_passcode_dialog;
 mod lock_field;
+mod lock_gate;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod lock_gate_tests;
 mod system_unlock_wait;
 pub(crate) use lock_field::LockField;

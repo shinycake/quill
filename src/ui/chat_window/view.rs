@@ -179,6 +179,9 @@ impl Render for ChatWindowView {
                 app.follow_windows(cx);
             }
             app.set_window_chat_active(chat_id, active);
+            // The call windows follow the call while this window is the one
+            // drawing: the main window may be hidden or minimized.
+            app.sync_call_windows(cx);
             if moved {
                 app.schedule_chat_windows_save(cx);
             }

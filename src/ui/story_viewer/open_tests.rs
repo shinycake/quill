@@ -250,7 +250,7 @@ fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestA
 fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     let vcx = &mut vcx;
-    app.update(vcx, |app, _| {
+    app.update(vcx, |app, cx| {
         assert!(app.stories.viewer.is_open());
         app.stories.with_viewer_ui(|open| {
             open.privacy_edit = Some(crate::ui::story_albums::StoryPrivacyEdit {
@@ -263,7 +263,7 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
             open.notice = Some("saved".into());
         });
         assert!(app.stories.viewer_ui().privacy_edit.is_some());
-        app.release_story_viewer();
+        app.release_story_viewer(cx);
         // Nothing opens over a closed viewer.
         app.stories.with_viewer_ui(|open| open.reply_open = true);
         assert!(!app.stories.viewer_ui().reply_open);

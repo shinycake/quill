@@ -40,7 +40,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.stories.page = Some(StoryPage::new(chat_id, window, cx));
+        if let Some(session) = self.demo_session.as_deref_mut() {
+            session.settle_story_page_op();
+        }
         if let Some(live) = self.live.as_mut() {
+            // Another chat's finished op does not show on this page.
+            live.driver.session.settle_story_page_op();
             if let Err(err) = live.driver.get_chat_story_albums(chat_id) {
                 self.screen
                     .connection
@@ -77,6 +82,14 @@ impl QuillApp {
     /// Phase 9.7: close the chat story page.
     pub(super) fn close_story_page(&mut self, cx: &mut Context<Self>) {
         self.stories.page = None;
+        // A finished op's line was about this page.
+        let session = match self.live.as_mut() {
+            Some(live) => Some(&mut live.driver.session),
+            None => self.demo_session.as_deref_mut(),
+        };
+        if let Some(session) = session {
+            session.settle_story_page_op();
+        }
         cx.notify();
     }
 

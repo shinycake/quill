@@ -662,7 +662,12 @@ impl QuillApp {
                     .text_sm()
                     .child(tr(keys::Q_OPS_HOW_WAS_THE_CALL_QUALITY)),
             );
-            match &self.dialogs.rating_detail {
+            let draft = self
+                .dialogs
+                .rating_detail
+                .as_ref()
+                .filter(|detail| detail.call_id == summary.call_id);
+            match draft {
                 // Phase C2i: star tap opens the detail editor (problems
                 // + comment) — nothing is sent until Submit.
                 None => {

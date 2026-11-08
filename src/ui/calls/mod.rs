@@ -354,7 +354,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(call_id) = self.shown_call_summary_id() else {
+            return;
+        };
         self.dialogs.rating_detail = Some(RatingDetail {
+            call_id,
             stars: rating,
             problems: [false; CALL_PROBLEMS.len()],
         });
@@ -362,6 +366,13 @@ impl QuillApp {
             input.set_value("", window, cx);
         });
         cx.notify();
+    }
+
+    /// The call whose end summary is shown.
+    pub(super) fn shown_call_summary_id(&self) -> Option<i32> {
+        self.session()
+            .and_then(|session| session.calls.summary.as_ref())
+            .map(|summary| summary.call_id)
     }
 
     pub(super) fn toggle_rating_problem(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -378,8 +389,10 @@ impl QuillApp {
     /// button — `open_rating_detail` never sends on its own.
     pub(super) fn submit_call_rating(&mut self, cx: &mut Context<Self>) {
         let detail = match self.dialogs.rating_detail.take() {
-            Some(detail) => detail,
-            None => {
+            // Only the call it was drafted for: the summary shown may be
+            // a later call's by now.
+            Some(detail) if Some(detail.call_id) == self.shown_call_summary_id() => detail,
+            _ => {
                 cx.notify();
                 return;
             }
@@ -463,6 +476,8 @@ impl QuillApp {
     /// Phase C1: dismiss the call-end screen (rating skipped or
     /// acknowledged).
     pub(super) fn dismiss_call_summary(&mut self, cx: &mut Context<Self>) {
+        // The rating draft was this summary's.
+        self.dialogs.rating_detail = None;
         for session in self
             .live
             .as_mut()
@@ -895,6 +910,9 @@ pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;
 mod live_pip_follow;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod rating_owner_tests;
 pub(super) mod stream_title;
 pub(super) mod stream_view;
 pub(super) mod stream_volume;

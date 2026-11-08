@@ -60,6 +60,12 @@ impl QuillApp {
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
         self.tick_media_seek(std::time::Instant::now(), cx);
         self.pump_start_files(cx);
+        // A link that arrives while Quill is locked waits for the unlock,
+        // as tdesktop's start links do (`checkStartUrls`): nothing it
+        // opens may show over the lock.
+        if self.refused_while_locked() {
+            return;
+        }
         // `tg://proxy` / `tg://socks` (and the t.me forms) are parsed
         // locally and need no sign-in: a user who is blocked from
         // Telegram can only get in through them.
@@ -161,6 +167,22 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// Render-time half of a resolved link: the chat it names, or the box
+    /// of a typed link. Held while Quill is locked, then run at the first
+    /// frame after the unlock.
+    pub(super) fn run_resolved_deep_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.refused_while_locked() {
+            return;
+        }
+        if let Some(open) = self.links.pending_deep_link_open.take() {
+            self.open_deep_link_chat(open, window, cx);
+            self.drop_shared_card(cx);
+        }
+        if let Some(ui) = self.links.pending_deep_link_ui.take() {
+            self.run_deep_link_ui(ui, window, cx);
+        }
     }
 
     /// Starts the deep-link flow for `link` at the next poll, remembering

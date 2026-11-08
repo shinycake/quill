@@ -267,8 +267,12 @@ impl QuillApp {
     /// Bring the group call window back (the call bar).
     pub(super) fn show_group_call_window(&mut self, cx: &mut Context<Self>) {
         self.group_call_screen.window_closed_by_user = None;
-        if let Some(handle) = self.group_call.window {
-            let _ = handle.update(cx, |_, window, _| window.activate_window());
+        match self.group_call.window {
+            Some(handle) => {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
+            // Pressed in a chat window: the window opens now.
+            None => self.sync_call_windows(cx),
         }
         cx.notify();
     }

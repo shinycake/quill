@@ -396,11 +396,17 @@ fn a_gif_played_again_while_it_decodes_starts_at_once(cx: &mut TestAppContext) {
                 first: Some(clip.clone()),
             },
         );
-        app.playback.playing_animation = Some(message);
+        app.playback.playing_animation = Some(crate::ui::playback_state::PlayingGif {
+            window: None,
+            message: ChatMessage::new(chat, message),
+        });
         app.playback.gif = Some(clip.clone());
         app.stop_animation_playback();
         assert!(app.playback.gif.is_none());
-        app.playback.playing_animation = Some(message);
+        app.playback.playing_animation = Some(crate::ui::playback_state::PlayingGif {
+            window: None,
+            message: ChatMessage::new(chat, message),
+        });
         app.spawn_gif_decode(
             chat,
             message,

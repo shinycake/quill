@@ -245,7 +245,7 @@ impl QuillApp {
     /// owes TDLib and disk a cancel).
     pub(super) fn enter_chat_ui(&mut self, chat: ChatId, cx: &mut Context<Self>) {
         // Phase B4: the TTL picker belongs to the previous chat.
-        self.notify.ttl_picker_open = false;
+        self.notify.ttl_picker = None;
         self.dismiss_forward_for_chat(chat);
         self.cancel_recording_here(cx);
         if self.chat_ui.chat == Some(chat) {
