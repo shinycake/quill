@@ -124,7 +124,7 @@ impl Session {
                 | RequestPurpose::MutateProxy
                 | RequestPurpose::Settings(SettingsPurpose::PingProxy { .. })
                 | RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. })),
-            ) => self.apply_proxy_error(purpose, err),
+            ) => self.apply_proxy_error(purpose, pending, err),
             Some(
                 purpose @ (RequestPurpose::GetNewChatPrivacy
                 | RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy { .. })

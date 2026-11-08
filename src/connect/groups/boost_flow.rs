@@ -43,6 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn close_boost_box(&mut self) {
         self.session.groups.boost_box = None;
         self.session.groups.boost_intent = None;
+        self.session.groups.boost_slots_by_chat.clear();
     }
 
     /// Back from the reassign list to the counters.

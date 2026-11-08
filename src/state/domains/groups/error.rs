@@ -212,8 +212,19 @@ impl Session {
                     self.groups.supergroup_is_broadcast.remove(&supergroup_id);
                 }
             }
+            // Only the request the list waits for fails it, and it is
+            // settled: an older search's error must not cover a newer
+            // list, and a stale `latest` would drop every later answer.
             Some(RequestPurpose::GetChatJoinRequests) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self
+                        .groups
+                        .join_request_latest
+                        .get(&chat_id.0)
+                        .is_none_or(|latest| *latest == pending.id)
+                {
+                    self.groups.join_request_latest.remove(&chat_id.0);
                     self.groups.join_requests.insert(
                         chat_id.0,
                         JoinRequestFetch::Failed(call_request_error_line(
@@ -422,6 +433,16 @@ impl Session {
             Some(RequestPurpose::AddChatMembers | RequestPurpose::AddChatMember) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     *self.groups.add_members_failed.entry(chat_id.0).or_insert(0) += 1;
+                }
+            }
+            Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {
+                filter,
+                ..
+            })) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
+                    self.groups.take_member_more((chat_id.0, filter), pending);
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {

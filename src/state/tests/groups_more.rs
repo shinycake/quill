@@ -668,6 +668,8 @@ fn g2_boost_slots_stashed_for_chain() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
+    // Stashed only while a boost waits for the slots.
+    session.groups.boost_intent = Some(13);
     apply_json(
         &mut session,
         &seq,

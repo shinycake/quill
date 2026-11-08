@@ -48,7 +48,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.groups.supergroup_members.get(&(chat_id.0, filter)),
             Some(SupergroupMembersFetch::Loaded { members, .. }) if members.len() as i32 == offset
         );
-        if !loaded || self.supergroup_members_more_in_flight(chat_id, filter) {
+        // The page continues the list shown, so only for the query that
+        // list was asked with.
+        let same_query = self.session.groups.member_query((chat_id.0, filter)) == query;
+        if !loaded || !same_query || self.supergroup_members_more_in_flight(chat_id, filter) {
             return Ok(None);
         }
         let purpose =
@@ -71,6 +74,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session
+            .groups
+            .note_member_more((chat_id.0, filter), extra);
         Ok(Some(extra))
     }
 }

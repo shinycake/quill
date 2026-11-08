@@ -589,3 +589,34 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
     p.0.delete_received_gift("a").unwrap();
     assert_eq!(sent_request(&p.1, "deleteGift")["received_gift_id"], "a");
 }
+
+#[test]
+fn a_send_answer_for_an_earlier_dialog_does_not_land_in_the_open_one() {
+    let mut p = parts();
+    p.0.session.payments.hub.balance = Some(StarAmount {
+        stars: 1000,
+        nanos: 0,
+    });
+    open_send_dialog(&mut p);
+    let first = p.0.send_star_gift(55, "", false, false).unwrap();
+    // Closed before the answer; the dialog opens again for a new send.
+    open_send_dialog(&mut p);
+    let second = p.0.send_star_gift(55, "", false, false).unwrap();
+    feed(&mut p, json!({"@type": "ok", "@extra": first.as_extra()}));
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(send.sending, "the open dialog still waits for its own send");
+    assert!(send.done.is_none());
+    assert!(
+        p.0.send_star_gift(55, "", false, false).is_err(),
+        "Send stays disabled: no double purchase"
+    );
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": first.as_extra(), "code": 400, "message": "STARGIFT_USAGE_LIMITED"}),
+    );
+    assert!(p.0.session.payments.gifts_manage.send.error.is_none());
+    feed(&mut p, json!({"@type": "ok", "@extra": second.as_extra()}));
+    let send = &p.0.session.payments.gifts_manage.send;
+    assert!(!send.sending);
+    assert_eq!(send.done.as_deref(), Some("Gift sent."));
+}

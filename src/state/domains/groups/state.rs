@@ -24,6 +24,27 @@ impl GroupsState {
             .get(&key)
             .is_none_or(|(id, _)| *id == pending.id)
     }
+
+    /// A next-page request for `key` was sent: it extends the list the
+    /// latest first page filled.
+    pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
+        let base = self.supergroup_member_queries.get(&key).map(|(id, _)| *id);
+        self.member_more_bases.insert(more, base);
+    }
+
+    /// Settle the next page `pending`: whether it extends the list `key`
+    /// shows now. A page asked for an older query (another first page came
+    /// since) is dropped, or it would join the new search's results.
+    pub(crate) fn take_member_more(
+        &mut self,
+        key: (i64, MemberListFilter),
+        pending: &PendingRequest,
+    ) -> bool {
+        let Some(base) = self.member_more_bases.remove(&pending.id) else {
+            return false;
+        };
+        base == self.supergroup_member_queries.get(&key).map(|(id, _)| *id)
+    }
 }
 
 pub struct GroupsState {
@@ -225,6 +246,9 @@ pub struct GroupsState {
     /// search for another query sends a new request; only the latest one's
     /// answer or error fills the entry.
     pub supergroup_member_queries: HashMap<(i64, MemberListFilter), (RequestId, String)>,
+    /// Each next-page request in flight and the first-page request whose
+    /// list it extends (`None`: a list filled without one).
+    pub(crate) member_more_bases: HashMap<RequestId, Option<RequestId>>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -369,6 +393,7 @@ impl GroupsState {
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
             supergroup_member_queries: HashMap::new(),
+            member_more_bases: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

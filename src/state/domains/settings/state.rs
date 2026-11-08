@@ -207,6 +207,11 @@ pub struct SettingsState {
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
+    /// The latest `pingProxy` sent for each ping slot (a list entry, or
+    /// the link box's). Only its answer fills the slot: an older ping of
+    /// another server (the previous link, the entry before an edit) is
+    /// dropped.
+    pub(crate) proxy_ping_requests: HashMap<i32, RequestId>,
     /// The running or just-finished account export ("Export Telegram
     /// data"); the UI shows its progress and clears it.
     pub account_export: Option<crate::export::AccountExport>,
@@ -306,6 +311,7 @@ impl SettingsState {
             language_prefs: LanguagePrefs::default(),
             device_prefs: Default::default(),
             proxy: Default::default(),
+            proxy_ping_requests: HashMap::new(),
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),

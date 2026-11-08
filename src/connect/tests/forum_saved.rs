@@ -348,3 +348,35 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
         77
     );
 }
+
+#[test]
+fn a_second_tag_asks_at_once_and_the_first_tags_page_is_dropped() {
+    let mut f = Fixture::new();
+    f.saved_chat();
+    let love = ReactionType::emoji("\u{2764}");
+    let like = ReactionType::emoji("\u{1f44d}");
+    let first = f.driver.filter_saved_by_tag(love).unwrap().unwrap();
+    let second = f
+        .driver
+        .filter_saved_by_tag(like.clone())
+        .unwrap()
+        .expect("the second tag is asked for while the first is out");
+    let page = |extra: crate::ids::RequestId, id: i64| {
+        format!(
+            r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":1,"messages":[{{"id":{id},"chat_id":{ME},"date":1,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"tagged","entities":[]}}}}}}],"next_from_message_id":{id}}}"#,
+            extra.0
+        )
+    };
+    f.ingest(&page(first, 9));
+    let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
+    assert_eq!(search.tag, like);
+    assert!(
+        !search.loaded,
+        "the first tag's page does not fill the chip"
+    );
+    f.ingest(&page(second, 5));
+    let search = f.driver.session.threads.saved.tag_search.as_ref().unwrap();
+    assert!(search.loaded);
+    assert!(search.history.messages.contains_key(&5));
+    assert!(!search.history.messages.contains_key(&9));
+}

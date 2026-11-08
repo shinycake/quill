@@ -21,6 +21,9 @@ pub struct SavedTagSearch {
     pub history: TopicHistory,
     /// The first page was answered (an empty result then says "no messages").
     pub loaded: bool,
+    /// The `searchSavedMessages` page this filter waits for. Only its
+    /// answer fills it: a page asked for the previous tag is dropped.
+    pub request: Option<RequestId>,
 }
 
 /// Everything the Saved Messages sublist / tag UI needs.

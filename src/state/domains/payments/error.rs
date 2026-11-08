@@ -178,7 +178,7 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::Payments(purpose)) if purpose.is_gift_manage() => {
-                self.apply_gift_manage_error(err, purpose)
+                self.apply_gift_manage_error(err, purpose, pending)
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::Grams(purpose))) => {
                 self.apply_grams_error(err, purpose, pending)

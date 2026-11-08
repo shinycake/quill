@@ -242,10 +242,13 @@ impl Session {
             // Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
             // `getAvailableChatBoostSlots` answer. Stashed per chat so the
             // driver's `boostChat` chain can consume it (see
-            // `maybe_continue_boost` in connect.rs).
+            // `maybe_continue_boost` in connect.rs). Only while a boost
+            // waits for them: a stash left from a closed box would be
+            // used, out of date, by the next press.
             GroupsPayload::ChatBoostSlots { slots } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self.groups.boost_intent == Some(chat_id.0)
                 {
                     self.groups.boost_slots_by_chat.insert(chat_id.0, slots);
                 }
@@ -524,7 +527,9 @@ impl Session {
                 } else if let Some(RequestPurpose::Groups(
                     GroupsPurpose::GetSupergroupMembersMore { filter, .. },
                 )) = pending.map(|p| p.purpose)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
                     // The info panel's next page joins the cached one. A
                     // page dropped meanwhile by a membership change stays
