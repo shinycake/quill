@@ -1,5 +1,6 @@
 //! The payments domain: payments, Premium, Stars and gifts.
 mod apply;
+mod checkout;
 mod earn;
 mod error;
 mod gift_code;

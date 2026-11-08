@@ -313,11 +313,7 @@ fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
     let call = session.calls.active_call.as_mut().expect("active call");
     let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-    session.calls.hang_up = Some(crate::state::HangUp {
-        request,
-        call_id,
-        resume,
-    });
+    session.calls.hang_up = Some(crate::state::HangUp::new(request, call_id, resume));
     request
 }
 

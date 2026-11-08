@@ -54,6 +54,7 @@ impl QuillApp {
             payments.validated = None;
             payments.shipping_id = None;
             payments.form_paid = false;
+            payments.checkout_closed = false;
             payments.form_loading = true;
             payments.note = None;
             live.driver.send_payment_form_request(invoice)

@@ -25,6 +25,9 @@ impl Session {
                 self.payments.form_loading = false;
                 self.payments.sending = false;
                 self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::SendPaymentForm) {
+                    self.settle_closed_checkout();
+                }
             }
             Some(RequestPurpose::GetPaymentReceipt) => {
                 self.payments.receipt_error =

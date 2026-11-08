@@ -37,19 +37,14 @@ impl QuillApp {
     }
 
     /// Slice P1: close the checkout dialog, discarding the form answers.
-    /// The in-flight payment request context is cleared here (and only
-    /// here) — the answer reducers keep it so `validateOrderInfo` and
-    /// `sendPaymentForm` still correlate after the form answer is applied.
+    /// The payment request context goes here, or, while a payment is in
+    /// flight, once it answers (`Session::close_checkout`): the answer
+    /// reducers keep it so `validateOrderInfo` and `sendPaymentForm` still
+    /// correlate after the form answer is applied.
     pub(super) fn close_payment_dialog(&mut self, cx: &mut Context<Self>) {
         self.payments.dialog = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.payments.form = None;
-            live.driver.session.payments.form_loading = false;
-            live.driver.session.payments.note = None;
-            live.driver.session.payments.validated = None;
-            live.driver.session.payments.shipping_id = None;
-            live.driver.session.payments.request = None;
-            live.driver.session.payments.form_paid = false;
+            live.driver.session.close_checkout();
         }
         cx.notify();
     }

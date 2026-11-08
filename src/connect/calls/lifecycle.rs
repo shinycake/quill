@@ -125,18 +125,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(call) = self.session.calls.active_call.as_mut() {
             let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-            self.session.calls.hang_up = Some(crate::state::HangUp {
-                request: extra,
-                call_id,
-                resume,
-            });
+            self.session.calls.hang_up = Some(crate::state::HangUp::new(extra, call_id, resume));
         }
-        self.log_call_sound_summary(call_id);
-        if let Some(engine) = self.call_engine.as_deref_mut() {
-            // Prompt teardown; the later terminal updateCall repeats this
-            // idempotently through `pump_call_engine`.
-            let _ = engine.hangup(call_id);
-        }
+        // The engine hangs up once TDLib took the hang-up (its `ok` or
+        // the terminal updateCall, through `pump_call_engine`): an error
+        // puts the call back, and its sound with it.
         Ok(extra)
     }
 
@@ -147,8 +140,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// tdesktop's `Call::answer` leaves the waiting state at once.
     pub(crate) fn hang_up_for_close(&mut self) {
         let (call_running, joined) = (self.call_running(), self.group_call_joined());
-        if call_running {
-            let _ = self.discard_call();
+        if call_running && self.discard_call().is_ok() {
+            // The client goes now: no answer will come back to wait for.
+            let hanging_up = self.session.calls.hang_up.as_ref().map(|h| h.call_id);
+            if let (Some(call_id), Some(engine)) = (hanging_up, self.call_engine.as_deref_mut()) {
+                let _ = engine.hangup(call_id);
+            }
         }
         if joined {
             let _ = self.leave_group_call();

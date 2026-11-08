@@ -32,6 +32,9 @@ pub struct PaymentsState {
     /// The open form was paid: Pay stays off, so one form is never sent
     /// twice.
     pub form_paid: bool,
+    /// The checkout closed while `sendPaymentForm` was in flight:
+    /// `request` and `form` wait for its answer (`Session::close_checkout`).
+    pub checkout_closed: bool,
     /// "Media Unlocked" note after a paid-media purchase, drained into the
     /// status bar by the UI poll.
     pub unlocked_notice: Option<String>,
@@ -133,6 +136,7 @@ impl PaymentsState {
             note: None,
             sending: false,
             form_paid: false,
+            checkout_closed: false,
             unlocked_notice: None,
             receipt_error: None,
             verification_url: None,

@@ -190,15 +190,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(self.session.auth, AuthorizationState::Ready) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let before = self.session.shutdown;
-        self.session.begin_logout();
         let extra = self.session.request(RequestPurpose::LogOut, None);
         if let Err(err) = self.sender.send_json(&log_out(extra)) {
-            // Nothing went out: the account stays signed in and usable.
+            // Nothing went out: the account stays signed in and usable,
+            // its requests and generation untouched.
             self.session.requests.take(extra);
-            self.session.shutdown = before;
             return Err(err);
         }
+        self.session.logout_sent(extra);
         Ok(extra)
     }
 }

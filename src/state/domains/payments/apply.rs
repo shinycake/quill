@@ -71,6 +71,7 @@ impl Session {
                     } else {
                         self.payments.note = Some("Payment failed".to_string());
                     }
+                    self.settle_closed_checkout();
                 }
             }
             PaymentsPayload::MarketplaceGift(quote) => {

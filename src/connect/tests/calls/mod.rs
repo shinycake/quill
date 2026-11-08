@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
+mod hang_up;
 mod late_engine;
 mod media;
 mod sound_watch;

@@ -583,6 +583,11 @@ impl RequestRegistry {
         id
     }
 
+    /// Puts back a request taken out (`take`) that is still in flight.
+    pub(crate) fn readmit(&mut self, pending: PendingRequest) {
+        self.insert(pending);
+    }
+
     fn remove(&mut self, key: u64) -> Option<PendingRequest> {
         let pending = self.pending.remove(&key)?;
         self.forget_download(&pending);

@@ -70,6 +70,7 @@ mod live_location;
 mod live_story;
 mod live_story_beside_call;
 mod location_picker;
+mod logout_send;
 mod masks;
 mod media_library;
 mod member_moderation;

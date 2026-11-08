@@ -141,6 +141,18 @@ impl Session {
         self.shutdown = ShutdownPhase::CloseRequested;
     }
 
+    /// `logOut` went out as `request`: the account's other requests settle
+    /// and its generation moves on, while `request` itself stays under the
+    /// new generation so TDLib's answer to it still lands.
+    pub fn logout_sent(&mut self, request: RequestId) {
+        let sent = self.requests.take(request);
+        self.begin_logout();
+        if let Some(mut sent) = sent {
+            sent.account_generation = self.account_generation;
+            self.requests.readmit(sent);
+        }
+    }
+
     pub fn begin_logout(&mut self) {
         self.settings.account_export = None;
         self.settings.chat_export = None;

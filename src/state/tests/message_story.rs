@@ -107,6 +107,17 @@ fn a_story_is_unread_only_while_active_and_newer_than_the_read_mark() {
 }
 
 fn pay_for(session: &mut Session, sink: &Arc<MemorySink>, content: &str, star_count: i64) {
+    pay_for_then(session, sink, content, star_count, |_| {});
+}
+
+/// `pay_for`, with `meanwhile` run while `sendPaymentForm` is in flight.
+fn pay_for_then(
+    session: &mut Session,
+    sink: &Arc<MemorySink>,
+    content: &str,
+    star_count: i64,
+    meanwhile: impl FnOnce(&mut Session),
+) {
     let seq = AtomicU64::new(session.last_seq);
     apply_json(
         session,
@@ -130,6 +141,8 @@ fn pay_for(session: &mut Session, sink: &Arc<MemorySink>, content: &str, star_co
         product_description: String::new(),
     });
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(21)));
+    session.payments.sending = true;
+    meanwhile(session);
     apply_json(
         session,
         &seq,
@@ -153,6 +166,42 @@ fn paying_for_paid_media_leaves_a_media_unlocked_note() {
     let note = session.payments.unlocked_notice.take().expect("a note");
     assert!(note.starts_with("Media Unlocked."), "{note}");
     assert!(note.contains("25 Stars"), "{note}");
+}
+
+/// The checkout closed before TDLib answered: the payment still knows what
+/// it bought, and what it kept goes with the answer.
+#[test]
+fn a_payment_answered_after_the_checkout_closed_still_unlocks_the_media() {
+    let (mut session, sink) = session();
+    pay_for_then(
+        &mut session,
+        &sink,
+        r#"{"@type":"messagePaidMedia","star_count":25,"media":[{"@type":"paidMediaPreview","width":4,"height":3,"duration":0,"minithumbnail":null}],"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
+        25,
+        |session| {
+            session.close_checkout();
+            assert!(session.payments.request.is_some(), "kept for the answer");
+        },
+    );
+    let note = session.payments.unlocked_notice.take().expect("a note");
+    assert!(note.contains("25 Stars"), "{note}");
+    assert!(session.payments.request.is_none());
+    assert!(session.payments.form.is_none());
+    assert!(!session.payments.checkout_closed);
+}
+
+#[test]
+fn closing_a_checkout_with_nothing_in_flight_drops_it_at_once() {
+    let (mut session, _sink) = session();
+    session.payments.request = Some(PaymentRequest {
+        invoice: crate::payment_invoice::InputInvoice::Message {
+            chat_id: ChatId(21),
+            message_id: MessageId(402),
+        },
+    });
+    session.close_checkout();
+    assert!(session.payments.request.is_none());
+    assert!(!session.payments.checkout_closed);
 }
 
 #[test]
