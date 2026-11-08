@@ -152,7 +152,7 @@ fn a_poll_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
     let kept = vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             app.open_poll_dialog(window, cx);
-            if let Some(dialog) = app.composer_ui.poll_dialog.as_ref() {
+            if let Some(dialog) = app.chat_ui.poll_dialog.as_ref() {
                 dialog
                     .question_input
                     .update(cx, |input, cx| input.set_value("Lunch?", window, cx));
@@ -179,7 +179,7 @@ fn a_checklist_drops_a_reply_to_a_deleted_message(cx: &mut TestAppContext) {
             if let Some(task) = dialog.task_inputs.first() {
                 task.update(cx, |input, cx| input.set_value("Pack", window, cx));
             }
-            app.composer_ui.checklist_dialog = Some(dialog);
+            app.chat_ui.checklist_dialog = Some(dialog);
             app.submit_checklist_dialog(cx);
             app.chat_ui.has_reply()
         })

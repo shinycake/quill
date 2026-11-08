@@ -45,7 +45,7 @@ impl AttachTarget {
 impl QuillApp {
     fn attach_ref(&self, target: AttachTarget) -> Option<&OptionAttach> {
         match target {
-            AttachTarget::Row(index) => self.composer_ui.poll_dialog.as_ref()?.attach.get(index),
+            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_ref()?.attach.get(index),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -56,9 +56,7 @@ impl QuillApp {
 
     fn attach_mut(&mut self, target: AttachTarget) -> Option<&mut OptionAttach> {
         match target {
-            AttachTarget::Row(index) => {
-                self.composer_ui.poll_dialog.as_mut()?.attach.get_mut(index)
-            }
+            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_mut()?.attach.get_mut(index),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -70,7 +68,7 @@ impl QuillApp {
     /// Every media slot being written, rows first.
     fn attach_slots(&mut self) -> Vec<&mut OptionAttach> {
         let mut slots: Vec<&mut OptionAttach> = Vec::new();
-        if let Some(dialog) = self.screen.composer_ui.poll_dialog.as_mut() {
+        if let Some(dialog) = self.screen.chat_ui.poll_dialog.as_mut() {
             slots.extend(dialog.attach.iter_mut());
         }
         if let Some(panel) = self.screen.message_ui.poll_add_option.as_mut() {
@@ -83,7 +81,7 @@ impl QuillApp {
     fn option_input(&self, target: AttachTarget) -> Option<Entity<TextareaState>> {
         match target {
             AttachTarget::Row(index) => self
-                .composer_ui
+                .chat_ui
                 .poll_dialog
                 .as_ref()?
                 .option_inputs
@@ -475,7 +473,7 @@ impl QuillApp {
             return None;
         }
         let rows = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .map_or(0, |dialog| dialog.attach.len());
@@ -553,7 +551,7 @@ impl QuillApp {
             return false;
         }
         let rows = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .map_or(0, |dialog| dialog.attach.len());

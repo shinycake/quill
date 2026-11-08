@@ -75,6 +75,9 @@ pub(crate) struct AiStylePreview {
 pub(crate) struct ApplyInPlace {
     pub(super) token: u64,
     pub(super) chat_id: ChatId,
+    /// The window whose composer asked (`None`: the main window's); the
+    /// answer rewrites that composer.
+    pub(super) window: Option<ChatId>,
     /// The rewritten selection; `None` for the whole field.
     pub(super) selection: Option<Range<usize>>,
     /// The caret when the request was sent (kept after a whole-field
@@ -84,6 +87,10 @@ pub(crate) struct ApplyInPlace {
 
 pub(crate) struct AiComposeOpen {
     pub(super) chat_id: ChatId,
+    /// The window whose composer the box was opened over (`None`: the
+    /// main window's). The box closes when that window shows another
+    /// chat, not when the main window does.
+    pub(super) window: Option<ChatId>,
     pub(super) ai: AiComposeBox,
     pub(super) view: AiComposeView,
     /// The style names the box last refreshed against.

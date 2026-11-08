@@ -272,3 +272,31 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
         assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
     });
 }
+
+/// Round 8, 2a: a new poll or checklist goes to the chat shown at Create,
+/// so its box goes when another chat opens (a notification click opens
+/// one under the box).
+#[gpui_kit::test]
+fn another_chat_closes_the_poll_and_checklist_boxes(cx: &mut TestAppContext) {
+    use crate::ui::ChecklistDialog;
+    use crate::ui::dialogs::poll::{PollDialog, QuizLock};
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, false, QuizLock::Free));
+        app.chat_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
+    });
+    frames(&mut vcx);
+    open(&app, &mut vcx, other);
+    app.read_with(&vcx, |app, _| {
+        assert!(
+            app.chat_ui.poll_dialog.is_none(),
+            "the poll was the last chat's"
+        );
+        assert!(
+            app.chat_ui.checklist_dialog.is_none(),
+            "the checklist was the last chat's"
+        );
+    });
+}

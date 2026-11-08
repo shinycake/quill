@@ -77,8 +77,12 @@ impl GroupTypeBox {
             .session()
             .and_then(|s| s.group_username_verdict(facts.chat_id, &text))
             .map(|result| check_outcome(result, &text, &facts.editable));
+        let failed = app
+            .session()
+            .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
             LinkStatus::Empty if self.save_refused => LinkStatus::Problem(LinkProblem::TooShort),
+            LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
             status => status,
         }
     }
@@ -312,7 +316,12 @@ impl QuillApp {
             return;
         };
         let public = type_box.draft.public && !facts.public_blocked;
-        if public && !type_box.status(self, &facts, cx).is_good() {
+        let status = type_box.status(self, &facts, cx);
+        if public && !status.is_good() {
+            if status == LinkStatus::Problem(LinkProblem::CheckFailed) {
+                // The last check failed: Save asks again, once per press.
+                self.recheck_group_type_link(cx);
+            }
             if let Some(type_box) = self.group_type_box_mut() {
                 type_box.save_refused = true;
                 type_box

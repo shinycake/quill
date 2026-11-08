@@ -177,6 +177,11 @@ impl ChatWindows {
         self.open.iter().map(|open| (open.chat_id, open.handle))
     }
 
+    /// Every open chat window's slot.
+    fn slots(&self) -> impl Iterator<Item = slot::SharedSlot> + '_ {
+        self.open.iter().map(|open| open.slot.clone())
+    }
+
     fn window_for(&self, chat_id: ChatId) -> Option<&OpenChatWindow> {
         self.open.iter().find(|open| open.chat_id == chat_id)
     }

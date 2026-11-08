@@ -57,7 +57,7 @@ fn muting_the_pip_window_shows_on_a_paused_player_bar(cx: &mut TestAppContext) {
     assert!(!labelled(vcx, unmute));
 
     // Drawn without moving the clock, so no progress tick runs.
-    let hooks = super::pip_hooks(app.downgrade());
+    let hooks = super::pip_hooks(app.downgrade(), None);
     vcx.update(|_, cx| (hooks.volume)(0.0, cx));
     vcx.run_until_parked();
     assert!(labelled(vcx, unmute), "the speaker shows the sound muted");

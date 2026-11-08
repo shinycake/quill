@@ -525,3 +525,40 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
     assert!(!sink.rendered().contains("CANARY_DRV_chat"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Round 8, 2f: opening search again while it is open on a query (a
+/// second click on the same hashtag, the QuickSwitch chord) inside the
+/// debounce keeps the pending commit, so the query is sent.
+#[test]
+fn reopening_search_inside_the_debounce_still_sends_the_query() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let _ = driver.open_search().unwrap();
+    let token = match driver.set_search_query("#tag").unwrap() {
+        SearchQueryOutcome::Debounced { token } => token,
+        other => panic!("{other:?}"),
+    };
+    assert!(driver.open_search().unwrap().is_none(), "already open");
+    let settled = driver.commit_debounced_search(token).unwrap();
+    assert!(
+        matches!(settled, Some(SearchFlight::Query(_, _, _))),
+        "the query went out"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

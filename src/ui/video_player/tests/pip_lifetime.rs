@@ -130,6 +130,43 @@ fn locking_quill_closes_pip_without_a_main_window_render(cx: &mut TestAppContext
     assert!(script.borrow().dropped, "the player stopped");
 }
 
+/// Round 8, 2b: a window opened from a chat window's viewer keeps its
+/// link in that window's slot. Another sound starting while the main
+/// window's state is in place (a voice message there) still closes it, as
+/// the lock and a deletion do (`take_video_pips`).
+#[gpui_kit::test]
+fn another_sound_closes_pip_opened_from_a_chat_window(cx: &mut TestAppContext) {
+    let script = ready_script();
+    let (app, mut vcx, player) = open_pip_on(cx, &script, |_| {}, MessageId(204), 0);
+    drop(player);
+    let vcx = &mut vcx;
+    let chat = ChatId(11);
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_in_new_window(chat, window, cx)
+    });
+    vcx.run_until_parked();
+    // Move the link where a chat window's viewer would have put it.
+    let placed = app.update(vcx, |app, cx| {
+        app.set_window_scope(None);
+        let link = app.viewer.pip.take();
+        let had = link.is_some();
+        app.in_window_scope(Some(chat), cx, move |app, _| app.viewer.pip = link)
+            .is_some()
+            && had
+    });
+    assert!(placed, "the chat window holds the link");
+    app.update(vcx, |app, cx| {
+        app.set_window_scope(None);
+        app.sound_starts(cx);
+    });
+    vcx.run_until_parked();
+    let left = app.update(vcx, |app, cx| {
+        app.in_window_scope(Some(chat), cx, |app, _| app.viewer.pip.is_some())
+    });
+    assert_eq!(left, Some(false), "the chat window's link went");
+    assert!(script.borrow().dropped, "the player stopped");
+}
+
 #[gpui_kit::test]
 fn switching_accounts_keeps_pip_and_its_own_logout_closes_it(cx: &mut TestAppContext) {
     let script = ready_script();

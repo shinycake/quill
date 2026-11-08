@@ -109,6 +109,35 @@ fn only_the_newest_check_counts() {
     );
 }
 
+/// Round 8, 2h: a failed check records that it failed for its text, so
+/// the box says so instead of "Checking..." with nothing in flight, and a
+/// new check (Save asks one) clears it.
+#[test]
+fn a_failed_check_is_recorded_until_the_next_one() {
+    let mut rig = Rig::new();
+    let check = rig
+        .driver
+        .check_group_username(ChatId(13), "quillchat")
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 3"}}"#,
+        check.0
+    ));
+    let session = &rig.driver.session;
+    assert!(session.group_username_check_failed(ChatId(13), "quillchat"));
+    assert!(!session.group_username_check_failed(ChatId(13), "quillchats"));
+    assert_eq!(session.groups.group_type.check_pending, None);
+    rig.driver
+        .check_group_username(ChatId(13), "quillchat")
+        .unwrap();
+    assert!(
+        !rig.driver
+            .session
+            .group_username_check_failed(ChatId(13), "quillchat")
+    );
+}
+
 #[test]
 fn a_basic_group_is_checked_as_a_new_chat() {
     let mut rig = Rig::new();

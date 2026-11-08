@@ -35,6 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         state.check_generation = state.check_generation.wrapping_add(1);
         let generation = state.check_generation;
         state.check_pending = Some((chat_id, username.to_string()));
+        state.check_failed = None;
         let extra = self.session.request(
             purpose(GroupTypePurpose::CheckChatUsername { generation }),
             Some(chat_id),

@@ -2,7 +2,6 @@
 //! attachments and options are per chat, in `composer_sends.rs`.
 #![deny(clippy::indexing_slicing)]
 
-use super::*;
 use quill::composer::DraftTopic;
 use quill::ids::ChatId;
 use quill::telegram::envelope::ChatDraft;
@@ -123,10 +122,6 @@ pub(crate) struct ComposerUi {
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
     pub(super) slow_mode_tick_chat: Option<ChatId>,
-    /// Phase 4.2: poll creation dialog (open above the composer).
-    pub(super) poll_dialog: Option<PollDialog>,
-    /// B15: the checklist composer / "Add Tasks" box.
-    pub(super) checklist_dialog: Option<ChecklistDialog>,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -165,8 +160,6 @@ impl ComposerUi {
             drop_state: None,
             drop_preview: None,
             slow_mode_tick_chat: None,
-            poll_dialog: None,
-            checklist_dialog: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
         }

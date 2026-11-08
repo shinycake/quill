@@ -413,3 +413,26 @@ fn devices_page_esc_leaves_session_details_before_the_page(cx: &mut TestAppConte
     assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_none()));
     assert!(shown(vcx, "settings-page-devices"), "the page stays");
 }
+
+/// Round 8, 2i: an armed "Press a key" goes with the Calls page. Left
+/// armed, the next key typed anywhere became the push-to-talk key.
+#[gpui_kit::test]
+fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    let armed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| app.group_call.ptt_capture)
+    };
+    app.update(vcx, |app, _| {
+        app.open_settings(Some(Page::Calls));
+        app.group_call.ptt_capture = true;
+        app.switch_settings_page(Page::Privacy);
+    });
+    assert!(!armed(&app, vcx), "another page");
+    app.update(vcx, |app, _| {
+        app.switch_settings_page(Page::Calls);
+        app.group_call.ptt_capture = true;
+        app.close_settings();
+    });
+    assert!(!armed(&app, vcx), "Settings closed");
+}

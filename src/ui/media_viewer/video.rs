@@ -102,7 +102,7 @@ impl QuillApp {
         let start = self
             .viewer
             .pending_seek
-            .take_if(|(id, _)| *id == item.message_id)
+            .take_if(|(key, _)| *key == quill::ids::ChatMessage::new(item.chat_id, item.message_id))
             .map(|(_, secs)| secs.max(0.0))
             .or_else(|| {
                 item.is_video_photo()

@@ -121,7 +121,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // One sound at a time; one live PiP at a time.
-        self.close_video_pip(cx);
+        self.close_every_video_pip(cx);
         self.close_live_pip(cx);
         let account = self.session().map(|session| session.account.clone());
         self.group_call.live_pip = Some(LivePipLink {

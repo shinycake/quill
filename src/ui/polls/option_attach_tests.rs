@@ -27,7 +27,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn slot(app: &QuillApp, index: usize) -> OptionMediaSlot {
-    app.composer_ui.poll_dialog.as_ref().unwrap().attach[index]
+    app.chat_ui.poll_dialog.as_ref().unwrap().attach[index]
         .media
         .clone()
 }
@@ -42,7 +42,7 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         assert_eq!(slot(app, 1), OptionMediaSlot::None);
         assert!(app.connection.status_note().contains("link"));
 
-        let input = app.composer_ui.poll_dialog.as_ref().unwrap().attach[1]
+        let input = app.chat_ui.poll_dialog.as_ref().unwrap().attach[1]
             .link_input
             .clone()
             .unwrap();
@@ -56,7 +56,7 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
                 url: "https://example.com/tacos".into()
             })
         );
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         assert!(dialog.attach[1].link_input.is_none());
         // The draft carries it for the second option once it has text.
         let draft = dialog.draft(cx);
@@ -108,13 +108,7 @@ fn a_picked_photo_is_read_then_ready_and_a_text_file_is_refused(cx: &mut TestApp
 
         app.take_poll_option_file(AttachTarget::Row(0), photo, cx);
         assert_eq!(slot(app, 0), OptionMediaSlot::Preparing(shown.clone()));
-        assert!(
-            app.composer_ui
-                .poll_dialog
-                .as_ref()
-                .unwrap()
-                .media_preparing()
-        );
+        assert!(app.chat_ui.poll_dialog.as_ref().unwrap().media_preparing());
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {
@@ -122,13 +116,7 @@ fn a_picked_photo_is_read_then_ready_and_a_text_file_is_refused(cx: &mut TestApp
             slot(app, 0),
             OptionMediaSlot::Ready(PollOptionInput::Photo { path: shown })
         );
-        assert!(
-            !app.composer_ui
-                .poll_dialog
-                .as_ref()
-                .unwrap()
-                .media_preparing()
-        );
+        assert!(!app.chat_ui.poll_dialog.as_ref().unwrap().media_preparing());
     });
 }
 
@@ -140,13 +128,13 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
         app.add_poll_option_row(window, cx);
         let link = |url: &str| OptionMediaSlot::Ready(PollOptionInput::Link { url: url.into() });
         {
-            let dialog = app.composer_ui.poll_dialog.as_mut().unwrap();
+            let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
             dialog.attach[0].media = link("a");
             dialog.attach[2].media = link("c");
             dialog.attach[2].menu_open = true;
         }
         app.remove_poll_option_row(1, cx);
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         let media: Vec<_> = dialog.attach.iter().map(|a| a.media.clone()).collect();
         assert_eq!(media, vec![link("a"), link("c")]);
         assert!(dialog.attach[1].menu_open, "the open menu follows its row");
@@ -209,7 +197,7 @@ fn emoji_picked_in_the_panel_go_to_the_option_field_with_a_token(cx: &mut TestAp
         assert!(app.pickers.media_panel.open);
         assert!(app.route_poll_option_emoji("\u{1F600}", window, cx));
         assert!(app.route_poll_option_custom_emoji("\u{2B50}", 5368324170671202286, window, cx));
-        let dialog = app.composer_ui.poll_dialog.as_ref().unwrap();
+        let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         let field = dialog.option_inputs[1].read(cx);
         assert_eq!(field.value().as_ref(), "\u{1F600}\u{2B50}");
         assert_eq!(field.tokens().len(), 1);
