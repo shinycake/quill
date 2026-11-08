@@ -340,6 +340,10 @@ impl QuillApp {
             return;
         }
         let session = &live.driver.session;
+        // A failed first page or tags request waits for the connection.
+        if session.threads.saved.retry_when_online {
+            return;
+        }
         if !session.threads.saved.tags_loaded
             && !session
                 .requests
