@@ -167,6 +167,41 @@ fn another_sound_closes_pip_opened_from_a_chat_window(cx: &mut TestAppContext) {
     assert!(script.borrow().dropped, "the player stopped");
 }
 
+/// The lock closes a PiP a chat window opened, and both windows go idle
+/// behind their lock screens (each has its own passcode field).
+#[gpui_kit::test]
+fn locking_closes_pip_opened_from_a_chat_window(cx: &mut TestAppContext) {
+    let script = ready_script();
+    let (app, mut vcx, player) = open_pip_on(cx, &script, |_| {}, MessageId(204), 0);
+    drop(player);
+    let vcx = &mut vcx;
+    let chat = ChatId(11);
+    app.update_in(vcx, |app, window, cx| {
+        app.open_chat_in_new_window(chat, window, cx)
+    });
+    vcx.run_until_parked();
+    let placed = app.update(vcx, |app, cx| {
+        app.set_window_scope(None);
+        let link = app.viewer.pip.take();
+        let had = link.is_some();
+        app.in_window_scope(Some(chat), cx, move |app, _| app.viewer.pip = link)
+            .is_some()
+            && had
+    });
+    assert!(placed, "the chat window holds the link");
+    app.update(vcx, |app, cx| {
+        app.set_window_scope(None);
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+    });
+    vcx.run_until_parked();
+    let left = app.update(vcx, |app, cx| {
+        app.in_window_scope(Some(chat), cx, |app, _| app.viewer.pip.is_some())
+    });
+    assert_eq!(left, Some(false), "the chat window's link went");
+    assert!(script.borrow().dropped, "the player stopped");
+}
+
 #[gpui_kit::test]
 fn switching_accounts_keeps_pip_and_its_own_logout_closes_it(cx: &mut TestAppContext) {
     let script = ready_script();
