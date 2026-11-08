@@ -31,6 +31,8 @@ impl QuillApp {
             session.open_chat(if mode == "author" { CHANNEL } else { GROUP });
             crate::ui::message_menu_ui::item_rows::inject_menu_facts(session, &mode);
         }
+        // The boxes are the chat's (`ChatUi`): the view takes the chat first.
+        self.sync_chat_ui();
         use crate::ui::ChecklistDialog;
         match mode.as_str() {
             "checklist" => {

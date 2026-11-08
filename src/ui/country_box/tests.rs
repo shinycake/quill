@@ -183,13 +183,16 @@ fn the_limit_switch_is_for_channels_and_off_forgets_the_countries(cx: &mut TestA
     // The demo chat is a group: no switch.
     app.update_in(&mut vcx, |app, window, cx| app.open_poll_dialog(window, cx));
     assert!(!shown(&mut vcx));
-    // A channel shows it (the dialog opens again after the chat change).
-    app.update_in(&mut vcx, |app, window, cx| {
+    // A channel shows it. The box goes with the chat change (it is the
+    // chat's, `ChatUi`), so it opens again once the channel is shown.
+    app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             super::demo::open_demo_channel(session);
         }
-        app.open_poll_dialog(window, cx);
+        cx.notify();
     });
+    let _ = shown(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| app.open_poll_dialog(window, cx));
     assert!(shown(&mut vcx));
     app.update_in(&mut vcx, |app, window, cx| {
         let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();

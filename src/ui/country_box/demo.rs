@@ -71,6 +71,9 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             open_demo_channel(session);
         }
+        // The box is the chat's: let the view take the channel first, or
+        // the next frame's chat change drops it.
+        self.sync_chat_ui();
         self.open_poll_dialog(window, cx);
         if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
             dialog.limit_by_country = true;
