@@ -27,10 +27,12 @@ use super::super::history_state::HistoryUi;
 use super::super::image_budget::{BoundedImageCache, WindowDraw};
 use super::super::media_viewer::PipLink;
 use super::super::message_state::MessageUi;
+use super::super::motion::MotionState;
 use super::super::passcode::LockField;
 use super::super::pickers_state::PickerUi;
 use super::super::share_state::ShareUi;
 use super::super::sticker_player;
+use super::super::surface_reveal::Surfaces;
 use super::super::viewer_state::ViewerUi;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::*;
@@ -62,6 +64,8 @@ impl SlotFarewell for MessageUi {}
 impl SlotFarewell for PickerUi {}
 impl SlotFarewell for ShareUi {}
 impl SlotFarewell for LockField {}
+impl SlotFarewell for Surfaces {}
+impl SlotFarewell for MotionState {}
 
 /// The Picture-in-Picture window opened from this window's viewer plays
 /// the window's clip, with its link in this slot: it closes with it.
@@ -104,6 +108,11 @@ super::super::on_screen::on_screen_fields! {
     /// The window's own passcode field on the lock screen
     /// (`PasscodeUi::lock`).
     lock_field: LockField,
+    /// The window's bars, corner buttons and toast as they slide and fade
+    /// (`FrameUi::surfaces`): each window follows its own.
+    surfaces: Surfaces,
+    /// The window's history reveal and selection fades (`FrameUi::motion`).
+    motion: MotionState,
 }
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
@@ -165,6 +174,8 @@ impl WindowSlot {
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
             lock_field: LockField::new(window, cx, app.account.passcode.locked),
+            surfaces: Surfaces::new(std::time::Instant::now()),
+            motion: MotionState::default(),
             slices: WindowSlices::new(Some(chat_id), cx)
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
@@ -228,6 +239,8 @@ impl QuillApp {
         std::mem::swap(&mut self.share, &mut slot.share);
         std::mem::swap(&mut self.account.passcode.lock, &mut slot.lock_field);
         std::mem::swap(&mut self.slices.window, &mut slot.slices);
+        std::mem::swap(&mut self.frame.surfaces, &mut slot.surfaces);
+        std::mem::swap(&mut self.frame.motion, &mut slot.motion);
     }
 
     /// Run `f` as `window_chat`'s window (`None`: the main window), for

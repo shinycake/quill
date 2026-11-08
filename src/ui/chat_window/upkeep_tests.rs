@@ -118,3 +118,55 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
         "fixed text"
     );
 }
+
+#[gpui_kit::test]
+fn each_window_lifts_its_own_corner_buttons(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    let now = std::time::Instant::now();
+    read(&h, Some(OTHER), cx, |app, _| {
+        app.frame.surfaces.corner_lift.borrow_mut().go(
+            1.,
+            crate::ui::surface_reveal::CORNER,
+            false,
+            now,
+        );
+    });
+    let main = read(&h, None, cx, |app, _| {
+        app.frame.surfaces.corner_lift.borrow().target()
+    });
+    let window = read(&h, Some(OTHER), cx, |app, _| {
+        app.frame.surfaces.corner_lift.borrow().target()
+    });
+    // One shared glide flipped between the two targets at every draw of
+    // either window and kept both on a 60 fps tick.
+    assert_eq!((main, window), (0., 1.));
+}
+
+#[gpui_kit::test]
+fn a_main_dialog_stays_open_while_the_pointer_is_in_a_chat_window(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    read(&h, None, cx, |app, cx| {
+        app.message_ui.open_link_confirm = Some(crate::ui::entity_links::OpenLinkConfirm {
+            url: "https://example.com".into(),
+            shown: "https://example.com".into(),
+            suspicious: Vec::new(),
+            from_poll_option: false,
+        });
+        app.note_window_input(None);
+        cx.notify();
+    });
+    draw(h.main, cx);
+    assert!(h.shell.read_with(cx, |shell, _| shell.dialog_open()));
+    // The pointer moves into the chat window, then the main window draws.
+    h.app.update(cx, |app, cx| {
+        app.note_window_input(Some(OTHER));
+        cx.notify();
+    });
+    draw(h.main, cx);
+    assert!(
+        h.shell.read_with(cx, |shell, _| shell.dialog_open()),
+        "the main window's dialog read the main window's flag"
+    );
+}
