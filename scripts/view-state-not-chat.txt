@@ -8,9 +8,12 @@
 # `ComposerReplyTo`, `ComposerEdit` or a raw `i64` (TDLib's ids; outside a
 # keyed map or set) is listed here with its reason, or it goes in `ChatUi`
 # (ui/chat_ui_state.rs), which is replaced whole when the chat shown
-# changes. A nested field is named by its path.
+# changes. A nested field is named by its path; `Option`, `Vec`, map
+# values and enum payloads are walked too (round 7: a variant's payload is
+# `Variant.0` or `Variant.field`). A name with `*` after it covers every
+# field under it.
 #
-#   <Struct>.<field> | <why it may outlive the chat it names>
+#   <Struct>.<field> [*] | <why it may outlive the chat it names>
 
 ComposerUi.shown_draft | carries its own chat and topic: a draft for another slot never matches
 ComposerUi.slow_mode_tick_chat | marks the running 1 s tick task, which exits by itself when the chat changes; resetting it would start a second task
@@ -38,3 +41,26 @@ HistoryUi.pull.next_chat | the pull gesture's next chat; `pull_sync` resets it w
 HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
 ViewerUi.extra.share_at | the media viewer's "Share at" forward, as ViewerUi.video
 ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches
+# Round 7: walked through `Option`, `Vec`, map values and enums. Each of
+# these carries the chat it acts on, or holds no chat's ids at all (a time,
+# a sticker set, an effect).
+ComposerUi.inline_return * | carries the chat it came from (`origin`) and the bot's; it acts only once the bot's chat answers
+ComposerUi.send_menu * | the send menu carries its chat; it closes when the chat viewed is another (`send_effects`); the rest are effect ids
+ComposerUi.clear_draft_on_success * | carries its chat: the draft cleared is that chat's
+ComposerUi.date_dialog * | a date box over the composer text; `initial` is a unix time, not an id
+ComposerUi.poll_dialog * | the new poll's deadline box; `initial` is a unix time; the poll goes to the slot it was opened for
+ComposerUi.checklist_dialog * | `add_to` carries its chat and message
+ComposerUi.send_box * | the attachment tray's video editor: a sticker set id and times in ms, no chat's ids; the tray is keyed by draft slot
+MessageUi.menu * | carries its chat and message; its actions use them
+MessageUi.pending_link * | carries its chat and message (`msg_key`); run at the next render
+MessageUi.selection_drag * | one press gesture; carries its chat, and the release checks it
+MessageUi.request_share * | the bot's request carries its chat and message; the answer goes to them
+MessageUi.poll_voters_dialog * | carries its chat and message
+MessageUi.poll_add_option * | carries its chat and message
+MessageUi.fact_check_dialog * | carries its chat and message
+HistoryUi.rows * | rebuilt whenever `rows_key` (with its chat) changes; the ids inside are emoji status and album ids
+HistoryUi.rows_key * | what the rows were built from, its chat included: the check that rebuilds them on a change
+HistoryUi.reaction_fly * | carries its chat and message; drawn only on that row (`reaction_fly_for`)
+HistoryUi.landing * | ended by the history's sync when the chat or topic shown changes (`end_landing`)
+PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
+ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history

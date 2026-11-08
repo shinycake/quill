@@ -24,6 +24,13 @@ impl Session {
             Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id })) => {
                 self.fail_sticker_set_view(set_id)
             }
+            // "Attached Stickers": the box it opened (set 0) says it failed.
+            Some(RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { .. })) => {
+                if pending.map(|p| p.id) == self.stickers.stickers.attached_request {
+                    self.stickers.stickers.attached_request = None;
+                    self.fail_sticker_set_view(0);
+                }
+            }
             Some(
                 RequestPurpose::SetEmojiStatus
                 | RequestPurpose::ClearRecentEmojiStatuses

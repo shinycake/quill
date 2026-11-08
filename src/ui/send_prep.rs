@@ -377,7 +377,7 @@ impl QuillApp {
             // MED1: the grouping override was consumed: the next composer
             // follows the pref again.
             self.composer_ui.group_media = None;
-            self.composer_ui.schedule_popup_open = false;
+            self.chat_ui.schedule_popup_open = false;
             self.chat_ui.set_reply(None);
             self.clear_suggest_bar_after_send(chat_id);
         }

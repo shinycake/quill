@@ -44,6 +44,10 @@ pub struct MemberDialog {
     pub(crate) is_basic_group: bool,
     pub(crate) tab: MemberTab,
     pub(crate) search_input: Entity<TextareaState>,
+    /// The query the list was last asked for (Search, a tab change). The
+    /// list shows that query's results while the field is edited, never
+    /// "Loading" for a query nothing was sent for.
+    pub(crate) searched: String,
     pub(crate) add_open: bool,
     pub(crate) add_search: Entity<TextareaState>,
     pub(crate) add_selected: Vec<i64>,
@@ -75,6 +79,7 @@ impl MemberDialog {
             is_basic_group,
             tab: MemberTab::All,
             search_input,
+            searched: String::new(),
             add_open: false,
             add_search,
             add_selected: Vec::new(),

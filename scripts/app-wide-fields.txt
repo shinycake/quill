@@ -44,7 +44,7 @@ preferences.emoji_style * | the emoji set and its download, an app-wide asset
 frame.animation_demand | how many animations want frames: a count, for the frame clock
 frame.row_fx | the row fade map; keys are row view ids, cleared with the views
 frame.animation_targets | the views that asked for an animation frame
-frame.still_ticks | per-view still ticks, keyed by view entity
+frame.still_ticks * | per-view still ticks, keyed by view entity
 frame.window_views | the views of chat windows, by entity
 frame.animation_sound | an animation is playing a sound this frame
 frame.own_window_tick | the window ticks on its own clock
@@ -76,7 +76,7 @@ frame.context_menu_was_open | the menu was open last frame
 frame.context_menu_previous_focus | the focus to give back when the menu closes
 frame.layer_focus * | weak focus handles of the open layer, restored when it closes
 frame.draft_timer * | the one debounced draft timer: a token the driver on screen ignores unless it issued it (`commit_debounced_draft`)
-language.open | the language box: languages are the app's
+language.open * | the language box: languages are the app's
 language.writes * | language file write counters
 language.recent | recently picked languages
 auth_demo.demo_state | the synthetic mode's authorization state, next to demo_session
@@ -109,7 +109,7 @@ disk.start_refused | a client start was refused for space; retried for every acc
 demo_ui.call_devices | the screenshot demos' call devices
 demo_ui.selected_devices | the screenshot demos' chosen devices
 demo_ui.selected_camera | the screenshot demos' chosen camera
-demo_ui.group_feeds | the screenshot demos' video chat feeds
+demo_ui.group_feeds * | the screenshot demos' video chat feeds
 demo_ui.group_stage | the screenshot demos' stage view
 demo_ui.seq | the screenshot demos' sequence
 demo_ui.sink | the screenshot demos' sink
@@ -122,7 +122,7 @@ calls.window | the call window, opened and closed by the sync with the session o
 calls.window_opening | that window is opening
 calls.window_raised | that window was raised
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
-background.clients | the accounts running in the background, each with its key
+background.clients * | the accounts running in the background, each with its key: the ids inside are that client's
 background.screen_preparing | how many screen clients are being prepared
 background.generation | which background start may land
 background.polling | the background poll runs
@@ -130,7 +130,7 @@ background.clicks | account clicks from the tray and notifications, each with it
 background.pending_open | the account to open once its client is ready, by key
 background.notify_from_all | the "notify from all accounts" setting
 background.attention | the dock attention for background accounts
-background.ringing | a background account's ring, with its key
+background.ringing * | a background account's ring, with its key: the call id is that account's
 background.closing | the clients closing, by key
 background.quit_close | the quit subscription that closes them
 background.wiping | the data wipe runs, for every account
@@ -148,7 +148,7 @@ spell.checked_text | the text last checked, compared by value
 spell.task | the running check
 spell.engine_builder | builds the engine
 spell.engine_task | the engine build
-slices.sidebar | cached child views of the sidebar: entities that render from the app, holding no state of their own
+slices.sidebar * | cached child views of the sidebar: entities that render from the app, holding no state of their own
 slices.window * | the same for the conversation, composer and panel, with measured heights
 slices.viewer | the same for the media viewer
 slices.viewer_chrome | the same for its chrome
@@ -176,24 +176,33 @@ group_call.row_levels | participant voice level animations by source id; pruned 
 group_call.panel_scroll | the window's participant list scroll
 group_call.rows_place * | where the participant rows sit in the window
 group_call.players | tile players by `LiveKey`; the sync drops every one whose call is not the call shown
-group_call.tile_overlays | tile control fades by `LiveKey`, pruned with the players
+group_call.tile_overlays * | tile control fades by `LiveKey`, pruned with the players
 group_call.stage_volume | the stage tile's volume popover
+group_call.stage_volume.sender | the stage's speaker: the popover is cleared whenever no stage is drawn, and the pin that keeps a stage drawn is the screen's (GroupCallScreen)
+group_call.stage_volume.level | the popover's volume, as stage_volume.sender
+group_call.stage_volume.dragging | the slider is being dragged, as stage_volume.sender
+group_call.stage_volume.slider | the popover's slider, as stage_volume.sender
+group_call.stage_volume._events | the slider's subscription, as stage_volume.sender
 group_call.stream * | the stream window's player, photo, controls and overlay; `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
-group_call.live_pip | the live picture-in-picture link
+group_call.live_pip * | the live picture-in-picture link; it carries its account (`account`), and enlarge closes it for any other
 screen_share.window | the share chooser window, closed by the screen's goodbye (`CallScreen`)
 screen_share.opening | the chooser's listing, tagged with the screen that asked: another screen's never blocks
 screen_share.for_call | which call the chooser shares to: one or the video chat, of the client on screen; cleared when the chooser closes
-screen_share.sources | the windows and screens listed
+screen_share.for_call.Private.0 | the call id of for_call, cleared with it
+screen_share.sources * | the windows and screens listed
 screen_share.selected | the source picked
 screen_share.with_audio | share sound with it
 screen_share.generation | which listing may land
 screen_share.privacy_for | the screen recording permission box's call; cleared by the screen's goodbye
+screen_share.privacy_for.Private.0 | the call id of privacy_for, cleared with it
 screen_share.backend | the capture backend
 screen_share.demo_active | the screenshot demos' shared source
 screen_share.demo_active_audio | the screenshot demos' shared sound
 screen_share.demo_system_audio | the screenshot demos' system sound
 main_window.handle | the main window's handle
-main_window.place | the main window's place
+main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
 main_window.dialogs_closed | the main window's dialogs were closed this switch
 main_window._key_scope | the key-scope interceptor
+first_run.Welcome * | the first-run intro's player and timings, before any account
+first_run.Highlights * | the first-run highlights' timing, before any account

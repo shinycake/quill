@@ -4,6 +4,28 @@
 use crate::state::*;
 use crate::telegram::envelope::{ParsedBoostFeatures, ParsedBoostStatus};
 
+impl GroupsState {
+    /// The query the member list `key` was asked with ("" for one asked
+    /// before queries were kept, or filled elsewhere).
+    pub fn member_query(&self, key: (i64, MemberListFilter)) -> &str {
+        self.supergroup_member_queries
+            .get(&key)
+            .map_or("", |(_, query)| query.as_str())
+    }
+
+    /// Whether `pending` is the latest first-page request for `key`, the
+    /// one whose answer may fill it.
+    pub(crate) fn is_latest_member_request(
+        &self,
+        key: (i64, MemberListFilter),
+        pending: &PendingRequest,
+    ) -> bool {
+        self.supergroup_member_queries
+            .get(&key)
+            .is_none_or(|(id, _)| *id == pending.id)
+    }
+}
+
 pub struct GroupsState {
     /// Transfer-ownership gate, transfer progress and the "next owner" lookup.
     pub ownership: OwnershipState,
@@ -198,6 +220,11 @@ pub struct GroupsState {
     /// promote member picker and the member-management dialog, keyed by
     /// (chat id, filter). One page per filter.
     pub supergroup_members: HashMap<(i64, MemberListFilter), SupergroupMembersFetch>,
+    /// The first-page `getSupergroupMembers` each entry of
+    /// `supergroup_members` comes from, and the query it asked with. A
+    /// search for another query sends a new request; only the latest one's
+    /// answer or error fills the entry.
+    pub supergroup_member_queries: HashMap<(i64, MemberListFilter), (RequestId, String)>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -341,6 +368,7 @@ impl GroupsState {
             supergroup_invite_right: HashMap::new(),
             admin_lists: HashMap::new(),
             supergroup_members: HashMap::new(),
+            supergroup_member_queries: HashMap::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

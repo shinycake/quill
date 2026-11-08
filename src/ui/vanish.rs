@@ -356,6 +356,10 @@ enum Phase {
 }
 
 impl Vanishing {
+    fn is(&self, chat_id: ChatId, id: MessageId) -> bool {
+        self.message.chat_id == chat_id && self.message.id == id
+    }
+
     fn phase(&self, now: Instant) -> Phase {
         if self.started.is_none() {
             // A clock behind the request counts as no time passed.
@@ -524,18 +528,25 @@ impl QuillApp {
             .unwrap_or_else(|| self.vanish_clock_now())
     }
 
+    /// The chat the history in place shows.
+    fn vanish_chat_shown(&self) -> Option<ChatId> {
+        self.session().and_then(|session| session.open_chat)
+    }
+
     fn vanish_clock_now(&self) -> Instant {
         self.history.vanish_clock.get().now()
     }
 
     /// Seconds since a crumbling message left the history. `None` on a
     /// borrow conflict too: the row is drawn unchanged for that one frame.
-    pub(super) fn vanish_progress(&self, id: MessageId) -> Option<f32> {
+    /// Matched by chat and message: message ids repeat across channels and
+    /// supergroups, and the dissolve outlives a switch to another chat.
+    pub(super) fn vanish_progress(&self, chat_id: ChatId, id: MessageId) -> Option<f32> {
         let now = self.vanish_now();
         let vanishing = self.history.vanishing.try_borrow().ok()?;
         vanishing
             .iter()
-            .find(|ghost| ghost.message.id == id)?
+            .find(|ghost| ghost.is(chat_id, id))?
             .elapsed(now)
     }
 
@@ -565,11 +576,17 @@ impl QuillApp {
 
     /// A crumbling message's row, `t` seconds in: the message cut away
     /// behind the front, then an empty gap closing with a half-sine ease.
-    pub(super) fn ghost_row(&self, id: MessageId, t: f32, row: AnyElement) -> AnyElement {
+    pub(super) fn ghost_row(
+        &self,
+        chat_id: ChatId,
+        id: MessageId,
+        t: f32,
+        row: AnyElement,
+    ) -> AnyElement {
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
             return row;
         };
-        let Some(ghost) = vanishing.iter().find(|ghost| ghost.message.id == id) else {
+        let Some(ghost) = vanishing.iter().find(|ghost| ghost.is(chat_id, id)) else {
             return row;
         };
         let Some(bounds) = ghost.row else {
@@ -596,11 +613,13 @@ impl QuillApp {
     /// remeasure and the drawn gap agree however long a frame takes.
     pub(super) fn closing_rows(&self) -> Vec<usize> {
         let now = self.vanish_now();
+        let shown = self.vanish_chat_shown();
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
             return Vec::new();
         };
         vanishing
             .iter()
+            .filter(|ghost| Some(ghost.message.chat_id) == shown)
             .filter(|ghost| ghost.row.is_some())
             .filter(|ghost| {
                 ghost
@@ -650,11 +669,15 @@ impl QuillApp {
             cx.notify();
         }
         let now = self.vanish_now();
+        let shown = self.vanish_chat_shown();
         let Ok(vanishing) = self.history.vanishing.try_borrow() else {
             return None;
         };
+        // Only the shown chat's dust: another chat's would paint over rows
+        // that are not its own.
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
+            .filter(|ghost| Some(ghost.message.chat_id) == shown)
             .filter_map(|ghost| Some((ghost.elapsed(now)?, ghost.grains.clone())))
             .filter(|(_, grains)| !grains.is_empty())
             .collect();

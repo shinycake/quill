@@ -32,7 +32,15 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetChatScheduledMessages
         {
-            self.messages.scheduled_messages = messages.to_vec();
+            // The list holds each chat's rows; an answer replaces only the
+            // rows of the chat it was asked for.
+            let chat = pending.chat_id;
+            self.messages
+                .scheduled_messages
+                .retain(|m| Some(m.chat_id) != chat);
+            self.messages
+                .scheduled_messages
+                .extend(messages.iter().filter(|m| Some(m.chat_id) == chat).cloned());
             return;
         }
         if let Some(pending) = pending

@@ -27,6 +27,12 @@ the chat changes. A field of a per-view struct (the ones a chat window's
 names one chat's ids (typed, or a raw `i64`) goes in `ChatUi`, or is listed
 in scripts/view-state-not-chat.txt with the reason it may outlive that
 chat. A `ChatUi` field declared again in a per-view struct fails too.
+
+Both levels look through `Option`, `Vec`, `VecDeque`, map values and the
+payloads of src/ui enums (round 7: an `Option<SchedulePicker>` whose
+target enum held a message id slipped past). Under a keyed map or set the
+chat check stands down; under a value keyed by its account, the account
+check does.
 Run from the repository root:
 
     python3 scripts/check-screen-state.py [--root DIR]
@@ -135,11 +141,52 @@ def struct_fields(body):
     return out
 
 
+def split_top(text):
+    """`text` split at its top-level commas."""
+    parts, depth, part = [], 0, []
+    for i, ch in enumerate(text):
+        if ch in "<([{":
+            depth += 1
+        elif ch in ">)]}" and not (ch == ">" and i > 0 and text[i - 1] == "-"):
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(part).strip())
+            part = []
+        else:
+            part.append(ch)
+    parts.append("".join(part).strip())
+    return [p for p in parts if p]
+
+
+def enum_body(text, name):
+    """The text between `enum <name> {` and its closing brace."""
+    return struct_body(text.replace(f"enum {name}", f"struct {name}"), name)
+
+
+def enum_fields(body):
+    """`(Variant.field, type)` for each payload of an enum: `Variant.0` for
+    a tuple variant's types, `Variant.name` for a struct variant's fields."""
+    out = []
+    for chunk in split_top(strip_noise(body)):
+        match = re.match(r"([A-Z][A-Za-z0-9_]*)\s*(.*)$", chunk, re.S)
+        if not match:
+            continue
+        variant, rest = match.group(1), match.group(2).strip()
+        if rest.startswith("(") and rest.endswith(")"):
+            for n, ty in enumerate(split_top(rest[1:-1])):
+                out.append((f"{variant}.{n}", " ".join(ty.split())))
+        elif rest.startswith("{") and rest.endswith("}"):
+            for field, ty in struct_fields(rest[1:-1]):
+                out.append((f"{variant}.{field}", ty))
+    return out
+
+
 class Structs:
     """Every `struct Name {` under src/, by name."""
 
     def __init__(self):
         self.by_name = {}
+        self.enums = set()
         for root, _, names in os.walk("src"):
             for name in names:
                 if not name.endswith(".rs"):
@@ -147,17 +194,31 @@ class Structs:
                 path = os.path.join(root, name)
                 with open(path, encoding="utf-8") as f:
                     text = f.read()
-                for match in re.finditer(r"\bstruct ([A-Z][A-Za-z0-9_]*)\s*(?:<[^{;]*>)?\s*\{", text):
-                    self.by_name.setdefault(match.group(1), []).append(path)
+                for match in re.finditer(
+                    r"\b(struct|enum) ([A-Z][A-Za-z0-9_]*)\s*(?:<[^{;]*>)?\s*\{", text
+                ):
+                    self.by_name.setdefault(match.group(2), []).append(path)
+                    if match.group(1) == "enum":
+                        self.enums.add((match.group(2), path))
 
     def ui_struct(self, ty):
-        """The src/ui struct a field's type is, with its file, or `None`
-        (a std, kit or core type, an entity handle, a map, an option of
-        anything: those are leaves)."""
+        """The src/ui struct or enum a field's type is, with its file, or
+        `None` (a std, kit or core type, an entity handle: those are
+        leaves). `Box`, `Rc`, `RefCell`, `Option`, `Vec`, `VecDeque` and a
+        map's values are looked through: an `Option<Picker>` holds the
+        picker's fields as much as a `Picker` does (round 7, the Reschedule
+        picker)."""
         ty = ty.strip()
-        for wrapper in ("Box<", "std::rc::Rc<", "Rc<", "std::cell::RefCell<", "RefCell<"):
+        for wrapper in (
+            "Box<", "std::rc::Rc<", "Rc<", "std::cell::RefCell<", "RefCell<",
+            "Option<", "Vec<", "VecDeque<", "std::collections::VecDeque<",
+        ):
             if ty.startswith(wrapper) and ty.endswith(">"):
                 return self.ui_struct(ty[len(wrapper):-1])
+        for wrapper in ("HashMap<", "BTreeMap<", "std::collections::HashMap<"):
+            if ty.startswith(wrapper) and ty.endswith(">"):
+                args = split_top(ty[len(wrapper):-1])
+                return self.ui_struct(args[-1]) if len(args) == 2 else None
         if not re.fullmatch(r"(?:[a-z_][a-z0-9_]*::)*[A-Z][A-Za-z0-9_]*", ty):
             return None
         name = ty.rsplit("::", 1)[-1]
@@ -204,18 +265,25 @@ def listed_fields(path=LIST):
     return out
 
 
-def walk_struct(structs, prefix, name, path, seen):
-    """`(path.to.field, type, file)` for every field of `name`, and of the
-    src/ui structs its fields hold, depth first."""
-    body = struct_body(read(path), name)
-    if body is None:
-        return
-    for field, ty in struct_fields(body):
+def walk_struct(structs, prefix, name, path, seen, outer=()):
+    """`(path.to.field, type, file, outer)` for every field of `name`, and
+    of the src/ui structs and enums its fields hold, depth first. `outer`:
+    the types of the fields it sits under."""
+    text = read(path)
+    if (name, path) in structs.enums:
+        body = enum_body(text, name)
+        fields = enum_fields(body) if body is not None else []
+    else:
+        body = struct_body(text, name)
+        fields = struct_fields(body) if body is not None else []
+    for field, ty in fields:
         key = f"{prefix}.{field}"
-        yield key, ty, path
+        yield key, ty, path, outer
         inner = structs.ui_struct(ty)
         if inner and inner[0] not in seen:
-            yield from walk_struct(structs, key, inner[0], inner[1], seen | {inner[0]})
+            yield from walk_struct(
+                structs, key, inner[0], inner[1], seen | {inner[0]}, outer + (ty,)
+            )
 
 
 def app_wide_subfields(structs=None):
@@ -235,13 +303,15 @@ def app_wide_field_problems(structs):
     justified = listed_fields(FIELD_LIST)
     covered = [key[:-1].rstrip() for key in justified if key.endswith("*")]
     seen = set()
-    for key, ty, path in app_wide_subfields(structs):
-        seen.add(key)
+    for key, ty, path, outer in app_wide_subfields(structs):
+        seen.update(prefixes(key))
         if any(key.startswith(whole + ".") for whole in covered):
             continue
         if key in justified or f"{key} *" in justified or f"{key}*" in justified:
             continue
-        if OWNER_KEYED.search(ty):
+        # Under a value keyed by its owner (a map by account, an account's
+        # client), the owner key covers it.
+        if OWNER_KEYED.search(ty) or any(OWNER_KEYED.search(o) for o in outer):
             continue
         problems.append(
             f"{path}: `{key}` ({ty}) is inside an app-wide struct but neither keyed "
@@ -254,6 +324,23 @@ def app_wide_field_problems(structs):
         if bare not in seen:
             problems.append(f"{FIELD_LIST}: `{key}` is listed but no such field exists")
     return problems
+
+
+def prefixes(key):
+    """`a.b.c` and the paths above it: `a.b`, `a` (an enum variant is a
+    path of its own)."""
+    parts = key.split(".")
+    return {".".join(parts[: n + 1]) for n in range(len(parts))}
+
+
+def covered(key, listed):
+    """`key` is listed, or sits under a field listed with `*`."""
+    if key in listed:
+        return True
+    return any(
+        name.endswith("*") and key.startswith(name[:-1].rstrip() + ".")
+        for name in listed
+    )
 
 
 def chat_scope_problems(structs):
@@ -269,8 +356,8 @@ def chat_scope_problems(structs):
         if struct_body(read(path), struct) is None:
             problems.append(f"{path}: no `struct {struct}`")
             continue
-        for key, ty, at in walk_struct(structs, struct, struct, path, {struct}):
-            seen.add(key)
+        for key, ty, at, outer in walk_struct(structs, struct, struct, path, {struct}):
+            seen.update(prefixes(key))
             top = key.count(".") == 1
             name = key.rsplit(".", 1)[-1]
             if top and name in chat_fields:
@@ -278,7 +365,10 @@ def chat_scope_problems(structs):
                     f"{at}: `{key}` is declared in ChatUi too; the chat's copy is the only one"
                 )
                 continue
-            if not CHAT_IDS.search(ty) or KEYED.search(ty) or key in listed:
+            # A keyed map or set, or anything under one, holds every
+            # chat's entries.
+            keyed = KEYED.search(ty) or any(KEYED.search(o) for o in outer)
+            if not CHAT_IDS.search(ty) or keyed or covered(key, listed):
                 continue
             problems.append(
                 f"{at}: `{key}` ({ty}) names one chat's ids but is not in ChatUi "
@@ -287,7 +377,8 @@ def chat_scope_problems(structs):
                 f"it may outlive its chat."
             )
     for key in listed:
-        if key not in seen:
+        bare = key[:-1].rstrip() if key.endswith("*") else key
+        if bare not in seen:
             problems.append(f"{VIEW_LIST}: `{key}` is listed but no such field exists")
     return problems
 

@@ -957,3 +957,64 @@ those structs the screen's.
   `inline_videos`, plus the chat-level hits above. Findings 4 and 5 are
   outside what a field check can see. One is a reducer matching answers
   by purpose; the other is a continuation carrying an exemption comment.
+
+### Phase 7 (the chat level, and answers nothing waited for)
+
+Round 7 of the review, on `claude/sm-review7`. The account level held.
+What was left sat at the chat level, or was a request whose failure or
+late answer nothing handled.
+
+- **Schedule picker and scheduled list.** The picker, its popup flag and
+  the scheduled-messages dialog's flag moved from `ComposerUi` to
+  `ChatUi`. A Reschedule picker named only a message id. Left open while
+  another chat opened (a chat-list click, a notification), its Confirm
+  rescheduled, or with "Send when online" sent, the new chat's scheduled
+  message with that id. A chat change now drops the picker and closes the
+  dialog. The session's scheduled list keeps each chat's rows: an answer
+  replaces only the rows of the chat it was asked for, the dialog reads
+  `Session::scheduled_in(open_chat)`, and a finished scheduling edit, a
+  delete or an edit refresh matches chat and id.
+- **Attached Stickers.** A failed `getAttachedStickerSets` now fails the
+  box it opened (set 0) instead of leaving it spinning.
+  `attached_request` ties the answer to the request the box waits for,
+  and the answer opens a set only while that box is still open and
+  loading. Before, a late answer could take over another set's box.
+- **Saved Messages.** A failed first `loadSavedMessagesTopics` page
+  clears `topics_requested`, so the pane no longer waits on it until
+  restart. A failed page or failed global tags set `retry_when_online`.
+  The pump holds off until `updateConnectionState` reaches ready, which
+  stops the tags request going out again on every poll pass. A failure
+  while already online (FLOOD_WAIT) waits for the next reconnect.
+- **Member search.** The dialog shows the list for the query last asked
+  (`MemberDialog::searched`), not the text being typed. Typing alone no
+  longer shows "Loading members…" with nothing in flight.
+  `supergroup_member_queries` records the latest first-page request and
+  its query for each `(chat, filter)`. A search for another query is sent
+  while the last is in flight, and only the latest request's answer or
+  error fills the list.
+- **Recent Actions poll.** When the chat window the poll started in
+  closes, the loop's updates return `Gone`. The flag is now reset through
+  `ScopedApp::main()`, as round 6 did for `screen_share.opening`. Before,
+  Recent Actions for that chat never refreshed again on that screen.
+- **Delete animation and info cards.** A dissolve is matched by chat and
+  message (`vanish_progress`, `ghost_row`), and the dust and the gap
+  remeasure only cover the shown chat's. `topic_info_open` and
+  `thread_info_open` moved to `ChatUi`.
+- **Guard.** `check-screen-state.py` looks through `Option`, `Vec`,
+  `VecDeque`, map values and the payloads of src/ui enums at both levels.
+  Under a keyed map the chat check stands down; under a value keyed by
+  its account, the account check does. A `*` entry in
+  `view-state-not-chat.txt` covers a field's whole subtree. The new walk
+  found the Reschedule target (`ComposerUi.schedule_picker.target.Reschedule.0`,
+  fixed above) and 20 other view fields. Each carries its own chat, or
+  holds no chat's ids (times, sticker sets, effects); all 20 are listed
+  with reasons. At the account level, ten app-wide entries became `*`
+  (the sidebar slices, the live PiP, which carries its account, the
+  background clients, which carry theirs, and others), and nine lines were
+  added (the first run's two screens, the stage volume popover's fields,
+  the share chooser's call ids).
+- **Not done.** Pasted-image temp files: `OwnedFile` deletes on drop, but
+  the file must outlive the tray until TDLib has uploaded it, so it does
+  not fit in a few lines. Moving the files into a swept work folder would
+  fit. No deterministic test for the event-log reset: it needs a chat
+  window whose poll timer fires after the window closes.

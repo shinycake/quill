@@ -81,6 +81,19 @@ pub(crate) struct ChatUi {
     /// Scheduled messages ticked in the scheduled-messages dialog (send
     /// now, reschedule or delete together).
     pub(super) scheduled_selected: Vec<MessageId>,
+    /// M1: the scheduled-messages dialog (view/delete). Here so that a
+    /// chat change closes it: its rows act on the chat shown.
+    pub(super) scheduled_dialog_open: bool,
+    /// M1: the schedule picker popup above the composer.
+    pub(super) schedule_popup_open: bool,
+    /// The date+time picker behind the schedule popup (created when the
+    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
+    /// a message id of this chat, so the picker goes with the chat.
+    pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
+    /// The info card under the open forum topic's strip.
+    pub(super) topic_info_open: bool,
+    /// The info card under the open reply thread's root bar.
+    pub(super) thread_info_open: bool,
     /// Same-chat reply draft (tdesktop `FieldHeader::replyToMessage`).
     /// Private on purpose: a sender must take the reply through
     /// `QuillApp::reply_for_send` so a reply to a deleted message is dropped.

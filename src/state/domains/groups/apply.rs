@@ -508,7 +508,11 @@ impl Session {
                 } else if let Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
                     filter,
                 })) = pending.map(|p| p.purpose)
-                    && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self
+                        .groups
+                        .is_latest_member_request((chat_id.0, filter), pending)
                 {
                     self.groups.supergroup_members.insert(
                         (chat_id.0, filter),

@@ -348,7 +348,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.history.thread_info_open = !this.history.thread_info_open;
+                            this.chat_ui.thread_info_open = !this.chat_ui.thread_info_open;
                             cx.notify();
                         })),
                 )

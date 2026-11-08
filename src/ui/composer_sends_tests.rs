@@ -437,10 +437,10 @@ fn a_photo_edit_saved_after_a_chat_switch_replaces_the_photo_it_was_opened_on(
     });
 }
 
+/// The picker is the chat's (`ChatUi`, round 7): a chat switch drops it,
+/// so a confirm afterwards neither sends B's text nor schedules A's.
 #[gpui_kit::test]
-fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothing(
-    cx: &mut TestAppContext,
-) {
+fn a_schedule_picker_left_by_a_chat_switch_is_dropped_and_sends_nothing(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         // The picker opens at 01:15, which went by once already as CDT.
@@ -448,12 +448,16 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
         app.select_listed_chat(A, window, cx);
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
-        if let Some(picker) = app.composer_ui.schedule_picker.as_mut() {
+        if let Some(picker) = app.chat_ui.schedule_picker.as_mut() {
             picker.send_after = true;
         }
         app.select_listed_chat(B, window, cx);
         app.composer
             .update(cx, |input, cx| input.set_value("for B", window, cx));
+        assert!(
+            app.chat_ui.schedule_picker.is_none(),
+            "A's picker went with A"
+        );
         let before = history_len(app, B);
         app.confirm_schedule_picker(window, cx);
         assert!(matches!(
@@ -462,10 +466,7 @@ fn a_schedule_confirmed_after_a_chat_switch_goes_to_its_own_chat_and_sends_nothi
         ));
         assert_eq!(history_len(app, B), before, "B's text was not sent");
         app.select_listed_chat(A, window, cx);
-        assert_eq!(
-            app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 900)
-        );
+        assert_eq!(app.pending_send().scheduling, ComposerScheduling::None);
     });
 }
 
@@ -504,14 +505,14 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         let value = picker_value(first_pass, cx).expect("a picker value");
         let date = app
-            .composer_ui
+            .chat_ui
             .schedule_picker
             .as_ref()
             .map(|picker| picker.date.state.clone())
             .expect("the picker");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));
         app.confirm_schedule_picker(window, cx);
-        assert!(app.composer_ui.schedule_picker.is_none(), "no \"too soon\"");
+        assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
         assert_eq!(
             app.pending_send().scheduling,
             ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 1800)

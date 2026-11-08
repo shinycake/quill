@@ -213,6 +213,7 @@ impl Session {
                 // for again at once.
                 if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
                     self.stories.story_retry.clear();
+                    self.threads.saved.retry_when_online = false;
                 }
                 self.connection = state;
             }

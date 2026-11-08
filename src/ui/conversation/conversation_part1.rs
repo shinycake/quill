@@ -271,12 +271,10 @@ impl QuillApp {
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
                         .when(
-                            self.composer_ui.schedule_popup_open
-                                && !self.composer_ui.schedule_picker.as_ref().is_some_and(
-                                    |picker| {
-                                        picker.target == super::scheduled::ScheduleTarget::Share
-                                    },
-                                ),
+                            self.chat_ui.schedule_popup_open
+                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
+                                    picker.target == super::scheduled::ScheduleTarget::Share
+                                }),
                             |this| this.child(self.schedule_popup(cx)),
                         )
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
@@ -540,7 +538,7 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .when_some(
-                topic_info.clone().filter(|_| self.history.topic_info_open),
+                topic_info.clone().filter(|_| self.chat_ui.topic_info_open),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
@@ -742,7 +740,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(self.thread_root_bar(cx))
-            .when(self.history.thread_info_open, |this| {
+            .when(self.chat_ui.thread_info_open, |this| {
                 this.children(self.thread_info_card(cx))
             })
             .child(list)

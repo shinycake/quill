@@ -31,10 +31,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let key = (chat_id.0, filter);
         let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter });
-        if matches!(
-            self.session.groups.supergroup_members.get(&key),
-            Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
-        ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
+        // The same list for the same query is asked once; a search for
+        // another query is sent even while the last one is in flight, and
+        // only its answer fills the list.
+        let same_query = self.session.groups.member_query(key) == query;
+        if same_query
+            && (matches!(
+                self.session.groups.supergroup_members.get(&key),
+                Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
+            ) || self.session.requests.has_purpose_for_chat(purpose, chat_id))
         {
             return Ok(None);
         }
@@ -43,6 +48,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .supergroup_members
             .insert(key, SupergroupMembersFetch::Loading);
         let extra = self.session.request(purpose, Some(chat_id));
+        self.session
+            .groups
+            .supergroup_member_queries
+            .insert(key, (extra, query.to_string()));
         let filter_json = match filter {
             MemberListFilter::Recent => supergroup_members_filter_recent_json(),
             MemberListFilter::Search => supergroup_members_filter_search_json(query),
@@ -59,6 +68,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             self.session.groups.supergroup_members.remove(&key);
+            self.session.groups.supergroup_member_queries.remove(&key);
             return Err(err);
         }
         Ok(Some(extra))

@@ -82,15 +82,12 @@ impl QuillApp {
     /// shows. Basic groups read `getBasicGroupFullInfo`; supergroups
     /// read the matching `getSupergroupMembers` filter.
     pub(super) fn refresh_member_dialog(&mut self, cx: &mut Context<Self>) {
-        let (chat_id, is_basic_group, tab, query) = match self.admin.member_dialog.as_ref() {
-            Some(dialog) => (
-                dialog.chat_id,
-                dialog.is_basic_group,
-                dialog.tab,
-                dialog.search_input.read(cx).value().trim().to_string(),
-            ),
-            None => return,
+        let Some(dialog) = self.admin.member_dialog.as_mut() else {
+            return;
         };
+        let query = dialog.search_input.read(cx).value().trim().to_string();
+        dialog.searched = query.clone();
+        let (chat_id, is_basic_group, tab) = (dialog.chat_id, dialog.is_basic_group, dialog.tab);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -192,7 +189,7 @@ impl QuillApp {
             let can_add = this
                 .session()
                 .is_some_and(|session| session.chat_can_add_members(chat_id));
-            let fetch = this.member_dialog_fetch(cx);
+            let fetch = this.member_dialog_fetch();
 
             let mut body = div().flex().flex_col().gap_2();
             // kit Phase 3: the member tab strip as a kit segmented
@@ -315,7 +312,7 @@ impl QuillApp {
                 .max_h(px(240.))
                 .overflow_y_scroll()
                 .track_scroll(&dialog_state.scroll)
-                .on_scroll(cx.listener(|this, _, _, cx| this.member_dialog_load_more(cx)));
+                .on_scroll(cx.listener(|this, _, _, _| this.member_dialog_load_more()));
             match fetch {
                 None | Some(SupergroupMembersFetch::Loading) => {
                     list = list.child(
@@ -577,10 +574,7 @@ impl QuillApp {
     }
 
     /// Slice G1: the member page the dialog's current tab shows.
-    pub(super) fn member_dialog_fetch(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> Option<SupergroupMembersFetch> {
+    pub(super) fn member_dialog_fetch(&self) -> Option<SupergroupMembersFetch> {
         let dialog = self.admin.member_dialog.as_ref()?;
         let session = self.session()?;
         if dialog.is_basic_group {
@@ -590,7 +584,7 @@ impl QuillApp {
                 .get(&dialog.chat_id.0)
                 .cloned();
         }
-        let filter = self.member_dialog_filter(cx)?;
+        let filter = self.member_dialog_filter()?;
         session
             .groups
             .supergroup_members
@@ -599,10 +593,10 @@ impl QuillApp {
     }
 
     /// The supergroup list the dialog's tab and search show.
-    fn member_dialog_filter(&self, cx: &App) -> Option<MemberListFilter> {
+    fn member_dialog_filter(&self) -> Option<MemberListFilter> {
         let dialog = self.admin.member_dialog.as_ref()?;
         let session = self.session()?;
-        let query = dialog.search_input.read(cx).value();
+        let query = dialog.searched.as_str();
         let filter = match dialog.tab.filter() {
             Some(filter) => filter,
             None if query.trim().is_empty() => MemberListFilter::Recent,
@@ -621,18 +615,18 @@ impl QuillApp {
 
     /// The member dialog scrolled: near the end of the list, ask for the
     /// next page (tdesktop pages `getSupergroupMembers` past the first).
-    fn member_dialog_load_more(&mut self, cx: &mut Context<Self>) {
+    fn member_dialog_load_more(&mut self) {
         let Some(dialog) = self.admin.member_dialog.as_ref() else {
             return;
         };
         if dialog.is_basic_group {
             return;
         }
-        let Some(filter) = self.member_dialog_filter(cx) else {
+        let Some(filter) = self.member_dialog_filter() else {
             return;
         };
         let (chat_id, scroll) = (dialog.chat_id, dialog.scroll.clone());
-        let query = dialog.search_input.read(cx).value().trim().to_string();
+        let query = dialog.searched.clone();
         self.load_more_members(chat_id, filter, &query, &scroll);
     }
 
