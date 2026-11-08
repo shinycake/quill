@@ -432,7 +432,7 @@ impl QuillApp {
         let Some(item) = self.stories.viewer.current().cloned() else {
             return;
         };
-        let options = self.composer_send_options();
+        let options = self.send_options_to(dest);
         let sent = self.live.as_mut().map(|live| {
             live.driver
                 .share_story_to_chat(dest, item.chat_id, item.story_id, &options)
