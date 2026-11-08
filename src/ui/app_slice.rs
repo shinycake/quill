@@ -274,6 +274,8 @@ impl QuillApp {
         let scope = self.slices.scope.clone();
         self.slices.image_cache =
             Some(cx.new(|_| super::image_budget::BoundedImageCache::new(scope)));
+        // window-scope: redraws every window's slices, the ones in place and
+        // each chat window slot's (`conversation_slices`), whatever is in place.
         cx.observe_self(|this, cx| this.notify_slices(cx)).detach();
     }
 

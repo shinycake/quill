@@ -125,6 +125,8 @@ pub(crate) struct ComposerUi {
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
+    /// This composer's spell check and underlines (`spellcheck_ui`).
+    pub(super) spelling: super::spell_state::ComposerSpelling,
 }
 
 impl ComposerUi {
@@ -162,6 +164,7 @@ impl ComposerUi {
             slow_mode_tick_chat: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
+            spelling: Default::default(),
         }
     }
 }

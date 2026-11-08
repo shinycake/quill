@@ -311,6 +311,7 @@ impl QuillApp {
         }
         self.frame.frame_clock_running.set(true);
         let fps = self.frame.animation_demand.get();
+        // window-scope: the clock ticks every window's layers by entity id.
         // screen-scope: the frame clock is the app's; each tick draws
         // whichever account is on screen.
         cx.spawn(async move |this, cx| {

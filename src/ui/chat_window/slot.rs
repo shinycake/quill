@@ -235,6 +235,22 @@ impl QuillApp {
         Some(result)
     }
 
+    /// Run `f` once for every window with that window's state in place:
+    /// the main window's, then each chat window's. The scope in place
+    /// before is put back. For work that no frame or input of the window
+    /// runs (a batch of session updates, a new spelling engine) and that
+    /// each window's state needs.
+    pub(in crate::ui) fn in_every_window(
+        &mut self,
+        cx: &mut Context<Self>,
+        mut f: impl FnMut(&mut Self, &mut Context<Self>),
+    ) {
+        let chats: Vec<ChatId> = self.windows.open_windows().map(|(chat, _)| chat).collect();
+        for window in std::iter::once(None).chain(chats.into_iter().map(Some)) {
+            self.in_window_scope(window, cx, &mut f);
+        }
+    }
+
     /// The lock started: every window's passcode field, the one in place
     /// and each chat window slot's, empties and takes its window's focus
     /// at that window's next frame.

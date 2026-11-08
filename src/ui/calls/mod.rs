@@ -515,6 +515,7 @@ impl QuillApp {
             return;
         }
         self.calls.tick_active = true;
+        // window-scope: the clock redraws every window's conversation (`notify_conversations`).
         // screen-scope: the call tick reads the current screen and the background accounts' rings on every beat, and must keep running across a switch.
         cx.spawn(async move |this, cx| {
             loop {

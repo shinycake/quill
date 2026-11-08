@@ -42,6 +42,8 @@ mod slot;
 #[cfg(test)]
 mod tests;
 mod view;
+#[cfg(test)]
+mod window_state_tests;
 
 use super::app::QuillApp;
 use cover::WindowPlace;
