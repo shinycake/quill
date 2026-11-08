@@ -861,20 +861,10 @@ impl Render for QuillApp {
             })
             .when_some(self.link_tooltip_overlay(cx), |this, overlay| {
                 this.child(overlay)
-            })
-            // Middle-click autoscroll: the anchor mark, and any other press
-            // ends the mode (`ListWidget::mousePressEvent`).
-            .when_some(self.autoscroll_mark(cx), |this, mark| this.child(mark))
-            .when(self.autoscroll_active(), |this| {
-                this.on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _, _, cx| this.autoscroll_stop(cx)),
-                )
             });
+        // Middle-click autoscroll: the anchor mark, and any other press
+        // ends the mode (`ListWidget::mousePressEvent`).
+        let root = self.autoscroll_layer(cx).on(root, cx.weak_entity());
         let root = root.children(self.disk_full_cover(&auth, cx));
         // The lock screen covers the whole window, above every overlay.
         let root = root.when(self.account.passcode.locked, |this| {

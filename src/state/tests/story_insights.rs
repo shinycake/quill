@@ -82,6 +82,7 @@ fn found_stories_fill_the_cache_and_page() {
         )
     };
     let extra = session.request(RequestPurpose::SearchPublicStories, None);
+    session.story_search_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -101,6 +102,7 @@ fn found_stories_fill_the_cache_and_page() {
 
     session.story_search_page_requested();
     let extra = session.request(RequestPurpose::SearchPublicStories, None);
+    session.story_search_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -123,6 +125,7 @@ fn search_error_lands_in_the_panel() {
     let seq = AtomicU64::new(0);
     session.begin_story_search(StorySearchQuery::Tag("#x".into()));
     let extra = session.request(RequestPurpose::SearchPublicStories, None);
+    session.story_search_sent(extra);
     apply_json(
         &mut session,
         &seq,

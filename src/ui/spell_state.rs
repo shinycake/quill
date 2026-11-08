@@ -14,14 +14,6 @@ pub(crate) struct SpellUi {
     /// Appearance → Spelling → Manage dictionaries (parity:appearance-dictionaries).
     pub(super) dict_manager: super::spell_dictionaries::DictManager,
     pub(super) dict_filter_input: Entity<TextareaState>,
-    /// Misspellings underlined in the composer; byte ranges into
-    /// `spell_checked_text`.
-    pub(super) misspellings: Vec<quill::spellcheck::Misspelling>,
-    /// The composer text `spell_misspellings` refers to (shifted on every
-    /// edit, so underlines follow the text before the re-check lands).
-    pub(super) checked_text: String,
-    /// The debounced background re-check (dropping it cancels it).
-    pub(super) task: Option<Task<()>>,
     /// Builds the platform engine for the user's language picks; runs on a
     /// background task (a field so tests can slow it down).
     pub(super) engine_builder: EngineBuilder,
@@ -51,11 +43,24 @@ impl SpellUi {
             info: spell_info,
             dict_manager: Default::default(),
             dict_filter_input,
-            misspellings: Vec::new(),
-            checked_text: String::new(),
-            task: None,
             engine_builder: std::sync::Arc::new(super::app::QuillApp::build_spell_engine),
             engine_task: None,
         }
     }
+}
+
+/// One composer's spelling: what was checked and what is underlined. Each
+/// window's composer has its own (`ComposerUi::spelling`, swapped with
+/// the window's state), so typing in one window keeps another window's
+/// underlines.
+#[derive(Default)]
+pub(crate) struct ComposerSpelling {
+    /// Misspellings underlined in the composer; byte ranges into
+    /// `checked_text`.
+    pub(super) misspellings: Vec<quill::spellcheck::Misspelling>,
+    /// The composer text `misspellings` refers to (shifted on every edit,
+    /// so underlines follow the text before the re-check lands).
+    pub(super) checked_text: String,
+    /// The debounced background re-check (dropping it cancels it).
+    pub(super) task: Option<Task<()>>,
 }

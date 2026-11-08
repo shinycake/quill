@@ -98,6 +98,8 @@ impl QuillApp {
         // start once that settled, so they play them.
         let _ = self.star_bursts_settled(cx);
         let placed = std::rc::Rc::new(std::cell::Cell::new(false));
+        // window-scope: a screenshot demo of the story viewer, which no
+        // chat window shows; it only seeds the viewer's star effects.
         cx.observe_self(move |this, cx| {
             if placed.get() || !this.star_bursts_settled(cx) {
                 return;

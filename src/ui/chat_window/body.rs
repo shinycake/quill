@@ -29,11 +29,12 @@ impl QuillApp {
         self.sync_composer_placeholder(window, cx);
         // The main window's frame upkeep syncs only its own composer.
         self.sync_emoji_words(cx);
+        // The window's lock field: focus while locked, empty once unlocked.
+        self.passcode_frame(window, cx);
         if self.account.passcode.locked {
             // Telegram Desktop's passcode lock covers every window
             // (`Application::lockByPasscode` → `setupPasscodeLock` on each):
             // the same box, unlocking everywhere at once.
-            self.passcode_frame(window, cx);
             return div()
                 .id("chat-window-locked")
                 .relative()

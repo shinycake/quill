@@ -1075,3 +1075,61 @@ app-wide allowlist entries, and error arms that ended in no state.
   test harness, PiP or not: `run_until_parked` after the lock never
   returns. That was not traced and needs a look on its own. It may be a
   test-only redraw loop or a real one.
+
+### Phase 9 (work that resumed in the wrong window)
+
+Round 9 of the review, on `claude/sm-review9`. Most findings were one
+shape: work started in one window and finished with another window's
+state in place, or ran for the main window only.
+
+- **The guard reads the slot.** `check-window-scope.py` no longer keeps
+  its own list of slot fields. It reads the `on_screen_fields!` block
+  and `swap_slot` in `chat_window/slot.rs`, and fails when a declared
+  view field is not swapped or a swap names a field that is not
+  declared. With the real list it flagged five sites. Spellcheck was a
+  bug (next item). The other four redraw every window on purpose and
+  carry a `window-scope:` marker: `observe_self` in `app_slice.rs`, the
+  call tick, the frame clock and the live story demo.
+- **Spelling per composer.** `misspellings`, `checked_text` and the
+  check task moved from `SpellUi` to `ComposerUi::spelling`
+  (`ComposerSpelling`). The check resumes with `spawn_scoped`. An engine
+  install or a recheck runs in every window (`in_every_window`). Before,
+  a chat window's check underlined the main window's composer.
+- **Inline bots in chat windows.** `progress_inline_mode` runs in every
+  window. A window whose query was held back marks
+  `ChatUi::inline_query_waiting`, and only that window sends once the
+  bot resolves. Two windows share the session's one resolve slot, and
+  the flag keeps them from re-sending in turns.
+- **Pins.** A new pin refetches the pinned list of any chat on screen
+  (`chat_is_shown`), not only the main window's open chat.
+- **Instant View.** The page is part of `SessionView`. The answer goes
+  to the window that asked (`PendingRequest::window`), and a window
+  closed meanwhile gets nothing. The guard lists `messages.instant_view`.
+- **Story search.** `StorySearchState::request` names the page request
+  the search waits for. Only that answer or error fills it, so an old
+  query's late page no longer fills a new search, and a new query sends
+  at once instead of waiting for the old one.
+- **Story statistics.** Reopening a story's statistics while its request
+  is pending resets the state before returning, and the late answer
+  fills the reopened panel.
+- **Notification popups.** A popup the user is replying in is not
+  reused for a new message from that chat. Hiding is derived on each
+  event and tick: a live popup fades when nothing holds it (hover or any
+  reply) and it is due. When the hovered popup goes away under the
+  pointer, hovering clears and the rest start hiding, as in tdesktop
+  (#28813). Every popup still shown rearms when a hold ends.
+- **Passcode.** `run_passcode_job` runs its answer in the submitting
+  window (`in_window_of`); if that window closed, only `busy` clears. A
+  wrong passcode empties the field it was typed in. Unlocking queues a
+  clear on every window's field (`clear_lock_fields`), applied at that
+  window's next frame.
+- **Autoscroll.** `AutoscrollLayer` builds the anchor mark and the left
+  or right press that ends the mode from the window's own state. The
+  main window and chat windows both use it. Before, a chat window
+  autoscrolled with no mark and no way to stop it by clicking.
+- **Not done.** The inline resolve slot is still one per session, so
+  two windows asking two different bots at once resolve one after the
+  other. Force reply, the pinned fetch replacing the whole list, the
+  autoscroll lock, and popups left after a logout were not changed. The
+  inline progress test covers `in_every_window` only, because the
+  progress needs a live client and the demo has none.

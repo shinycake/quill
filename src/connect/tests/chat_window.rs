@@ -351,3 +351,77 @@ fn going_to_the_background_saves_the_draft_waiting_to_be_saved() {
     );
     assert!(!h.driver.session.draft_is_dirty(ALICE, DraftTopic::Chat));
 }
+
+/// The Instant View reader opens in the window that asked for it: the
+/// answer lands in that window's view, not the main window's, and a
+/// window closed meanwhile gets nothing.
+#[test]
+fn an_instant_view_opens_in_the_window_that_asked() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let ask = |h: &mut Harness, url: &str| {
+        h.driver.session.enter_view(Some(BOB));
+        let outcome = h.driver.open_instant_view(url);
+        h.driver.session.enter_view(None);
+        assert!(matches!(outcome, InstantViewOutcome::Requested));
+        let sent = h.recorder.snapshot();
+        let last: Value = serde_json::from_str(sent.last().expect("sent")).unwrap();
+        last["@extra"].as_str().expect("extra").to_string()
+    };
+    let answer = |h: &mut Harness, extra: &str| {
+        h.ingest(&format!(
+            r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{extra}"}}"#
+        ));
+    };
+    let extra = ask(&mut h, "https://example.com/a");
+    answer(&mut h, &extra);
+    assert!(
+        h.driver.session.messages.instant_view.is_none(),
+        "the main window shows no reader"
+    );
+    h.driver.session.enter_view(Some(BOB));
+    let page = h.driver.session.messages.instant_view.take();
+    h.driver.session.enter_view(None);
+    assert_eq!(
+        page.map(|page| page.url).as_deref(),
+        Some("https://example.com/a")
+    );
+
+    let extra = ask(&mut h, "https://example.com/b");
+    h.driver.close_chat_window(BOB).unwrap();
+    answer(&mut h, &extra);
+    assert!(h.driver.session.messages.instant_view.is_none());
+}
+
+/// A pin in a chat shown only in its own window refetches that chat's
+/// pinned list: `updateMessageIsPinned` edits loaded rows only, and the
+/// window's pinned bar reads the fetched list.
+#[test]
+fn a_new_pin_in_a_window_chat_refetches_its_pinned_list() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let pinned_fetches = |h: &Harness| {
+        h.sent("searchChatMessages", BOB)
+            .into_iter()
+            .filter(|v| v["filter"]["@type"] == "searchMessagesFilterPinned")
+            .collect::<Vec<_>>()
+    };
+    let first = pinned_fetches(&h);
+    assert_eq!(first.len(), 1, "the window fetched its pins on open");
+    let extra = first[0]["@extra"]
+        .as_str()
+        .expect("the request id")
+        .to_string();
+    h.ingest(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":0,"messages":[],"next_from_message_id":0}}"#
+    ));
+
+    h.ingest(r#"{"@type":"updateMessageIsPinned","chat_id":8,"message_id":60,"is_pinned":true}"#);
+    assert_eq!(
+        pinned_fetches(&h).len(),
+        2,
+        "the pin refetches the window chat's list"
+    );
+}

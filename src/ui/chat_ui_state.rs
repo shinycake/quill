@@ -67,6 +67,11 @@ pub(crate) struct ChatUi {
     pub(super) inline_results_open: bool,
     pub(super) inline_results_selected: usize,
     pub(super) inline_query_armed: Option<(String, String)>,
+    /// The trigger's query waits for the session: the bot is being
+    /// resolved, or an older query of this chat and bot is in flight.
+    /// `progress_inline_mode` sends it when updates land, in whichever
+    /// window this value is in.
+    pub(super) inline_query_waiting: bool,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pub(super) pending_delete: Option<DeleteConfirm>,
     /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line

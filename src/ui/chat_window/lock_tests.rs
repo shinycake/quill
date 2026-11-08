@@ -112,3 +112,83 @@ fn each_window_types_into_its_own_lock_field(cx: &mut TestAppContext) {
         "the main window's field is its own"
     );
 }
+
+fn type_into(
+    app: &Entity<QuillApp>,
+    window: AnyWindowHandle,
+    scope: Option<ChatId>,
+    text: &'static str,
+    cx: &mut TestAppContext,
+) {
+    cx.update_window(window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_scope(scope, cx, |app, cx| {
+                let input = app.account.passcode.lock.input.clone();
+                input.update(cx, |input, cx| input.set_value(text, window, cx));
+            })
+        })
+    })
+    .expect("the window");
+}
+
+/// The passcode check runs off the UI thread and answers later, with the
+/// main window's state in place by then: a wrong passcode still empties
+/// the field it was typed in, not the main window's.
+#[gpui_kit::test]
+fn a_wrong_passcode_empties_the_field_it_was_typed_in(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let chat_window = open_chat_window(&app, main, cx);
+    lock(&app, cx);
+    cx.run_until_parked();
+    type_into(&app, chat_window, Some(OTHER), "1234", cx);
+    type_into(&app, main, None, "99", cx);
+    cx.update_window(chat_window, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.in_window_of(window, cx, |app, window, cx| {
+                app.run_passcode_job(
+                    || Err(quill::passcode::PasscodeError::Wrong),
+                    QuillApp::unlock_answered,
+                    window,
+                    cx,
+                );
+            })
+        })
+    })
+    .expect("the chat window");
+    app.update(cx, |app, _| app.set_window_scope(None));
+    cx.run_until_parked();
+    assert_eq!(typed(&app, Some(OTHER), cx), "", "the wrong passcode went");
+    assert_eq!(typed(&app, None, cx), "99", "the main window's text stays");
+    app.read_with(cx, |app, _| {
+        assert!(!app.account.passcode.busy);
+        assert!(app.account.passcode.lock_error.is_some());
+    });
+}
+
+/// Unlocking in one window empties every window's field: what was typed
+/// in the others does not wait there for the next lock.
+#[gpui_kit::test]
+fn unlocking_empties_every_windows_field(cx: &mut TestAppContext) {
+    let (app, main) = new_app(cx);
+    let chat_window = open_chat_window(&app, main, cx);
+    lock(&app, cx);
+    cx.run_until_parked();
+    type_into(&app, chat_window, Some(OTHER), "1234", cx);
+    type_into(&app, main, None, "99", cx);
+    cx.update_window(main, |_, window, cx| {
+        app.update(cx, |app, cx| {
+            app.set_window_scope(None);
+            app.unlock_answered(Ok(()), window, cx);
+        })
+    })
+    .expect("the main window");
+    cx.update_window(chat_window, |_, window, cx| window.render_frame(cx))
+        .expect("the chat window");
+    cx.run_until_parked();
+    assert_eq!(typed(&app, None, cx), "");
+    assert_eq!(
+        typed(&app, Some(OTHER), cx),
+        "",
+        "emptied at its next frame"
+    );
+}

@@ -63,6 +63,10 @@ pub struct StorySearchState {
     pub next_offset: String,
     pub loading: bool,
     pub error: Option<String>,
+    /// The page request this search waits for. Only its answer or error
+    /// fills the search: an earlier search's request still in flight
+    /// answers into nothing.
+    pub request: Option<RequestId>,
 }
 
 /// The hashtag or cashtag a chat-search box holds, when the whole text is
@@ -163,7 +167,23 @@ impl Session {
             next_offset: String::new(),
             loading: true,
             error: None,
+            request: None,
         });
+    }
+
+    /// The open search sent `request` for its next page.
+    pub fn story_search_sent(&mut self, request: RequestId) {
+        if let Some(search) = self.stories.search.as_mut() {
+            search.request = Some(request);
+        }
+    }
+
+    /// The open search, when `pending` is the page request it waits for.
+    fn search_waiting_for(&mut self, pending: &PendingRequest) -> Option<&mut StorySearchState> {
+        self.stories
+            .search
+            .as_mut()
+            .filter(|search| search.request == Some(pending.id))
     }
 
     /// Mark the next page of the open search as requested.
@@ -178,7 +198,11 @@ impl Session {
         self.stories.search = None;
     }
 
-    pub(crate) fn accept_found_stories(&mut self, found: FoundStoriesView) {
+    pub(crate) fn accept_found_stories(
+        &mut self,
+        pending: &PendingRequest,
+        found: FoundStoriesView,
+    ) {
         self.remember_files(&found.files);
         let keys: Vec<(i64, i32)> = found
             .stories
@@ -190,9 +214,10 @@ impl Session {
                 .stories
                 .insert((story.poster_chat_id, story.id), story);
         }
-        let Some(search) = self.stories.search.as_mut() else {
+        let Some(search) = self.search_waiting_for(pending) else {
             return;
         };
+        search.request = None;
         search.loading = false;
         search.error = None;
         search.total_count = found.total_count;
@@ -204,8 +229,9 @@ impl Session {
         }
     }
 
-    pub(crate) fn fail_story_search(&mut self, message: String) {
-        if let Some(search) = self.stories.search.as_mut() {
+    pub(crate) fn fail_story_search(&mut self, pending: &PendingRequest, message: String) {
+        if let Some(search) = self.search_waiting_for(pending) {
+            search.request = None;
             search.loading = false;
             search.error = Some(message);
         }

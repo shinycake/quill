@@ -357,23 +357,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         // takes the pending request; the UI drains
         // `Session::instant_view` into the IV reader. The URL rides
         // `Session::instant_view_urls` (the purpose stays `Copy`).
-        let instant_view_answer: Option<(String, RichMessageContent)> =
+        // The reader opens in the window that asked (`SessionView`).
+        let instant_view_answer: Option<(Option<ChatId>, String, RichMessageContent)> =
             match &owned.envelope.payload {
                 EnvelopePayload::Messages(MessagesPayload::WebPageInstantView { rich }) => owned
                     .envelope
                     .extra
                     .and_then(|id| {
-                        (self.session.requests.purpose(id)
-                            == Some(RequestPurpose::GetWebPageInstantView))
-                        .then_some(id)
+                        let pending = self.session.requests.get(id)?;
+                        (pending.purpose == RequestPurpose::GetWebPageInstantView)
+                            .then_some((id, pending.window))
                     })
-                    .and_then(|id| {
+                    .and_then(|(id, window)| {
                         let messages = &mut self.session.messages;
                         messages.instant_view_agent_requests.remove(&id);
                         messages
                             .instant_view_urls
                             .remove(&id)
-                            .map(|url| (url, rich.clone()))
+                            .map(|url| (window, url, rich.clone()))
                     }),
                 _ => None,
             };
@@ -523,7 +524,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => Vec::new(),
         };
-        // A pin in the open chat refetches its pinned list (the pinned
+        // A pin in a chat on screen refetches its pinned list (the pinned
         // message may not be loaded); a confirmed unpin-all empties it.
         let pins_changed: Option<ChatId> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
@@ -605,7 +606,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .pinned_messages
                 .insert(chat_id.0, Vec::new());
         }
-        if let Some(chat_id) = pins_changed.filter(|chat| self.session.open_chat == Some(*chat)) {
+        if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
         self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
@@ -789,9 +790,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.users_state.username_check = Some((username, result));
         }
         // MED4: stash the `getWebPageInstantView` answer (success →
-        // IV reader; error → browser fallback) for the UI drains.
-        if let Some((url, rich)) = instant_view_answer {
-            self.session.messages.instant_view = Some(InstantViewPage { url, rich });
+        // reader in the asking window, unless it closed; error → browser).
+        if let Some((window, url, rich)) = instant_view_answer {
+            let _ = self.session.with_view(window, |session| {
+                session.messages.instant_view = Some(InstantViewPage { url, rich });
+            });
         }
         if let Some((url, from_agent)) = instant_view_fallback {
             self.session.messages.instant_view_fallback_url = Some(url);

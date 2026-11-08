@@ -143,9 +143,6 @@ spell.checker | the spellchecker engine
 spell.info * | the engine kind and dictionaries: languages, not accounts
 spell.dict_manager * | the dictionary manager box and its download
 spell.dict_filter_input | that box's filter field
-spell.misspellings | the misspellings of `checked_text`, recomputed whenever the text checked changes
-spell.checked_text | the text last checked, compared by value
-spell.task | the running check
 spell.engine_builder | builds the engine
 spell.engine_task | the engine build
 slices.sidebar * | cached child views of the sidebar: entities that render from the app, holding no state of their own

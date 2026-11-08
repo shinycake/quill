@@ -73,8 +73,11 @@ START = re.compile(
     r"|on_next_frame|cx\.subscribe(?:_in)?|cx\.observe\w*"
     r"|\.on_focus_in|\.on_focus_out|\.on_focus|\.on_blur)\s*\("
 )
-# The fields `swap_slot` exchanges, on the app.
-SLOT_FIELDS = r"(?:history|composer|composer_ui|message_ui|pickers|viewer|share)\b(?!_)"
+# Where a chat window's state is declared and exchanged with the app's.
+SLOT_FILE = pathlib.Path("chat_window") / "slot.rs"
+SLOT_SWAP = re.compile(
+    r"std::mem::swap\(\s*&mut\s+self\.([a-z_][a-z0-9_.]*)\s*,\s*&mut\s+slot\.([a-z_][a-z0-9_]*)\s*\)"
+)
 # Continuations: a closure that runs later and acts for the account that
 # was on screen when it was made.
 CONTINUATION = re.compile(
@@ -90,18 +93,20 @@ SCREEN_SCOPE_CALL = re.compile(r"\bin_screen_scope\s*\(")
 # The session's view (`Session::swap_view`) and the accessors that read it.
 SESSION_VIEW = re.compile(
     r"search_ui\.chat_input|\bopen_chat\b|\bopen_topic\b|threads\.thread\b"
-    r"|saved\.(sublist|tag_search)|\bchat_search\b|\bshared_media\b"
+    r"|saved\.(sublist|tag_search)|\bchat_search\b|\bshared_media\b|\bmessages\.instant_view\b"
     r"|\bopen_chat_id\(|\bviewed_chat\(|\bviewed_topic\("
 )
 # The same view as the session sees it, and as the driver reaches it.
 SESSION_SELF_VIEW = re.compile(
     r"\bself\.(?:open_chat|open_topic)\b|\bself\.threads\.(?:thread|saved\.(?:sublist|tag_search))\b"
     r"|\bself\.search\.chat_search\b|\bself\.media\.shared_media\b"
+    r"|\bself\.messages\.instant_view\b"
 )
 DRIVER_SELF_VIEW = re.compile(
     r"\bself\.session\.(?:open_chat|open_topic)\b"
     r"|\bself\.session\.threads\.(?:thread|saved\.(?:sublist|tag_search))\b"
     r"|\bself\.session\.search\.chat_search\b|\bself\.session\.media\.shared_media\b"
+    r"|\bself\.session\.messages\.instant_view\b"
 )
 SELF_CALL = re.compile(r"\bself\.([a-z_0-9]+)\s*\(")
 SELF_SESSION_CALL = re.compile(r"\bself\.session\.([a-z_0-9]+)\s*\(")
@@ -216,6 +221,46 @@ def alternation(names: set[str]) -> str:
     return "|".join(sorted(re.escape(n) for n in names))
 
 
+def slot_fields(root: pathlib.Path) -> str:
+    """The app fields `swap_slot` exchanges, as a pattern to put after a
+    receiver: every field `WindowSlot` declares (`on_screen_fields!` in
+    chat_window/slot.rs) that `swap_slot` swaps, by the path it has on the
+    app. A field of `OnScreen` (`self.screen.chat_ui`) is also reached
+    through `Deref` (`this.chat_ui`). Fails when a declared view field is
+    not swapped, or a swap names a field the slot does not declare."""
+    path = root / SLOT_FILE
+    if not path.exists():
+        sys.exit(f"{path} is missing: the WindowSlot declaration lives there")
+    text = path.read_text()
+    start = text.find("on_screen_fields! {")
+    if start < 0:
+        sys.exit(f"{path} has no `on_screen_fields!` declaration of WindowSlot")
+    body = block_after(text, start)
+    # The bookkeeping fields (no goodbye) end at a line holding only `;`.
+    parts = re.split(r"\n\s*;\s*\n", body, maxsplit=1)
+    if len(parts) != 2:
+        sys.exit(f"{path}: the WindowSlot declaration has no `;` line before its view fields")
+    bookkeeping, view = parts
+    bookkeeping_fields = ON_SCREEN_FIELD.findall(bookkeeping)
+    view_fields = ON_SCREEN_FIELD.findall(view)
+    swap_at = text.find("fn swap_slot")
+    if swap_at < 0:
+        sys.exit(f"{path} has no `swap_slot`")
+    swaps = {slot: app for app, slot in SLOT_SWAP.findall(block_after(text, swap_at))}
+    declared = set(bookkeeping_fields) | set(view_fields)
+    problems = [f"`WindowSlot::{f}` is not exchanged in `swap_slot`" for f in view_fields if f not in swaps]
+    problems += [f"`swap_slot` exchanges `slot.{f}`, which `WindowSlot` does not declare" for f in swaps if f not in declared]
+    if problems:
+        sys.exit(f"{path}: " + "; ".join(problems))
+    paths = set(swaps.values())
+    paths |= {p.removeprefix("screen.") for p in paths if p.startswith("screen.")}
+    names = "|".join(re.escape(p) for p in sorted(paths, key=len, reverse=True))
+    return rf"(?:{names})\b(?!_)"
+
+
+SLOT_FIELDS = ""
+
+
 def slot_field_hits(body: str, recv: set[str]) -> list[str]:
     pattern = re.compile(rf"\b(?:{alternation(recv)})\.{SLOT_FIELDS}")
     return [m.group(0) for m in pattern.finditer(body)]
@@ -307,6 +352,8 @@ def driver_hits(body: str, session_view: set[str], driver_view: set[str]) -> lis
 
 def main() -> int:
     root = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT
+    global SLOT_FIELDS
+    SLOT_FIELDS = slot_fields(root)
     files = [p for p in sorted(root.rglob("*.rs")) if not is_test(p)]
     texts = {p: p.read_text() for p in files}
     session_view, driver_view = view_methods(root.parent)

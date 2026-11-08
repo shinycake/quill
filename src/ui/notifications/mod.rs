@@ -773,9 +773,8 @@ impl QuillApp {
         }
         progressed |= ingested;
         // Bots slice: re-run the inline progress check after every batch
-        // of session updates — arm the debounced dispatch for the current
-        // trigger, if any. Idempotent: no-ops when the slot is already
-        // fresh or a timer is armed.
+        // of session updates, for every window's composer: send a query
+        // that waited for its bot or for an older query.
         if progressed {
             self.progress_inline_mode(cx);
         }

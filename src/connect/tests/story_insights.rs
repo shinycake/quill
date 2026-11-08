@@ -126,3 +126,148 @@ fn public_story_search_pages_by_next_offset() {
     assert!(driver.load_more_found_stories().unwrap().is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn found_stories(extra: crate::ids::RequestId, poster: i64, next: &str) -> String {
+    format!(
+        r#"{{"@type":"foundStories","@extra":"{}","total_count":1,"next_offset":"{next}","stories":[{{"@type":"story","id":1,"poster_chat_id":{poster},"date":1,"content":{{"@type":"storyContentUnsupported"}}}}]}}"#,
+        extra.0
+    )
+}
+
+/// A new search while the last one's page is in flight goes out at once,
+/// and only its own answer fills it: the old answer, its offset and its
+/// failure land in nothing.
+#[test]
+fn a_new_story_search_replaces_one_in_flight() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    let cats = driver
+        .search_public_stories(StorySearchQuery::Tag("#cats".into()))
+        .unwrap()
+        .expect("sends");
+    let dogs = driver
+        .search_public_stories(StorySearchQuery::Tag("#dogs".into()))
+        .unwrap()
+        .expect("the new query is sent while the old one is in flight");
+    assert_eq!(sent_types(&recorder).pop().unwrap()["tag"], "dogs");
+
+    driver
+        .ingest(copy_and_parse(&found_stories(cats, 21, "cats-2"), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let search = driver.session.stories.search.as_ref().expect("the search");
+    assert!(search.stories.is_empty(), "the old answer is not listed");
+    assert!(search.next_offset.is_empty());
+    assert!(search.loading, "still waiting for its own page");
+
+    driver
+        .ingest(copy_and_parse(&found_stories(dogs, 31, "dogs-2"), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let search = driver.session.stories.search.as_ref().expect("the search");
+    assert_eq!(search.stories, vec![(31, 1)]);
+    assert_eq!(search.next_offset, "dogs-2");
+
+    // A failure of a search left behind does not mark the open one.
+    let birds = driver
+        .search_public_stories(StorySearchQuery::Tag("#birds".into()))
+        .unwrap()
+        .expect("sends");
+    let fish = driver
+        .search_public_stories(StorySearchQuery::Tag("#fish".into()))
+        .unwrap()
+        .expect("sends");
+    let error = |id: crate::ids::RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"TAG_INVALID"}}"#,
+            id.0
+        )
+    };
+    driver
+        .ingest(copy_and_parse(&error(birds), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let search = driver.session.stories.search.as_ref().expect("the search");
+    assert!(search.error.is_none());
+    assert!(search.loading);
+    driver
+        .ingest(copy_and_parse(&error(fish), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    let search = driver.session.stories.search.as_ref().expect("the search");
+    assert!(search.error.is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Statistics opened on A, then B, then A again before A's answer: the
+/// panel waits for A, and A's answer fills it.
+#[test]
+fn story_statistics_reopened_while_pending_take_the_late_answer() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    for story in [5, 6] {
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            story,
+            "storyContentPhoto",
+            r#""can_get_statistics":true,"#,
+        );
+    }
+    let a = driver
+        .fetch_story_insights(ChatId(7), 5, false)
+        .unwrap()
+        .expect("A sends");
+    driver
+        .fetch_story_insights(ChatId(7), 6, false)
+        .unwrap()
+        .expect("B sends");
+    assert!(
+        driver
+            .fetch_story_insights(ChatId(7), 5, false)
+            .unwrap()
+            .is_none(),
+        "A's request is still in flight"
+    );
+    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    assert_eq!((insights.chat_id, insights.story_id), (7, 5));
+    assert!(insights.forwards_loading, "A's forwards are on the way too");
+
+    let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"storyStatistics","@extra":"{}","story_interaction_graph":{graph},"story_reaction_graph":{graph}}}"#,
+                    a.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    assert!(
+        matches!(
+            insights.statistics,
+            crate::state::StoryStatsFetch::Loaded(_)
+        ),
+        "{:?}",
+        insights.statistics
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
