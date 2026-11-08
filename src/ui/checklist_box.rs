@@ -24,7 +24,7 @@ impl QuillApp {
     ) -> Dialog {
         let adding = app
             .read(cx)
-            .composer_ui
+            .chat_ui
             .checklist_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.add_to.is_some());
@@ -47,7 +47,7 @@ impl QuillApp {
                 move |content, window, cx| {
                     let body = body_app.update(cx, |this, cx| {
                         let focus = this
-                            .composer_ui
+                            .chat_ui
                             .checklist_dialog
                             .as_mut()
                             .and_then(|dialog| dialog.focus_on_mount.take());
@@ -97,7 +97,7 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     ChecklistBox => DialogSpec::new(
         2938,
-        |app| app.composer_ui.checklist_dialog.is_some(),
+        |app| app.chat_ui.checklist_dialog.is_some(),
         QuillApp::build_checklist_dialog,
     )
     .close(|app, _, cx| app.close_checklist_dialog(cx)),

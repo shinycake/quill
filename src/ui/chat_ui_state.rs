@@ -90,6 +90,12 @@ pub(crate) struct ChatUi {
     /// popup opens, see `open_schedule_picker`). Its Reschedule target is
     /// a message id of this chat, so the picker goes with the chat.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
+    /// Phase 4.2: poll creation dialog (open above the composer). Here so
+    /// that a chat change closes it: Create posts to the chat shown.
+    pub(super) poll_dialog: Option<super::PollDialog>,
+    /// B15: the checklist composer / "Add Tasks" box. A new checklist goes
+    /// to the chat shown, so the box goes with the chat.
+    pub(super) checklist_dialog: Option<super::ChecklistDialog>,
     /// The info card under the open forum topic's strip.
     pub(super) topic_info_open: bool,
     /// The info card under the open reply thread's root bar.

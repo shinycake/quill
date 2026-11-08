@@ -34,11 +34,11 @@ impl QuillApp {
         use crate::ui::ChecklistDialog;
         match mode.as_str() {
             "checklist" => {
-                self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
+                self.chat_ui.checklist_dialog = Some(ChecklistDialog::new(None, window, cx));
             }
             "add-tasks" => {
                 let add_to = Some((GROUP, quill::ids::MessageId(21)));
-                self.composer_ui.checklist_dialog = Some(ChecklistDialog::new(add_to, window, cx));
+                self.chat_ui.checklist_dialog = Some(ChecklistDialog::new(add_to, window, cx));
             }
             "stop-poll" => {
                 self.begin_stop_poll(GROUP, quill::ids::MessageId(20), false, cx);

@@ -125,7 +125,7 @@ impl QuillApp {
                     .disabled(locked)
                     .accessibility_label(title)
                     .on_click(cx.listener(move |this, &next: &bool, _, cx| {
-                        if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+                        if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
                             set(dialog, next);
                         }
                         cx.notify();
@@ -136,7 +136,7 @@ impl QuillApp {
 
     /// The whole settings section, under its "Settings" title.
     pub(in crate::ui) fn poll_settings(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        let dialog = self.chat_ui.poll_dialog.as_ref()?;
         let mut section = div().flex().flex_col().gap_2().child(
             div()
                 .text_sm()
@@ -257,7 +257,7 @@ impl QuillApp {
     fn poll_ends_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
         let close = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .map(|dialog| dialog.close)
@@ -294,7 +294,7 @@ impl QuillApp {
                         .checked(close == PollClose::Period(secs))
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |this, cx| {
-                                if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+                                if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
                                     dialog.close = PollClose::Period(secs);
                                 }
                                 cx.notify();
@@ -320,7 +320,7 @@ impl QuillApp {
     /// it is on, the "Allowed Countries" row under it. Turning it off
     /// forgets the chosen countries.
     fn poll_country_limit(&self, cx: &mut Context<Self>) -> AnyElement {
-        let dialog = self.composer_ui.poll_dialog.as_ref();
+        let dialog = self.chat_ui.poll_dialog.as_ref();
         let on = dialog.is_some_and(|dialog| dialog.limit_by_country);
         let codes = dialog.map(|dialog| dialog.country_codes.clone());
         let mut block = div().flex().flex_col().gap_2().child(self.poll_switch_row(

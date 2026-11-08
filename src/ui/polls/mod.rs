@@ -500,12 +500,12 @@ impl QuillApp {
             .session()
             .and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)))
             .is_some_and(|chat| chat.is_channel());
-        self.composer_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
+        self.chat_ui.poll_dialog = Some(PollDialog::new(window, cx, in_channel, lock));
         cx.notify();
     }
 
     pub(super) fn close_poll_dialog(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.poll_dialog = None;
+        self.chat_ui.poll_dialog = None;
         cx.notify();
     }
 
@@ -513,12 +513,12 @@ impl QuillApp {
     /// the inline discard confirmation instead of closing silently.
     pub(super) fn request_close_poll_dialog(&mut self, cx: &mut Context<Self>) {
         let dirty = self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.is_dirty(cx));
         if dirty {
-            if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+            if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
                 dialog.confirming_discard = true;
             }
             cx.notify();
@@ -576,7 +576,7 @@ impl QuillApp {
     }
 
     pub(super) fn add_poll_option_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.poll_dialog.as_mut() else {
+        let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;
         };
         if dialog.option_inputs.len() >= POLL_OPTIONS_MAX {
@@ -597,7 +597,7 @@ impl QuillApp {
     }
 
     pub(super) fn remove_poll_option_row(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.poll_dialog.as_mut() else {
+        let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;
         };
         if dialog.option_inputs.len() <= POLL_OPTIONS_MIN || index >= dialog.option_inputs.len() {
@@ -618,7 +618,7 @@ impl QuillApp {
     /// pending reply (if any) is attached like a normal send.
     pub(super) fn submit_poll_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let close_max = self.poll_close_max_secs();
-        let draft = match self.composer_ui.poll_dialog.as_ref() {
+        let draft = match self.chat_ui.poll_dialog.as_ref() {
             Some(dialog) => PollDraft {
                 close_max,
                 ..dialog.draft(cx)
@@ -633,7 +633,7 @@ impl QuillApp {
             return;
         }
         if self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.limit_by_country && dialog.country_codes.is_empty())
@@ -650,7 +650,7 @@ impl QuillApp {
             return;
         }
         if self
-            .composer_ui
+            .chat_ui
             .poll_dialog
             .as_ref()
             .is_some_and(|dialog| dialog.media_preparing())
@@ -681,7 +681,7 @@ impl QuillApp {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {
                 Ok(_) => {
-                    self.composer_ui.poll_dialog = None;
+                    self.chat_ui.poll_dialog = None;
                     self.chat_ui.set_reply(None);
                     self.connection
                         .set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_POLL)));
@@ -696,7 +696,7 @@ impl QuillApp {
         }
         // Screenshot demos have no live driver; close the dialog honestly.
         let _ = window;
-        self.composer_ui.poll_dialog = None;
+        self.chat_ui.poll_dialog = None;
         self.connection.set_note(StatusNote::info(tr(
             keys::Q_MEDIA_POLLS_NEED_A_LIVE_CONNECTION,
         )));
@@ -709,7 +709,7 @@ impl QuillApp {
     /// fields, anonymous / multiple-answers / revoting / shuffle / quiz
     /// toggles, discard confirmation, Create / Cancel.
     pub(super) fn poll_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.composer_ui.poll_dialog.as_ref()?;
+        self.chat_ui.poll_dialog.as_ref()?;
         self.poll_dialog_panel_body(cx)
     }
 
@@ -719,7 +719,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn poll_dialog_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        let dialog = self.chat_ui.poll_dialog.as_ref()?;
         if dialog.country_box.is_some() {
             return self.poll_country_panel(cx);
         }
@@ -764,7 +764,7 @@ impl QuillApp {
                             &[("number", &(index + 1).to_string())],
                         ))
                         .on_click(cx.listener(move |this, &on, _, cx| {
-                            if let Some(dialog) = this.composer_ui.poll_dialog.as_mut() {
+                            if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
                                 dialog.set_correct_row(index, on);
                             }
                             cx.notify();
@@ -836,7 +836,7 @@ impl QuillApp {
     /// Cancel and Create, pinned under the scrolling box. The country and
     /// deadline pickers bring their own buttons, so they get none.
     pub(super) fn poll_box_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.poll_dialog.as_ref()?;
+        let dialog = self.chat_ui.poll_dialog.as_ref()?;
         if dialog.country_box.is_some() || dialog.deadline_box.is_some() {
             return None;
         }

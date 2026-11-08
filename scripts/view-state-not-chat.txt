@@ -48,8 +48,6 @@ ComposerUi.inline_return * | carries the chat it came from (`origin`) and the bo
 ComposerUi.send_menu * | the send menu carries its chat; it closes when the chat viewed is another (`send_effects`); the rest are effect ids
 ComposerUi.clear_draft_on_success * | carries its chat: the draft cleared is that chat's
 ComposerUi.date_dialog * | a date box over the composer text; `initial` is a unix time, not an id
-ComposerUi.poll_dialog * | the new poll's deadline box; `initial` is a unix time; the poll goes to the slot it was opened for
-ComposerUi.checklist_dialog * | `add_to` carries its chat and message
 ComposerUi.send_box * | the attachment tray's video editor: a sticker set id and times in ms, no chat's ids; the tray is keyed by draft slot
 MessageUi.menu * | carries its chat and message; its actions use them
 MessageUi.pending_link * | carries its chat and message (`msg_key`); run at the next render

@@ -22,7 +22,7 @@ impl QuillApp {
             session.open_chat(quill::ids::ChatId(chat));
         }
         self.open_poll_dialog(window, cx);
-        let Some(dialog) = self.composer_ui.poll_dialog.as_mut() else {
+        let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;
         };
         match mode.as_str() {

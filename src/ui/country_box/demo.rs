@@ -72,7 +72,7 @@ impl QuillApp {
             open_demo_channel(session);
         }
         self.open_poll_dialog(window, cx);
-        if let Some(dialog) = self.composer_ui.poll_dialog.as_mut() {
+        if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
             dialog.limit_by_country = true;
             dialog.country_codes = vec!["US".into(), "GB".into()];
         }
