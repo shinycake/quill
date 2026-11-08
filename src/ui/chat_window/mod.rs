@@ -33,6 +33,8 @@ use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 mod body;
 mod cover;
+#[cfg(test)]
+mod lock_tests;
 mod recording;
 mod saved;
 mod scoped;
