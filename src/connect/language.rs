@@ -115,6 +115,31 @@ impl<S: JsonSender> ConnectDriver<S> {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// The client comes on screen after running in the background. What its
+    /// language flow made there (its startup pack, a reload, string updates)
+    /// is for the choice saved when it started, and the interface may have
+    /// moved on since: installing it would put the old pack back and save
+    /// it as the choice. It is dropped, and the client follows the choice
+    /// saved now.
+    pub fn adopt_saved_language(&mut self) -> Result<(), ConnectSendError> {
+        let state = &mut self.session.settings.language;
+        state.ready = None;
+        state.patch.clear();
+        state.reload = false;
+        let root = crate::settings::app_root_of(&self.paths).map(std::path::Path::to_path_buf);
+        let choice = root.as_deref().map(load_choice).unwrap_or_default();
+        let wanted = (!choice.is_builtin()).then_some(choice.pack_id.as_str());
+        let shown = state.current.as_ref().map(|info| info.id.as_str());
+        let switching = state
+            .switching
+            .as_ref()
+            .map(|switch| switch.info.id.as_str());
+        if switching.map_or(shown == wanted, |id| Some(id) == wanted) {
+            return Ok(());
+        }
+        self.switch_language(info_of(&choice))
+    }
+
     /// After a failed switch: point TDLib back at the pack the interface
     /// still uses.
     pub fn restore_language_option(&mut self) -> Result<(), ConnectSendError> {
