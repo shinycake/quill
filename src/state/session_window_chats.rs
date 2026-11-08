@@ -283,6 +283,9 @@ pub struct SessionView {
     pub saved_tag_search: Option<SavedTagSearch>,
     pub chat_search: ChatSearchState,
     pub shared_media: SharedMediaState,
+    /// The Instant View reader opened in this window
+    /// (`MessagesState::instant_view`).
+    pub instant_view: Option<InstantViewPage>,
 }
 
 impl SessionView {
@@ -309,5 +312,6 @@ impl Session {
         );
         std::mem::swap(&mut self.search.chat_search, &mut view.chat_search);
         std::mem::swap(&mut self.media.shared_media, &mut view.shared_media);
+        std::mem::swap(&mut self.messages.instant_view, &mut view.instant_view);
     }
 }

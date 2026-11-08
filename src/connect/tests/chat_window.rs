@@ -352,6 +352,48 @@ fn going_to_the_background_saves_the_draft_waiting_to_be_saved() {
     assert!(!h.driver.session.draft_is_dirty(ALICE, DraftTopic::Chat));
 }
 
+/// The Instant View reader opens in the window that asked for it: the
+/// answer lands in that window's view, not the main window's, and a
+/// window closed meanwhile gets nothing.
+#[test]
+fn an_instant_view_opens_in_the_window_that_asked() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let ask = |h: &mut Harness, url: &str| {
+        h.driver.session.enter_view(Some(BOB));
+        let outcome = h.driver.open_instant_view(url);
+        h.driver.session.enter_view(None);
+        assert!(matches!(outcome, InstantViewOutcome::Requested));
+        let sent = h.recorder.snapshot();
+        let last: Value = serde_json::from_str(sent.last().expect("sent")).unwrap();
+        last["@extra"].as_str().expect("extra").to_string()
+    };
+    let answer = |h: &mut Harness, extra: &str| {
+        h.ingest(&format!(
+            r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{extra}"}}"#
+        ));
+    };
+    let extra = ask(&mut h, "https://example.com/a");
+    answer(&mut h, &extra);
+    assert!(
+        h.driver.session.messages.instant_view.is_none(),
+        "the main window shows no reader"
+    );
+    h.driver.session.enter_view(Some(BOB));
+    let page = h.driver.session.messages.instant_view.take();
+    h.driver.session.enter_view(None);
+    assert_eq!(
+        page.map(|page| page.url).as_deref(),
+        Some("https://example.com/a")
+    );
+
+    let extra = ask(&mut h, "https://example.com/b");
+    h.driver.close_chat_window(BOB).unwrap();
+    answer(&mut h, &extra);
+    assert!(h.driver.session.messages.instant_view.is_none());
+}
+
 /// A pin in a chat shown only in its own window refetches that chat's
 /// pinned list: `updateMessageIsPinned` edits loaded rows only, and the
 /// window's pinned bar reads the fetched list.

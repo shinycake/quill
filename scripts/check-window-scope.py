@@ -93,18 +93,20 @@ SCREEN_SCOPE_CALL = re.compile(r"\bin_screen_scope\s*\(")
 # The session's view (`Session::swap_view`) and the accessors that read it.
 SESSION_VIEW = re.compile(
     r"search_ui\.chat_input|\bopen_chat\b|\bopen_topic\b|threads\.thread\b"
-    r"|saved\.(sublist|tag_search)|\bchat_search\b|\bshared_media\b"
+    r"|saved\.(sublist|tag_search)|\bchat_search\b|\bshared_media\b|\bmessages\.instant_view\b"
     r"|\bopen_chat_id\(|\bviewed_chat\(|\bviewed_topic\("
 )
 # The same view as the session sees it, and as the driver reaches it.
 SESSION_SELF_VIEW = re.compile(
     r"\bself\.(?:open_chat|open_topic)\b|\bself\.threads\.(?:thread|saved\.(?:sublist|tag_search))\b"
     r"|\bself\.search\.chat_search\b|\bself\.media\.shared_media\b"
+    r"|\bself\.messages\.instant_view\b"
 )
 DRIVER_SELF_VIEW = re.compile(
     r"\bself\.session\.(?:open_chat|open_topic)\b"
     r"|\bself\.session\.threads\.(?:thread|saved\.(?:sublist|tag_search))\b"
     r"|\bself\.session\.search\.chat_search\b|\bself\.session\.media\.shared_media\b"
+    r"|\bself\.session\.messages\.instant_view\b"
 )
 SELF_CALL = re.compile(r"\bself\.([a-z_0-9]+)\s*\(")
 SELF_SESSION_CALL = re.compile(r"\bself\.session\.([a-z_0-9]+)\s*\(")
