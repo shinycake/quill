@@ -115,3 +115,49 @@ fn a_parked_viewer_clip_or_gif_belongs_to_its_window(cx: &mut TestAppContext) {
         assert!(dropped);
     }
 }
+
+/// A secret chat in its own window keeps that window out of capture,
+/// whatever the main window shows.
+#[gpui_kit::test]
+fn a_secret_chats_window_blocks_capture_of_itself(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestWindowExt;
+    use quill::ids::UserId;
+    use quill::telegram::envelope::ChatKind;
+    let (app, main) = new_app(cx, "ready-chats");
+    app.update(cx, |app, _| {
+        let chat = app
+            .demo_session
+            .as_mut()
+            .and_then(|session| session.chats.get_mut(&OTHER.0));
+        if let Some(chat) = chat {
+            chat.kind = ChatKind::Secret {
+                secret_chat_id: 9,
+                user_id: UserId(OTHER.0),
+            };
+        }
+    });
+    open_chat_window(&app, main, cx);
+    let window = cx
+        .windows()
+        .into_iter()
+        .find(|handle| handle.window_id() != main.window_id())
+        .expect("the chat window");
+    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+        .expect("the chat window draws");
+    let view = app
+        .read_with(cx, |app, _| {
+            app.windows
+                .open
+                .first()
+                .and_then(|open| open.view.upgrade())
+        })
+        .expect("the window view");
+    let (window_blocked, main_blocked) = app.update(cx, |app, cx| {
+        (
+            view.read(cx).is_capture_blocked(),
+            app.frame.capture_blocked,
+        )
+    });
+    assert!(window_blocked, "the secret chat window");
+    assert!(!main_blocked, "the main window shows another chat");
+}
