@@ -458,7 +458,7 @@ impl Session {
                     return;
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatMessageByDate) {
-                    self.accept_date_message(message.id);
+                    self.accept_date_message(message.id, pending);
                     return;
                 }
                 if let Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {

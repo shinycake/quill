@@ -139,8 +139,9 @@ pub(super) struct TranslateScreen {
     toast: Option<TranslateToast>,
     toast_seq: u64,
     offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
-    /// What `pump_translation` tested last (`pump_scan`).
-    pub(super) pump: pump_scan::PumpScan,
+    /// What `pump_translation` tested last (`pump_scan`), by chat: each
+    /// window pumps the chat it shows.
+    pub(super) pump: std::collections::HashMap<i64, pump_scan::PumpScan>,
     #[cfg(test)]
     asked: Vec<(MessageId, &'static str)>,
 }

@@ -91,6 +91,9 @@ impl QuillApp {
         live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();
+        // So is the interface language: the pack it made in the background
+        // is not installed over the one shown.
+        let _ = live.driver.adopt_saved_language();
         live.driver.set_stream_volume(self.players.volume);
         live.bridge.wake_with(&quill::wake::UPDATES);
         self.put_on_screen(live);

@@ -45,6 +45,14 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Only the main window draws the modal (chat windows show no info
+        // panel): a click in a chat window opens it there, brought forward,
+        // and its search field is built with the main window.
+        if self.hand_to_main_window(cx, move |app, window, cx| {
+            app.open_avatar_profile(sender, window, cx);
+        }) {
+            return;
+        }
         let Some(target) = self
             .session()
             .and_then(|session| session.avatar_profile_target(sender))

@@ -185,7 +185,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .pings
             .insert(slot, PingStatus::Checking);
         match self.sender.send_json(&ping_proxy(extra, draft)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session
+                    .settings
+                    .proxy_ping_requests
+                    .insert(slot, extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.settings.proxy.pings.remove(&slot);

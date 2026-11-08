@@ -100,6 +100,9 @@ impl crate::ui::on_screen::Farewell for PaymentUi {
         app.close_gift_value(cx);
         app.close_gift_code_box(cx);
         app.close_money(cx);
+        app.close_collectible_info(cx);
+        app.close_gifts(cx);
+        app.dismiss_wallet_notice(cx);
     }
 }
 

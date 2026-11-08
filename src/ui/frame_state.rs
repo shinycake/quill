@@ -63,7 +63,8 @@ pub(crate) struct FrameUi {
     /// What the main window's animation layers drew since their ticks
     /// (`QuillApp::note_layer_drawn`).
     pub(super) layers_drawn: std::cell::RefCell<super::layer_draws::LayerDraws>,
-    /// History motion: new-message reveal and selection-mode fades.
+    /// History motion: new-message reveal and selection-mode fades. The
+    /// window's in place: a chat window swaps in its own (`slot`).
     pub(super) motion: super::motion::MotionState,
     /// Chat list column width (drag its right edge; double-click resets).
     pub(super) sidebar_width: Pixels,
@@ -71,7 +72,8 @@ pub(crate) struct FrameUi {
     pub(super) sidebar: super::sidebar_reveal::SidebarReveal,
     /// The side panel column's slide (`panel_reveal`).
     pub(super) panels: super::panel_reveal::PanelReveal,
-    /// Surfaces that come and go with their state (`surface_reveal`).
+    /// Surfaces that come and go with their state (`surface_reveal`), of
+    /// the window in place: a chat window swaps in its own (`slot`).
     pub(super) surfaces: super::surface_reveal::Surfaces,
     /// The main window's content width as last drawn (`shell_layout`).
     pub(super) main_width: Pixels,

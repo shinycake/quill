@@ -58,21 +58,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // Continue paging only when this envelope completes an in-flight loadChats
         // with ok. Unrelated ingest ticks and non-404 errors must not re-issue.
-        let load_chats_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
-            && owned.envelope.extra.is_some_and(|id| {
-                self.session.requests.purpose(id) == Some(RequestPurpose::LoadChats)
-            });
+        let answered = owned
+            .envelope
+            .extra
+            .and_then(|id| self.session.requests.purpose(id));
+        let ok = matches!(owned.envelope.payload, EnvelopePayload::Ok);
+        let load_chats_ok = ok && answered == Some(RequestPurpose::LoadChats);
         // The archive pages the same way, starting once the main list is
         // exhausted (its 404 lands in this envelope).
-        let load_archive_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
-            && owned.envelope.extra.is_some_and(|id| {
-                self.session.requests.purpose(id) == Some(RequestPurpose::LoadArchiveChats)
-            });
+        let load_archive_ok = ok && answered == Some(RequestPurpose::LoadArchiveChats);
+        // A main page failed short of its end: the archive starts anyway.
+        let load_chats_failed = answered == Some(RequestPurpose::LoadChats)
+            && matches!(&owned.envelope.payload, EnvelopePayload::Error(err) if err.code != 404);
         // Story lists page the same way, until their 404.
-        let story_page_ok = matches!(owned.envelope.payload, EnvelopePayload::Ok)
-            .then(|| owned.envelope.extra)
-            .flatten()
-            .and_then(|id| self.session.requests.purpose(id))
+        let story_page_ok = answered
+            .filter(|_| ok)
             .and_then(crate::state::story_list_of);
         let main_was_exhausted = self.session.chat_list.chats_exhausted;
         // Parity slice: a folder `loadChats` page completing with ok pages
@@ -342,15 +342,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 EnvelopePayload::Users(UsersPayload::CheckChatUsernameResult(result)) => owned
                     .envelope
                     .extra
-                    .and_then(|id| self.session.requests.purpose(id))
-                    .and_then(|purpose| {
+                    .and_then(|id| {
                         self.session
                             .users_state
                             .username_check_pending
                             .clone()
-                            .filter(|_| purpose == RequestPurpose::CheckUsername)
-                            .map(|username| (username, *result))
-                    }),
+                            .filter(|(pending, _)| *pending == id)
+                    })
+                    .map(|(_, username)| (username, *result)),
                 _ => None,
             };
         // MED4: capture the `getWebPageInstantView` answer before `apply`
@@ -690,7 +689,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        if load_archive_ok || (!main_was_exhausted && self.session.chat_list.chats_exhausted) {
+        let main_ended = !main_was_exhausted && self.session.chat_list.chats_exhausted;
+        if load_archive_ok || load_chats_failed || main_ended {
             self.maybe_load_archive_chats()?;
         }
         if let Some(folder_id) = folder_load_ok {
@@ -761,14 +761,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             *existing = rich;
         }
-        // Corner "@" / heart buttons: jump to the oldest unread marker the
-        // search found. A failed jump (closed chat) just drops it.
-        if let Some(message_id) = self.session.messages.unread_jump.take() {
-            let _ = self.jump_to_chat_search_message(message_id);
-        }
-        // Jump to date: `getChatMessageByDate` resolved (or 404'd) a target.
-        if let Some((message_id, mode)) = self.session.search.date_jump.take() {
-            let _ = self.jump_to_message_with(message_id, mode);
+        // Corner "@" / heart buttons and jump to date: run in the window
+        // that asked, for its chat. A failed jump (closed chat) drops it.
+        let unread = self.session.messages.unread_jump.take();
+        for jump in [unread, self.session.search.date_jump.take()]
+            .into_iter()
+            .flatten()
+        {
+            let _ = self.run_view_jump(jump);
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {

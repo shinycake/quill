@@ -271,3 +271,58 @@ fn story_statistics_reopened_while_pending_take_the_late_answer() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A's forwards answer before A's statistics, B opens, then A again: A's
+/// forwards are asked for again instead of showing an empty list.
+#[test]
+fn story_forwards_answered_before_a_reopen_are_asked_again() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    for story in [5, 6] {
+        seed_story(
+            &mut driver,
+            &seq,
+            &dyn_sink,
+            7,
+            story,
+            "storyContentPhoto",
+            r#""can_get_statistics":true,"#,
+        );
+    }
+    driver.fetch_story_insights(ChatId(7), 5, false).unwrap();
+    let forwards = sent_types(&recorder)
+        .into_iter()
+        .find(|v| v["@type"] == "getStoryPublicForwards")
+        .expect("A's forwards");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"publicForwards","@extra":"{}","total_count":0,"next_offset":"","forwards":[]}}"#,
+                    forwards["@extra"].as_str().unwrap()
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.fetch_story_insights(ChatId(7), 6, false).unwrap();
+    driver.fetch_story_insights(ChatId(7), 5, false).unwrap();
+    let asked = sent_types(&recorder)
+        .into_iter()
+        .filter(|v| v["@type"] == "getStoryPublicForwards" && v["story_id"] == 5)
+        .count();
+    assert_eq!(asked, 2);
+    let insights = driver.session.stories.insights.as_ref().expect("insights");
+    assert_eq!((insights.chat_id, insights.story_id), (7, 5));
+    assert!(insights.forwards_loading);
+    let _ = std::fs::remove_dir_all(dir);
+}

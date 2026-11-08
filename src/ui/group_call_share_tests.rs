@@ -202,3 +202,41 @@ fn the_box_waits_for_the_passcode_unlock(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, _| app.account.passcode.locked = false);
     assert!(overlay_shown(&app, vcx));
 }
+
+/// The boxes belong to the call they were opened for: another call closes
+/// them, and a share box whose listener link failed is not left open
+/// unseen, holding the stream window's keys.
+#[gpui_kit::test]
+fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    video_chat(&app, vcx, SPEAKER);
+    app.update_in(vcx, |app, _, cx| {
+        app.sync_group_call_boxes();
+        app.open_group_call_share_links(cx);
+        app.group_call_screen.settings_open = true;
+        app.sync_group_call_boxes();
+    });
+    let open = app.read_with(vcx, |app, _| {
+        app.group_call_boxes.share_open && app.group_call_screen.settings_open
+    });
+    assert!(open, "the same call keeps them");
+
+    app.update_in(vcx, |app, _, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.calls.active_group_call = Some(ActiveGroupCall::fresh(78));
+        }
+        app.sync_group_call_boxes();
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(!app.group_call_boxes.share_open);
+        assert!(!app.group_call_screen.settings_open);
+    });
+
+    app.update_in(vcx, |app, _, _| {
+        app.group_call_boxes.share_open = true;
+        app.sync_group_call_boxes();
+    });
+    let open = app.read_with(vcx, |app, _| app.group_call_boxes.share_open);
+    assert!(!open, "no links and none on the way: the box closes");
+}

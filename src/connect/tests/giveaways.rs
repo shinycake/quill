@@ -184,7 +184,7 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     assert_eq!(sent["parameters"]["boosted_chat_id"], -100);
     assert!(matches!(
         driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launching { chat_id: -100 }
+        GiveawayLaunch::Launching { chat_id: -100, .. }
     ));
     // A second click while it runs sends nothing.
     assert!(driver.launch_prepaid_giveaway(&draft, NOW).is_err());

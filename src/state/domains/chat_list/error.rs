@@ -51,7 +51,9 @@ impl Session {
                 RequestPurpose::CheckChatFolderInviteLink
                 | RequestPurpose::AddChatFolderByInviteLink,
             ) => {
-                self.chat_list.folder_invite_error = Some(error_reason(err));
+                if self.chat_list.take_folder_invite_answer(pending) {
+                    self.chat_list.folder_invite_error = Some(error_reason(err));
+                }
             }
             // Slice CL1: refused chat-list actions surface in the
             // status note (the UI drains `chat_action_error`) —
@@ -79,6 +81,24 @@ impl Session {
             Some(RequestPurpose::RemoveChatFromList) => {
                 self.chats_state.chat_action_error =
                     Some(format!("could not delete the chat (error {})", err.code));
+            }
+            // The removals waiting for this spec are dropped: asking again
+            // on every ingest would loop at round-trip speed.
+            Some(RequestPurpose::GetChatFolder) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    let queue = &mut self.chat_list.folder_remove_queue;
+                    let before = queue.len();
+                    queue.retain(|(_, folder)| *folder != folder_id);
+                    if queue.len() != before {
+                        self.chats_state.chat_action_error = Some(format!(
+                            "{} (error {})",
+                            crate::lang::tr(
+                                crate::lang::keys::Q_CHATLIST_COULD_NOT_REMOVE_FROM_FOLDER
+                            ),
+                            err.code
+                        ));
+                    }
+                }
             }
             Some(RequestPurpose::HidePromotion) => {
                 self.chats_state.chat_action_error = Some(format!(
@@ -129,11 +149,26 @@ impl Session {
             }
             _ => {}
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) && err.code == 404 {
-            self.chat_list.chats_exhausted = true;
-        }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadArchiveChats) && err.code == 404 {
-            self.chat_list.archive_chats_exhausted = true;
+        // A 404 ends a list. Any other failure (a timeout, a 500) waits
+        // and asks again, or paging stopped until the next reconnect.
+        let now = std::time::Instant::now();
+        let list = &mut self.chat_list;
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::LoadChats) if err.code == 404 => {
+                list.chats_exhausted = true;
+                list.chats_retry = None;
+            }
+            Some(RequestPurpose::LoadChats) => {
+                list.chats_retry = Some(ChatListState::next_page_retry(list.chats_retry, now));
+            }
+            Some(RequestPurpose::LoadArchiveChats) if err.code == 404 => {
+                list.archive_chats_exhausted = true;
+                list.archive_retry = None;
+            }
+            Some(RequestPurpose::LoadArchiveChats) => {
+                list.archive_retry = Some(ChatListState::next_page_retry(list.archive_retry, now));
+            }
+            _ => {}
         }
         // Parity slice: folder `loadChats` paging ends the same way
         // as the main list — a 404 marks that folder exhausted.

@@ -1,6 +1,5 @@
 //! Connect driver: chat list, folders, selection, read/pin state.
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::folders::spec_without_chat;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{HistoryOpen, InfoPanelTarget, RequestPurpose, RequestRollback};
@@ -68,8 +67,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.cancel_outgoing_typing()?;
         self.close_open_chat()?;
-        self.draft_clock = DraftSaveClock::idle();
-        self.pending_draft = None;
+        // A chat window's waiting save still goes.
+        let _ = self.settle_pending_draft();
         self.session.open_chat(chat_id);
         self.session.prepare_history_window(chat_id);
         // Channels are ungated since Phase 2.2: they follow the normal

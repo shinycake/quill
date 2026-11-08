@@ -300,6 +300,9 @@ fn tag_search_pages_land_in_the_filter() {
     let tag = ReactionType::emoji("\u{2764}");
     session.begin_saved_tag_search(0, tag.clone());
     let extra = session.request(RequestPurpose::SearchSavedMessages { topic_id: 0 }, None);
+    if let Some(search) = session.threads.saved.tag_search.as_mut() {
+        search.request = Some(extra);
+    }
     apply_json(
         &mut session,
         &seq,

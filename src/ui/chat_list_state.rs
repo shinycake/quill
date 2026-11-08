@@ -43,9 +43,6 @@ pub(crate) struct ChatListUi {
     /// Slice CL: an in-progress long press on a chat-list row — the
     /// row's chat id + press start, for the peek preview.
     pub(super) preview_press: Option<(ChatId, Instant)>,
-    /// The message the next chat open lands on ("Go To Message" from the
-    /// peek preview); taken by `select_chat_with`.
-    pub(super) open_at: Option<quill::ids::MessageId>,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -66,12 +63,6 @@ pub(crate) struct ChatListUi {
     /// call settings instead of the chat list. Mutually exclusive with
     /// `contacts_tab_open`.
     pub(super) calls_tab_open: bool,
-    /// On a narrow window the forum's topic column replaces the chat list;
-    /// this brings the list back until another forum opens.
-    pub(super) forum_chats_peek: bool,
-    /// The forum topic column is on screen this frame, so the conversation
-    /// shows a hint instead of repeating the topic list.
-    pub(super) forum_column_shown: bool,
     /// Phase B1: pending "Close secret chat" confirm for the open chat
     /// (`closeSecretChat`, schema 1.8.67 line 15242).
     pub(super) pending_close_secret_chat: Option<ChatId>,
@@ -104,15 +95,12 @@ impl ChatListUi {
             pin_press: None,
             preview: None,
             preview_press: None,
-            open_at: None,
             selected: HashSet::new(),
             filter: ChatListFilter::All,
             archive_hint_open: false,
             my_chats_open: None,
             contacts_tab_open: false,
             calls_tab_open: false,
-            forum_chats_peek: false,
-            forum_column_shown: false,
             pending_close_secret_chat: None,
             pending_story_open: None,
             drop_on_row: Default::default(),

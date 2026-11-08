@@ -19,23 +19,23 @@ use quill::ids::{ChatId, MessageId};
 use quill::telegram::envelope::MessageContent;
 
 /// The demo's open chat and two more chats from its list.
-const OPEN: ChatId = ChatId(11);
-const OTHER: ChatId = ChatId(12);
-const CHANNEL: ChatId = ChatId(13);
+pub(super) const OPEN: ChatId = ChatId(11);
+pub(super) const OTHER: ChatId = ChatId(12);
+pub(super) const CHANNEL: ChatId = ChatId(13);
 /// The one message in chat B.
-const OTHER_LAST: MessageId = MessageId(40);
+pub(super) const OTHER_LAST: MessageId = MessageId(40);
 
-struct Harness {
-    app: Entity<QuillApp>,
-    shell: Entity<QuillShell>,
-    main: AnyWindowHandle,
+pub(super) struct Harness {
+    pub(super) app: Entity<QuillApp>,
+    pub(super) shell: Entity<QuillShell>,
+    pub(super) main: AnyWindowHandle,
 }
 
-fn new_app(cx: &mut TestAppContext) -> Harness {
+pub(super) fn new_app(cx: &mut TestAppContext) -> Harness {
     new_demo_app(cx, "ready-chats")
 }
 
-fn new_demo_app(cx: &mut TestAppContext, demo: &'static str) -> Harness {
+pub(super) fn new_demo_app(cx: &mut TestAppContext, demo: &'static str) -> Harness {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -62,7 +62,11 @@ fn new_demo_app(cx: &mut TestAppContext, demo: &'static str) -> Harness {
 }
 
 impl Harness {
-    fn open_in_new_window(&self, chat: ChatId, cx: &mut TestAppContext) -> AnyWindowHandle {
+    pub(super) fn open_in_new_window(
+        &self,
+        chat: ChatId,
+        cx: &mut TestAppContext,
+    ) -> AnyWindowHandle {
         let app = self.app.clone();
         cx.update_window(self.main, |_, window, cx| {
             app.update(cx, |app, cx| app.open_chat_in_new_window(chat, window, cx));
@@ -94,11 +98,11 @@ impl Harness {
     /// Put the main window's state in place, as the next main-window
     /// input, draw or poll would: a chat window's state stays in place
     /// after its input until then.
-    fn settle(&self, cx: &mut TestAppContext) {
+    pub(super) fn settle(&self, cx: &mut TestAppContext) {
         self.app.update(cx, |app, _| app.set_window_scope(None));
     }
 
-    fn open_chat(&self, cx: &mut TestAppContext) -> Option<ChatId> {
+    pub(super) fn open_chat(&self, cx: &mut TestAppContext) -> Option<ChatId> {
         self.settle(cx);
         self.app
             .read_with(cx, |app, _| app.session().and_then(|s| s.open_chat))
@@ -129,7 +133,11 @@ impl Harness {
     }
 
     /// The compose field of `chat`'s window.
-    fn window_composer(&self, chat: ChatId, cx: &mut TestAppContext) -> Entity<TextareaState> {
+    pub(super) fn window_composer(
+        &self,
+        chat: ChatId,
+        cx: &mut TestAppContext,
+    ) -> Entity<TextareaState> {
         self.settle(cx);
         self.app
             .read_with(cx, |app, _| {
@@ -140,7 +148,7 @@ impl Harness {
             .expect("the chat has a window")
     }
 
-    fn main_composer_text(&self, cx: &mut TestAppContext) -> String {
+    pub(super) fn main_composer_text(&self, cx: &mut TestAppContext) -> String {
         self.settle(cx);
         self.app
             .read_with(cx, |app, cx| app.composer.read(cx).value().to_string())

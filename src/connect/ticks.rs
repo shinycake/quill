@@ -61,8 +61,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.redraw(self.carrier_tick());
         outcome.progress(self.network_tick(network));
         outcome.progress(self.active_stories_tick(now));
+        outcome.progress(self.chat_list_tick(now));
         self.pump_exports();
+        // Star reactions: commit the ones whose Undo window ended, in the
+        // background too (tdesktop's other sessions keep their send timer),
+        // so a switch inside the window neither holds them nor sends them
+        // late with no Undo on return.
+        let committed = self.paid_reaction_tick(crate::state::unix_ms_now());
         let TickScope::OnScreen { settings_open } = scope else {
+            outcome.progress(committed);
             return outcome;
         };
         // User avatars the last frames showed without a file.
@@ -78,12 +85,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.progress(
             self.system_proxy_tick(&crate::system_proxy::latest(self.wants_system_proxy())),
         );
-        // Star reactions: commit the ones whose Undo window ended, and keep
-        // the toast's countdown redrawing while one is waiting.
-        outcome.redraw(
-            self.paid_reaction_tick(crate::state::unix_ms_now())
-                || self.session.payments.paid.has_pending(),
-        );
+        // Keep the Undo toast's countdown redrawing while one is waiting.
+        outcome.redraw(committed || self.session.payments.paid.has_pending());
         outcome
     }
 

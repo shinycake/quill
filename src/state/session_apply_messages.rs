@@ -247,9 +247,8 @@ impl Session {
                 MessagesPurpose::JumpToUnread { .. }
             ))
         ) {
-            if pending.and_then(|p| p.chat_id) == self.open_chat {
-                self.messages.unread_jump = oldest_message_id(messages.iter().map(|m| m.id));
-            }
+            self.messages.unread_jump = oldest_message_id(messages.iter().map(|m| m.id))
+                .and_then(|id| ViewJump::for_request(pending, id, DateJumpMode::Exact));
             return;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPinnedMessages) {

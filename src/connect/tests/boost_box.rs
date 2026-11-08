@@ -313,3 +313,38 @@ fn closing_the_box_drops_a_pending_boost_intent() {
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
     assert!(rig.sent_all("boostChat").is_empty());
 }
+
+#[test]
+fn a_press_after_closing_mid_request_takes_over_the_slots_read() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.driver.close_boost_box();
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    // The first read is still out: this press waits for it.
+    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    assert_eq!(rig.phase(), BoostPhase::Working);
+    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
+    rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
+    let boost = rig.sent_all("boostChat");
+    assert_eq!(boost.len(), 1, "the press boosts with the answer");
+    assert_eq!(boost[0]["slot_ids"], serde_json::json!([5]));
+    assert!(rig.driver.session.groups.boost_slots_by_chat.is_empty());
+}
+
+#[test]
+fn slots_answered_after_the_box_closed_are_not_kept_for_the_next_press() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    rig.driver.request_chat_boost(ChatId(13)).unwrap();
+    rig.driver.close_boost_box();
+    rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
+    assert!(
+        rig.driver.session.groups.boost_slots_by_chat.is_empty(),
+        "no stash runs a press behind"
+    );
+    // The next press reads the slots afresh.
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
+    assert!(rig.sent_all("boostChat").is_empty());
+}

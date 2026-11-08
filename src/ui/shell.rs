@@ -347,6 +347,24 @@ impl QuillShell {
         cx: &mut Context<Self>,
     ) {
         let app = self.app.clone();
+        // The host's state goes in place for the flags and the builders,
+        // whatever the last input left there.
+        let outer = app.update(cx, |app, _| {
+            let outer = app.windows.scope;
+            app.set_window_scope(host);
+            outer
+        });
+        self.sync_host_dialogs(host, window, cx);
+        app.update(cx, |app, _| app.set_window_scope(outer));
+    }
+
+    fn sync_host_dialogs(
+        &mut self,
+        host: Option<ChatId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = self.app.clone();
         let shell = cx.entity();
         Self::close_blocked_dialogs(&app, window, cx);
         // Snapshot the flags once; the app is not leased here.
@@ -381,6 +399,14 @@ impl QuillShell {
                 let app_c = app.clone();
                 let shell_c = shell.clone();
                 window.open_dialog(cx, move |dialog, window, cx| {
+                    // The kit's dialog layer builds after the host's render
+                    // restored the scope: the host's state goes in place
+                    // again for the builder.
+                    let outer = app_c.update(cx, |app, _| {
+                        let outer = app.windows.scope;
+                        app.set_window_scope(host);
+                        outer
+                    });
                     // The kit binds Enter to Confirm (which closes the dialog);
                     // the hand-rolled dialogs had no dialog-level Enter behavior,
                     // so keep it disabled. A builder that wants Enter-to-confirm
@@ -390,7 +416,9 @@ impl QuillShell {
                         .max_h((window.viewport_size().height - px(48.)).max(px(120.)));
                     // Every dialog's pictures go through the main window's
                     // bounded image cache, so closing one lets them go.
-                    super::dialog_image_cache::cover(dialog, app_c.read(cx), window)
+                    let dialog = super::dialog_image_cache::cover(dialog, app_c.read(cx), window);
+                    app_c.update(cx, |app, _| app.set_window_scope(outer));
+                    dialog
                 });
             }
         }

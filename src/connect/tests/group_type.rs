@@ -253,3 +253,34 @@ fn a_basic_group_upgrades_before_its_link_is_set() {
     assert_eq!(username[0]["username"], "bookclub");
     assert_eq!(rig.sent("setChatTitle")[0]["chat_id"], -100777);
 }
+
+#[test]
+fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
+    let requests = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .clone()
+        .unwrap()
+        .requests;
+    rig.answer(requests[0], "ok");
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAME_NOT_MODIFIED"}}"#,
+        requests[1].0
+    ));
+    let state = &rig.driver.session.groups.group_type;
+    assert_eq!(state.revoke, None, "the row stops spinning");
+    assert_eq!(state.public_limit_reached, Some(true));
+    assert!(
+        rig.driver.session.chats_state.chat_action_error.is_some(),
+        "the failure is said"
+    );
+    // The box is usable again: a second Revoke goes out.
+    assert!(rig.driver.revoke_public_link(ChatId(13)).unwrap().is_some());
+    assert_eq!(rig.sent("setSupergroupUsername").len(), 2);
+}

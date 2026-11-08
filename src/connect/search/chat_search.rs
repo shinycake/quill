@@ -485,7 +485,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_date_jump(false);
+                self.session.fail_date_jump(false, None);
                 Err(err)
             }
         }

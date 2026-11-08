@@ -71,7 +71,11 @@ fn a_phone_on_telegram_imports_the_contact_and_opens_the_chat() {
         ),
     );
     assert_eq!(
-        f.1.session.users_state.new_contact_outcome,
+        f.1.session
+            .users_state
+            .new_contact_outcome
+            .clone()
+            .map(|(_, outcome)| outcome),
         Some(NewContactOutcome::Joined(777))
     );
     let open = last_request(&f);
@@ -95,7 +99,11 @@ fn a_phone_not_on_telegram_reports_not_joined_and_opens_nothing() {
         ),
     );
     assert_eq!(
-        f.1.session.users_state.new_contact_outcome,
+        f.1.session
+            .users_state
+            .new_contact_outcome
+            .clone()
+            .map(|(_, outcome)| outcome),
         Some(NewContactOutcome::NotJoined)
     );
     assert!(f.1.session.users_state.user_chat_to_open.is_none());
@@ -117,7 +125,11 @@ fn a_failed_import_is_reported_to_the_box() {
         ),
     );
     assert_eq!(
-        f.1.session.users_state.new_contact_outcome,
+        f.1.session
+            .users_state
+            .new_contact_outcome
+            .clone()
+            .map(|(_, outcome)| outcome),
         Some(NewContactOutcome::Failed(400))
     );
     cleanup(f);

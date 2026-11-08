@@ -298,9 +298,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Parity slice: remove a chat from a folder. There is no
     /// `removeChatFromList` in 1.8.67 — removal is `editChatFolder` with the
     /// chat dropped from the spec (and added to `excluded_chat_ids` when it
-    /// would still match the folder's filter flags). Queues the intent and
-    /// fetches the full spec; `maybe_finish_folder_removals` (called from
-    /// `ingest`) sends the edit once the spec arrives.
+    /// would still match the folder's filter flags). Queues the intent;
+    /// `maybe_finish_folder_removals` (also called from `ingest`) fetches
+    /// the folder's current spec and sends the edit once it arrives.
     pub fn remove_chat_from_folder(
         &mut self,
         chat_id: ChatId,
@@ -320,33 +320,71 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .folder_remove_queue
                 .push((chat_id, folder_id));
         }
-        // Skip the fetch when the spec is already cached (the edit dialog
-        // keeps it fresh); otherwise the edit waits for `getChatFolder`.
-        if !self.session.chat_list.folder_specs.contains_key(&folder_id) {
-            self.fetch_chat_folder(folder_id)?;
-        }
         self.maybe_finish_folder_removals()?;
         Ok(())
     }
 
-    /// Send `editChatFolder` for queued remove-from-folder intents whose
-    /// full spec is cached and which have no edit already in flight.
+    /// Work through the queued remove-from-folder intents, one folder at a
+    /// time. A folder with an edit in flight waits for its answer. One
+    /// without a fresh spec (`ChatListState::fresh_spec`) asks
+    /// `getChatFolder` and waits. Otherwise every chat queued for it goes
+    /// out in one `editChatFolder` built from the spec as it is now, and
+    /// the spec is marked stale: the next edit fetches it again. Telegram
+    /// Desktop edits the filter it keeps current from the server's
+    /// updates; TDLib's `updateChatFolders` carries no chat lists, so the
+    /// current spec is fetched instead.
     pub(crate) fn maybe_finish_folder_removals(&mut self) -> Result<(), ConnectSendError> {
         let queue = std::mem::take(&mut self.session.chat_list.folder_remove_queue);
+        let mut folders: Vec<i32> = queue.iter().map(|(_, folder)| *folder).collect();
+        folders.sort_unstable();
+        folders.dedup();
         let mut still_pending = Vec::new();
-        for (chat_id, folder_id) in queue {
-            let Some(spec) = self.session.chat_list.folder_specs.get(&folder_id).cloned() else {
-                still_pending.push((chat_id, folder_id));
-                continue;
-            };
-            if self
-                .session
-                .requests
-                .has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
-            {
-                still_pending.push((chat_id, folder_id));
+        let mut failure = None;
+        for folder_id in folders {
+            let chats: Vec<ChatId> = queue
+                .iter()
+                .filter(|(_, folder)| *folder == folder_id)
+                .map(|(chat, _)| *chat)
+                .collect();
+            if failure.is_some() {
+                still_pending.extend(chats.iter().map(|chat| (*chat, folder_id)));
                 continue;
             }
+            match self.finish_folder_removal(folder_id, &chats) {
+                Ok(true) => {}
+                Ok(false) => still_pending.extend(chats.iter().map(|chat| (*chat, folder_id))),
+                Err(err) => {
+                    // Keep the intents so a transient send failure retries
+                    // on the next ingest instead of silently dropping them.
+                    still_pending.extend(chats.iter().map(|chat| (*chat, folder_id)));
+                    failure = Some(err);
+                }
+            }
+        }
+        self.session.chat_list.folder_remove_queue = still_pending;
+        failure.map_or(Ok(()), Err)
+    }
+
+    /// One folder's queued removals: `true` once the edit is sent, `false`
+    /// while they wait for an edit in flight or a fresh spec.
+    fn finish_folder_removal(
+        &mut self,
+        folder_id: i32,
+        chats: &[ChatId],
+    ) -> Result<bool, ConnectSendError> {
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+        {
+            return Ok(false);
+        }
+        let Some(spec) = self.session.chat_list.fresh_spec(folder_id).cloned() else {
+            self.fetch_chat_folder(folder_id)?;
+            return Ok(false);
+        };
+        let mut edited = spec;
+        for chat_id in chats {
             let Some(chat) = self.session.chats.get(&chat_id.0) else {
                 continue;
             };
@@ -355,23 +393,19 @@ impl<S: JsonSender> ConnectDriver<S> {
                 _ => None,
             };
             let user = user_id.and_then(|id| self.session.users.get(&id));
-            let edited = spec_without_chat(&spec, chat, user);
-            let extra = self
-                .session
-                .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
-            if let Err(err) = self
-                .sender
-                .send_json(&edit_chat_folder(extra, folder_id, &edited))
-            {
-                self.session.requests.take(extra);
-                // Restore the current intent so a transient send failure
-                // retries on the next ingest instead of silently dropping it.
-                still_pending.push((chat_id, folder_id));
-                self.session.chat_list.folder_remove_queue = still_pending;
-                return Err(err);
-            }
+            edited = spec_without_chat(&edited, chat, user);
         }
-        self.session.chat_list.folder_remove_queue = still_pending;
-        Ok(())
+        let extra = self
+            .session
+            .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
+        if let Err(err) = self
+            .sender
+            .send_json(&edit_chat_folder(extra, folder_id, &edited))
+        {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
+        self.session.chat_list.mark_spec_stale(folder_id);
+        Ok(true)
     }
 }

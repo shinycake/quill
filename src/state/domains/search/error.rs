@@ -64,7 +64,9 @@ impl Session {
             self.search.chat_search.next_from_message_id = MessageId(0);
         }
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::GetChatMessageByDate) => self.fail_date_jump(err.code == 404),
+            Some(RequestPurpose::GetChatMessageByDate) => {
+                self.fail_date_jump(err.code == 404, pending)
+            }
             Some(RequestPurpose::Search(SearchPurpose::GetChatMessageCalendar { .. })) => {
                 self.fail_message_calendar(pending)
             }

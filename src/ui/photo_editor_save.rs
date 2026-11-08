@@ -101,9 +101,9 @@ impl QuillApp {
                     .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
-                    Some(text) if here => {
+                    Some((text, once)) if here => {
                         this.viewer.photo_editor_after = None;
-                        this.submit_composer(text, window, cx);
+                        this.with_send_once(once, |this| this.submit_composer(text, window, cx));
                     }
                     Some(_) => this.note_held_send_dropped(),
                     None => {
@@ -226,8 +226,9 @@ impl QuillApp {
 /// What a finished render left in its tray.
 #[derive(Default)]
 struct Landed {
-    /// The held Send, once nothing in that tray renders.
-    held: Option<String>,
+    /// The held Send and its one-time options, once nothing in that tray
+    /// renders.
+    held: Option<(String, super::composer_sends::SendOnce)>,
     /// The photo's file now, while it is still in the tray.
     path: Option<PathBuf>,
 }

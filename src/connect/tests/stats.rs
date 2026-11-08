@@ -427,3 +427,51 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     session.open_message_stats_page(-100, 9 << 20);
     assert_eq!(session.stats_thumb_file_ids(), vec![FileId(55), FileId(56)]);
 }
+
+#[test]
+fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
+    let mut rig = Rig::new();
+    let (a, b) = (MessageId(42 << 20), MessageId(43 << 20));
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap()
+        .unwrap();
+    // A's forwards answer before its statistics.
+    let forwards = rig.extra_of("getMessagePublicForwards");
+    rig.answer(forwards, &forwards_page("", &[1, 2]));
+    // B opens, then A again while A's statistics are still out.
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), b, true)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        rig.driver
+            .fetch_message_statistics(ChatId(-100), a, true)
+            .unwrap(),
+        None
+    );
+    let asked = rig
+        .sent()
+        .into_iter()
+        .filter(|v| v["@type"] == "getMessagePublicForwards" && v["message_id"] == a.0)
+        .count();
+    assert_eq!(asked, 2, "A's forwards are asked for again");
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert!(state.forwards.loading);
+    let forwards = rig.extra_of("getMessagePublicForwards");
+    rig.answer(forwards, &forwards_page("", &[1, 2]));
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert_eq!(state.forwards.forwards.len(), 2);
+}

@@ -443,3 +443,58 @@ fn without_a_carrier_host_the_enabled_proxy_cannot_become_a_web_proxy() {
     assert!(rig.driver.edit_proxy(2, &web, false, "").is_ok());
     assert_eq!(rig.count("editProxy"), 1);
 }
+
+#[test]
+fn an_earlier_links_ping_does_not_fill_the_next_links_box() {
+    let mut rig = Rig::new();
+    let kind = crate::calls::proxy::ProxyKind::Socks5;
+    let dead = crate::proxy::ProxyDraft {
+        server: "dead.example".into(),
+        ..crate::proxy::ProxyDraft::empty(kind)
+    };
+    let live = crate::proxy::ProxyDraft {
+        server: "live.example".into(),
+        ..crate::proxy::ProxyDraft::empty(kind)
+    };
+    let first = rig.driver.ping_link_proxy(&dead).unwrap();
+    // The box closes and the next link's box opens and checks its proxy.
+    rig.driver
+        .session
+        .settings
+        .proxy
+        .pings
+        .remove(&crate::state::LINK_PING_ID);
+    let second = rig.driver.ping_link_proxy(&live).unwrap();
+    rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": second.0.to_string()}));
+    rig.feed(
+        json!({"@type": "error", "code": 400, "message": "Request timeout", "@extra": first.0.to_string()}),
+    );
+    assert_eq!(
+        rig.driver
+            .session
+            .settings
+            .proxy
+            .pings
+            .get(&crate::state::LINK_PING_ID),
+        Some(&PingStatus::Available(50)),
+        "the working proxy is not shown as unavailable"
+    );
+}
+
+#[test]
+fn a_ping_sent_before_an_edit_does_not_land_on_the_edited_entry() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false)]);
+    let before = rig.driver.ping_listed_proxy(1).unwrap();
+    let draft = rig
+        .driver
+        .session
+        .settings
+        .proxy
+        .find(1)
+        .map(|p| p.proxy.clone())
+        .unwrap();
+    rig.driver.edit_proxy(1, &draft, false, "").unwrap();
+    rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": before.0.to_string()}));
+    assert_eq!(rig.driver.session.settings.proxy.pings.get(&1), None);
+}

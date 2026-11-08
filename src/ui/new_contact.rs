@@ -82,9 +82,10 @@ impl QuillApp {
             None => Ok(None),
         };
         match sent {
-            Ok(_) => {
+            Ok(request) => {
                 if let Some(dialog) = self.screen.dialogs.add_contact_dialog.as_mut() {
                     dialog.sent_name = Some(first);
+                    dialog.sent_request = request;
                     if self.live.is_none() {
                         dialog.not_joined = true;
                     }
@@ -98,13 +99,21 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Apply the import's answer to the open box: close it when the chat
-    /// opens, or switch to the "not joined" text.
+    /// Apply the import's answer to the box that sent it: close it when the
+    /// chat opens, or switch to the "not joined" text. An answer for a box
+    /// that was closed is dropped, never applied to the next one.
     fn take_new_contact_outcome(&mut self, cx: &mut Context<Self>) {
+        let sent = self
+            .dialogs
+            .add_contact_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.sent_request);
         let outcome = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.users_state.new_contact_outcome.take());
+            .and_then(|live| live.driver.session.users_state.new_contact_outcome.take())
+            .filter(|(request, _)| Some(*request) == sent)
+            .map(|(_, outcome)| outcome);
         match outcome {
             None => {}
             Some(NewContactOutcome::Joined(_)) => {
@@ -171,6 +180,7 @@ impl QuillApp {
                             if let Some(dialog) = this.dialogs.add_contact_dialog.as_mut() {
                                 dialog.not_joined = false;
                                 dialog.sent_name = None;
+                                dialog.sent_request = None;
                             }
                             cx.notify();
                         })),

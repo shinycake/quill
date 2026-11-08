@@ -114,4 +114,20 @@ impl MessageUi {
 }
 
 /// Nothing to say: its state is the account's only app-side.
-impl super::on_screen::Farewell for MessageUi {}
+/// The Block from replies box keeps its target in the session
+/// (`users_state.replies_block`), which goes to the background with the
+/// account.
+impl super::on_screen::Farewell for MessageUi {
+    fn farewell(
+        app: &mut super::app::QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<super::app::QuillApp>,
+    ) {
+        if app
+            .session()
+            .is_some_and(|session| session.users_state.replies_block.is_some())
+        {
+            app.close_replies_block(cx);
+        }
+    }
+}

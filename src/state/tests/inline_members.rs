@@ -60,8 +60,44 @@ fn next_page_joins_the_cached_one_without_repeats() {
         }),
         Some(ChatId(13)),
     );
+    let key = (13, MemberListFilter::Recent);
+    session.groups.note_member_more(key, more);
     apply_json(&mut session, &seq, &sink, &page(&[3, 4, 5], 7, more.0));
     assert_eq!(loaded_ids(&session), (vec![1, 2, 3, 4, 5], 7));
+}
+
+#[test]
+fn a_next_page_of_an_older_query_does_not_join_the_new_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (13, MemberListFilter::Recent);
+    let purpose = RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
+        filter: MemberListFilter::Recent,
+    });
+    let first = session.request(purpose, Some(ChatId(13)));
+    session
+        .groups
+        .supergroup_member_queries
+        .insert(key, (first, "al".into()));
+    apply_json(&mut session, &seq, &sink, &page(&[1, 2, 3], 6, first.0));
+    let more = session.request(
+        RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembersMore {
+            filter: MemberListFilter::Recent,
+            offset: 3,
+        }),
+        Some(ChatId(13)),
+    );
+    session.groups.note_member_more(key, more);
+    // A search for "bob" fills the list before the "al" page lands.
+    let second = session.request(purpose, Some(ChatId(13)));
+    session
+        .groups
+        .supergroup_member_queries
+        .insert(key, (second, "bob".into()));
+    apply_json(&mut session, &seq, &sink, &page(&[8, 9], 2, second.0));
+    apply_json(&mut session, &seq, &sink, &page(&[3, 4, 5], 7, more.0));
+    assert_eq!(loaded_ids(&session), (vec![8, 9], 2));
+    assert!(session.groups.member_more_bases.is_empty());
 }
 
 #[test]

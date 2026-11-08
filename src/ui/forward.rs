@@ -203,18 +203,46 @@ impl QuillApp {
         }
     }
 
+    /// A forward's answer from TDLib (`poll_live`): shown in the window
+    /// that shows its source chat, the chat's own window when it has one,
+    /// else the main window.
+    pub(super) fn present_forward_answer(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
+        let source = result.from_chat_id;
+        let window = self
+            .windows
+            .open_windows()
+            .any(|(chat, _)| chat == source)
+            .then_some(source);
+        self.in_window_scope(window, cx, |app, cx| app.present_forward_result(result, cx));
+    }
+
+    /// Show `result` in the window in place. What that window was
+    /// building for this forward (its selection, bar and picker) goes;
+    /// another forward being built there stays.
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
         let label = result.success_label();
-        self.connection
-            .set_note(if result.forwarded_ids.is_empty() {
+        let host = self.windows.scope;
+        self.connection.set_note_in(
+            host,
+            if result.forwarded_ids.is_empty() {
                 StatusNote::error(label)
             } else {
                 StatusNote::info(label)
-            });
+            },
+        );
+        let this_forward = self
+            .share
+            .pending_forward
+            .as_ref()
+            .is_none_or(|draft| draft.from_chat_id == result.from_chat_id);
+        if this_forward {
+            self.share.pending_forward = None;
+            self.share.forward_picker_open = false;
+            if self.share.forward_bar_dest == Some(result.dest_chat_id) {
+                self.share.forward_bar_dest = None;
+            }
+        }
         self.share.forward_result = Some(result);
-        self.share.pending_forward = None;
-        self.share.forward_bar_dest = None;
-        self.share.forward_picker_open = false;
         cx.notify();
     }
 

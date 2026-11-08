@@ -70,12 +70,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self.session.groups.boost_intent == Some(chat_id.0)
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
+        if self.session.groups.boost_intent == Some(chat_id.0) {
+            return Ok(None);
+        }
+        // A slots read from a press whose box closed is still out: this
+        // press takes it over, and its answer (stashed only while an
+        // intent waits) continues this boost.
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::GetBoostSlotsForBoost, chat_id)
         {
+            self.session.groups.boost_intent = Some(chat_id.0);
+            if let Some(state) = self.boost_box_for(chat_id) {
+                state.phase = BoostPhase::Working;
+                state.note = None;
+            }
             return Ok(None);
         }
         let extra = self

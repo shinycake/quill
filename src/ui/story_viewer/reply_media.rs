@@ -426,6 +426,7 @@ impl QuillApp {
         let finished = cx.background_spawn(async move { capture.finish() });
         // Story ids are the poster's, the same on every account: the reply
         // goes out only from the screen it was recorded on (`spawn_screen`).
+        // window-scope: the story viewer, and its reply, are the main window's.
         self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());
@@ -489,6 +490,7 @@ impl QuillApp {
         let finished = cx.background_spawn(async move { finish.complete() });
         // Story ids are the poster's, the same on every account: the reply
         // goes out only from the screen it was recorded on (`spawn_screen`).
+        // window-scope: the story viewer, and its reply, are the main window's.
         self.spawn_screen(cx, async move |this, cx| {
             let result = finished.await;
             let path = result.as_ref().ok().map(|draft| draft.path.clone());

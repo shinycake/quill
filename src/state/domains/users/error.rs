@@ -8,9 +8,20 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
+        // The failed check is over: its text no longer reads "Checking…".
+        if extra.is_some()
+            && self
+                .users_state
+                .username_check_pending
+                .as_ref()
+                .map(|(id, _)| *id)
+                == extra
+        {
+            self.users_state.username_check_pending = None;
+        }
         match pending.map(|p| p.purpose) {
             // A5: profile-edit failures surface in the
             // edit-profile dialog. The message is classified by
@@ -118,7 +129,8 @@ impl Session {
                     Some(format!("could not import contacts (error {})", err.code));
             }
             Some(RequestPurpose::AddContactByPhone) => {
-                self.users_state.new_contact_outcome = Some(NewContactOutcome::Failed(err.code));
+                self.users_state.new_contact_outcome =
+                    pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
             }
             Some(RequestPurpose::ClearImportedContacts) => {
                 self.users_state.contacts_notice = Some(format!(

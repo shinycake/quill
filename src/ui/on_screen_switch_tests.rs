@@ -350,3 +350,6 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
         assert!(QuillShell::open_dialog_names(app).is_empty());
     });
 }
+
+#[path = "on_screen_session_box_tests.rs"]
+mod session_box_tests;

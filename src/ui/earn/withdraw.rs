@@ -258,7 +258,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn cancel_withdraw(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn cancel_withdraw(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_withdrawal();
         } else if let Some(earn) = self.earn_mut() {

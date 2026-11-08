@@ -104,11 +104,30 @@ impl Session {
         self.settings.proxy.error = None;
     }
 
+    /// Whether `pending` is the ping its slot waits for: the latest one
+    /// sent for the slot, which still shows Checking (a slot cleared since,
+    /// for a new link or an edit, waits for nothing). Settles the slot's
+    /// request either way when it is the latest.
+    fn take_awaited_ping(&mut self, pending: Option<&PendingRequest>) -> Option<i32> {
+        let pending = pending?;
+        let RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) = pending.purpose
+        else {
+            return None;
+        };
+        if self.settings.proxy_ping_requests.get(&proxy_id) != Some(&pending.id) {
+            return None;
+        }
+        self.settings.proxy_ping_requests.remove(&proxy_id);
+        matches!(
+            self.settings.proxy.pings.get(&proxy_id),
+            Some(PingStatus::Checking)
+        )
+        .then_some(proxy_id)
+    }
+
     /// `pingProxy` answer, in seconds.
     pub(crate) fn apply_proxy_ping(&mut self, pending: Option<&PendingRequest>, seconds: f64) {
-        if let Some(RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id })) =
-            pending.map(|p| p.purpose)
-        {
+        if let Some(proxy_id) = self.take_awaited_ping(pending) {
             let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
             self.settings
                 .proxy
@@ -129,7 +148,12 @@ impl Session {
     }
 
     /// Error for the proxy purposes.
-    pub(crate) fn apply_proxy_error(&mut self, purpose: RequestPurpose, err: &TdError) {
+    pub(crate) fn apply_proxy_error(
+        &mut self,
+        purpose: RequestPurpose,
+        pending: Option<&PendingRequest>,
+        err: &TdError,
+    ) {
         match purpose {
             RequestPurpose::GetProxies => {
                 self.settings.proxy.loading = false;
@@ -141,11 +165,13 @@ impl Session {
                 self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
             }
             // A failed ping is the answer: the proxy is not available.
-            RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) => {
-                self.settings
-                    .proxy
-                    .pings
-                    .insert(proxy_id, PingStatus::Unavailable);
+            RequestPurpose::Settings(SettingsPurpose::PingProxy { .. }) => {
+                if let Some(proxy_id) = self.take_awaited_ping(pending) {
+                    self.settings
+                        .proxy
+                        .pings
+                        .insert(proxy_id, PingStatus::Unavailable);
+                }
             }
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. }) => {
                 self.settings.proxy.error =

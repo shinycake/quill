@@ -69,6 +69,7 @@ impl QuillApp {
                 text: text.to_string(),
             },
             slot,
+            once: self.send_once(),
         });
         self.paid_messages.confirm_trust = false;
         if let Some(live) = self.live.as_mut() {
@@ -118,7 +119,11 @@ impl QuillApp {
     /// released as it is.
     pub(super) fn confirm_paid_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let remember = self.paid_messages.confirm_trust;
-        let Some(ComposerPaidConfirm { ask: confirm, slot }) = self.paid_messages.confirm.take()
+        let Some(ComposerPaidConfirm {
+            ask: confirm,
+            slot,
+            once,
+        }) = self.paid_messages.confirm.take()
         else {
             if let Some(live) = self.live.as_mut()
                 && live.driver.held_paid_send().is_some()
@@ -151,7 +156,7 @@ impl QuillApp {
             }
         }
         let total = confirm.total();
-        self.submit_composer(confirm.text, window, cx);
+        self.with_send_once(once, |this| this.submit_composer(confirm.text, window, cx));
         // Not trusted: what the send left held is released up to the total
         // the user just agreed to, never more.
         let mut budget = total;

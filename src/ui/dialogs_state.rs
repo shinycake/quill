@@ -93,6 +93,15 @@ impl crate::ui::on_screen::Farewell for DialogUi {
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
         let _ = app.close_business_saving(false, window, cx);
+        // The appearance box's status choices are resolved while the
+        // session's `chat_status_open` is set.
+        app.close_chat_appearance_dialog(cx);
+        if app
+            .session()
+            .is_some_and(|session| session.groups.private_sharing.request_box_chat().is_some())
+        {
+            app.close_sharing_request_box(cx);
+        }
     }
 }
 

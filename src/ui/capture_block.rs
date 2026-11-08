@@ -25,7 +25,7 @@ pub(super) fn should_block(open_chat_secret: bool, viewer_chat_secret: bool) -> 
 }
 
 #[cfg(target_os = "macos")]
-fn apply_sharing(window: &Window, blocked: bool) {
+pub(super) fn apply_sharing(window: &Window, blocked: bool) {
     use objc2_app_kit::{NSView, NSWindowSharingType};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(handle) = HasWindowHandle::window_handle(window)
@@ -44,7 +44,7 @@ fn apply_sharing(window: &Window, blocked: bool) {
 }
 
 #[cfg(target_os = "windows")]
-fn apply_sharing(window: &Window, blocked: bool) {
+pub(super) fn apply_sharing(window: &Window, blocked: bool) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
@@ -63,7 +63,7 @@ fn apply_sharing(window: &Window, blocked: bool) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn apply_sharing(_window: &Window, _blocked: bool) {}
+pub(super) fn apply_sharing(_window: &Window, _blocked: bool) {}
 
 /// Whether this platform can keep a window out of screen capture.
 pub(super) const CAPTURE_BLOCK_SUPPORTED: bool =
@@ -75,14 +75,22 @@ pub(super) const CAPTURE_BLOCK_UNSUPPORTED_NOTE: &str = "Screenshots can't be bl
      secret chat can be captured on this computer.";
 
 impl QuillApp {
-    /// Called every render; touches AppKit only when the desired state changes.
-    pub(super) fn sync_capture_block(&mut self, window: &Window) {
+    /// Whether the window whose state is in place shows a secret chat, or
+    /// secret media in its viewer. A chat window applies it to itself
+    /// (`ChatWindowView::capture_blocked`).
+    pub(super) fn capture_block_wanted(&self) -> bool {
         let viewer_chat_secret = self
             .viewer
             .state
             .current()
             .is_some_and(|item| self.chat_is_secret(item.chat_id.0));
-        let blocked = should_block(self.open_chat_is_secret(), viewer_chat_secret);
+        should_block(self.open_chat_is_secret(), viewer_chat_secret)
+    }
+
+    /// Called every main-window render; touches AppKit only when the
+    /// desired state changes. `frame.capture_blocked` is the main window's.
+    pub(super) fn sync_capture_block(&mut self, window: &Window) {
+        let blocked = self.capture_block_wanted();
         if blocked != self.frame.capture_blocked {
             apply_sharing(window, blocked);
             self.frame.capture_blocked = blocked;

@@ -531,3 +531,59 @@ fn subscription_links_are_for_channel_admins_and_use_the_monthly_period() {
         "Gold"
     );
 }
+
+#[test]
+fn reopening_after_a_failed_search_loads_the_list() {
+    let mut rig = Rig::new(false, ADMIN);
+    let search = rig
+        .driver
+        .search_chat_join_requests(ChatId(13), "an")
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Request aborted"}}"#,
+        search.0
+    ));
+    assert!(matches!(
+        rig.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    // The box closes and opens again.
+    let fresh = rig
+        .driver
+        .refresh_chat_join_requests(ChatId(13))
+        .unwrap()
+        .unwrap();
+    rig.ingest(&requests_json(fresh, 1, &[5]));
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
+        panic!("the list loads instead of spinning");
+    };
+    assert_eq!(list.requests.len(), 1);
+}
+
+#[test]
+fn reopening_during_a_search_shows_the_full_list_not_the_search() {
+    let mut rig = Rig::new(false, ADMIN);
+    let search = rig
+        .driver
+        .search_chat_join_requests(ChatId(13), "an")
+        .unwrap()
+        .unwrap();
+    let fresh = rig
+        .driver
+        .refresh_chat_join_requests(ChatId(13))
+        .unwrap()
+        .expect("the full list is asked for at once");
+    rig.ingest(&requests_json(search, 1, &[1]));
+    assert!(matches!(
+        rig.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Loading)
+    ));
+    rig.ingest(&requests_json(fresh, 2, &[5, 6]));
+    let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
+    else {
+        panic!("loaded");
+    };
+    assert_eq!(list.total_count, 2);
+}

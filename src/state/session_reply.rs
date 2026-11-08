@@ -508,25 +508,25 @@ impl Session {
             .map(|username| format!("@{username}"))
     }
 
-    /// Rows of the open chat (and its loaded topics) whose replied-to
-    /// message is neither loaded, known deleted nor already requested.
+    /// Rows of the chats on screen (the main window's and each chat
+    /// window's, with their loaded topics) whose replied-to message is
+    /// neither loaded, known deleted nor already requested.
     pub fn reply_fetch_candidates(&self) -> Vec<(ChatId, MessageId)> {
-        let Some(open) = self.open_chat else {
-            return Vec::new();
-        };
+        let shown = self.chats_shown();
         let mut wanted = Vec::new();
-        let rows = self
-            .histories
-            .get(&open.0)
-            .into_iter()
-            .flat_map(|history| history.messages.values())
-            .chain(
-                self.threads
-                    .topic_histories
-                    .iter()
-                    .filter(|((chat, _), _)| *chat == open.0)
-                    .flat_map(|(_, topic)| topic.messages.values()),
-            );
+        let rows = shown.iter().flat_map(|open| {
+            self.histories
+                .get(&open.0)
+                .into_iter()
+                .flat_map(|history| history.messages.values())
+                .chain(
+                    self.threads
+                        .topic_histories
+                        .iter()
+                        .filter(move |((chat, _), _)| *chat == open.0)
+                        .flat_map(|(_, topic)| topic.messages.values()),
+                )
+        });
         for message in rows {
             if message.id.0 <= 0 || message.pending() {
                 continue;
@@ -702,16 +702,15 @@ impl Session {
         ids
     }
 
-    /// Stories the open chat's rows reply to that are not cached yet, for
+    /// Stories the shown chats' rows reply to that are not cached yet, for
     /// `getStory` (the strip's picture comes from them). One known to be
     /// gone, or waiting out a failure at `now`, is left out.
     pub fn reply_story_candidates(&self, now: std::time::Instant) -> Vec<(ChatId, i32)> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
-            return Vec::new();
-        };
-        let mut wanted: Vec<(ChatId, i32)> = history
-            .messages
-            .values()
+        let mut wanted: Vec<(ChatId, i32)> = self
+            .chats_shown()
+            .iter()
+            .filter_map(|chat| self.histories.get(&chat.0))
+            .flat_map(|history| history.messages.values())
             .filter_map(|message| message.reply_to.as_ref())
             .filter(|reply| reply.story_id != 0 && reply.chat_id.0 != 0)
             .map(|reply| (reply.chat_id, reply.story_id))

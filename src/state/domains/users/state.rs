@@ -51,8 +51,10 @@ pub struct UsersState {
     /// before `apply` takes the pending request; the dialog only shows it
     /// when it matches the current input text (stale verdicts ignored).
     pub username_check: Option<(String, UsernameCheckResult)>,
-    /// A5: username text of the in-flight `checkChatUsername`.
-    pub username_check_pending: Option<String>,
+    /// A5: the in-flight `checkChatUsername` and the text it checks. Its
+    /// answer or its error is matched by this request, not by purpose: an
+    /// earlier check's reply never stands for the latest text.
+    pub username_check_pending: Option<(RequestId, String)>,
     /// `bio_length_max` option (TDLib default 70, Premium raises it):
     /// the edit-profile bio counter.
     pub bio_length_max: usize,
@@ -99,8 +101,9 @@ pub struct UsersState {
     pub user_chat_to_open: Option<i64>,
     /// The answer to the New Contact box's `importContacts`, taken by the
     /// box: tdesktop's `AddContactBox::save` opens the chat when the phone
-    /// belongs to a Telegram user and otherwise shows "not joined".
-    pub new_contact_outcome: Option<NewContactOutcome>,
+    /// belongs to a Telegram user and otherwise shows "not joined". Keyed by
+    /// the import it answers: only the box that sent it applies it.
+    pub new_contact_outcome: Option<(RequestId, NewContactOutcome)>,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// The QR box's backdrops, contact link and free-code answers.

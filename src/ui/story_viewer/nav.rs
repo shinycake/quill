@@ -135,6 +135,9 @@ impl QuillApp {
         if let Some(open) = self.stories.viewer_ui_mut() {
             open.notice = None;
         }
+        // The Report and viewers panels are about the story they opened on:
+        // a reason picked after a move would report the next story.
+        self.close_story_item_panels();
         self.stories.video.retry();
         self.stories.playback.start(Instant::now());
         self.sync_story_video(cx);

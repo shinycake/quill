@@ -1,6 +1,5 @@
 //! Connect driver: channel comments and group reply threads.
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{RequestPurpose, ThreadStatus, ThreadsPurpose};
 use crate::telegram::requests::{
@@ -85,8 +84,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.cancel_outgoing_typing()?;
         self.close_open_chat()?;
-        self.draft_clock = DraftSaveClock::idle();
-        self.pending_draft = None;
+        // A chat window's waiting save still goes.
+        let _ = self.settle_pending_draft();
         self.session.open_chat(chat_id);
         if let Some(thread) = self.session.threads.thread.as_mut() {
             thread.needs_chat_switch = false;

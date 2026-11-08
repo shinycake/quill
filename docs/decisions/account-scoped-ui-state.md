@@ -1133,3 +1133,290 @@ state in place, or ran for the main window only.
   autoscroll lock, and popups left after a logout were not changed. The
   inline progress test covers `in_every_window` only, because the
   progress needs a live client and the demo has none.
+
+### Phase 10 (area A: core answers and chat windows)
+
+Round 10 of the review, area A, on `claude/sm-review10-a`. This covers
+the core modules only (`src/state`, `src/connect`, `src/telegram`). All
+seventeen findings held up when checked in code. Two shapes were fixed
+at the root.
+
+**Post-reducer work covers every shown chat, or carries the window that
+asked.**
+
+- **Jumps.** The date jump and the jump to the next mention or
+  reaction no longer use `open_chat`. Their answers make a `ViewJump`
+  holding the asking window (`PendingRequest::window`), the chat and
+  the message. `ingest` runs it with `run_view_jump`, which uses the
+  new `in_view_of(window, ..)`. That returns `None` when the window has
+  closed. It also does nothing if the window has since moved to
+  another chat. `date_jump_pending` now records its chat and is part
+  of `SessionView`, so each window keeps its own.
+- **Reply strips.** `reply_fetch_candidates` and
+  `reply_story_candidates` go over `chats_shown()`. A reply in a chat
+  window now fetches its original.
+
+**One-slot answers match by request id or by key.** Each one keeps the
+id of the request it is waiting for. An answer or error with any other
+id is dropped. The previous rule was "the latest request of this
+purpose", or "the box is open".
+
+- Proxy pings: `proxy_ping_requests` per slot.
+- Join requests: `join_request_latest`. The `has_purpose` dedupe is
+  gone, so a new query is sent at once.
+- Send gift: `SendGiftState::request`.
+- Saved Messages tag search: `SavedTagSearch::request`. A second tag
+  is sent at once. The first tag's page is dropped.
+- Member "more" pages: `member_more_bases` maps each page to the query
+  it extends.
+- Boost slots: kept only while `boost_intent` names the chat. A boost
+  pressed while slots are loading takes over that request.
+- Folder invite links: `folder_invite_request` covers check and add.
+  "Done" and errors from an earlier link no longer land in the dialog
+  of a later one.
+- Statistics forwards, for posts and stories: reopening while the
+  statistics request is out asks for the forwards again, unless they
+  are loaded or already requested.
+
+**Folder edits read the current spec.** `folder_specs_stale` marks a
+spec stale on `updateChatFolders`, on a folder's edit answer, and on
+"add to folder". Code that edits a folder gets the spec through
+`fresh_spec`. Removals queue per folder and wait while an edit is in
+flight. They refetch a stale spec and send one edit per folder.
+Before, a second removal wrote back a chat the first had just removed.
+A failed spec fetch drops that folder's queued removals and shows
+"Could not remove the chat from the folder". It does not ask again.
+
+**Error arms end loading and roll back.**
+
+- A failed public-link revoke clears the revoke and the public-chats
+  fetch, and shows "Could not revoke the link".
+- A failed similar-bots load removes its `Loading` entry.
+- A topic mute and a poll vote carry a `RequestRollback`
+  (`ForumTopicMute`, `PollVote`). `restore_optimistic` puts the
+  previous value back, but only while the shown value is still the
+  optimistic one. A later update is never overwritten.
+
+**Sticker sets back off.** A failed `getStickerSet` marks
+`failed_set_id`, and `selected_needs_load` skips it. Before, every
+`ingest` sent the request again. Picking the set again clears the mark.
+
+**Chat-list paging resumes.** A failed `loadChats` page that is not a
+404 sets `chats_retry` or `archive_retry`. The wait starts at 1 s and
+doubles up to 300 s. `chat_list_tick` in `poll_ticks` sends the page
+again once the wait is over, and a page that goes through clears the
+retry. A failed main-list page also starts the archive, so the archive
+no longer waits for a main list that might never end. A send that
+fails at once releases its request.
+
+**Not done.** Message-story candidates still look at `open_chat` only.
+The cost is a missing story preview in a chat window's reply strip.
+Every fix has a deterministic driver or state test
+(`connect/tests/chat_window_jumps.rs`,
+`connect/tests/chat_list/folder_removals.rs`,
+`connect/tests/refused_requests.rs`, and additions to the proxy,
+invite, gift, saved, stats, story-insights, boost, group-type and
+inline-members tests).
+
+### Phase 10 (area B: the messaging UI's per-window upkeep and routing)
+
+Round 10 of the review, area B, on `claude/sm-review10-b`. The account
+level held. What was left was the window level: upkeep that only the
+main window's frame ran, state every window shared because `swap_slot`
+did not swap it, and chat opens that skipped the window routing or lost
+their context on the way.
+
+- **Per-window upkeep.** `per_window_upkeep`
+  (`app_render/window_upkeep.rs`) holds every frame step that keeps one
+  window's chat, composer and history in step: the thread advance, gone
+  reply and edit targets, `sync_chat_ui`, the history holds, the inline
+  return, the pending draft restore, the remote draft, the placeholder,
+  the `:` suggestions, emoji words, the AI composer answer, the
+  slow-mode, self-destruct and live-location ticks, and the pending link
+  click. The main window runs it from `frame_upkeep` and a chat window
+  from its render, with that window's state in place. Before, a chat
+  window ran three of these. Its link clicks did nothing, a topic switch
+  kept the old topic's text and reply and saved them as the new topic's
+  draft, comments stayed on "Opening the thread", AI answers were dropped
+  and the countdowns froze. `poll_every_window` runs the translation pump
+  and Saved Messages' loads in every window from the poll loop, and the
+  translation scan is kept by chat. The history holds read every slot,
+  so a window's frame does not drop the main window's claims.
+- **The guard.** `check-window-scope.py` checks `frame_upkeep` and
+  `flush_notifications`. A call there to a method that touches
+  per-window state (the same transitive test the async rule uses) fails
+  unless it carries `// main-only: <why>`. The steps left there say why:
+  notification delivery, deep links, stories, mini apps, the main
+  window's boxes, the AI compose box (it carries its window), the one
+  composer link preview the session keeps, and the reply target fetch.
+- **One router.** `route_chat_open` (`chat_window/routing.rs`) decides
+  where a `ChatOpen` goes: the chat's own window, the main window
+  (deferred, from a chat window), or the window in place when it already
+  shows the chat. The request carries what the open lands on: the
+  message (`open_at`, which replaces `ChatListUi::open_at`), a reply
+  aimed at the chat from another one, a forum topic, and a comment
+  thread resolved in a chat window, which moves into the main window's
+  view with its discussion group. `select_chat_with`, the search and
+  header opens (`select_search_chat`, `select_search_message`), "Go to
+  message", "Reply in Another Chat" and the topic chip all go through
+  it. Before, a "Forwarded from" or external reply header in a chat
+  window re-pointed that window at another chat, and in the main window
+  it opened a chat that had its own window a second time.
+- **Per-window motion.** `FrameUi::surfaces` (bars, corner buttons and
+  the corner lift, toasts) and `FrameUi::motion` (history reveal,
+  selection fades) are swapped with the slot. With one corner-lift
+  `Glide`, a window scrolled up and a window at the bottom flipped its
+  target at every draw and kept each other on a 60 fps tick. Not
+  measured in a live build: the tests do not animate
+  (`surface_reveal::animate` is off under `cfg(test)`), so the test
+  asserts that each window keeps its own glide.
+- **Dialog scope.** `QuillShell::sync_kit_dialogs_in` puts its host's
+  state in place for the flags and the close, and the kit dialog's
+  builder does the same when the kit layer builds it later. Before, a
+  pointer move into a chat window left its scope in place, and the main
+  shell closed its own dialog (whose flag lives in the main window's
+  `MessageUi`) until the next main-window input.
+- **Smaller items.**
+  - Escape in a chat window runs `dismiss_window_layer`, which closes
+    the topmost of the layers a chat window draws (`WINDOW_LAYERS`), not
+    the main window's pages and panels.
+  - The driver's debounced draft: a note for another slot sends the
+    waiting one first, the main window's chat switch and a thread switch
+    send it instead of dropping it, and a send cancels only its own
+    chat's save (`cancel_pending_draft_of`). The driver still keeps one
+    waiting save; this keeps a chat window's from being lost.
+  - A forward's answer shows in the window that shows its source chat,
+    and clears only that forward's selection, picker and bar.
+  - The forum peek and "topic column shown" are per window
+    (`HistoryUi`).
+  - Silent and effect options ride with a held send (`SendOnce`, kept
+    by the paid-message confirm and the photo-edit hold).
+  - The text-limit count lands in the memo of the window that asked
+    (`spawn_scoped`).
+- **Skipped.** The folder spec cache (finding 5) and the reply target
+  fetch for chat windows are area A's. Force reply still arms the main
+  window's composer. The comment-thread handoff has no UI test: the demo
+  session has no live client, so `advance_thread` does nothing there.
+  The held send's options are tested through `with_send_once`, not
+  through a live paid-message confirm.
+
+### Phase 10 (area C)
+
+Round 10 of the review, area C, on `claude/sm-review10-c`. The
+findings were eight shapes, each a rule from earlier phases that a few
+sites missed.
+
+- **A box whose open flag lives in the Session closes in a farewell.**
+  Nineteen kit dialogs read `session()` in their predicate and had no
+  closer in their type's farewell: collectible info, gifts, the wallet
+  notice, the language link, the boost box, masks, emoji sets, archive
+  settings, RTMP start, the location picker, chat appearance, the
+  sharing request, giveaway info, the replies block, the call link
+  confirm and the Earn boxes. Each farewell now calls its closer.
+  Guard: `scripts/session_dialogs.py` (run by `check-screen-state.py`)
+  parses every `DialogSpec` predicate, follows `self.`/`app.` helpers
+  three calls deep, and fails a predicate that reads the session unless
+  `scripts/session-dialogs.txt` names its closer or says why none is
+  needed. The list has 48 entries.
+- **A per-item panel resets when its item changes.** Moving to another
+  story closes its Report and viewers panels and clears their session
+  flows and the last management error (`close_story_item_panels`). The
+  report answer is matched by poster and story (`StoryReportFlow::is_for`).
+  Any open story panel holds playback. A video chat's rename, Settings,
+  invite, share boxes and pin belong to the call they were opened for
+  (`GroupCallScreen::boxes_call`). Another call, or none, closes them,
+  and so does a share box whose links failed, since it is never drawn.
+- **The lock reaches every surface.** Locking closes the media viewer in
+  every window, not only the main one, and closes the mini app window,
+  as tdesktop's `closeAdditionalWindows` does. A Touch ID answer runs
+  in the window that asked. If that window closed meanwhile, `busy`
+  still clears and a success unlocks in the main window. Before, a
+  stuck `busy` refused every unlock until restart. The wait moved to
+  `passcode/system_unlock_wait.rs`, which keeps `passcode/mod.rs` under
+  1000 lines.
+- **A surface opened from a chat window is drawn there, or carries its
+  window.**
+  - The story viewer and the profile modal are drawn only by the main
+    window. Opened from a chat window, they hand off to it
+    (`hand_to_main_window`): the open runs at the end of the update, as
+    the main window, which is brought forward. We kept that rather than
+    drawing them in chat windows, because both hold screen-wide state
+    (playback, the modal stack) that a second copy would split.
+  - Image decodes resume with `run_off_ui_scoped_then`, so the decoded
+    image lands in its own window.
+  - The GIF decode and the parked play intent (`PlayTarget::Gif` and
+    `Viewer`) carry their window. A target whose window closed is
+    dropped. The composer's text-limit check resumes in its own window.
+  - A mini app's switch-inline text goes to the chat the app was opened
+    from (`WebAppLaunch::chat_id`). If a chat window shows that chat,
+    the text goes there (`hand_to_chat_window`). Otherwise the main
+    window opens the chat first. Before, it landed in whatever the main
+    window had open.
+  - Guard: `check-window-scope.py` treats the bodies of
+    `run_off_ui_then` and `spawn_screen` like other continuations, so a
+    new one needs a `window-scope:` marker or a scoped helper. Six
+    sites that stay screen-wide on purpose carry the marker. "Reached
+    from slot input" would need a call graph, so the guard flags every
+    such body rather than tracing callers.
+- **Chat windows count as windows.** A chat window mounts the input
+  probe, so typing there counts as activity for auto-lock and presence.
+  It also applies the capture block itself, so a chat window showing a
+  secret chat is hidden from screen capture.
+- **An Entity drawn in several windows gets one per window.** The player
+  bar's progress slider is one per window (`PlayerBarState::sliders`),
+  made at that window's first draw of the track. Closed windows' sliders
+  are pruned. Before, one slider kept the last window's geometry, and a
+  press in the other window sought to the wrong spot.
+- **An error arm ends loading.**
+  - A refused `setInactiveSessionTtl` rolls back to the value it replaced
+    (`SetInactiveSessionTtl { previous }`), not to `None`, which the
+    picker drew as loading with nothing to refetch it.
+  - A failed `getChatMember` shows "Couldn't load admin rights" in the
+    rights editor and on Save, not "Loading rights…". Reopening the
+    editor asks again.
+  - A failed username check clears its "Checking…".
+  - A refetch that fails after a sticker set edit leaves the box as it
+    was. Only a failed load shows "Couldn't load".
+  - Settings > Calls fetches its own privacy rules and auto-download
+    presets when it opens, so it no longer depends on another page
+    having loaded them.
+- **Answers are matched by request, not by purpose.**
+  - The username check's verdict and error: `username_check_pending`
+    holds `(RequestId, text)`.
+  - New Contact: `new_contact_outcome` is keyed by the import, and only
+    the box that sent it (`AddContactDialog::sent_request`) applies it.
+  - The gift craft and resale buy (`craft_request`, `ResaleBuy::request`).
+  - The prepaid giveaway launch (`GiveawayLaunch::Launching { request }`).
+    The boost cache is still dropped on any success.
+  - Send-gift (`SendGiftState::sending_request`).
+  - A mini app's replaced popup: the helper shows one popup at a time, so
+    when a newer one (the close confirm) replaces another (a write-access
+    or phone prompt), the replaced one is answered as dismissed
+    (`answer_replaced_popups`). Before, its request never answered, and
+    every later one got "busy".
+- **Background accounts.**
+  - A background account's Star reactions commit when their Undo window
+    ends (`paid_reaction_tick` runs before the on-screen return). Before,
+    they were held until you came back, then sent at once with no Undo.
+    tdesktop's other sessions keep their send timers.
+  - A client coming on screen follows the interface language saved
+    since it went to the background (`adopt_saved_language`).
+- **A saved track has no chat neighbours.** A profile's saved-music
+  track does not play on into the open chat's songs, and the bar's
+  Previous and Next are off for it. Playing through the saved list
+  would be a new feature.
+- **Not done, or not tested.**
+  - Settings > Calls (1f) has no test, because the fetch needs a live
+    driver.
+  - Chat-window input activity (1g) has no test, because
+    `LAST_INPUT_MS` is a process-global static.
+  - Closing the mini app on lock was not tested, because the window
+    needs the helper process.
+  - The New Contact box's request filter is covered by the driver tests
+    only. The demo has no import.
+  - The Touch ID test covers the closed-window path with a refusal. A
+    success would set the process-global unlock key.
+  - `seek_hover` on the player bar is still screen-wide. It is only a
+    hover preview, and the next move over a bar resets it.
+  - A mini app's switch-inline still waits for the main window's next
+    frame when that window is hidden.

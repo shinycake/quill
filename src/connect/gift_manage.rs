@@ -629,6 +629,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.payments.gifts_manage.send.sending = false;
             return Err(err);
         }
+        self.session.payments.gifts_manage.send.request = Some(extra);
         Ok(extra)
     }
 }

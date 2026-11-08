@@ -21,7 +21,9 @@ impl QuillApp {
             ViewerVideoStart::ParkDownload => {
                 if let Some(play_id) = item.play_file_id {
                     let target = PlayTarget::Viewer {
+                        chat: item.chat_id,
                         message: item.message_id,
+                        window: self.windows.scope,
                     };
                     self.play_when_ready(play_id, target, cx);
                 }

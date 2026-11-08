@@ -143,9 +143,10 @@ pub struct MessagesState {
     /// (`RequestPurpose::GetPinnedMessages`). Absent until fetched; the
     /// pinned bar then falls back to pinned rows in loaded history.
     pub pinned_messages: HashMap<i64, Vec<HistoryMessage>>,
-    /// The oldest unread mention/reaction found for the corner buttons;
-    /// the driver takes it and jumps (`ConnectDriver::ingest`).
-    pub(crate) unread_jump: Option<MessageId>,
+    /// The oldest unread mention/reaction found for the corner buttons,
+    /// for the window and chat that asked; the driver takes it and jumps
+    /// in that window (`ConnectDriver::ingest`).
+    pub(crate) unread_jump: Option<ViewJump>,
     /// B4: `getPollVoters` fetch state for the poll-voters dialog, keyed
     /// by (chat id, message id, 0-based option index). One page per key.
     pub poll_voters: HashMap<(i64, i64, i32), PollVotersFetch>,

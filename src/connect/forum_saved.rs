@@ -366,16 +366,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if search.history.loaded_complete {
             return Ok(None);
         }
+        // A page for this filter is out. One asked for another tag does not
+        // hold this one back: its answer is dropped on arrival.
+        if search.request.is_some() {
+            return Ok(None);
+        }
         let topic_id = search.topic_id;
         let from = search.history.next_from_message_id.0;
         let tag = search.tag.to_tdlib_json();
         let purpose = RequestPurpose::SearchSavedMessages { topic_id };
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
-        self.send_purpose(purpose, None, |extra| {
+        let sent = self.send_purpose(purpose, None, |extra| {
             search_saved_messages(extra, topic_id, Some(&tag), "", from, SAVED_PAGE)
-        })
+        })?;
+        if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
+            search.request = sent;
+        }
+        Ok(sent)
     }
 
     /// Drop the tag filter ("All" in the tags bar).

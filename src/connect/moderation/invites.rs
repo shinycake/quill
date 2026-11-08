@@ -202,11 +202,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if matches!(
             self.session.groups.join_requests.get(&chat_id.0),
             Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
-        ) || self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatJoinRequests, chat_id)
-        {
+        ) {
             return Ok(None);
         }
         self.session
@@ -224,6 +220,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.groups.join_requests.remove(&chat_id.0);
             return Err(err);
         }
+        // The unfiltered list is what the box waits for now: a search
+        // still in flight is superseded, so its answer is not shown as
+        // the whole list under an empty field.
+        let groups = &mut self.session.groups;
+        groups.join_request_latest.insert(chat_id.0, extra);
+        groups.join_request_queries.insert(chat_id.0, String::new());
         Ok(Some(extra))
     }
 

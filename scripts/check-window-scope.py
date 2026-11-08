@@ -25,6 +25,13 @@ whose closure touches per-window state:
 - a `QuillApp` method that does any of these, directly or through other
   `QuillApp` methods (matched by name, so a false hit is possible).
 
+Two helpers that finish as the main window are checked the same way
+(round 10): `run_off_ui_then`, whose `done` closure is written at the call
+site, and `spawn_screen` / `spawn_screen_in`. Reached from a chat window's
+input, either one lands that window's work in the main window's state (a
+GIF file that never played, an Edit Image that opened over the main
+window). One that is the main window's by design says so with the marker.
+
 Fix one by starting the work with `spawn_scoped` / `spawn_scoped_in`
 (it finishes in the window it started in, and not at all once that window
 closed), `QuillApp::spawn_screen` / `spawn_screen_in` / `spawn_app` /
@@ -53,6 +60,18 @@ and act for the account on screen at event time, and one made on a
 screen-owned entity dies with it. The `OnScreen` field list is read from
 the `on_screen_fields!` declaration in src/ui/on_screen.rs.
 
+The upkeep rule: `frame_upkeep` (app_render/frame_upkeep.rs) and
+`flush_notifications` (notifications/mod.rs) run in the main window's
+frame only. A step there that reads or writes per-window state (by the
+same test as above) would serve the main window alone, so it goes in
+`per_window_upkeep` (app_render/window_upkeep.rs), which every window's
+frame runs with its own state in place, or says why it is the main
+window's with
+
+    // main-only: <why>
+
+on one of the three lines above the call.
+
 Known limits: a method is matched by name, not type; a field reached
 through a local binding (`let h = &mut this.history;` in an outer
 function, captured by the closure) or a helper on another type is not
@@ -71,7 +90,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "src" / "ui"
 START = re.compile(
     r"\b(cx\.spawn|\.spawn_in|cx\.defer|\.defer_in|window\.spawn|window\.defer"
     r"|on_next_frame|cx\.subscribe(?:_in)?|cx\.observe\w*"
-    r"|\.on_focus_in|\.on_focus_out|\.on_focus|\.on_blur)\s*\("
+    r"|\.on_focus_in|\.on_focus_out|\.on_focus|\.on_blur"
+    r"|\.run_off_ui_then|\.spawn_screen(?:_in)?)\s*\("
 )
 # Where a chat window's state is declared and exchanged with the app's.
 SLOT_FILE = pathlib.Path("chat_window") / "slot.rs"
@@ -135,6 +155,12 @@ NOT_WINDOW_STATE = {
     "swap_slot",
 }
 BASE_RECEIVERS = {"self", "this", "app"}
+# Upkeep only the main window's frame runs, by file and function.
+MAIN_ONLY_UPKEEP = [
+    (pathlib.Path("app_render") / "frame_upkeep.rs", "frame_upkeep"),
+    (pathlib.Path("notifications") / "mod.rs", "flush_notifications"),
+]
+MAIN_ONLY_MARKER = re.compile(r"//\s*main-only:\s*\S")
 
 
 def block_after(text: str, at: int) -> str:
@@ -350,6 +376,42 @@ def driver_hits(body: str, session_view: set[str], driver_view: set[str]) -> lis
     return hits
 
 
+def main_only_failures(
+    root: pathlib.Path, texts: dict[pathlib.Path, str], touching: set[str]
+) -> list[str]:
+    """Upkeep that only the main window's frame runs must not read or
+    write per-window state unless it says why: a chat window's frame never
+    runs it, so it would serve the main window alone. Per-window steps go
+    in `per_window_upkeep` (app_render/window_upkeep.rs), which every
+    window's frame runs with its own state in place."""
+    failures = []
+    for rel, fn in MAIN_ONLY_UPKEEP:
+        path = root / rel
+        text = texts.get(path)
+        if text is None:
+            sys.exit(f"{path} is missing: `{fn}` is checked for main-only upkeep")
+        at = re.search(rf"\bfn\s+{fn}\s*\(", text)
+        if at is None:
+            sys.exit(f"{path} has no `fn {fn}`")
+        start = text.find("{", at.end())
+        body = block_after(text, at.end())
+        lines = text.split("\n")
+        for m in re.finditer(r"\bself\s*\.\s*([a-z_0-9]+)\s*\(", body):
+            name = m.group(1)
+            if name not in touching or name in NOT_WINDOW_STATE or name == "per_window_upkeep":
+                continue
+            line = text.count("\n", 0, start + m.start()) + 1
+            above = lines[max(0, line - 4) : line]
+            if any(MAIN_ONLY_MARKER.search(l) for l in above):
+                continue
+            rel_path = path.relative_to(root.parent.parent)
+            failures.append(
+                f"{rel_path}:{line}: `{fn}` runs `{name}()`, which touches per-window state, "
+                "for the main window only"
+            )
+    return failures
+
+
 def main() -> int:
     root = pathlib.Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT
     global SLOT_FIELDS
@@ -380,6 +442,7 @@ def main() -> int:
         lambda b: bool(screen_field_hits(b, receivers(b), fields)),
         lambda b: calls_on(b, receivers(b)),
     )
+    main_only = main_only_failures(root, texts, touching)
     failures = []
     screen_failures = []
     for path, text in texts.items():
@@ -417,6 +480,14 @@ def main() -> int:
                 rel = path.relative_to(root.parent.parent)
                 what = ", ".join((direct + [f"{c}()" for c in via])[:4])
                 screen_failures.append(f"{rel}:{line}: {kind} touches the screen's state ({what})")
+    if main_only:
+        print("\n".join(main_only))
+        print(
+            f"\n{len(main_only)} main-window upkeep step(s) touch per-window state.\n"
+            "Move each to `per_window_upkeep` (src/ui/app_render/window_upkeep.rs), which\n"
+            "every window's frame runs with its own state in place, or say why it serves\n"
+            "the main window alone with `// main-only: <why>` on one of the three lines above.\n"
+        )
     if screen_failures:
         print("\n".join(screen_failures))
         print(
@@ -440,7 +511,7 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures:
+    if screen_failures or main_only:
         return 1
     print("window scope: OK")
     print("screen scope: OK")

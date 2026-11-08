@@ -170,8 +170,33 @@ impl Session {
             tag,
             history: TopicHistory::default(),
             loaded: false,
+            request: None,
         });
         self.view_generation.bump();
+    }
+
+    /// The tag filter shown, when `pending` is the page it waits for (the
+    /// page is then settled).
+    fn awaiting_saved_tag_search(
+        &mut self,
+        pending: Option<&PendingRequest>,
+    ) -> Option<&mut SavedTagSearch> {
+        let pending = pending?;
+        let search = self.threads.saved.tag_search.as_mut()?;
+        if search.request != Some(pending.id) {
+            return None;
+        }
+        search.request = None;
+        Some(search)
+    }
+
+    /// A `searchSavedMessages` page failed: the filter stops paging (the
+    /// error line says why) instead of waiting on it.
+    pub(crate) fn fail_saved_tag_page(&mut self, pending: Option<&PendingRequest>) {
+        if let Some(search) = self.awaiting_saved_tag_search(pending) {
+            search.loaded = true;
+            search.history.loaded_complete = true;
+        }
     }
 
     /// Clear the tag filter ("All" in the tags bar).
@@ -244,10 +269,7 @@ impl Session {
             self.remember_files(&message.files);
         }
         let Some(search) = self
-            .threads
-            .saved
-            .tag_search
-            .as_mut()
+            .awaiting_saved_tag_search(pending)
             .filter(|search| search.topic_id == topic_id)
         else {
             return;

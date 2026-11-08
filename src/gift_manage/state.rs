@@ -37,11 +37,19 @@ pub struct SendGiftState {
     pub premium_options: Vec<PremiumGiftOption>,
     pub premium_loaded: bool,
     pub sending: bool,
+    /// The `sendGift` this dialog waits for. The dialog is rebuilt for
+    /// each recipient, so an earlier recipient's answer is dropped.
+    pub request: Option<crate::ids::RequestId>,
     pub error: Option<String>,
     pub done: Option<String>,
 }
 
 impl SendGiftState {
+    /// Whether `pending` is the `sendGift` this dialog waits for.
+    pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
+        pending.is_some_and(|pending| self.request == Some(pending.id))
+    }
+
     pub fn selected_gift(&self) -> Option<&AvailableGift> {
         let id = self.selected?;
         self.gifts.iter().find(|g| g.id == id)

@@ -164,7 +164,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::CheckChatFolderInviteLink, None);
-        self.send_folder_request(extra, check_chat_folder_invite_link(extra, invite_link))
+        let sent =
+            self.send_folder_request(extra, check_chat_folder_invite_link(extra, invite_link))?;
+        self.session.chat_list.folder_invite_request = Some(sent);
+        Ok(sent)
     }
 
     /// `getChat` for the chats of an `addlist` link that are not loaded,
@@ -207,10 +210,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::AddChatFolderByInviteLink, None);
-        self.send_folder_request(
+        let sent = self.send_folder_request(
             extra,
             add_chat_folder_by_invite_link(extra, invite_link, chat_ids),
-        )
+        )?;
+        self.session.chat_list.folder_invite_request = Some(sent);
+        Ok(sent)
     }
 
     /// `getChatFolderNewChats` for a shared folder, at most once per

@@ -101,7 +101,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stats
             .message_for(chat_id.0, message_id.0)
             .is_some_and(|state| matches!(state.statistics, MessageStatsFetch::Loaded(_)));
-        if loaded || self.session.requests.has_purpose(purpose) {
+        if loaded {
+            return Ok(None);
+        }
+        if self.session.requests.has_purpose(purpose) {
+            // The statistics are on the way, but the forwards may have
+            // come while another post was shown and gone with its page:
+            // ask for them again (deduped while in flight).
+            if !self.message_forwards_loaded(chat_id, message_id) {
+                let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
+            }
             return Ok(None);
         }
         if let Some(state) = self.session.groups.stats.message.as_mut() {
@@ -112,16 +121,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra,
             &get_message_statistics(extra, chat_id, message_id, is_dark),
         )?;
-        let forwards_loaded = self
-            .session
-            .groups
-            .stats
-            .message_for(chat_id.0, message_id.0)
-            .is_some_and(|state| state.forwards.total > 0 || !state.forwards.forwards.is_empty());
-        if !forwards_loaded {
+        if !self.message_forwards_loaded(chat_id, message_id) {
             let _ = self.fetch_message_public_forwards(chat_id, message_id, "");
         }
         Ok(Some(extra))
+    }
+
+    /// Whether the open post's page holds a forwards answer.
+    fn message_forwards_loaded(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.session
+            .groups
+            .stats
+            .message_for(chat_id.0, message_id.0)
+            .is_some_and(|state| state.forwards.total > 0 || !state.forwards.forwards.is_empty())
     }
 
     /// One `getMessagePublicForwards` page; `offset` is the previous
@@ -140,6 +152,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id: message_id.0,
         });
         if self.session.requests.has_purpose(purpose) {
+            // A page reopened meanwhile waits for the one on its way.
+            self.session
+                .groups
+                .stats
+                .forwards_requested(chat_id.0, message_id.0);
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));

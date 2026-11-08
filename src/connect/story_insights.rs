@@ -49,6 +49,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             if forwards_pending && let Some(state) = self.session.stories.insights.as_mut() {
                 state.forwards_loading = true;
             }
+            // The forwards came while another story was shown, and that
+            // story's insights replaced them: ask for the first page again.
+            if !forwards_pending {
+                let _ = self.fetch_story_public_forwards(chat_id, story_id, "");
+            }
             return Ok(None);
         }
         self.session.clear_story_insights();

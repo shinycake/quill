@@ -46,8 +46,12 @@ pub(super) struct PlayerBarState {
     /// Chat the active track belongs to (may differ from the open chat).
     pub(super) chat: Option<ChatId>,
     pub(super) meta: Option<TrackMeta>,
-    /// The bar's own progress slider (the row has another one).
-    pub(super) slider: Option<Entity<SliderState>>,
+    /// The bar's own progress slider (the row has another one), one for
+    /// each window that draws the bar (`None`: the main window). A slider
+    /// keeps the geometry of its last paint and maps a press through it,
+    /// so one slider drawn in two windows sought with the other window's
+    /// layout (docs/decisions/lock-field-per-window.md, "Rejected").
+    pub(super) sliders: std::collections::HashMap<Option<ChatId>, Entity<SliderState>>,
     pub(super) repeat: RepeatMode,
     pub(super) order: OrderMode,
     pub(super) shuffle: ShuffleState,
@@ -171,6 +175,23 @@ impl QuillApp {
     ) {
         self.playback.player.chat = Some(chat);
         self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
+        // Each window makes its slider for the new track when it draws.
+        self.playback.player.sliders.clear();
+        cx.notify();
+    }
+
+    /// The bar's slider in the window whose state is in place, made at its
+    /// first draw for the track; the closed windows' go.
+    fn player_bar_slider(&mut self, cx: &mut Context<Self>) -> Entity<SliderState> {
+        let scope = self.windows.scope;
+        if let Some(slider) = self.playback.player.sliders.get(&scope) {
+            return slider.clone();
+        }
+        let open: Vec<ChatId> = self.windows.open_windows().map(|(chat, _)| chat).collect();
+        self.playback
+            .player
+            .sliders
+            .retain(|window, _| window.is_none_or(|chat| open.contains(&chat)));
         let duration = self.playback.track_duration().map_or(0.1, |d| d.max(0.1));
         let offset = self.active_position_secs().unwrap_or(0.0);
         let slider = cx.new(|_| {
@@ -185,7 +206,8 @@ impl QuillApp {
             this.on_seek_event(event, cx);
         })
         .detach();
-        self.playback.player.slider = Some(slider);
+        self.playback.player.sliders.insert(scope, slider.clone());
+        slider
     }
 
     /// The chat's playable messages, oldest first.
@@ -229,7 +251,7 @@ impl QuillApp {
 
     /// Whether the bar offers previous / next for the active track.
     pub(super) fn playlist_can_move(&self) -> (bool, bool) {
-        if self.active_playback_kind() != PlaybackKind::Audio {
+        if self.active_playback_kind() != PlaybackKind::Audio || self.playing_saved_track() {
             return (false, false);
         }
         let Some(chat) = self.playback.player.chat else {
@@ -237,6 +259,12 @@ impl QuillApp {
         };
         let len = self.playlist_audio_ids(chat).len();
         (len > 1, len > 1)
+    }
+
+    /// A saved-music track plays (`playlist_message_id`: a negated file id,
+    /// never a message's).
+    fn playing_saved_track(&self) -> bool {
+        self.active_playback_id().is_some_and(|id| id.0 < 0)
     }
 
     /// The message to play after the active one, per the playlist rules.
@@ -250,6 +278,9 @@ impl QuillApp {
                 }
                 playlist::next_voice(&self.playlist_voice_entries(chat), current.0)
             }
+            // A profile's saved track is no message of the chat it was
+            // played from: its songs are not the track's neighbours.
+            PlaybackKind::Audio if self.playing_saved_track() => return None,
             PlaybackKind::Audio => {
                 let ids = self.playlist_audio_ids(chat);
                 let mv = Move {
@@ -417,6 +448,7 @@ impl QuillApp {
             },
         };
         let playing = self.is_playing();
+        let slider = self.player_bar_slider(cx);
         let elapsed = self.playback.seek_preview_secs.unwrap_or(position);
         let time = format!(
             "{} / {}",
@@ -549,22 +581,20 @@ impl QuillApp {
                     )
                 })
                 .child(title_block)
-                .when_some(self.playback.player.slider.clone(), |this, slider| {
-                    this.child(
-                        div().flex_none().w(px(140.)).child(
-                            AudioScrubber::new(
-                                "player-bar-seek",
-                                &slider,
-                                ScrubberFace::Line,
-                                accent(),
-                                QuillApp::seek_hover_handler(SeekSite::PlayerBar, cx),
-                            )
-                            .progress(progress)
-                            .hover(hover)
-                            .dragging(dragging),
-                        ),
-                    )
-                })
+                .child(
+                    div().flex_none().w(px(140.)).child(
+                        AudioScrubber::new(
+                            "player-bar-seek",
+                            &slider,
+                            ScrubberFace::Line,
+                            accent(),
+                            QuillApp::seek_hover_handler(SeekSite::PlayerBar, cx),
+                        )
+                        .progress(progress)
+                        .hover(hover)
+                        .dragging(dragging),
+                    ),
+                )
                 .child(
                     div()
                         .flex_none()

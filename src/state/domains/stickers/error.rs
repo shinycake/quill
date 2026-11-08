@@ -53,9 +53,16 @@ impl Session {
             self.stickers.stickers.loading_sets = false;
             self.stickers.stickers.failed = true;
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStickerSet) {
-            self.stickers.stickers.loading_set = false;
-            self.stickers.stickers.failed = true;
+        if let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetStickerSet) {
+            let panel = &mut self.stickers.stickers;
+            panel.loading_set = false;
+            panel.failed = true;
+            if let Some((request, set_id)) = panel.set_request
+                && request == pending.id
+            {
+                panel.set_request = None;
+                panel.failed_set_id = Some(set_id);
+            }
         }
         if let Some(RequestPurpose::Stickers(StickersPurpose::LoadLibrarySet { set_id })) =
             pending.map(|p| p.purpose)

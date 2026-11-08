@@ -76,6 +76,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     let seq = AtomicU64::new(0);
     // Joining shared folders past the limit.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -122,6 +123,7 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
     );
     // Any other failure is still an ordinary error.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,

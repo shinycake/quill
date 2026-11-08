@@ -387,7 +387,7 @@ impl QuillApp {
             && self
                 .session()
                 .and_then(|s| s.users_state.username_check_pending.clone())
-                .is_some_and(|text| text == username_text);
+                .is_some_and(|(_, text)| text == username_text);
         let error = self
             .session()
             .and_then(|s| s.users_state.profile_edit_error.clone());

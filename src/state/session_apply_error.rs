@@ -185,6 +185,10 @@ impl Session {
             Some(RequestRollback::ArchiveChatListSettings { previous }) => {
                 self.chat_list.archive_chat_list_settings = previous;
             }
+            Some(
+                rollback @ (RequestRollback::ForumTopicMute { .. }
+                | RequestRollback::PollVote { .. }),
+            ) => self.restore_optimistic(rollback),
             None => {}
         }
         // Everything else belongs to the request's domain
