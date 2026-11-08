@@ -48,8 +48,6 @@ pub(crate) struct PasscodeUi {
     pub(crate) locked: bool,
     /// Startup was locked: the connection starts after the first unlock.
     pub(crate) deferred_connect: bool,
-    /// Focus the lock field on the next frame.
-    focus_lock_input: bool,
     /// Offer the system prompt as soon as the lock screen shows.
     suggest_system_unlock: bool,
     pub(crate) open: bool,
@@ -57,7 +55,9 @@ pub(crate) struct PasscodeUi {
     pub(crate) old: Entity<InputState>,
     pub(crate) new: Entity<InputState>,
     pub(crate) confirm: Entity<InputState>,
-    pub(crate) lock_input: Entity<InputState>,
+    /// The main window's field on the lock screen; a chat window's is in
+    /// its slot, swapped in while that window's state is in place.
+    pub(crate) lock: LockField,
     pub(crate) custom_time: Entity<InputState>,
     pub(crate) error: Option<String>,
     pub(crate) lock_error: Option<String>,
@@ -90,7 +90,6 @@ impl PasscodeUi {
         let old = field(window, cx, tr(keys::Q_PREFS_CURRENT_PASSCODE));
         let new = field(window, cx, tr(keys::Q_PREFS_NEW_PASSCODE));
         let confirm = field(window, cx, tr(keys::PASSCODE_CONFIRM_NEW));
-        let lock_input = field(window, cx, tr(keys::PASSCODE_PH));
         let custom_time = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("10:00")
@@ -105,20 +104,6 @@ impl PasscodeUi {
             .detach();
         }
         cx.subscribe_in(
-            &lock_input,
-            window,
-            |this, _, event: &InputEvent, window, cx| {
-                this.in_window_of(window, cx, |this, window, cx| match event {
-                    InputEvent::PressEnter { .. } => this.submit_unlock(window, cx),
-                    InputEvent::Change if this.account.passcode.lock_error.take().is_some() => {
-                        cx.notify();
-                    }
-                    _ => {}
-                });
-            },
-        )
-        .detach();
-        cx.subscribe_in(
             &custom_time,
             window,
             |this, _, event: &InputEvent, _, cx| {
@@ -131,19 +116,19 @@ impl PasscodeUi {
         let root = safe_app_root();
         let config = root.as_deref().and_then(passcode::load_config);
         let enabled = config.is_some();
+        let lock = LockField::new(window, cx, enabled);
         Self {
             enabled,
             // The app starts locked when a passcode is set (tdesktop).
             locked: enabled,
             deferred_connect: enabled,
-            focus_lock_input: enabled,
             suggest_system_unlock: false,
             open: false,
             view: PasscodeView::Status,
             old,
             new,
             confirm,
-            lock_input,
+            lock,
             custom_time,
             error: None,
             lock_error: None,
@@ -510,7 +495,7 @@ impl QuillApp {
         self.account.passcode.locked = true;
         quill::wake::PASSCODE.poke();
         quill::wake::CHROME.poke();
-        self.account.passcode.focus_lock_input = true;
+        self.reset_lock_fields();
         self.account.passcode.suggest_system_unlock =
             self.account.passcode.system_unlock_key.is_some();
         self.account.passcode.lock_error = None;
@@ -539,7 +524,8 @@ impl QuillApp {
         self.account.passcode.logout_confirm = false;
         self.account
             .passcode
-            .lock_input
+            .lock
+            .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         if self.account.passcode.system_unlock {
             self.account.passcode.system_unlock_key = global_unlock().key();
@@ -555,7 +541,7 @@ impl QuillApp {
         self.account.passcode.lock_error = Some(message);
         quill::wake::PASSCODE.poke();
         self.account.passcode.shake_started = Some(Instant::now());
-        self.account.passcode.focus_lock_input = true;
+        self.account.passcode.lock.refocus();
         cx.notify();
     }
 
@@ -564,7 +550,7 @@ impl QuillApp {
         if !self.account.passcode.locked || self.account.passcode.busy {
             return;
         }
-        let typed = self.read_field(&self.account.passcode.lock_input, cx);
+        let typed = self.read_field(&self.account.passcode.lock.input, cx);
         if typed.is_empty() {
             self.lock_failed(tr(keys::Q_PREFS_ENTER_YOUR_PASSCODE).into(), cx);
             return;
@@ -587,7 +573,8 @@ impl QuillApp {
                 Err(PasscodeError::Wrong) => {
                     this.account
                         .passcode
-                        .lock_input
+                        .lock
+                        .input
                         .update(cx, |input, cx| input.set_value("", window, cx));
                     this.lock_failed(PasscodeError::Wrong.to_string(), cx);
                 }
@@ -742,7 +729,8 @@ impl QuillApp {
         self.account.passcode.locked = false;
         self.account
             .passcode
-            .lock_input
+            .lock
+            .input
             .update(cx, |input, cx| input.set_value("", window, cx));
         // With local data, the connection starts once it is wiped (above).
         if !self.account.passcode.demo && !wiping {
@@ -778,10 +766,7 @@ impl QuillApp {
     /// Per-frame work for the lock screen (focus, shake clock).
     pub(crate) fn passcode_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.account.passcode.locked {
-            if std::mem::take(&mut self.account.passcode.focus_lock_input) {
-                let input = self.account.passcode.lock_input.clone();
-                input.update(cx, |input, cx| input.focus(window, cx));
-            }
+            self.account.passcode.lock.frame(window, cx);
             if std::mem::take(&mut self.account.passcode.suggest_system_unlock) {
                 self.unlock_with_system(window, cx);
             }
@@ -834,7 +819,7 @@ impl QuillApp {
             )
             .child(
                 div().w_full().relative().left(px(shake)).child(
-                    Input::new(&ui.lock_input)
+                    Input::new(&ui.lock.input)
                         .aria_label(tr(keys::SETTINGS_PASSCODE_TITLE))
                         .content_type(InputContentType::Password)
                         .h(px(40.)),
@@ -952,3 +937,5 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_passcode_dialog;
+mod lock_field;
+pub(crate) use lock_field::LockField;

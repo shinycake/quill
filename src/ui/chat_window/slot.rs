@@ -27,6 +27,7 @@ use super::super::history_state::HistoryUi;
 use super::super::image_budget::{BoundedImageCache, WindowDraw};
 use super::super::media_viewer::PipLink;
 use super::super::message_state::MessageUi;
+use super::super::passcode::LockField;
 use super::super::pickers_state::PickerUi;
 use super::super::share_state::ShareUi;
 use super::super::sticker_player;
@@ -60,6 +61,7 @@ impl SlotFarewell for ChatUi {}
 impl SlotFarewell for MessageUi {}
 impl SlotFarewell for PickerUi {}
 impl SlotFarewell for ShareUi {}
+impl SlotFarewell for LockField {}
 
 /// The Picture-in-Picture window opened from this window's viewer plays
 /// the window's clip, with its link in this slot: it closes with it.
@@ -99,6 +101,9 @@ super::super::on_screen::on_screen_fields! {
     chat_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     share: ShareUi,
+    /// The window's own passcode field on the lock screen
+    /// (`PasscodeUi::lock`).
+    lock_field: LockField,
 }
 
 pub(super) type SharedSlot = Rc<RefCell<WindowSlot>>;
@@ -142,6 +147,7 @@ impl WindowSlot {
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
+            lock_field: LockField::new(window, cx, app.account.passcode.locked),
             slices: WindowSlices::new(Some(chat_id), cx)
                 .with_composer_height(app.slices.composer_height()),
             images: cx.new(|_| BoundedImageCache::for_window(chat_id, app.slices.scope())),
@@ -203,6 +209,7 @@ impl QuillApp {
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
         std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
         std::mem::swap(&mut self.share, &mut slot.share);
+        std::mem::swap(&mut self.account.passcode.lock, &mut slot.lock_field);
         std::mem::swap(&mut self.slices.window, &mut slot.slices);
     }
 
@@ -226,6 +233,18 @@ impl QuillApp {
         let result = f(self, cx);
         self.set_window_scope(outer);
         Some(result)
+    }
+
+    /// The lock started: every window's passcode field, the one in place
+    /// and each chat window slot's, empties and takes its window's focus
+    /// at that window's next frame.
+    pub(in crate::ui) fn reset_lock_fields(&mut self) {
+        self.account.passcode.lock.reset();
+        for slot in self.windows.slots() {
+            if let Ok(mut slot) = slot.try_borrow_mut() {
+                slot.lock_field.reset();
+            }
+        }
     }
 
     /// Take the Picture-in-Picture links `pick` chooses from every
