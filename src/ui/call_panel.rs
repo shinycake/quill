@@ -299,6 +299,7 @@ impl QuillApp {
         self.calls.window_opening = true;
         self.calls.window_raised = false;
         let owner = cx.entity();
+        // screen-scope: the call window is the app's; its failure note goes to whichever account is on screen.
         cx.defer(move |cx| {
             let weak = owner.downgrade();
             let render_owner = owner.clone();

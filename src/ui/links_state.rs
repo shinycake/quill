@@ -46,6 +46,8 @@ pub(crate) struct LinkUi {
     pub(super) login_url_confirm: Option<LoginUrlConfirm>,
 }
 
+impl crate::ui::on_screen::Farewell for LinkUi {}
+
 impl LinkUi {
     pub(super) fn new() -> Self {
         Self {

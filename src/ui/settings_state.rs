@@ -1,4 +1,6 @@
-//! Settings state: the settings window, appearance, shortcuts, storage, proxy, translation and app updates.
+//! Settings state: the settings window and its pages (the account's,
+//! `SettingsUi`) and what the process keeps across accounts (appearance,
+//! shortcuts, translation, updates: `PreferencesUi`).
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
@@ -7,6 +9,8 @@ use gpui_kit::*;
 use quill::data_settings::AutoDownloadNetSettings;
 use quill::data_settings::NetworkKind;
 
+/// The settings window of the account on screen: its pages, search,
+/// scrolls and the boxes they open. A field of `OnScreen`.
 pub(crate) struct SettingsUi {
     /// The settings window covers the chat list and the chat.
     pub(super) open: bool,
@@ -27,6 +31,66 @@ pub(crate) struct SettingsUi {
     pub(super) sub_scroll: ScrollHandle,
     /// Holds focus inside the settings window, so Esc steps back.
     pub(super) focus: FocusHandle,
+    pub(super) sticker_settings_open: bool,
+    pub(super) storage_scroll: super::dialogs::data_storage::StorageScroll,
+    /// Slice S4: the Data & Storage per-network editor — the network
+    /// being edited plus its draft settings (saved or discarded
+    /// explicitly, never applied optimistically).
+    pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
+    /// Slice S4: the "Clear cache" button is awaiting its second,
+    /// confirming tap.
+    pub(super) storage_confirm: Option<StorageClear>,
+    /// Batch 6: the file types ticked for "Clear selected".
+    pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
+    /// `parity:proxy-settings`: proxy list / editor / link-confirm state.
+    pub(super) proxy: super::proxy::ProxyUi,
+    /// The "No" answer of the phone-number prompt was chosen: show the note.
+    pub(super) phone_change_note: bool,
+}
+
+impl SettingsUi {
+    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        Self {
+            open: false,
+            page: None,
+            sub: None,
+            log_out_confirm: false,
+            search: Default::default(),
+            arrival: None,
+            page_scroll: ScrollHandle::new(),
+            sub_scroll: ScrollHandle::new(),
+            focus: cx.focus_handle(),
+            sticker_settings_open: false,
+            storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
+            data_storage_editor: None,
+            storage_confirm: None,
+            storage_selected: Default::default(),
+            proxy: Default::default(),
+            phone_change_note: false,
+        }
+    }
+}
+
+/// The stickers manager commits its reordering and removals through the
+/// old client when it closes (`close_stickers_manager`); the pages and
+/// the other boxes are flags.
+impl super::on_screen::Farewell for SettingsUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app.settings.sticker_settings_open {
+            app.close_stickers_manager(cx);
+        }
+    }
+}
+
+/// What Settings keeps for the process, whichever account is on screen:
+/// shortcuts, the applied appearance and themes, the pickers, translation
+/// prefs and its box, app updates, What's New, the advanced page and the
+/// emoji set. A `QuillApp` field (`preferences`).
+pub(crate) struct PreferencesUi {
     /// Parity slice (platform-custom-keybindings): the rebindable action id
     /// currently capturing a keystroke, if any.
     pub(super) keybinding_capture: Option<String>,
@@ -40,8 +104,6 @@ pub(crate) struct SettingsUi {
     /// Parity slice (platform-custom-keybindings): saved shortcut overrides
     /// applied to the keymap once the live driver is ready.
     pub(super) keybindings_applied: bool,
-    pub(super) sticker_settings_open: bool,
-    pub(super) storage_scroll: super::dialogs::data_storage::StorageScroll,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
@@ -65,20 +127,9 @@ pub(crate) struct SettingsUi {
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.
     pub(super) accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
-    /// Slice S4: the Data & Storage per-network editor — the network
-    /// being edited plus its draft settings (saved or discarded
-    /// explicitly, never applied optimistically).
-    pub(super) data_storage_editor: Option<(NetworkKind, AutoDownloadNetSettings)>,
     /// The step sliders of the network editor, the local storage limits and
     /// the auto-delete picker (`index_sliders.rs`).
     pub(super) index_sliders: super::index_sliders::IndexSliders,
-    /// Slice S4: the "Clear cache" button is awaiting its second,
-    /// confirming tap.
-    pub(super) storage_confirm: Option<StorageClear>,
-    /// Batch 6: the file types ticked for "Clear selected".
-    pub(super) storage_selected: std::collections::BTreeSet<&'static str>,
-    /// `parity:proxy-settings`: proxy list / editor / link-confirm state.
-    pub(super) proxy: super::proxy::ProxyUi,
     /// Translation: prefs (`translate_prefs.json`), the translate dialog,
     /// the bar's toast.
     pub(super) translate: super::translate_ui::TranslateUi,
@@ -86,8 +137,6 @@ pub(crate) struct SettingsUi {
     pub(super) update_banner_dismissed: bool,
     /// The What's New window and the release notes it shows.
     pub(super) whats_new: super::whats_new::WhatsNewUi,
-    /// The "No" answer of the phone-number prompt was chosen: show the note.
-    pub(super) phone_change_note: bool,
     /// Advanced and experimental settings, the secret codes, the test
     /// environment (`ui/advanced_state.rs`).
     pub(super) advanced: super::advanced_state::AdvancedUi,
@@ -95,7 +144,7 @@ pub(crate) struct SettingsUi {
     pub(super) emoji_style: super::emoji_style_ui::EmojiStyleUi,
 }
 
-impl SettingsUi {
+impl PreferencesUi {
     pub(super) fn new(
         cx: &mut Context<QuillApp>,
         font_picker: Entity<
@@ -107,32 +156,17 @@ impl SettingsUi {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         Self {
-            open: false,
-            page: None,
-            sub: None,
-            log_out_confirm: false,
-            search: Default::default(),
-            arrival: None,
-            page_scroll: ScrollHandle::new(),
-            sub_scroll: ScrollHandle::new(),
-            focus: cx.focus_handle(),
             keybinding_capture: None,
             keybinding_error: None,
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
-            sticker_settings_open: false,
-            storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
             appearance_applied: None,
             app_theme: Default::default(),
             system_accent: None,
             system_accent_probed: false,
             font_picker,
             accent_picker,
-            data_storage_editor: None,
             index_sliders: Default::default(),
-            storage_confirm: None,
-            storage_selected: Default::default(),
-            proxy: Default::default(),
             translate: super::translate_ui::TranslateUi::load(),
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()
@@ -141,7 +175,6 @@ impl SettingsUi {
             },
             update_banner_dismissed: false,
             whats_new: Default::default(),
-            phone_change_note: false,
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),
         }

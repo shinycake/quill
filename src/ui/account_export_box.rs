@@ -104,7 +104,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("export the account's data") {
             return;
         }
-        let Some(draft) = self.dialogs.account_export_dialog.as_mut() else {
+        let Some(draft) = self.screen.dialogs.account_export_dialog.as_mut() else {
             return;
         };
         let started = match self.live.as_mut() {
@@ -363,7 +363,7 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_account_export_dialog,
     )
-    .closes(|app, _, cx| { app.dialogs.account_export_dialog = None; app.dialogs.account_export_progress_hidden = true; cx.notify(); }),
+    .close(|app, _, cx| { app.dialogs.account_export_dialog = None; app.dialogs.account_export_progress_hidden = true; cx.notify(); }),
 }
 
 #[cfg(test)]

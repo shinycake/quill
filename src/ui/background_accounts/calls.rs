@@ -343,5 +343,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.background_ring_audible() && !app.account.passcode.locked,
         QuillApp::build_background_call_dialog,
     )
-    .app_wide_closes(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
+    .close(|app, _, cx| { if let Some(ring) = app.background.ringing.as_mut() { ring.dismissed = true; } cx.notify(); }),
 }

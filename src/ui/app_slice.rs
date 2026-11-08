@@ -332,6 +332,7 @@ impl QuillApp {
         let Some(cache) = self.slices.image_cache.clone() else {
             return;
         };
+        // screen-scope: the trim sweeps the caches of whichever windows are open when it runs.
         self.slices.idle_trim = Some(cx.spawn(async move |this, cx| {
             while let Some(due) = super::image_budget::idle_trim_due() {
                 let now = std::time::Instant::now();
@@ -339,11 +340,11 @@ impl QuillApp {
                     let (main, background, windows, sweeping) = this
                         .read_with(cx, |this, _| {
                             (
-                                this.windows.main,
+                                this.main_window.handle,
                                 !this.frame.window_active.get(),
                                 this.windows.image_caches(),
-                                this.windows
-                                    .main
+                                this.main_window
+                                    .handle
                                     .into_iter()
                                     .chain(this.windows.open_windows().map(|(_, handle)| handle))
                                     .collect::<Vec<_>>(),

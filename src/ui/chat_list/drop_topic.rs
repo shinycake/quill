@@ -380,7 +380,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.drop_topic_alive(),
         QuillApp::build_drop_topic_dialog,
     )
-    .closes(|app, _, cx| app.close_drop_topic(cx)),
+    .close(|app, _, cx| app.close_drop_topic(cx)),
 }
 
 #[cfg(feature = "demo-capture")]

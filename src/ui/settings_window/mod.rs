@@ -84,7 +84,7 @@ impl QuillApp {
         self.settings.search.close();
         self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
-        self.settings.app_theme.editor_read = None;
+        self.preferences.app_theme.editor_read = None;
         self.settings.open = false;
         self.settings.page = None;
         self.settings.sub = None;
@@ -130,7 +130,7 @@ impl QuillApp {
             Page::DataStorage => self.leave_data_storage(),
             Page::AgentAccess => self.leave_agent_page(),
             // The test lives with its section, as in tdesktop.
-            Page::Calls => self.calls.mic_test = Default::default(),
+            Page::Calls => self.call_boxes.mic_test = Default::default(),
             _ => {}
         }
     }
@@ -215,7 +215,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.settings.keybinding_capture.is_some() {
+                if this.preferences.keybinding_capture.is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {

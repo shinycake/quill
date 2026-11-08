@@ -78,7 +78,7 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        self.calls.add_people = Some(AddPeopleBox::new(call_id));
+        self.call_boxes.add_people = Some(AddPeopleBox::new(call_id));
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.is_none()
         {
@@ -96,12 +96,12 @@ impl QuillApp {
             .and_then(|session| session.calls.active_call.as_ref())
             .map(|call| call.id);
         let stale = self
-            .calls
+            .call_boxes
             .add_people
             .as_ref()
             .is_some_and(|open| Some(open.call_id) != current);
         if stale {
-            self.calls.add_people = None;
+            self.call_boxes.add_people = None;
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.search_add_people("");
             }
@@ -109,7 +109,7 @@ impl QuillApp {
     }
 
     fn close_call_add_people(&mut self, cx: &mut Context<Self>) {
-        self.calls.add_people = None;
+        self.call_boxes.add_people = None;
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.search_add_people("");
         }
@@ -118,7 +118,7 @@ impl QuillApp {
 
     /// The search field's text, empty before it exists.
     fn call_add_people_query(&self, cx: &App) -> String {
-        self.calls
+        self.call_boxes
             .add_people
             .as_ref()
             .and_then(|open| open.search.as_ref())
@@ -128,7 +128,7 @@ impl QuillApp {
 
     /// What the box lists for the typed query.
     fn call_add_people_view(&self, cx: &App) -> Option<AddPeopleView> {
-        let open = self.calls.add_people.as_ref()?;
+        let open = self.call_boxes.add_people.as_ref()?;
         let session = self.session()?;
         let peer = session
             .calls
@@ -147,7 +147,7 @@ impl QuillApp {
     /// Check or uncheck someone; a person checked from the server's
     /// results joins the top of the list.
     fn toggle_call_add_person(&mut self, user_id: i64, from_search: bool, cx: &mut Context<Self>) {
-        if let Some(open) = self.calls.add_people.as_mut() {
+        if let Some(open) = self.call_boxes.add_people.as_mut() {
             if let Some(at) = open.picked.iter().position(|id| *id == user_id) {
                 open.picked.remove(at);
             } else {
@@ -174,7 +174,7 @@ impl QuillApp {
     /// The box's Invite, or "Create Call Link" with nobody picked: the
     /// call moves into a new conference call.
     fn finish_call_add_people(&mut self, share_link: bool, cx: &mut Context<Self>) {
-        let Some(open) = self.calls.add_people.take() else {
+        let Some(open) = self.call_boxes.add_people.take() else {
             return;
         };
         let invite = if share_link { Vec::new() } else { open.picked };
@@ -204,7 +204,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<InputState>> {
-        let open = self.calls.add_people.as_mut()?;
+        let open = self.call_boxes.add_people.as_mut()?;
         if let Some(input) = open.search.clone() {
             return Some(input);
         }
@@ -236,7 +236,7 @@ impl QuillApp {
         {
             let _ = live.driver.search_add_people(&initial);
         }
-        if let Some(open) = self.calls.add_people.as_mut() {
+        if let Some(open) = self.call_boxes.add_people.as_mut() {
             open.search = Some(input.clone());
         }
         Some(input)
@@ -305,7 +305,7 @@ impl QuillApp {
         let search = self.call_add_people_search(window, cx)?;
         let view = self.call_add_people_view(cx)?;
         let none_picked = self
-            .calls
+            .call_boxes
             .add_people
             .as_ref()
             .is_none_or(|open| open.picked.is_empty());

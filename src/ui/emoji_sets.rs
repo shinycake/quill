@@ -167,7 +167,8 @@ impl QuillApp {
     }
     fn install_emoji_set(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.set_emoji_pack_installed(id, true) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_INSTALLING_EMOJI_PACK)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_AN_EMOJI_PACK_IS_ALREADY)),
@@ -418,8 +419,7 @@ crate::ui::shell::register_dialogs! {
         5100,
         |app| app.session().is_some_and(|s| s.stickers.emoji.open),
         QuillApp::build_emoji_sets_dialog,
-    )
-    .follows_account(),
+    ),
 }
 
 #[cfg(test)]

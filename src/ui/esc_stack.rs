@@ -20,39 +20,14 @@ pub(super) struct EscLayer {
     /// Used by tests and diagnostics.
     #[cfg_attr(not(test), allow(dead_code))]
     pub name: &'static str,
-    /// What switching the account on screen does to it.
-    pub on_switch: LayerSwitch,
     pub is_open: fn(&QuillApp) -> bool,
     pub close: fn(&mut QuillApp, &mut Window, &mut Context<QuillApp>),
 }
 
-/// What switching the account on screen does to a layer
-/// (`QuillApp::end_account_surfaces`), as `shell::OnSwitch` says for a
-/// dialog. Every layer states one, because an overlay that keeps the old
-/// account's ids app-side but acts through `self.live` would act as the
-/// account switched to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum LayerSwitch {
-    /// Holds the old account's objects app-side: the switch runs its close
-    /// until it is shut (a close that peels one level runs again).
-    Closes,
-    /// The switch ends it another way, because its Escape close asks
-    /// first or does more than end it: the chat leave takes the reply,
-    /// edit and selection, the recording is cancelled, the forward is
-    /// dropped.
-    EndedBySwitch,
-    /// Read from the account on screen (its `Session`), so after a switch
-    /// it is the new account's own.
-    FollowsAccount,
-    /// Belongs to no one account (a call, the window's chrome): it stays.
-    AppWide,
-}
-
 macro_rules! layer {
-    ($name:literal, $switch:expr, $open:expr, $close:expr) => {
+    ($name:literal, $open:expr, $close:expr) => {
         EscLayer {
             name: $name,
-            on_switch: $switch,
             is_open: $open,
             close: $close,
         }
@@ -65,13 +40,11 @@ macro_rules! layer {
 pub(super) static ESC_LAYERS: &[EscLayer] = &[
     layer!(
         "first-run-intro",
-        LayerSwitch::AppWide,
         |app| app.first_run.intro_skippable(std::time::Instant::now()),
         |app, _, cx| app.skip_first_run_intro(cx)
     ),
     layer!(
         "instant-view",
-        LayerSwitch::FollowsAccount,
         |app| app.live.as_ref().is_some_and(|live| live
             .driver
             .session
@@ -87,7 +60,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "context-menus",
-        LayerSwitch::Closes,
         |app| app.context_menu_open(),
         |app, _, cx| {
             app.dismiss_context_menus(cx);
@@ -95,7 +67,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "link-popup",
-        LayerSwitch::Closes,
         |app| app.message_ui.link_popup.is_some(),
         |app, _, cx| {
             app.message_ui.link_popup = None;
@@ -105,20 +76,17 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // The profile layer fades out before anything beneath it.
     layer!(
         "profile-modal",
-        LayerSwitch::FollowsAccount,
         |app| app.profile_modal_active(),
         |app, _, cx| app.close_profile_modal(cx)
     ),
     layer!(
         "earn-layer",
-        LayerSwitch::FollowsAccount,
         |app| app.earn_layer_open(),
         |app, window, cx| app.earn_layer_escape(window, cx)
     ),
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        LayerSwitch::Closes,
         |app| app.chat_list.preview.is_some() || app.chat_list.preview_press.is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
@@ -126,33 +94,28 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // itself is a live call and never closes on Escape.
     layer!(
         "screen-privacy",
-        LayerSwitch::AppWide,
         |app| app.screen_share.privacy_for.is_some(),
         |app, _, cx| app.close_screen_privacy(cx)
     ),
     layer!(
         "group-call-settings",
-        LayerSwitch::AppWide,
         |app| app.group_call.settings_open,
         |app, _, cx| app.close_group_call_settings(cx)
     ),
     layer!(
         "group-call-title",
-        LayerSwitch::AppWide,
         |app| app.group_call.title_dialog.is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
     layer!(
         "story-page",
-        LayerSwitch::Closes,
         |app| app.stories.page.is_some(),
         |app, _, cx| app.close_story_page(cx)
     ),
     // Phase 9.3: the story composer is above the story viewer.
     layer!(
         "story-composer",
-        LayerSwitch::Closes,
         |app| app.stories.composer.open,
         |app, _, cx| app.close_story_composer(cx)
     ),
@@ -160,7 +123,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // panel close before the viewer does.
     layer!(
         "story-reply-recording",
-        LayerSwitch::EndedBySwitch,
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
             if app.recording.locked {
@@ -175,7 +137,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "story-reply-panel",
-        LayerSwitch::Closes,
         |app| app.story_reply_panel_active(),
         |app, _, cx| {
             app.stories.reply_panel = false;
@@ -185,38 +146,30 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Phase 9.1: the story viewer is above the media viewer.
     layer!(
         "story-viewer",
-        LayerSwitch::Closes,
         |app| app.stories.viewer.is_open(),
         |app, _, cx| app.close_story_viewer(cx)
     ),
     layer!(
         "photo-editor",
-        LayerSwitch::Closes,
         |app| app.viewer.photo_editor.is_some(),
         |app, _, cx| app.close_photo_editor(cx)
     ),
     layer!(
         "media-viewer",
-        LayerSwitch::Closes,
         |app| app.viewer.state.is_open(),
         |app, _, cx| app.close_media_viewer(cx)
     ),
-    layer!(
-        "country-box",
-        LayerSwitch::Closes,
-        |app| app.country_box_open(),
-        |app, _, cx| { app.close_open_country_boxes(cx) }
-    ),
+    layer!("country-box", |app| app.country_box_open(), |app, _, cx| {
+        app.close_open_country_boxes(cx)
+    }),
     // Slice P1: the checkout and receipt dialogs.
     layer!(
         "payment-dialog",
-        LayerSwitch::Closes,
         |app| app.payments.dialog.is_some(),
         |app, _, cx| app.close_payment_dialog(cx)
     ),
     layer!(
         "payment-receipt",
-        LayerSwitch::FollowsAccount,
         |app| app
             .session()
             .is_some_and(|session| session.payments.receipt_open),
@@ -227,53 +180,38 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        LayerSwitch::EndedBySwitch,
         |app| app.recording.discard_confirm && app.recording_here(),
         |app, _, cx| {
             app.recording.discard_confirm = false;
             cx.notify();
         }
     ),
-    layer!(
-        "recording",
-        LayerSwitch::EndedBySwitch,
-        |app| app.recording_here(),
-        |app, _, cx| {
-            if app.recording.locked {
-                app.connection.set_note(StatusNote::silent(tr(
-                    keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
-                )));
-                cx.notify();
-            } else {
-                app.request_discard_recording(cx);
-            }
+    layer!("recording", |app| app.recording_here(), |app, _, cx| {
+        if app.recording.locked {
+            app.connection.set_note(StatusNote::silent(tr(
+                keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
+            )));
+            cx.notify();
+        } else {
+            app.request_discard_recording(cx);
         }
-    ),
-    layer!(
-        "gif-panel",
-        LayerSwitch::FollowsAccount,
-        |app| app.gif_panel_open(),
-        |app, _, cx| app.close_gif_panel(cx)
-    ),
+    }),
+    layer!("gif-panel", |app| app.gif_panel_open(), |app, _, cx| app
+        .close_gif_panel(cx)),
     layer!(
         "sticker-panel",
-        LayerSwitch::FollowsAccount,
         |app| app.sticker_panel_open(),
         |app, _, cx| app.close_sticker_panel(cx)
     ),
     // Devices page: Esc cancels a pending terminate confirmation first,
     // then leaves a session's details.
-    layer!(
-        "sessions",
-        LayerSwitch::Closes,
-        |app| app.sessions_layer_open(),
-        |app, _, cx| { app.close_sessions_top(cx) }
-    ),
+    layer!("sessions", |app| app.sessions_layer_open(), |app, _, cx| {
+        app.close_sessions_top(cx)
+    }),
     // Slice S3: privacy peels one level per press (picker, exceptions,
     // then the editor), like TGX's back stack.
     layer!(
         "privacy",
-        LayerSwitch::Closes,
         |app| app.privacy.editor.is_some()
             || app.privacy.exceptions.is_some()
             || app.privacy.block_picker_open,
@@ -281,14 +219,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "mute-menu",
-        LayerSwitch::Closes,
         |app| app.notify.mute_menu_open,
         |app, _, cx| app.close_mute_menu(cx)
     ),
     // Phase B4: the TTL picker.
     layer!(
         "ttl-picker",
-        LayerSwitch::Closes,
         |app| app.notify.ttl_picker_open,
         |app, _, cx| {
             app.notify.ttl_picker_open = false;
@@ -297,7 +233,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "sponsored-report",
-        LayerSwitch::FollowsAccount,
         |app| app
             .session()
             .is_some_and(|session| session.messages.sponsored_report.is_some()),
@@ -305,7 +240,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "send-as",
-        LayerSwitch::Closes,
         |app| app.composer_ui.send_as_open,
         |app, _, cx| {
             app.composer_ui.send_as_open = false;
@@ -314,21 +248,18 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "reply-panels",
-        LayerSwitch::Closes,
         |app| (app.share.reply_elsewhere_open || app.share.reply_quote_open)
             && app.composer_ui.has_reply(),
         |app, window, cx| app.close_reply_panels(window, cx)
     ),
     layer!(
         "forward-picker",
-        LayerSwitch::Closes,
         |app| app.share.forward_picker_open,
         |app, window, cx| app.close_forward_picker(window, cx)
     ),
     // The chat list peeking over the conversation (`sidebar_reveal`).
     layer!(
         "sidebar-peek",
-        LayerSwitch::AppWide,
         |app| app.frame.sidebar.pointer() != super::sidebar_reveal::Peek::Off,
         |app, window, cx| app.dismiss_sidebar_peek(window, cx)
     ),
@@ -336,7 +267,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // jump closes the gallery into a chat search).
     layer!(
         "shared-media",
-        LayerSwitch::FollowsAccount,
         |app| app.session().is_some_and(|session| {
             session.media.shared_media.open || session.media.shared_media.playlist_user.is_some()
         }),
@@ -344,31 +274,24 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "chat-search",
-        LayerSwitch::FollowsAccount,
         |app| app.chat_search_is_open(),
         |app, window, cx| app.close_chat_search_ui(window, cx)
     ),
-    layer!(
-        "search",
-        LayerSwitch::FollowsAccount,
-        |app| app.search_is_open(),
-        |app, window, cx| {
-            let query = app.search_ui.input.read(cx).value().to_string();
-            if query.trim().is_empty() {
-                app.close_search_ui(window, cx);
-            } else {
-                app.search_ui
-                    .input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                app.sync_search_query("", cx);
-            }
+    layer!("search", |app| app.search_is_open(), |app, window, cx| {
+        let query = app.search_ui.input.read(cx).value().to_string();
+        if query.trim().is_empty() {
+            app.close_search_ui(window, cx);
+        } else {
+            app.search_ui
+                .input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            app.sync_search_query("", cx);
         }
-    ),
+    }),
     // Selection mode first: Escape leaves it before a reply or edit header
     // goes (tdesktop `HistoryWidget::escape`).
     layer!(
         "selection-mode",
-        LayerSwitch::EndedBySwitch,
         |app| app
             .session()
             .and_then(|session| session.open_chat)
@@ -377,25 +300,21 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "pending-reply",
-        LayerSwitch::EndedBySwitch,
         |app| app.composer_ui.has_reply(),
         |app, _, cx| app.clear_reply(cx)
     ),
     layer!(
         "pending-edit",
-        LayerSwitch::EndedBySwitch,
         |app| app.composer_ui.is_editing(),
         |app, window, cx| app.request_cancel_edit(window, cx)
     ),
     layer!(
         "pending-forward",
-        LayerSwitch::EndedBySwitch,
         |app| app.share.pending_forward.is_some(),
         |app, window, cx| app.clear_forward(window, cx)
     ),
     layer!(
         "forward-result",
-        LayerSwitch::EndedBySwitch,
         |app| app.share.forward_result.is_some(),
         |app, _, cx| {
             app.share.forward_result = None;
@@ -408,7 +327,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Side panels beside the conversation go last: they are not modal.
     layer!(
         "downloads-panel",
-        LayerSwitch::FollowsAccount,
         |app| app
             .session()
             .is_some_and(|session| session.media.downloads_panel_open),
@@ -423,7 +341,6 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "info-panel",
-        LayerSwitch::FollowsAccount,
         |app| !app.profile_modal_active()
             && app
                 .session()
@@ -508,44 +425,10 @@ impl QuillApp {
         (layer.close)(self, window, cx);
         true
     }
-
-    /// The account on screen is changing (`end_account_surfaces`): every
-    /// open layer that closes on a switch ([`LayerSwitch::Closes`]) closes.
-    pub(super) fn close_layers_for_switch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let layers: Vec<_> = ESC_LAYERS
-            .iter()
-            .filter(|layer| layer.on_switch == LayerSwitch::Closes)
-            .map(|layer| (layer.is_open, layer.close))
-            .collect();
-        super::account_surfaces::close_open_surfaces(self, window, cx, &layers);
-    }
 }
 
 #[cfg(test)]
 mod table_tests {
-    /// Every layer says what a switch does to it; only these stay open
-    /// across one (calls and the window's chrome). A new app-wide layer
-    /// joins this list on purpose.
-    #[test]
-    fn only_app_wide_layers_stay_across_a_switch() {
-        use super::LayerSwitch;
-        let kept: Vec<_> = super::ESC_LAYERS
-            .iter()
-            .filter(|layer| layer.on_switch == LayerSwitch::AppWide)
-            .map(|layer| layer.name)
-            .collect();
-        assert_eq!(
-            kept,
-            [
-                "first-run-intro",
-                "screen-privacy",
-                "group-call-settings",
-                "group-call-title",
-                "sidebar-peek"
-            ]
-        );
-    }
-
     #[test]
     fn layer_names_are_unique() {
         let mut names: Vec<_> = super::ESC_LAYERS.iter().map(|layer| layer.name).collect();

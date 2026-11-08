@@ -77,7 +77,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.settings.advanced.debug_confirm,
+            app.preferences.advanced.debug_confirm,
             Some(quill::advanced::debug_mode::enabled())
         );
     });
@@ -87,7 +87,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     // Cancel keeps the mode as it was and clears the question.
     let was = quill::advanced::debug_mode::enabled();
     app.update_in(vcx, |app, _, cx| {
-        app.settings.advanced.debug_confirm = None;
+        app.preferences.advanced.debug_confirm = None;
         cx.notify();
     });
     vcx.run_until_parked();
@@ -106,7 +106,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.settings.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, None);
     });
     // A Settings subpage does not read them either (tdesktop reads them on
     // the settings pages, not on boxes and subpages opened from them).
@@ -117,7 +117,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.settings.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, None);
     });
     // Ctrl-chords are not typed text.
     app.update_in(vcx, |app, _, _| app.settings.sub = None);
@@ -136,7 +136,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     }
     type_into(&app, vcx, "ebugmod");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.settings.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, None);
     });
 }
 
@@ -298,7 +298,7 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
         "the sign-in screen says Test Mode"
     );
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.advanced.test_environment());
+        assert!(app.preferences.advanced.test_environment());
         assert_eq!(app.connection.status_note(), SWITCHED_TO_TEST);
         assert!(app.live.is_none(), "nothing connected");
     });
@@ -341,24 +341,27 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         app.apply_check_result(UpdateState::Available(release.clone()), cx);
         assert!(
-            matches!(app.settings.update_state, UpdateState::Available(_)),
+            matches!(app.preferences.update_state, UpdateState::Available(_)),
             "a package manager installs it: only shown"
         );
     });
     // Forced: the download in the background refuses at once, offline.
     quill::update_install::force_self_update_available(Some(Ok(())));
     app.update_in(vcx, |app, _, cx| {
-        app.settings.update_state = UpdateState::Idle;
+        app.preferences.update_state = UpdateState::Idle;
         app.apply_check_result(UpdateState::Available(release.clone()), cx);
         assert!(
-            matches!(&app.settings.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
             "the release downloads without a click"
         );
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, _| {
         assert!(
-            matches!(app.settings.update_state, UpdateState::DownloadFailed(..)),
+            matches!(
+                app.preferences.update_state,
+                UpdateState::DownloadFailed(..)
+            ),
             "the download finished (offline here) and its result is shown"
         );
     });
@@ -390,12 +393,12 @@ fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppCont
         app.apply_disk_reading(Some(FLOORS.warn - 1), cx);
         app.apply_check_result(UpdateState::Available(release.clone()), cx);
         assert!(
-            matches!(app.settings.update_state, UpdateState::Available(_)),
+            matches!(app.preferences.update_state, UpdateState::Available(_)),
             "the disk bar holds it"
         );
         app.apply_disk_reading(Some(FLOORS.warn_clear), cx);
         assert!(
-            matches!(&app.settings.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
             "a healthy disk starts it"
         );
     });
@@ -430,7 +433,7 @@ fn a_staged_update_asks_for_a_restart_from_the_title_bar(cx: &mut TestAppContext
     assert!(!shown(vcx, "dismiss-update-banner"));
     app.update_in(vcx, |app, _, _| {
         assert_eq!(app.update_control(), quill::updater::UpdateControl::Restart);
-        app.settings.update_state = quill::updater::UpdateState::UpToDate;
+        app.preferences.update_state = quill::updater::UpdateState::UpToDate;
     });
     assert!(
         !shown(vcx, "title-bar-update"),
@@ -455,7 +458,10 @@ fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) 
     click_id(vcx, "title-bar-update");
     app.update_in(vcx, |app, _, _| {
         assert!(
-            matches!(app.settings.update_state, UpdateState::DownloadFailed(..)),
+            matches!(
+                app.preferences.update_state,
+                UpdateState::DownloadFailed(..)
+            ),
             "the click downloaded (and, offline, failed)"
         );
         assert!(matches!(app.update_control(), UpdateControl::Install(_)));

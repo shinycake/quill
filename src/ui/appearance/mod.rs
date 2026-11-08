@@ -77,8 +77,8 @@ impl QuillApp {
             && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
         super::keybindings::capture_active(
             shown,
-            &mut self.settings.keybinding_capture,
-            &mut self.settings.keybinding_error,
+            &mut self.preferences.keybinding_capture,
+            &mut self.preferences.keybinding_error,
         )
     }
 
@@ -154,7 +154,7 @@ impl QuillApp {
         let accent = quill::system_accent::effective(
             self.appearance.accent_rgb,
             self.appearance.system_accent,
-            self.settings.system_accent,
+            self.preferences.system_accent,
         );
         let scale = self.appearance.interface_scale_pct;
         let family = super::appearance_power::interface_font(&self.appearance.font_family, cx);
@@ -164,7 +164,7 @@ impl QuillApp {
             u64::from(accent)
         };
         let applied = (mode, look, hc, scale, family.clone());
-        if self.settings.appearance_applied.as_ref() == Some(&applied) {
+        if self.preferences.appearance_applied.as_ref() == Some(&applied) {
             return;
         }
         set_theme_mode(mode, None, cx);
@@ -214,7 +214,7 @@ impl QuillApp {
         // update.
         let zoom = super::interface_zoom::zoom_for_percent(scale);
         cx.defer(move |_| super::interface_zoom::set_zoom(zoom));
-        self.settings.appearance_applied = Some(applied);
+        self.preferences.appearance_applied = Some(applied);
         cx.notify();
     }
 

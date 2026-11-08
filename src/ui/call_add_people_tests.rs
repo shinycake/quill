@@ -120,7 +120,7 @@ fn typing_filters_the_contacts_and_the_server_people_follow(cx: &mut TestAppCont
     let (rows, _) = shown(&app, call);
     assert_eq!(rows.first(), Some(&4520));
     let picked = app.read_with(call, |app, _| {
-        app.calls
+        app.call_boxes
             .add_people
             .as_ref()
             .map(|open| open.picked.clone())
@@ -142,7 +142,7 @@ fn the_box_goes_with_its_call(cx: &mut TestAppContext) {
         }
         app.sync_call_window(cx);
     });
-    let open = app.read_with(call, |app, _| app.calls.add_people.is_some());
+    let open = app.read_with(call, |app, _| app.call_boxes.add_people.is_some());
     assert!(!open);
     // A new call's box starts empty.
     app.update(call, |app, cx| {
@@ -159,7 +159,7 @@ fn the_box_goes_with_its_call(cx: &mut TestAppContext) {
         app.open_call_add_people(cx);
     });
     let fresh = app.read_with(call, |app, cx| {
-        let open = app.calls.add_people.as_ref().expect("the box");
+        let open = app.call_boxes.add_people.as_ref().expect("the box");
         (open.picked.is_empty(), app.call_add_people_query(cx))
     });
     assert_eq!(fresh, (true, String::new()));

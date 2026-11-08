@@ -425,5 +425,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.bot_verify_dialog.is_some(),
         QuillApp::build_bot_verify_dialog,
     )
-    .closes(|app, _, cx| app.close_bot_verify(cx)),
+    .close(|app, _, cx| app.close_bot_verify(cx)),
 }

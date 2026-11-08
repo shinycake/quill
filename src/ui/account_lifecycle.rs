@@ -680,7 +680,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.account.lifecycle.open,
         QuillApp::build_account_lifecycle_dialog,
     )
-    .closes(|app, window, cx| app.close_account_lifecycle(window, cx)),
+    .close(|app, window, cx| app.close_account_lifecycle(window, cx)),
 }
 
 #[cfg(test)]

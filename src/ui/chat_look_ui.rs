@@ -316,7 +316,7 @@ impl QuillApp {
                         }
                     }
                 }
-                if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
+                if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
                     d.awaiting = (sent > 0).then_some(LookWait { base, sent });
                 }
                 // Nothing in flight and no error: nothing to wait for.
@@ -841,7 +841,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.chat_look_dialog.is_some(),
         QuillApp::build_chat_look_dialog,
     )
-    .closes(|app, _, cx| app.close_chat_look_dialog(cx)),
+    .close(|app, _, cx| app.close_chat_look_dialog(cx)),
 }
 
 #[cfg(test)]

@@ -385,5 +385,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.welcome_dialog.is_some(),
         QuillApp::build_welcome_dialog,
     )
-    .closes(|app, _, cx| app.close_welcome_dialog(cx)),
+    .close(|app, _, cx| app.close_welcome_dialog(cx)),
 }

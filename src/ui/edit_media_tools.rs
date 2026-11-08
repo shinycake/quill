@@ -241,7 +241,7 @@ impl QuillApp {
         };
         match cover_send_path(path) {
             Some(cover) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.screen.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_MISC_COVER_WILL_BE_SAVED_WITH,
                     &[("shown_name", &(shown_name(&cover)).to_string())],
                 )));

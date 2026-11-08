@@ -976,5 +976,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.mini_apps.confirm.is_some(),
         QuillApp::build_web_app_confirm_dialog,
     )
-    .closes(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
 }

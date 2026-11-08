@@ -78,7 +78,7 @@ impl QuillApp {
         }
         let next = !matches!(self.record_mode(), RecordMode::Video);
         self.set_media_pref(|prefs| prefs.prefer_video_mode = next, cx);
-        self.connection.set_note(StatusNote::silent(format!(
+        self.screen.connection.set_note(StatusNote::silent(format!(
             "{} — {}",
             if next {
                 tr(keys::Q_MISC_VIDEO_NOTE_MODE)
@@ -211,11 +211,13 @@ impl QuillApp {
             return;
         }
         self.recording.locked = !self.recording.locked;
-        self.connection.set_note(if self.recording.locked {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.locked {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
+            });
         cx.notify();
     }
 
@@ -315,11 +317,13 @@ impl QuillApp {
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
         self.recording.once = !self.recording.once;
-        self.connection.set_note(if self.recording.once {
-            StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
-        } else {
-            StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
-        });
+        self.screen
+            .connection
+            .set_note(if self.screen.recording.once {
+                StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
+            } else {
+                StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
+            });
         cx.notify();
     }
 

@@ -691,3 +691,64 @@ this one as what shipped.
   alone (the live story's leave and PiP tests) now call
   `end_account_surfaces` first, as `switch_account` does: the story's
   leave is `StoryUi`'s farewell, not the retire's business.
+
+### Phase 3 (the dialogs' state, the splits, the typestates)
+
+- **Calls stay the app's.** The doc's table put the call window, its
+  players, `ended_at` and the group call's window, stream, pin, levels,
+  composer and settings/title dialogs on the screen. A call keeps running
+  in the background account (tdesktop's call panel belongs to the session,
+  which outlives the switch), so `CallUi`, `GroupCallUi` and
+  `ScreenShareUi` (the share chooser of a call, with the AppWide
+  "screen-privacy" layer) stay on `QuillApp`. Only the boxes that open
+  from the account on screen moved: `call_boxes: CallBoxes` (confirm,
+  dialing, call history scroll, mic test, add people, conference link)
+  and `group_call_boxes: GroupCallBoxes` (start dialog, create request,
+  RTMP start, invite, share).
+- **The other splits and their app halves:** `settings` /
+  `preferences: PreferencesUi` (theme, accent and font pickers, sliders,
+  keybindings, updates, what's new, advanced, emoji style, translate);
+  `auth_ui` / `auth_demo: AuthDemo` (`demo_state`, `demo_inputs`: the
+  synthetic mode's, next to `demo_session`; the doc had `demo_state` on
+  the screen); `agent_ui` / `agent_bridge: AgentBridge` (`activity_shown`,
+  `ui_send`, and the wake task, which a per-screen `new` must not spawn);
+  `connection` / `connect: ConnectGeneration` (`generation` and the
+  closed-note mark only: the toasts stay with the note they are made
+  from, so `set_note`'s 1,300 call sites did not move); `windows` /
+  `main_window: MainWindow` (handle, place, cascade, `dialogs_closed`, the
+  key-scope subscription).
+- **The new screen's connection status is the old one's.** The switch
+  sets it again at once (`adopt_live`, `start_connection`); a fresh
+  default would draw the synthetic pane for a frame.
+- **Chat windows close in the farewell**, `ChatWindows`' own, before
+  the replacement, instead of after `end_account_surfaces` in
+  `switch_account`; the new screen's `restore` starts `Pending`, which is
+  what that code set by hand.
+- **Farewells with a body**, found by reading every `.closes` closer and
+  every `LayerSwitch::Closes` row before deleting them: `PaymentUi`
+  (the hub, premium, stars, gifts and money boxes keep their flags in the
+  `Session`, so without a close they would come back on switch-back, and
+  the first-grams hint reaches TDLib), `DialogUi` (a business save in
+  flight), `GiveawayUi`, `PaidMessagesUi` (the held paid send),
+  `PrivacyState` (the OS passkey ceremony), `PeerQrUi` and `ComposerUi`
+  (temp files), `SettingsUi` (the stickers manager commits its edits).
+  Everything else was a flag or `Session` reset, which the drop covers.
+- **`DialogSpec::new` returns the spec**; `.close(c)` is optional and
+  only the agent block reads it. 161 `.closes` → `.close`, 2
+  `.app_wide_closes` → `.close`, 25 `.follows_account()` / `.app_wide()`
+  dropped. `LayerSwitch` and the `layer!` switch argument are gone.
+- **Lint fallout:** the moves made 14 more continuations touch the
+  screen; 4 became `spawn_screen` (toast wake, mic-test meter, the group
+  call schedule countdown, the picked video cover) and 10 carry markers
+  (file-save and failure notes posted as the app, the idle image trim).
+- **Tests:** the four field-list tests went; the boxes test and the
+  round-4 table are one parametrised test over a `HeldBox` table
+  (GroupConfirm, FolderDelete, SessionsConfirm, ClearCalls, BlockBar,
+  CallConfirm) that also checks each flag's struct is an `OnScreen`
+  field (`OnScreen::FIELD_NAMES`); an app-wide dialog's flag
+  (`preferences.emoji_style.open`) is checked to survive. Worth a second
+  look later: the Translate dialog's flag is in `preferences`, so it
+  survives a switch too.
+- **Three auth placeholders** got lang keys (`qll_misc_phone_country_code`,
+  `qll_misc_recovery_code_from_email`, `qll_misc_verification_code`) when
+  they left the check-lang-exempt `app_demo.rs`.

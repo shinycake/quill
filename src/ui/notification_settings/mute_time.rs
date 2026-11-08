@@ -57,7 +57,7 @@ impl QuillApp {
         if self.notify.mute_time.is_some() {
             return;
         }
-        let Some(handle) = self.windows.main else {
+        let Some(handle) = self.main_window.handle else {
             return;
         };
         let app = cx.entity().downgrade();

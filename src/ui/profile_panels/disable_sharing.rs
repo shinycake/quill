@@ -164,7 +164,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.disable_sharing.is_some(),
         QuillApp::build_disable_sharing_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.dialogs.disable_sharing = None;
             cx.notify();
         }),

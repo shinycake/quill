@@ -51,7 +51,7 @@ them at all. The exception marker is
 Subscriptions and observers are not continuations: they react to events
 and act for the account on screen at event time, and one made on a
 screen-owned entity dies with it. The `OnScreen` field list is read from
-src/ui/on_screen.rs when it exists, else from SCREEN_FIELDS below.
+the `on_screen_fields!` declaration in src/ui/on_screen.rs.
 
 Known limits: a method is matched by name, not type; a field reached
 through a local binding (`let h = &mut this.history;` in an outer
@@ -83,16 +83,6 @@ CONTINUATION = re.compile(
 )
 # The app's own work, whose body must not touch the screen's state.
 APP_WORK = re.compile(r"\bspawn_app(?:_in)?\s*\(")
-# The `OnScreen` fields until src/ui/on_screen.rs declares them (phase 1 of
-# the design): the Screen bucket of its section 2.2.
-SCREEN_FIELDS = """
-chat_list shared_media_grid stories premium_preview history composer
-composer_ui pickers sticker_box payments earn common_groups auth_ui
-search_ui location_ui media_search share ai_compose message_ui dialogs
-privacy twofa screen_share recording admin inline_members links giveaway
-paid_messages direct_messages suggested_posts gift_market paid_reaction
-mini_apps viewer folders peer_qr video_avatar profile_cover
-""".split()
 ON_SCREEN_FIELD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][a-z0-9_]*)\s*:", re.M)
 SCREEN_ACCESS = r"(?:live|demo_session)\b|session(?:_mut)?\s*\("
 SCREEN_MARKER = re.compile(r"//\s*screen-scope:\s*\S")
@@ -191,19 +181,16 @@ def without_screen_calls(body: str) -> str:
 
 
 def screen_fields(root: pathlib.Path) -> list[str]:
-    """The `OnScreen` fields: declared in on_screen.rs once it exists."""
+    """The `OnScreen` fields, as `on_screen_fields!` declares them."""
     on_screen = root / "on_screen.rs"
     if not on_screen.exists():
-        return SCREEN_FIELDS
+        sys.exit(f"{on_screen} is missing: the OnScreen field list lives there")
     text = on_screen.read_text()
-    start = text.find("on_screen_fields!")
+    start = text.find("on_screen_fields! {")
     if start < 0:
-        return SCREEN_FIELDS
+        sys.exit(f"{on_screen} has no `on_screen_fields!` declaration")
     body = block_after(text, start)
-    declared = [f for f in ON_SCREEN_FIELD.findall(body) if f not in ("epoch", "client_filled")]
-    # Until the dialogs phase of the design moves the rest, the planned
-    # fields still count.
-    return sorted(set(declared) | set(SCREEN_FIELDS))
+    return [f for f in ON_SCREEN_FIELD.findall(body) if f not in ("epoch", "client_filled")]
 
 
 def screen_field_hits(body: str, recv: set[str], fields: list[str]) -> list[str]:

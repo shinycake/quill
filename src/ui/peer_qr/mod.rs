@@ -149,6 +149,20 @@ pub(crate) struct PeerQrUi {
     pub(super) pending_attach: Option<(ChatId, PathBuf)>,
 }
 
+/// The open box's share card is a file on disk: it goes with the box
+/// (`close_qr_box`).
+impl crate::ui::on_screen::Farewell for PeerQrUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        if app.peer_qr.open.is_some() {
+            app.close_qr_box(cx);
+        }
+    }
+}
+
 impl PeerQrUi {
     pub(crate) fn new(_cx: &mut App) -> Self {
         Self {
@@ -580,7 +594,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.peer_qr.open.is_some(),
         QuillApp::build_peer_qr_dialog,
     )
-    .closes(|app, _, cx| app.close_qr_box(cx)),
+    .close(|app, _, cx| app.close_qr_box(cx)),
 }
 
 #[cfg(test)]

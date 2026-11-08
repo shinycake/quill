@@ -290,8 +290,7 @@ crate::ui::shell::register_dialogs! {
         3951,
         |app| app.session().is_some_and(|s| s.users_state.replies_block.is_some()),
         QuillApp::build_replies_block_dialog,
-    )
-    .follows_account(),
+    ),
 }
 
 /// The chats of the `ready-origin-menus` demo.

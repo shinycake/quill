@@ -52,8 +52,9 @@ pub(in crate::ui) use slot::scope_probe;
 use view::ChatWindowView;
 pub(in crate::ui) use view::WindowScope;
 
-/// The open chat windows and the scope bookkeeping (a `QuillApp` field,
-/// `windows`).
+/// The open chat windows and the scope bookkeeping of the account on
+/// screen (a field of `OnScreen`, `windows`). The main window itself is
+/// the app's ([`MainWindow`]).
 pub(crate) struct ChatWindows {
     open: Vec<OpenChatWindow>,
     /// The chat whose window's state is in place (`None`: the main
@@ -64,15 +65,6 @@ pub(crate) struct ChatWindows {
     pub(super) last_input: Option<ChatId>,
     /// The window showing the kit dialog (`Some(None)`: the main window).
     dialog_host: Option<Option<ChatId>>,
-    /// An account switch closed every kit dialog in the main window: its
-    /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
-    pub(super) main_dialogs_closed: bool,
-    /// The main window, as last rendered.
-    pub(super) main: Option<AnyWindowHandle>,
-    /// Where the main window stood at its last render (`cover`).
-    main_place: Option<WindowPlace>,
-    /// New windows cascade from the main window; this counts them.
-    cascade: u32,
     /// A write of the open windows is scheduled (`saved`).
     save_pending: bool,
     /// Windows the user closed, newest last, for "Reopen closed window"
@@ -80,9 +72,71 @@ pub(crate) struct ChatWindows {
     closed: Vec<(ChatId, Bounds<Pixels>)>,
     /// The windows from last time (`saved`).
     restore: saved::Restore,
+}
+
+/// The outgoing account's windows close, their places saved under that
+/// account and their drafts flushed through its client
+/// (`close_chat_windows_for_switch`); the new screen's `restore` starts
+/// `Pending`, so the incoming account's saved windows come back.
+impl crate::ui::on_screen::Farewell for ChatWindows {
+    fn farewell(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
+        app.close_chat_windows_for_switch(cx);
+    }
+}
+
+/// The main window as the chat windows see it: its handle and place, the
+/// cascade of windows opened from it, and the switch's dialog close. The
+/// process's: a `QuillApp` field (`main_window`).
+pub(crate) struct MainWindow {
+    /// The main window, as last rendered.
+    pub(super) handle: Option<AnyWindowHandle>,
+    /// Where the main window stood at its last render (`cover`).
+    place: Option<WindowPlace>,
+    /// New windows cascade from the main window; this counts them.
+    cascade: u32,
+    /// An account switch closed every kit dialog in the main window: its
+    /// shell forgets the one it showed (`QuillShell::sync_kit_dialogs_in`).
+    pub(super) dialogs_closed: bool,
     /// Keys go to the window that received them: the interceptor runs
     /// before any handler and puts that window's state in place.
     _key_scope: Subscription,
+}
+
+impl MainWindow {
+    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
+        let app = cx.weak_entity();
+        let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
+            let id = window.window_handle().window_id();
+            let _ = app.update(cx, |app, _| {
+                let chat = app.windows.chat_for_window(id);
+                app.note_window_input(chat);
+            });
+        });
+        Self {
+            handle: None,
+            place: None,
+            cascade: 0,
+            dialogs_closed: false,
+            _key_scope: key_scope,
+        }
+    }
+
+    /// Where the next window opens: a 3/4-sized window stepping down and
+    /// right from the main window, as Telegram Desktop's child windows
+    /// do (`MainWindow::countInitialGeometry`, 3/4 of the default size,
+    /// each new child offset from the last).
+    fn next_bounds(&mut self, main: Bounds<Pixels>) -> Bounds<Pixels> {
+        self.cascade = self.cascade % 6 + 1;
+        let step = px(36.) * self.cascade as f32;
+        let size = size(
+            (main.size.width * 0.75).max(px(480.)),
+            (main.size.height * 0.75).max(px(420.)),
+        );
+        Bounds {
+            origin: main.origin + point(step, step),
+            size,
+        }
+    }
 }
 
 struct OpenChatWindow {
@@ -95,28 +149,15 @@ struct OpenChatWindow {
 }
 
 impl ChatWindows {
-    pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
-        let app = cx.weak_entity();
-        let key_scope = cx.intercept_keystrokes(move |_, window, cx| {
-            let id = window.window_handle().window_id();
-            let _ = app.update(cx, |app, _| {
-                let chat = app.windows.chat_for_window(id);
-                app.note_window_input(chat);
-            });
-        });
+    pub(super) fn new() -> Self {
         Self {
             open: Vec::new(),
             scope: None,
             last_input: None,
             dialog_host: None,
-            main_dialogs_closed: false,
-            main: None,
-            main_place: None,
-            cascade: 0,
             save_pending: false,
             closed: Vec::new(),
             restore: saved::Restore::default(),
-            _key_scope: key_scope,
         }
     }
 
@@ -277,23 +318,6 @@ impl ChatWindows {
         });
         true
     }
-
-    /// Where the next window opens: a 3/4-sized window stepping down and
-    /// right from the main window, as Telegram Desktop's child windows
-    /// do (`MainWindow::countInitialGeometry`, 3/4 of the default size,
-    /// each new child offset from the last).
-    fn next_bounds(&mut self, main: Bounds<Pixels>) -> Bounds<Pixels> {
-        self.cascade = self.cascade % 6 + 1;
-        let step = px(36.) * self.cascade as f32;
-        let size = size(
-            (main.size.width * 0.75).max(px(480.)),
-            (main.size.height * 0.75).max(px(420.)),
-        );
-        Bounds {
-            origin: main.origin + point(step, step),
-            size,
-        }
-    }
 }
 
 impl QuillApp {
@@ -397,11 +421,11 @@ impl QuillApp {
         // Cascade from the main window, wherever the request came from.
         let bounds = bounds.unwrap_or_else(|| {
             let main = self
-                .windows
-                .main
+                .main_window
+                .handle
                 .and_then(|main| main.update(cx, |_, window, _| window.bounds()).ok())
                 .unwrap_or_else(|| window.bounds());
-            self.windows.next_bounds(main)
+            self.main_window.next_bounds(main)
         });
         let owner = cx.entity();
         let screen = self.screen_epoch();
@@ -482,7 +506,7 @@ impl QuillApp {
             // The window shows it already.
             return true;
         }
-        let Some(main) = self.windows.main else {
+        let Some(main) = self.main_window.handle else {
             return false;
         };
         let owner = cx.entity();

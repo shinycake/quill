@@ -124,7 +124,7 @@ impl QuillApp {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .track_scroll(&self.calls.history_scroll)
+                    .track_scroll(&self.call_boxes.history_scroll)
                     .on_scroll(crate::ui::scroll_load::watch_scroll(
                         cx,
                         Self::calls_history_more,
@@ -565,7 +565,7 @@ impl QuillApp {
         })
         .when(
             quill::auth::can_request_qr_login(&self.current_auth())
-                && (self.live.is_some() || self.auth_ui.demo_inputs),
+                && (self.live.is_some() || self.auth_demo.demo_inputs),
             |this| {
                 this.child(
                     Button::new("qr-login")

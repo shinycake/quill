@@ -331,7 +331,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.contact_prefs.sync_enabled = next;
             if let Err(err) = live.driver.save_contact_prefs() {
-                self.connection.set_note(StatusNote::error(tr_with(
+                self.screen.connection.set_note(StatusNote::error(tr_with(
                     keys::Q_PEOPLE_COULDNT_SAVE_CONTACT_PREFS,
                     &[("err", &err.to_string())],
                 )));
@@ -534,14 +534,14 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.import_contacts_dialog.is_some(),
         QuillApp::build_import_contacts_dialog,
     )
-    .closes(|app, _, cx| app.close_import_contacts_dialog(cx)),
+    .close(|app, _, cx| app.close_import_contacts_dialog(cx)),
 
     AddContact => DialogSpec::new(
         6200,
         |app| app.dialogs.add_contact_dialog.is_some(),
         QuillApp::build_add_contact_dialog,
     )
-    .closes(|app, _, cx| app.close_add_contact_dialog(cx)),
+    .close(|app, _, cx| app.close_add_contact_dialog(cx)),
 }
 
 /// tdesktop's `contactsPhotoSize`.

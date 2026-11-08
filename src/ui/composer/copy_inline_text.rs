@@ -55,7 +55,7 @@ impl QuillApp {
         };
         match edit.replacement_for(path, as_file) {
             Ok(replacement) => {
-                self.connection.set_note(StatusNote::silent(tr_with(
+                self.screen.connection.set_note(StatusNote::silent(tr_with(
                     keys::Q_CHAT_REPLACING_ATTACHMENT_WITH,
                     &[("file_name", &replacement.file_name.to_string())],
                 )));
@@ -261,7 +261,7 @@ impl QuillApp {
             match result {
                 Ok(_) => {
                     self.finish_edit_restore_draft(window, cx);
-                    self.connection.set_note(
+                    self.screen.connection.set_note(
                         self.send_started_note(
                             ComposerScheduling::None,
                             tr(keys::Q_CHAT_SAVING_EDIT),

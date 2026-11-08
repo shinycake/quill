@@ -367,7 +367,7 @@ impl QuillApp {
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .select_search_chat_open(chat_id, open, text, reply, now_ms)
@@ -414,7 +414,7 @@ impl QuillApp {
         // The found message wins over the chat's saved scroll position.
         let _ = self.chat_open_at(chat_id, Some(message_id));
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .select_search_message(chat_id, message_id, text, reply, now_ms)

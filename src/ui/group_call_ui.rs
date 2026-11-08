@@ -200,7 +200,7 @@ impl QuillApp {
                             .accessibility_label(tr(keys::GROUP_CALL_CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.group_call.invite_open = false;
+                                this.group_call_boxes.invite_open = false;
                                 this.close_conference_link();
                                 cx.notify();
                             })),

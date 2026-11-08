@@ -670,7 +670,7 @@ impl QuillApp {
         allowed: bool,
         cx: &mut Context<Self>,
     ) {
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.set_community_permissions(community_id, allowed) {
                 Ok(Some(_)) => {
                     StatusNote::silent(tr(keys::Q_PEOPLE_UPDATING_COMMUNITY_PERMISSIONS))
@@ -692,14 +692,14 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.username_dialog.is_some(),
         QuillApp::build_username_dialog,
     )
-    .closes(|app, _, cx| app.close_username_dialog(cx)),
+    .close(|app, _, cx| app.close_username_dialog(cx)),
 
     GroupConfirm => DialogSpec::new(
         4800,
         |app| app.admin.group_confirm_dialog.is_some(),
         QuillApp::build_group_confirm_dialog,
     )
-    .closes(|app, _, cx| app.close_group_confirm(cx)),
+    .close(|app, _, cx| app.close_group_confirm(cx)),
 }
 
 mod build_group_confirm_dialog;

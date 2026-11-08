@@ -104,7 +104,7 @@ fn a_users_bio_offers_translate_unless_the_button_is_off(cx: &mut TestAppContext
     );
     assert!(plan.translate.is_some_and(|t| !t.selected));
     app.update(&mut vcx, |app, _| {
-        app.settings.translate.prefs.show_button = false;
+        app.preferences.translate.prefs.show_button = false;
     });
     let off = app.read_with(&vcx, |app, _| app.about_menu_plan(chat, bio, Some("Lyon")));
     assert!(off.translate.is_none());

@@ -51,7 +51,7 @@ impl QuillApp {
         };
         let handle = match origin {
             Some(chat_id) => self.windows.window_for(chat_id).map(|open| open.handle),
-            None => self.windows.main,
+            None => self.main_window.handle,
         };
         let Some(handle) = handle else {
             self.discard_recording_of_closed_window(cx);

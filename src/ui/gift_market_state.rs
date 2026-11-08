@@ -102,6 +102,8 @@ pub(crate) struct GiftMarketUi {
     pub(super) forge_started: Option<Instant>,
 }
 
+impl crate::ui::on_screen::Farewell for GiftMarketUi {}
+
 impl GiftMarketUi {
     pub(super) fn new() -> Self {
         Self {

@@ -826,35 +826,31 @@ crate::ui::shell::register_dialogs! {
         |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm.is_some()),
         QuillApp::build_earn_setup_confirm_dialog,
     )
-    .closes(|app, _, cx| app.close_setup_confirm(cx)),
+    .close(|app, _, cx| app.close_setup_confirm(cx)),
     /// "View existing programs".
     EarnPrograms => DialogSpec::new(
         7616,
         |app| app.earn_state().is_some_and(|e| e.programs_box.is_some()),
         QuillApp::build_earn_programs_dialog,
-    )
-    .follows_account(),
+    ),
     /// Joining a program.
     EarnJoin => DialogSpec::new(
         7617,
         |app| app.earn_state().is_some_and(|e| e.join_box.is_some()),
         QuillApp::build_earn_join_dialog,
-    )
-    .follows_account(),
+    ),
     /// A joined program's referral link.
     EarnLink => DialogSpec::new(
         7618,
         |app| app.earn_state().is_some_and(|e| e.link_box.is_some()),
         QuillApp::build_earn_link_dialog,
-    )
-    .follows_account(),
+    ),
     /// "Revoke Link".
     EarnRevoke => DialogSpec::new(
         7619,
         |app| app.earn_state().is_some_and(|e| e.revoke.is_some()),
         QuillApp::build_earn_revoke_dialog,
-    )
-    .follows_account(),
+    ),
 }
 
 #[cfg(test)]

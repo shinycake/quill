@@ -511,7 +511,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.community.create_dialog.is_some(),
         build_create_community_dialog,
     )
-    .closes(|app, _, cx| app.close_create_community_dialog(cx)),
+    .close(|app, _, cx| app.close_create_community_dialog(cx)),
 
     /// Slice G10: communities hub dialog.
     CommunityHub => DialogSpec::new(
@@ -519,5 +519,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.community.hub_open,
         build_community_hub_dialog,
     )
-    .closes(|app, _, cx| app.close_community_hub(cx)),
+    .close(|app, _, cx| app.close_community_hub(cx)),
 }

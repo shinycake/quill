@@ -871,7 +871,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.links.callback_password_dialog.is_some(),
         QuillApp::build_callback_password_dialog,
     )
-    .closes(|app, _, cx| app.close_callback_password_dialog(cx)),
+    .close(|app, _, cx| app.close_callback_password_dialog(cx)),
 
     LoginUrlConfirm => DialogSpec::new(
         2500,
@@ -879,5 +879,5 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_login_url_confirm_dialog,
     )
 
-    .closes(|app, _, cx| { app.links.login_url_confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.links.login_url_confirm = None; cx.notify(); }),
 }

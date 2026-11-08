@@ -40,6 +40,8 @@ pub(super) struct ProfileCoverUi {
     pub(super) rating_preview: bool,
 }
 
+impl crate::ui::on_screen::Farewell for ProfileCoverUi {}
+
 /// The ring's box around the cover: the photo keeps its size inside it.
 const RINGED_COVER: f32 = COVER_SIZE + 3. * UNREAD_WIDTH;
 
@@ -235,11 +237,11 @@ crate::ui::shell::register_dialogs! {
         |app| app.profile_cover.rating_box.is_some(),
         QuillApp::build_rating_box,
     )
-    .closes(|app, _, cx| app.close_rating_box(cx)),
+    .close(|app, _, cx| app.close_rating_box(cx)),
     ShowOrPremium => DialogSpec::new(
         3792,
         |app| app.profile_cover.show_or_premium.is_some(),
         QuillApp::build_show_or_premium_box,
     )
-    .closes(|app, _, cx| app.close_show_or_premium(cx)),
+    .close(|app, _, cx| app.close_show_or_premium(cx)),
 }

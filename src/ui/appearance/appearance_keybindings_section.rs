@@ -25,7 +25,7 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         let resolved = resolve_keybindings(&customs);
-        let capturing = self.settings.keybinding_capture.clone();
+        let capturing = self.preferences.keybinding_capture.clone();
         let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
             let row_state = resolved.iter().find(|row| row.id == ra.id);
             let current = row_state
@@ -47,7 +47,7 @@ impl QuillApp {
             let error = if is_capturing {
                 None
             } else {
-                self.settings
+                self.preferences
                     .keybinding_error
                     .as_ref()
                     .filter(|(err_id, _)| err_id == ra.id)
@@ -101,13 +101,13 @@ impl QuillApp {
                                 .on_click({
                                     let id = id.clone();
                                     cx.listener(move |this, _, window, cx| {
-                                        if this.settings.keybinding_capture.as_deref()
+                                        if this.preferences.keybinding_capture.as_deref()
                                             == Some(id.as_str())
                                         {
-                                            this.settings.keybinding_capture = None;
+                                            this.preferences.keybinding_capture = None;
                                         } else {
-                                            this.settings.keybinding_capture = Some(id.clone());
-                                            window.focus(&this.settings.keybinding_focus, cx);
+                                            this.preferences.keybinding_capture = Some(id.clone());
+                                            window.focus(&this.preferences.keybinding_focus, cx);
                                         }
                                         cx.notify();
                                     })
@@ -130,14 +130,14 @@ impl QuillApp {
                                             let customs = live.driver.load_custom_keybindings();
                                             apply_custom_bindings(cx, &customs);
                                         }
-                                        this.settings.keybinding_capture = None;
+                                        this.preferences.keybinding_capture = None;
                                         if this
-                                            .settings
+                                            .preferences
                                             .keybinding_error
                                             .as_ref()
                                             .is_some_and(|(err_id, _)| err_id == &id)
                                         {
-                                            this.settings.keybinding_error = None;
+                                            this.preferences.keybinding_error = None;
                                         }
                                         cx.notify();
                                     })
@@ -145,7 +145,7 @@ impl QuillApp {
                         ),
                 );
             let row = if is_capturing {
-                row.track_focus(&self.settings.keybinding_focus)
+                row.track_focus(&self.preferences.keybinding_focus)
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         // Stop the key before it dismisses Appearance or runs
                         // a global binding. GPUI also matches keybindings
@@ -206,14 +206,14 @@ impl QuillApp {
         if !self.keybinding_capture_active() {
             return;
         }
-        let Some(id) = self.settings.keybinding_capture.clone() else {
+        let Some(id) = self.preferences.keybinding_capture.clone() else {
             return;
         };
         if keystroke.is_modifier_key() {
             return;
         }
         if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            self.settings.keybinding_capture = None;
+            self.preferences.keybinding_capture = None;
             cx.notify();
             return;
         }
@@ -226,8 +226,8 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.settings.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
-            self.settings.keybinding_capture = None;
+            self.preferences.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
+            self.preferences.keybinding_capture = None;
             cx.notify();
             return;
         }
@@ -242,15 +242,15 @@ impl QuillApp {
         if let Some(customs) = saved {
             apply_custom_bindings(cx, &customs);
             if self
-                .settings
+                .preferences
                 .keybinding_error
                 .as_ref()
                 .is_some_and(|(err_id, _)| err_id == &id)
             {
-                self.settings.keybinding_error = None;
+                self.preferences.keybinding_error = None;
             }
         }
-        self.settings.keybinding_capture = None;
+        self.preferences.keybinding_capture = None;
         cx.notify();
     }
 }

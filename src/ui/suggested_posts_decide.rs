@@ -589,19 +589,19 @@ crate::ui::shell::register_dialogs! {
         |app| app.suggested_posts.grams_needed.is_some(),
         QuillApp::build_grams_needed_dialog,
     )
-    .closes(|app, _, cx| app.close_grams_needed(cx)),
+    .close(|app, _, cx| app.close_grams_needed(cx)),
     /// "Accept Terms" of a suggested post.
     SuggestAccept => DialogSpec::new(
         3964,
         |app| app.suggested_posts.accept.is_some(),
         QuillApp::build_suggest_accept_dialog,
     )
-    .closes(|app, _, cx| app.close_suggest_accept(cx)),
+    .close(|app, _, cx| app.close_suggest_accept(cx)),
     /// "Decline" of a suggested post, with the reason.
     SuggestDecline => DialogSpec::new(
         3966,
         |app| app.suggested_posts.decline.is_some(),
         QuillApp::build_suggest_decline_dialog,
     )
-    .closes(|app, _, cx| app.close_suggest_decline(cx)),
+    .close(|app, _, cx| app.close_suggest_decline(cx)),
 }

@@ -37,6 +37,12 @@ pub(crate) struct CallUi {
     pub(super) ended_at: Option<(i32, std::time::Instant)>,
     pub(super) sounds: super::call_sounds::CallSounds,
     pub(super) sound_marks: super::call_sounds::SoundMarks,
+}
+
+/// The boxes the account on screen opens around calls. The call itself
+/// ([`CallUi`]) is the app's: it goes on in the background account, as
+/// tdesktop's call panel belongs to the session. A field of `OnScreen`.
+pub(crate) struct CallBoxes {
     /// Phase C2i: pending "call again" / profile-call confirmation when
     /// the confirm-before-calling pref is on: `(user_id, is_video)`.
     pub(super) confirm: Option<(i64, bool)>,
@@ -58,6 +64,26 @@ pub(crate) struct CallUi {
     /// (`ui::call_conference_ui`).
     pub(super) conference_link: Option<String>,
 }
+
+impl CallBoxes {
+    pub(super) fn new() -> Self {
+        Self {
+            confirm: None,
+            history_scroll: ScrollHandle::new(),
+            history_asked: Default::default(),
+            dialing: None,
+            mic_test: Default::default(),
+            mic_test_starts: 0,
+            open_mic_test: super::call_audio_ui::open_default_mic_test(),
+            add_people: None,
+            conference_link: None,
+        }
+    }
+}
+
+/// The microphone test's device closes with the value; the boxes hold ids
+/// and flags.
+impl super::on_screen::Farewell for CallBoxes {}
 
 impl CallUi {
     /// The call window is gone (closed by the user or by the app): drop its
@@ -83,15 +109,6 @@ impl CallUi {
             ended_at: None,
             sounds: super::call_sounds::CallSounds::new(audio_output),
             sound_marks: Default::default(),
-            confirm: None,
-            history_scroll: ScrollHandle::new(),
-            history_asked: Default::default(),
-            dialing: None,
-            mic_test: Default::default(),
-            mic_test_starts: 0,
-            open_mic_test: super::call_audio_ui::open_default_mic_test(),
-            add_people: None,
-            conference_link: None,
         }
     }
 }

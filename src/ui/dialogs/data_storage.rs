@@ -120,8 +120,12 @@ impl QuillApp {
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage));
         self.settings.data_storage_editor = None;
-        self.settings.index_sliders.remove(StepSlider::StorageSize);
-        self.settings.index_sliders.remove(StepSlider::StorageKeep);
+        self.preferences
+            .index_sliders
+            .remove(StepSlider::StorageSize);
+        self.preferences
+            .index_sliders
+            .remove(StepSlider::StorageKeep);
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.storage_freed = None;
@@ -580,7 +584,7 @@ impl QuillApp {
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 // Switching on resumes at the slider's step.
                                 let index = this
-                                    .settings
+                                    .preferences
                                     .index_sliders
                                     .index(StepSlider::DataCap(kind), cx);
                                 if let Some((_, draft)) = this.settings.data_storage_editor.as_mut()

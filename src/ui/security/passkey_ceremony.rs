@@ -610,7 +610,7 @@ crate::ui::shell::register_dialogs! {
             .is_some_and(|ui| ui.sheet != CeremonySheet::Probing),
         QuillApp::build_passkey_ceremony_dialog,
     )
-    .closes(|app, window, cx| app.close_passkey_ceremony(window, cx)),
+    .close(|app, window, cx| app.close_passkey_ceremony(window, cx)),
 }
 
 crate::ui::screenshot_demo::register_demos![

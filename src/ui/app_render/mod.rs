@@ -73,7 +73,7 @@ impl Render for QuillApp {
         super::frame_clock::trace_slice_render("app");
         let outer_scope = self.windows.scope;
         self.set_window_scope(None);
-        self.windows.main = Some(window.window_handle());
+        self.main_window.handle = Some(window.window_handle());
         self.slices.a11y_active.set(self.a11y_tree_wanted(window));
         self.release_viewer_key_probe(window, cx);
         self.sync_update_pill();
@@ -139,7 +139,7 @@ impl Render for QuillApp {
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
         let inputs_live =
-            (self.live.is_some() || self.auth_ui.demo_inputs) && !self.disk.shows_screen();
+            (self.live.is_some() || self.auth_demo.demo_inputs) && !self.disk.shows_screen();
         let show_phone = inputs_live && matches!(auth.action, AuthAction::EnterPhone);
         let show_code = inputs_live && matches!(auth.action, AuthAction::EnterCode);
         let show_password = inputs_live && matches!(auth.action, AuthAction::EnterPassword);
@@ -606,9 +606,9 @@ impl Render for QuillApp {
             .children(self.unconfirmed_login_banner(cx))
             .when(
                 matches!(
-                    self.settings.update_state,
+                    self.preferences.update_state,
                     quill::updater::UpdateState::Installed(_)
-                ) && !self.settings.update_banner_dismissed,
+                ) && !self.preferences.update_banner_dismissed,
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection

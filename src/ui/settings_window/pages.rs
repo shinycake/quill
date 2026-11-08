@@ -96,7 +96,7 @@ impl QuillApp {
                 )),
             Page::Appearance => {
                 self.ensure_wallpapers_loaded(cx);
-                if !self.settings.system_accent_probed {
+                if !self.preferences.system_accent_probed {
                     self.refresh_system_accent(cx);
                 }
                 column

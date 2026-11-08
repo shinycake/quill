@@ -45,26 +45,29 @@ impl QuillApp {
     /// Shows the window, raising it when it is already open, and loads the
     /// notes the first time (or again after a failure).
     pub(crate) fn open_whats_new(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.settings.whats_new.notes, Notes::Idle | Notes::Failed) {
+        if matches!(
+            self.preferences.whats_new.notes,
+            Notes::Idle | Notes::Failed
+        ) {
             self.load_release_notes(cx);
         }
-        if let Some(handle) = self.settings.whats_new.window {
+        if let Some(handle) = self.preferences.whats_new.window {
             let raised = handle.update(cx, |_, window, _| window.activate_window());
             if raised.is_ok() {
                 return;
             }
-            self.settings.whats_new.window = None;
+            self.preferences.whats_new.window = None;
         }
-        if self.settings.whats_new.opening {
+        if self.preferences.whats_new.opening {
             return;
         }
-        self.settings.whats_new.opening = true;
+        self.preferences.whats_new.opening = true;
         let owner = cx.entity();
         cx.defer(move |cx| {
             let handle = open_window(owner.clone(), cx);
             owner.update(cx, |app, cx| {
-                app.settings.whats_new.opening = false;
-                app.settings.whats_new.window = handle;
+                app.preferences.whats_new.opening = false;
+                app.preferences.whats_new.window = handle;
                 cx.notify();
             });
         });
@@ -74,14 +77,14 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        self.settings.whats_new.notes = Notes::Loading;
+        self.preferences.whats_new.notes = Notes::Loading;
         let fetch = cx
             .background_executor()
             .spawn(async move { quill::release_notes::fetch() });
         cx.spawn(async move |this, cx| {
             let result = fetch.await;
             let _ = this.update(cx, |app, cx| {
-                app.settings.whats_new.notes = match result {
+                app.preferences.whats_new.notes = match result {
                     Ok(notes) => Notes::Loaded(Rc::new(notes)),
                     Err(_) => Notes::Failed,
                 };
@@ -93,7 +96,7 @@ impl QuillApp {
     }
 
     fn whats_new_closed(&mut self, cx: &mut Context<Self>) {
-        self.settings.whats_new.window = None;
+        self.preferences.whats_new.window = None;
         cx.notify();
     }
 }
@@ -208,7 +211,7 @@ impl QuillApp {
     /// The window's content, from the loaded notes alone.
     fn whats_new_body(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let content = match &self.settings.whats_new.notes {
+        let content = match &self.preferences.whats_new.notes {
             Notes::Idle | Notes::Loading => div()
                 .id("whats-new-loading")
                 .flex()
@@ -394,11 +397,11 @@ fn release_section(note: &ReleaseNote, cx: &mut Context<QuillApp>) -> AnyElement
 impl QuillApp {
     /// Screenshot demos and tests: the notes as if just loaded.
     pub(crate) fn use_release_notes(&mut self, notes: Vec<ReleaseNote>) {
-        self.settings.whats_new.notes = Notes::Loaded(Rc::new(notes));
+        self.preferences.whats_new.notes = Notes::Loaded(Rc::new(notes));
     }
 
     #[cfg(test)]
     pub(crate) fn whats_new_window(&self) -> Option<AnyWindowHandle> {
-        self.settings.whats_new.window
+        self.preferences.whats_new.window
     }
 }

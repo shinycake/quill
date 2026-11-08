@@ -31,6 +31,8 @@ pub(crate) struct SharedMediaGridUi {
     list_asked: [Asked; SharedMediaTab::COUNT],
 }
 
+impl crate::ui::on_screen::Farewell for SharedMediaGridUi {}
+
 impl SharedMediaGridUi {
     pub(crate) fn new() -> Self {
         Self {

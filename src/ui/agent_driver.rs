@@ -238,7 +238,7 @@ impl QuillApp {
                         Err(refusal) => Err(refusal),
                     });
                 refusals.extend(guard::take_refusals());
-                let send = app.update(cx, |app, _| app.agent_ui.ui_send.take());
+                let send = app.update(cx, |app, _| app.agent_bridge.ui_send.take());
                 match outcome {
                     Err(()) => {
                         pending.answer(UiReply::Refused(policy::window_closed()));

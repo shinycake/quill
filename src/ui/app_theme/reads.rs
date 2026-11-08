@@ -35,20 +35,20 @@ impl QuillApp {
     /// The custom themes for the chooser, read off the UI thread the first
     /// time; empty until then. A file that cannot be read is left out.
     pub(crate) fn custom_themes(&mut self, cx: &mut Context<Self>) -> &[CustomTheme] {
-        let themes = &mut self.settings.app_theme;
+        let themes = &mut self.preferences.app_theme;
         if themes.custom.is_none() && themes.custom_read.is_none() {
             let dir = Self::themes_dir();
             let read = cx.background_spawn(async move { read_custom_themes(&dir) });
             themes.custom_read = Some(cx.spawn(async move |this, cx| {
                 let read = read.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.settings.app_theme.custom = Some(read);
-                    this.settings.app_theme.custom_read = None;
+                    this.preferences.app_theme.custom = Some(read);
+                    this.preferences.app_theme.custom_read = None;
                     cx.notify();
                 });
             }));
         }
-        self.settings
+        self.preferences
             .app_theme
             .custom
             .as_deref()
@@ -65,7 +65,7 @@ impl QuillApp {
         name: &str,
         cx: &mut Context<Self>,
     ) -> PaletteRead {
-        let themes = &mut self.settings.app_theme;
+        let themes = &mut self.preferences.app_theme;
         if let Some(palette) = themes.cached_palette(name) {
             return PaletteRead::Read(palette.clone());
         }
@@ -87,7 +87,7 @@ impl QuillApp {
             let task = cx.spawn(async move |this, cx| {
                 let palette = read.await;
                 let _ = this.update(cx, |this, cx| {
-                    let themes = &mut this.settings.app_theme;
+                    let themes = &mut this.preferences.app_theme;
                     themes.palette_read = None;
                     themes.cache_palette(wanted, palette);
                     this.apply_appearance(cx);

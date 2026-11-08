@@ -60,7 +60,7 @@ impl QuillApp {
             Some("❤")
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, emoji)
@@ -95,7 +95,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.join_live_story(chat_id, story_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_JOINING_LIVE_STORY)),
                     Err(err) => crate::ui::calls::join_error_note(
@@ -141,7 +142,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .set_story_reaction(item.chat_id, item.story_id, Some(emoji))
@@ -214,7 +215,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.set_story_custom_emoji_reaction(
                     item.chat_id,
                     item.story_id,
@@ -295,7 +296,7 @@ impl QuillApp {
         self.close_story_viewer(cx);
         self.flush_leaving_draft(cx);
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .select_chat(chat_id)
@@ -308,7 +309,9 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_chat(chat_id);
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         self.dismiss_cross_chat_state(chat_id, cx);
         // The composer shows the new chat's draft (next frame: no window here).
@@ -338,7 +341,7 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .send_story_reply(item.chat_id, item.story_id, &text)
@@ -368,7 +371,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.delete_story(item.chat_id, item.story_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_DELETING_STORY)),
                     Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_DELETE_STORY)),
@@ -539,7 +542,7 @@ impl QuillApp {
                     .session
                     .story_report_sending(item.chat_id.0, item.story_id);
             }
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .report_story(item.chat_id, item.story_id, option_id, text)

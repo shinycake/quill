@@ -451,5 +451,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.bot_edit_dialog.is_some(),
         QuillApp::build_bot_edit_dialog,
     )
-    .closes(|app, _, cx| app.close_bot_edit(cx)),
+    .close(|app, _, cx| app.close_bot_edit(cx)),
 }

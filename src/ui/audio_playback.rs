@@ -337,7 +337,7 @@ impl QuillApp {
         let _ = self.players.audio.seek(offset, was_playing);
         quill::wake::CHROME.poke();
         if was_playing {
-            self.connection.set_note(StatusNote::silent(format!(
+            self.screen.connection.set_note(StatusNote::silent(format!(
                 "{} — seek {}",
                 match self.active_playback_kind() {
                     PlaybackKind::Voice => tr(keys::Q_AV_PLAYING_VOICE_NOTE),
@@ -599,7 +599,7 @@ impl QuillApp {
                     .set_note(StatusNote::silent(tr(keys::Q_AV_VOICE_NOTE_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.set_note(if self.is_playing() {
+                self.screen.connection.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_VOICE_NOTE))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_VOICE_NOTE_CANT_BE_PLAYED))
@@ -678,7 +678,7 @@ impl QuillApp {
                     .set_note(StatusNote::silent(tr(keys::Q_AV_AUDIO_PAUSED)));
             } else {
                 self.resume_active_playback(cx);
-                self.connection.set_note(if self.is_playing() {
+                self.screen.connection.set_note(if self.is_playing() {
                     StatusNote::silent(tr(keys::Q_AV_PLAYING_AUDIO))
                 } else {
                     StatusNote::error(tr(keys::Q_AV_AUDIO_CANT_BE_PLAYED))

@@ -507,7 +507,8 @@ impl QuillApp {
     /// locally (no live driver).
     pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.join_channel(chat_id) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_JOINING_CHANNEL)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_JOIN_CHANNEL)),
@@ -525,7 +526,8 @@ impl QuillApp {
     /// `leaveChat` for the open channel. Demo sessions flip the status locally.
     pub(in crate::ui) fn leave_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.leave_channel(chat_id) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_LEAVING_CHANNEL)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LEAVE_CHANNEL)),

@@ -512,7 +512,7 @@ impl QuillApp {
         };
         let mut changed = false;
         if let Some(note) = live.driver.session.take_sticker_set_edit_note() {
-            self.connection.set_note(StatusNote::info(note));
+            self.screen.connection.set_note(StatusNote::info(note));
             changed = true;
         }
         let deleted = live

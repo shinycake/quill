@@ -231,7 +231,7 @@ crate::ui::shell::register_dialogs! {
             )
         },
     )
-    .closes(|app, _, cx| app.set_invite_link_custom(None, cx)),
+    .close(|app, _, cx| app.set_invite_link_custom(None, cx)),
     /// "Custom" of "Limit by number of users".
     InviteLinkLimit => DialogSpec::new(
         4862,
@@ -246,5 +246,5 @@ crate::ui::shell::register_dialogs! {
             )
         },
     )
-    .closes(|app, _, cx| app.set_invite_link_custom(None, cx)),
+    .close(|app, _, cx| app.set_invite_link_custom(None, cx)),
 }

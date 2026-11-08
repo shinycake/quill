@@ -125,7 +125,7 @@ impl QuillApp {
             match live.driver.resolve_custom_emoji(id) {
                 Ok(None) => break,
                 Ok(Some(_)) | Err(_) => {
-                    self.ai_compose.emoji_asked.insert(id);
+                    self.screen.ai_compose.emoji_asked.insert(id);
                 }
             }
         }

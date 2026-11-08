@@ -797,7 +797,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.privacy.websites_open,
         QuillApp::build_websites_dialog,
     )
-    .closes(|app, _, cx| app.close_websites(cx)),
+    .close(|app, _, cx| app.close_websites(cx)),
 
     TwoFa => DialogSpec::new(
         800,
@@ -805,7 +805,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_twofa_dialog,
     )
 
-    .closes(|app, window, cx| app.close_twofa(window, cx)),
+    .close(|app, window, cx| app.close_twofa(window, cx)),
 }
 
 mod passkey_ceremony;

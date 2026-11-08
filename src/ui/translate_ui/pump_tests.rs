@@ -43,7 +43,7 @@ fn a_picked_language_is_asked_for_by_the_pass_the_pick_wakes(cx: &mut TestAppCon
 
     let asked = app.update(&mut vcx, |app, _| {
         app.pump_translation();
-        app.settings.translate.asked.clone()
+        app.preferences.translate.asked.clone()
     });
     assert_eq!(
         asked.first(),

@@ -118,7 +118,7 @@ impl QuillApp {
         else {
             return false;
         };
-        self.connection.set_note(match self.live.as_mut() {
+        self.screen.connection.set_note(match self.live.as_mut() {
             Some(live) => match live.driver.get_message_link_at(chat_id, message_id, secs) {
                 Ok(_) => StatusNote::info(tr(keys::Q_AV_FETCHING_MESSAGE_LINK)),
                 Err(_) => StatusNote::error(tr(keys::Q_AV_COULD_NOT_GET_MESSAGE_LINK)),

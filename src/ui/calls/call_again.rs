@@ -34,7 +34,7 @@ impl QuillApp {
             .session()
             .is_some_and(|session| session.calls.prefs.confirm_before_calling);
         if confirm {
-            self.calls.confirm = Some((user_id, is_video));
+            self.call_boxes.confirm = Some((user_id, is_video));
             cx.notify();
             return;
         }
@@ -54,11 +54,11 @@ impl QuillApp {
         let calls = &session.calls;
         let loaded = calls.recent_calls.len();
         if !load_due(
-            scrolled_near_end(&self.calls.history_scroll),
+            scrolled_near_end(&self.call_boxes.history_scroll),
             !calls.recent_calls_offset.is_empty(),
             calls.recent_calls_loading,
         ) || calls.recent_calls_error && !scrolled
-            || !self.calls.history_asked.allow(loaded, scrolled)
+            || !self.call_boxes.history_asked.allow(loaded, scrolled)
         {
             return;
         }

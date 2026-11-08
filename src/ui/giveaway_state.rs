@@ -1,6 +1,7 @@
 //! The giveaway form's state (`giveaway_create_ui.rs`).
 #![deny(clippy::indexing_slicing)]
 
+use super::app::QuillApp;
 use gpui_kit::component::input::InputState;
 use gpui_kit::*;
 use quill::giveaway::GiveawayDraft;
@@ -30,6 +31,18 @@ pub(crate) struct GiveawayForm {
 
 pub(crate) struct GiveawayUi {
     pub(super) form: Option<GiveawayForm>,
+}
+
+/// A giveaway just launched asks the old client for the chat's boost
+/// status, and the session's launch state is reset (`close_giveaway_form`).
+impl crate::ui::on_screen::Farewell for GiveawayUi {
+    fn farewell(
+        app: &mut QuillApp,
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<QuillApp>,
+    ) {
+        app.close_giveaway_form(cx);
+    }
 }
 
 impl GiveawayUi {

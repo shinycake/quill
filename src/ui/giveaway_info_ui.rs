@@ -289,6 +289,5 @@ crate::ui::shell::register_dialogs! {
         2937,
         |app| app.session().is_some_and(|s| s.payments.giveaway.info.is_some()),
         QuillApp::build_giveaway_info_dialog,
-    )
-    .follows_account(),
+    ),
 }

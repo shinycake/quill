@@ -130,7 +130,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn dismiss_premium_limit(&mut self) {
+    pub(in crate::ui) fn dismiss_premium_limit(&mut self) {
         if let Some(hub) = self.hub_mut() {
             hub.limit_box = None;
         }
@@ -265,5 +265,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.hub.limit_box.is_some()),
         QuillApp::build_premium_limit_dialog,
     )
-    .closes(|app, _, cx| { app.dismiss_premium_limit(); cx.notify(); }),
+    .close(|app, _, cx| { app.dismiss_premium_limit(); cx.notify(); }),
 }

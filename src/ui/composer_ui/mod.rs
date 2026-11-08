@@ -245,7 +245,8 @@ impl QuillApp {
 
     pub(super) fn select_sticker_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.select_sticker_set(set_id) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_STICKER_SET)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_STICKER_SET)),

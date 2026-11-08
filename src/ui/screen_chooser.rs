@@ -658,6 +658,7 @@ impl QuillApp {
             let asked = cx
                 .background_executor()
                 .spawn(async move { backend.ask_access() });
+            // screen-scope: the OS settings pane is the app's; its failure note goes to whichever account is on screen.
             Self::spawn_app(cx, async move |this, cx| {
                 let Some(pane) = asked.await else {
                     return;

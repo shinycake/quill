@@ -3,7 +3,7 @@
 //! `QuillApp` draws for one account at a time. Everything that account has
 //! open (its chat list, history, composer, viewer, boxes, menus, the mini
 //! app) sits in [`OnScreen`], and an account switch replaces that value
-//! whole ([`QuillApp::take_off_screen`]): nothing a box or a viewer held for
+//! whole ([`QuillApp::replace_screen`]): nothing a box or a viewer held for
 //! the old account can act for the new one, and no list of fields to clear
 //! has to be kept. Telegram Desktop does the same with one
 //! `SessionController` per account on screen. Design and the state of the
@@ -82,6 +82,13 @@ macro_rules! on_screen_fields {
             )+
         }
 
+        impl OnScreen {
+            /// The declared fields, in order: a test checks a flag's struct
+            /// against this list instead of naming it by hand.
+            #[cfg(test)]
+            pub(super) const FIELD_NAMES: &'static [&'static str] = &[$(stringify!($field)),+];
+        }
+
         impl QuillApp {
             /// What the account leaving the screen says, through its own
             /// client (still `self.live` here), before its UI is dropped.
@@ -128,6 +135,67 @@ on_screen_fields! {
     notify: super::notify_state::NotifyUi,
     /// Chat folders UI: the tab strip, editor, manager, share and invite boxes.
     folders: super::folders_state::FolderUi,
+    /// Standalone boxes: profiles, contacts, chat look, export, tags and call rating (`ui/dialogs_state.rs`).
+    dialogs: super::dialogs_state::DialogUi,
+    /// Group and channel management boxes: invite links, admins, members, permissions (`ui/admin_state.rs`).
+    admin: super::admin_state::AdminUi,
+    /// Payments and the gift marketplace (`ui/payments_state.rs`).
+    payments: super::payments_state::PaymentUi,
+    /// Revenue pages, withdrawals and affiliate programs (`ui/earn_state.rs`).
+    earn: super::earn_state::EarnUi,
+    /// Gift resale, auctions and crafting boxes (`ui/gift_market_state.rs`).
+    gift_market: super::gift_market_state::GiftMarketUi,
+    /// The giveaway form (`ui/giveaway_state.rs`).
+    giveaway: super::giveaway_state::GiveawayUi,
+    /// Paid messages: price, confirmation, Remove Fee (`ui/paid_messages_state.rs`).
+    paid_messages: super::paid_messages_state::PaidMessagesUi,
+    /// The Star reaction box (`ui/paid_reaction_state.rs`).
+    paid_reaction: super::paid_reaction_state::PaidReactionUi,
+    /// Suggested posts: price, time and decision boxes (`ui/suggested_posts_state.rs`).
+    suggested_posts: super::suggested_posts_state::SuggestedPostsUi,
+    /// Channel direct messages: the admin's and the writer's boxes (`ui/direct_messages_state.rs`).
+    direct_messages: super::direct_messages_state::DirectMessagesUi,
+    /// Privacy and security screens: rules, blocked users, sessions and websites (`ui/privacy_state.rs`).
+    privacy: super::privacy_state::PrivacyState,
+    /// Two-step verification box: its view, inputs and pending confirmation.
+    twofa: super::twofa_state::TwoStepUi,
+    /// Deep links and bot link confirmations (`ui/links_state.rs`).
+    links: super::links_state::LinkUi,
+    /// The QR code box (`ui/peer_qr`).
+    peer_qr: super::peer_qr::PeerQrUi,
+    /// The profile cover's rating and last seen boxes (`ui/profile_cover`).
+    profile_cover: super::profile_cover::ProfileCoverUi,
+    /// The info cover's video profile photo (`ui/video_avatar`).
+    video_avatar: super::video_avatar::VideoAvatarUi,
+    /// The members block of the group info panel (`ui/inline_members_state.rs`).
+    inline_members: super::inline_members_state::InlineMembersUi,
+    /// The search field above a profile's groups in common.
+    common_groups: super::profile_panels::common_groups::CommonGroupsUi,
+    /// The gallery's search field (`ui/shared_media_search_state.rs`).
+    media_search: super::shared_media_search_state::SharedMediaSearchUi,
+    /// Scroll positions of the shared-media grid tabs (`ui/shared_media_grid_state.rs`).
+    shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi,
+    /// The Premium feature preview's clip player (`ui/premium_preview_state.rs`).
+    premium_preview: super::premium_preview_state::PremiumPreviewUi,
+    /// Send Location's map gesture, search field and timers (`ui/location_picker/state.rs`).
+    location_ui: super::location_picker::state::LocationPickerUi,
+    /// The AI compose box, its style editor and preview (`ui/ai_compose_state.rs`).
+    ai_compose: super::ai_compose_state::AiComposeUi,
+    /// The settings window: its pages, search and the boxes they open (`ui/settings_state.rs`).
+    settings: super::settings_state::SettingsUi,
+    /// The boxes around 1:1 calls: confirm, dialing, the microphone test, Add People (`ui/calls_state.rs`).
+    call_boxes: super::calls_state::CallBoxes,
+    /// The boxes around a video chat: start, invite, share link (`ui/group_call_state.rs`).
+    group_call_boxes: super::group_call_state::GroupCallBoxes,
+    /// Sign-in: inputs, registration, terms, recovery and the QR code (`ui/auth_state.rs`).
+    auth_ui: super::auth_state::AuthUi,
+    /// Agent access: the account Settings edits, the consent box and the page (`ui/agent_state.rs`).
+    agent_ui: super::agent_state::AgentUi,
+    /// Connection status, the status note and its toasts, presence sync (`ui/connection_state.rs`).
+    connection: super::connection_state::ConnectionUi,
+    /// Chats open in windows of their own and the frame scope that names the one being drawn (`ui/chat_window`).
+    /// Last: its windows close after everything they showed has said goodbye.
+    windows: super::chat_window::ChatWindows,
 }
 
 impl OnScreen {
@@ -138,6 +206,8 @@ impl OnScreen {
     pub(super) fn new(
         epoch: ScreenEpoch,
         chat_prefs: &ChatPrefs,
+        connect_status: super::connect_ui::ConnectUiStatus,
+        status_note: String,
         window: &mut Window,
         cx: &mut Context<QuillApp>,
     ) -> Self {
@@ -231,6 +301,36 @@ impl OnScreen {
             message_ui,
             notify: super::notify_state::NotifyUi::new(),
             folders: super::folders_state::FolderUi::new(),
+            dialogs: super::dialogs_state::DialogUi::new(window, cx),
+            admin: super::admin_state::AdminUi::new(),
+            payments: super::payments_state::PaymentUi::new(window, cx),
+            earn: super::earn_state::EarnUi::new(window, cx),
+            gift_market: super::gift_market_state::GiftMarketUi::new(),
+            giveaway: super::giveaway_state::GiveawayUi::new(),
+            paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
+            paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
+            suggested_posts: super::suggested_posts_state::SuggestedPostsUi::new(),
+            direct_messages: super::direct_messages_state::DirectMessagesUi::new(),
+            privacy: super::privacy_state::PrivacyState::new(window, cx),
+            twofa: super::twofa_state::TwoStepUi::new(window, cx),
+            links: super::links_state::LinkUi::new(),
+            peer_qr: super::peer_qr::PeerQrUi::new(cx),
+            profile_cover: Default::default(),
+            video_avatar: Default::default(),
+            inline_members: super::inline_members_state::InlineMembersUi::new(),
+            common_groups: Default::default(),
+            media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),
+            shared_media_grid: super::shared_media_grid_state::SharedMediaGridUi::new(),
+            premium_preview: Default::default(),
+            location_ui: Default::default(),
+            ai_compose: super::ai_compose_state::AiComposeUi::new(window, cx),
+            settings: super::settings_state::SettingsUi::new(cx),
+            call_boxes: super::calls_state::CallBoxes::new(),
+            group_call_boxes: super::group_call_state::GroupCallBoxes::new(),
+            auth_ui: super::auth_state::AuthUi::new(window, cx),
+            agent_ui: super::agent_state::AgentUi::new(),
+            connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
+            windows: super::chat_window::ChatWindows::new(),
         }
     }
 }
@@ -272,7 +372,11 @@ impl QuillApp {
     pub(in crate::ui) fn replace_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_window_scope(None);
         let epoch = self.screen.epoch.next();
-        self.screen = OnScreen::new(epoch, &self.chat_prefs, window, cx);
+        // The status is the connection's, which the switch sets again right
+        // after (`adopt_live`, `start_connection`); a fresh default would
+        // show the synthetic pane for a frame.
+        let status = self.connection.status.clone();
+        self.screen = OnScreen::new(epoch, &self.chat_prefs, status, String::new(), window, cx);
         cx.notify();
     }
 
@@ -286,7 +390,7 @@ impl QuillApp {
     pub(in crate::ui) fn screen_leaves_later(&mut self, cx: &mut Context<Self>) {
         self.screen.epoch = self.screen.epoch.next();
         self.screen.client_filled = false;
-        let Some(handle) = self.windows.main else {
+        let Some(handle) = self.main_window.handle else {
             return;
         };
         let app = cx.entity().downgrade();

@@ -77,7 +77,7 @@ impl QuillApp {
             }
             seed_people(session, &query, &sink, &self.demo_ui.seq);
         }
-        self.calls.add_people = Some(AddPeopleBox::with_query(CALL, query));
+        self.call_boxes.add_people = Some(AddPeopleBox::with_query(CALL, query));
         cx.notify();
     }
 }

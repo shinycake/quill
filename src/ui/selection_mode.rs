@@ -406,6 +406,7 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::SETTINGS_SAVE).into()),
         });
+        // screen-scope: the note reports a local file save to whichever account is on screen.
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(dirs))) = picker.await else {
                 return;

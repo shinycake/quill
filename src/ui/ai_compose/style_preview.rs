@@ -545,7 +545,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.ai_compose.preview.is_some(),
         QuillApp::build_ai_style_preview_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.ai_compose.preview = None;
             cx.notify();
         }),

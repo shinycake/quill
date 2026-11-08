@@ -348,7 +348,7 @@ impl QuillApp {
         if self.dismiss_topmost_layer(window, cx) {
             return;
         }
-        if self.settings.open && self.settings.keybinding_capture.is_none() {
+        if self.settings.open && self.preferences.keybinding_capture.is_none() {
             self.settings_escape(window, cx);
         } else {
             self.escape_to_chat_list(window, cx);
@@ -657,7 +657,8 @@ impl QuillApp {
 
     pub(super) fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.jump_selected_chat_search_hit() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
@@ -671,7 +672,9 @@ impl QuillApp {
             {
                 let _ = session.begin_chat_search_jump(id);
             }
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }
@@ -682,21 +685,25 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.jump_to_chat_search_message(message_id) {
+            self.screen.connection.set_note(
+                match live.driver.jump_to_chat_search_message(message_id) {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
-                });
+                },
+            );
         } else if let Some(session) = self.demo_session.as_mut() {
             let _ = session.begin_chat_search_jump(message_id);
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }
 
     pub(super) fn chat_search_newer(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.chat_search_newer() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
@@ -705,14 +712,17 @@ impl QuillApp {
             if let Some(id) = session.search.chat_search.select_newer() {
                 let _ = session.begin_chat_search_jump(id);
             }
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }
 
     pub(super) fn chat_search_older(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.chat_search_older() {
                     Ok(_) => chat_search_jump_note(&live.driver.session),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_JUMP_TO_MESSAGE)),
@@ -721,7 +731,9 @@ impl QuillApp {
             if let Some(id) = session.search.chat_search.select_older() {
                 let _ = session.begin_chat_search_jump(id);
             }
-            self.connection.set_note(chat_search_jump_note(session));
+            self.screen
+                .connection
+                .set_note(chat_search_jump_note(session));
         }
         cx.notify();
     }
@@ -808,10 +820,12 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_search_filters(filters) {
-                self.connection.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_SEARCH_FILTERS,
-                    &err,
-                )));
+                self.screen
+                    .connection
+                    .set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_SEARCH_FILTERS,
+                        &err,
+                    )));
             }
             if filters.scope == SearchScope::Apps {
                 let _ = live.driver.fetch_grossing_web_app_bots();

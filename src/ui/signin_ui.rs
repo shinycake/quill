@@ -363,10 +363,9 @@ impl QuillApp {
             return;
         }
         self.auth_ui.signin.tick_armed = true;
-        // screen-scope: a one-second redraw tick that only clears its own
-        // armed flag on whichever sign-in state is on screen; dropping it on
-        // a switch would leave the flag set and stop later ticks
-        cx.spawn(async move |this, cx| {
+        // A tick dropped by a switch leaves nothing stuck: the new screen's
+        // flag starts clear.
+        self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             let _ = this.update(cx, |this, cx| {
                 this.auth_ui.signin.tick_armed = false;
@@ -791,7 +790,8 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        self.connection
+        self.screen
+            .connection
             .set_note(match live.driver.reset_login_email() {
                 Ok(_) => StatusNote::silent(tr(keys::Q_OPS_EMAIL_RESET_REQUESTED_WAITING_FOR)),
                 Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_RESET_THE_EMAIL)),

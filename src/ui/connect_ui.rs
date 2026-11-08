@@ -120,11 +120,11 @@ impl super::app::QuillApp {
             return;
         }
         quill::startup_trace::mark("connect_start");
-        self.connection.generation += 1;
-        let generation = self.connection.generation;
+        self.connect.generation += 1;
+        let generation = self.connect.generation;
         let credentials = self.credentials.clone();
         self.connection.status = ConnectUiStatus::Live;
-        self.auth_ui.demo_state = AuthorizationState::WaitTdlibParameters;
+        self.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
         self.connection
             .set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
@@ -184,14 +184,14 @@ impl super::app::QuillApp {
                 };
                 let again = this
                     .update(cx, |this, cx| {
-                        if generation != this.connection.generation {
+                        if generation != this.connect.generation {
                             return false;
                         }
                         if !safe {
                             // Its old client's close can't be confirmed in
                             // this run: never open the database again, and
                             // say so instead of staying on Connecting.
-                            this.auth_ui.demo_state =
+                            this.auth_demo.demo_state =
                                 AuthorizationState::StartupFailed(StartupFailure::CloseUnconfirmed);
                             this.connection.status = ConnectUiStatus::Blocked;
                             this.connection.clear_note();
@@ -262,12 +262,12 @@ impl super::app::QuillApp {
             Err(blocker) => match blocker.startup_failure() {
                 Some(failure) => {
                     eprintln!("quill: no client: {}", blocker.user_message());
-                    self.auth_ui.demo_state = AuthorizationState::StartupFailed(failure);
+                    self.auth_demo.demo_state = AuthorizationState::StartupFailed(failure);
                     self.connection.status = ConnectUiStatus::Blocked;
                     self.connection.clear_note();
                 }
                 None => {
-                    self.auth_ui.demo_state = AuthorizationState::WaitPhoneNumber;
+                    self.auth_demo.demo_state = AuthorizationState::WaitPhoneNumber;
                     self.connection.status = ConnectUiStatus::NeedCredentials;
                     self.connection
                         .set_note(StatusNote::error(blocker.user_message()));

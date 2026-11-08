@@ -31,12 +31,12 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 }
 
 fn applied_id(app: &QuillApp) -> Option<&ThemeId> {
-    app.settings.app_theme.applied.as_ref().map(|(id, _)| id)
+    app.preferences.app_theme.applied.as_ref().map(|(id, _)| id)
 }
 
 /// Apply the prefs as they are now, in memory only.
 fn reapply(app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>) {
-    app.settings.appearance_applied = None;
+    app.preferences.appearance_applied = None;
     app.apply_appearance(cx);
 }
 
@@ -137,7 +137,7 @@ fn the_editor_previews_live_and_cancel_reverts(cx: &mut TestAppContext) {
         app.appearance.auto_night = quill::settings::AutoNight::Off;
         reapply(app, cx);
         app.open_theme_editor(EditorSource::Current, window, cx);
-        assert!(app.settings.app_theme.editor.is_some());
+        assert!(app.preferences.app_theme.editor.is_some());
         app.select_editor_row(EditorRow::Key(PaletteKey::WindowBg), window, cx);
         app.editor_color_changed(Hsla::from(rgb(0x123456)), cx);
         assert_eq!(installed(PaletteKey::WindowBg), Some(0x123456ff));
@@ -169,7 +169,7 @@ fn omarchy_theme_is_followed_until_another_is_chosen(cx: &mut TestAppContext) {
         reapply(app, cx);
     });
     app.read_with(vcx, |app, _| {
-        let (id, palette) = app.settings.app_theme.applied.clone().expect("applied");
+        let (id, palette) = app.preferences.app_theme.applied.clone().expect("applied");
         assert_eq!(id, ThemeId::Omarchy);
         assert_eq!(palette.rgb(PaletteKey::WindowBg), 0x1a1b26);
         assert_eq!(installed(PaletteKey::WindowBgActive), Some(0x7aa2f7ff));
@@ -181,7 +181,7 @@ fn omarchy_theme_is_followed_until_another_is_chosen(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(!app.appearance.follow_omarchy);
         assert_eq!(
-            app.settings
+            app.preferences
                 .app_theme
                 .applied
                 .as_ref()
@@ -195,7 +195,7 @@ fn omarchy_theme_is_followed_until_another_is_chosen(cx: &mut TestAppContext) {
     });
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.settings
+            app.preferences
                 .app_theme
                 .applied
                 .as_ref()
@@ -246,12 +246,12 @@ fn a_late_custom_read_leaves_a_newer_editor_alone(cx: &mut TestAppContext) {
     let note = app.read_with(vcx, |app, _| app.connection.status_note().to_string());
     app.update_in(vcx, |app, window, cx| {
         app.open_theme_editor(EditorSource::Custom(missing), window, cx);
-        assert!(app.settings.app_theme.editor.is_none(), "still reading");
+        assert!(app.preferences.app_theme.editor.is_none(), "still reading");
         app.open_theme_editor(EditorSource::Current, window, cx);
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let editor = app.settings.app_theme.editor.as_ref();
+        let editor = app.preferences.app_theme.editor.as_ref();
         assert!(editor.is_some_and(|editor| editor.editing.is_none()));
         assert_eq!(app.connection.status_note(), note);
     });
@@ -271,7 +271,7 @@ fn closing_settings_drops_the_editor_read(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.settings.app_theme.editor.is_none());
+        assert!(app.preferences.app_theme.editor.is_none());
         assert_eq!(app.connection.status_note(), note, "no load error either");
     });
 }

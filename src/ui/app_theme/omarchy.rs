@@ -36,11 +36,11 @@ impl OmarchyState {
 impl QuillApp {
     /// Omarchy's palette, looked for on first use.
     pub(super) fn omarchy_palette(&mut self) -> Option<Palette> {
-        if !self.settings.app_theme.omarchy_probed {
-            self.settings.app_theme.omarchy_probed = true;
-            self.settings.app_theme.omarchy = current_dir().and_then(OmarchyState::read);
+        if !self.preferences.app_theme.omarchy_probed {
+            self.preferences.app_theme.omarchy_probed = true;
+            self.preferences.app_theme.omarchy = current_dir().and_then(OmarchyState::read);
         }
-        self.settings
+        self.preferences
             .app_theme
             .omarchy
             .as_ref()
@@ -49,7 +49,7 @@ impl QuillApp {
 
     /// The theme Omarchy shows, when Quill runs on Omarchy.
     pub(crate) fn omarchy_theme(&self) -> Option<&OmarchyState> {
-        self.settings.app_theme.omarchy.as_ref()
+        self.preferences.app_theme.omarchy.as_ref()
     }
 
     /// The tile's "follow Omarchy" choice.
@@ -62,13 +62,13 @@ impl QuillApp {
     /// Re-read the theme whenever Omarchy's generation stamp changes;
     /// started once, when a theme was found (not in screenshot demos).
     pub(crate) fn start_omarchy_watch(&mut self, cx: &mut Context<Self>) {
-        if self.demo_session.is_some() || self.settings.app_theme.omarchy_watched {
+        if self.demo_session.is_some() || self.preferences.app_theme.omarchy_watched {
             return;
         }
         let Some(dir) = self.omarchy_theme().map(|s| s.dir.clone()) else {
             return;
         };
-        self.settings.app_theme.omarchy_watched = true;
+        self.preferences.app_theme.omarchy_watched = true;
         // screen-scope: the Omarchy watcher re-applies the app's appearance for whichever account is on screen.
         cx.spawn(async move |this, cx| {
             loop {
@@ -80,7 +80,7 @@ impl QuillApp {
                     .await;
                 let Ok(()) = this.update(cx, |app, cx| {
                     let current = app
-                        .settings
+                        .preferences
                         .app_theme
                         .omarchy
                         .as_ref()
@@ -89,7 +89,7 @@ impl QuillApp {
                         return;
                     }
                     if let Some(state) = OmarchyState::read(dir.clone()) {
-                        app.settings.app_theme.omarchy = Some(state);
+                        app.preferences.app_theme.omarchy = Some(state);
                         app.apply_appearance(cx);
                         cx.notify();
                     }
@@ -106,7 +106,7 @@ impl QuillApp {
 impl QuillApp {
     /// Screenshot demos and tests: Omarchy found at `dir`, no watcher.
     pub(crate) fn use_omarchy_dir(&mut self, dir: PathBuf) {
-        self.settings.app_theme.omarchy_probed = true;
-        self.settings.app_theme.omarchy = OmarchyState::read(dir);
+        self.preferences.app_theme.omarchy_probed = true;
+        self.preferences.app_theme.omarchy = OmarchyState::read(dir);
     }
 }

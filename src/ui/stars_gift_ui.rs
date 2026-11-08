@@ -49,7 +49,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn close_stars_gift_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_stars_gift_dialog(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_stars_gift();
         }
@@ -309,5 +309,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.session().is_some_and(|s| s.payments.stars_gift.open),
         QuillApp::build_stars_gift_dialog,
     )
-    .closes(|app, _, cx| app.close_stars_gift_dialog(cx)),
+    .close(|app, _, cx| app.close_stars_gift_dialog(cx)),
 }

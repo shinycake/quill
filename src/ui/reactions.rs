@@ -338,7 +338,7 @@ impl QuillApp {
             });
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .toggle_reaction_choice(chat_id, message_id, &choice)

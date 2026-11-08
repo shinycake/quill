@@ -650,7 +650,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.admin.restrict_dialog.is_some(),
         QuillApp::build_restrict_dialog,
     )
-    .closes(|app, _, cx| app.close_restrict_dialog(cx)),
+    .close(|app, _, cx| app.close_restrict_dialog(cx)),
 }
 
 mod add_special;

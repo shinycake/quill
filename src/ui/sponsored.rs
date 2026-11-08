@@ -427,10 +427,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.hide_sponsored_messages(chat_id, message_id) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_OPS_HIDING_ADS)),
-                    Ok(None) => self.connection.note().clone(),
+                    Ok(None) => self.screen.connection.note().clone(),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_HIDE_ADS)),
                 },
             );
@@ -496,7 +496,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live
                     .driver
                     .report_sponsored_message(chat_id, message_id, "")
@@ -544,7 +544,7 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.report_sponsored_message(
                     flight.chat_id,
                     flight.message_id,

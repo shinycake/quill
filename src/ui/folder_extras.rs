@@ -879,7 +879,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.folders.limit_box.is_some(),
         QuillApp::build_folder_limit_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.folders.limit_box = None;
             cx.notify();
         }),
@@ -890,7 +890,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.folders.new_chats_dialog.is_some(),
         QuillApp::build_folder_new_chats_dialog,
     )
-    .closes(|app, _, cx| app.close_folder_new_chats(cx)),
+    .close(|app, _, cx| app.close_folder_new_chats(cx)),
 }
 
 #[cfg(test)]

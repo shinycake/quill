@@ -25,6 +25,8 @@ pub(crate) struct DirectMessagesUi {
     pub(super) confirm: Option<DirectConfirm>,
 }
 
+impl crate::ui::on_screen::Farewell for DirectMessagesUi {}
+
 impl DirectMessagesUi {
     pub(super) fn new() -> Self {
         Self { confirm: None }

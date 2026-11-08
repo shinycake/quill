@@ -132,7 +132,8 @@ impl QuillApp {
     /// `updateFileDownload`).
     pub(super) fn pause_media_download(&mut self, file_id: FileId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.pause_download(file_id) {
                     Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_PAUSED)),
                     Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_PAUSE)),
@@ -154,7 +155,8 @@ impl QuillApp {
             self.connection
                 .set_note(StatusNote::silent(tr(keys::Q_DISK_DOWNLOAD_NO_ROOM)));
         } else if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.resume_download(file_id) {
                     Ok(true) => StatusNote::silent(tr(keys::Q_OPS_DOWNLOAD_RESUMED)),
                     Ok(false) => StatusNote::silent(tr(keys::Q_OPS_NOTHING_TO_RESUME)),

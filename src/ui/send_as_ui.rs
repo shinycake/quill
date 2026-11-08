@@ -103,11 +103,12 @@ impl QuillApp {
             return;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection
-                .set_note(match live.driver.set_chat_message_sender(chat_id, sender) {
+            self.screen.connection.set_note(
+                match live.driver.set_chat_message_sender(chat_id, sender) {
                     Ok(()) => StatusNote::silent(tr(keys::Q_OPS_CHANGING_SENDER)),
                     Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_CHANGE_THE_SENDER)),
-                });
+                },
+            );
         } else {
             self.apply_demo_message_sender(chat_id, sender);
         }

@@ -407,7 +407,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.stories.stealth_box.is_some(),
         QuillApp::build_story_stealth_dialog,
     )
-    .closes(|app, _, cx| {
+    .close(|app, _, cx| {
             app.close_stealth_box();
             cx.notify();
         }),

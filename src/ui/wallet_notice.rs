@@ -159,6 +159,5 @@ crate::ui::shell::register_dialogs! {
         3790,
         |app| app.wallet_notice_open(),
         QuillApp::build_wallet_notice_dialog,
-    )
-    .follows_account(),
+    ),
 }

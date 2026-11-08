@@ -580,7 +580,8 @@ impl QuillApp {
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
-                self.connection
+                self.screen
+                    .connection
                     .set_note(self.send_started_note(options.scheduling, tr(keys::Q_CHAT_SENDING)));
             }
             Err(_) => {

@@ -1,4 +1,6 @@
-//! A switch ends what acts for the account on screen.
+//! A switch ends what acts for the account on screen: the behaviour of
+//! the boxes, the viewer and the chat leave. That every screen field is
+//! gone is `on_screen_tests.rs`.
 
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -144,43 +146,56 @@ fn a_switch_saves_the_typed_text_and_empties_the_composer(cx: &mut TestAppContex
     });
 }
 
-/// Checked chats are the old account's ids.
-#[gpui_kit::test]
-fn a_switch_clears_the_chat_list_selection(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx, "ready-chats");
-    frames(&mut vcx);
-    app.update(&mut vcx, |app, _| {
-        app.chat_list.selected.insert(CHAT.0);
-    });
-    switch(&app, &mut vcx);
-    app.read_with(&vcx, |app, _| assert!(app.chat_list.selected.is_empty()));
-}
-
-/// The player's track, and the chat its next and previous read, are the
-/// old account's.
-#[gpui_kit::test]
-fn a_switch_stops_the_player(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app(cx, "ready-chats");
-    frames(&mut vcx);
-    app.update(&mut vcx, |app, _| {
-        app.playback.playing_audio = Some(MessageId(1));
-        app.playback.player.chat = Some(CHAT);
-    });
-    switch(&app, &mut vcx);
-    app.read_with(&vcx, |app, _| {
-        assert_eq!(app.playback.playing_audio, None);
-        assert_eq!(app.playback.player.chat, None);
-    });
-}
-
-/// Boxes that keep the old account's ids in app-side state and act through
-/// `self.live` all close on a switch: none reopens over the new account to
-/// delete, leave, terminate or call there.
+/// The round-4 table: boxes that keep the old account's ids and act
+/// through `self.live`. Each one's flag sits in a struct the screen owns,
+/// so the switch closes them all: none reopens over the new account to
+/// delete, leave, terminate, block or call there.
 #[gpui_kit::test]
 fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
+    use crate::ui::chat_bars::BlockBarDialog;
     use crate::ui::dialogs::confirm::SessionsConfirm;
     use crate::ui::dialogs::folder::FolderDeleteConfirm;
     use crate::ui::dialogs::group_confirm::GroupConfirmAction;
+    use crate::ui::on_screen::OnScreen;
+
+    struct HeldBox {
+        dialog: &'static str,
+        /// The `OnScreen` field whose struct holds the flag.
+        field: &'static str,
+        open: fn(&QuillApp) -> bool,
+    }
+    let boxes = [
+        HeldBox {
+            dialog: "GroupConfirm",
+            field: "admin",
+            open: |app| app.admin.group_confirm_dialog.is_some(),
+        },
+        HeldBox {
+            dialog: "FolderDelete",
+            field: "folders",
+            open: |app| app.folders.delete_confirm.is_some(),
+        },
+        HeldBox {
+            dialog: "SessionsConfirm",
+            field: "privacy",
+            open: |app| app.privacy.sessions_confirm.is_some(),
+        },
+        HeldBox {
+            dialog: "ClearCalls",
+            field: "chat_list",
+            open: |app| app.chat_list.global.clear_calls_open,
+        },
+        HeldBox {
+            dialog: "BlockBar",
+            field: "dialogs",
+            open: |app| app.dialogs.block_bar_dialog.is_some(),
+        },
+        HeldBox {
+            dialog: "CallConfirm",
+            field: "call_boxes",
+            open: |app| app.call_boxes.confirm.is_some(),
+        },
+    ];
 
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
@@ -195,22 +210,36 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
         });
         app.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
         app.chat_list.global.clear_calls_open = true;
-        app.calls.confirm = Some((7, false));
+        app.dialogs.block_bar_dialog = Some(BlockBarDialog {
+            chat_id: CHAT,
+            user_id: 5,
+            report: false,
+            delete_chat: false,
+        });
+        app.call_boxes.confirm = Some((7, false));
         cx.notify();
     });
     frames(&mut vcx);
     assert!(dialog_up(&mut vcx));
-    let opened = [
-        "GroupConfirm",
-        "FolderDelete",
-        "SessionsConfirm",
-        "ClearCalls",
-        "CallConfirm",
-    ];
     app.read_with(&vcx, |app, _| {
         let open = QuillShell::open_dialog_names(app);
-        for name in opened {
-            assert!(open.contains(&name), "{name} open before the switch");
+        for held in &boxes {
+            assert!(
+                (held.open)(app),
+                "{} flagged before the switch",
+                held.dialog
+            );
+            assert!(
+                open.contains(&held.dialog),
+                "{} open before the switch",
+                held.dialog
+            );
+            assert!(
+                OnScreen::FIELD_NAMES.contains(&held.field),
+                "{}'s flag lives in `{}`, which is not on the screen",
+                held.dialog,
+                held.field
+            );
         }
     });
 
@@ -220,48 +249,35 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| {
         let open = QuillShell::open_dialog_names(app);
         assert!(open.is_empty(), "still open: {open:?}");
-        assert!(app.admin.group_confirm_dialog.is_none());
-        assert!(app.folders.delete_confirm.is_none());
-        assert!(app.privacy.sessions_confirm.is_none());
-        assert!(!app.chat_list.global.clear_calls_open);
-        assert!(app.calls.confirm.is_none());
+        for held in &boxes {
+            assert!(
+                !(held.open)(app),
+                "{} flagged after the switch",
+                held.dialog
+            );
+        }
     });
 }
 
-/// Every dialog says what a switch does to it (the registry will not take
-/// one that does not), and only these few stay open across one. A new
-/// app-wide dialog joins this list on purpose.
-#[test]
-fn only_app_wide_dialogs_stay_open_across_a_switch() {
-    use crate::ui::shell::OnSwitch;
-
-    let mut kept: Vec<_> = QuillShell::dialog_switch_scopes()
-        .into_iter()
-        .filter(|(_, on_switch)| *on_switch == OnSwitch::AppWide)
-        .map(|(name, _)| name)
-        .collect();
-    kept.sort_unstable();
-    assert_eq!(
-        kept,
-        ["BackgroundCall", "EmojiSetStyle", "Passcode", "ThemeEditor"]
-    );
-}
-
-/// The story composer holds the old account's media, caption and
-/// audience; its Post would publish them as the new account. A check still
-/// in flight must not leave the next composer stuck on "Checking…".
+/// An app-wide dialog's flag sits in a struct the app keeps, so the switch
+/// leaves it: the emoji set style box is open for the next account too.
 #[gpui_kit::test]
-fn a_switch_closes_the_story_composer(cx: &mut TestAppContext) {
+fn an_app_wide_dialogs_flag_survives_a_switch(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
-    app.update(&mut vcx, |app, _| {
-        app.stories.composer.open = true;
-        app.stories.composer.check_sent = true;
+    app.update(&mut vcx, |app, cx| {
+        app.preferences.emoji_style.open = true;
+        cx.notify();
+    });
+    frames(&mut vcx);
+    app.read_with(&vcx, |app, _| {
+        assert!(QuillShell::open_dialog_names(app).contains(&"EmojiSetStyle"));
     });
     switch(&app, &mut vcx);
+    frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.stories.composer.open);
-        assert!(!app.stories.composer.check_sent);
+        assert!(app.preferences.emoji_style.open, "the flag is the app's");
+        assert!(QuillShell::open_dialog_names(app).contains(&"EmojiSetStyle"));
     });
 }
 
@@ -324,29 +340,5 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| {
         assert!(app.giveaway.form.is_none());
         assert!(QuillShell::open_dialog_names(app).is_empty());
-    });
-}
-
-/// Folder ids are numbered per account: the folder tab menu's "Mark as
-/// read" after a switch would read the new account's folder with that id.
-/// Every context menu closes.
-#[gpui_kit::test]
-fn a_switch_closes_every_context_menu(cx: &mut TestAppContext) {
-    use crate::ui::folder_extras::FolderTabMenu;
-    use gpui_kit::point;
-    let (app, mut vcx) = new_app(cx, "ready-chats");
-    frames(&mut vcx);
-    app.update(&mut vcx, |app, _| {
-        app.folders.tab_menu = Some(FolderTabMenu {
-            folder_id: Some(2),
-            position: point(px(10.), px(10.)),
-        });
-        app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
-    });
-    switch(&app, &mut vcx);
-    app.read_with(&vcx, |app, _| {
-        assert!(app.folders.tab_menu.is_none());
-        assert!(app.chat_list.archive_menu.is_none());
-        assert!(!app.context_menu_open());
     });
 }

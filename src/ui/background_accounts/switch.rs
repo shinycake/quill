@@ -81,13 +81,13 @@ impl QuillApp {
     /// its client exists, minus the restart. The chat list, folders and
     /// counters are there at once.
     pub(in crate::ui) fn adopt_live(&mut self, mut live: LiveConnect, cx: &mut Context<Self>) {
-        self.connection.generation += 1;
+        self.connect.generation += 1;
         self.connection.status = ConnectUiStatus::Live;
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
         self.connection
             .set_note(StatusNote::silent(live_status_for(&auth)));
-        self.auth_ui.demo_state = auth;
+        self.auth_demo.demo_state = auth;
         live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();

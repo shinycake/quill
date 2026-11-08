@@ -114,7 +114,8 @@ impl QuillApp {
                     ForwardDraft::from_message(chat_id, message_id, pending);
             }
         }
-        self.connection
+        self.screen
+            .connection
             .set_note(match self.forward_draft().map(|d| d.count()) {
                 Some(1) => StatusNote::silent(tr(keys::Q_MISC_1_MESSAGE_SELECTED)),
                 Some(n) => StatusNote::silent(trn(keys::Q_MISC_MESSAGES_SELECTED, n)),

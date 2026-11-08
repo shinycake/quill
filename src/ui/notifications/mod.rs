@@ -197,7 +197,7 @@ impl PolledRedraw {
 
 impl QuillApp {
     pub(super) fn spawn_poll_loop(&mut self, cx: &mut Context<Self>) {
-        let generation = self.connection.generation;
+        let generation = self.connect.generation;
         // screen-scope: the poll loop drains whichever client is on screen; its
         // generation guard ends it when the client is replaced.
         // window-scope: `poll_live` puts the main window's state in place itself.
@@ -206,7 +206,7 @@ impl QuillApp {
             let hold = backlog_hold(&executor);
             run_poll_loop(executor, &quill::wake::UPDATES, POLL_PACE, hold, || {
                 this.update(cx, |this, cx| {
-                    if generation != this.connection.generation {
+                    if generation != this.connect.generation {
                         return None;
                     }
                     let work_left = this.poll_live(cx);
@@ -231,15 +231,15 @@ impl QuillApp {
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
         super::keybindings::invalidate_account_keybindings(
-            &mut self.settings.keybindings_applied,
-            &mut self.settings.keybinding_capture,
-            &mut self.settings.keybinding_error,
+            &mut self.preferences.keybindings_applied,
+            &mut self.preferences.keybinding_capture,
+            &mut self.preferences.keybinding_error,
         );
         self.apply_pending_keybindings(cx);
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.settings.keybindings_applied {
+        if self.preferences.keybindings_applied {
             return;
         }
         let Some(live) = self.live.as_ref() else {
@@ -248,7 +248,7 @@ impl QuillApp {
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.settings.keybindings_applied = true;
+        self.preferences.keybindings_applied = true;
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs
@@ -338,8 +338,8 @@ impl QuillApp {
         // Asked of the platform: a hidden or minimized main window does not
         // draw, so its last render may predate its deactivation.
         let main_active = self
-            .windows
-            .main
+            .main_window
+            .handle
             .is_some_and(|main| cx.active_window() == Some(main));
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
@@ -412,10 +412,10 @@ impl QuillApp {
         // nothing more will arrive, so surface it like an unexpected
         // Closed with a Retry instead of a UI that silently goes stale.
         if self
-            .connection
+            .connect
             .claim_closed_note(live.bridge.stopped_unexpectedly(), budget_hit)
         {
-            self.connection.set_note(StatusNote::silent(tr(
+            self.screen.connection.set_note(StatusNote::silent(tr(
                 keys::Q_PREFS_CONNECTION_TO_TELEGRAM_WAS_CLOSED,
             )));
             progressed = true;

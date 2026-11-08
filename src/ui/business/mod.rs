@@ -404,7 +404,7 @@ crate::ui::shell::register_dialogs! {
         |app| app.dialogs.business_dialog.is_some(),
         QuillApp::build_business_dialog,
     )
-    .closes(|app, window, cx| {
+    .close(|app, window, cx| {
         app.close_business_saving(false, window, cx);
     }),
 }

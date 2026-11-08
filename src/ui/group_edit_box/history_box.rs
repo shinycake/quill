@@ -163,5 +163,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.group_edit_box().is_some_and(|edit| edit.history_box.is_some()),
         QuillApp::build_group_history_box,
     )
-    .closes(|app, _, cx| app.close_history_box(cx)),
+    .close(|app, _, cx| app.close_history_box(cx)),
 }

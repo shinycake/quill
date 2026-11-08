@@ -339,7 +339,7 @@ impl QuillApp {
     /// Whether a dark theme is in effect (the Night Mode switch).
     pub(super) fn night_mode_on(&self) -> bool {
         quill::main_menu::night_mode_on(
-            self.settings
+            self.preferences
                 .appearance_applied
                 .as_ref()
                 .map(|(mode, ..)| *mode == gpui_kit::component::theme::ThemeMode::Dark),

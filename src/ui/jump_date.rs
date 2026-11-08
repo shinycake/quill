@@ -62,7 +62,8 @@ impl QuillApp {
 
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.connection
+            self.screen
+                .connection
                 .set_note(match live.driver.jump_to_date(day) {
                     Ok(_) => StatusNote::silent(tr(keys::Q_MISC_JUMPING_TO_DATE)),
                     Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)),
@@ -263,6 +264,5 @@ crate::ui::shell::register_dialogs! {
         7100,
         |app| app.session().is_some_and(|s| s.search.history_calendar.is_some()),
         QuillApp::build_jump_date_dialog,
-    )
-    .follows_account(),
+    ),
 }

@@ -32,8 +32,8 @@ impl QuillApp {
         ) {
             return;
         }
-        self.settings.update_state = UpdateState::Checking;
-        self.settings.update_banner_dismissed = false;
+        self.preferences.update_state = UpdateState::Checking;
+        self.preferences.update_banner_dismissed = false;
         let check = cx
             .background_executor()
             .spawn(async move { check_latest_release() });
@@ -50,7 +50,7 @@ impl QuillApp {
     /// session opens on "Updated to Quill X"; a check only starts when
     /// nothing is in flight (`check_for_updates`).
     pub(super) fn start_update_checks(&mut self, cx: &mut Context<Self>) {
-        if self.settings.update_state == UpdateState::Idle {
+        if self.preferences.update_state == UpdateState::Idle {
             self.check_for_updates(cx);
         }
         cx.spawn(async move |this, cx| {
@@ -70,7 +70,7 @@ impl QuillApp {
     /// The answer of a release check: shown, and a newer release this copy
     /// can install starts downloading at once.
     pub(super) fn apply_check_result(&mut self, state: UpdateState, cx: &mut Context<Self>) {
-        self.settings.update_state = state;
+        self.preferences.update_state = state;
         self.auto_download_update(cx);
         cx.notify();
     }
@@ -82,7 +82,7 @@ impl QuillApp {
             return;
         }
         if let Some(release) = UpdateControl::auto_download(
-            &self.settings.update_state,
+            &self.preferences.update_state,
             quill::update_install::self_update_availability(),
         ) {
             self.download_update(release, cx);
@@ -99,7 +99,7 @@ impl QuillApp {
         result: Result<std::path::PathBuf, &'static str>,
         cx: &mut Context<Self>,
     ) {
-        self.settings.update_state = match result {
+        self.preferences.update_state = match result {
             Ok(plan) => UpdateState::Staged(release, plan),
             Err(_) if progress.is_held() => UpdateState::Available(release),
             Err(message) => UpdateState::DownloadFailed(release, message),
@@ -110,7 +110,7 @@ impl QuillApp {
     /// The disk went low or full: an update download already running stops,
     /// as one about to start waits (`auto_download_update`).
     pub(super) fn hold_update_download(&mut self) {
-        if let UpdateState::Downloading(_, progress) = &self.settings.update_state {
+        if let UpdateState::Downloading(_, progress) = &self.preferences.update_state {
             progress.hold();
         }
     }
@@ -118,7 +118,7 @@ impl QuillApp {
     /// The update button for the current state (`UpdateControl::of`).
     pub(super) fn update_control(&self) -> UpdateControl {
         UpdateControl::of(
-            &self.settings.update_state,
+            &self.preferences.update_state,
             quill::update_install::self_update_availability(),
         )
     }
@@ -149,13 +149,13 @@ impl QuillApp {
     /// too (`update_install::apply_on_start`). Quill never restarts itself.
     fn download_update(&mut self, release: quill::updater::ReleaseInfo, cx: &mut Context<Self>) {
         if matches!(
-            self.settings.update_state,
+            self.preferences.update_state,
             UpdateState::Downloading(..) | UpdateState::Installing(_) | UpdateState::Staged(..)
         ) {
             return;
         }
         let progress = DownloadProgress::default();
-        self.settings.update_state = UpdateState::Downloading(release.clone(), progress.clone());
+        self.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
         let download_release = release.clone();
         let download_progress = progress.clone();
         let download = cx.background_executor().spawn(async move {
@@ -177,7 +177,7 @@ impl QuillApp {
                     .await;
                 let running = this.update(cx, |this, cx| {
                     let running = matches!(
-                        &this.settings.update_state,
+                        &this.preferences.update_state,
                         UpdateState::Downloading(_, current) if *current == progress
                     );
                     if running {
@@ -197,17 +197,17 @@ impl QuillApp {
     /// "Restart to update": install the staged update and start the new
     /// version.
     fn restart_to_update(&mut self, cx: &mut Context<Self>) {
-        let UpdateState::Staged(release, plan) = &self.settings.update_state else {
+        let UpdateState::Staged(release, plan) = &self.preferences.update_state else {
             return;
         };
         let release = release.clone();
         match quill::update_install::hand_off(plan) {
             Ok(()) => {
-                self.settings.update_state = UpdateState::Installing(release);
+                self.preferences.update_state = UpdateState::Installing(release);
                 cx.quit();
             }
             Err(_) => {
-                self.settings.update_state =
+                self.preferences.update_state =
                     UpdateState::InstallFailed(release, tr(keys::Q_OPS_COULD_NOT_START_THE_UPDATE));
             }
         }
@@ -275,7 +275,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn update_settings_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let control = self.update_control();
-        let status = self.settings.update_state.label();
+        let status = self.preferences.update_state.label();
         let mut section = div()
             .flex()
             .flex_col()
@@ -331,14 +331,14 @@ impl QuillApp {
                 self.update_release_notes(cx)
                     .map(|notes| self.setting_spot(&["system.release_notes"], notes, cx)),
             );
-        if matches!(self.settings.update_state, UpdateState::Installed(_)) {
+        if matches!(self.preferences.update_state, UpdateState::Installed(_)) {
             section = section.child(
                 div().flex().child(
                     Button::new("acknowledge-update-changelog")
                         .label(tr(keys::Q_OPS_DISMISS_CHANGELOG))
                         .on_click(cx.listener(|this, _, _, cx| {
                             match quill::update_install::acknowledge_changelog() {
-                                Ok(()) => this.settings.update_state = UpdateState::UpToDate,
+                                Ok(()) => this.preferences.update_state = UpdateState::UpToDate,
                                 Err(_) => this.connection.set_note(StatusNote::error(tr(
                                     keys::Q_OPS_COULD_NOT_SAVE_CHANGELOG_DISMISSAL,
                                 ))),
@@ -353,7 +353,7 @@ impl QuillApp {
 
     /// The release the state is about, if any.
     fn known_release(&self) -> Option<&quill::updater::ReleaseInfo> {
-        match &self.settings.update_state {
+        match &self.preferences.update_state {
             UpdateState::Available(release)
             | UpdateState::Downloading(release, _)
             | UpdateState::DownloadFailed(release, _)
@@ -399,7 +399,7 @@ impl QuillApp {
         };
         // A newer release the button cannot install: the reason.
         let reason = matches!(
-            self.settings.update_state,
+            self.preferences.update_state,
             UpdateState::Available(_) | UpdateState::DownloadFailed(..)
         )
         .then(quill::update_install::self_update_availability)
@@ -548,10 +548,10 @@ impl QuillApp {
     /// "Updated to Quill X" after an update, with its notes; the update
     /// itself is offered in the title bar.
     pub(super) fn update_banner(&self, cx: &mut Context<Self>) -> AnyElement {
-        if !matches!(self.settings.update_state, UpdateState::Installed(_)) {
+        if !matches!(self.preferences.update_state, UpdateState::Installed(_)) {
             return div().into_any_element();
         }
-        let label = self.settings.update_state.label();
+        let label = self.preferences.update_state.label();
         div()
             .flex()
             .items_center()
@@ -581,7 +581,7 @@ impl QuillApp {
                             .label(tr(keys::Q_OPS_DISMISS))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.update_banner_dismissed = true;
+                                this.preferences.update_banner_dismissed = true;
                                 cx.notify();
                             })),
                     ),

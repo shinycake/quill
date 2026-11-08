@@ -56,7 +56,7 @@ fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, u6
         (
             app.disk_low_banner(cx).is_some(),
             app.disk_full_view().is_some(),
-            app.connection.generation,
+            app.connect.generation,
         )
     })
 }
@@ -579,14 +579,14 @@ fn a_running_update_download_waits_for_space_and_starts_again(cx: &mut TestAppCo
     };
     let progress = DownloadProgress::default();
     app.update_in(&mut vcx, |app, _, _| {
-        app.settings.update_state = UpdateState::Downloading(release.clone(), progress.clone());
+        app.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
     });
     read(&app, &mut vcx, Some(FLOORS.warn - 1));
     assert!(progress.is_held(), "the low disk stops the download");
     app.update_in(&mut vcx, |app, _, cx| {
         app.finish_update_download(release.clone(), &progress, Err("stopped"), cx);
         assert_eq!(
-            app.settings.update_state,
+            app.preferences.update_state,
             UpdateState::Available(release.clone()),
             "it waits, it did not fail"
         );

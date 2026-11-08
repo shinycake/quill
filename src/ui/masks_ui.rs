@@ -60,7 +60,7 @@ impl QuillApp {
             masks.confirm_remove = None;
         }
         if let Some(live) = self.live.as_mut() {
-            self.connection.set_note(
+            self.screen.connection.set_note(
                 match live.driver.change_mask_set(set_id, installed, archived) {
                     Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MISC_UPDATING_MASKS)),
                     Ok(None) => StatusNote::silent(tr(keys::Q_MISC_A_MASK_UPDATE_IS_ALREADY)),

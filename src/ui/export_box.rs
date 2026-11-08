@@ -110,7 +110,7 @@ impl QuillApp {
         if quill::agent::ui_driver::guard::refuse_if_injecting("export a chat") {
             return;
         }
-        let Some(draft) = self.dialogs.chat_export_dialog.as_mut() else {
+        let Some(draft) = self.screen.dialogs.chat_export_dialog.as_mut() else {
             return;
         };
         let settings = draft.settings.clone();
@@ -575,7 +575,7 @@ crate::ui::shell::register_dialogs! {
         },
         QuillApp::build_chat_export_dialog,
     )
-    .closes(|app, _, cx| { app.dialogs.chat_export_dialog = None; app.dialogs.chat_export_progress_hidden = true; cx.notify(); }),
+    .close(|app, _, cx| { app.dialogs.chat_export_dialog = None; app.dialogs.chat_export_progress_hidden = true; cx.notify(); }),
 }
 
 #[cfg(test)]
