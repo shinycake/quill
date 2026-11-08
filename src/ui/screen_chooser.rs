@@ -703,6 +703,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Esc in a call window: close the privacy box shown over that window
+    /// (`group` as in `screen_privacy_overlay`). Whether it did.
+    pub(super) fn escape_screen_privacy(&mut self, group: bool, cx: &mut Context<Self>) -> bool {
+        let shown = match self.screen_share.privacy_for {
+            Some(ScreenFor::Group) => group,
+            Some(ScreenFor::Private(_)) => !group,
+            None => false,
+        };
+        if shown {
+            self.close_screen_privacy(cx);
+        }
+        shown
+    }
+
     /// Open Settings: ask the OS, open its privacy pane, close the box.
     pub(super) fn open_screen_privacy_settings(&mut self, cx: &mut Context<Self>) {
         if let Some(backend) = self.screen_backend() {

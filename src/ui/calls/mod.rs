@@ -906,6 +906,9 @@ mod dial;
 pub(in crate::ui) use dial::join_error_note;
 #[cfg(feature = "demo-capture")]
 mod history_demo;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod invite_over_summary_tests;
 pub(super) mod live_pip;
 #[cfg(feature = "demo-capture")]
 mod live_pip_demo;

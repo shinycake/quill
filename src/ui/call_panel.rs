@@ -137,7 +137,7 @@ impl QuillApp {
     pub(super) fn call_snapshot(&mut self) -> Option<CallSnap> {
         let session = self.session()?;
         let call = session.calls.active_call.clone();
-        let summary = session.calls.summary.clone();
+        let summary = super::call_conference_ui::shown_call_summary(session).cloned();
         let (user_id, is_video) = match (&call, &summary) {
             (Some(call), _) => (call.user_id, call.is_video),
             (None, Some(summary)) => (summary.user_id, summary.is_video),
@@ -302,7 +302,10 @@ impl QuillApp {
     /// and the other side was busy.
     fn call_window_target(&self) -> (Option<i32>, bool, bool, bool) {
         match self.session() {
-            Some(session) => match (&session.calls.active_call, &session.calls.summary) {
+            Some(session) => match (
+                &session.calls.active_call,
+                super::call_conference_ui::shown_call_summary(session),
+            ) {
                 (Some(call), _) => (
                     Some(call.id),
                     matches!(call.state, CallState::Pending { .. }) && !call.is_outgoing,

@@ -26,6 +26,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Esc in the video chat window closes its topmost box: the screen
+    /// privacy box, then Settings, then rename. The boxes are drawn in
+    /// that window only, so their Esc lives there and not in the main
+    /// window. Whether a box closed.
+    pub(super) fn group_call_window_escape(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.escape_screen_privacy(true, cx) {
+            return true;
+        }
+        if self.group_call_screen.settings_open {
+            self.close_group_call_settings(cx);
+            return true;
+        }
+        if self.group_call_screen.title_dialog.is_some() {
+            self.close_group_call_title_dialog(cx);
+            return true;
+        }
+        false
+    }
+
     /// The Settings box over the voice chat window, while open.
     pub(super) fn group_call_settings_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.group_call_screen.settings_open {

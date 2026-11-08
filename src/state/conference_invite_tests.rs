@@ -86,3 +86,22 @@ fn a_deleted_invitation_stops_ringing() {
     );
     assert_eq!(session.calls.conference_invite, None);
 }
+
+#[test]
+fn an_invitation_replaces_an_earlier_calls_end_screen() {
+    let mut session = session();
+    apply(
+        &mut session,
+        r#"{"@type":"updateCall","call":{"@type":"call","id":5,"unique_id":"97","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":false,"need_debug_information":false,"need_log":false}}}"#,
+    );
+    assert!(session.calls.summary.is_some(), "the ended call's summary");
+    apply(
+        &mut session,
+        &invitation(crate::local_time::now_unix(), false, false),
+    );
+    assert!(session.calls.conference_invite.is_some());
+    assert!(
+        session.calls.summary.is_none(),
+        "the old end screen does not come back once the invitation stops"
+    );
+}

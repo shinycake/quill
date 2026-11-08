@@ -18,7 +18,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::state::Session;
+use quill::state::{CallSummary, Session};
 
 /// The call window's key for a ringing invitation: never a call id (those
 /// are positive), and stable for the invitation's message.
@@ -26,6 +26,16 @@ pub(super) fn ringing_invite_key(session: &Session) -> Option<i32> {
     let invite = session.calls.conference_invite.as_ref()?;
     let server_id = (invite.message_id.0 >> 20) & 0x3fff_ffff;
     Some(-i32::try_from(server_id).unwrap_or(0) - 1)
+}
+
+/// The ended call's summary the call window shows: only while no call
+/// goes on and no invitation rings. What happens now outranks an older
+/// call's end screen (tdesktop shows the invitation as a new call).
+pub(super) fn shown_call_summary(session: &Session) -> Option<&CallSummary> {
+    if session.calls.active_call.is_some() || session.calls.conference_invite.is_some() {
+        return None;
+    }
+    session.calls.summary.as_ref()
 }
 
 /// tdesktop `lng_confcall_already_joined_*`: up to three names, then a
