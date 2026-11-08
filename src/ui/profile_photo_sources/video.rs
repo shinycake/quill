@@ -60,8 +60,11 @@ impl QuillApp {
         editor.note = Some(tr(keys::Q_AV_PREPARING_THE_VIDEO).into());
         editor.serial += 1;
         let serial = editor.serial;
-        let output = work_dir().join(format!("avatar-{serial}.mp4"));
-        let args = encode_args(&input, &output.to_string_lossy(), &edits, &info);
+        // Removed unless the profile photo request takes it, also when the
+        // window or screen is gone before the encode ends.
+        let output =
+            quill::scratch::OwnedFile::new(work_dir().join(format!("avatar-{serial}.mp4")));
+        let args = encode_args(&input, &output.path().to_string_lossy(), &edits, &info);
         let log = work_dir().join("encode.log");
         let worker = cx.background_spawn(async move { run_ffmpeg(&args, &log) });
         self.spawn_scoped_in(window, cx, async move |this, cx| {
@@ -74,7 +77,6 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|editor| editor.serial == serial);
                 if !current {
-                    let _ = std::fs::remove_file(&output);
                     return;
                 }
                 let still = this
@@ -86,7 +88,7 @@ impl QuillApp {
                 let sent = result.and_then(|()| {
                     let photo = ChosenPhoto {
                         input: ChatPhotoInput::Animation {
-                            path: output.to_string_lossy().into_owned(),
+                            path: output.path().to_string_lossy().into_owned(),
                             main_frame_timestamp: main_frame_secs(&edits),
                         },
                         preview: still.map(PhotoPreview::Image),
@@ -95,11 +97,12 @@ impl QuillApp {
                 });
                 match sent {
                     Ok(()) => {
+                        output.keep();
                         this.close_video_editor(cx);
                         this.close_kit_dialog_if_done(DialogKind::VideoEditor, window, cx);
                     }
                     Err(note) => {
-                        let _ = std::fs::remove_file(&output);
+                        drop(output);
                         if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
                             editor.busy = false;
                             editor.note = Some(note);

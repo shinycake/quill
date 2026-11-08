@@ -126,8 +126,11 @@ impl QuillApp {
         sources.serial += 1;
         let serial = sources.serial;
         let rgb = camera.rgb.clone();
-        let output = work_dir().join(format!("camera-{serial}.jpg"));
-        let target = output.clone();
+        // Removed unless the shot is taken (`camera.shot`), also when the
+        // screen is gone before the save answers.
+        let output =
+            quill::scratch::OwnedFile::new(work_dir().join(format!("camera-{serial}.jpg")));
+        let target = output.path().to_path_buf();
         let worker = cx.background_spawn(async move {
             let frame = image::RgbImage::from_raw(LIVE_SIDE, LIVE_SIDE, rgb)
                 .ok_or(tr(keys::Q_PEOPLE_THE_CAMERA_PICTURE_WAS_DAMAGED))?;
@@ -146,7 +149,7 @@ impl QuillApp {
                         if let Some(sources) = this.sources_mut() {
                             let camera = &mut sources.camera;
                             if let Some(frozen) = camera.live.take() {
-                                camera.shot = Some((output, frozen));
+                                camera.shot = Some((output.keep(), frozen));
                             }
                             camera.stream = None;
                             sources.busy = false;
