@@ -770,3 +770,88 @@ this one as what shipped.
   dialog, the app-wide flag) are `on_screen_switch_tests.rs`.
 - Not done here (phase 5, optional): merging `connect.generation` into
   the epoch, and declaring `WindowSlot` through the macro.
+
+### Phase 5 (the chat, the story viewer, the window, the leftovers)
+
+Section 6 built, on `claude/sm-chat-scope`.
+
+- **`ChatUi`** (`src/ui/chat_ui_state.rs`): one value for the chat the
+  view shows, a boxed field of `OnScreen` and of every `WindowSlot`.
+  `enter_chat_ui` replaces it when the chat changes, carrying a reply or
+  edit aimed at the next chat; `leave_chat_ui` drops it; `sync_chat_ui`
+  at the top of `frame_upkeep` catches a chat changed by a path that
+  skipped both. `dismiss_cross_chat_state` is gone. Fields:
+  `rich_editor_open`, `send_as_open`, `link_popup`, the reply and edit
+  (with `EditMode`), the command and inline menus, `inline_query_armed`,
+  `pending_delete`, `pending_stop_poll`, and also `selection_anchor`,
+  `selection_focus` and `scheduled_selected`, which hold message ids of
+  the shown chat and were not in the 6.6 list.
+- Deviations from 6.6: `slow_mode_tick_chat` stays in `ComposerUi`; it
+  names the chat its timer task runs for, not state of the chat shown.
+  `notify.ttl_picker_open` stays in `NotifyUi` (not per window) and is
+  reset in `enter_chat_ui`. The forward bar and the recording keep their
+  own explicit goodbyes, called from `enter_chat_ui`, since both own
+  tasks or devices. `Box<ChatUi>` because `QuillApp` would pass its
+  48 KB stack budget otherwise.
+- Guard: `scripts/check-screen-state.py` now fails when a view struct
+  (`ComposerUi`, `MessageUi`, `HistoryUi`, `PickerUi`, `ShareUi`,
+  `ViewerUi`) gains a field typed or named by a chat or message id that
+  is not in `ChatUi` and not listed with a reason in
+  `scripts/view-state-not-chat.txt` (14 entries), or redeclares a
+  `ChatUi` field.
+- **`StoryViewerUi`** (`src/ui/stories_state.rs`): what the story viewer
+  has open (reaction picker, reply bar and panel, viewers, stats, report,
+  cover and privacy editors, close friends, share box, notice) is one
+  `Option` inside `StoryUi`, present only while the viewer is open.
+  `release_story_viewer` drops it, so a release is a close for this
+  state. Writes go through `viewer_ui_mut` / `with_viewer_ui` and are
+  dropped while the viewer is closed; reads go through `viewer_ui`, which
+  falls back to an empty value. `close_story_viewer` ends the story reply
+  before the release so the reply's own cleanup still sees its bar.
+- **The media viewer's photo editor is not moved into the viewer.** 6.3
+  assumed it could be opened from the viewer. It cannot: it opens from the
+  attachment tray, a message edit, the sticker creator and the profile
+  photo, never from the viewer's item. Nesting it in the viewer's open
+  state would leave it unopenable. It stays in `ViewerUi` beside the
+  viewer, which `OnScreen` already replaces on a switch; the Esc order was
+  already right.
+- **`WindowSlot` through the macro.** `on_screen_fields!` now takes the
+  struct name, its farewell trait, the name and parameters of the
+  generated farewell method, and a list of bookkeeping fields with no
+  goodbye before a `;`. `OnScreen` declares `epoch` and `client_filled`
+  there; `WindowSlot` declares `slices`, `images`, `frame_started`,
+  `active` and `place`. The slot's trait is `SlotFarewell`, which takes
+  no `Window` because `forget_chat_window` has none. Only `ViewerUi` says
+  anything: it closes the Picture-in-Picture window its link points at.
+  `forget_chat_window` runs `farewell_window` inside the window's scope
+  before the slot is dropped. The recording and the drop archive did not
+  need slot goodbyes: the recording already ends in `forget_chat_window`,
+  and the archive is covered by the work-file guard below.
+- **Translate.** The dialog, the bar's toast and its sequence, the offer
+  cache and the pump's scan moved from `preferences.translate` to a new
+  screen field `translate: TranslateScreen`. Only the prefs stay app-wide.
+  The toast timer runs through `spawn_screen`, so an old screen's timer
+  cannot clear the next screen's toast that has the same id.
+- **Work files.** `quill::scratch::OwnedFile` removes its file (or the
+  folder it was made in) when dropped untaken; `keep()` hands the path
+  on. The sticker video encode, the camera shot, the avatar video encode
+  and the dropped-folder archive wrap their outputs in it, so a
+  continuation that never runs (screen or window gone) removes the file
+  instead of leaving it for the startup sweep.
+- **Logout.** `request_logout` sends `logOut` before touching anything.
+  A send failure now leaves the generation, the requests and the shutdown
+  phase as they were (before, only the shutdown phase was put back). On
+  success `Session::logout_sent` settles the other requests, bumps the
+  generation, and puts the `logOut` request back under the new
+  generation so its answer is not dropped as stale.
+- **Checkout.** `Session::close_checkout` replaces the UI's field-by-field
+  clear. While `sendPaymentForm` is in flight it keeps the invoice and
+  form (`checkout_closed`), so a paid-media payment that answers after the
+  close still leaves its "Media Unlocked" note. `settle_closed_checkout`
+  drops them on the answer or the error. A new checkout clears the flag.
+- **Hang-up.** `discard_call` no longer hangs up the call engine as soon
+  as `discardCall` is sent. `HangUp` gained `engine_hang_up_due`, set by
+  TDLib's `ok`; `pump_call_engine` hangs the engine up then, or on the
+  terminal `updateCall` as before. An error puts the call back with its
+  sound running. `hang_up_for_close` still hangs up at once, because the
+  client is going and no answer will come back.
