@@ -72,12 +72,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Phase D3c: explicit refresh of `getChatEventLog` — clears the
-    /// cached page and re-sends (the plain fetch keeps `Loaded`).
+    /// cached page and re-sends (the plain fetch keeps `Loaded`). A page
+    /// or poll still in flight was asked under the previous query and
+    /// filters: the refresh is sent anyway, and their answers are dropped.
     pub fn refresh_chat_event_log(
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.groups.event_logs.remove(&chat_id.0);
+        self.session.groups.event_log_waits.remove(&chat_id.0);
         self.fetch_chat_event_log(chat_id)
     }
 
@@ -215,10 +218,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !matches!(
             self.session.groups.event_logs.get(&chat_id.0),
             Some(ChatEventLogFetch::Loaded(_))
-        ) || self.session.requests.has_purpose_for_chat(
-            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog),
-            chat_id,
-        ) {
+        ) || self.event_log_wait(chat_id).poll.is_some()
+        {
             return Ok(None);
         }
         self.send_chat_event_log_request(chat_id, 0, GroupsPurpose::PollChatEventLog)
@@ -246,7 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        if !polling && self.session.requests.has_event_log_in_flight(chat_id) {
+        if !polling && self.event_log_wait(chat_id).page.is_some() {
             return Ok(None);
         }
         if from_event_id == 0 && !polling {
@@ -294,7 +295,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(err);
         }
+        let wait = self
+            .session
+            .groups
+            .event_log_waits
+            .entry(chat_id.0)
+            .or_default();
+        if polling {
+            wait.poll = Some(extra);
+        } else {
+            wait.page = Some(extra);
+        }
         Ok(Some(extra))
+    }
+
+    /// The requests `chat_id`'s event log waits for.
+    fn event_log_wait(&self, chat_id: ChatId) -> crate::state::EventLogWait {
+        self.session
+            .groups
+            .event_log_waits
+            .get(&chat_id.0)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Phase D3b: shared `setChatMemberStatus` sender (TDLib 1.8.67,

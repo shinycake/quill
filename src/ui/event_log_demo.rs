@@ -96,6 +96,13 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
         RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
         Some(CHANNEL),
     );
+    // The log only takes the page it waits for, as the driver records it.
+    session
+        .groups
+        .event_log_waits
+        .entry(CHANNEL.0)
+        .or_default()
+        .page = Some(extra);
     let json = format!(
         r#"{{"@type":"chatEvents","@extra":"{}","events":[{}]}}"#,
         extra.0,

@@ -81,9 +81,13 @@ not checked (they name their screen and window by construction).
 Usage: python3 scripts/check-window-scope.py [src/ui directory]
 """
 
+import os
 import pathlib
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import view_reads  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "src" / "ui"
 
@@ -480,6 +484,16 @@ def main() -> int:
                 rel = path.relative_to(root.parent.parent)
                 what = ", ".join((direct + [f"{c}()" for c in via])[:4])
                 screen_failures.append(f"{rel}:{line}: {kind} touches the screen's state ({what})")
+    view_failures = view_reads.problems(root.parent.parent)
+    if view_failures:
+        print("\n".join(view_failures))
+        print(
+            f"\n{len(view_failures)} core update path(s) read the view in place as what is on screen.\n"
+            "During ingest that is the main window's view alone. Ask Session::views_shown,\n"
+            "chat_is_shown or chat_drawn, or edit through Session::in_every_view\n"
+            "(src/state/session_views.rs); or, when the view in place is the right one,\n"
+            "add `// view-in-place: <why>` on the line or one of the three above.\n"
+        )
     if main_only:
         print("\n".join(main_only))
         print(
@@ -511,10 +525,11 @@ def main() -> int:
             "docs/contributing/structure.md (Window scope)."
         )
         return 1
-    if screen_failures or main_only:
+    if screen_failures or main_only or view_failures:
         return 1
     print("window scope: OK")
     print("screen scope: OK")
+    print("core view reads: OK")
     return 0
 
 

@@ -800,19 +800,6 @@ impl RequestRegistry {
             .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
     }
 
-    /// Phase D3c: whether any `getChatEventLog` request is in flight for
-    /// the chat, whatever its paging cursor. `has_purpose_for_chat`
-    /// compares the full purpose (including `from_event_id`), so it
-    /// cannot dedup across pages.
-    pub fn has_event_log_in_flight(&self, chat_id: ChatId) -> bool {
-        self.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. })
-            ) && p.chat_id == Some(chat_id)
-        })
-    }
-
     /// Bots slice: whether a `getInlineQueryResults` request is in flight
     /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
     /// compares the full purpose (including `first_page`), so it cannot

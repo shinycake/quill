@@ -584,18 +584,24 @@ pub struct ReactionNotifyInput<'a> {
     pub chat_muted: bool,
     pub app_active: bool,
     pub open_chat: Option<ChatId>,
+    /// The chat is shown in a chat window of its own that is the active
+    /// one ([`NotifyInput::shown_in_active_window`]).
+    pub shown_in_active_window: bool,
 }
 
 /// tdesktop only notifies about reactions the user's settings allow
 /// (`None` / `Contacts` / `All`), never in a muted chat, and not while the
-/// chat is open in the focused window.
+/// chat is open in the focused window (the main one or a chat window).
 pub fn decide_reaction_notify(input: &ReactionNotifyInput) -> Option<OsNotification> {
     match input.source {
         ReactionNotificationSource::None => return None,
         ReactionNotificationSource::Contacts if !input.sender_is_contact => return None,
         ReactionNotificationSource::Contacts | ReactionNotificationSource::All => {}
     }
-    if input.chat_muted || (input.app_active && input.open_chat == Some(input.chat_id)) {
+    if input.chat_muted
+        || input.shown_in_active_window
+        || (input.app_active && input.open_chat == Some(input.chat_id))
+    {
         return None;
     }
     let body = match (input.show_preview, input.sender_name, input.emoji) {

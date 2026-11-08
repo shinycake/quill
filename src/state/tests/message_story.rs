@@ -319,3 +319,29 @@ fn the_note_counts_one_star_in_the_singular() {
         "Media Unlocked. 1 Star transferred to Dana."
     );
 }
+
+/// Round 11 (area A): a story message in a chat shown only in its own
+/// window asks for its story, as one in the main window's chat does.
+#[test]
+fn a_chat_windows_story_message_asks_for_its_story() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":3,"chat_id":21,"is_outgoing":false,"date":1,"content":{"@type":"messageStory","story_poster_chat_id":7,"story_id":9,"via_mention":false}}}"#,
+    );
+    let now = std::time::Instant::now();
+    assert!(
+        !session
+            .reply_story_candidates(now)
+            .contains(&(ChatId(7), 9))
+    );
+    session.open_window_chat(ChatId(21));
+    assert!(
+        session
+            .reply_story_candidates(now)
+            .contains(&(ChatId(7), 9))
+    );
+}

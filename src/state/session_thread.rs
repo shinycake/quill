@@ -135,6 +135,7 @@ impl Session {
         let origin_chat = pending.chat_id;
         for message in &messages {
             self.remember_files(&message.files);
+            self.index_poll_parsed(message);
         }
         let Some(thread) = self.threads.thread.as_mut() else {
             return;

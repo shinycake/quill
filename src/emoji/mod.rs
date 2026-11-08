@@ -456,18 +456,15 @@ impl Session {
         }
     }
 
-    /// Custom emoji the open chat shows: ids in message text and style link
-    /// cards, custom-emoji reactions under messages, and those the open
-    /// reaction picker offers. Sorted and deduplicated.
+    /// Custom emoji the chats on screen show (the main window's and each
+    /// chat window's, with their threads and Saved Messages views): ids in
+    /// message text and style link cards, custom-emoji reactions under
+    /// messages, and those the open reaction picker offers. Sorted and
+    /// deduplicated.
     pub fn open_chat_custom_emoji_ids(&self) -> Vec<i64> {
         use crate::telegram::envelope::{LinkPreviewKind, ReactionType};
         let mut ids = Vec::new();
-        for message in self
-            .open_chat
-            .and_then(|id| self.histories.get(&id.0))
-            .into_iter()
-            .flat_map(|history| history.messages.values())
-        {
+        for message in self.shown_messages() {
             if let Some(reactions) = message
                 .interaction_info
                 .as_ref()

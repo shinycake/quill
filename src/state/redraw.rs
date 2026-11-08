@@ -56,6 +56,7 @@ impl Session {
     /// wherever the row is (the media viewer): every row then counts as on
     /// screen.
     pub fn note_rows_on_screen(&mut self, messages: Option<&[MessageId]>) {
+        // view-in-place: the main window's frame reports its own rows.
         let history = self.open_chat.and_then(|chat| self.histories.get(&chat.0));
         self.messages.rows_on_screen = messages.map(|messages| RowsOnScreen {
             messages: messages.iter().copied().collect(),
@@ -203,38 +204,35 @@ pub fn redraw_need(session: &Session, envelope: &Envelope) -> RedrawNeed {
     }
 }
 
-/// Whether the conversation pane draws `chat_id`: the open chat, or the
-/// comment thread shown in its place.
+/// Whether a window's conversation pane draws `chat_id`: the main
+/// window's or a chat window's chat, or the comment thread shown in its
+/// place.
 fn shows_chat(session: &Session, chat_id: ChatId) -> bool {
-    session.open_chat == Some(chat_id)
-        || session
-            .threads
-            .thread
-            .as_ref()
-            .is_some_and(|thread| thread.chat_id == chat_id || thread.origin_chat_id == chat_id)
+    session.chat_drawn(chat_id)
 }
 
-/// Whether the conversation header shows `user_id`'s status: the peer of
-/// the open private or secret chat.
-fn shows_user(session: &Session, user_id: UserId) -> bool {
+/// The record of each window's chat (main and chat windows).
+fn shown_chats(session: &Session) -> impl Iterator<Item = &super::ChatSummary> {
     session
-        .open_chat
-        .and_then(|chat_id| session.chats.get(&chat_id.0))
-        .is_some_and(|chat| match chat.kind {
-            ChatKind::Private { user_id: peer } | ChatKind::Secret { user_id: peer, .. } => {
-                peer == user_id
-            }
-            _ => false,
-        })
+        .views_shown()
+        .filter_map(|view| view.open_chat)
+        .filter_map(|chat_id| session.chats.get(&chat_id.0))
 }
 
-/// `Now` when the open chat is the group `is_group` matches, else `Later`.
+/// Whether a conversation header shows `user_id`'s status: the peer of a
+/// private or secret chat shown in any window.
+fn shows_user(session: &Session, user_id: UserId) -> bool {
+    shown_chats(session).any(|chat| match chat.kind {
+        ChatKind::Private { user_id: peer } | ChatKind::Secret { user_id: peer, .. } => {
+            peer == user_id
+        }
+        _ => false,
+    })
+}
+
+/// `Now` when a window shows the group `is_group` matches, else `Later`.
 fn group_need(session: &Session, is_group: impl Fn(&ChatKind) -> bool) -> RedrawNeed {
-    let open = session
-        .open_chat
-        .and_then(|chat_id| session.chats.get(&chat_id.0))
-        .is_some_and(|chat| is_group(&chat.kind));
-    if open {
+    if shown_chats(session).any(|chat| is_group(&chat.kind)) {
         RedrawNeed::Now
     } else {
         RedrawNeed::Later
@@ -249,14 +247,17 @@ fn list_unless_shown(session: &Session, chat_id: ChatId) -> RedrawNeed {
     }
 }
 
-/// Only the main window knows which rows are on screen, so a chat window
-/// always redraws.
+/// Only the main window reports which rows are on screen, so a chat
+/// window that draws the chat always redraws.
 fn interaction_need(session: &Session, chat_id: ChatId, message_id: MessageId) -> RedrawNeed {
-    let in_window =
-        session.window_chats.contains(&chat_id) || session.window_chats.shows_chat(chat_id);
-    let on_screen = shows_chat(session, chat_id)
-        && session.row_on_screen(|rows| rows.messages.contains(&message_id));
-    if in_window || on_screen {
+    let drawn_in = |main: bool| {
+        session
+            .views_shown()
+            .any(|view| view.window.is_none() == main && view.draws_chat(chat_id))
+    };
+    let on_screen =
+        drawn_in(true) && session.row_on_screen(|rows| rows.messages.contains(&message_id));
+    if drawn_in(false) || on_screen {
         RedrawNeed::Conversation
     } else {
         RedrawNeed::Later

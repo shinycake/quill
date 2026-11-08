@@ -1420,3 +1420,119 @@ sites missed.
     hover preview, and the next move over a bar resets it.
   - A mini app's switch-inline still waits for the main window's next
     frame when that window is hidden.
+
+### Phase 11 (area A)
+
+Round 11 of the review, area A, on `claude/sm-review11-a`. Core modules
+only. All six findings held up in code. Three of them (1, 2 and 5) had
+one cause: update paths read `open_chat` or the main window's thread or
+Saved view as "what is on screen". During `ingest` the view in place is
+the main window's, so a chat window got nothing.
+
+**One notion of every view on screen** (`src/state/session_views.rs`).
+
+- `views_shown()` reads every window's view where it is kept: the one
+  in place and each one in `WindowViews`. Each `ShownView` says which
+  window it belongs to and carries its chat, topic, thread and Saved
+  views. `chat_drawn(chat)` asks whether any window's pane draws a
+  chat, counting a comment thread's chats. `chat_is_shown` and
+  `chats_shown` are now built on it, and `WindowViews::shows_chat` /
+  `shows_topic` are gone.
+- `in_every_view(f)` runs an edit once with each view in place, for the
+  rows a view keeps itself (thread, Saved sublist and tag filter, the
+  gallery, the search jump). Requests made inside are stamped with that
+  view. Inside a closed window's throwaway view it runs once, because the
+  main window's view is held outside the session then.
+- Designs considered. (a) A `&mut` projection over every view's layers:
+  no swaps, but `thread_upsert` needs the request table as well as the
+  thread, so it would need a second path anyway. (b) Keying threads and
+  Saved views by window in the session: a larger move of state that
+  `swap_view` already owns. (c) Fixing each call site with its own loop,
+  as `maybe_download_shown_thumbs` does: that is the shape that kept
+  missing sites. We picked one read projection plus `in_every_view`.
+  A swap is nine `mem::swap`s, and with no chat window open
+  `in_every_view` runs `f` once with no swap.
+
+What goes through it:
+
+- **Redraw grading (1).** `shows_chat`, `shows_user`, `group_need` and
+  `interaction_need` read `views_shown`. New messages, typing, read ticks,
+  counters, drafts and positions of a chat shown only in a chat window
+  grade `Now`, and so does its peer's status. Before, they graded
+  `ChatList`, which redraws only the sidebar.
+- **Live thread and Saved updates (2).** New replies (`thread_upsert`),
+  the own reply's server id or failure (`replace_view_copy`), edits,
+  reactions and content changes (`edit_loaded_message` now edits every
+  view's thread and Saved rows), reply counters (`sync_thread_reply_info`),
+  deletions (thread, Saved views, gallery, search jump) and a deleted
+  Saved sublist all reach every window. `prune_reply_targets` keeps the
+  targets of every window's thread.
+- **Tap effects (5).** `accept_emoji_effect` checks `chat_is_shown`.
+- **Same shape, found in the sweep.** Reaction notifications now skip a
+  chat shown in the active chat window (`shown_in_active_window`, as
+  message notifications already did). The custom emoji the screen
+  shows, and the stories that story messages point at, come from
+  `shown_messages()` (every shown chat's history and every view's
+  layered rows). Full-media auto-download runs for each chat window
+  (`maybe_download_shown_chat_media`). The history pruner's "shown"
+  checks read `views_shown`.
+- **Guard.** `scripts/view_reads.py`, run by `check-window-scope.py`,
+  reads the update, answer and redraw files of `src/state` (`redraw.rs`,
+  `session_apply*.rs`, `session_updates.rs`, `updates_sync.rs`,
+  `session_notifications.rs`, `session_forward.rs`, and each domain's
+  `apply.rs`, `error.rs` and `interaction.rs`). It fails on a read of
+  `self.open_chat` / `session.open_chat`, `.threads.thread` or the Saved
+  views, unless the line or one of the three above carries
+  `// view-in-place: <why>`. Three reads carry it: the sponsored answer
+  (applied in the asking view), and the two notification inputs (the
+  main window's chat while the app is active). On 7240cf719 it fails
+  with 14 lines, among them `interaction.rs:23` (finding 5), the four
+  redraw reads behind finding 1, and the thread and Saved reads behind
+  finding 2 in `messages/apply.rs` and `edit_loaded_message`. A read split
+  over two lines (`session`, then `.open_chat`) counts. It cannot see a
+  read inside a helper defined in another file, such as `thread_accepts`
+  in `session_thread.rs`.
+
+**Every copy of a message (3).** `loaded_message(chat, message)` finds a
+row in the chat's history, a loaded forum topic, or any window's thread
+or Saved views. The poll vote and retract look the row up there, and the
+optimistic flip, its immediate undo and the `PollVote` rollback go
+through `set_poll_marks`, which edits every copy via
+`edit_loaded_message`. `apply_update_poll` updates every copy the same
+way. Thread pages, live thread replies, Saved pages and a live topic row
+outside the main window now index their polls, so `updatePoll` finds
+them. `apply_update_poll` returns the number of rows updated in any copy.
+
+**Answers matched to the query that asked (4, 6).**
+
+- Recent actions: `GroupsState::event_log_waits` holds the page and poll
+  each chat's log waits for (`EventLogWait`). A refresh forgets both and
+  is sent at once, even while an older page is out. A page, poll or
+  error with another id changes nothing. `has_event_log_in_flight` is
+  gone. A failed poll now clears its wait, so the next tick polls again.
+- Recent calls: `recent_calls_loading` is now
+  `recent_calls_request: Option<RequestId>`, and `recent_calls_loading()`
+  is derived from it. Reopening the tab clears it and asks for the first
+  page again. "Clear all"'s `ok` forgets the page in flight. Only the
+  awaited page or error lands.
+
+**Tests.** Every fix has a deterministic test of what the user sees:
+`state/tests/redraw.rs` (a chat window's typing, message, read tick and
+status grade `Now`, also with the window's view in place, and a chat
+window's thread counts), `connect/tests/chat_window_views.rs` (a live
+reply, the own reply's server id, edit and delete in a chat window's
+thread, a vote and a refused vote there, a vote in a forum topic),
+`connect/tests/latest_query_wins.rs` (search typed during a load,
+filters saved during an older page, a poll from before a refresh, a
+Calls reopen, Clear all during a page),
+`state/tests/emoji_interaction.rs`, `notify/tests.rs`, `emoji/tests.rs`,
+`state/tests/message_story.rs` and `connect/tests/update_batch.rs`. With
+`in_every_view` and `loaded_message` reduced to the view in place, the
+five chat-window thread tests fail.
+
+**Not done.** File-progress grading still treats chat windows' automatic
+downloads as off-screen (`Later`), because only the main window reports
+the rows it shows. A Saved Messages sublist takes no live new messages,
+in any window, as before. `drop_thread_pages_past` matches pages by
+thread, so two windows showing the same thread mark each other's pages
+stale.

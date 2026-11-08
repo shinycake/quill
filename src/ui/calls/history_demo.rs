@@ -27,6 +27,8 @@ impl QuillApp {
         };
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         let extra = session.request(RequestPurpose::SearchCallMessages, None);
+        // Recent calls only take the page they wait for.
+        session.calls.recent_calls_request = Some(extra);
         let calls: Vec<String> = (0..14i64)
             .map(|n| {
                 let reason = if n % 3 == 1 {

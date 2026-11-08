@@ -463,12 +463,14 @@ impl Session {
             chat_id: message.chat_id,
             message_id: message.id,
         });
-        // The open comment / reply thread shows its own replies.
-        if self.thread_accepts(&message) {
-            self.remember_files(&message.files);
-            let row = history_message(message.clone(), false);
-            self.thread_upsert(row);
-        }
+        // A comment / reply thread open in any window shows its own replies.
+        self.in_every_view(|session| {
+            if session.thread_accepts(&message) {
+                session.remember_files(&message.files);
+                session.index_poll_parsed(&message);
+                session.thread_upsert(history_message(message.clone(), false));
+            }
+        });
         let (chat_id, topic_id) = (message.chat_id, message.topic_id);
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
@@ -483,6 +485,7 @@ impl Session {
                     .topic_histories
                     .contains_key(&(chat_id.0, topic_id))
             {
+                self.index_poll_parsed(&message);
                 let row = history_message(message, false);
                 self.note_live_topic_message(chat_id, topic_id, row);
             }

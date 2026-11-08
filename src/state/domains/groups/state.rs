@@ -122,6 +122,8 @@ pub struct GroupsState {
     pub pending_join_request_users: HashMap<i64, Vec<i64>>,
     /// Phase D3c: `getChatEventLog` fetch state, keyed by chat id.
     pub event_logs: HashMap<i64, ChatEventLogFetch>,
+    /// The requests each chat's event log waits for, by chat id.
+    pub event_log_waits: HashMap<i64, EventLogWait>,
     /// Slice G2: per-chat event-log filters (`chatEventLogFilters`,
     /// schema 1.8.67, line 7956). Absent = all event types (the schema's
     /// `null`).
@@ -356,6 +358,7 @@ impl GroupsState {
             pending_join_request_counts: HashMap::new(),
             pending_join_request_users: HashMap::new(),
             event_logs: HashMap::new(),
+            event_log_waits: HashMap::new(),
             event_log_filters: HashMap::new(),
             event_log_queries: HashMap::new(),
             event_log_users: HashMap::new(),

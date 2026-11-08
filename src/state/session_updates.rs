@@ -236,10 +236,11 @@ impl Session {
     }
 
     /// Apply `edit` to every loaded copy of one message: the row in the
-    /// chat's main history and the row in any loaded forum-topic history
-    /// of that chat (the topic view reads `topic_histories` only, and
-    /// per-message updates carry no topic id). Returns whether any copy
-    /// was found.
+    /// chat's main history, the row in any loaded forum-topic history of
+    /// that chat (the topic view reads `topic_histories` only, and
+    /// per-message updates carry no topic id), and the rows of every
+    /// window's comment thread and Saved Messages views. Returns whether
+    /// any copy was found.
     pub(crate) fn edit_loaded_message(
         &mut self,
         chat_id: ChatId,
@@ -263,35 +264,9 @@ impl Session {
                 found = true;
             }
         }
-        if let Some(thread) = self.threads.thread.as_mut()
-            && thread.chat_id == chat_id
-            && let Some(message) = thread.history.messages.get_mut(&message_id.0)
-        {
-            edit(message);
-            found = true;
-        }
-        if self.my_user_id == Some(chat_id.0) {
-            if let Some(message) = self
-                .threads
-                .saved
-                .sublist
-                .as_mut()
-                .and_then(|view| view.history.messages.get_mut(&message_id.0))
-            {
-                edit(message);
-                found = true;
-            }
-            if let Some(message) = self
-                .threads
-                .saved
-                .tag_search
-                .as_mut()
-                .and_then(|search| search.history.messages.get_mut(&message_id.0))
-            {
-                edit(message);
-                found = true;
-            }
-        }
+        self.in_every_view(|session| {
+            found |= session.edit_view_copy(chat_id, message_id, &mut edit);
+        });
         // A reply's original fetched with getRepliedMessage, kept beside the
         // histories: its strip shows the edit too. Not counted as loaded.
         for target in self.messages.reply_targets.values_mut() {
@@ -307,12 +282,21 @@ impl Session {
 
     /// Record a loaded poll row in `poll_messages` (see `apply_update_poll`).
     pub(crate) fn index_poll(&mut self, message: &HistoryMessage) {
-        if let MessageContent::Poll(content) = &message.content {
+        self.index_poll_content(message.chat_id, message.id, &message.content);
+    }
+
+    /// [`Self::index_poll`] for a message not yet made a row.
+    pub(crate) fn index_poll_parsed(&mut self, message: &ParsedMessage) {
+        self.index_poll_content(message.chat_id, message.id, &message.content);
+    }
+
+    fn index_poll_content(&mut self, chat_id: ChatId, id: MessageId, content: &MessageContent) {
+        if let MessageContent::Poll(content) = content {
             self.messages
                 .poll_messages
                 .entry(content.poll.id)
                 .or_default()
-                .insert((message.chat_id.0, message.id.0));
+                .insert((chat_id.0, id.0));
         }
     }
 

@@ -7,7 +7,9 @@ use crate::state::*;
 use crate::telegram::envelope::{ChatKind, ParsedFile, StickerItem, StickersPayload};
 
 impl Session {
-    /// Queue the effect of a tap for the window, when its chat is open.
+    /// Queue the effect of a tap for the windows, when a window shows its
+    /// chat (the main window's or a chat window's; each window plays the
+    /// effects of its own chat).
     pub(crate) fn accept_emoji_effect(
         &mut self,
         chat_id: i64,
@@ -20,7 +22,7 @@ impl Session {
         let Some(sticker) = sticker else {
             return;
         };
-        if chat_id == 0 || message_id == 0 || self.open_chat != Some(ChatId(chat_id)) {
+        if chat_id == 0 || message_id == 0 || !self.chat_is_shown(ChatId(chat_id)) {
             return;
         }
         self.stickers.interactions.push(EmojiEffect {

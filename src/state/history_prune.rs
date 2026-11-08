@@ -265,14 +265,10 @@ impl Session {
     /// A view (main window, chat window, topic or comment thread) shows
     /// `chat_id`.
     fn chat_shown_by_view(&self, chat_id: ChatId) -> bool {
-        self.open_chat == Some(chat_id)
-            || self.window_chats.contains(&chat_id)
-            || self.window_chats.shows_chat(chat_id)
+        self.chat_is_shown(chat_id)
             || self
-                .threads
-                .thread
-                .as_ref()
-                .is_some_and(|thread| thread.chat_id == chat_id)
+                .views_shown()
+                .any(|view| view.thread.is_some_and(|thread| thread.chat_id == chat_id))
     }
 
     /// Whether some view shows `chat_id` or the UI holds it: its history
@@ -282,8 +278,8 @@ impl Session {
     }
 
     fn topic_shown_by_view(&self, chat_id: ChatId, topic: i32) -> bool {
-        (self.open_chat == Some(chat_id) && self.open_topic == Some(topic))
-            || self.window_chats.shows_topic(chat_id, topic)
+        self.views_shown()
+            .any(|view| view.open_chat == Some(chat_id) && view.open_topic == Some(topic))
     }
 
     fn topic_history_in_use(&self, chat_id: ChatId, topic: i32) -> bool {

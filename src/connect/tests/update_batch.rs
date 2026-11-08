@@ -443,3 +443,37 @@ fn a_cross_chat_reply_target_that_turns_into_a_photo_gets_its_thumbnail() {
     assert_eq!(downloads(), vec![5]);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Round 11 (area A): a photo arriving in a chat shown only in its own
+/// window gets its full download as well as its thumbnail, as it would in
+/// the main window's chat.
+#[test]
+fn a_photo_in_a_chat_window_downloads_like_one_in_the_main_window() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, payload: &str| {
+        driver
+            .ingest(copy_and_parse(payload, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
+    );
+    driver.open_chat_window(ChatId(7)).unwrap();
+    assert_eq!(
+        driver.session.open_chat, None,
+        "the main window shows nothing"
+    );
+    ingest(&mut driver, &photo_message(20, 7, 1, 2));
+    let mut downloads: Vec<i64> = sent_of_type(&recorder, "downloadFile")
+        .iter()
+        .filter_map(|request| request["file_id"].as_i64())
+        .collect();
+    downloads.sort_unstable();
+    assert_eq!(downloads, vec![1, 2]);
+    let _ = std::fs::remove_dir_all(dir);
+}

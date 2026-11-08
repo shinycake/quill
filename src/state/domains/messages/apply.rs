@@ -216,12 +216,8 @@ impl Session {
                 {
                     topic_history.replace_id(old_message_id, row.clone());
                 }
-                if let Some(thread) = self.threads.thread.as_mut()
-                    && thread.chat_id == chat_id
-                    && thread.history.messages.contains_key(&old_message_id.0)
-                {
-                    thread.history.replace_id(old_message_id, row);
-                }
+                // A reply sent from a thread in any window resolves there.
+                self.in_every_view(|session| session.replace_view_copy(old_message_id, &row));
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
                 let slot = if direct_topic != 0 && self.is_direct_messages_admin(chat_id) {
@@ -278,12 +274,8 @@ impl Session {
                 {
                     topic_history.replace_id(old_message_id, row.clone());
                 }
-                if let Some(thread) = self.threads.thread.as_mut()
-                    && thread.chat_id == chat_id
-                    && thread.history.messages.contains_key(&old_message_id.0)
-                {
-                    thread.history.replace_id(old_message_id, row);
-                }
+                // A reply sent from a thread in any window resolves there.
+                self.in_every_view(|session| session.replace_view_copy(old_message_id, &row));
             }
             MessagesPayload::UpdateMessageSendAcknowledged { .. } => {
                 // Not success. Keep the pending row until Succeeded/Failed.
@@ -305,13 +297,12 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.interaction_info = interaction_info.clone();
                 });
-                self.sync_thread_reply_info(
-                    chat_id,
-                    message_id,
-                    interaction_info
-                        .as_ref()
-                        .and_then(|info| info.reply_info.as_ref()),
-                );
+                let reply_info = interaction_info
+                    .as_ref()
+                    .and_then(|info| info.reply_info.as_ref());
+                self.in_every_view(|session| {
+                    session.sync_thread_reply_info(chat_id, message_id, reply_info);
+                });
             }
             MessagesPayload::UpdateMessageIsPinned {
                 chat_id,
@@ -415,16 +406,6 @@ impl Session {
                     if let Some(history) = self.histories.get_mut(&chat_id.0) {
                         history.remove(id, true);
                     }
-                    if is_permanent
-                        && matches!(
-                            self.search.chat_search.jump,
-                            ChatSearchJump::Ready { message_id }
-                                | ChatSearchJump::Loading { message_id }
-                                if message_id == id
-                        )
-                    {
-                        self.search.chat_search.jump = ChatSearchJump::Missing { message_id: id };
-                    }
                 }
                 // Parity slice 4: the topic view reads only
                 // `topic_histories`, so deletions must reach its rows too.
@@ -435,11 +416,18 @@ impl Session {
                         }
                     }
                 }
-                self.thread_remove(chat_id, &message_ids);
-                self.saved_remove_messages(chat_id, &message_ids);
-                self.media
-                    .shared_media
-                    .remove_messages(chat_id, &message_ids);
+                // Every window's thread, Saved Messages views and gallery.
+                self.in_every_view(|session| {
+                    if is_permanent {
+                        session.miss_search_jump(&message_ids);
+                    }
+                    session.thread_remove(chat_id, &message_ids);
+                    session.saved_remove_messages(chat_id, &message_ids);
+                    session
+                        .media
+                        .shared_media
+                        .remove_messages(chat_id, &message_ids);
+                });
             }
             MessagesPayload::Messages {
                 messages,
@@ -526,6 +514,8 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
+                    // view-in-place: the answer applies in the view that asked
+                    // (`lands_in_view`), so this is the asking window's chat.
                     if self.open_chat != Some(chat_id) {
                         self.diagnostics.record(Diagnostic {
                             category: "reducer",

@@ -90,9 +90,9 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         )
     };
 
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
@@ -108,9 +108,9 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     // Older page appends; the overlapping id dedupes; a full page
     // (100 events) keeps `has_more`.
     let full: Vec<i64> = (200..300).rev().collect();
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 299 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 299 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
@@ -124,9 +124,9 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     assert!(loaded.has_more);
 
     // A short final page clears `has_more`.
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 200 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 200 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
@@ -137,9 +137,9 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     assert!(!loaded.has_more);
 
     // A first-page refetch replaces everything (refresh semantics).
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
     let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
@@ -159,9 +159,9 @@ fn event_log_failure_states() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
 
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(
         &mut session,
@@ -180,9 +180,9 @@ fn event_log_failure_states() {
     assert!(message.contains("Could not load recent actions"));
 
     // Load one page, then fail the older page: the loaded page stays.
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 0 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(
         &mut session,
@@ -193,9 +193,9 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let extra = session.request(
-        RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { from_event_id: 50 }),
-        Some(ChatId(13)),
+    let extra = event_log_request(
+        &mut session,
+        GroupsPurpose::GetChatEventLog { from_event_id: 50 },
     );
     apply_json(
         &mut session,

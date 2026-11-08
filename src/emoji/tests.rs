@@ -480,3 +480,21 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     );
     assert!(with_purpose.stickers.emoji.installed_sets.is_empty());
 }
+
+/// Round 11 (area A): custom emoji of a chat shown only in its own window
+/// are resolved too (and kept when the cache trims).
+#[test]
+fn a_chat_windows_custom_emoji_count_as_shown() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":9,"chat_id":4,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi 😀","entities":[{"@type":"textEntity","offset":3,"length":2,"type":{"@type":"textEntityTypeCustomEmoji","custom_emoji_id":"12345"}}]}}}}"#,
+    );
+    assert!(!session.open_chat_custom_emoji_ids().contains(&12345));
+    session.open_window_chat(ChatId(4));
+    assert!(session.open_chat_custom_emoji_ids().contains(&12345));
+    assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
+}

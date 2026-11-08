@@ -13,50 +13,33 @@ impl Session {
     /// carries no chat or message id, so the rows holding that poll are
     /// found through `poll_messages` (filled wherever a row is loaded) and
     /// the poll is replaced in place (vote counts, percentages, chosen
-    /// marks) in the main history and any loaded topic history. Returns the
-    /// number of main-history rows updated.
+    /// marks) in every copy of the row: the main history, a loaded topic
+    /// history, and every window's comment thread and Saved Messages
+    /// views (`edit_loaded_message`). Returns the number of rows updated.
     pub fn apply_update_poll(&mut self, poll: Poll) -> usize {
         let Some(rows) = self.messages.poll_messages.remove(&poll.id) else {
             return 0;
         };
-        let mut updated = 0;
         let mut touched = Vec::new();
-        let mut live = HashSet::new();
         for (chat_id, message_id) in rows {
-            let replace = |message: &mut HistoryMessage| match &mut message.content {
-                MessageContent::Poll(poll_content) if poll_content.poll.id == poll.id => {
-                    poll_content.poll = poll.clone();
-                    true
-                }
-                _ => false,
-            };
-            let mut found = false;
-            if let Some(message) = self
-                .histories
-                .get_mut(&chat_id)
-                .and_then(|history| history.messages.get_mut(&message_id))
-                && replace(message)
-            {
-                touched.push((chat_id, message_id));
-                updated += 1;
-                found = true;
-            }
-            // The topic view reads only `topic_histories`.
-            for ((topic_chat_id, _), topic) in self.threads.topic_histories.iter_mut() {
-                if *topic_chat_id == chat_id
-                    && let Some(message) = topic.messages.get_mut(&message_id)
-                    && replace(message)
+            let mut replaced = false;
+            self.edit_loaded_message(ChatId(chat_id), MessageId(message_id), |message| {
+                if let MessageContent::Poll(poll_content) = &mut message.content
+                    && poll_content.poll.id == poll.id
                 {
-                    found = true;
+                    poll_content.poll = poll.clone();
+                    replaced = true;
                 }
-            }
+            });
             // Rows that left (deleted, edited away) drop out of the index.
-            if found {
-                live.insert((chat_id, message_id));
+            if replaced {
+                touched.push((chat_id, message_id));
             }
         }
-        if !live.is_empty() {
-            self.messages.poll_messages.insert(poll.id, live);
+        if !touched.is_empty() {
+            self.messages
+                .poll_messages
+                .insert(poll.id, touched.iter().copied().collect());
         }
         // N2: an open voter dialog goes stale when the poll updates
         // (counts/options change) — drop cached pages for touched
@@ -66,7 +49,33 @@ impl Session {
                 .poll_voters
                 .retain(|(chat_id, message_id, _), _| !touched.contains(&(*chat_id, *message_id)));
         }
-        updated
+        touched.len()
+    }
+
+    /// Set the chosen marks of a poll row in every copy of it (an
+    /// optimistic vote, or its rollback). With `only_if`, a copy changes
+    /// only while it still shows those marks: an update that came since
+    /// tells the truth.
+    pub(crate) fn set_poll_marks(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        marks: &[bool],
+        only_if: Option<&[bool]>,
+    ) {
+        self.edit_loaded_message(chat_id, message_id, |message| {
+            let MessageContent::Poll(content) = &mut message.content else {
+                return;
+            };
+            let options = &mut content.poll.options;
+            let current: Vec<bool> = options.iter().map(|option| option.is_chosen).collect();
+            if only_if.is_some_and(|expected| expected != current.as_slice()) {
+                return;
+            }
+            for (option, mark) in options.iter_mut().zip(marks) {
+                option.is_chosen = *mark;
+            }
+        });
     }
 
     pub fn resolve_reply_preview(&self, reply: &MessageReplyTo, fallback_chat: ChatId) -> String {

@@ -218,6 +218,7 @@ impl Session {
         };
         for message in &messages {
             self.remember_files(&message.files);
+            self.index_poll_parsed(message);
         }
         let Some(view) = self
             .threads
@@ -267,6 +268,7 @@ impl Session {
         };
         for message in &messages {
             self.remember_files(&message.files);
+            self.index_poll_parsed(message);
         }
         let Some(search) = self
             .awaiting_saved_tag_search(pending)
@@ -294,15 +296,18 @@ impl Session {
     pub(crate) fn remove_saved_topic(&mut self, topic_id: i64) {
         self.threads.saved.topics.remove(&topic_id);
         self.threads.saved.topic_tags.remove(&topic_id);
-        if self
-            .threads
-            .saved
-            .sublist
-            .as_ref()
-            .is_some_and(|view| view.topic_id == topic_id)
-        {
-            self.threads.saved.close_views();
-        }
+        // Whichever window shows the sublist.
+        self.in_every_view(|session| {
+            if session
+                .threads
+                .saved
+                .sublist
+                .as_ref()
+                .is_some_and(|view| view.topic_id == topic_id)
+            {
+                session.threads.saved.close_views();
+            }
+        });
         self.view_generation.bump();
     }
 

@@ -51,14 +51,10 @@ pub fn message_story_key(content: &MessageContent) -> Option<(i64, i32, bool)> {
 }
 
 impl Session {
-    /// Stories the open chat's story messages point at.
+    /// Stories the story messages of the chats on screen point at (the
+    /// main window's and each chat window's).
     fn open_chat_message_stories(&self) -> Vec<(i64, i32)> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
-            return Vec::new();
-        };
-        history
-            .messages
-            .values()
+        self.shown_messages()
             .filter_map(|message| message_story_key(&message.content))
             .map(|(chat, story, _)| (chat, story))
             .collect()

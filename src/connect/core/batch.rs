@@ -133,7 +133,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.batch.media_passes += 1;
         }
         self.maybe_download_shown_thumbs()?;
-        self.maybe_download_open_chat_media()?;
+        self.maybe_download_shown_chat_media()?;
         Ok(())
     }
 

@@ -59,6 +59,8 @@ impl Session {
                 self.calls.recent_calls_offset.clear();
                 self.calls.recent_calls_error = false;
                 self.calls.recent_calls_clearing = false;
+                // A page in flight still lists the calls just deleted.
+                self.calls.recent_calls_request = None;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages.message_action_note = Some("messages deleted".into());

@@ -14,6 +14,12 @@ impl Session {
         events: Vec<ParsedChatEvent>,
         pending: Option<&PendingRequest>,
     ) {
+        // Only the requests the log waits for (`event_log_waits`): a page
+        // or poll asked under an earlier query or filter is dropped.
+        let Some(pending) = pending.filter(|pending| self.take_event_log_wait(pending)) else {
+            return;
+        };
+        let pending = Some(pending);
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::Groups(GroupsPurpose::PollChatEventLog)
             && let Some(chat_id) = pending.chat_id
@@ -58,5 +64,26 @@ impl Session {
                 }),
             );
         }
+    }
+
+    /// Whether `pending` is a `getChatEventLog` page or poll its chat's log
+    /// still waits for; if so the log stops waiting for it.
+    pub(super) fn take_event_log_wait(&mut self, pending: &PendingRequest) -> bool {
+        let Some(chat_id) = pending.chat_id else {
+            return false;
+        };
+        let Some(wait) = self.groups.event_log_waits.get_mut(&chat_id.0) else {
+            return false;
+        };
+        let slot = match pending.purpose {
+            RequestPurpose::Groups(GroupsPurpose::PollChatEventLog) => &mut wait.poll,
+            RequestPurpose::Groups(GroupsPurpose::GetChatEventLog { .. }) => &mut wait.page,
+            _ => return false,
+        };
+        if *slot != Some(pending.id) {
+            return false;
+        }
+        *slot = None;
+        true
     }
 }
