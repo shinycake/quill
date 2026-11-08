@@ -49,7 +49,10 @@ impl QuillApp {
                 });
                 // Same as a chat click: a hidden window may never render on
                 // its own, and the pick runs from `flush_notifications`.
-                activate_everything(cx);
+                let skip = notification_app
+                    .read_with(cx, |this, _| this.delivery.windows.window_ids())
+                    .unwrap_or_default();
+                activate_everything(&skip, cx);
                 return;
             }
             let Some((tag_account, chat_id)) = quill::notify::parse_notification_tag(&response.tag)
@@ -144,7 +147,7 @@ impl QuillApp {
         // A hidden (close-to-tray) or minimized window may never render
         // again on its own: bring the app forward so `flush_notifications`
         // runs and opens the chat.
-        activate_everything(cx);
+        activate_everything(&self.delivery.windows.window_ids(), cx);
     }
 
     /// "Mark as read" from the notification: `viewMessages` through the
@@ -220,10 +223,16 @@ impl QuillApp {
     }
 }
 
-/// Bring the app and every window forward.
-fn activate_everything(cx: &mut App) {
+/// Bring the app and every window forward except Quill's notification
+/// windows (`skip`): activating one would take the focus off the main
+/// window, and on Windows GPUI's activation sends a synthetic Alt press
+/// into it.
+pub(in crate::ui) fn activate_everything(skip: &[WindowId], cx: &mut App) {
     cx.activate(true);
     for window in cx.windows() {
+        if skip.contains(&window.window_id()) {
+            continue;
+        }
         let _ = window.update(cx, |_, window, _| window.activate_window());
     }
 }

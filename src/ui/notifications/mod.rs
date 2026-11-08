@@ -864,6 +864,7 @@ pub(in crate::ui) use avatar_icon::forget_cached_icons;
 mod debug_notification;
 mod deliver;
 mod inline_reply;
+pub(in crate::ui) use inline_reply::activate_everything;
 #[cfg(target_os = "linux")]
 mod linux_dbus;
 #[cfg(target_os = "linux")]
