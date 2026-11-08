@@ -523,7 +523,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             _ => Vec::new(),
         };
-        // A pin in the open chat refetches its pinned list (the pinned
+        // A pin in a chat on screen refetches its pinned list (the pinned
         // message may not be loaded); a confirmed unpin-all empties it.
         let pins_changed: Option<ChatId> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::UpdateMessageIsPinned {
@@ -605,7 +605,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .pinned_messages
                 .insert(chat_id.0, Vec::new());
         }
-        if let Some(chat_id) = pins_changed.filter(|chat| self.session.open_chat == Some(*chat)) {
+        if let Some(chat_id) = pins_changed.filter(|chat| self.session.chat_is_shown(*chat)) {
             let _ = self.fetch_pinned_messages(chat_id);
         }
         self.run_post_ingest_pumps(active_call_before, bridge_signaling, group_calls_before)?;
