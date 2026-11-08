@@ -17,9 +17,15 @@ pub struct ChatListState {
     pub are_folder_tags_enabled: bool,
     /// Parity slice: cached full `chatFolder` specs from `getChatFolder`
     /// responses (keyed by folder id) — edit dialog prefill and the
-    /// remove-from-folder chain. Stale entries are dropped when the folder
-    /// is edited or deleted.
+    /// remove-from-folder chain. Dropped when the folder is edited
+    /// through the dialog or deleted.
     pub folder_specs: HashMap<i32, ChatFolderSpec>,
+    /// Folders whose cached spec may be behind the server: a folder
+    /// changed since it was fetched (`updateChatFolders`, an edit or an
+    /// "Add to folder"), possibly from another device. An edit must start
+    /// from a fresh spec ([`ChatListState::fresh_spec`]), or it writes the
+    /// old chat lists back for every device.
+    pub(crate) folder_specs_stale: HashSet<i32>,
     /// Parity slice: `getChatListsToAddChat` results per chat id — the chat
     /// lists a chat may be added to. Drives the per-chat folder picker as
     /// the schema intends (`:13347` doc comment).
@@ -60,6 +66,10 @@ pub struct ChatListState {
     pub folder_invite_error: Option<String>,
     /// `addChatFolderByInviteLink` confirmed.
     pub folder_invite_done: bool,
+    /// The check or add the "Add folder" dialog waits for. Only its answer
+    /// or error lands: one for an earlier link must not fill the dialog of
+    /// the link open now.
+    pub(crate) folder_invite_request: Option<RequestId>,
     /// `getChatFolderNewChats` answers per shared folder: chats its owner
     /// added since the user last looked (the "N new chats" bar).
     pub folder_new_chats: HashMap<i32, Vec<i64>>,
@@ -94,6 +104,12 @@ pub struct ChatListState {
     /// `loadChats(chatListArchive)` answered 404 — the archive is fully
     /// loaded (paging starts once the main list is exhausted).
     pub archive_chats_exhausted: bool,
+    /// After a `loadChats` failure other than 404: no page before this
+    /// instant, and the wait before it, which doubles per failure. The
+    /// driver's tick asks again then (`ConnectDriver::chat_list_tick`).
+    pub(crate) chats_retry: Option<(std::time::Instant, std::time::Duration)>,
+    /// The same for `loadChats(chatListArchive)`.
+    pub(crate) archive_retry: Option<(std::time::Instant, std::time::Duration)>,
     /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
     /// (schema 1.8.67, line 13421). `None` until the first fetch; the
     /// archive-settings panel fetches on open (TGX
@@ -144,12 +160,65 @@ impl ChatListState {
         self.main_list_position = order.main_position;
     }
 
+    /// `folder_id`'s spec when nothing changed the folder since it was
+    /// fetched: the only spec an edit may start from.
+    pub fn fresh_spec(&self, folder_id: i32) -> Option<&ChatFolderSpec> {
+        if self.folder_specs_stale.contains(&folder_id) {
+            return None;
+        }
+        self.folder_specs.get(&folder_id)
+    }
+
+    /// A `getChatFolder` answer: the folder's spec as it is now.
+    pub(crate) fn store_spec(&mut self, folder_id: i32, spec: ChatFolderSpec) {
+        self.folder_specs.insert(folder_id, spec);
+        self.folder_specs_stale.remove(&folder_id);
+    }
+
+    /// Something changed `folder_id`: its cached spec stays for display,
+    /// but the next edit fetches it again.
+    pub(crate) fn mark_spec_stale(&mut self, folder_id: i32) {
+        if self.folder_specs.contains_key(&folder_id) {
+            self.folder_specs_stale.insert(folder_id);
+        }
+    }
+
+    /// Some folder changed (`updateChatFolders` names no folder): every
+    /// cached spec is fetched again before an edit.
+    pub(crate) fn mark_specs_stale(&mut self) {
+        self.folder_specs_stale
+            .extend(self.folder_specs.keys().copied());
+    }
+
+    /// Whether `pending` is the check or add the "Add folder" dialog waits
+    /// for; settles it when it is.
+    pub(crate) fn take_folder_invite_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
+        let answers = pending.is_some_and(|p| self.folder_invite_request == Some(p.id));
+        if answers {
+            self.folder_invite_request = None;
+        }
+        answers
+    }
+
+    /// The wait after a chat-list page failed: one second, doubling per
+    /// failure up to five minutes.
+    pub(crate) fn next_page_retry(
+        previous: Option<(std::time::Instant, std::time::Duration)>,
+        now: std::time::Instant,
+    ) -> (std::time::Instant, std::time::Duration) {
+        const FIRST: std::time::Duration = std::time::Duration::from_secs(1);
+        const MAX: std::time::Duration = std::time::Duration::from_secs(300);
+        let wait = previous.map_or(FIRST, |(_, wait)| wait.saturating_mul(2).min(MAX));
+        (now.checked_add(wait).unwrap_or(now), wait)
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             chat_folders: Vec::new(),
             main_list_position: 0,
             are_folder_tags_enabled: false,
             folder_specs: HashMap::new(),
+            folder_specs_stale: HashSet::new(),
             chat_lists_for_add: HashMap::new(),
             folder_chats_exhausted: HashSet::new(),
             folder_remove_queue: Vec::new(),
@@ -164,6 +233,7 @@ impl ChatListState {
             folder_invite_info: None,
             folder_invite_error: None,
             folder_invite_done: false,
+            folder_invite_request: None,
             folder_new_chats: HashMap::new(),
             folder_new_chats_asked: HashMap::new(),
             folder_limits: crate::folder_limits::FolderLimits::default(),
@@ -178,6 +248,8 @@ impl ChatListState {
             folder_unread_chats: HashMap::new(),
             chats_exhausted: false,
             archive_chats_exhausted: false,
+            chats_retry: None,
+            archive_retry: None,
             archive_chat_list_settings: None,
             archive_settings_loading: false,
             archive_settings_open: false,

@@ -10,7 +10,7 @@
 use super::*;
 use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, RequestId};
-use crate::state::RequestPurpose;
+use crate::state::{RequestPurpose, ViewJump};
 use crate::telegram::requests::close_chat;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -49,6 +49,46 @@ impl<S: JsonSender> ConnectDriver<S> {
         let result = f(self);
         self.session.enter_view(outer);
         result
+    }
+
+    /// Run `f` with `window`'s view in place (`None`: the main window's),
+    /// then put back the view that was. `None`, without running `f`, when
+    /// that window closed: work it asked for must not land in another.
+    pub(crate) fn in_view_of<R>(
+        &mut self,
+        window: Option<ChatId>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> Option<R> {
+        if window.is_some_and(|chat_id| !self.session.window_chats.contains(&chat_id)) {
+            return None;
+        }
+        let outer = self.session.view_in_place();
+        self.session.enter_view(window);
+        let result = f(self);
+        self.session.enter_view(outer);
+        Some(result)
+    }
+
+    /// A jump an answer resolved (corner buttons, jump to date): run it in
+    /// the window that asked, while that window still shows the chat it
+    /// asked about. Otherwise it is dropped.
+    pub(crate) fn run_view_jump(
+        &mut self,
+        jump: ViewJump,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.in_view_of(jump.window, |driver| {
+            let shown = driver
+                .session
+                .search
+                .chat_search
+                .chat_id
+                .or(driver.session.open_chat);
+            if shown != Some(jump.chat_id) {
+                return Ok(None);
+            }
+            driver.jump_to_message_with(jump.message_id, jump.mode)
+        })
+        .unwrap_or(Ok(None))
     }
 
     /// The window showing `chat_id` closed: `closeChat` pairs the

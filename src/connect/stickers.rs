@@ -677,7 +677,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.mark_sticker_set_loading();
         let extra = self.session.request(RequestPurpose::GetStickerSet, None);
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stickers.stickers.set_request = Some((extra, set_id));
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.stickers.stickers.loading_set = false;

@@ -492,6 +492,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
     assert_eq!(recommended[0].description, "All unread chats");
 
     let extra = session.request(RequestPurpose::CheckChatFolderInviteLink, None);
+    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -508,6 +509,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
 
     // Adding confirms through `ok`; a failure shows its reason.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -516,6 +518,7 @@ fn recommended_folders_and_addlist_check_are_cached() {
     );
     assert!(session.chat_list.folder_invite_done);
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
+    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,

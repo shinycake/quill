@@ -20,6 +20,35 @@ pub enum DateJumpMode {
     Oldest,
 }
 
+/// A jump an answer resolved, for the window that asked for it
+/// (`PendingRequest::window`) and the chat it was asked in. The driver
+/// runs it in that window's view, and drops it when the window closed
+/// or shows another chat by then.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewJump {
+    pub window: Option<ChatId>,
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub mode: DateJumpMode,
+}
+
+impl ViewJump {
+    /// The jump for the request `pending`, or `None` when it named no chat.
+    pub(crate) fn for_request(
+        pending: Option<&PendingRequest>,
+        message_id: MessageId,
+        mode: DateJumpMode,
+    ) -> Option<Self> {
+        let pending = pending?;
+        Some(Self {
+            window: pending.window,
+            chat_id: pending.chat_id?,
+            message_id,
+            mode,
+        })
+    }
+}
+
 /// One open calendar box.
 #[derive(Debug, Clone)]
 pub struct HistoryCalendar {

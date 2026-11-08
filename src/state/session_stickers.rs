@@ -225,6 +225,7 @@ impl Session {
         self.stickers.stickers.stickers.clear();
         self.stickers.stickers.loading_set = false;
         self.stickers.stickers.failed = false;
+        self.stickers.stickers.failed_set_id = None;
     }
 
     pub fn mark_sticker_set_loading(&mut self) {

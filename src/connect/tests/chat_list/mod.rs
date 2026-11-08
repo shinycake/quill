@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 mod contacts_bots;
+mod folder_removals;
 mod open_close;
 
 #[test]

@@ -65,3 +65,4 @@
 "lng_channels_too_much_public_revoke" = "Revoke";
 "lng_channels_too_much_public_revoke_confirm_group" = "Are you sure you want to revoke the link {link}?\n\nThe group «{group}» will become private.";
 "lng_channels_too_much_public_revoke_confirm_channel" = "Are you sure you want to revoke the link {link}?\n\nThe channel «{group}» will become private.";
+"qll_group_type_revoke_failed" = "Could not revoke the link";

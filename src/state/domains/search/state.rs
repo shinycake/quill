@@ -8,10 +8,13 @@ pub struct SearchDomainState {
     pub chat_search: ChatSearchState,
     /// The calendar box ("Jump to date"), when open.
     pub history_calendar: Option<HistoryCalendar>,
-    /// A resolved date jump the driver has not started yet.
-    pub(crate) date_jump: Option<(MessageId, DateJumpMode)>,
-    /// A started date jump waiting for its window to load.
-    pub(crate) date_jump_pending: Option<(MessageId, DateJumpMode)>,
+    /// A resolved date jump the driver has not started yet, for the
+    /// window and chat that asked.
+    pub(crate) date_jump: Option<ViewJump>,
+    /// A started date jump waiting for its window to load: the chat, the
+    /// message loaded around and where to land. Part of a window's view
+    /// (`SessionView::date_jump_pending`).
+    pub(crate) date_jump_pending: Option<(ChatId, MessageId, DateJumpMode)>,
     /// One-shot note for a date jump that found nothing.
     pub date_jump_note: Option<String>,
 }

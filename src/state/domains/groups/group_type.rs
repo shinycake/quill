@@ -279,7 +279,10 @@ impl Session {
     }
 
     /// One answer of a revoke. Once both came without an error, the link
-    /// is free: the limit box closes and the limit no longer holds.
+    /// is free: the limit box closes and the limit no longer holds. Once
+    /// both came and one failed, the revoke ends with a note and the list
+    /// is asked again (the other half may have gone through), so the box
+    /// can revoke again.
     fn settle_public_link_revoke(&mut self, pending: Option<&PendingRequest>, failed: bool) {
         let Some(pending) = pending else {
             return;
@@ -297,6 +300,10 @@ impl Session {
             return;
         }
         if revoke.failed {
+            state.revoke = None;
+            state.public_chats = PublicChatsFetch::None;
+            self.chats_state.chat_action_error =
+                Some(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
             return;
         }
         state.revoke = None;

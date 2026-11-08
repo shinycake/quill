@@ -77,4 +77,64 @@ pub enum RequestRollback {
     ArchiveChatListSettings {
         previous: Option<ArchiveChatListSettings>,
     },
+    /// The tab menu's Mute / Unmute (`setForumTopicNotificationSettings`):
+    /// the topic's settings before it and the ones it showed instead.
+    ForumTopicMute {
+        chat_id: i64,
+        forum_topic_id: i32,
+        previous: crate::telegram::envelope::ChatNotificationSettings,
+        shown: crate::telegram::envelope::ChatNotificationSettings,
+    },
+    /// A poll vote or retraction (`setPollAnswer`): each option's chosen
+    /// mark before it and the marks it showed instead.
+    PollVote {
+        chat_id: i64,
+        message_id: i64,
+        previous: Vec<bool>,
+        shown: Vec<bool>,
+    },
+}
+
+impl Session {
+    /// Undo an optimistic topic mute or poll vote the server refused,
+    /// unless something has changed it since (an update then tells the
+    /// truth, and restoring would overwrite it).
+    pub(crate) fn restore_optimistic(&mut self, rollback: RequestRollback) {
+        match rollback {
+            RequestRollback::ForumTopicMute {
+                chat_id,
+                forum_topic_id,
+                previous,
+                shown,
+            } => {
+                self.threads
+                    .forum_topics
+                    .update_topic(chat_id, forum_topic_id, |topic| {
+                        if topic.notification_settings == shown {
+                            topic.notification_settings = previous;
+                        }
+                    });
+            }
+            RequestRollback::PollVote {
+                chat_id,
+                message_id,
+                previous,
+                shown,
+            } => {
+                if let Some(history) = self.histories.get_mut(&chat_id)
+                    && let Some(message) = history.messages.get_mut(&message_id)
+                    && let MessageContent::Poll(content) = &mut message.content
+                {
+                    let options = &mut content.poll.options;
+                    let marks: Vec<bool> = options.iter().map(|o| o.is_chosen).collect();
+                    if marks == shown {
+                        for (option, was) in options.iter_mut().zip(previous) {
+                            option.is_chosen = was;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }

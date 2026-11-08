@@ -103,6 +103,9 @@ impl Session {
                 are_tags_enabled,
             } => {
                 self.chat_list.chat_folders = folders;
+                // The update names no folder: any of them may have new
+                // chat lists (an edit here, on another device, a join).
+                self.chat_list.mark_specs_stale();
                 self.chat_list.main_list_position = main_chat_list_position;
                 self.chat_list.are_folder_tags_enabled = are_tags_enabled;
             }
@@ -120,13 +123,16 @@ impl Session {
                     Some(existing) => *existing = info,
                     None => self.chat_list.chat_folders.push(info),
                 }
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.mark_spec_stale(folder_id);
+                }
             }
             ChatListPayload::ChatFolder { spec } => {
                 // Parity slice: `getChatFolder` response — cache the full
                 // spec for the edit dialog prefill / remove-from-folder
                 // chain (correlated via `PendingRequest::folder_id`).
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.chat_list.folder_specs.insert(folder_id, spec);
+                    self.chat_list.store_spec(folder_id, spec);
                 }
             }
             ChatListPayload::ChatFolderInviteLink(link) => {
@@ -182,7 +188,9 @@ impl Session {
                 self.chat_list.recommended_folders = Some(folders);
             }
             ChatListPayload::ChatFolderInviteLinkInfo(info) => {
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckChatFolderInviteLink) {
+                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckChatFolderInviteLink)
+                    && self.chat_list.take_folder_invite_answer(pending)
+                {
                     self.chat_list.folder_invite_info = Some(info);
                 }
             }

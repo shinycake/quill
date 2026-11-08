@@ -29,6 +29,12 @@ pub struct StickerPanel {
     pub installed_loaded: bool,
     pub loading_set: bool,
     pub failed: bool,
+    /// The `getStickerSet` in flight and the set it asks for.
+    pub set_request: Option<(RequestId, i64)>,
+    /// A set whose `getStickerSet` failed: not asked again until another
+    /// set is selected, or the per-update pass would resend it at
+    /// round-trip speed.
+    pub failed_set_id: Option<i64>,
     pub batch_total: usize,
     pub batch_completed: usize,
     pub batch_failed: usize,
@@ -135,7 +141,7 @@ impl StickerPanel {
 
     pub fn selected_needs_load(&self) -> Option<i64> {
         let id = self.selected_set_id?;
-        if self.loading_set || self.loaded_set_id == Some(id) {
+        if self.loading_set || self.loaded_set_id == Some(id) || self.failed_set_id == Some(id) {
             None
         } else {
             Some(id)

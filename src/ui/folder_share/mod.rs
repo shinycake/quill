@@ -110,12 +110,12 @@ impl QuillApp {
     ) {
         self.folders.share = Some(FolderShareDialog::new(window, cx, folder_id));
         if let Some(live) = self.live.as_mut() {
-            if !live
+            if live
                 .driver
                 .session
                 .chat_list
-                .folder_specs
-                .contains_key(&folder_id)
+                .fresh_spec(folder_id)
+                .is_none()
                 && let Err(err) = live.driver.fetch_chat_folder(folder_id)
             {
                 self.screen

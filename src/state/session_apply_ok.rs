@@ -552,8 +552,12 @@ impl Session {
         ) {
             self.settings.scope_notification_settings.clear();
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadChats) {
-            // A short OK is not exhaustion; 404 is.
+        // A short OK is not exhaustion; 404 is. A page that went through
+        // ends the wait after an earlier failure.
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::LoadChats) => self.chat_list.chats_retry = None,
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_retry = None,
+            _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
@@ -565,7 +569,14 @@ impl Session {
             self.chat_list.folder_specs.remove(&folder_id);
             self.chat_list.folder_chats_exhausted.remove(&folder_id);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink) {
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatToList) {
+            // "Add to folder" changed some folder's chats; the answer
+            // does not say which, so every cached spec is refetched.
+            self.chat_list.mark_specs_stale();
+        }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink)
+            && self.chat_list.take_folder_invite_answer(pending)
+        {
             self.chat_list.folder_invite_done = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)

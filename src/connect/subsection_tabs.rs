@@ -2,8 +2,8 @@
 //! the tab layout toggle and the tab context menu's topic actions.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::RequestPurpose;
 use crate::state::ThreadsPurpose;
+use crate::state::{RequestPurpose, RequestRollback};
 use crate::subsection_tabs::SubsectionTabsMode;
 use crate::telegram::envelope::{
     ChatListPayload, ChatsPayload, GroupsPayload, MessagesPayload, ThreadsPayload, UsersPayload,
@@ -235,6 +235,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                     topic.notification_settings = previous;
                 });
             return Err(err);
+        }
+        // A refusal restores the topic's settings (`restore_optimistic`).
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::ForumTopicMute {
+                chat_id: chat_id.0,
+                forum_topic_id,
+                previous,
+                shown: settings,
+            });
         }
         Ok(Some(extra))
     }

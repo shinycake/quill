@@ -61,6 +61,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         outcome.redraw(self.carrier_tick());
         outcome.progress(self.network_tick(network));
         outcome.progress(self.active_stories_tick(now));
+        outcome.progress(self.chat_list_tick(now));
         self.pump_exports();
         let TickScope::OnScreen { settings_open } = scope else {
             return outcome;

@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::poll::{PollDraft, can_stop_poll, poll_answer_for_tap};
 use crate::state::MessagesPurpose;
-use crate::state::{PollVotersFetch, RequestPurpose};
+use crate::state::{PollVotersFetch, RequestPurpose, RequestRollback};
 use crate::telegram::envelope::MessageContent;
 use crate::telegram::requests::{
     PollSend, PollTypeSend, SendReply, get_poll_voters, send_poll, set_poll_answer,
@@ -92,6 +92,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // rolled back if the send fails (the server's `updatePoll` corrects
         // counts/percentages in place on success).
         let mut previous: Vec<bool> = Vec::new();
+        let mut shown: Vec<bool> = Vec::new();
         if let Some(history) = self.session.histories.get_mut(&chat_id.0)
             && let Some(message) = history.messages.get_mut(&message_id.0)
             && let MessageContent::Poll(poll_content) = &mut message.content
@@ -100,6 +101,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             for (index, option) in poll_content.poll.options.iter_mut().enumerate() {
                 previous.push(option.is_chosen);
                 option.is_chosen = chosen.contains(&(index as i32));
+                shown.push(option.is_chosen);
             }
         }
         let extra = self
@@ -107,7 +109,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::SetPollAnswer, Some(chat_id));
         let json = set_poll_answer(extra, chat_id, message_id, &option_ids);
         match self.sender.send_json(&json) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // A refusal (a poll closed meanwhile, which brings no
+                // `updatePoll`) restores the marks (`restore_optimistic`).
+                if let Some(pending) = self.session.requests.pending_mut(extra) {
+                    pending.rollback = Some(RequestRollback::PollVote {
+                        chat_id: chat_id.0,
+                        message_id: message_id.0,
+                        previous: previous.clone(),
+                        shown,
+                    });
+                }
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 // The vote never left the client: restore the previous marks.

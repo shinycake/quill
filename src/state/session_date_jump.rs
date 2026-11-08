@@ -65,15 +65,20 @@ impl Session {
     }
 
     /// `getChatMessageByDate` answered: the last message before the day.
-    pub(crate) fn accept_date_message(&mut self, message_id: MessageId) {
-        self.search.date_jump = Some((message_id, DateJumpMode::Next));
+    pub(crate) fn accept_date_message(
+        &mut self,
+        message_id: MessageId,
+        pending: Option<&PendingRequest>,
+    ) {
+        self.search.date_jump = ViewJump::for_request(pending, message_id, DateJumpMode::Next);
     }
 
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
     /// the jump goes to the start of the chat.
-    pub(crate) fn fail_date_jump(&mut self, not_found: bool) {
+    pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
         if not_found {
-            self.search.date_jump = Some((FIRST_MESSAGE_ID, DateJumpMode::Oldest));
+            self.search.date_jump =
+                ViewJump::for_request(pending, FIRST_MESSAGE_ID, DateJumpMode::Oldest);
         } else {
             self.search.date_jump_note = Some("Couldn't jump to that date.".into());
         }
@@ -86,7 +91,13 @@ impl Session {
         message_id: MessageId,
         mode: DateJumpMode,
     ) -> ChatSearchJumpNeed {
-        self.search.date_jump_pending = (mode != DateJumpMode::Exact).then_some((message_id, mode));
+        self.search.date_jump_pending = self
+            .search
+            .chat_search
+            .chat_id
+            .or(self.open_chat)
+            .filter(|_| mode != DateJumpMode::Exact)
+            .map(|chat_id| (chat_id, message_id, mode));
         let need = self.begin_chat_search_jump(message_id);
         if need == ChatSearchJumpNeed::AlreadyReady {
             self.resolve_date_jump(message_id);
@@ -97,16 +108,18 @@ impl Session {
     /// The window around `message_id` is loaded: land on the day's first
     /// message (`Next`) or the chat's oldest loaded one (`Oldest`).
     pub(crate) fn resolve_date_jump(&mut self, message_id: MessageId) {
-        let Some((pending_id, mode)) = self.search.date_jump_pending else {
+        let Some((chat_id, pending_id, mode)) = self.search.date_jump_pending else {
             return;
         };
         if pending_id != message_id {
             return;
         }
         self.search.date_jump_pending = None;
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat) else {
+        // The view moved to another chat since the jump began: its window
+        // is not the one the jump was for.
+        if self.search.chat_search.chat_id.or(self.open_chat) != Some(chat_id) {
             return;
-        };
+        }
         let Some(history) = self.histories.get(&chat_id.0) else {
             return;
         };

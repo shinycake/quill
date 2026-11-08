@@ -286,6 +286,9 @@ pub struct SessionView {
     /// The Instant View reader opened in this window
     /// (`MessagesState::instant_view`).
     pub instant_view: Option<InstantViewPage>,
+    /// A date jump this window started, waiting for its page
+    /// (`SearchDomainState::date_jump_pending`).
+    pub(crate) date_jump_pending: Option<(ChatId, MessageId, DateJumpMode)>,
 }
 
 impl SessionView {
@@ -313,5 +316,9 @@ impl Session {
         std::mem::swap(&mut self.search.chat_search, &mut view.chat_search);
         std::mem::swap(&mut self.media.shared_media, &mut view.shared_media);
         std::mem::swap(&mut self.messages.instant_view, &mut view.instant_view);
+        std::mem::swap(
+            &mut self.search.date_jump_pending,
+            &mut view.date_jump_pending,
+        );
     }
 }

@@ -144,9 +144,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::LoadChats, None);
-        self.sender
-            .send_json(&load_chats(extra, MAIN_CHAT_LOAD_LIMIT))?;
+        if let Err(err) = self
+            .sender
+            .send_json(&load_chats(extra, MAIN_CHAT_LOAD_LIMIT))
+        {
+            // Nothing went out: `LoadChats` is not swept, so a registered
+            // page would hold paging back for good.
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(Some(extra))
+    }
+
+    /// The chat lists' retry after a failed page: once its wait is over at
+    /// `now`, the main list and the archive each ask for the page again.
+    /// Whether a page went out.
+    pub(crate) fn chat_list_tick(&mut self, now: std::time::Instant) -> bool {
+        let due = |retry: Option<(std::time::Instant, std::time::Duration)>| {
+            retry.is_some_and(|(at, _)| now >= at)
+        };
+        let mut sent = false;
+        if due(self.session.chat_list.chats_retry) {
+            sent |= matches!(self.maybe_load_main_chats(), Ok(Some(_)));
+        }
+        if due(self.session.chat_list.archive_retry) {
+            sent |= matches!(self.maybe_load_archive_chats(), Ok(Some(_)));
+        }
+        sent
     }
 
     /// One `loadChats(chatListArchive)` page unless the archive is

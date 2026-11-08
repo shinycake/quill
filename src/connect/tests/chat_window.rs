@@ -14,20 +14,20 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-struct Harness {
-    driver: ConnectDriver<Arc<RecordingSender>>,
-    recorder: Arc<RecordingSender>,
+pub(super) struct Harness {
+    pub(super) driver: ConnectDriver<Arc<RecordingSender>>,
+    pub(super) recorder: Arc<RecordingSender>,
     seq: AtomicU64,
     sink: Arc<dyn DiagnosticSink>,
     _dir: std::path::PathBuf,
 }
 
-const ALICE: ChatId = ChatId(7);
-const BOB: ChatId = ChatId(8);
+pub(super) const ALICE: ChatId = ChatId(7);
+pub(super) const BOB: ChatId = ChatId(8);
 
 impl Harness {
     /// Two private chats, nothing unread: Alice (7) and Bob (8).
-    fn two_chats() -> Self {
+    pub(super) fn two_chats() -> Self {
         let store = MemorySecretStore::new();
         let (dir, prepared) = prepared_tmp(&store);
         let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -54,13 +54,13 @@ impl Harness {
         h
     }
 
-    fn ingest(&mut self, json: &str) {
+    pub(super) fn ingest(&mut self, json: &str) {
         self.driver
             .ingest(copy_and_parse(json, &self.seq, &self.sink).unwrap())
             .unwrap();
     }
 
-    fn answer(&mut self, chat: ChatId, extra: RequestId, ids: &[i64]) {
+    pub(super) fn answer(&mut self, chat: ChatId, extra: RequestId, ids: &[i64]) {
         let messages: Vec<String> = ids
             .iter()
             .rev()
@@ -74,7 +74,7 @@ impl Harness {
         ));
     }
 
-    fn sent(&self, kind: &str, chat: ChatId) -> Vec<Value> {
+    pub(super) fn sent(&self, kind: &str, chat: ChatId) -> Vec<Value> {
         self.recorder
             .snapshot()
             .iter()
@@ -84,12 +84,12 @@ impl Harness {
             .collect()
     }
 
-    fn history(&self, chat: ChatId) -> &crate::state::HistoryState {
+    pub(super) fn history(&self, chat: ChatId) -> &crate::state::HistoryState {
         self.driver.session.histories.get(&chat.0).expect("history")
     }
 }
 
-fn message_json(chat: i64, id: i64, outgoing: bool) -> String {
+pub(super) fn message_json(chat: i64, id: i64, outgoing: bool) -> String {
     format!(
         r#"{{"@type":"message","id":{id},"chat_id":{chat},"is_outgoing":{outgoing},"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m{id}","entities":[]}}}}}}"#
     )

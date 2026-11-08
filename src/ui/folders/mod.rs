@@ -821,11 +821,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Reuse the cached spec when the manage dialog just created it;
-        // otherwise fetch the full folder for the prefill.
+        // Reuse the cached spec while nothing changed the folder since it
+        // was fetched; otherwise fetch the full folder for the prefill (a
+        // Save writes the prefilled chat lists back).
         let cached = self
             .session()
-            .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned());
+            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
         let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id));
         if let Some(spec) = cached {
             dialog.prefill_from_spec(&spec, window, cx);
@@ -857,7 +858,7 @@ impl QuillApp {
         };
         let Some(spec) = self
             .session()
-            .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned())
+            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned())
         else {
             return;
         };

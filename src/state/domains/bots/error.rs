@@ -22,6 +22,16 @@ impl Session {
                     Some(format!("could not start the bot (error {})", err.code));
             }
             Some(RequestPurpose::GetBotSimilarBots) => {
+                // The section goes back to its button, so it can ask again
+                // (a `Loading` left behind refused every later press).
+                if let Some(bot) = pending.and_then(|p| p.user_id)
+                    && matches!(
+                        self.bots.similar_bots.get(&bot),
+                        Some(SimilarBotsFetch::Loading)
+                    )
+                {
+                    self.bots.similar_bots.remove(&bot);
+                }
                 self.chats_state.chat_action_error =
                     Some(format!("could not load similar bots (error {})", err.code));
             }
