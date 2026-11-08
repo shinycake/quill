@@ -133,7 +133,7 @@ impl ComposerUi {
     pub(super) fn new() -> Self {
         Self {
             mention_selected: 0,
-            suggest: super::composer_suggest::SuggestUi::load(),
+            suggest: super::composer_suggest::SuggestUi::default(),
             emoji_words: Default::default(),
             inline_query_token: 0,
             inline_scroll: gpui_kit::ScrollHandle::new(),

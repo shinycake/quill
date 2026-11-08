@@ -120,7 +120,7 @@ impl QuillApp {
             .max_h(px(440.))
             .overflow_y_scroll()
             .track_scroll(&self.inline_members.scroll)
-            .on_scroll(cx.listener(|this, _, _, cx| this.maybe_load_more_inline(cx)));
+            .on_scroll(cx.listener(|this, _, _, cx| this.maybe_load_more_inline(true, cx)));
         let muted = cx.theme().muted_foreground;
         let hint = move |text: String| {
             div()
@@ -157,7 +157,7 @@ impl QuillApp {
         // Look again once this frame is laid out: a short list or a
         // page that arrived may leave the end in view.
         self.defer_screen(cx, move |this, cx| {
-            this.maybe_load_more_inline(cx);
+            this.maybe_load_more_inline(false, cx);
         });
         Some(block.into_any_element())
     }

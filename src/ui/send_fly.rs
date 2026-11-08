@@ -86,6 +86,9 @@ struct Source {
 }
 
 struct Fly {
+    /// The window the sticker was sent from (`None`: the main window):
+    /// only its conversation draws the flight, in its own coordinates.
+    window: Option<ChatId>,
     chat_id: i64,
     file: i32,
     /// Unix time the sticker was sent: older messages are not its message.
@@ -298,6 +301,7 @@ impl QuillApp {
         TARGET.with(|target| target.set(None));
         FLY.with(|fly| {
             *fly.borrow_mut() = Some(Fly {
+                window: key.window,
                 chat_id: chat_id.0,
                 file: file.0,
                 since,
@@ -313,6 +317,11 @@ impl QuillApp {
     /// The flying picture, over the conversation; `None` when nothing
     /// flies. Ends the flight (and shows the message) when it lands.
     pub(super) fn send_fly_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // Another window's flight: its coordinates and target are not ours.
+        let here = self.windows.scope;
+        if FLY.with(|fly| fly.borrow().as_ref().is_some_and(|fly| fly.window != here)) {
+            return None;
+        }
         let now = Instant::now();
         let step = FLY.with(|fly| {
             let mut fly = fly.borrow_mut();
@@ -377,6 +386,25 @@ impl QuillApp {
 #[cfg(feature = "demo-capture")]
 pub(super) fn flight_state() -> Option<bool> {
     FLY.with(|fly| fly.borrow().as_ref().map(|fly| fly.started.is_some()))
+}
+
+/// A flight armed from `window` for `chat`, as `arm_send_fly` leaves it.
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+pub(super) fn arm_for_test(window: Option<ChatId>, chat: ChatId, image: ImageSource) {
+    let from = Bounds::new(point(px(10.), px(10.)), size(px(40.), px(40.)));
+    FLY.with(|fly| {
+        *fly.borrow_mut() = Some(Fly {
+            window,
+            chat_id: chat.0,
+            file: 5,
+            since: 0,
+            from,
+            image,
+            armed: Instant::now(),
+            started: None,
+        });
+    });
 }
 
 /// Forget any flight and what was noted (tests share a thread).

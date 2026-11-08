@@ -259,6 +259,9 @@ pub struct GroupsState {
     /// Each next-page request in flight and the first-page request whose
     /// list it extends (`None`: a list filled without one).
     pub(crate) member_more_bases: HashMap<RequestId, Option<RequestId>>,
+    /// Lists whose last next-page request failed. The members panel takes
+    /// the mark and asks for that page again at its next scroll.
+    pub member_more_failed: HashSet<(i64, MemberListFilter)>,
     /// Slice G1: `getBasicGroupFullInfo` fetch state (the member list for
     /// basic groups), keyed by chat id. Reuses `SupergroupMembersFetch`
     /// (Loading / Loaded / Failed).
@@ -406,6 +409,7 @@ impl GroupsState {
             supergroup_members: HashMap::new(),
             supergroup_member_queries: HashMap::new(),
             member_more_bases: HashMap::new(),
+            member_more_failed: HashSet::new(),
             basic_group_members: HashMap::new(),
             basic_group_descriptions: HashMap::new(),
             info_edit_errors: HashMap::new(),

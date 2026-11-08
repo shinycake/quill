@@ -40,6 +40,12 @@ pub(crate) struct LinkUi {
     /// The link in `QuillApp::pending_deep_link` when a step the UI driver
     /// injected queued it (`QuillApp::queue_deep_link`).
     pub(super) agent_pending_link: Option<String>,
+    /// The link in `QuillApp::pending_deep_link` and the chat window it
+    /// was clicked in, when it was one (`QuillApp::queue_deep_link`).
+    pub(super) window_pending_link: Option<(String, ChatId)>,
+    /// The chat window the link flow in progress was asked from. Taken
+    /// with the flow's state at each step, as the agent origin is.
+    pub(super) flow_window: Option<ChatId>,
     /// B1: password prompt for `inlineKeyboardButtonTypeCallbackWithPassword`.
     pub(super) callback_password_dialog: Option<CallbackPasswordDialog>,
     /// B1: `loginUrlInfoRequestConfirmation` domain/url awaiting user consent.
@@ -72,6 +78,8 @@ impl LinkUi {
             pending_deep_link_ui: None,
             pending_deep_link_open: None,
             agent_pending_link: None,
+            window_pending_link: None,
+            flow_window: None,
             callback_password_dialog: None,
             login_url_confirm: None,
         }

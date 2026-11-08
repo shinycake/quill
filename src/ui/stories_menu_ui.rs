@@ -147,7 +147,7 @@ impl QuillApp {
                     entry.label,
                     text_menu().into(),
                     true,
-                    &self.frame.context_menu_items,
+                    &self.frame.menu.items,
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -176,7 +176,7 @@ impl QuillApp {
                 cx.notify();
             }),
         )
-        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
         .anchored(
             position, // The menu of a chat's stories is cut with that
             // chat's row by the UI driver.
@@ -186,6 +186,6 @@ impl QuillApp {
                 .a11y_tag(quill::agent::ui_driver::redact::chat_tag(chat_id))
                 .child(panel),
         )
-        .focus_trap("story-menu-focus", &self.frame.context_menu_focus)
+        .focus_trap("story-menu-focus", &self.frame.menu.focus)
     }
 }

@@ -1,0 +1,89 @@
+# Process-wide state in src/ui that every window shares, and why that is
+# safe (scripts/ui_statics.py, run by check-window-scope.py).
+# `path NAME[,NAME] | why`. State that paint writes for one window belongs
+# in a map keyed by WindowId instead (selectable_text.rs, spoiler_fx.rs).
+
+# Scoped: set before a draw and put back after it, inside one window's frame.
+src/ui/anim_layer.rs CURRENT,UNDER_LAYER | set and restored around one slice's draw
+src/ui/anim_layer.rs PAINT_SEQ | a paint-order counter; only its order matters
+src/ui/chat_palette.rs ACTIVE,OUTGOING | set and restored around one chat's draw
+src/ui/selectable_text.rs VIEWPORT | set and restored around one history's paint
+src/ui/bubble_theme.rs HISTORY_AREA | the wallpaper layer sets it in the same frame before its bubbles read it
+src/ui/image_budget.rs SCOPE,SCOPED | set and restored around one slice's draw; SCOPED carries its window
+src/ui/agent_driver_shot.rs CAPTURING | set around the agent's filtered draw only
+src/ui/chat_theme.rs DARK,HIGH_CONTRAST,LAST | the app theme, the same in every window
+
+# Keyed by something that is in one window at a time, or that carries it.
+src/ui/selectable_text.rs OWNERS | keyed by text entity, which lives in one window
+src/ui/image_budget.rs WHOLE | keyed by window scope (None: the main window)
+src/ui/image_budget.rs SLICES | keyed by slice entity, each with its own window
+src/ui/send_fly.rs CELLS | keyed by window scope and file
+src/ui/send_fly.rs FLY | the flight names its window; only that window draws it
+src/ui/send_fly.rs SOURCE,TARGET,ORIGIN | the one flight's ends, drawn only in its window
+src/ui/sticker_player/display.rs DISPLAYS | keyed by window scope
+src/ui/emoji_effect.rs ANCHORS,ACTIVE | keyed by chat and message; a chat shows in one window
+src/ui/emoji_effect.rs NEXT_HEAD | an id counter
+src/ui/vanish.rs PAINTED | keyed by chat and message; a chat shows in one window
+src/ui/pull_next_ui.rs SLIDE | names its chat; a chat shows in one window
+src/ui/premium_sticker_effect.rs SEEN,PLAYED | keyed by chat and message; a chat shows in one window
+src/ui/message_effect_badge.rs BADGES,REPLAYS | keyed by chat and message; a chat shows in one window
+src/ui/message_effect_badge.rs APP | a weak handle to the one app
+src/ui/message_effect_play.rs WAITING | each entry names its message
+src/ui/spoiler_fx.rs REVEALS | keyed by reveal (message and spot)
+src/ui/spoiler_fx.rs TILE | the speck tile image cache
+src/ui/frame_clips.rs VIDEO_ASKS,ANSWERED | each ask is its clip's own, by display
+src/ui/frame_grid.rs GRIDS,PLAYING | keyed by display, shared by its windows on purpose
+src/ui/frame_clock.rs CONTENT_LATTICE | the main window's display clock by design
+src/ui/interface_zoom/mod.rs ZOOM,WINDOWS | the app zoom; WINDOWS lists every window's own zoom
+src/ui/window_frame.rs NATIVE_FRAME | an app setting
+src/ui/agent_takeover.rs PILL,PROMPT | drawn by the main window only
+src/ui/agent_driver_surface.rs BLOCKED | the agent driver's queue, not drawn
+src/ui/stat_chart/mod.rs CHARTS | keyed by the chart's data
+src/ui/image_budget/retired.rs RETIRED,SWEEPS,FRAME_DONE,WAKE | the app's retired-image queue; waits on every window (SEEN is by WindowId)
+src/ui/image_budget.rs FRAME | counts every window's frames on purpose
+src/ui/image_budget.rs ACTIVITY,IDLE_TRIMMED | the app's idle trim
+
+# Caches: any window may read what another drew.
+src/ui/paragraph_cache.rs CACHE | a text shaping cache
+src/ui/history/text_measure.rs CHAR_WIDTHS | a glyph width cache
+src/ui/call_panel_backdrop.rs CACHE | an image cache
+src/ui/inline_video.rs MASKS | an image cache
+src/ui/message_media/surfaces.rs BLURRED | an image cache
+src/ui/render_decode.rs CACHE | an image cache
+src/ui/reply_pattern.rs CACHE | an image cache
+src/ui/round_seek.rs SHADES | an image cache
+src/ui/wallpaper.rs ROTATIONS | keyed by wallpaper
+src/ui/wallpaper_cache.rs CACHE,FADES,INLINE_SOURCES | keyed by wallpaper
+src/ui/emoji_sprites.rs ACTIVE | the emoji atlas
+src/ui/emoji_style_ui.rs PREVIEWS | an image cache
+src/ui/app_theme/mod.rs ACTIVE,COLORS | the app theme, the same in every window
+src/ui/notifications/avatar_icon.rs DECODING | decodes in flight, by file
+src/ui/touch_bar/mac/draw.rs FILES | an image cache
+
+# The app's own: not drawn per window.
+src/ui/audio/mod.rs VIDEO_OUTPUT | the one audio output
+src/ui/audio/engine.rs PANICKED_BUILD_WAKES | a counter
+src/ui/early_connect.rs FIRST | the first client, main thread only
+src/ui/location_picker/geolocation/macos.rs RUNNING | the one location request
+src/ui/location_picker/demo.rs NEXT_EXTRA | an id counter
+src/ui/platform_cursor.rs OS_PLATFORM | the platform handle
+src/ui/startup_failure.rs QUIT,GPU_GONE,QUIT_ASKED | app quit state
+src/ui/touch_bar/mac/mod.rs HOST,INBOX,SYNC_SCHEDULER | the one Touch Bar
+src/ui/video_player/mod.rs NEXT | an id counter
+src/ui/video_player/decoder_load.rs LOADS,REFRESHES | counters
+src/ui/video_player/controls/pip/open.rs LATEST,WRITING | the one Picture-in-Picture
+src/ui/video_editor.rs OPENED | a counter
+src/ui/photo_editor_save.rs NEXT_RENDER | an id counter
+src/ui/story_albums/cover_strip.rs NEXT_SERIAL | an id counter
+src/ui/presence.rs LAST_INPUT_MS | the app's last input, any window
+src/ui/tray_settings.rs WINDOW_SKIPS_TASKBAR | an app setting
+src/ui/window_control.rs CONNECTION | the X connection
+src/ui/first_run_ui.rs WRITING | a file write lock
+src/ui/appearance/new_accent_picker.rs WATCHING | a one-time watcher
+src/ui/notifications/debug_notification.rs CHECKED | a one-time check
+
+# Test platform hooks inside test-only modules.
+src/ui/agent_driver_shot.rs CAPTURED | test hook
+src/ui/composer_rtl.rs SHAPED | test hook
+src/ui/video_player/controls/pip/place.rs FRAMES | test hook
+src/ui/frame_trace.rs COUNTS,LAST | a debug trace, off by default

@@ -318,7 +318,7 @@ impl QuillApp {
                 action.id(),
                 label,
                 false,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
                 move |this, window, cx| {
                     let _ = window;

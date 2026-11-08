@@ -20,18 +20,40 @@ thread_local! {
     /// Bounds of the scrolling region whose paint is in progress; see
     /// [`SelectionViewport`].
     static VIEWPORT: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+    /// What each window's selection covers, as that window last painted
+    /// it. Every window has its own selection, so a copy reads the entry
+    /// of the window it runs in; see [`selected_message_text`].
+    static SELECTED: std::cell::RefCell<std::collections::HashMap<WindowId, WindowSelected>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// The message each painted text participant belongs to, by the
     /// participant's entity id; see [`SelectableRichText::message`].
-    /// The message whose text the current selection covers, as last
-    /// painted; see [`selected_message_text`].
-    static SELECTED_MESSAGE: Cell<Option<(i64, u64)>> = const { Cell::new(None) };
-    /// Custom emoji inside the current selection, by (document order,
-    /// byte offset): their fallback text replaces the placeholders in the
-    /// copied string; see [`selected_message_text`].
-    static SELECTED_EMOJI: std::cell::RefCell<std::collections::BTreeMap<(u64, usize), String>> =
-        const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
     static OWNERS: std::cell::RefCell<std::collections::HashMap<EntityId, (i64, u64)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// One window's selection, as its last paint saw it.
+#[derive(Default)]
+struct WindowSelected {
+    /// The message whose text the selection covers.
+    message: Option<(i64, u64)>,
+    /// Custom emoji inside the selection, by (document order, byte
+    /// offset): their fallback text replaces the placeholders in the
+    /// copied string.
+    emoji: std::collections::BTreeMap<(u64, usize), String>,
+}
+
+/// Runs `f` on the selection record of `window`, dropping the records of
+/// windows that have closed once a few have piled up.
+fn with_selected<R>(window: &Window, cx: &App, f: impl FnOnce(&mut WindowSelected) -> R) -> R {
+    let id = window.window_handle().window_id();
+    SELECTED.with(|selected| {
+        let mut selected = selected.borrow_mut();
+        if selected.len() > 8 && !selected.contains_key(&id) {
+            let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
+            selected.retain(|window, _| open.contains(window));
+        }
+        f(selected.entry(id).or_default())
+    })
 }
 
 /// Called with the index of the clicked range.
@@ -599,7 +621,7 @@ impl Element for SelectableRichText {
                 .flatten()
                 .any(|range| !range.is_empty())
         {
-            SELECTED_MESSAGE.with(|selected| selected.set(Some(message)));
+            with_selected(window, cx, |selected| selected.message = Some(message));
         }
         if let Some(map) = self.source.take() {
             let (text, ranges) = (self.text.clone(), projection.ranges().to_vec());
@@ -614,17 +636,17 @@ impl Element for SelectableRichText {
                 cx,
             );
         }
-        if !self.emoji.is_empty() || SELECTED_EMOJI.with(|map| !map.borrow().is_empty()) {
-            let order = self.document_order;
-            let selected = selected_fallbacks(&self.emoji, projection.ranges());
-            SELECTED_EMOJI.with(|map| {
-                let mut map = map.borrow_mut();
-                map.retain(|(o, _), _| *o != order);
-                for (at, fallback) in selected {
-                    map.insert((order, at), fallback);
-                }
-            });
-        }
+        let order = self.document_order;
+        let picked = selected_fallbacks(&self.emoji, projection.ranges());
+        with_selected(window, cx, |selected| {
+            if self.emoji.is_empty() && selected.emoji.is_empty() {
+                return;
+            }
+            selected.emoji.retain(|(o, _), _| *o != order);
+            for (at, fallback) in picked {
+                selected.emoji.insert((order, at), fallback);
+            }
+        });
         for range in projection.ranges().iter().flatten() {
             for quad in layout.range_rects(range.clone()) {
                 window.paint_quad(fill(quad, self.selection_color));
@@ -825,14 +847,16 @@ pub(super) fn selected_message_text(
         return None;
     }
     let selected = TextSelection::selected_text(window, cx);
-    let message = SELECTED_MESSAGE.with(Cell::get)?;
-    let fallbacks: Vec<String> = SELECTED_EMOJI.with(|map| {
-        map.borrow()
+    let (message, fallbacks) = with_selected(window, cx, |selected| {
+        let message = selected.message?;
+        let fallbacks: Vec<String> = selected
+            .emoji
             .iter()
             .filter(|((order, _), _)| order >> 10 == message.1)
             .map(|(_, fallback)| fallback.clone())
-            .collect()
-    });
+            .collect();
+        Some((message, fallbacks))
+    })?;
     let text = with_emoji_fallbacks(&selected, &fallbacks);
     let text = text.trim();
     if text.is_empty() {
@@ -916,6 +940,11 @@ impl Element for SelectionViewport {
 #[cfg(feature = "demo-capture")]
 #[path = "selectable_text_redraw_tests.rs"]
 mod redraw_tests;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "selectable_text_window_tests.rs"]
+mod window_tests;
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

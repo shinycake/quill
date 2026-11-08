@@ -191,6 +191,8 @@ on_screen_fields! {
     profile_cover: super::profile_cover::ProfileCoverUi,
     /// The info cover's video profile photo (`ui/video_avatar`).
     video_avatar: super::video_avatar::VideoAvatarUi,
+    /// The `#` popup's recent hashtags, one list for every window (`ui/recent_hashtags_state.rs`).
+    recent_hashtags: super::recent_hashtags_state::RecentHashtagsUi,
     /// The members block of the group info panel (`ui/inline_members_state.rs`).
     inline_members: super::inline_members_state::InlineMembersUi,
     /// The search field above a profile's groups in common.
@@ -349,6 +351,7 @@ impl OnScreen {
             peer_qr: super::peer_qr::PeerQrUi::new(cx),
             profile_cover: Default::default(),
             video_avatar: Default::default(),
+            recent_hashtags: Default::default(),
             inline_members: super::inline_members_state::InlineMembersUi::new(),
             common_groups: Default::default(),
             media_search: super::shared_media_search_state::SharedMediaSearchUi::new(window, cx),

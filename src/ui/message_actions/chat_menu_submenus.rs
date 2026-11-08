@@ -165,7 +165,7 @@ impl QuillApp {
                     false,
                     hover,
                     row_key(MUTE_ROW_ORDER),
-                    &self.frame.context_menu_items,
+                    &self.frame.menu.items,
                     cx,
                 )
                 .on_hover(cx.listener(|this, hovered, _, cx| {
@@ -179,7 +179,8 @@ impl QuillApp {
             );
         }
         self.frame
-            .context_menu_items
+            .menu
+            .items
             .mark_submenu_parent(MUTE_ROW_ORDER, ChatMenuSubmenu::Mute);
         let open = menu.submenu == Some(ChatMenuSubmenu::Mute);
         let parent = menu_row(
@@ -189,7 +190,7 @@ impl QuillApp {
             false,
             hover,
             row_key(MUTE_ROW_ORDER),
-            &self.frame.context_menu_items,
+            &self.frame.menu.items,
             cx,
         )
         .child(Icon::new(IconName::ChevronRight).size(px(14.)))
@@ -206,7 +207,7 @@ impl QuillApp {
         if !open {
             return Some(parent.into_any_element());
         }
-        let items = &self.frame.context_menu_items;
+        let items = &self.frame.menu.items;
         let settings = &chat.notification_settings;
         let sound_off = !settings.use_default_sound && settings.sound_id == 0;
         let sub_item = |index: usize, id: &'static str, icon: IconName, label: String| {
@@ -326,7 +327,8 @@ impl QuillApp {
         }
         let chat_id = menu.chat_id;
         self.frame
-            .context_menu_items
+            .menu
+            .items
             .mark_submenu_parent(FOLDERS_ROW_ORDER, ChatMenuSubmenu::Folders);
         let open = menu.submenu == Some(ChatMenuSubmenu::Folders);
         let parent = menu_row(
@@ -336,7 +338,7 @@ impl QuillApp {
             false,
             hover,
             row_key(FOLDERS_ROW_ORDER),
-            &self.frame.context_menu_items,
+            &self.frame.menu.items,
             cx,
         )
         .child(Icon::new(IconName::ChevronRight).size(px(14.)))
@@ -351,7 +353,7 @@ impl QuillApp {
         if !open {
             return Some(parent.into_any_element());
         }
-        let items = &self.frame.context_menu_items;
+        let items = &self.frame.menu.items;
         let mut rows: Vec<AnyElement> = Vec::new();
         for (index, folder) in folders.iter().enumerate() {
             let folder_id = folder.id;
@@ -427,7 +429,7 @@ impl QuillApp {
                 true,
                 hover,
                 row_key(90),
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
             )
             .on_hover(cx.listener(|this, hovered, _, cx| {

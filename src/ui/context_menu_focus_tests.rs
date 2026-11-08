@@ -42,7 +42,7 @@ pub(super) fn tab_lands_on_an_item(app: &Entity<QuillApp>, vcx: &mut VisualTestC
     vcx.run_until_parked();
     vcx.simulate_keystrokes("tab");
     let (inside, on_frame) = vcx.update(|window, cx| {
-        let menu = app.read(cx).frame.context_menu_focus.clone();
+        let menu = app.read(cx).frame.menu.focus.clone();
         (menu.contains_focused(window, cx), menu.is_focused(window))
     });
     assert!(inside, "focus stays in the menu");
@@ -112,12 +112,7 @@ fn open_archive_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 }
 
 fn in_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
-    vcx.update(|window, cx| {
-        app.read(cx)
-            .frame
-            .context_menu_focus
-            .contains_focused(window, cx)
-    })
+    vcx.update(|window, cx| app.read(cx).frame.menu.focus.contains_focused(window, cx))
 }
 
 pub(super) fn focus_chat_list(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
@@ -133,8 +128,7 @@ fn down_moves_between_archive_menu_items_and_wraps(cx: &mut TestAppContext) {
     open_archive_menu(&app, vcx);
     vcx.simulate_keystrokes("down");
     let first = focused(vcx).expect("Down focuses an item");
-    let on_frame =
-        vcx.update(|window, cx| app.read(cx).frame.context_menu_focus.is_focused(window));
+    let on_frame = vcx.update(|window, cx| app.read(cx).frame.menu.focus.is_focused(window));
     assert!(!on_frame, "Down left the menu frame for an item");
     vcx.simulate_keystrokes("down");
     let second = focused(vcx).expect("second item");
@@ -161,7 +155,7 @@ fn down_cycles_every_story_menu_item(cx: &mut TestAppContext) {
     });
     vcx.run_until_parked();
     let expected = app.read_with(vcx, |app, _| app.story_menu_entries(1).len());
-    let drawn = app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count());
+    let drawn = app.read_with(vcx, |app, _| app.frame.menu.items.enabled_count());
     assert_eq!(
         drawn, expected,
         "every story menu entry is a focusable item"
@@ -274,7 +268,7 @@ fn focused_label(vcx: &mut VisualTestContext) -> Option<String> {
 
 /// Rows the menu registered as focus targets.
 fn drawn(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
-    app.read_with(vcx, |app, _| app.frame.context_menu_items.enabled_count())
+    app.read_with(vcx, |app, _| app.frame.menu.items.enabled_count())
 }
 
 /// Down walks the rows exactly as the menu draws them, top to bottom, then

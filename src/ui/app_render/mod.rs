@@ -104,26 +104,12 @@ impl Render for QuillApp {
             .viewer_cover
             .set(cover.follow(opening, cx.background_executor().now()));
         // Spoiler specks painted last frame keep drifting.
-        if super::spoiler_fx::take_text_painted() || super::spoiler_fx::revealing() {
+        if super::spoiler_fx::take_text_painted(window) || super::spoiler_fx::revealing() {
             self.request_animation_tick(30, cx);
         }
         let status_toast = self.status_toast_in(None, cx);
-        self.frame.context_menu_items.begin();
-        let menu_open = self.context_menu_open();
-        if menu_open && !self.frame.context_menu_was_open {
-            self.frame.context_menu_previous_focus = window.focused(cx);
-            window.focus(&self.frame.context_menu_focus, cx);
-        } else if !menu_open && self.frame.context_menu_was_open {
-            // A menu action may already have focused an editor or a dialog.
-            if self.frame.context_menu_focus.contains_focused(window, cx)
-                && let Some(previous) = self.frame.context_menu_previous_focus.as_ref()
-            {
-                window.focus(previous, cx);
-            }
-            self.frame.context_menu_previous_focus = None;
-        }
-        self.frame.context_menu_was_open = menu_open;
-        self.track_layer_focus(window, cx);
+        // The menus' and layers' focus hand-off runs first in
+        // `per_window_upkeep`, so a chat window's frame runs its own.
         self.frame_upkeep(window, cx);
         let auth_state = self.current_auth();
         let auth = view_for(&auth_state);
@@ -605,9 +591,7 @@ impl Render for QuillApp {
             Some(cache) => super::image_budget::CacheScope::new(cache, root).into_any_element(),
             None => root.into_any_element(),
         };
-        self.frame
-            .context_menu_items
-            .apply_pending_focus(window, cx);
+        self.frame.menu.items.apply_pending_focus(window, cx);
         // Back to the scope this draw interrupted; the layout and paint of
         // the root run as the main window's again.
         self.set_window_scope(outer_scope);

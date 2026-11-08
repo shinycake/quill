@@ -158,10 +158,28 @@ impl QuillApp {
 
     /// Called when the list may need more rows: near its end, draw the
     /// rows already loaded, then ask the server for the next page.
-    pub(super) fn maybe_load_more_inline(&mut self, cx: &mut Context<Self>) {
+    /// `scrolled` is a scroll by the user. A page whose request failed is
+    /// asked for again at the next one, not at every frame, so a failing
+    /// server is not asked in a loop.
+    pub(super) fn maybe_load_more_inline(&mut self, scrolled: bool, cx: &mut Context<Self>) {
         let Some(shape) = self.inline_members_current() else {
             return;
         };
+        let failed_page = self.session_mut().is_some_and(|session| {
+            let groups = &mut session.groups;
+            let before = groups.member_more_failed.len();
+            groups
+                .member_more_failed
+                .retain(|(chat, _)| *chat != shape.chat.0);
+            groups.member_more_failed.len() != before
+        });
+        if failed_page {
+            self.inline_members.retry_at_scroll = true;
+        }
+        if scrolled && self.inline_members.retry_at_scroll {
+            self.inline_members.retry_at_scroll = false;
+            self.inline_members.failed_offset = None;
+        }
         // Members hidden from the viewer: show the administrators.
         if self.inline_members_filter(shape) == MemberListFilter::Administrators
             && let Some(live) = self.live.as_mut()
@@ -256,3 +274,8 @@ impl QuillApp {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "inline_members_retry_tests.rs"]
+mod retry_tests;

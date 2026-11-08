@@ -54,6 +54,34 @@ pub(super) struct ContextMenuItems {
     focus_pending: Cell<Option<u32>>,
 }
 
+/// One window's focus hand-off for its context menus and hand-drawn
+/// layers. Each window keeps its own (`FrameUi::menu` for the window in
+/// place, swapped with a chat window's slot), so a menu opened in a chat
+/// window takes that window's keyboard and gives it back on close.
+pub(super) struct MenuFocus {
+    /// The open menu's frame, focused while no item is.
+    pub(super) focus: FocusHandle,
+    /// Focus handles of the open context menu's items.
+    pub(super) items: ContextMenuItems,
+    pub(super) was_open: bool,
+    /// What had the focus when the menu opened.
+    pub(super) previous: Option<FocusHandle>,
+    /// Focus return for hand-drawn layers (`esc_stack::track_layer_focus`).
+    pub(super) layers: super::esc_stack::LayerFocus,
+}
+
+impl MenuFocus {
+    pub(super) fn new(cx: &mut App) -> Self {
+        Self {
+            focus: cx.focus_handle(),
+            items: ContextMenuItems::default(),
+            was_open: false,
+            previous: None,
+            layers: Default::default(),
+        }
+    }
+}
+
 /// Sort key of a submenu row: just after its parent row (`order`), in the
 /// order the submenu draws them.
 ///
@@ -300,6 +328,31 @@ pub(super) fn context_menu_item(
 }
 
 impl QuillApp {
+    /// The window in place's focus hand-off, run at the top of each
+    /// window's frame (`per_window_upkeep`), before its menus draw: the
+    /// menu's items claim their handles afresh; a menu that just opened
+    /// takes the focus, and one that just closed gives it back unless its
+    /// action moved it on purpose. Then the same for the hand-drawn layers.
+    pub(super) fn menu_focus_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.frame.menu.items.begin();
+        let menu_open = self.context_menu_open();
+        let menu = &mut self.frame.menu;
+        if menu_open && !menu.was_open {
+            menu.previous = window.focused(cx);
+            window.focus(&menu.focus, cx);
+        } else if !menu_open && menu.was_open {
+            // A menu action may already have focused an editor or a dialog.
+            if menu.focus.contains_focused(window, cx)
+                && let Some(previous) = menu.previous.as_ref()
+            {
+                window.focus(previous, cx);
+            }
+            menu.previous = None;
+        }
+        menu.was_open = menu_open;
+        self.track_layer_focus(window, cx);
+    }
+
     /// Whether a context menu shows in the window whose state is in
     /// place. The one list the focus hand-off, the keystroke interceptor
     /// and the Escape stack all read. The message menu is each window's
@@ -398,7 +451,7 @@ impl QuillApp {
         }
         let name = key.key.as_str();
         let (focused, own, open_parent) = {
-            let items = &self.frame.context_menu_items;
+            let items = &self.frame.menu.items;
             let focused = items.focused_key(window);
             let open_parent = self.open_submenu().and_then(|s| items.parent_of(s));
             (
@@ -414,10 +467,7 @@ impl QuillApp {
             match name {
                 "down" | "up" => {
                     let forward = name == "down";
-                    let next = self
-                        .frame
-                        .context_menu_items
-                        .step(forward, Some(parent), window);
+                    let next = self.frame.menu.items.step(forward, Some(parent), window);
                     if let Some(next) = next {
                         window.focus(&next, cx);
                     }
@@ -425,14 +475,14 @@ impl QuillApp {
                 }
                 "left" | "escape" => {
                     self.close_chat_submenu(cx);
-                    let handle = self.frame.context_menu_items.handle_for(parent);
+                    let handle = self.frame.menu.items.handle_for(parent);
                     if let Some(handle) = handle {
                         window.focus(&handle, cx);
                     }
                     return true;
                 }
                 "right" | "enter" if focused == Some(parent) => {
-                    let first = self.frame.context_menu_items.first_submenu_handle(parent);
+                    let first = self.frame.menu.items.first_submenu_handle(parent);
                     if let Some(first) = first {
                         window.focus(&first, cx);
                     }
@@ -459,9 +509,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_chat_submenu(submenu, cx);
-        self.frame
-            .context_menu_items
-            .focus_first_row_next_frame(parent);
+        self.frame.menu.items.focus_first_row_next_frame(parent);
         cx.notify();
     }
 
@@ -470,10 +518,10 @@ impl QuillApp {
     /// (the message and chat menus, or every item disabled) the menu frame
     /// takes the focus, so the arrows never reach what is under the menu.
     pub(super) fn move_context_menu_focus(&self, forward: bool, window: &mut Window, cx: &mut App) {
-        match self.frame.context_menu_items.step(forward, None, window) {
+        match self.frame.menu.items.step(forward, None, window) {
             Some(item) => window.focus(&item, cx),
-            None if !self.frame.context_menu_focus.contains_focused(window, cx) => {
-                window.focus(&self.frame.context_menu_focus, cx)
+            None if !self.frame.menu.focus.contains_focused(window, cx) => {
+                window.focus(&self.frame.menu.focus, cx)
             }
             None => {}
         }

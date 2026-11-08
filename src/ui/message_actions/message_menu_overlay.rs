@@ -105,7 +105,7 @@ impl QuillApp {
                         .text_sm()
                         .text_color(if danger { danger_bright() } else { text_menu() })
                         .hover(|style| style.bg(row_hover))
-                        .menu_key_target(row_key($order), &self.frame.context_menu_items, $cx)
+                        .menu_key_target(row_key($order), &self.frame.menu.items, $cx)
                         .role(gpui_kit::Role::MenuItem)
                         .aria_label($label)
                         .child(Icon::new($icon).size(px(16.)))
@@ -173,11 +173,7 @@ impl QuillApp {
                     .text_sm()
                     .text_color(text_menu())
                     .hover(|style| style.bg(row_hover))
-                    .menu_key_target(
-                        row_key(order::REPLY_TIMECODE),
-                        &self.frame.context_menu_items,
-                        cx,
-                    )
+                    .menu_key_target(row_key(order::REPLY_TIMECODE), &self.frame.menu.items, cx)
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(tr_with(
                         keys::Q_CHAT_REPLY_WITH_TIMECODE,
@@ -333,7 +329,7 @@ impl QuillApp {
                         "menu-ton-explorer",
                         address,
                         |this| this.message_ui.menu = None,
-                        Some((&self.frame.context_menu_items, row_key(order::TON_EXPLORER))),
+                        Some((&self.frame.menu.items, row_key(order::TON_EXPLORER))),
                         cx,
                     ),
                 ));
@@ -346,10 +342,7 @@ impl QuillApp {
                     super::super::ton_wallet_ui::send_money_menu_row(
                         "menu-ton-send-money",
                         |this| this.message_ui.menu = None,
-                        Some((
-                            &self.frame.context_menu_items,
-                            row_key(order::TON_SEND_MONEY),
-                        )),
+                        Some((&self.frame.menu.items, row_key(order::TON_SEND_MONEY))),
                         cx,
                     ),
                 ));
@@ -726,7 +719,7 @@ impl QuillApp {
                 "menu-cancel-upload",
                 tr(keys::Q_CHAT_CANCEL_UPLOAD),
                 true,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
                 move |this, _, cx| {
                     this.cancel_message_upload(chat_id, message_id, cx);
@@ -755,7 +748,7 @@ impl QuillApp {
                 "menu-report",
                 tr(keys::Q_CHAT_REPORT),
                 false,
-                &self.frame.context_menu_items,
+                &self.frame.menu.items,
                 cx,
                 move |this, _, cx| {
                     // A grouped album reports every photo in it.
@@ -798,11 +791,7 @@ impl QuillApp {
                     .max_w(px(260.))
                     .text_color(text_muted())
                     .hover(|style| style.bg(row_hover))
-                    .menu_key_target(
-                        row_key(order::EMOJI_PACKS),
-                        &self.frame.context_menu_items,
-                        cx,
-                    )
+                    .menu_key_target(row_key(order::EMOJI_PACKS), &self.frame.menu.items, cx)
                     .role(gpui_kit::Role::MenuItem)
                     .aria_label(format!("{before}{bold}{after}"))
                     .child(before)
@@ -871,7 +860,7 @@ impl QuillApp {
                         _ => tr(keys::Q_CHAT_BACK),
                     },
                     false,
-                    &self.frame.context_menu_items,
+                    &self.frame.menu.items,
                     cx,
                     |this, _, cx| {
                         this.message_ui.menu_ui.page = MessageMenuPage::Main;
@@ -913,7 +902,7 @@ impl QuillApp {
                 cx.notify();
             }),
         )
-        .layer(|layer| layer.track_focus(&self.frame.context_menu_focus))
+        .layer(|layer| layer.track_focus(&self.frame.menu.focus))
         .anchored(
             menu.position,
             div()
@@ -933,6 +922,6 @@ impl QuillApp {
                 })
                 .child(panel),
         )
-        .focus_trap("message-menu-focus", &self.frame.context_menu_focus)
+        .focus_trap("message-menu-focus", &self.frame.menu.focus)
     }
 }
